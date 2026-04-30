@@ -2,48 +2,43 @@
 ##
 ## IsoNim DOM-rendering view for the Calltrace panel.
 ##
-## Renders a live, reactive DOM tree driven by CalltraceVM signals.
+## Renders a live, reactive DOM tree driven by `CalltraceVM` signals.
 ## When the VM's signals change (visible lines, selected entry,
 ## scroll indicators, search query), the DOM updates automatically
 ## via IsoNim's `createRenderEffect`.
 ##
-## This view is the primary renderer for the Calltrace panel,
-## replacing the legacy Karax calltrace component. The DOM structure
-## matches the Karax output exactly so that Playwright GUI tests
-## continue to find elements via their existing selectors:
+## Two structures are produced:
 ##
-##   `.calltrace-lines`         — lines container
-##   `.calltrace-call-line`     — each call line row
-##   `.call-child-box`          — inner box per entry
-##   `.call-text`               — function name text (click target)
-##   `.toggle-call`             — expand/collapse toggle area
-##   `.dot-call-img`            — leaf call marker
-##   `.calltrace-search-input`  — search input
-##   `.call-search-results`     — search results container
-##   `.event-selected`          — selected row CSS class
-##   `> span` first child       — depth offset (min-width style)
+## - `MockRenderer` — simple test-friendly DOM used by headless unit
+##   tests (see `src/tests/gui/tests/views/isonim_views_test.nim`).
 ##
-## Generic over the renderer type `R` so that:
-## - `MockRenderer` can be used for headless unit tests
-## - The web renderer can be used for real browser DOM
+## - `WebRenderer` — Karax-compatible DOM that preserves the exact
+##   class names, IDs, and hierarchy that Playwright page objects
+##   (`CallTracePane`, `CallTraceEntry`) expect:
+##     `.component-container.calltrace-view.isonim-calltrace`
+##     `.calltrace-call-line.calltrace-row[.event-selected]`
+##     `.call-child-box#local-call-{index}`
+##     `.toggle-call > .{dot|collapse}-call-img`
+##     `.call-text#local-call-text-{index}` (click = select / double-click = jump)
+##     `.calltrace-search > form > input.calltrace-search-input`
+##     `.call-search-results > .search-result`
 ##
-## Usage (test):
-##   let r = MockRenderer()
-##   let panel = renderCalltracePanel(r, calltraceVM)
-##   check panel.textContent.contains("main")
+## Both renderers share the `forIn` / `indexEach` reactive list logic
+## but render row contents differently to satisfy each contract.
 ##
-## Usage (web):
-##   import isonim/web/web_renderer
-##   let r = WebRenderer()
-##   let panel = renderCalltracePanel(r, calltraceVM)
-##   # panel is an isonim_dom.Element, append to any real DOM container
+## The DSL is used to express structure in single `ui()` blocks per
+## logical region; reactive attributes (class, style, text) are wrapped
+## automatically by the macro. Only behaviour that the DSL cannot
+## express directly — `addEventListener` for handlers that need the
+## raw `Event` object, scroll listeners — uses imperative wiring on
+## elements captured via `ref = var`.
 
-import std/[json, options, tables, strutils]
+import std/[json, options]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
 import isonim/dsl/components
-import isonim/testing/mock_dom  # MockNode type used in generic signatures
+import isonim/testing/mock_dom
 
 when defined(js):
   import isonim/web/web_renderer
@@ -54,341 +49,209 @@ import ../backend/backend_service
 import ../viewmodels/calltrace_vm
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Per-row click handlers
 # ---------------------------------------------------------------------------
+#
+# The DSL attaches handlers via `onclick = expr` which expects `proc()`.
+# Each row's handler must read the *current* line value so that updates
+# to a row's underlying CallLine (via `indexEach`) are reflected in the
+# action the click triggers. We achieve this by closing over the
+# `item()` accessor: the handler reads the live signal value when fired,
+# rather than capturing a stale snapshot.
 
-proc makeSelectHandler(vm: CalltraceVM; lineIndex: int64): proc() =
-  ## Factory to create a click handler with its own closure environment,
-  ## avoiding the Nim closure-in-loop capture issue.
-  ## Matches the legacy Karax calltrace where a single click on `.call-text`
-  ## both selects the entry AND navigates (calltraceJump) to its source
-  ## location. Without the navigation, Playwright's `activate()` would
-  ## select the row but the editor would not open the target file.
-  let idx = lineIndex
-  result = proc() =
-    vm.selectEntry(some(idx))
-    vm.doubleClickEntry(idx)
+type
+  RowHandlers = object
+    onSelect:    proc()
+    onDblClick:  proc()
+    onToggle:    proc()
 
-proc makeDoubleClickHandler(vm: CalltraceVM; lineIndex: int64): proc() =
-  ## Factory to create a double-click handler with its own closure environment.
-  let idx = lineIndex
-  result = proc() =
-    vm.doubleClickEntry(idx)
-
-proc makeToggleHandler(vm: CalltraceVM; lineIndex: int64): proc() =
-  ## Factory to create a toggle click handler for expand/collapse.
-  ## Sends expand or collapse request to the backend via the VM.
-  let idx = lineIndex
-  result = proc() =
-    vm.toggleExpandCallChildren(idx)
-
-# ---------------------------------------------------------------------------
-# Scroll indicator renderers
-# ---------------------------------------------------------------------------
-
-proc renderScrollIndicatorAbove*[R, N](r: R; parent: N; vm: CalltraceVM) =
-  ## Render the "more above" scroll indicator.
-  ## Visible when there are calltrace entries above the viewport.
-  let indicator = ui(r):
-    tdiv(class = "more-above"):
-      discard
-  r.appendChild(parent, indicator)
-
-  createRenderEffect proc() =
-    r.setStyle(indicator, "display", if vm.hasMoreAbove.val: "block" else: "none")
-
-proc renderScrollIndicatorBelow*[R, N](r: R; parent: N; vm: CalltraceVM) =
-  ## Render the "more below" scroll indicator.
-  ## Visible when there are calltrace entries below the viewport.
-  let indicator = ui(r):
-    tdiv(class = "more-below"):
-      discard
-  r.appendChild(parent, indicator)
-
-  createRenderEffect proc() =
-    r.setStyle(indicator, "display", if vm.hasMoreBelow.val: "block" else: "none")
-
-# ---------------------------------------------------------------------------
-# Search input renderer
-# ---------------------------------------------------------------------------
-
-proc renderSearchInput*[R, N](r: R; parent: N; vm: CalltraceVM) =
-  ## Render the search input for filtering calltrace entries.
-  let inputRow = ui(r):
-    tdiv(class = "calltrace-search-row"):
-      input(class = "calltrace-search-input", placeholder = "Search calltrace...")
-  r.appendChild(parent, inputRow)
-
-  # Note: In a real browser, we would read `input.value` on input events.
-  # With MockRenderer, the input value isn't tracked — the actual
-  # setSearchQuery call will come from the ViewModel action layer or a
-  # higher-level integration. The input is wired up as a placeholder.
-
-# ---------------------------------------------------------------------------
-# Call line list renderer
-# ---------------------------------------------------------------------------
-
-proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
-  ## Render the calltrace line list container.
-  ## Uses indexEach for positional rendering: when the visible lines
-  ## change, rows are updated in place or added/removed.
-  let container = ui(r):
-    tdiv(class = "calltrace-lines"):
-      discard
-  r.appendChild(parent, container)
-
-  indexEach[CallLine, R, N](r, container,
-    proc(): seq[CallLine] =
-      vm.visibleLines.val,
-    proc(item: proc(): CallLine, index: int): N =
-      let row = r.createElement("div")
-      r.setAttribute(row, "class", "calltrace-call-line")
-
-      createRenderEffect proc() =
-        let line = item()
-
-        # Clear and rebuild row content on each update.
-        # A more optimised version would use per-field effects.
-        r.clearChildren(row)
-
-        # Depth-based indentation via padding-left style
-        if line.depth > 0:
-          r.setStyle(row, "padding-left", $(line.depth * 16) & "px")
-        else:
-          r.setStyle(row, "padding-left", "0px")
-
-        # Selected entry highlighting
-        let selected = vm.selectedEntry.val
-        if selected.isSome and selected.get == line.index:
-          r.setAttribute(row, "class", "calltrace-call-line selected")
-        else:
-          r.setAttribute(row, "class", "calltrace-call-line")
-
-        # Function name
-        let nameSpan = r.createElement("span")
-        r.setAttribute(nameSpan, "class", "call-name")
-        r.setTextContent(nameSpan, line.name)
-        r.appendChild(row, nameSpan)
-
-        # Click to select, double-click to navigate
-        # Re-register event listeners on each rebuild since we clear children
-        # and the row itself is reused. Event listeners are additive on MockNode
-        # so we clear and re-add by rebuilding the listeners table.
-        r.clearEventListeners(row)
-        r.addEventListener(row, "click", makeSelectHandler(vm, line.index))
-        r.addEventListener(row, "dblclick", makeDoubleClickHandler(vm, line.index))
-
-      row
+proc rowHandlers(vm: CalltraceVM; item: proc(): CallLine): RowHandlers =
+  ## Build the trio of click handlers used by both Mock and Web row
+  ## bodies. Each handler reads the latest CallLine via `item()` so it
+  ## stays correct under indexEach signal updates.
+  let getLine = item
+  RowHandlers(
+    onSelect: proc() =
+      let line = getLine()
+      # Single click in the legacy Karax calltrace selects the row AND
+      # navigates to the source location (calltraceJump). Without the
+      # navigation, Playwright `activate()` selects the row but the
+      # editor never opens the target file.
+      vm.selectEntry(some(line.index))
+      vm.doubleClickEntry(line.index),
+    onDblClick: proc() =
+      vm.doubleClickEntry(getLine().index),
+    onToggle: proc() =
+      vm.toggleExpandCallChildren(getLine().index),
   )
 
 # ---------------------------------------------------------------------------
-# Loading indicator
+# Reactive helpers used inside DSL expressions
 # ---------------------------------------------------------------------------
 
-proc renderCalltraceLoading*[R, N](r: R; parent: N; vm: CalltraceVM) =
-  ## Render a loading indicator that appears when calltrace data is loading.
-  let indicator = ui(r):
-    tdiv(class = "calltrace-loading"):
-      text "Loading..."
-  r.appendChild(parent, indicator)
+proc selectedRowClass(base: string; vm: CalltraceVM; item: proc(): CallLine): string =
+  ## Compute the row class with the optional selected modifier.
+  ## Wrapping this in a proc keeps the DSL attribute expression short.
+  let sel = vm.selectedEntry.val
+  let line = item()
+  if sel.isSome and sel.get == line.index:
+    base & " selected"
+  else:
+    base
 
-  createRenderEffect proc() =
-    let loading = vm.isLoading.val
-    r.setStyle(indicator, "display", if loading: "block" else: "none")
+proc paddingForDepth(item: proc(): CallLine; pxPerLevel: int): string =
+  let depth = item().depth
+  if depth > 0: $(depth * pxPerLevel) & "px" else: "0px"
+
+proc displayIf(cond: bool): string =
+  if cond: "block" else: "none"
 
 # ---------------------------------------------------------------------------
-# Main panel renderer
+# MockRenderer renderer — simple structure for headless unit tests
 # ---------------------------------------------------------------------------
+
+proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
+                           item: proc(): CallLine): MockNode =
+  ## Render a single calltrace row in the Mock-friendly structure.
+  ## Only the row class, padding, name text and click handlers are
+  ## reactive; all attribute updates are wired via the DSL.
+  let h = rowHandlers(vm, item)
+  ui(r):
+    tdiv(class = selectedRowClass("calltrace-call-line", vm, item),
+         padding_left = paddingForDepth(item, 16),
+         onclick = h.onSelect,
+         ondblclick = h.onDblClick):
+      span(class = "call-name"):
+        text item().name
 
 proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
-  ## Render the complete Calltrace panel.
+  ## Render the complete Calltrace panel for Mock-based tests.
   ##
-  ## Structure:
+  ## Structure (matches `isonim_views_test.nim` expectations):
   ##   div.calltrace-component
-  ##     div.more-above              (hidden when no entries above)
-  ##     div.calltrace-loading       (hidden when not loading)
-  ##     div.calltrace-lines
-  ##       div.call-line ...
-  ##     div.more-below              (hidden when no entries below)
+  ##     div.more-above              (display reactive on hasMoreAbove)
+  ##     div.calltrace-loading       (display reactive on isLoading)
+  ##     div.calltrace-lines         (populated reactively by indexEach)
+  ##     div.more-below              (display reactive on hasMoreBelow)
   ##     div.calltrace-search-row
   ##       input.calltrace-search-input
-  ##
-  ## All content is reactive: changing CalltraceVM signals automatically
-  ## updates the DOM tree via createRenderEffect.
+  var linesContainer: MockNode
+
   let panel = ui(r):
     tdiv(class = "calltrace-component"):
-      discard
+      tdiv(class = "more-above",
+           display = displayIf(vm.hasMoreAbove.val)):
+        discard
+      tdiv(class = "calltrace-loading",
+           display = displayIf(vm.isLoading.val)):
+        text "Loading..."
+      tdiv(class = "calltrace-lines", ref = linesContainer):
+        discard
+      tdiv(class = "more-below",
+           display = displayIf(vm.hasMoreBelow.val)):
+        discard
+      tdiv(class = "calltrace-search-row"):
+        input(class = "calltrace-search-input",
+              placeholder = "Search calltrace...")
 
-  renderScrollIndicatorAbove(r, panel, vm)
-  renderCalltraceLoading(r, panel, vm)
-  renderCallLineList(r, panel, vm)
-  renderScrollIndicatorBelow(r, panel, vm)
-  renderSearchInput(r, panel, vm)
+  indexEach[CallLine, MockRenderer, MockNode](r, linesContainer,
+    proc(): seq[CallLine] = vm.visibleLines.val,
+    proc(item: proc(): CallLine, index: int): MockNode =
+      renderCallLineRowMock(r, vm, item))
 
   panel
 
 # ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
+# WebRenderer renderer — Karax-compatible structure for Playwright tests
 # ---------------------------------------------------------------------------
 #
-# The web version matches the Karax calltrace DOM exactly:
-#   - Same container IDs (`calltraceComponent-{id}`, `calltraceScroll-{id}`)
-#   - Same CSS classes (`.calltrace-call-line`, `.call-child-box`,
-#     `.call-text`, `.toggle-call`, `.dot-call-img`, `.event-selected`)
-#   - Same depth-offset `<span style="min-width: {depth*8}px">` pattern
-#   - Click on `.call-text` delegates to the VM's selectEntry + doubleClickEntry
+# Each row's DOM mirrors the legacy Karax calltrace component:
 #
-# This ensures Playwright page objects (CallTracePane, CallTraceEntry)
-# find the same DOM structure they expect.
-# ---------------------------------------------------------------------------
+#   div.calltrace-call-line.calltrace-row [.event-selected]
+#     span                                           depth offset (min-width)
+#     div.calltrace-child.call-depth
+#       div.call-child-box#local-call-{index}
+#         span.toggle-call                           click = expand/collapse
+#           div.{collapse|dot}-call-img
+#         div.call-text#local-call-text-{index}      click = select; dbl = jump
+#           text "{name} #{index}"
+#         div.call-args
+#           text "()"
+#
+# `.call-text` is the click target — a single click selects the row,
+# a double click navigates to source.
 
 when defined(js):
-  # -----------------------------------------------------------------------
-  # Helper: create a call line row matching the Karax calltrace structure
-  # -----------------------------------------------------------------------
-  #
-  # Karax produces per row:
-  #   div.calltrace-call-line.calltrace-row [.event-selected]
-  #     span (depth offset, style="min-width: {depth*8}px")
-  #     div.calltrace-child.call-depth
-  #       div.call-child-box#local-call-{key}
-  #         span.toggle-call
-  #           div.dot-call-img
-  #         div.call-text#local-call-text-{key}
-  #           text "functionName #key"
-  #         div.call-args
-  #           text "()"
-  #
-  # The `.call-text` is the click target for navigation (single click
-  # selects, double click jumps to source).
-  # -----------------------------------------------------------------------
 
-  proc renderWebCallLineList(r: WebRenderer; parent: isonim_dom.Element;
-                              vm: CalltraceVM) =
-    ## Render the calltrace line list using Karax-compatible DOM structure.
-    ## Wrapped in an indexEach for reactive list updates.
-    let container = ui(r):
-      tdiv(class = "calltrace-lines"):
-        discard
-    r.appendChild(parent, container)
-    when defined(js):
-      {.emit: "console.error('[PIPELINE] renderWebCallLineList: container created, starting indexEach');".}
+  proc rowClassWeb(vm: CalltraceVM; item: proc(): CallLine): string =
+    let sel = vm.selectedEntry.val
+    let line = item()
+    if sel.isSome and sel.get == line.index:
+      "calltrace-call-line calltrace-row event-selected"
+    else:
+      "calltrace-call-line calltrace-row"
 
-    indexEach[CallLine, WebRenderer, isonim_dom.Element](r, container,
-      proc(): seq[CallLine] =
-        let lines = vm.visibleLines.val
-        when defined(js):
-          {.emit: "console.error('[PIPELINE] renderWebCallLineList indexEach source: visibleLines.len=' + `lines`.length);".}
-        lines,
-      proc(item: proc(): CallLine, index: int): isonim_dom.Element =
-        let row = r.createElement("div")
+  proc toggleIconClass(item: proc(): CallLine): string =
+    let line = item()
+    if line.hasChildren and line.isExpanded: "collapse-call-img"
+    else: "dot-call-img"
 
-        createRenderEffect proc() =
-          let line = item()
-          r.clearChildren(row)
+  proc renderCallLineRowWeb(r: WebRenderer; vm: CalltraceVM;
+                            item: proc(): CallLine): isonim_dom.Element =
+    ## Render a single calltrace row using the Karax-compatible markup.
+    ## All dynamic content (class, depth offset, expand state, IDs,
+    ## name text, click handlers) is expressed in the DSL — the macro
+    ## emits per-attr reactive effects so updates are fine-grained.
+    ##
+    ## NOTE: `indexEach` reuses the same row element across data changes
+    ## (e.g. when scrolling shifts which CallLines are visible), so all
+    ## per-line content — including IDs derived from `line.index` — must
+    ## be reactive. Reading `item()` inside the DSL achieves that
+    ## automatically.
+    let h = rowHandlers(vm, item)
+    ui(r):
+      tdiv(class = rowClassWeb(vm, item)):
+        span(min_width = $(item().depth * 8) & "px"):
+          discard
+        tdiv(class = "calltrace-child call-depth"):
+          tdiv(id = "local-call-" & $item().index, class = "call-child-box"):
+            span(class = "toggle-call", onclick = h.onToggle):
+              tdiv(class = toggleIconClass(item)):
+                discard
+            tdiv(id = "local-call-text-" & $item().index, class = "call-text",
+                 onclick = h.onSelect, ondblclick = h.onDblClick):
+              text item().name & " #" & $item().index
+            tdiv(class = "call-args"):
+              text "()"
 
-          # Row class: calltrace-call-line calltrace-row [event-selected]
-          let selected = vm.selectedEntry.val
-          let isSelected = selected.isSome and selected.get == line.index
-          let rowClass = if isSelected:
-            "calltrace-call-line calltrace-row event-selected"
-          else:
-            "calltrace-call-line calltrace-row"
-          r.setAttribute(row, "class", rowClass)
+  proc renderSearchResultsList(r: WebRenderer; container: isonim_dom.Element;
+                               vm: CalltraceVM) =
+    ## Reactively populate the search-results container. The hide/show
+    ## class flip is also reactive. On `mousedown`, the result emits a
+    ## calltrace-jump command so the editor navigates to the entry.
+    createRenderEffect proc() =
+      let results = vm.backendSearchResults.val
+      r.clearChildren(container)
+      if results.len == 0:
+        r.setAttribute(container, "class", "call-search-results hidden")
+        return
+      r.setAttribute(container, "class", "call-search-results")
+      for res in results:
+        let capturedRrTicks = res.rrTicks
+        let resultEl = ui(r):
+          tdiv(class = "search-result",
+               onmousedown = proc() =
+                 discard vm.store.backend.send(
+                   "ct/calltrace-jump",
+                   %*{"rrTicks": capturedRrTicks})):
+            text "#" & res.key & " - rrTicks(" & $res.rrTicks & "): " & res.name
+        r.appendChild(container, resultEl)
 
-          # Depth offset span — Playwright reads min-width to infer depth.
-          # Karax uses `style="min-width: {depth * 8}px"` on a leading <span>.
-          let depthSpan = r.createElement("span")
-          r.setStyle(depthSpan, "min-width", $(line.depth * 8) & "px")
-          r.appendChild(row, depthSpan)
-
-          # Outer call container: div.calltrace-child.call-depth
-          let callChild = r.createElement("div")
-          r.setAttribute(callChild, "class", "calltrace-child call-depth")
-          r.appendChild(row, callChild)
-
-          # Inner box: div.call-child-box#local-call-{index}
-          let callBox = r.createElement("div")
-          let lineKey = $line.index
-          r.setAttribute(callBox, "id", "local-call-" & lineKey)
-          r.setAttribute(callBox, "class", "call-child-box")
-          r.appendChild(callChild, callBox)
-
-          # Toggle area: span.toggle-call > div.(dot|collapse|expand)-call-img
-          # Leaf calls show dot-call-img; expandable calls show either
-          # collapse-call-img (expanded) or dot-call-img with a click
-          # handler to trigger expansion.
-          let toggleSpan = r.createElement("span")
-          r.setAttribute(toggleSpan, "class", "toggle-call")
-          r.appendChild(callBox, toggleSpan)
-
-          let toggleIcon = r.createElement("div")
-          if line.hasChildren:
-            if line.isExpanded:
-              r.setAttribute(toggleIcon, "class", "collapse-call-img")
-            else:
-              r.setAttribute(toggleIcon, "class", "dot-call-img")
-            r.addEventListener(toggleSpan, "click",
-              makeToggleHandler(vm, line.index))
-          else:
-            r.setAttribute(toggleIcon, "class", "dot-call-img")
-          r.appendChild(toggleSpan, toggleIcon)
-
-          # Call text: div.call-text#local-call-text-{index}
-          # Shows "functionName #key" matching the Karax format.
-          let callText = r.createElement("div")
-          r.setAttribute(callText, "id", "local-call-text-" & lineKey)
-          r.setAttribute(callText, "class", "call-text")
-          r.setTextContent(callText, line.name & " #" & lineKey)
-          r.appendChild(callBox, callText)
-
-          # Args placeholder: div.call-args > text "()"
-          # The VM does not yet expose per-call arguments; render an
-          # empty args container so the DOM structure is complete.
-          let callArgs = r.createElement("div")
-          r.setAttribute(callArgs, "class", "call-args")
-          r.setTextContent(callArgs, "()")
-          r.appendChild(callBox, callArgs)
-
-          # Click to select
-          r.clearEventListeners(callText)
-          r.addEventListener(callText, "click",
-            makeSelectHandler(vm, line.index))
-
-          # Double-click to navigate to source
-          r.addEventListener(callText, "dblclick",
-            makeDoubleClickHandler(vm, line.index))
-
-        row
-    )
-
-  # -----------------------------------------------------------------------
-  # Search input (web version) — matches Karax calltrace search DOM
-  # -----------------------------------------------------------------------
-
-  proc renderWebSearchInput(r: WebRenderer; parent: isonim_dom.Element;
-                             vm: CalltraceVM) =
-    ## Render the calltrace search bar using the Karax-compatible DOM:
-    ##   div.calltrace-search
-    ##     form.calltrace-search-form-0
-    ##       input.calltrace-search-input
-    ##   div.call-search-results
-    ##     div.search-result ...
-    let searchDiv = ui(r):
-      tdiv(class = "calltrace-search"):
-        discard
-    r.appendChild(parent, searchDiv)
-
-    let form = r.createElement("form")
-    r.setAttribute(form, "class", "calltrace-search-form-0")
-    r.appendChild(searchDiv, form)
-
-    let input = ui(r):
-      input(class = "calltrace-search-input calltrace-search-input-0 ct-input-panel ct-input-search-image",
-            `type` = "text", placeholder = "Search", tabindex = "0")
-    r.appendChild(form, input)
-
-    # Wire up search form submission
+  proc wireSearchForm(form, input: isonim_dom.Element; vm: CalltraceVM) =
+    ## Wire up search form submission and Enter-key handling on the
+    ## input. The DSL's `onclick` handler shape is `proc()`, but here
+    ## we need access to the raw `Event` to call `preventDefault`, so
+    ## these handlers are attached imperatively.
     let inputNode = isonim_dom.Node(input)
     isonim_dom.addEventListener(isonim_dom.Node(form), cstring"submit",
       proc(ev: isonim_dom.Event) =
@@ -396,162 +259,84 @@ when defined(js):
         {.emit: "`ev`.stopPropagation();".}
         var query: cstring
         {.emit: "`query` = `inputNode`.value || '';".}
-        vm.setSearchQuery($query)
-    )
-
-    # Wire up Enter key on input
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
+        vm.setSearchQuery($query))
+    isonim_dom.addEventListener(inputNode, cstring"keydown",
       proc(ev: isonim_dom.Event) =
         var keyCode: int
         {.emit: "`keyCode` = `ev`.keyCode || 0;".}
-        if keyCode == 13:  # Enter
+        if keyCode == 13:
           {.emit: "`ev`.preventDefault();".}
           {.emit: "`ev`.stopPropagation();".}
           var query: cstring
           {.emit: "`query` = `inputNode`.value || '';".}
-          vm.setSearchQuery($query)
-    )
+          vm.setSearchQuery($query))
 
-    # Search results container — Playwright queries `.call-search-results`
-    # and `.search-result` inside it.
-    let resultsDiv = ui(r):
-      tdiv(class = "call-search-results hidden"):
-        discard
-    r.appendChild(parent, resultsDiv)
-
-    # Reactive update: show/hide results from backend search.
-    # Uses backendSearchResults (populated by the legacy calltrace
-    # component's registerSearchRes via CtCalltraceSearchResponse)
-    # instead of the local highlightedMatches memo, because the
-    # backend searches the full trace while local search only
-    # covers the currently loaded viewport.
-    createRenderEffect proc() =
-      let results = vm.backendSearchResults.val
-      r.clearChildren(resultsDiv)
-      if results.len == 0:
-        r.setAttribute(resultsDiv, "class", "call-search-results hidden")
-      else:
-        r.setAttribute(resultsDiv, "class", "call-search-results")
-        for res in results:
-          let resultDiv = r.createElement("div")
-          r.setAttribute(resultDiv, "class", "search-result")
-          # Format: "#key - rrTicks(N): functionName"
-          # matching the Karax searchResultView output
-          let text = "#" & res.key & " - rrTicks(" & $res.rrTicks & "): " & res.name
-          r.setTextContent(resultDiv, text)
-          r.appendChild(resultsDiv, resultDiv)
-
-          # Click on search result navigates to the entry's location.
-          # Use the key and rrTicks to build a calltrace-jump command.
-          let capturedRrTicks = res.rrTicks
-          r.addEventListener(resultDiv, "mousedown", proc() =
-            let args = %*{
-              "rrTicks": capturedRrTicks,
-            }
-            discard vm.store.backend.send("ct/calltrace-jump", args))
-
-  # -----------------------------------------------------------------------
-  # Loading indicator (web version)
-  # -----------------------------------------------------------------------
-
-  proc renderWebLoading(r: WebRenderer; parent: isonim_dom.Element;
-                         vm: CalltraceVM) =
-    let indicator = ui(r):
-      tdiv(class = "calltrace-loading", id = "calltrace-toggle-loading-0"):
-        text "Loading..."
-    r.appendChild(parent, indicator)
-
-    createRenderEffect proc() =
-      let loading = vm.isLoading.val
-      r.setStyle(indicator, "display", if loading: "block" else: "none")
-
-  # -----------------------------------------------------------------------
-  # Main panel renderer (WebRenderer)
-  # -----------------------------------------------------------------------
-
-  proc renderCalltracePanel*(r: WebRenderer;
-                              vm: CalltraceVM): isonim_dom.Element =
-    ## Render the complete Calltrace panel using real DOM elements.
-    ##
-    ## The DOM structure matches the Karax calltrace.nim render() output:
-    ##   div.component-container.calltrace-view.isonim-calltrace
-    ##     div  (header: search + async toggle placeholder)
-    ##       div.calltrace-search
-    ##         form > input.calltrace-search-input
-    ##       div.call-search-results
-    ##     div.local-calltrace-view#calltraceScroll-0  (scroll container)
-    ##       div.local-calltrace  (inner wrapper, height set by totalCallsCount)
-    ##         div.calltrace-lines  (reactive line list)
-    ##           div.calltrace-call-line.calltrace-row ...
-    ##     div.calltrace-loading#calltrace-toggle-loading-0
-    ##
-    ## All IDs use the `-0` suffix matching the default component id=0.
-    ## Playwright page objects (CallTracePane, CallTraceEntry) query
-    ## these selectors unchanged.
-    let panel = ui(r):
-      tdiv(class = "component-container calltrace-view isonim-calltrace",
-           `data-label` = "calltrace-data-label-0", tabindex = "2"):
-        discard
-
-    # Header section: search + async toggle placeholder
-    let header = ui(r):
-      tdiv:
-        discard
-    r.appendChild(panel, header)
-
-    renderWebSearchInput(r, header, vm)
-
-    # Scroll container
-    let scrollContainer = ui(r):
-      tdiv(id = "calltraceScroll-0", class = "local-calltrace-view"):
-        discard
-    r.appendChild(panel, scrollContainer)
-
-    # Wire up scroll events to feed the VM
-    isonim_dom.addEventListener(isonim_dom.Node(scrollContainer), cstring"scroll",
+  proc wireScrollContainer(scrollContainer: isonim_dom.Element;
+                            vm: CalltraceVM) =
+    ## Wire scroll events to the VM. The DSL renderer-API `onscroll`
+    ## variant exists, but the handler needs access to `scrollTop` from
+    ## the element, so this is attached imperatively.
+    const CALL_HEIGHT_PX = 24.0
+    isonim_dom.addEventListener(isonim_dom.Node(scrollContainer),
+      cstring"scroll",
       proc(ev: isonim_dom.Event) =
         var scrollTop: float
         {.emit: "`scrollTop` = `scrollContainer`.scrollTop || 0;".}
-        let lineIndex = int64(scrollTop / 24.0)  # CALL_HEIGHT_PX = 24
-        vm.scroll(lineIndex)
-    )
+        vm.scroll(int64(scrollTop / CALL_HEIGHT_PX)))
 
-    # Inner wrapper: div.local-calltrace
-    let localCalltrace = ui(r):
-      tdiv(class = "local-calltrace"):
-        discard
-    r.appendChild(scrollContainer, localCalltrace)
+  proc renderCalltracePanel*(r: WebRenderer;
+                             vm: CalltraceVM): isonim_dom.Element =
+    ## Render the complete Calltrace panel using real DOM elements.
+    ##
+    ## DOM matches the legacy Karax `calltrace.nim render()` output so
+    ## that Playwright page objects (CallTracePane, CallTraceEntry)
+    ## continue to find every selector unchanged.
+    var
+      formEl, inputEl: isonim_dom.Element
+      resultsContainer: isonim_dom.Element
+      scrollContainer, innerContainer, linesContainer: isonim_dom.Element
 
-    # Reactive height based on totalCallsCount for virtual scrolling
-    createRenderEffect proc() =
-      let total = vm.store.calltrace.totalCallsCount.val
-      r.setStyle(localCalltrace, "height", $(total.int * 24) & "px")
+    let panel = ui(r):
+      tdiv(class = "component-container calltrace-view isonim-calltrace",
+           `data-label` = "calltrace-data-label-0", tabindex = "2"):
+        tdiv:
+          tdiv(class = "calltrace-search"):
+            form(ref = formEl, class = "calltrace-search-form-0"):
+              input(ref = inputEl,
+                    class = "calltrace-search-input calltrace-search-input-0 " &
+                            "ct-input-panel ct-input-search-image",
+                    `type` = "text", placeholder = "Search", tabindex = "0")
+          tdiv(ref = resultsContainer, class = "call-search-results hidden"):
+            discard
+        tdiv(ref = scrollContainer,
+             id = "calltraceScroll-0",
+             class = "local-calltrace-view"):
+          tdiv(ref = innerContainer,
+               class = "local-calltrace",
+               height = $(vm.store.calltrace.totalCallsCount.val.int * 24) & "px"):
+            tdiv(ref = linesContainer, class = "calltrace-lines"):
+              discard
+        tdiv(class = "calltrace-loading",
+             id = "calltrace-toggle-loading-0",
+             display = displayIf(vm.isLoading.val)):
+          text "Loading..."
 
-    # Call line list
-    renderWebCallLineList(r, localCalltrace, vm)
+    indexEach[CallLine, WebRenderer, isonim_dom.Element](r, linesContainer,
+      proc(): seq[CallLine] = vm.visibleLines.val,
+      proc(item: proc(): CallLine, index: int): isonim_dom.Element =
+        renderCallLineRowWeb(r, vm, item))
 
-    # Loading indicator
-    renderWebLoading(r, panel, vm)
+    renderSearchResultsList(r, resultsContainer, vm)
+    wireSearchForm(formEl, inputEl, vm)
+    wireScrollContainer(scrollContainer, vm)
 
     panel
 
   proc mountIsoNimCalltrace*(container: isonim_dom.Element;
-                              vm: CalltraceVM) =
-    ## Mount the IsoNim calltrace view into a real DOM container.
-    ##
-    ## Creates the reactive DOM tree and appends it as a child of
-    ## `container`. The IsoNim reactive effects handle all subsequent
-    ## updates — no manual redraw is needed.
-    ##
-    ## Call this once after the CalltraceVM has been created.
-    ## This view is the primary calltrace renderer — the Karax
-    ## calltrace render() returns an empty stub when this is mounted.
-    when defined(js):
-      {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: starting, container=', `container`);".}
+                             vm: CalltraceVM) =
+    ## Mount the IsoNim calltrace panel as a child of `container`.
+    ## Reactive effects then handle every subsequent update — no manual
+    ## redraw is needed. Call once, after the `CalltraceVM` exists.
     let r = WebRenderer()
-    let calltracePanel = renderCalltracePanel(r, vm)
-    when defined(js):
-      {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: panel created, children=', `calltracePanel`.childNodes ? `calltracePanel`.childNodes.length : 0);".}
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(calltracePanel))
-    when defined(js):
-      {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: appended to container, container.children=', `container`.childNodes ? `container`.childNodes.length : 0);".}
+    let panel = renderCalltracePanel(r, vm)
+    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

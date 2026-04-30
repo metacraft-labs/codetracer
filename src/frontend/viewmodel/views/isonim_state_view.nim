@@ -1,33 +1,31 @@
 ## views/isonim_state_view.nim
 ##
-## IsoNim DOM-rendering view for the State panel — primary renderer.
+## IsoNim DOM-rendering view for the State (Locals / Globals / Watches)
+## panel — primary renderer.
 ##
-## Renders a live, reactive DOM tree driven by StateVM signals.
-## When the StateVM's signals change (active tab, variable list,
-## loading state, watch expressions), the DOM updates automatically
-## via IsoNim's `createRenderEffect`.
+## Renders a live, reactive DOM tree driven by `StateVM` signals.
+## When the VM's signals change (active tab, variable list, loading
+## state, watch expressions), the DOM updates automatically via
+## IsoNim's `createRenderEffect`.
 ##
-## The DOM structure matches the legacy Karax value-component markup
-## so that Playwright tests (which query `.value-expanded`,
-## `.value-name`, `.value-expanded-text`, etc.) work without changes.
+## Two structures are produced:
 ##
-## Generic over the renderer type `R` so that:
-## - `MockRenderer` can be used for headless unit tests
-## - The web renderer can be used for real browser DOM
+## - `MockRenderer` — simple test-friendly DOM used by headless unit
+##   tests (see `src/tests/gui/tests/views/isonim_views_test.nim`).
 ##
-## Usage (test):
-##   let r = MockRenderer()
-##   let panel = renderStatePanel(r, stateVM)
-##   check panel.textContent.contains("Locals")
+## - `WebRenderer` — Karax-compatible DOM for the real browser. The
+##   DOM matches the legacy Karax `value-component` markup so that
+##   Playwright tests (which query `.value-expanded`, `.value-name`,
+##   `.value-expanded-text`, etc.) continue to work unchanged.
 ##
-## Usage (web):
-##   let panel = renderStatePanel(webRenderer, stateVM)
-##   document.body.appendChild(panel)
+## In both cases the panel structure is expressed in single `ui()`
+## blocks; per-row content is also expressed via the DSL inside the
+## `indexEach` body so the structure is visible at a glance.
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
 import isonim/dsl/components
-import isonim/testing/mock_dom  # MockNode type used in generic signatures
+import isonim/testing/mock_dom
 
 when defined(js):
   import isonim/web/web_renderer
@@ -37,467 +35,279 @@ import ../viewmodels/state_vm
 import ../views/state_view
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Static label / class helpers
 # ---------------------------------------------------------------------------
 
 proc tabCssClass(tab: StateTab): string =
-  ## CSS class name for a tab button, used for test queries.
+  ## CSS class name for a tab button — used both for the static class
+  ## and for the dynamic active-modifier expression.
   case tab
   of stLocals:  "tab-locals"
   of stGlobals: "tab-globals"
   of stWatches: "tab-watches"
 
 proc tabLabel(tab: StateTab): string =
-  ## Display label for a tab button.
   case tab
   of stLocals:  "Locals"
   of stGlobals: "Globals"
   of stWatches: "Watches"
 
+proc displayIf(cond: bool): string =
+  if cond: "block" else: "none"
+
 # ---------------------------------------------------------------------------
-# Variable row renderer — Karax-compatible DOM structure
+# Reactive expressions (used inside DSL attributes)
 # ---------------------------------------------------------------------------
 #
-# Each variable row matches the Karax value-component DOM:
-#
-#   div.value-expanded.value-expanded-name.border-value-{depth}
-#     div.value-expanded-atom-parent          (or -compound-parent)
-#       div.value-name-container
-#         span.value-expand-button            (if expandable)
-#           div.caret-expand or .caret-collapse
-#         span.value-name                     "varname: "
-#         span.value-type                     (if expanded compound)
-#       div                                   (value wrapper)
-#         span.value-view
-#           span.value-expanded-text          "value text"
-#
-# Playwright tests query:
-#   .value-expanded          — locates each variable row
-#   .value-name              — reads the variable name
-#   .value-expanded-text     — reads the value text
-#   .value-type              — reads the type annotation
-#   .value-name-container    — parent of name/expand button
-#   .value-expand-button     — click target for expand/collapse
-#   .caret-expand/.caret-collapse — presence check for expandability
-#   .value-expanded-atom-parent   — atom variable parent
+# Each helper reads one or more signals and returns a string. The DSL
+# attribute that calls the helper is detected as dynamic, so the macro
+# wraps the call in a `createRenderEffect` and tracks its signal reads
+# automatically.
 
-proc makeExpandClickHandler(vm: StateVM; path: string): proc() =
-  ## Factory for expand/collapse click handlers. Creates a separate
-  ## closure per variable path to avoid the Nim closure-in-loop
-  ## capture issue.
-  let p = path
-  result = proc() =
-    vm.toggleExpand(p)
+proc tabClass(vm: StateVM; tab: StateTab): string =
+  ## Tab button class with the optional `active` modifier.
+  let cls = tabCssClass(tab)
+  if vm.activeTab.val == tab: cls & " active" else: cls
 
-proc renderVariableRow*[R, N](r: R; parent: N;
-                               v: proc(): VariableViewState;
-                               vm: StateVM) =
-  ## Render a single variable row into `parent` using the Karax-compatible
-  ## DOM structure. Wrapped in a createRenderEffect so the row updates
-  ## reactively when `v` changes.
-  let row = r.createElement("div")
-  r.appendChild(parent, row)
+proc atomOrCompoundClass(item: proc(): VariableViewState): string =
+  ## "value-expanded-compound-parent" when the variable is an expanded
+  ## compound; otherwise "value-expanded-atom-parent". Mirrors the
+  ## legacy Karax value-component class branching.
+  let v = item()
+  if v.hasChildren and v.isExpanded:
+    "value-expanded-compound-parent"
+  else:
+    "value-expanded-atom-parent"
 
-  createRenderEffect proc() =
-    let vs = v()
-    r.clearChildren(row)
+proc rowClass(item: proc(): VariableViewState): string =
+  ## Outer row class with depth-borders class.
+  "value-expanded value-expanded-name border-value-" & $item().depth
 
-    # Outer row: div.value-expanded.value-expanded-name.border-value-{depth}
-    r.setAttribute(row, "class",
-      "value-expanded value-expanded-name border-value-" & $vs.depth)
+proc rowPaddingLeft(item: proc(): VariableViewState; pxPerLevel: int): string =
+  let depth = item().depth
+  if depth > 0: $(depth * pxPerLevel) & "px" else: "0px"
 
-    # Atom vs compound parent wrapper
-    let atomClass = if vs.hasChildren and vs.isExpanded:
-      "value-expanded-compound-parent"
-    else:
-      "value-expanded-atom-parent"
-    let atomDiv = r.createElement("div")
-    r.setAttribute(atomDiv, "class", atomClass)
-    r.appendChild(row, atomDiv)
+proc caretClass(item: proc(): VariableViewState): string =
+  if item().isExpanded: "caret-expand" else: "caret-collapse"
 
-    # Name container
-    let nameContainer = r.createElement("div")
-    r.setAttribute(nameContainer, "class", "value-name-container")
-    r.appendChild(atomDiv, nameContainer)
+proc compoundTypeVisible(item: proc(): VariableViewState): bool =
+  ## Show the type annotation next to the name when the row is an
+  ## expanded compound with a non-empty type name.
+  let v = item()
+  v.hasChildren and v.isExpanded and v.typeName.len > 0
 
-    # Expand/collapse button (only for expandable variables)
-    if vs.hasChildren:
-      let expandBtn = r.createElement("span")
-      r.setAttribute(expandBtn, "class", "value-expand-button")
-      r.appendChild(nameContainer, expandBtn)
-
-      let caretDiv = r.createElement("div")
-      if vs.isExpanded:
-        r.setAttribute(caretDiv, "class", "caret-expand")
-      else:
-        r.setAttribute(caretDiv, "class", "caret-collapse")
-      r.appendChild(expandBtn, caretDiv)
-
-      # Wire up expand/collapse click
-      r.addEventListener(expandBtn, "click",
-        makeExpandClickHandler(vm, vs.path))
-
-    # Variable name: span.value-name with trailing ": "
-    let nameSpan = r.createElement("span")
-    r.setAttribute(nameSpan, "class", "value-name")
-    r.setTextContent(nameSpan, vs.name & ": ")
-    r.appendChild(nameContainer, nameSpan)
-
-    # Type annotation (shown next to name when expanded compound)
-    if vs.hasChildren and vs.isExpanded and vs.typeName.len > 0:
-      let typeSpan = r.createElement("span")
-      r.setAttribute(typeSpan, "class", "value-type")
-      r.setTextContent(typeSpan, vs.typeName)
-      r.appendChild(nameContainer, typeSpan)
-
-    # Value wrapper div
-    let valueWrapper = r.createElement("div")
-    r.appendChild(atomDiv, valueWrapper)
-
-    let valueView = r.createElement("span")
-    r.setAttribute(valueView, "class", "value-view")
-    r.appendChild(valueWrapper, valueView)
-
-    # Value text: span.value-expanded-text (or div depending on type)
-    let valueText = r.createElement("span")
-    r.setAttribute(valueText, "class", "value-expanded-text")
-    r.setTextContent(valueText, vs.value)
-    r.appendChild(valueView, valueText)
-
-    # Type annotation for atoms (shown after value)
-    if not (vs.hasChildren and vs.isExpanded) and vs.typeName.len > 0:
-      let typeSpan = r.createElement("span")
-      r.setAttribute(typeSpan, "class", "value-type")
-      r.setTextContent(typeSpan, vs.typeName)
-      r.appendChild(valueView, typeSpan)
-
-    # Indentation via padding-left style for nested variables
-    if vs.depth > 0:
-      r.setStyle(row, "padding-left", $(vs.depth * 16) & "px")
-    else:
-      r.setStyle(row, "padding-left", "0px")
+proc atomTypeVisible(item: proc(): VariableViewState): bool =
+  ## Show the type annotation next to the value when the row is NOT an
+  ## expanded compound and has a non-empty type name.
+  let v = item()
+  (not (v.hasChildren and v.isExpanded)) and v.typeName.len > 0
 
 # ---------------------------------------------------------------------------
-# Tab bar renderer
+# Click handler factories
 # ---------------------------------------------------------------------------
 
-proc makeTabClickHandler(vm: StateVM; tab: StateTab): proc() =
-  ## Factory to create a click handler with its own closure environment,
-  ## avoiding the Nim closure-in-loop capture issue.
+proc onSelectTab(vm: StateVM; tab: StateTab): proc() =
   let t = tab
+  result = proc() = vm.selectTab(t)
+
+proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
+  ## The expand-button only reacts when the variable has children.
+  ## Reading `item()` inside the closure ensures the toggle targets the
+  ## current variable at this row's position, even after `indexEach`
+  ## reuses the row for a different item.
   result = proc() =
-    vm.selectTab(t)
-
-proc makeTabActiveEffect[R, N](r: R; btn: N; vm: StateVM; tab: StateTab): proc() =
-  ## Factory to create a reactive effect that updates the active CSS class.
-  let t = tab
-  result = proc() =
-    let isActive = vm.activeTab.val == t
-    let cls = tabCssClass(t) & (if isActive: " active" else: "")
-    r.setAttribute(btn, "class", cls)
-
-proc renderTabBar*[R, N](r: R; parent: N; vm: StateVM) =
-  ## Render the three tab buttons (Locals, Globals, Watches) into `parent`.
-  ## The active tab gets the "active" CSS class reactively.
-  let tabBar = ui(r):
-    tdiv(class = "state-tabs"):
-      discard
-  r.appendChild(parent, tabBar)
-
-  for tab in [stLocals, stGlobals, stWatches]:
-    let btn = ui(r):
-      button(class = tabCssClass(tab), onclick = makeTabClickHandler(vm, tab)):
-        text tabLabel(tab)
-    r.appendChild(tabBar, btn)
-
-    # Reactive "active" class update — uses dynamic class toggling
-    # which must stay imperative.
-    createRenderEffect makeTabActiveEffect(r, btn, vm, tab)
+    let v = item()
+    if v.hasChildren: vm.toggleExpand(v.path)
 
 # ---------------------------------------------------------------------------
-# Watch input renderer — Karax-compatible DOM structure
+# Variable row component (shared between Mock and Web renderers)
 # ---------------------------------------------------------------------------
 #
-# Matches the legacy Karax watchView() output:
-#   div#gdb-evaluate
-#     form
-#       input#watch-0.ct-input-panel.ct-fill-available
-#
-# Playwright tests query `#watch` or `#watch-0` for the text box.
+# Implemented as a template so the body — which uses the `ui()` macro
+# and therefore must know the renderer's concrete element type at
+# compile time — can be expanded once per concrete renderer (Mock,
+# Web) without duplicating the markup.
 
-proc renderWatchInput*[R, N](r: R; parent: N; vm: StateVM) =
-  ## Render the watch-expression input form using the Karax-compatible
-  ## DOM structure. The form is always present (same as legacy Karax).
+template renderVariableRowImpl(r, vm, item: untyped): untyped =
+  ## Build a single variable row using the Karax-compatible markup.
   ##
-  ## DOM structure produced:
-  ##   div#gdb-evaluate
-  ##     form
-  ##       input#watch-0.ct-input-panel.ct-fill-available
-  let gdbEvaluate = ui(r):
-    tdiv(id = "gdb-evaluate"):
-      form:
-        input(`type` = "text", placeholder = "Enter a watch expression",
-              id = "watch-0", class = "ct-input-panel ct-fill-available")
-  r.appendChild(parent, gdbEvaluate)
+  ## DOM structure (matches legacy `value-component`):
+  ##   div.value-expanded.value-expanded-name.border-value-{depth}
+  ##     div.value-expanded-{atom|compound}-parent
+  ##       div.value-name-container
+  ##         showIf hasChildren:
+  ##           span.value-expand-button > div.{caret-expand|caret-collapse}
+  ##         span.value-name : "{name}: "
+  ##         showIf compoundTypeVisible:
+  ##           span.value-type : "{typeName}"
+  ##       div
+  ##         span.value-view
+  ##           span.value-expanded-text : "{value}"
+  ##           showIf atomTypeVisible:
+  ##             span.value-type : "{typeName}"
+  ##
+  ## Every attribute and text expression that reads `item()` becomes
+  ## reactive via the DSL macro — the row is rebuilt incrementally as
+  ## the underlying VariableViewState signal updates.
+  let onToggle = onToggleExpand(vm, item)
+  ui(r):
+    tdiv(class = rowClass(item),
+         padding_left = rowPaddingLeft(item, 16)):
+      tdiv(class = atomOrCompoundClass(item)):
+        tdiv(class = "value-name-container"):
+          showIf item().hasChildren:
+            span(class = "value-expand-button", onclick = onToggle):
+              tdiv(class = caretClass(item)):
+                discard
+          span(class = "value-name"):
+            text item().name & ": "
+          showIf compoundTypeVisible(item):
+            span(class = "value-type"):
+              text item().typeName
+        tdiv:
+          span(class = "value-view"):
+            span(class = "value-expanded-text"):
+              text item().value
+            showIf atomTypeVisible(item):
+              span(class = "value-type"):
+                text item().typeName
 
-  # Note: For MockRenderer, the submit/keydown wiring is a no-op.
-  # Real browser wiring is done in mountIsoNimStatePanel via direct
-  # DOM API calls on the created elements.
+proc renderVariableRow*(r: MockRenderer; vm: StateVM;
+                        item: proc(): VariableViewState): MockNode =
+  renderVariableRowImpl(r, vm, item)
 
-# ---------------------------------------------------------------------------
-# Loading indicator
-# ---------------------------------------------------------------------------
-
-proc renderLoadingIndicator*[R, N](r: R; parent: N; vm: StateVM) =
-  ## Render a loading spinner/text that appears when isLoading is true.
-  let indicator = ui(r):
-    tdiv(class = "loading-indicator"):
-      text "Loading..."
-  r.appendChild(parent, indicator)
-
-  createRenderEffect proc() =
-    let loading = vm.isLoading.val
-    r.setStyle(indicator, "display", if loading: "block" else: "none")
-
-# ---------------------------------------------------------------------------
-# Variable list renderer
-# ---------------------------------------------------------------------------
-
-proc renderVariableList*[R, N](r: R; parent: N; vm: StateVM) =
-  ## Render the variable list container.
-  ## Uses indexEach for positional rendering: when the flattened variable
-  ## list changes, rows are updated in place or added/removed.
-  let container = ui(r):
-    tdiv(class = "value-components-container"):
-      discard
-  r.appendChild(parent, container)
-
-  # Empty overlay shown when there are no variables
-  let emptyOverlay = ui(r):
-    tdiv(class = "empty-overlay"):
-      text "No local variables are present in the current point of execution."
-  r.appendChild(container, emptyOverlay)
-
-  createRenderEffect proc() =
-    let vars = getStateViewState(vm).variables
-    r.setStyle(emptyOverlay, "display",
-      if vars.len == 0: "block" else: "none")
-
-  # Variable rows rendered via indexEach for reactive list updates
-  let rowContainer = r.createElement("div")
-  r.appendChild(container, rowContainer)
-
-  indexEach[VariableViewState, R, N](r, rowContainer,
-    proc(): seq[VariableViewState] =
-      getStateViewState(vm).variables,
-    proc(item: proc(): VariableViewState, index: int): N =
-      let row = r.createElement("div")
-
-      createRenderEffect proc() =
-        let vs = item()
-        r.clearChildren(row)
-
-        # Outer row: div.value-expanded.value-expanded-name.border-value-{depth}
-        r.setAttribute(row, "class",
-          "value-expanded value-expanded-name border-value-" & $vs.depth)
-
-        # Atom vs compound parent wrapper
-        let atomClass = if vs.hasChildren and vs.isExpanded:
-          "value-expanded-compound-parent"
-        else:
-          "value-expanded-atom-parent"
-        let atomDiv = r.createElement("div")
-        r.setAttribute(atomDiv, "class", atomClass)
-        r.appendChild(row, atomDiv)
-
-        # Name container
-        let nameContainer = r.createElement("div")
-        r.setAttribute(nameContainer, "class", "value-name-container")
-        r.appendChild(atomDiv, nameContainer)
-
-        # Expand/collapse button (only for expandable variables)
-        if vs.hasChildren:
-          let expandBtn = r.createElement("span")
-          r.setAttribute(expandBtn, "class", "value-expand-button")
-          r.appendChild(nameContainer, expandBtn)
-
-          let caretDiv = r.createElement("div")
-          if vs.isExpanded:
-            r.setAttribute(caretDiv, "class", "caret-expand")
-          else:
-            r.setAttribute(caretDiv, "class", "caret-collapse")
-          r.appendChild(expandBtn, caretDiv)
-
-          # Wire up expand/collapse click
-          r.addEventListener(expandBtn, "click",
-            makeExpandClickHandler(vm, vs.name))
-
-        # Variable name: span.value-name with trailing ": "
-        let nameSpan = r.createElement("span")
-        r.setAttribute(nameSpan, "class", "value-name")
-        r.setTextContent(nameSpan, vs.name & ": ")
-        r.appendChild(nameContainer, nameSpan)
-
-        # Type annotation (shown next to name when expanded compound)
-        if vs.hasChildren and vs.isExpanded and vs.typeName.len > 0:
-          let typeSpan = r.createElement("span")
-          r.setAttribute(typeSpan, "class", "value-type")
-          r.setTextContent(typeSpan, vs.typeName)
-          r.appendChild(nameContainer, typeSpan)
-
-        # Value wrapper div
-        let valueWrapper = r.createElement("div")
-        r.appendChild(atomDiv, valueWrapper)
-
-        let valueView = r.createElement("span")
-        r.setAttribute(valueView, "class", "value-view")
-        r.appendChild(valueWrapper, valueView)
-
-        # Value text
-        let valueText = r.createElement("span")
-        r.setAttribute(valueText, "class", "value-expanded-text")
-        r.setTextContent(valueText, vs.value)
-        r.appendChild(valueView, valueText)
-
-        # Type annotation for atoms (shown after value)
-        if not (vs.hasChildren and vs.isExpanded) and vs.typeName.len > 0:
-          let typeSpan = r.createElement("span")
-          r.setAttribute(typeSpan, "class", "value-type")
-          r.setTextContent(typeSpan, vs.typeName)
-          r.appendChild(valueView, typeSpan)
-
-        # Indentation for nested variables
-        if vs.depth > 0:
-          r.setStyle(row, "padding-left", $(vs.depth * 16) & "px")
-        else:
-          r.setStyle(row, "padding-left", "0px")
-
-      row
-  )
+when defined(js):
+  proc renderVariableRow*(r: WebRenderer; vm: StateVM;
+                          item: proc(): VariableViewState): isonim_dom.Element =
+    renderVariableRowImpl(r, vm, item)
 
 # ---------------------------------------------------------------------------
-# Main panel renderer — MockRenderer overload
+# MockRenderer panel
 # ---------------------------------------------------------------------------
 
 proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
-  ## Render the complete State panel using Karax-compatible DOM structure.
+  ## Render the full State panel for headless tests.
   ##
   ## Structure:
   ##   div.state-component
   ##     div.state-tabs
-  ##       button.tab-locals  (.active when selected)
-  ##       button.tab-globals
-  ##       button.tab-watches
-  ##     div.watch-input-container        (visible only on Watches tab)
-  ##       input.watch-input
-  ##     div.loading-indicator            (visible only when loading)
+  ##       button.tab-locals[.active]   onclick = selectTab(stLocals)   "Locals"
+  ##       button.tab-globals[.active]  onclick = selectTab(stGlobals)  "Globals"
+  ##       button.tab-watches[.active]  onclick = selectTab(stWatches)  "Watches"
+  ##     div.watch-input-container[display: block when activeTab == stWatches]
+  ##       input.watch-input[placeholder = "Add watch expression..."]
+  ##     div.loading-indicator[display: block when isLoading]
+  ##       text "Loading..."
   ##     div.value-components-container
-  ##       div.empty-overlay              (hidden when variables present)
-  ##       div                            (row container — indexEach)
-  ##         div.value-expanded.value-expanded-name.border-value-0
-  ##           ...
-  ##
-  ## All content is reactive: changing StateVM signals automatically
-  ## updates the DOM tree via createRenderEffect.
+  ##       div.empty-overlay[display: block when no variables]
+  ##         text "No local variables..."
+  ##       div                                         (row container)
+  ##         indexEach VariableViewState -> renderVariableRow(...)
+  var rowContainer: MockNode
+
   let panel = ui(r):
     tdiv(class = "state-component"):
-      discard
+      tdiv(class = "state-tabs"):
+        button(class = tabClass(vm, stLocals),
+               onclick = onSelectTab(vm, stLocals)):
+          text tabLabel(stLocals)
+        button(class = tabClass(vm, stGlobals),
+               onclick = onSelectTab(vm, stGlobals)):
+          text tabLabel(stGlobals)
+        button(class = tabClass(vm, stWatches),
+               onclick = onSelectTab(vm, stWatches)):
+          text tabLabel(stWatches)
+      tdiv(class = "watch-input-container",
+           display = displayIf(vm.activeTab.val == stWatches)):
+        input(class = "watch-input",
+              placeholder = "Add watch expression...")
+      tdiv(class = "loading-indicator",
+           display = displayIf(vm.isLoading.val)):
+        text "Loading..."
+      tdiv(class = "value-components-container"):
+        tdiv(class = "empty-overlay",
+             display = displayIf(getStateViewState(vm).variables.len == 0)):
+          text "No local variables are present in the current point of execution."
+        tdiv(ref = rowContainer):
+          discard
 
-  # Tab bar (Locals / Globals / Watches)
-  renderTabBar(r, panel, vm)
-
-  # Watch input container — visible only when the Watches tab is active.
-  block buildWatchInputContainer:
-    let watchContainer = ui(r):
-      tdiv(class = "watch-input-container"):
-        input(class = "watch-input", placeholder = "Add watch expression...")
-    r.appendChild(panel, watchContainer)
-
-    createRenderEffect proc() =
-      let visible = vm.activeTab.val == stWatches
-      r.setStyle(watchContainer, "display", if visible: "block" else: "none")
-
-  # Loading indicator
-  renderLoadingIndicator(r, panel, vm)
-
-  # Variable list
-  renderVariableList(r, panel, vm)
+  indexEach[VariableViewState, MockRenderer, MockNode](r, rowContainer,
+    proc(): seq[VariableViewState] = getStateViewState(vm).variables,
+    proc(item: proc(): VariableViewState, index: int): MockNode =
+      renderVariableRow(r, vm, item))
 
   panel
 
 # ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
+# WebRenderer panel
 # ---------------------------------------------------------------------------
+#
+# The web version produces the same Karax-compatible markup the legacy
+# component used. Notable differences from the Mock structure:
+#
+# - Watch input is always visible (matches the Karax behaviour).
+# - The watch input lives inside `div#gdb-evaluate > form > input#watch-0`
+#   and submitting the form calls `vm.addWatch(...)` then clears the
+#   input. The form's `submit` event needs `preventDefault`, which the
+#   DSL's `onclick = ...` shape (no event arg) cannot express; it is
+#   wired imperatively after capturing the input via `ref = var`.
 
 when defined(js):
-  proc renderStatePanelWeb(r: WebRenderer;
-                            vm: StateVM): isonim_dom.Element =
-    ## Render the complete State panel using real DOM elements with
-    ## Karax-compatible DOM structure for Playwright test compatibility.
-    ##
-    ## Returns an `isonim_dom.Element` that can be appended to any live
-    ## DOM container. All content is reactive: changing StateVM signals
-    ## automatically updates the DOM tree via `createRenderEffect`.
+
+  proc wireWatchInputForm(form, input: isonim_dom.Element; vm: StateVM) =
+    ## Read the input value on submit, push it to the VM, then clear
+    ## the input. Uses raw `dom_api` so the handler can call
+    ## `preventDefault` on the event object.
+    let inputNode = isonim_dom.Node(input)
+    isonim_dom.addEventListener(isonim_dom.Node(form), cstring"submit",
+      proc(ev: isonim_dom.Event) =
+        {.emit: "`ev`.preventDefault();".}
+        {.emit: "`ev`.stopPropagation();".}
+        var expression: cstring
+        {.emit: "`expression` = `inputNode`.value || '';".}
+        if expression.len > 0:
+          vm.addWatch($expression)
+          {.emit: "`inputNode`.value = '';".})
+
+  proc renderStatePanel*(r: WebRenderer; vm: StateVM): isonim_dom.Element =
+    ## Render the State panel using real DOM elements.
+    var
+      formEl, inputEl: isonim_dom.Element
+      rowContainer: isonim_dom.Element
+
     let panel = ui(r):
       tdiv(class = "state-component isonim-state"):
-        discard
-
-    # Watch input (always visible, same as legacy Karax).
-    # The form structure is built with the DSL but the submit handler
-    # needs access to the input element reference, so we create the
-    # input separately and wire it up imperatively.
-    block buildWatchInput:
-      let gdbEvaluate = ui(r):
         tdiv(id = "gdb-evaluate"):
-          discard
-      r.appendChild(panel, gdbEvaluate)
+          form(ref = formEl):
+            input(ref = inputEl,
+                  `type` = "text",
+                  placeholder = "Enter a watch expression",
+                  id = "watch-0",
+                  class = "ct-input-panel ct-fill-available")
+        tdiv(class = "loading-indicator",
+             display = displayIf(vm.isLoading.val)):
+          text "Loading..."
+        tdiv(class = "value-components-container"):
+          tdiv(class = "empty-overlay",
+               display = displayIf(getStateViewState(vm).variables.len == 0)):
+            text "No local variables are present in the current point of execution."
+          tdiv(ref = rowContainer):
+            discard
 
-      let form = r.createElement("form")
-      r.appendChild(gdbEvaluate, form)
+    indexEach[VariableViewState, WebRenderer, isonim_dom.Element](r, rowContainer,
+      proc(): seq[VariableViewState] = getStateViewState(vm).variables,
+      proc(item: proc(): VariableViewState, index: int): isonim_dom.Element =
+        renderVariableRow(r, vm, item))
 
-      let input = ui(r):
-        input(`type` = "text", placeholder = "Enter a watch expression",
-              id = "watch-0", class = "ct-input-panel ct-fill-available")
-      r.appendChild(form, input)
-
-      # Wire up form submission. Prevent default and read the input
-      # value directly from the element reference we already hold.
-      let inputNode = isonim_dom.Node(input)
-      isonim_dom.addEventListener(isonim_dom.Node(form), cstring"submit",
-        proc(ev: isonim_dom.Event) =
-          {.emit: "`ev`.preventDefault();".}
-          {.emit: "`ev`.stopPropagation();".}
-          var expression: cstring
-          {.emit: "`expression` = `inputNode`.value || '';".}
-          if expression.len > 0:
-            vm.addWatch($expression)
-            {.emit: "`inputNode`.value = '';".}
-      )
-
-    # Loading indicator
-    renderLoadingIndicator(r, panel, vm)
-
-    # Variable list
-    renderVariableList(r, panel, vm)
+    wireWatchInputForm(formEl, inputEl, vm)
 
     panel
 
-  proc renderStatePanel*(r: WebRenderer;
-                          vm: StateVM): isonim_dom.Element =
-    ## Public overload — delegates to the internal web-specific builder.
-    renderStatePanelWeb(r, vm)
-
   proc mountIsoNimStatePanel*(container: isonim_dom.Element;
-                               vm: StateVM) =
-    ## Mount the IsoNim state panel view into a real DOM container.
-    ##
-    ## Creates the reactive DOM tree and appends it as a child of
-    ## `container`. The IsoNim reactive effects handle all subsequent
-    ## updates — no manual redraw is needed.
-    ##
-    ## This is the primary renderer for the State panel. The Karax
-    ## state.nim `render()` method returns a minimal stub when this
-    ## view is mounted.
+                              vm: StateVM) =
+    ## Mount the IsoNim State panel as a child of `container`. Reactive
+    ## effects handle every subsequent update — no manual redraw is
+    ## needed. Call once after the `StateVM` exists.
     let r = WebRenderer()
-    let panel = renderStatePanelWeb(r, vm)
+    let panel = renderStatePanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
