@@ -33,10 +33,18 @@ test.describe("wasm example — state and navigation", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "wasm_example/", launchMode: "trace" });
 
-  // BUG: The event log footer row count stays at 0 for DB-based traces (WASM, blockchain).
-  // The trace data exists (34 events, 8 steps) but the frontend DataTables component
-  // does not populate the footer count for DB trace types. This is a frontend bug
-  // in the event log population code path, not a backend or recorder issue.
+  // FAILING: 2026-05-01 — the WASM DB trace produces zero events on
+  // the dense event-log table, even though the recorder reports the
+  // trace contains 34 events / 8 steps. Other DB traces (e.g. noir)
+  // now work after fixing the event-log footer update path; wasm
+  // still shows an empty table body with the "no events recorded"
+  // placeholder, so the gap is in the wasm recorder → db-backend
+  // event flow, not in the frontend.
+  // TODO: investigate the wasm recorder's event-log emission. Likely
+  // the trace_metadata.json reports 34 events but they never land in
+  // the event_db / global_table that `update_table` reads from. Look
+  // at `codetracer-wasm-recorder` event-emission paths and the
+  // db-backend ingestion in `event_db.rs`.
   test.fixme("expected event count", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 

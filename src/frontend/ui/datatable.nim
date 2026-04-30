@@ -195,8 +195,33 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
       self.context.scroller.measure()
 
 proc updateTableFooter*(self: DataTableComponent) =
+  ## Synchronise the footer DOM (rendered statically by the IsoNim
+  ## event-log shell or by the Karax `tableFooter` VNode) with the
+  ## current `startRow`, `endRow`, and `rowsCount` fields.
+  ##
+  ## In the legacy Karax path the footer was a VNode rebuilt on every
+  ## `redraw()`, so its `class` string and inner texts updated
+  ## automatically. The IsoNim shell renders the footer once with a
+  ## static class (`data-tables-footer 0to0`) and a fixed structure;
+  ## this proc is the only mechanism that keeps the visible counters
+  ## in sync as DataTables reports new totals via the ajax callback.
+  ##
+  ## Page-object tests (e.g. `EventLogTab.getRows`) parse the parent
+  ## `.data-tables-footer` element's class with the regex `(\d*)to`
+  ## to read the current start row, so the class string must be kept
+  ## in sync as well — otherwise the assertion stays at the literal
+  ## "0to0" emitted at mount time.
   if self.footerDom.isNil:
     return
+
+  # Mirror the Karax `tableFooter` VNode class string: the suffix
+  # `<startRow>to<endRow>` is part of the test contract — see
+  # `EventLogTab.getRows()` in
+  # src/tests/gui/page-objects/layout_page.ts which parses the regex
+  # `(\d*)to` out of the class attribute.
+  self.footerDom.setAttribute(
+    cstring"class",
+    cstring(fmt"data-tables-footer {self.startRow}to{self.endRow}"))
 
   if not self.inputFieldChange:
     let inputField = self.footerDom.findNodeInElement(".data-tables-footer-input")

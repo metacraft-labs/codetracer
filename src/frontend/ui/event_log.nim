@@ -1269,6 +1269,24 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
     self.tableCallback(mutData.toJs)
     self.redraw()
 
+    # The IsoNim event-log shell renders the footer once with a static
+    # class string (`data-tables-footer 0to0`) and child counters fixed
+    # at "0".  Under the legacy Karax path the surrounding
+    # `tableFooter(...)` VNode was rebuilt on every `redraw()` so its
+    # class string and inner texts updated automatically — but with the
+    # IsoNim shell as primary renderer no such re-render happens.  We
+    # must therefore push the new totals into the existing DOM
+    # explicitly after each ajax callback.  `updateTableRows` recomputes
+    # `startRow`/`endRow` from the Scroller's current page and the new
+    # `rowsCount`; `updateTableFooter` then writes those values into
+    # the visible counters and parent class.  Page-object tests parse
+    # the parent `.data-tables-footer` class with `(\d*)to`, so keeping
+    # it in sync is part of the test contract.
+    if not dt.isNil and not dt.context.isNil:
+      dt.updateTableRows(redraw = false)
+      if not dt.footerDom.isNil:
+        dt.updateTableFooter()
+
     if self.autoScrollUpdate:
       self.findActiveRow(self.activeRowTicks, true)
       self.autoScrollUpdate = false
@@ -1303,6 +1321,14 @@ method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.}
 
     dt.rowsCount = response.totalCount
     self.redraw()
+
+    # Keep the IsoNim-rendered footer in sync with the new totalCount
+    # (see comment in `onUpdatedTable` for the full rationale — the
+    # static IsoNim shell does not re-render on `redraw()`).
+    if not dt.isNil and not dt.context.isNil:
+      dt.updateTableRows(redraw = false)
+      if not dt.footerDom.isNil:
+        dt.updateTableFooter()
 
 method onUpdatedEvents*(self: EventLogComponent, response: seq[ProgramEvent]) {.async.} =
   self.receivedUpdates = true

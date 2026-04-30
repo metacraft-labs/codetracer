@@ -37,23 +37,39 @@ export class TabObject {
 
   /**
    * Click the tab button, working around the "element is outside of the
-   * viewport" issue that occurs on Windows when the Electron window is
-   * maximized but golden-layout tab buttons are positioned beyond the
-   * visible viewport.
+   * viewport" issue that occurs on Windows (and Xvfb headless Linux)
+   * where the Electron window is maximized but GoldenLayout tab
+   * buttons are positioned beyond Playwright's perceived viewport.
    *
-   * Scrolls the element into view via JavaScript first, then uses a
-   * force-click as a fallback if the normal click still fails.
+   * Three layered attempts:
+   *
+   *   1. plain `click()` — succeeds in most ordinary cases.
+   *   2. `scrollIntoView` + `click({ force: true })` — handles the
+   *      common case where the element is rendered but Playwright's
+   *      viewport detection rejects it.
+   *   3. `dispatchEvent('click')` — bypasses Playwright's viewport
+   *      handling entirely. Required under Xvfb where step 2 still
+   *      fails with "outside of the viewport"; GoldenLayout's tab
+   *      handler runs from a synthetic click event just fine.
    */
   async clickTab(): Promise<void> {
     const btn = this.tabButton();
     try {
       await btn.click({ timeout: 5_000 });
     } catch {
-      // Force-scroll into view and retry with force click
-      await btn.evaluate((el: HTMLElement) => {
-        el.scrollIntoView({ block: "center", inline: "center" });
-      });
-      await btn.click({ force: true, timeout: 5_000 });
+      try {
+        // Force-scroll into view and retry with force click
+        await btn.evaluate((el: HTMLElement) => {
+          el.scrollIntoView({ block: "center", inline: "center" });
+        });
+        await btn.click({ force: true, timeout: 5_000 });
+      } catch {
+        // Final fallback: synthetic dispatch — GoldenLayout's tab
+        // handler doesn't care whether the click came from real input
+        // or a synthetic event, and dispatching sidesteps Playwright's
+        // viewport rejection entirely.
+        await btn.dispatchEvent("click");
+      }
     }
   }
 

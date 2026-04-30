@@ -32,17 +32,6 @@ test.describe("noir example — state and navigation", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "noir_example/", launchMode: "trace" });
 
-  // FAILING: 2026-04-30 — `loadedEventLog` waits 30s and times out
-  // because the event log footer never reports a non-zero row count
-  // for noir DB traces. Trace recording is fast (~170ms), Electron
-  // launches fine, but the DataTables footer counter stays at 0 — the
-  // same symptom the wasm_example "expected event count" test
-  // documents (see test.fixme there).
-  // TODO: The DB-trace event-log population path doesn't update the
-  // `.data-tables-footer-rows-count` element for noir/wasm. Find where
-  // the footer is updated for RR-based traces (likely in `event_log.nim`
-  // / `eventLogAfterRedraws`) and ensure the same code runs after the
-  // DB-trace event load handler in the IsoNim event_log_view too.
   test("expected event count", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 

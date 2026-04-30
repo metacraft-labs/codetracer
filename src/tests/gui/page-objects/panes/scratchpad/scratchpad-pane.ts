@@ -24,11 +24,18 @@ export class ScratchpadPane {
   }
 
   async clickTab(): Promise<void> {
+    // Layered click: plain → force → dispatchEvent. See
+    // `TabObject.clickTab` (base-page.ts) for the rationale — Xvfb
+    // sometimes rejects force-clicks with "outside of the viewport".
     const btn = this.tabButton();
     try {
       await btn.click({ timeout: 5_000 });
     } catch {
-      await btn.click({ force: true, timeout: 5_000 });
+      try {
+        await btn.click({ force: true, timeout: 5_000 });
+      } catch {
+        await btn.dispatchEvent("click");
+      }
     }
   }
 

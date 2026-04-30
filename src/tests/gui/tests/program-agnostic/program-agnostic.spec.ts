@@ -23,17 +23,6 @@ test.describe("ProgramAgnostic", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
-  // FAILING: 2026-05-01 — the inner `retry()` waits for
-  // `table.dataTable tbody tr` count > 0, which is the populated
-  // event-log state. For noir_space_ship the DataTables widget mounts
-  // (the `table.dataTable` exists) but the body never gets rows
-  // populated within the retry budget. Same root cause as the
-  // page_object.spec.ts "Event Log Rows" failure and the noir_example
-  // event-count fixme: DB-trace event log does not flow into the
-  // DataTables tbody.
-  // TODO: this test will start passing automatically once the
-  // DB-trace event-log loader is fixed (see noir_example.spec.ts
-  // "expected event count" TODO). No action needed in this file.
   test("view menu opens event log and scratchpad", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
@@ -44,8 +33,12 @@ test.describe("ProgramAgnostic", () => {
     expect(eventLogs.length).toBeGreaterThan(0);
     const eventLog = eventLogs[0];
 
-    // Click on Event Log tab button to ensure it's selected
-    await eventLog.tabButton().click();
+    // Click on Event Log tab button to ensure it's selected. Use the
+    // layered `clickTab()` helper (TabObject.clickTab) so we tolerate
+    // the Xvfb "outside of the viewport" rejection — GoldenLayout tab
+    // titles are positioned beyond Playwright's perceived viewport in
+    // headless runs even when they are physically visible.
+    await eventLog.clickTab();
     expect(await eventLog.isVisible()).toBe(true);
 
     // Verify Event Log has loaded content (not just an empty container)
@@ -61,12 +54,13 @@ test.describe("ProgramAgnostic", () => {
     expect(scratchpads.length).toBeGreaterThan(0);
     const scratchpad = scratchpads[0];
 
-    // Click on Scratchpad tab button to make it visible
-    await scratchpad.tabButton().click();
+    // Click on Scratchpad tab button to make it visible (layered
+    // click — same rationale as above).
+    await scratchpad.clickTab();
     expect(await scratchpad.isVisible()).toBe(true);
 
     // Verify we can switch back to Event Log
-    await eventLog.tabButton().click();
+    await eventLog.clickTab();
     expect(await eventLog.isVisible()).toBe(true);
   });
 

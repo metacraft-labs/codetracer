@@ -27,11 +27,19 @@ export class EventLogPane {
   }
 
   async clickTab(): Promise<void> {
+    // Layered click: plain → force → dispatchEvent. The final
+    // dispatchEvent fallback is required under Xvfb where Playwright
+    // rejects even force-clicks with "outside of the viewport" — see
+    // the same pattern in `TabObject.clickTab` (base-page.ts).
     const btn = this.tabButton();
     try {
       await btn.click({ timeout: 5_000 });
     } catch {
-      await btn.click({ force: true, timeout: 5_000 });
+      try {
+        await btn.click({ force: true, timeout: 5_000 });
+      } catch {
+        await btn.dispatchEvent("click");
+      }
     }
   }
 

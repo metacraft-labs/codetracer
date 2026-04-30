@@ -21,6 +21,7 @@ import * as process from "node:process";
 
 import {
   test as base,
+  expect,
   type Page,
   type ElectronApplication,
 } from "@playwright/test";
@@ -1118,8 +1119,29 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
   await p.locator(".location-path").click();
 }
 
-/** Wait for the event log footer to be populated. */
+/** Wait for the event log footer to be populated.
+ *
+ * The footer is rendered immediately by the IsoNim event-log shell with
+ * a placeholder row count of "0"; DataTables fills it in after its
+ * server-side ajax response arrives.  We therefore wait until the
+ * counter shows a non-zero integer before returning.
+ *
+ * Earlier revisions of this helper followed the visibility wait with a
+ * `.click()` on the counter element; the click was redundant for the
+ * actual readiness contract and routinely failed under Xvfb because
+ * the footer can be off-viewport when the GoldenLayout is not yet
+ * fully sized.  The non-zero text wait subsumes the previous goal
+ * (let DataTables finish populating) without depending on the click.
+ */
 export async function loadedEventLog(p: Page): Promise<void> {
-  await p.locator(".data-tables-footer-rows-count").waitFor({ state: "visible", timeout: 15_000 });
-  await p.locator(".data-tables-footer-rows-count").click();
+  const rowsCount = p.locator(".data-tables-footer-rows-count");
+  await rowsCount.waitFor({ state: "visible", timeout: 15_000 });
+  await expect.poll(
+    async () => {
+      const text = (await rowsCount.textContent()) ?? "";
+      const match = text.match(/(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    },
+    { timeout: 30_000, intervals: [250, 500, 1000] },
+  ).toBeGreaterThan(0);
 }
