@@ -130,7 +130,7 @@ proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
       vm.visibleLines.val,
     proc(item: proc(): CallLine, index: int): N =
       let row = r.createElement("div")
-      r.setAttribute(row, "class", "call-line")
+      r.setAttribute(row, "class", "calltrace-call-line")
 
       createRenderEffect proc() =
         let line = item()
@@ -148,9 +148,9 @@ proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
         # Selected entry highlighting
         let selected = vm.selectedEntry.val
         if selected.isSome and selected.get == line.index:
-          r.setAttribute(row, "class", "call-line selected")
+          r.setAttribute(row, "class", "calltrace-call-line selected")
         else:
-          r.setAttribute(row, "class", "call-line")
+          r.setAttribute(row, "class", "calltrace-call-line")
 
         # Function name
         let nameSpan = r.createElement("span")
@@ -266,10 +266,13 @@ when defined(js):
     let container = r.createElement("div")
     r.setAttribute(container, "class", "calltrace-lines")
     r.appendChild(parent, container)
+    {.emit: "console.error('[PIPELINE] renderWebCallLineList: container created, starting indexEach');".}
 
     indexEach[CallLine, WebRenderer, isonim_dom.Element](r, container,
       proc(): seq[CallLine] =
-        vm.visibleLines.val,
+        let lines = vm.visibleLines.val
+        {.emit: "console.error('[PIPELINE] renderWebCallLineList indexEach source: visibleLines.len=' + `lines`.length);".}
+        lines,
       proc(item: proc(): CallLine, index: int): isonim_dom.Element =
         let row = r.createElement("div")
 
@@ -527,6 +530,9 @@ when defined(js):
     ## Call this once after the CalltraceVM has been created.
     ## This view is the primary calltrace renderer — the Karax
     ## calltrace render() returns an empty stub when this is mounted.
+    {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: starting, container=', `container`);".}
     let r = WebRenderer()
     let calltracePanel = renderCalltracePanel(r, vm)
+    {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: panel created, children=', `calltracePanel`.childNodes ? `calltracePanel`.childNodes.length : 0);".}
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(calltracePanel))
+    {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: appended to container, container.children=', `container`.childNodes ? `container`.childNodes.length : 0);".}

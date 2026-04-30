@@ -137,6 +137,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
   dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+    {.emit: "console.error('[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=' + (`value`.location ? `value`.location.rrTicks : 'no-location') + ', emitting to viewsApi');".}
     viewsApi.emit(CtCompleteMove, value)
     lastCompleteMove = value
 
@@ -216,6 +217,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(CtSetupTraceSession, proc(kind: CtEventKind, value: RunTracepointsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadAsmFunction, proc(kind: CtEventKind, value: FunctionLocation, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(InternalLastCompleteMove, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
+    {.emit: "console.error('[PIPELINE] middleware.InternalLastCompleteMove: lastCompleteMove=' + (`lastCompleteMove` !== null && `lastCompleteMove` !== undefined ? 'SET (rrTicks=' + (`lastCompleteMove`.location ? `lastCompleteMove`.location.rrTicks : 'no-location') + ')' : 'NULL'));".}
     if not lastCompleteMove.isNil:
       viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
   )

@@ -100,36 +100,38 @@ proc tryMountIsoNimStatePanel() =
   ##   reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
+  cerror "[PIPELINE] tryMountIsoNimStatePanel: called, isoNimStateMounted=" & $isoNimStateMounted & " vmIsNil=" & $stateVMInstance.isNil
   if isoNimStateMounted or stateVMInstance.isNil:
+    cerror "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
     return
 
-  # Short delay to ensure the GoldenLayout container has been created
-  # and the initial Karax render has populated it.
-  discard setTimeout(proc() =
+  let key = cstring"stateComponent-0"
+  var stateRetryCount = 0
+  proc doMount() =
     if isoNimStateMounted:
       return
-    let container = dom_api.getElementById(dom_api.document, cstring"stateComponent-0")
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim state panel: #stateComponent-0 element not found"
+    stateRetryCount += 1
+    let container = dom_api.getElementById(dom_api.document, key)
+    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+      if stateRetryCount mod 10 == 0:
+        cerror "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $stateRetryCount
+      if stateRetryCount > 200:
+        cerror "[PIPELINE] tryMountIsoNimStatePanel: not ready after 200 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 10)
       return
 
-    # Clear existing Karax-rendered content so the IsoNim view has a
-    # clean container. We also remove the Karax renderer from kxiMap
-    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
-    # this component (which would corrupt the IsoNim-managed DOM).
+    kxiMap.del(key)
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    # Remove the Karax instance so redrawAll() skips this component.
-    # The `del` call is safe even if the key is absent (JS delete on
-    # a missing property is a no-op that returns true).
-    kxiMap.del(cstring"stateComponent-0")
-
+    cerror "[PIPELINE] tryMountIsoNimStatePanel: container + kxiMap found, mounting now"
     isoNimStateMounted = true
     mountIsoNimStatePanel(container, stateVMInstance)
-    clog "IsoNim state panel: mounted as primary renderer in #stateComponent-0"
-  , 500)
+    cerror "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
+
+  doMount()
 
 proc initStateVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel StateVM using an externally-provided
@@ -144,6 +146,7 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
     isoNimStateMounted = false
   stateVMStore = store
   stateVMInstance = createStateVM(store)
+  {.emit: "console.error('[PIPELINE] initStateVMWithStore: storeId=' + `store`.storeId);".}
   clog "StateVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimStatePanel()
 
@@ -191,7 +194,7 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
       hasChildren = (if v.value.isNil: false else: v.value.elements.len > 0),
     ))
   stateVMStore.updateLocals(vmLocals)
-  clog fmt"StateVM: synced {vmLocals.len} locals into store"
+  cerror fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
 
 proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
@@ -200,7 +203,7 @@ proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
     return
   let ticks = cast[uint64](rrTicks)
   stateVMStore.updateDebuggerPosition(ticks, $path, line)
-  clog fmt"StateVM: synced debugger rrTicks={ticks}"
+  cerror fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
 
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
   clog fmt"registerLocals"

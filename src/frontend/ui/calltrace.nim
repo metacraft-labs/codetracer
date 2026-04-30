@@ -944,36 +944,50 @@ proc tryMountIsoNimCalltrace() =
   ##   store, and IsoNim's reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
+  cerror "[PIPELINE] tryMountIsoNimCalltrace: called, isoNimCalltraceMounted=" & $isoNimCalltraceMounted & " vmIsNil=" & $calltraceVMInstance.isNil
   if isoNimCalltraceMounted or calltraceVMInstance.isNil:
+    cerror "[PIPELINE] tryMountIsoNimCalltrace: skipping (already mounted or VM nil)"
     return
 
-  # Short delay to ensure the GoldenLayout container has been created
-  # and the initial Karax render has populated it.
-  discard setTimeout(proc() =
+  # Wait for both the DOM container and the Karax kxiMap entry to exist
+  # before mounting. GoldenLayout creates the container immediately but
+  # calls setRenderer inside a 200ms windowSetTimeout. If we mount before
+  # setRenderer runs, our kxiMap.del is a no-op and Karax later overwrites
+  # the IsoNim DOM. By waiting for the kxiMap entry, we guarantee we can
+  # delete it atomically with the mount.
+  let key = cstring"calltraceComponent-0"
+  var calltraceRetryCount = 0
+  proc doMount() =
     if isoNimCalltraceMounted:
       return
-    let container = dom_api.getElementById(dom_api.document, cstring"calltraceComponent-0")
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim calltrace: #calltraceComponent-0 element not found"
+    calltraceRetryCount += 1
+    let container = dom_api.getElementById(dom_api.document, key)
+    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+      if calltraceRetryCount mod 10 == 0:
+        cerror "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &
+          ", container=" & (if dom_api.isNodeNil(dom_api.Node(container)): "nil" else: "found") &
+          ", kxiMap=" & (if kxiMap.hasKey(key): "found" else: "nil")
+      if calltraceRetryCount > 200:
+        cerror "[PIPELINE] tryMountIsoNimCalltrace: not ready after 200 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 10)
       return
 
-    # Clear existing Karax-rendered content so the IsoNim view has a
-    # clean container. We also remove the Karax renderer from kxiMap
-    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
-    # this component (which would corrupt the IsoNim-managed DOM).
+    # Both container and kxiMap entry exist. Remove the Karax instance
+    # FIRST so that no concurrent redrawAll() can interfere, then clear
+    # the container and mount the IsoNim view.
+    kxiMap.del(key)
+
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    # Remove the Karax instance so redrawAll() skips this component.
-    # The `del` call is safe even if the key is absent (JS delete on
-    # a missing property is a no-op that returns true).
-    kxiMap.del(cstring"calltraceComponent-0")
-
+    cerror "[PIPELINE] tryMountIsoNimCalltrace: container + kxiMap found, mounting now"
     isoNimCalltraceMounted = true
     mountIsoNimCalltrace(container, calltraceVMInstance)
-    clog "IsoNim calltrace: mounted as primary renderer in #calltraceComponent-0"
-  , 500)
+    cerror "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
+
+  doMount()
 
 proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel CalltraceVM using an externally-provided
@@ -990,6 +1004,7 @@ proc initCalltraceVMWithStore*(store: ReplayDataStore) =
     isoNimCalltraceMounted = false
   calltraceVMStore = store
   calltraceVMInstance = createCalltraceVM(store)
+  {.emit: "console.error('[PIPELINE] initCalltraceVMWithStore: storeId=' + `store`.storeId);".}
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimCalltrace()
 
@@ -1020,13 +1035,17 @@ proc initCalltraceVM() =
 
   calltraceVMStore = createReplayDataStore(stubBackend)
   calltraceVMInstance = createCalltraceVM(calltraceVMStore)
+  {.emit: "console.error('[PIPELINE] initCalltraceVM (stub): storeId=' + `calltraceVMStore`.storeId);".}
   clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimCalltrace()
 
 proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
   ## so the CalltraceVM's visibleLines memo sees the same data.
+  let diagSyncStoreId = if calltraceVMStore.isNil: -1 else: calltraceVMStore.storeId
+  cerror fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={isoNimCalltraceMounted}"
   if calltraceVMStore.isNil:
+    cerror "[PIPELINE] syncCalltraceData: store is nil, returning early"
     return
   var vmLines: seq[vm_types.CallLine] = @[]
   for i, callLine in results.callLines:
@@ -1046,7 +1065,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
     startIndex = 0'i64,
     totalCount = cast[uint64](results.totalCallsCount),
   )
-  clog fmt"CalltraceVM: synced {vmLines.len} calltrace lines into store"
+  cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store"
 
 proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
@@ -1054,8 +1073,9 @@ proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   if calltraceVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
+  let diagStoreId = calltraceVMStore.storeId
   calltraceVMStore.updateDebuggerPosition(ticks, $path, line)
-  clog fmt"CalltraceVM: synced debugger rrTicks={ticks}"
+  cerror fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
 
 method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
   self.totalCallsCount = results.totalCallsCount
@@ -1555,6 +1575,12 @@ proc setContinuationLinks*(self: CalltraceComponent, links: seq[ContinuationLink
 proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
   ## Called by the backend when async thread groupings are discovered.
   self.asyncThreads = threads
+
+method redrawForSinglePage*(self: CalltraceComponent) =
+  # IsoNim is the primary renderer. Suppress Karax redraws so that
+  # the IsoNim-managed DOM tree is not overwritten. Data flows through
+  # the reactive store signals and IsoNim effects handle all updates.
+  discard
 
 method render*(self: CalltraceComponent): VNode =
   # IsoNim is the primary renderer. Return a minimal empty container

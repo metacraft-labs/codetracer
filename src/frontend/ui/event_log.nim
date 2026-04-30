@@ -103,60 +103,84 @@ proc tryMountIsoNimEventLogPanel() =
   ##   data through the DataTables API; IsoNim effects can also react
   ##
   ## Safe to call multiple times — mounts only once.
+  cerror "tryMountIsoNimEventLogPanel: called, isoNimEventLogMounted=" & $isoNimEventLogMounted & " vmIsNil=" & $eventLogVMInstance.isNil & " compRefIsNil=" & $eventLogComponentRef.isNil
   if isoNimEventLogMounted or eventLogVMInstance.isNil:
+    cerror "tryMountIsoNimEventLogPanel: skipping (already mounted or VM nil)"
     return
   if eventLogComponentRef.isNil:
+    cerror "tryMountIsoNimEventLogPanel: skipping (eventLogComponentRef is nil)"
     return
 
-  # Short delay to ensure the GoldenLayout container has been created
-  # and the initial Karax render has populated it.
-  discard setTimeout(proc() =
+  let key = cstring"eventLogComponent-0"
+  var eventLogRetryCount = 0
+  proc doMount() =
     if isoNimEventLogMounted:
       return
-    let container = dom_api.getElementById(dom_api.document, cstring"eventLogComponent-0")
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim event log panel: #eventLogComponent-0 element not found"
+    eventLogRetryCount += 1
+    let container = dom_api.getElementById(dom_api.document, key)
+    # Wait for both the GoldenLayout container and the Karax kxiMap
+    # entry (created by setRenderer in a 200ms windowSetTimeout).
+    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+      if eventLogRetryCount > 200:
+        cerror "tryMountIsoNimEventLogPanel: not ready after 200 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 10)
       return
 
-    # Clear existing Karax-rendered content so the IsoNim view has a
-    # clean container. We also remove the Karax renderer from kxiMap
-    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
-    # this component (which would corrupt the IsoNim-managed DOM).
+    # Remove the Karax renderer so redrawAll() skips this component.
+    kxiMap.del(key)
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    # Remove the Karax instance so redrawAll() skips this component.
-    # The `del` call is safe even if the key is absent (JS delete on
-    # a missing property is a no-op that returns true).
-    kxiMap.del(cstring"eventLogComponent-0")
-
     isoNimEventLogMounted = true
 
     let comp = eventLogComponentRef
-    # Compute table IDs inline — the denseId/detailedId procs are
-    # defined later in the file and not available here.
+    # Null the Karax instance reference so that self.redraw() (called
+    # from onUpdatedTable, onUpdatedEvents, etc.) is a no-op instead
+    # of triggering Karax to re-render the empty stub over IsoNim content.
+    comp.kxi = nil
     let denseId = "eventLog-" & $comp.id & "-dense-table-" & $comp.index
     let detailedId = "eventLog-" & $comp.id & "-detailed-table-" & $comp.index
     let searchId = "eventLog-" & $comp.id & "-search"
 
-    mountIsoNimEventLogWithDataTables(
-      container,
-      eventLogVMInstance,
-      comp.id,
-      denseId,
-      detailedId,
-      searchId,
-      proc() =
-        # Trigger DataTables initialisation on the IsoNim-created
-        # table elements. Reset init state so events() goes through
-        # the full initialisation branch.
-        comp.init = false
-        comp.redrawColumns = true
-        comp.eventLogAfterRedraws()
-    )
-    clog "IsoNim event log panel: mounted as primary renderer in #eventLogComponent-0"
-  , 500)
+    try:
+      mountIsoNimEventLogWithDataTables(
+        container,
+        eventLogVMInstance,
+        comp.id,
+        denseId,
+        detailedId,
+        searchId,
+        proc() =
+          comp.init = false
+          comp.redrawColumns = true
+          comp.eventLogAfterRedraws()
+      )
+      cerror "tryMountIsoNimEventLogPanel: mount COMPLETE in #eventLogComponent-0"
+
+      # GoldenLayout's genericUiComponent callback calls setRenderer
+      # inside a 200ms windowSetTimeout.  If we mounted BEFORE that
+      # timeout fired, the kxiMap.del above was a no-op (the entry
+      # didn't exist yet).  When the timeout fires, setRenderer adds
+      # the kxiMap entry, and the next redrawAll() would let Karax
+      # re-render its empty stub — wiping out the IsoNim content.
+      # Poll for and remove late kxiMap entries so the IsoNim-managed
+      # DOM is never overwritten.
+      proc deferredKxiCleanup(attempt: int) =
+        if attempt > 20:
+          return
+        if kxiMap.hasKey(key):
+          kxiMap.del(key)
+        else:
+          discard setTimeout(proc() = deferredKxiCleanup(attempt + 1), 50)
+
+      discard setTimeout(proc() = deferredKxiCleanup(0), 50)
+
+    except:
+      cerror "tryMountIsoNimEventLogPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
+
+  doMount()
 
 var arg: js
 
@@ -1274,6 +1298,24 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
     else:
       self.findActiveRow(self.activeRowTicks)
 
+    # When the backend returns 0 records but the debugger has already
+    # positioned (self.started), the event data may not have been loaded
+    # yet (ct/event-load still in flight).  Schedule retries with
+    # exponential back-off so DataTables eventually populates once the
+    # backend is ready.  Stop retrying after events arrive or after a
+    # maximum number of attempts to avoid infinite spinning.
+    if response.data.recordsTotal == 0 and self.started and
+       not self.receivedUpdates and self.pendingReloadRetries < 8:
+      self.pendingReloadRetries += 1
+      let delay = 250 * self.pendingReloadRetries  # 250, 500, 750, ... ms
+      cerror "[PIPELINE] event_log: onUpdatedTable got 0 records, scheduling reload retry " &
+             $self.pendingReloadRetries & " in " & $delay & "ms"
+      discard setTimeout(proc() =
+        if not self.receivedUpdates and
+           not self.denseTable.isNil and not self.denseTable.context.isNil:
+          self.denseTable.context.ajax.reload(nil, false)
+      , delay)
+
 method onUpdatedTrace*(self: EventLogComponent, response: TraceUpdate) {.async.} =
   if response.firstUpdate or response.refreshEventLog or
       (not self.denseTable.context.isNil and cast[string](self.denseTable.context.search()) != ""):
@@ -1470,14 +1512,27 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
 
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
-    # The legacy CtEventLoad emit has been removed.  On the first (and
-    # every subsequent) complete-move the syncEventLogDebuggerPosition call
-    # in onCompleteMove updates the store's debugger signal.  The
-    # EventLogVM's auto-load effect detects the change and sends the
-    # ct/load-event-log command through the real backend, so the initial
-    # event load now happens automatically.
+    # On the first CtCompleteMove, DataTables has already been initialised
+    # and its initial ajax request returned 0 records (the backend had not
+    # finished loading events from the ct/event-load request yet).
+    # Trigger a DataTables ajax reload so it re-requests data now that the
+    # backend has had time to load events.  A short delay gives the backend
+    # a margin to finish processing ct/event-load before the reload fires.
     if not self.started:
       self.started = true
+      # Emit CtEventLoad to ensure the backend loads events.
+      # The IsoNim EventLogVM auto-load effect may not fire reliably
+      # yet, so the legacy CtEventLoad path is the primary trigger.
+      self.api.emit(CtEventLoad, EmptyArg())
+      # Schedule a single delayed DataTables ajax reload.  The
+      # onUpdatedTable retry mechanism handles further retries if
+      # the backend hasn't finished loading events yet.
+      if not self.denseTable.isNil and not self.denseTable.context.isNil:
+        discard setTimeout(proc() =
+          if not self.denseTable.isNil and not self.denseTable.context.isNil:
+            cerror "[PIPELINE] event_log: first CtCompleteMove, reloading DataTables ajax"
+            self.denseTable.context.ajax.reload(nil, false)
+        , 500)
   )
 
   api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =

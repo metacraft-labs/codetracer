@@ -32,6 +32,7 @@ proc listenAsync(server: JsObject; port: cint): Future[void] {.async.} =
   await newPromise(proc (resolve: proc () {.closure.}) {.closure.} =
     listenWithCallback(server, port, resolve)
   )
+proc serverAddressPort(server: JsObject): cint {.importjs: "#.address().port".}
 proc createConnection(server: JsObject; reader, writer: JsObject; disposer: proc () {.closure.}): JsObject {.importjs: "#.createConnection(#, #, #)".}
 proc forwardConnections(server: JsObject; a, b: JsObject) {.importjs: "#.forward(#, #)".}
 proc unusedOnNotification(connection: JsObject; handler: proc(methodName, params: JsObject) {.closure.}): JsObject {.importjs: "#.onNotification(#)".}
@@ -113,9 +114,11 @@ proc startBridge*(port: cint = 3000; pathName: string = "/lsp"; lsCommand: strin
   )
 
   await listenAsync(server, port)
-  echo "LSP bridge listening on ws://localhost:" & $port & pathName
+  let actualPort = serverAddressPort(server)
+  echo "LSP bridge listening on ws://localhost:" & $actualPort & pathName
 
   let result = newObject()
   setField(result, "server", server)
   setField(result, "wss", wss)
+  setField(result, "port", toJs(($actualPort).cstring))
   return result

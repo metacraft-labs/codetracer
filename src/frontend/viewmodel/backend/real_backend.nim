@@ -39,9 +39,15 @@ proc parseJsonFromJs(o: JsObject): JsonNode {.importjs:
   "JSON.parse(JSON.stringify(#))".}
   ## Convert a raw JsObject to a stdlib JsonNode.
 
-proc toJsObject(j: JsonNode): JsObject {.importjs:
-  "JSON.parse(JSON.stringify(#))".}
+proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
+
+proc toJsObject(j: JsonNode): JsObject =
   ## Convert a stdlib JsonNode to a raw JsObject for DapApi.
+  ## Nim's JS backend represents JsonNode as an internal object with
+  ## `kind`, `str`, `fields` etc. We must serialize to a JSON string
+  ## first (via Nim's `$`), then parse it back with JavaScript's
+  ## `JSON.parse` to get a plain JS object that DapApi expects.
+  jsonParseJs(cstring($j))
 
 # ---------------------------------------------------------------------------
 # Adapter types

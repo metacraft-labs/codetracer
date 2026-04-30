@@ -243,7 +243,10 @@ proc runInitial*(conf: CodetracerConf) =
         conf.replayTraceId,
         conf.replayTraceFolder,
         replayInteractive,
-        newTracePolicy = replayPolicy
+        newTracePolicy = replayPolicy,
+        inspect = conf.inspect,
+        remoteDebuggingPort = conf.remoteDebuggingPort,
+        remoteDebuggingPipe = conf.remoteDebuggingPipe,
       )
     of StartupCommand.noCommand:
       # When ct is launched with no subcommand, show the welcome screen.

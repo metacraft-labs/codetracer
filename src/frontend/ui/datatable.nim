@@ -218,7 +218,14 @@ proc updateTableRows*(self: DataTableComponent, redraw: bool = true) =
 
   let context = self.context
   let scroller = context.scroller
+  # Guard: the Scroller plugin may not be ready yet when DataTables is
+  # still processing its first server-side ajax request.  In that case
+  # `scroller` is undefined or `scroller.page()` returns undefined.
+  if scroller.isNil:
+    return
   let page = scroller.page()
+  if page.isNil:
+    return
   let totalRows = max(self.rowsCount, 0)
   var startRow = max(cast[int](page.start), 0)
   var endRow = max(cast[int](page["end"]), startRow)

@@ -179,7 +179,12 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
   ## 1. Mutable signals with sensible defaults
   ## 2. Derived memos for visibleLines, hasMore*, highlightedMatches, isLoading
   ## 3. An auto-load effect that requests calltrace data when scroll/viewport changes
+  {.emit: "console.error('[PIPELINE] createCalltraceVM: using store id=' + `store`.storeId);".}
   withViewModel proc(dispose: proc()): CalltraceVM =
+    let wrappedDispose = proc() =
+      {.emit: "console.error('[PIPELINE] CalltraceVM DISPOSED! This should only happen on cleanup.');".}
+      dispose()
+
     let scrollPosition = createSignal(0'i64)
     let viewportHeight = createSignal(0)
     let viewportDepth = createSignal(DEFAULT_VIEWPORT_DEPTH)
@@ -197,7 +202,11 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let scrollPos = scrollPosition.val
       let vpHeight = viewportHeight.val
 
+      let diagStoreIdVL = store.storeId
+      {.emit: "console.error('[PIPELINE] visibleLines memo: storeId=' + `diagStoreIdVL` + ' lines.len=' + `lines`.length + ' storeStart=' + `storeStart` + ' scrollPos=' + `scrollPos` + ' vpHeight=' + `vpHeight`);".}
+
       if lines.len == 0:
+        {.emit: "console.error('[PIPELINE] visibleLines memo: returning empty (no lines in store)');".}
         return newSeq[CallLine]()
 
       # When viewport height is not yet known (e.g. before the resize
@@ -220,6 +229,7 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let sliceStart = (viewStart - storeStart).int
       let sliceEnd = (viewEnd - storeStart).int
       result = lines[sliceStart .. sliceEnd]
+      {.emit: "console.error('[PIPELINE] visibleLines memo: returning ' + `result`.length + ' lines (slice ' + `sliceStart` + '..' + `sliceEnd` + ')');".}
 
     # Derived: whether there are entries above the current viewport.
     let hasMoreAbove = createMemo[bool] proc(): bool =
@@ -284,22 +294,20 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let depth = viewportDepth.val
       let dbg = store.debugger.val
       let patterns = rawIgnorePatterns.val
-      if dbg.rrTicks > 0'u64:
-        # Use a reasonable default when viewport height is not yet known.
-        # The resize observer will update viewportHeight later, triggering
-        # a follow-up request with the correct dimensions. Without this
-        # fallback, the initial data request would never fire if the
-        # calltrace panel hasn't been laid out yet.
-        let effectiveHeight = if vpHeight > 0: vpHeight else: 50
-        # Request a section with buffer on both sides for smooth scrolling.
-        let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
-        let totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
-        store.requestCalltraceSection(
-          bufferStart, totalHeight, depth,
-          rrTicks = dbg.rrTicks,
-          file = dbg.location.file,
-          line = dbg.location.line,
-          rawIgnorePatterns = patterns,
-        )
+      let diagRrTicks = dbg.rrTicks
+      let diagStoreId = store.storeId
+      {.emit: "console.error('[PIPELINE] CalltraceVM.autoLoad: storeId=' + `diagStoreId` + ' rrTicks=' + `diagRrTicks` + ' vpHeight=' + `vpHeight` + ' scrollPos=' + `scrollPos` + ' depth=' + `depth`);".}
+      # No rrTicks guard — DB-based traces always have rrTicks=0.
+      # RequestTracker deduplicates redundant backend requests.
+      let effectiveHeight = if vpHeight > 0: vpHeight else: 50
+      let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
+      let totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
+      store.requestCalltraceSection(
+        bufferStart, totalHeight, depth,
+        rrTicks = dbg.rrTicks,
+        file = dbg.location.file,
+        line = dbg.location.line,
+        rawIgnorePatterns = patterns,
+      )
 
     vm

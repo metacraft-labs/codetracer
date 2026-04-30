@@ -248,6 +248,28 @@ function setupLdLibraryPath(): void {
 }
 
 /**
+ * Remove Electron's single-instance lock files so a fresh launch can
+ * acquire the lock.  Stale locks from previous test runs (or manual
+ * launches) cause `_electron.launch()` to hang because the new Electron
+ * instance detects the lock and tries to delegate to a non-existent
+ * first instance.
+ */
+function clearElectronSingletonLocks(): void {
+  const electronUserDataDir = path.join(
+    process.env.HOME ?? process.env.USERPROFILE ?? "",
+    isWindows ? "AppData/Roaming/Electron" : ".config/Electron",
+  );
+  for (const lockFile of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+    const lockPath = path.join(electronUserDataDir, lockFile);
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      // File may not exist — that's fine.
+    }
+  }
+}
+
+/**
  * Recursively kills a process and all its descendants.
  * Prevents backend-manager and db-backend from leaking as orphans
  * when Electron is killed during test teardown.
@@ -425,6 +447,25 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+  // Bypass the Electron single-instance lock so that concurrent test runs
+  // (or stale Electron processes from previous runs) do not prevent this
+  // instance from starting.  With "window" policy the new process always
+  // opens its own window instead of delegating to an existing instance.
+  env.CODETRACER_NEW_TRACE_POLICY = "window";
+  // Prevent the GPU process from crashing fatally during long-running tests
+  // (e.g. Python traces that take ~40s to load).  The GPU process on some
+  // systems (nVidia + Wayland) crashes and after a few retries Electron
+  // terminates with "GPU process isn't usable. Goodbye."
+  // --in-process-gpu runs the GPU code in the main process, avoiding the
+  // separate GPU process crash/restart cycle entirely.
+  env.CODETRACER_ELECTRON_ARGS = [
+    "--no-sandbox",
+    "--no-zygote",
+    "--disable-gpu",
+    "--disable-gpu-compositing",
+    "--disable-dev-shm-usage",
+    "--in-process-gpu",
+  ].join(" ");
   if (extra) {
     Object.assign(env, extra);
   }
@@ -559,6 +600,7 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
 
 async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SMALL_RECORDING_MS): Promise<LaunchResult> {
   setupLdLibraryPath();
+  clearElectronSingletonLocks();
   const t0 = Date.now();
 
   // Support both relative paths (under test-programs/) and absolute paths
@@ -632,6 +674,7 @@ async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SM
 
 async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_RECORDING_MS): Promise<LaunchResult> {
   setupLdLibraryPath();
+  clearElectronSingletonLocks();
   const t0 = Date.now();
 
   // Support both relative paths (under test-programs/) and absolute paths
@@ -747,6 +790,7 @@ async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_R
 
 async function launchWelcomeScreen(): Promise<LaunchResult> {
   setupLdLibraryPath();
+  clearElectronSingletonLocks();
   console.log("# launching welcome screen");
 
   const welcomeExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
@@ -786,6 +830,7 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
 
 async function launchEditMode(folderPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
+  clearElectronSingletonLocks();
   console.log(`# launching edit mode for ${folderPath}`);
 
   const editExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
@@ -827,6 +872,7 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
 
 async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
+  clearElectronSingletonLocks();
   console.log(`# launching deepreview mode for ${jsonPath}`);
 
   const drExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;

@@ -353,8 +353,7 @@ proc navigationMenuView*(self: MenuComponent): VNode =
   ):
     tdiv(
       id = "menu-root",
-      onclick = proc (ev: Event, tg: VNode) =
-        ev.stopPropagation()
+      onclick = proc =
         toggle(self)
         discard setTimeout(proc() = jq("#navigation-menu").focus(), 10)):
       tdiv(id="menu-logo-img")

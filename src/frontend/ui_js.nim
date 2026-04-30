@@ -974,6 +974,8 @@ when not defined(ctInExtension):
                 handler($kind, raw)),
       )
       activeSessionVM = createSessionVM(realBackend)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: SessionVM created');".}
+      {.emit: "console.error('[PIPELINE] configureMiddleware: RealBackendService created');".}
       clog "SessionViewModel: created with real DapApi backend"
 
       # Pre-initialise (or upgrade) the panel VMs that have legacy bridge
@@ -982,12 +984,19 @@ when not defined(ctInExtension):
       # createUIComponents(), these calls replace them with real-backend
       # instances.  If register() hasn't run yet, the instances are
       # created fresh with the real backend.
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initStateVMWithStore');".}
       state.initStateVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCalltraceVMWithStore');".}
       calltrace.initCalltraceVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initDebugControlsVMWithStore');".}
       debug.initDebugControlsVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initEventLogVMWithStore');".}
       event_log.initEventLogVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initFlowVMWithStore');".}
       flow.initFlowVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initEditorVMWithStore');".}
       editor.initEditorVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initTimelineVMWithStore');".}
       trace.initTimelineVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
@@ -997,16 +1006,20 @@ when not defined(ctInExtension):
       # routing between early-registered components and viewsApi is
       # order-dependent and can miss events).
       # -----------------------------------------------------------------
+      {.emit: "console.error('[PIPELINE] configureMiddleware: registering viewsApi subscriptions');".}
       data.viewsApi.subscribe(CtUpdatedCalltrace,
         proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
+          {.emit: "console.error('[PIPELINE] viewsApi.CtUpdatedCalltrace: received ' + `response`.callLines.length + ' lines, totalCalls=' + `response`.totalCallsCount);".}
           calltrace.syncCalltraceData(response))
 
       data.viewsApi.subscribe(CtLoadLocalsResponse,
         proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
+          {.emit: "console.error('[PIPELINE] viewsApi.CtLoadLocalsResponse: received ' + `response`.locals.length + ' variables');".}
           state.syncStoreLocals(response.locals))
 
       data.viewsApi.subscribe(CtCompleteMove,
         proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+          {.emit: "console.error('[PIPELINE] viewsApi.CtCompleteMove: rrTicks=' + `response`.location.rrTicks + ' file=' + `response`.location.path + ' line=' + `response`.location.line);".}
           calltrace.syncCalltraceDebuggerPosition(
             response.location.rrTicks, response.location.path, response.location.line)
           state.syncStoreDebuggerPosition(
@@ -1035,14 +1048,20 @@ when not defined(ctInExtension):
           } catch(e) {}
         """.}
         if enableIsoNim:
-          # Show the IsoNim app container
-          {.emit: """
-            var isoEl = document.getElementById('isonim-app');
-            if (isoEl) isoEl.style.display = 'block';
-          """.}
-          activeIsoNimApp = mountIsoNimApp(activeSessionVM)
-          if not activeIsoNimApp.isNil:
-            clog "IsoNimApp: mounted successfully (same-process fast path)"
+          # The isonim_app shell mount is disabled — it creates a duplicate
+          # DOM tree in #isonim-app that conflicts with the per-panel
+          # tryMount procs which mount into GoldenLayout containers (where
+          # tests and actual UI look for content). The per-panel mounts in
+          # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
+          # rendering path.
+          discard
+          # {.emit: """
+          #   var isoEl = document.getElementById('isonim-app');
+          #   if (isoEl) isoEl.style.display = 'block';
+          # """.}
+          # activeIsoNimApp = mountIsoNimApp(activeSessionVM)
+          # if not activeIsoNimApp.isNil:
+          #   clog "IsoNimApp: mounted successfully (same-process fast path)"
 
     for content, components in data.ui.componentMapping:
       for i, component in components:
@@ -1060,12 +1079,14 @@ when not defined(ctInExtension):
     if not activeSessionVM.isNil:
       # Immediate replay: catches the case where CtCompleteMove already
       # fired and lastCompleteMove is set in the middleware.
+      {.emit: "console.error('[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)');".}
       data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
       # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
       # typically arrives 1-5 seconds after configureMiddleware.  This
       # retry ensures VMs learn the position even when the backend
       # responds after the immediate replay above found nothing.
       discard windowSetTimeout(proc() =
+        {.emit: "console.error('[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)');".}
         data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
       , 3_000)
 

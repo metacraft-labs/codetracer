@@ -444,12 +444,13 @@ proc findByRecordProcessId*(pid: int, test: bool): Trace =
 proc findRecentTraces*(limit: int, test: bool): seq[Trace] =
   let db = ensureDB(test)
   let traces =
-    if limit == -1:
+    if limit > 0:
       db.getAllRows(
         sql("SELECT * FROM traces ORDER BY id DESC LIMIT ?"),
         $limit
       )
     else:
+      # limit <= 0 means no limit (return all traces)
       db.getAllRows(
         sql("SELECT * FROM traces ORDER BY id DESC")
       )

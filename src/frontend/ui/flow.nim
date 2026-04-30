@@ -107,13 +107,20 @@ proc tryMountIsoNimFlowPanel() =
   if isoNimFlowMounted or flowVMInstance.isNil:
     return
 
-  # Short delay to ensure the Karax container has been created.
-  discard setTimeout(proc() =
+  # Try to mount synchronously. If the container doesn't exist yet,
+  # retry on the next event loop tick instead of using a 500ms delay.
+  # Gives up after 100 retries to avoid infinite spinning.
+  var flowRetryCount = 0
+  proc doMount() =
     if isoNimFlowMounted:
       return
+    flowRetryCount += 1
     let container = jsQuerySelector(cstring".flow-component-container")
     if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim flow panel: .flow-component-container element not found"
+      if flowRetryCount > 100:
+        clog "IsoNim flow panel: container not found after 100 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 0)
       return
 
     # Clear existing Karax-rendered content so the IsoNim view has a
@@ -127,7 +134,8 @@ proc tryMountIsoNimFlowPanel() =
     isoNimFlowMounted = true
     mountIsoNimFlow(dom_api.Element(containerNode), flowVMInstance)
     clog "IsoNim flow panel: mounted as primary renderer in .flow-component-container"
-  , 500)
+
+  doMount()
 
 # thank, God!
 proc resizeLineSlider(self: FlowComponent, position: int)

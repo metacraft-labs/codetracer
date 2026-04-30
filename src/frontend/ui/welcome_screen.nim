@@ -431,7 +431,7 @@ proc renderOption(self: WelcomeScreenComponent, option: WelcomeScreenOption): VN
 
   buildHtml(
     button(
-      class = "ct-button-sm-tertiary",
+      class = &"ct-button-sm-tertiary {containerClass}",
       onmousedown = proc(ev: Event, tg: VNode) =
         ev.preventDefault(),
       onmouseup = proc(ev: Event, tg: VNode) =

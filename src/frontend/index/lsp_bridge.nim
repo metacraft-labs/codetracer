@@ -199,6 +199,7 @@ proc parsePort(value: string; defaultValue: int): int =
 
 
 proc getField(target: JsObject; name: cstring): JsObject {.importjs: "#[#]".}
+proc getIntField(target: JsObject; name: cstring): int {.importjs: "parseInt(#[#], 10)".}
 proc serverClose(server: JsObject) {.importjs: "#.close()".}
 proc wssClose(wss: JsObject) {.importjs: "#.close()".}
 
@@ -223,14 +224,23 @@ proc startLspBridge*(kind: string = rustLspKind; lsCommand: string = ""; lsCwd: 
     commandDir = cwdOverride
   if path.len == 0:
     path = cfg.defaultPath
+  # Use port 0 for dynamic allocation when no explicit port was configured via
+  # environment variable. This avoids EADDRINUSE errors when multiple Electron
+  # instances run sequentially (e.g. during Playwright test suites).
+  let requestedPort =
+    if envValue(cfg.envPort).len > 0: port
+    else: 0
   ensureNotificationHandler()
   try:
-    let handle = await startBridge(cint(port), path, command, commandDir)
+    let handle = await startBridge(cint(requestedPort), path, command, commandDir)
+    # After listening, the OS may have assigned a different port (when we
+    # requested port 0). Read the actual port from the bridge handle.
+    let actualPort = getIntField(handle, "port")
     state.handle = handle
-    state.port = port
+    state.port = actualPort
     state.path = path
     state.lastBridgeError = ""
-    setEnv(cfg.envPort, $port)
+    setEnv(cfg.envPort, $actualPort)
     setEnv(cfg.envPath, path)
     setEnv(cfg.envUrl, lspBridgeUrl(kind))
     infoPrint fmt"index:lsp bridge ({kind}) listening on {lspBridgeUrl(kind)}"

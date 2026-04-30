@@ -1,4 +1,4 @@
-import std/[os, osproc, strformat, sequtils],
+import std/[os, osproc, strformat, sequtils, options],
   ../../common/[ paths, lang, types, trace_index ],
   ../launch/electron,
   ../utilities/[ env, language_detection ],
@@ -15,7 +15,10 @@ proc runRecordedTrace*(
   structuredDiffPath: string = "",
   indexDiffPath: string = "",
   recordCore: bool = false,
-  newTracePolicy: string = ""
+  newTracePolicy: string = "",
+  inspect: Option[string] = none(string),
+  remoteDebuggingPort: Option[string] = none(string),
+  remoteDebuggingPipe: bool = false,
 ) =
   var args = if test: @[$trace.id, "--test"] else: @[$trace.id]
   let traceStructuredDiffPath = trace.outputFolder / "diff.json"
@@ -27,6 +30,9 @@ proc runRecordedTrace*(
       args.add("--diff-index")
       args.add(traceIndexDiffPath)
   launchElectron(args, trace, ElectronLaunchMode.Default, recordCore, test,
+                 inspect = inspect,
+                 remoteDebuggingPort = remoteDebuggingPort,
+                 remoteDebuggingPipe = remoteDebuggingPipe,
                  newTracePolicy = newTracePolicy)
 
 

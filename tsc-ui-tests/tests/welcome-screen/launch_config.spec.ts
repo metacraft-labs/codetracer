@@ -1,3 +1,4 @@
+// Headless counterpart: src/frontend/viewmodel/tests/scenarios/welcome_screen.nim
 import type { Page } from "@playwright/test";
 import * as path from "node:path";
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
@@ -86,8 +87,6 @@ test.describe("Launch Configuration Menu", () => {
         ".menu-folder-launch-configurations",
       );
 
-      await ctPage.screenshot({ path: "test-results/debug-menu-open.png" });
-
       await expect(launchConfigFolder).toBeVisible();
     });
 
@@ -107,8 +106,6 @@ test.describe("Launch Configuration Menu", () => {
       );
       await launchConfigFolder.hover();
       await sleep(500);
-
-      await ctPage.screenshot({ path: "test-results/launch-configs-open.png" });
 
       const pythonFibonacci = ctPage.locator(".menu-element-python-fibonacci");
       await expect(pythonFibonacci).toBeVisible();
@@ -186,8 +183,6 @@ test.describe("Launch Configuration Recording", () => {
     await rubyFibonacci.click();
 
     await sleep(10000);
-
-    await ctPage.screenshot({ path: "test-results/after-recording.png" });
 
     const errorNotification = ctPage.locator(".notification-error");
     const errorCount = await errorNotification.count();
@@ -273,8 +268,6 @@ if (process.platform !== "darwin") {
           }
         }
       }
-
-      await ctPage.screenshot({ path: "test-results/menu-structure-debug.png" });
     });
   });
 }

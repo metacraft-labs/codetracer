@@ -612,6 +612,7 @@ type
     ignoreOutput*: bool
     programEvents*: seq[ProgramEvent]
     receivedUpdates*: bool
+    pendingReloadRetries*: int
 
 
   DebugComponent* = ref object of Component

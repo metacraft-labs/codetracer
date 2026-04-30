@@ -30,6 +30,11 @@ import ../backend/backend_service
 import types, request_tracker
 
 # ---------------------------------------------------------------------------
+# Store identity tracking — unique ID per store instance for diagnostics
+# ---------------------------------------------------------------------------
+var storeIdCounter {.global.}: int = 0
+
+# ---------------------------------------------------------------------------
 # Cross-platform future callback helper
 # ---------------------------------------------------------------------------
 
@@ -74,6 +79,7 @@ type
 
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
+    storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
     timeline*: Signal[TimelineState]
@@ -91,7 +97,11 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
   ## is stored on the ViewModel base so the caller can tear everything
   ## down with `store.dispose()`.
   withViewModel proc(dispose: proc()): ReplayDataStore =
+    inc storeIdCounter
+    let assignedId = storeIdCounter
+    {.emit: "console.error('[PIPELINE] createReplayDataStore: creating store id=' + `assignedId`);".}
     let store = ReplayDataStore(
+      storeId: assignedId,
       # -- top-level state --
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
@@ -257,23 +267,32 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
                              line: int = 0) =
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
+  # Always construct and assign a new DebuggerState so the signal fires.
+  # DB-based traces have rrTicks=0 for every position, so the old
+  # `if current.rrTicks != rrTicks` guard prevented the signal from
+  # ever triggering. Deduplication of redundant backend requests is
+  # handled by RequestTracker, not here.
   let current = store.debugger.val
-  if current.rrTicks != rrTicks:
-    # Construct a NEW object — on JS backend, var = signal.val gets a
-    # reference, so mutating and writing back the same object doesn't
-    # trigger the signal's equality check (it compares to itself).
-    store.debugger.val = DebuggerState(
-      rrTicks: rrTicks,
-      location: Location(file: file, line: line),
-      status: current.status,
-      threadId: current.threadId,
-    )
+  let diagOldTicks = current.rrTicks
+  let diagStoreId = store.storeId
+  {.emit: "console.error('[PIPELINE] updateDebuggerPosition: storeId=' + `diagStoreId` + ' setting rrTicks=' + `rrTicks` + ' (was ' + `diagOldTicks` + ') file=' + `file` + ' line=' + `line` + ' observers=' + (`store`.debugger.observers ? `store`.debugger.observers.length : 'N/A'));".}
+  # Construct a NEW object — on JS backend, var = signal.val gets a
+  # reference, so mutating and writing back the same object doesn't
+  # trigger the signal's equality check (it compares to itself).
+  store.debugger.val = DebuggerState(
+    rrTicks: rrTicks,
+    location: Location(file: file, line: line),
+    status: current.status,
+    threadId: current.threadId,
+  )
 
 proc updateLocals*(store: ReplayDataStore;
                    variables: seq[Variable]) =
   ## Replace the store's locals signal with a new variable list.
   ## Used by legacy UI code to mirror locals responses into the
   ## ViewModel layer.
+  let diagCount = variables.len
+  {.emit: "console.error('[PIPELINE] updateLocals: setting ' + `diagCount` + ' variables');".}
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
 
@@ -297,6 +316,10 @@ proc updateCalltraceSection*(store: ReplayDataStore;
   ## Replace the store's calltrace signals with new section data.
   ## Used by legacy UI code to mirror calltrace responses into the
   ## ViewModel layer.
+  let diagOldCount = store.calltrace.lines.val.len
+  let diagNewCount = lines.len
+  let diagStoreId = store.storeId
+  {.emit: "console.error('[PIPELINE] updateCalltraceSection: storeId=' + `diagStoreId` + ' setting ' + `diagNewCount` + ' lines (was ' + `diagOldCount` + '), startIndex=' + `startIndex` + ' totalCount=' + `totalCount`);".}
   store.calltrace.lines.val = lines
   store.calltrace.startLineIndex.val = startIndex
   store.calltrace.totalCallsCount.val = totalCount

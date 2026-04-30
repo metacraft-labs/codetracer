@@ -96,38 +96,35 @@ proc tryMountIsoNimTimelinePanel() =
   if isoNimTimelineMounted or timelineVMInstance.isNil:
     return
 
-  # Short delay to ensure the GoldenLayout container has been created
-  # and the initial Karax render has populated it.
-  discard setTimeout(proc() =
+  let key = cstring"timelineComponent-0"
+  var timelineRetryCount = 0
+  proc doMount() =
     if isoNimTimelineMounted:
       return
-    let container = dom_api.getElementById(dom_api.document, cstring"timelineComponent-0")
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim timeline panel: #timelineComponent-0 element not found"
+    timelineRetryCount += 1
+    let container = dom_api.getElementById(dom_api.document, key)
+    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+      if timelineRetryCount > 200:
+        clog "IsoNim timeline panel: not ready after 200 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 10)
       return
 
-    # Clear existing Karax-rendered content so the IsoNim view has a
-    # clean container. We also remove the Karax renderer from kxiMap
-    # so that `redrawAll()` no longer triggers Karax VDOM diffing for
-    # this component (which would corrupt the IsoNim-managed DOM).
+    kxiMap.del(key)
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    # Remove the Karax instance so redrawAll() skips this component.
-    kxiMap.del(cstring"timelineComponent-0")
-
     isoNimTimelineMounted = true
 
-    # Create the div#timeline that the legacy TimelineComponent.render()
-    # produced, then mount the IsoNim view inside it.
     let timelineDiv = dom_api.createElement(dom_api.document, cstring"div")
     dom_api.setAttribute(timelineDiv, cstring"id", cstring"timeline")
     dom_api.appendChild(containerNode, dom_api.Node(timelineDiv))
 
     mountIsoNimTimeline(timelineDiv, timelineVMInstance)
     clog "IsoNim timeline panel: mounted as primary renderer in #timelineComponent-0"
-  , 500)
+
+  doMount()
 
 let
   MIN_EDITOR_WIDTH: float = 20 #%

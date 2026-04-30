@@ -120,7 +120,10 @@ proc replay*(
   traceIdArg: Option[int],
   traceFolderArg: Option[string],
   interactive: bool,
-  newTracePolicy: string = ""
+  newTracePolicy: string = "",
+  inspect: Option[string] = none(string),
+  remoteDebuggingPort: Option[string] = none(string),
+  remoteDebuggingPipe: bool = false,
 ) =
   ## Note: This function does not return on POSIX (launchElectron uses execv)
   let recordCore = envLoadRecordCore()
@@ -160,4 +163,7 @@ proc replay*(
       echo "ERROR: can't find or import trace"
       quit(1)
   runRecordedTrace(trace, test=false, recordCore=recordCore,
-                   newTracePolicy=newTracePolicy)
+                   newTracePolicy=newTracePolicy,
+                   inspect=inspect,
+                   remoteDebuggingPort=remoteDebuggingPort,
+                   remoteDebuggingPipe=remoteDebuggingPipe)

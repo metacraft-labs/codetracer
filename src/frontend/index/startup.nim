@@ -7,7 +7,10 @@ import
   ../lib/[ jslib, electron_lib ],
   ../../common/[ paths, ct_logging ]
 
-const NO_LIMIT = (-1)
+## Maximum number of recent traces/folders to show in the welcome screen.
+## Using -1 (unlimited) caused 200+ MB of IPC data with thousands of traces,
+## blocking the renderer for well over 15 seconds and causing test timeouts.
+const RECENT_ITEMS_LIMIT = 50
 var
   startedFuture: proc: void
   startedReceived = false
@@ -204,11 +207,11 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
       mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
 
   else:
-    let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=NO_LIMIT)
-    let recentFolders = await electron_vars.app.findRecentFoldersWithCodetracer(limit=NO_LIMIT)
+    let recentTraces = await electron_vars.app.findRecentTracesWithCodetracer(limit=RECENT_ITEMS_LIMIT)
+    let recentFolders = await electron_vars.app.findRecentFoldersWithCodetracer(limit=RECENT_ITEMS_LIMIT)
     var recentTransactions: seq[StylusTransaction] = @[]
     if data.startOptions.stylusExplorer:
-      recentTransactions = await electron_vars.app.findRecentTransactions(limit=NO_LIMIT)
+      recentTransactions = await electron_vars.app.findRecentTransactions(limit=RECENT_ITEMS_LIMIT)
     mainWindow.webContents.send "CODETRACER::welcome-screen", js{
       home: paths.home.cstring,
       layout: layout,

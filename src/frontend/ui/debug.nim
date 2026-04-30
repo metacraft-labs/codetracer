@@ -36,24 +36,41 @@ proc tryMountIsoNimDebugControls() =
   ## This div lives outside Karax's VDOM tree, so direct DOM manipulation
   ## is safe and won't be overwritten by Karax redraw cycles.
   ## Safe to call multiple times — mounts only once.
+  cerror "tryMountIsoNimDebugControls: called, isoNimDebugMounted=" & $isoNimDebugMounted & " vmIsNil=" & $debugControlsVMInstance.isNil
   if isoNimDebugMounted or debugControlsVMInstance.isNil:
+    cerror "tryMountIsoNimDebugControls: skipping (already mounted or VM nil)"
     return
 
-  # Short delay to ensure the HTML has been parsed and the container exists.
-  discard setTimeout(proc() =
+  # Try to mount synchronously. If the container doesn't exist yet,
+  # retry on the next event loop tick instead of using a fixed delay.
+  # Gives up after 100 retries to avoid infinite spinning.
+  var debugRetryCount = 0
+  proc doMount() =
     if isoNimDebugMounted:
       return
+    debugRetryCount += 1
     let container = dom_api.getElementById(dom_api.document, cstring"isonim-debug-controls")
     if dom_api.isNodeNil(dom_api.Node(container)):
-      clog "IsoNim debug controls: #isonim-debug-controls element not found"
+      if debugRetryCount > 100:
+        cerror "tryMountIsoNimDebugControls: container not found after 100 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 0)
       return
+    # Clear any existing children from a previous mount cycle (e.g. when
+    # initDebugControlsVMWithStore replaces the stub VM with the real one).
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    cerror "tryMountIsoNimDebugControls: container found, mounting now"
     isoNimDebugMounted = true
     mountIsoNimDebugControls(container, debugControlsVMInstance)
-    clog "IsoNim debug controls: mounted into #isonim-debug-controls"
+    cerror "tryMountIsoNimDebugControls: mount COMPLETE"
     # The legacy Karax `#debug` div is hidden on next Karax redraw
     # cycle — see the `isoNimDebugMounted` check at the top of
     # `DebugComponent.render`.
-  , 200)
+
+  doMount()
 
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel DebugControlsVM using an externally-provided
