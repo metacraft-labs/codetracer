@@ -271,3 +271,23 @@ src/tup.config
 .tools/
 committed_dap_types.rs
 src/ct/online_sharing/test_mcr_enrichment
+
+# Nim JS compilation output in ViewModel layer
+src/frontend/viewmodel/**/*.js
+src/frontend/renderer.js
+src/frontend/types.js
+
+# Nim compiled test binaries (no extension, built by `nim c -r`)
+src/tests/gui/tests/**/calltrace_vm_test
+src/tests/gui/tests/**/state_vm_test
+src/tests/gui/tests/**/store_test
+src/tests/gui/tests/**/backend_test
+src/tests/gui/tests/**/debugging_scenarios_test
+src/tests/gui/tests/**/feature_scenarios_test
+src/tests/gui/tests/**/integration_test
+src/tests/gui/tests/**/isonim_views_test
+src/tests/gui/tests/**/views_test
+src/tests/gui/tests/**/*_vm_test
+
+# Old test directory (moved to src/tests/gui/)
+tsc-ui-tests/
