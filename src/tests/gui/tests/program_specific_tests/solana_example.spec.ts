@@ -60,7 +60,21 @@ const solanaRecorderAvailable = hasSolanaRecorder();
 // The Solana pipeline requires both the recorder binary and `cargo-build-sbf`
 // to compile Solana programs into the SBF ELF format the recorder expects.
 const solanaToolchainAvailable = hasToolOnPath("cargo-build-sbf");
-const solanaPipelineAvailable = solanaRecorderAvailable && solanaToolchainAvailable;
+// Source-from-`.rs` recording is not yet wired into `ct record`. The
+// recorder's CLI takes a compiled `.so` ELF file, not source. Until the
+// build-then-record pipeline is integrated (so `ct record foo.rs` runs
+// `cargo-build-sbf` first), the GUI tests would fall through to the
+// regular Rust recorder which fails because the test program is not a
+// crate root. Detect the integration by looking for a `Cargo.toml`
+// next to the test source — without one, treat the pipeline as
+// unavailable.
+const fs = require("node:fs") as typeof import("node:fs");
+const pathMod = require("node:path") as typeof import("node:path");
+const solanaSourceProjectReady = fs.existsSync(
+  pathMod.resolve("../../../test-programs/solana_example/Cargo.toml"),
+);
+const solanaPipelineAvailable =
+  solanaRecorderAvailable && solanaToolchainAvailable && solanaSourceProjectReady;
 
 // ---------------------------------------------------------------------------
 // Test suite: basic layout (title, entry status)
@@ -71,7 +85,7 @@ test.describe("solana_example — basic layout", () => {
   // Remove this guard once `ct record <path>.rs` (Solana) is integrated.
   test.skip(
     !solanaPipelineAvailable,
-    "Solana recorder pipeline not available (need codetracer-solana-recorder and cargo-build-sbf on PATH)",
+    "Solana recorder pipeline not available (needs codetracer-solana-recorder, cargo-build-sbf, and a Cargo.toml-rooted Solana program in test-programs/solana_example/)",
   );
 
   test.setTimeout(90_000);
@@ -103,7 +117,7 @@ test.describe("solana_example — basic layout", () => {
 test.describe("solana_example — event log", () => {
   test.skip(
     !solanaPipelineAvailable,
-    "Solana recorder pipeline not available (need codetracer-solana-recorder and cargo-build-sbf on PATH)",
+    "Solana recorder pipeline not available (needs codetracer-solana-recorder, cargo-build-sbf, and a Cargo.toml-rooted Solana program in test-programs/solana_example/)",
   );
 
   test.setTimeout(90_000);
@@ -131,7 +145,7 @@ test.describe("solana_example — event log", () => {
 test.describe("solana_example — state panel", () => {
   test.skip(
     !solanaPipelineAvailable,
-    "Solana recorder pipeline not available (need codetracer-solana-recorder and cargo-build-sbf on PATH)",
+    "Solana recorder pipeline not available (needs codetracer-solana-recorder, cargo-build-sbf, and a Cargo.toml-rooted Solana program in test-programs/solana_example/)",
   );
 
   test.setTimeout(90_000);
@@ -168,7 +182,7 @@ test.describe("solana_example — state panel", () => {
 test.describe("solana_example — call trace", () => {
   test.skip(
     !solanaPipelineAvailable,
-    "Solana recorder pipeline not available (need codetracer-solana-recorder and cargo-build-sbf on PATH)",
+    "Solana recorder pipeline not available (needs codetracer-solana-recorder, cargo-build-sbf, and a Cargo.toml-rooted Solana program in test-programs/solana_example/)",
   );
 
   test.setTimeout(90_000);

@@ -55,13 +55,65 @@ function hasFuelRecorder(): boolean {
   }
 }
 
+/**
+ * Returns true when the Sway/Fuel recorder produces a non-placeholder
+ * trace. As of 2026-04 the recorder accepts a Forc project but writes
+ * `"status": "placeholder"` into the trace metadata and emits
+ * "Recording not yet implemented for Sway projects (use --bytecode for
+ * raw bytecode)" on stderr — so the binary is present but the pipeline
+ * still cannot produce a debuggable trace.
+ *
+ * We detect this by performing a tiny test recording at collection
+ * time. The probe writes to a temp directory which is removed
+ * immediately; runtime cost is a few hundred ms once per test process.
+ */
+function fuelRecorderSupportsSource(): boolean {
+  const fromEnv = process.env.CODETRACER_FUEL_RECORDER_PATH ?? "";
+  const binary = fromEnv.length > 0 ? fromEnv : "codetracer-fuel-recorder";
+
+  // Resolve a Forc project to record. The shipped sway_example/
+  // directory contains Forc.toml + main.sw which is enough.
+  const fs = require("node:fs") as typeof import("node:fs");
+  const path = require("node:path") as typeof import("node:path");
+  const os = require("node:os") as typeof import("node:os");
+  const project = path.resolve("../../../test-programs/sway_example");
+  if (!fs.existsSync(path.join(project, "Forc.toml"))) return false;
+
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-fuel-probe-"));
+  try {
+    const result = childProcess.spawnSync(
+      binary,
+      ["record", "--out-dir", outDir, project],
+      { encoding: "utf-8", timeout: 30_000 },
+    );
+    if (result.status !== 0) return false;
+    const metadataPath = path.join(outDir, "trace_metadata.json");
+    if (!fs.existsSync(metadataPath)) return false;
+    const meta = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as Record<string, unknown>;
+    return meta.status !== "placeholder";
+  } catch {
+    return false;
+  } finally {
+    try {
+      fs.rmSync(outDir, { recursive: true, force: true });
+    } catch {
+      // ignore — the temp directory will be cleaned up by the OS later.
+    }
+  }
+}
+
 // Evaluated at collection time so skip decisions are instant.
 const fuelRecorderAvailable = hasFuelRecorder();
 // The Sway/Fuel pipeline requires both the recorder binary and the `forc`
 // compiler. The recorder is typically built from the sibling repo, but `forc`
 // lives in that repo's dev shell and is not available in codetracer's shell.
 const fuelToolchainAvailable = hasToolOnPath("forc");
-const fuelPipelineAvailable = fuelRecorderAvailable && fuelToolchainAvailable;
+// Source-level recording is not implemented as of the current recorder
+// release. Without it `ct record sway_example/` produces a stub trace
+// with no source/event/calltrace data and the UI tests time out.
+const fuelSourceRecordingReady = fuelRecorderSupportsSource();
+const fuelPipelineAvailable =
+  fuelRecorderAvailable && fuelToolchainAvailable && fuelSourceRecordingReady;
 
 // ---------------------------------------------------------------------------
 // Test suite: basic layout (title, entry status)
@@ -72,11 +124,12 @@ test.describe("sway_example — basic layout", () => {
   // Remove this guard once `ct record <path>.sw` is integrated.
   test.skip(
     !fuelPipelineAvailable,
-    "Fuel recorder pipeline not available (need codetracer-fuel-recorder and forc on PATH)",
+    "Fuel recorder pipeline not available (needs codetracer-fuel-recorder " +
+      "with source-level recording, forc compiler, and Forc.toml project layout)",
   );
 
   test.setTimeout(90_000);
-  test.use({ sourcePath: "sway_example/main.sw", launchMode: "trace" });
+  test.use({ sourcePath: "sway_example/", launchMode: "trace" });
 
   test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
     const title = await ctPage.title();
@@ -104,11 +157,12 @@ test.describe("sway_example — basic layout", () => {
 test.describe("sway_example — event log", () => {
   test.skip(
     !fuelPipelineAvailable,
-    "Fuel recorder pipeline not available (need codetracer-fuel-recorder and forc on PATH)",
+    "Fuel recorder pipeline not available (needs codetracer-fuel-recorder " +
+      "with source-level recording, forc compiler, and Forc.toml project layout)",
   );
 
   test.setTimeout(90_000);
-  test.use({ sourcePath: "sway_example/main.sw", launchMode: "trace" });
+  test.use({ sourcePath: "sway_example/", launchMode: "trace" });
 
   test("event log has at least one event", async ({ ctPage }) => {
     // Wait for the event log footer row-count to appear.
@@ -132,11 +186,12 @@ test.describe("sway_example — event log", () => {
 test.describe("sway_example — state panel", () => {
   test.skip(
     !fuelPipelineAvailable,
-    "Fuel recorder pipeline not available (need codetracer-fuel-recorder and forc on PATH)",
+    "Fuel recorder pipeline not available (needs codetracer-fuel-recorder " +
+      "with source-level recording, forc compiler, and Forc.toml project layout)",
   );
 
   test.setTimeout(90_000);
-  test.use({ sourcePath: "sway_example/main.sw", launchMode: "trace" });
+  test.use({ sourcePath: "sway_example/", launchMode: "trace" });
 
   test("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
@@ -169,11 +224,12 @@ test.describe("sway_example — state panel", () => {
 test.describe("sway_example — call trace", () => {
   test.skip(
     !fuelPipelineAvailable,
-    "Fuel recorder pipeline not available (need codetracer-fuel-recorder and forc on PATH)",
+    "Fuel recorder pipeline not available (needs codetracer-fuel-recorder " +
+      "with source-level recording, forc compiler, and Forc.toml project layout)",
   );
 
   test.setTimeout(90_000);
-  test.use({ sourcePath: "sway_example/main.sw", launchMode: "trace" });
+  test.use({ sourcePath: "sway_example/", launchMode: "trace" });
 
   test("call trace shows main entry", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
