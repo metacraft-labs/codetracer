@@ -19,6 +19,7 @@
 ## materialised into one concrete proc per renderer (Mock / Web).
 
 import isonim/dsl/ui
+import isonim/core/computation  # createRenderEffect — emitted by the DSL
 import isonim/testing/mock_dom
 
 when defined(js):

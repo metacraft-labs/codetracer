@@ -175,6 +175,30 @@ method render*(self: CaptionBarProgressComponent): VNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+
+  proc onContainerClick(self: CaptionBarProgressComponent): proc() =
+    ## DSL `onclick = ...` shape factory. Toggles the workspace view
+    ## and notifies the caller via IPC.
+    result = proc() =
+      self.viewState.activeView =
+        if self.viewState.activeView == UserWorkspace: AgentWorkspace
+        else: UserWorkspace
+      self.data.ipc.send(cstring(IPC_WORKSPACE_VIEW_SWITCH), js{
+        "view": cstring($self.viewState.activeView),
+        "sessionId": self.viewState.agentSessionId
+      })
+      redrawAll()
+
+  proc onContainerMouseEnter(self: CaptionBarProgressComponent): proc() =
+    result = proc() =
+      self.expanded = true
+      redrawAll()
+
+  proc onContainerMouseLeave(self: CaptionBarProgressComponent): proc() =
+    result = proc() =
+      self.expanded = false
+      redrawAll()
+
   proc renderIsoNimCaptionBarProgress*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -193,6 +217,12 @@ when defined(js):
     ##       span.caption-progress-current "milestone"  (if non-empty)
     ##     div.caption-progress-milestones  (if expanded)
     ##       div.caption-progress-milestone-item.{statusClass} ...
+    ##
+    ## The caller invokes this whenever progress state changes; the
+    ## function clears the container and rebuilds the panel each time.
+    ## (This is plain re-render rather than fine-grained reactivity
+    ## because the upstream signal is a Karax-managed redraw, not an
+    ## IsoNim signal.)
 
     # Clear existing content for re-render.
     let containerNode = isonim_dom.Node(container)
@@ -204,124 +234,55 @@ when defined(js):
       if isActive: "caption-progress-container caption-progress-active"
       else: "caption-progress-container"
 
-    let outer = ui(r):
-      tdiv(class = outerClass):
-        discard
-    r.appendChild(container, outer)
-
-    # Click handler: toggle workspace view
-    isonim_dom.addEventListener(isonim_dom.Node(outer), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        self.viewState.activeView =
-          if self.viewState.activeView == UserWorkspace: AgentWorkspace
-          else: UserWorkspace
-        self.data.ipc.send(cstring(IPC_WORKSPACE_VIEW_SWITCH), js{
-          "view": cstring($self.viewState.activeView),
-          "sessionId": self.viewState.agentSessionId
-        })
-        redrawAll()
-    )
-
-    # Hover handlers: expand/collapse milestone list
-    isonim_dom.addEventListener(isonim_dom.Node(outer), cstring"mouseenter",
-      proc(ev: isonim_dom.Event) =
-        self.expanded = true
-        redrawAll()
-    )
-    isonim_dom.addEventListener(isonim_dom.Node(outer), cstring"mouseleave",
-      proc(ev: isonim_dom.Event) =
-        self.expanded = false
-        redrawAll()
-    )
-
-    # -- Compact view --
     let stateClass = stateCssClass(self.progress.state)
     let compactClass = "caption-progress-compact " & $stateClass
-    let compact = ui(r):
-      tdiv(class = compactClass):
-        discard
-    r.appendChild(outer, compact)
 
-    # State label
-    let stateSpan = ui(r):
-      span(class = "caption-progress-state"):
-        text $stateLabel(self.progress.state)
-    r.appendChild(compact, stateSpan)
-
-    # Task name (if non-empty)
-    if self.progress.taskName.len > 0:
-      let taskSpan = ui(r):
-        span(class = "caption-progress-task"):
-          text $self.progress.taskName
-      r.appendChild(compact, taskSpan)
-
-    # Progress bar
     let pct = progressPercent(self.progress)
     let widthStr = fmt"{pct:.1f}%"
-    let bar = ui(r):
-      tdiv(class = "caption-progress-bar"):
-        discard
-    r.appendChild(compact, bar)
-    let fill = ui(r):
-      tdiv(class = "caption-progress-bar-fill"):
-        discard
-    r.setStyle(fill, "width", widthStr)
-    r.appendChild(bar, fill)
 
-    # Progress count
     let progressText =
       if self.progress.milestonesTotal > 0:
         fmt"{self.progress.milestonesCompleted}/{self.progress.milestonesTotal}"
       else:
         "0/0"
-    let countSpan = ui(r):
-      span(class = "caption-progress-count"):
-        text progressText
-    r.appendChild(compact, countSpan)
 
-    # Current milestone (if non-empty)
-    if self.progress.currentMilestone.len > 0:
-      let currentSpan = ui(r):
-        span(class = "caption-progress-current"):
-          text $self.progress.currentMilestone
-      r.appendChild(compact, currentSpan)
-
-    # -- Milestone list (expanded only) --
-    if self.expanded and self.progress.milestones.len > 0:
-      let milestoneContainer = ui(r):
-        tdiv(class = "caption-progress-milestones"):
-          discard
-      r.appendChild(outer, milestoneContainer)
-
-      if self.progress.milestones.len == 0:
-        let emptyDiv = ui(r):
-          tdiv(class = "caption-progress-milestone-empty"):
-            text "No milestones defined"
-        r.appendChild(milestoneContainer, emptyDiv)
-      else:
-        for milestone in self.progress.milestones:
-          let statusClass = milestoneStatusClass(milestone.status)
-          let itemClass = "caption-progress-milestone-item " & $statusClass
-          let item = ui(r):
-            tdiv(class = itemClass):
+    # `mouseenter` and `mouseleave` are non-bubbling DOM events; they
+    # are delivered to the element they were registered on, regardless
+    # of where the click landed within the subtree.
+    let panel = ui(r):
+      tdiv(class = outerClass,
+           onclick = onContainerClick(self),
+           onmouseenter = onContainerMouseEnter(self),
+           onmouseleave = onContainerMouseLeave(self)):
+        tdiv(class = compactClass):
+          span(class = "caption-progress-state"):
+            text $stateLabel(self.progress.state)
+          if self.progress.taskName.len > 0:
+            span(class = "caption-progress-task"):
+              text $self.progress.taskName
+          tdiv(class = "caption-progress-bar"):
+            tdiv(class = "caption-progress-bar-fill",
+                 width = widthStr):
               discard
-          r.appendChild(milestoneContainer, item)
+          span(class = "caption-progress-count"):
+            text progressText
+          if self.progress.currentMilestone.len > 0:
+            span(class = "caption-progress-current"):
+              text $self.progress.currentMilestone
+        if self.expanded and self.progress.milestones.len > 0:
+          tdiv(class = "caption-progress-milestones"):
+            for milestone in self.progress.milestones:
+              tdiv(class = "caption-progress-milestone-item " &
+                            $milestoneStatusClass(milestone.status)):
+                span(class = "caption-progress-milestone-icon"):
+                  text $milestoneStatusIcon(milestone.status)
+                span(class = "caption-progress-milestone-content"):
+                  text $milestone.content
+                if milestone.priority == cstring"high":
+                  span(class = "caption-progress-milestone-priority"):
+                    text "HIGH"
 
-          let iconSpan = ui(r):
-            span(class = "caption-progress-milestone-icon"):
-              text $milestoneStatusIcon(milestone.status)
-          r.appendChild(item, iconSpan)
-
-          let contentSpan = ui(r):
-            span(class = "caption-progress-milestone-content"):
-              text $milestone.content
-          r.appendChild(item, contentSpan)
-
-          if milestone.priority == cstring"high":
-            let prioritySpan = ui(r):
-              span(class = "caption-progress-milestone-priority"):
-                text "HIGH"
-            r.appendChild(item, prioritySpan)
+    r.appendChild(container, panel)
 
   proc tryMountCaptionBarProgress*(containerId: cstring;
                                     self: CaptionBarProgressComponent) =

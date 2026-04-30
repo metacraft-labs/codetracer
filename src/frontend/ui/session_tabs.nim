@@ -1,12 +1,12 @@
 ## Session tab bar for multi-replay sessions (M10, M12).
 ##
 ## Renders a horizontal tab bar inside the caption/menu bar area (next
-## to the omnibox), one tab per ``ReplaySession``.  The active session
-## is visually highlighted.  With a single session (the current default)
+## to the omnibox), one tab per ``ReplaySession``. The active session
+## is visually highlighted. With a single session (the current default)
 ## the bar is hidden via the ``.single-session`` CSS class.
 ##
 ## M12: The "+" button creates a new empty ReplaySession and switches
-## to it.  The new session inherits the current layout config so the
+## to it. The new session inherits the current layout config so the
 ## panel arrangement is preserved.
 ##
 ## Rendering uses IsoNim WebRenderer for direct DOM construction,
@@ -26,6 +26,9 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   from isonim/dsl/ui import ui
+  # `createRenderEffect` is referenced by code expanded from the DSL
+  # macro for any dynamic attribute, so it must be imported wherever
+  # `ui` is used even if no createRenderEffect appears textually here.
   from isonim/core/computation import createRenderEffect
 
 # ---------------------------------------------------------------------------
@@ -36,7 +39,7 @@ const tabIdPrefix = "session-tab-"
 
 proc tabIndexFromId(id: cstring): int =
   ## Extract the integer session index from a tab element id like
-  ## ``"session-tab-3"``.  Returns -1 if the id is malformed.
+  ## ``"session-tab-3"``. Returns -1 if the id is malformed.
   let s = $id
   if s.startsWith(tabIdPrefix):
     try:
@@ -48,17 +51,24 @@ proc tabIndexFromId(id: cstring): int =
 # ---------------------------------------------------------------------------
 # Click handler factories (avoid closure-in-loop capture issues)
 # ---------------------------------------------------------------------------
+#
+# The Nim JS backend compiles closures inside for-loops into a single
+# shared closure environment, so a `let idx = i` captured inside the
+# loop body ends up pointing to the **last** loop index by the time
+# any handler fires. Always go through a factory proc that takes
+# `index` by value — that gives each handler its own stack frame.
 
 when defined(js):
-  proc makeTabClickHandler(data: Data; index: int): proc(ev: isonim_dom.Event) =
-    ## Factory for tab click handlers. Creates a separate closure for
-    ## each tab index to avoid the classic JS closure-in-loop bug.
+  proc makeTabClick(data: Data; index: int): proc() =
+    ## Plain `proc()` factory used by the DSL `onclick = ...` shape.
     let idx = index
-    result = proc(ev: isonim_dom.Event) =
-      switchSession(data, idx)
+    result = proc() = switchSession(data, idx)
 
-  proc makeCloseClickHandler(data: Data; index: int): proc(ev: isonim_dom.Event) =
-    ## Factory for close button click handlers.
+  proc makeCloseClick(data: Data; index: int): proc(ev: isonim_dom.Event) =
+    ## Close handler with access to the raw event so it can call
+    ## `stopPropagation` and prevent the parent tab's click handler
+    ## from firing afterwards (which would attempt to switch to the
+    ## just-closed session).
     let idx = index
     result = proc(ev: isonim_dom.Event) =
       {.emit: "`ev`.stopPropagation();".}
@@ -73,12 +83,13 @@ proc attachTabClickHandlers*(data: Data) =
   ## Attach native DOM click handlers to every ``.session-tab`` element.
   ##
   ## This is the primary mechanism that ensures tab clicks always call
-  ## ``switchSession``.  The Nim JS backend compiles closures inside
-  ## for-loops into a **single shared closure environment**, so a
-  ## ``let idx = i`` captured inside the loop body ends up pointing to
-  ## the **last** loop index by the time any handler fires (the classic
-  ## JS closure-in-loop bug).  We avoid this by using raw JS that creates
-  ## a proper per-iteration closure via an IIFE.
+  ## ``switchSession`` for the legacy Karax rendering path. The Nim JS
+  ## backend compiles closures inside for-loops into a **single shared
+  ## closure environment**, so a ``let idx = i`` captured inside the
+  ## loop body ends up pointing to the **last** loop index by the time
+  ## any handler fires (the classic JS closure-in-loop bug). We avoid
+  ## this by using raw JS that creates a proper per-iteration closure
+  ## via an IIFE.
   ##
   ## Called after every Karax redraw of the tab bar via the post-render
   ## callback registered in ``layout.nim``.
@@ -122,75 +133,68 @@ proc renderSessionTabs*(data: Data): VNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc renderTab(r: WebRenderer; data: Data;
+                 session: ReplaySession; index: int): isonim_dom.Element =
+    ## Build a single session tab. The tab structure (label + optional
+    ## close button) lives in one DSL block; only the close button's
+    ## handler is wired imperatively because it needs `stopPropagation`
+    ## on the raw event, which the DSL `onclick = proc()` shape cannot
+    ## express.
+    let isActive = index == data.activeSessionIndex
+    let tabClass = if isActive: "session-tab active" else: "session-tab"
+    let multiSession = data.sessions.len > 1
+    var closeBtn: isonim_dom.Element
+
+    let tab = ui(r):
+      tdiv(class = tabClass,
+           id = tabIdPrefix & $index,
+           onclick = makeTabClick(data, index)):
+        span(class = "session-tab-label"):
+          text $sessionLabel(session, index)
+        if multiSession:
+          span(ref = closeBtn, class = "session-tab-close"):
+            text "×"
+
+    if multiSession:
+      isonim_dom.addEventListener(isonim_dom.Node(closeBtn),
+                                   cstring"click",
+                                   makeCloseClick(data, index))
+    tab
+
   proc renderIsoNimSessionTabs*(data: Data) =
-    ## Build the session tab bar DOM using IsoNim WebRenderer.
-    ## Renders directly into the #session-tab-bar element.
+    ## Build the session tab bar DOM using IsoNim WebRenderer and
+    ## render directly into the existing `#session-tab-bar` element.
     ##
     ## Structure:
     ##   div#session-tab-bar.session-tab-bar[.single-session]
     ##     div.session-tab[.active]#session-tab-{i}
-    ##       span.session-tab-label  "Trace N"
-    ##       span.session-tab-close  "x"  (if multiple sessions)
-    ##     div.session-tab-add  "+"
+    ##       span.session-tab-label
+    ##       span.session-tab-close            (only when multiple)
+    ##     div.session-tab-add                 (the "+" button)
     let container = isonim_dom.getElementById(isonim_dom.document,
                                                cstring"session-tab-bar")
     if isonim_dom.isNodeNil(isonim_dom.Node(container)):
       return
 
-    # Clear existing content for re-render.
+    # Clear any previous render.
     let containerNode = isonim_dom.Node(container)
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
     let r = WebRenderer()
 
-    # Update the container class based on session count.
+    # Bar class reflects single- vs multi-session mode (the
+    # `single-session` modifier hides the bar via CSS).
     let barClass =
       if data.sessions.len <= 1: "session-tab-bar single-session"
       else: "session-tab-bar"
     r.setAttribute(container, "class", barClass)
 
-    # Render each session tab.
     for i in 0 ..< data.sessions.len:
-      let session = data.sessions[i]
-      let isActive = i == data.activeSessionIndex
-      let tabClass =
-        if isActive: "session-tab active"
-        else: "session-tab"
-      let tabId = tabIdPrefix & $i
-      let tab = ui(r):
-        tdiv(class = tabClass, id = tabId):
-          discard
-      r.appendChild(container, tab)
+      r.appendChild(container, renderTab(r, data, data.sessions[i], i))
 
-      # Click handler for tab selection (uses factory to avoid
-      # closure-in-loop capture issue).
-      isonim_dom.addEventListener(isonim_dom.Node(tab), cstring"click",
-        makeTabClickHandler(data, i))
-
-      # Tab label
-      let label = ui(r):
-        span(class = "session-tab-label"):
-          text $sessionLabel(session, i)
-      r.appendChild(tab, label)
-
-      # Close button (only when multiple sessions exist)
-      if data.sessions.len > 1:
-        let closeBtn = ui(r):
-          span(class = "session-tab-close"):
-            text "\u00D7"
-        r.appendChild(tab, closeBtn)
-
-        # Close handler with stopPropagation to prevent tab switch.
-        isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
-          makeCloseClickHandler(data, i))
-
-    # "+" button to create a new session.
     let addBtn = ui(r):
-      tdiv(class = "session-tab-add"):
+      tdiv(class = "session-tab-add",
+           onclick = proc() = createNewSession(data)):
         text "+"
     r.appendChild(container, addBtn)
-    isonim_dom.addEventListener(isonim_dom.Node(addBtn), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        createNewSession(data)
-    )
