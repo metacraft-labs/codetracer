@@ -228,7 +228,7 @@ test.describe("Comprehensive tabbed replay", () => {
     //         preservation after tab switches.
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await retry(
       async () => {
         const loc = await getSessionDebuggerLocation(ctPage, 0);
@@ -237,7 +237,7 @@ test.describe("Comprehensive tabbed replay", () => {
       { maxAttempts: 30, delayMs: 500 },
     );
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
     // Record the debugger position after stepping.
@@ -346,7 +346,7 @@ test.describe("Comprehensive tabbed replay", () => {
     //         fully interactive after a data-model round-trip.
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
     const locAfterFinalStep = await getSessionDebuggerLocation(ctPage, 0);
@@ -487,7 +487,7 @@ test.describe("Comprehensive tabbed replay", () => {
     // First step in session 0
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
     // Verify session 0 moved.
@@ -509,7 +509,7 @@ test.describe("Comprehensive tabbed replay", () => {
     // Second step in session 0
     // ------------------------------------------------------------------
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
     const tab1LocAfterStep2 = await getSessionDebuggerLocation(ctPage, 0);
@@ -529,7 +529,7 @@ test.describe("Comprehensive tabbed replay", () => {
     // Continue (run to end) in session 0
     // ------------------------------------------------------------------
 
-    await layout.continueButton().click();
+    await layout.continueButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
     const tab1LocAfterContinue = await getSessionDebuggerLocation(ctPage, 0);

@@ -164,10 +164,10 @@ test.describe("Real tab switching with GL rebuild", () => {
     // 3. Step forward to establish a non-initial position
     // ==================================================================
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
-    await layout.nextButton().click();
+    await layout.nextButton().click({ force: true });
     await waitForStepComplete(ctPage);
 
     // Record post-step location

@@ -221,7 +221,7 @@ test.describe("Multi-trace loading into sessions", () => {
     let session0LineAfterStep = -1;
 
     if (nextBtnVisible) {
-      await nextBtn.click();
+      await nextBtn.click({ force: true });
       // Wait for the step to complete and capture the current line number.
       await ctPage.waitForTimeout(2000);
 
