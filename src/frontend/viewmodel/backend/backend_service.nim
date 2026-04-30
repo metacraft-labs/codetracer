@@ -11,13 +11,11 @@
 ## Works on both JS (nim js — Electron renderer) and C backends.
 
 import std/json
+import isonim/core/async_compat
 
-when defined(js):
-  import std/asyncjs
-  type BackendFuture*[T] = Future[T]
-else:
-  import std/asyncdispatch
-  type BackendFuture*[T] = Future[T]
+type BackendFuture*[T] = PlatformFuture[T]
+  ## Backend-specific alias for PlatformFuture. Kept as a named type
+  ## so that call sites remain self-documenting about their intent.
 
 type
   EventHandler* = proc(event: JsonNode)

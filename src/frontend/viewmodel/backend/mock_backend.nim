@@ -14,11 +14,7 @@
 
 import std/[json, options]
 
-when defined(js):
-  import std/asyncjs
-else:
-  import std/asyncdispatch
-
+import isonim/core/async_compat
 import backend_service
 
 type
@@ -126,39 +122,25 @@ proc toBackendService*(mock: MockBackendService): BackendService =
         idx = i
         break
 
-    when defined(js):
-      var res: BackendFuture[JsonNode]
-      if idx >= 0:
-        let response = m.expectations[idx].response
-        m.expectations.delete(idx)
-        res = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(response)
-      elif m.strict:
-        # In JS we cannot reject with newPromise's single-arg form,
-        # so we resolve with a sentinel and raise synchronously after.
+    if idx >= 0:
+      let response = m.expectations[idx].response
+      m.expectations.delete(idx)
+      return newCompletedFuture[JsonNode](response)
+    elif m.strict:
+      # Use AssertionDefect to match test expectations: strict-mode
+      # violations are programming errors, not recoverable failures.
+      when defined(js):
         raise newException(AssertionDefect,
           "MockBackendService: unexpected command in strict mode: " & command)
-      elif m.autoRespond:
-        res = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
       else:
-        res = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(newJNull())
-      return res
-    else:
-      var fut = newFuture[JsonNode]("MockBackendService.send")
-      if idx >= 0:
-        let response = m.expectations[idx].response
-        m.expectations.delete(idx)
-        fut.complete(response)
-      elif m.strict:
+        var fut = newFuture[JsonNode]("MockBackendService.send.strict")
         fut.fail(newException(AssertionDefect,
           "MockBackendService: unexpected command in strict mode: " & command))
-      elif m.autoRespond:
-        fut.complete(%*{})
-      else:
-        fut.complete(newJNull())
-      return fut
+        return fut
+    elif m.autoRespond:
+      return newCompletedFuture[JsonNode](%*{})
+    else:
+      return newCompletedFuture[JsonNode](newJNull())
 
   let onEventProc = proc(handler: EventHandler) =
     m.eventHandlers.add(handler)

@@ -18,12 +18,7 @@
 
 import std/json
 
-when defined(js):
-  import std/asyncjs
-else:
-  import std/asyncdispatch
-
-import isonim/core/[signals, owner]
+import isonim/core/[signals, owner, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
@@ -40,19 +35,12 @@ var storeIdCounter {.global.}: int = 0
 
 proc onComplete(fut: BackendFuture[JsonNode];
                 onSuccess: proc(); onError: proc()) =
-  ## Register callbacks for future completion.
-  ## Works on both the native (asyncdispatch) and JS (asyncjs) backends.
-  when defined(js):
-    proc success(v: JsonNode) = onSuccess()
-    proc failure(e: Error) = onError()
-    discard fut.then(success, failure)
-  else:
-    fut.addCallback proc() =
-      {.cast(gcsafe).}:
-        if fut.failed:
-          onError()
-        else:
-          onSuccess()
+  ## Convenience wrapper around `async_compat.onComplete` that discards
+  ## the result value and error message, matching the fire-and-forget
+  ## pattern used by store request procs.
+  async_compat.onComplete(fut,
+    onSuccess = proc(val: JsonNode) = onSuccess(),
+    onError = proc(msg: string) = onError())
 
 # ---------------------------------------------------------------------------
 # Sub-store aggregates — group related signals
