@@ -461,6 +461,12 @@ function makeCleanEnv(
   // terminates with "GPU process isn't usable. Goodbye."
   // --in-process-gpu runs the GPU code in the main process, avoiding the
   // separate GPU process crash/restart cycle entirely.
+  // Remove Wayland env vars so Electron does not attempt the Wayland
+  // backend when running under Xvfb.  Even with --ozone-platform-hint=x11,
+  // Electron may try Wayland first if WAYLAND_DISPLAY is set, causing
+  // "Failed to initialize Wayland platform" and process exit.
+  delete env.WAYLAND_DISPLAY;
+  delete env.XDG_SESSION_TYPE;
   env.CODETRACER_ELECTRON_ARGS = [
     "--no-sandbox",
     "--no-zygote",
@@ -468,6 +474,8 @@ function makeCleanEnv(
     "--disable-gpu-compositing",
     "--disable-dev-shm-usage",
     "--in-process-gpu",
+    // Force X11 backend so Electron does not attempt Wayland first.
+    "--ozone-platform-hint=x11",
   ].join(" ");
   if (extra) {
     Object.assign(env, extra);
