@@ -1603,7 +1603,14 @@ proc flowSimpleValue*(
         id = id,
         style = style,
         iteration = $(self.flow.steps[stepCount].iteration),
-        # class = &"flow-{flowMode}-value-box " & before,
+        # The `flow-parallel-value-box` token is part of the DOM contract:
+        # the GUI smoke-test helper `assertFlowValueVisible` (and any
+        # consumer checking [class*="flow-parallel-value-box"]) needs it
+        # present even on single-assignment / before-only spans. The
+        # AfterValueMode and dual cases below already include it; emit it
+        # here too so the contract is uniform across all flow value
+        # branches.
+        class = &"flow-{flowMode}-value-box " & before,
         onmousedown = proc(e: Event, v: VNode) =
           onMouseDown(e, v, beforeValue),
         oncontextmenu = proc(e: Event, v: VNode) =
