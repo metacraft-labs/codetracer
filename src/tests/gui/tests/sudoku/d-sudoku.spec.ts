@@ -22,6 +22,16 @@ test.describe("DSudoku", () => {
     await helpers.assertCallTraceNavigation(ctPage, "main", "entrypoint.d");
   });
 
+  // FAILING: 2026-05-01 — D RR trace lands at `entrypoint.d` (D's
+  // `extern(C) main` runtime trampoline). Flow annotations DO render
+  // there, but the variables in scope are `argc`, `argv`, `_Dmain` —
+  // not the user-program `testBoards` defined inside `_Dmain`.
+  // `assertFlowValueVisible`'s 5 step-overs aren't enough to descend
+  // through D's runtime into user code.
+  // TODO: extend `assertFlowValueVisible` to accept an optional
+  // `functionName` argument and navigate via the call trace first
+  // (mirroring `assertVariableVisible`), then check the flow / state
+  // pane. See handoff TODO 5.1(c).
   test("variable inspection testBoards", async ({ ctPage }) => {
     await helpers.assertFlowValueVisible(ctPage, "testBoards");
   });
