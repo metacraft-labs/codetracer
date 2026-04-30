@@ -22,6 +22,42 @@ async function clickTabButton(btn: Locator): Promise<void> {
 }
 
 /**
+ * Wait for the backend to settle on its current position.
+ *
+ * The naive "wait until #stable-status has class `ready-status`" check
+ * races against operation dispatch: after clicking a debug button the
+ * `InternalNewOperation` event reaches the status component asynchronously,
+ * so the status may still read "ready" for a few ms before flipping to
+ * "busy". This helper first observes the status flip to "busy" (or a
+ * short timeout if the operation completes too quickly) and then waits
+ * for it to come back to "ready".
+ */
+async function waitForStableReady(
+  page: Page,
+  maxSeconds = 15,
+): Promise<void> {
+  const status = page.locator("#stable-status");
+
+  // Best-effort wait for the busy transition. An operation that completes
+  // in <100ms may never flip to busy; in that case we proceed straight
+  // to the ready check.
+  for (let i = 0; i < 20; i++) {
+    const className = (await status.getAttribute("class")) ?? "";
+    if (className.includes("busy-status")) break;
+    if (className.includes("ready-status") && i >= 3) break;
+    await page.waitForTimeout(50);
+  }
+
+  await retry(
+    async () => {
+      const className = (await status.getAttribute("class")) ?? "";
+      return className.includes("ready-status");
+    },
+    { maxAttempts: maxSeconds, delayMs: 1000 },
+  );
+}
+
+/**
  * Language-agnostic smoke test helpers that verify core CodeTracer UI
  * functionality against any traced program.
  *
@@ -168,10 +204,22 @@ export async function assertVariableVisible(
 /**
  * Verify that a named variable is visible, checking both flow value
  * annotations in the editor and the Program State pane.
+ *
+ * When `functionName` is supplied, the helper first navigates to that
+ * call trace entry (mirroring `assertVariableVisible`). This is needed
+ * for traces that start in a language-runtime entry trampoline (e.g.
+ * Go's `runtime.rt0_go` chain) where the variables in scope at the
+ * trace's initial position are runtime-internal and the user-program
+ * variable only becomes visible after navigating into the user main.
+ *
+ * For RR traces that already start in user code (C, Rust) the default
+ * (no `functionName`) is sufficient — the helper's step-over loop
+ * reaches the variable's declaration line within `maxSteps`.
  */
 export async function assertFlowValueVisible(
   page: Page,
   variableName: string,
+  functionName?: string,
   maxSteps = 5,
 ): Promise<void> {
   const layout = new LayoutPage(page);
@@ -185,6 +233,20 @@ export async function assertFlowValueVisible(
     },
     { maxAttempts: 60, delayMs: 1000 },
   );
+
+  // If a user-main function name was supplied, navigate via the call
+  // trace before searching for the variable. The function entry's
+  // calltrace-jump moves the debugger into the function so the
+  // step-over loop below operates from inside user code.
+  if (functionName) {
+    const callTrace = (await layout.callTraceTabs())[0];
+    await clickTabButton(callTrace.tabButton());
+    callTrace.invalidateEntries();
+
+    const entry = await callTrace.navigateToEntry(functionName);
+    await entry.activate();
+    await waitForStableReady(page);
+  }
 
   const flowSelector = `span[id*="-${variableName}"][class*="flow-parallel-value-box"]`;
 
@@ -214,23 +276,19 @@ export async function assertFlowValueVisible(
         }
       }
 
-      // Step over once to advance past variable initialization.
-      // Use the layered click helper — under Xvfb the jstree filesystem
-      // panel can overlap the debug-toolbar and intercept the pointer
-      // event ("jstree-icon ... intercepts pointer events"); without
-      // the fallback every sudoku-variant flow-value test fails here.
+      // Advance the debugger one step. We step OVER (next) so that we
+      // walk through user code declarations one source line at a time
+      // without descending into stdlib/runtime calls.
+      //
+      // Layered click helper — under Xvfb the jstree filesystem panel
+      // can overlap the debug-toolbar and intercept the pointer event
+      // ("jstree-icon ... intercepts pointer events"); without the
+      // fallback every sudoku-variant flow-value test fails here.
       if (stepsPerformed < maxSteps) {
         await layout.clickNextButton();
         stepsPerformed++;
 
-        await retry(
-          async () => {
-            const status = page.locator("#stable-status");
-            const className = (await status.getAttribute("class")) ?? "";
-            return className.includes("ready-status");
-          },
-          { maxAttempts: 30, delayMs: 1000 },
-        );
+        await waitForStableReady(page);
       }
 
       return false;

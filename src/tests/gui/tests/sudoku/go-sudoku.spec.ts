@@ -22,16 +22,23 @@ test.describe("GoSudoku", () => {
     await helpers.assertCallTraceNavigation(ctPage, "main.main", "sudoku.go");
   });
 
-  // FAILING: 2026-05-01 — Go RR trace's initial position has zero
-  // flow annotations rendered (likely `runtime.main` / `runtime.rt0_go`
-  // chain in Go's startup). Editor loads `sudoku.go` (test 1 passes)
-  // but `assertFlowValueVisible`'s 5 step-overs don't descend into
-  // user `main.main` where `testBoards` is in scope.
-  // TODO: extend `assertFlowValueVisible` to accept an optional
-  // `functionName` argument and navigate via the call trace first
-  // (mirroring `assertVariableVisible`). See handoff TODO 5.1(c).
+  // FAILING: 2026-05-01 — calltrace navigation to `main.main` lands
+  // the debugger on line 78 (`func main() {` — the function header
+  // of `main.main`), where Go's RR backend exposes zero local
+  // variables (state pane shows "No local variables are present in
+  // the current point of execution.") and step-overs from this
+  // position do not visibly advance the gutter-highlighted line.
+  // The trace successfully navigates the editor to `sudoku.go` (test
+  // 3 above passes), but `testBoards` (declared on line 82) remains
+  // out of scope.
+  // TODO: investigate why RR step-over from a Go function-header
+  // line (with no expression on it) is a no-op. Likely the
+  // db-backend / native-backend dap step handler needs Go-specific
+  // handling: at a function header, skip to the first executable
+  // line of the body. See codetracer-native-backend run_to_entry's
+  // language heuristics for an existing pattern.
   test("variable inspection testBoards", async ({ ctPage }) => {
-    await helpers.assertFlowValueVisible(ctPage, "testBoards");
+    await helpers.assertFlowValueVisible(ctPage, "testBoards", "main.main");
   });
 
   test("output contains Solved", async ({ ctPage }) => {
