@@ -32,10 +32,16 @@ import { retry } from "../../lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Path constants (duplicated from fixtures.ts -- these are not exported)
+//
+// Playwright runs with cwd = `src/tests/gui/`, so the codetracer repo
+// root is three levels up. The earlier `path.dirname(currentDir)` form
+// only walked up one level (after a refactor that moved the GUI tests
+// from `tsc-ui-tests/` to `src/tests/gui/`), which built paths like
+// `.../src/tests/src/build-debug/bin/ct` that resolve to ENOENT.
 // ---------------------------------------------------------------------------
 
 const currentDir = path.resolve();
-const codetracerInstallDir = path.dirname(currentDir);
+const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
 const codetracerPath = process.env.CODETRACER_E2E_CT_PATH ??
@@ -105,6 +111,24 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_PREFIX;
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+
+  // Mirror the headless launch shape used by the standard ctPage
+  // fixture. Without these tweaks Electron tries the Wayland backend
+  // first under Xvfb and aborts with "platform failed to initialize".
+  delete env.WAYLAND_DISPLAY;
+  delete env.XDG_SESSION_TYPE;
+  if (!env.CODETRACER_ELECTRON_ARGS) {
+    env.CODETRACER_ELECTRON_ARGS = [
+      "--no-sandbox",
+      "--no-zygote",
+      "--disable-gpu",
+      "--disable-gpu-compositing",
+      "--disable-dev-shm-usage",
+      "--in-process-gpu",
+      "--ozone-platform-hint=x11",
+    ].join(" ");
+  }
+
   if (extra) Object.assign(env, extra);
   return env;
 }
