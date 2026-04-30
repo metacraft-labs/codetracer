@@ -25,6 +25,7 @@
 ##   document.body.appendChild(panel)
 
 import isonim/core/[signals, computation]
+import isonim/dsl/ui
 import isonim/dsl/components
 import isonim/testing/mock_dom  # MockNode type used in generic signatures
 
@@ -198,21 +199,20 @@ proc makeTabActiveEffect[R, N](r: R; btn: N; vm: StateVM; tab: StateTab): proc()
 proc renderTabBar*[R, N](r: R; parent: N; vm: StateVM) =
   ## Render the three tab buttons (Locals, Globals, Watches) into `parent`.
   ## The active tab gets the "active" CSS class reactively.
-  let tabBar = r.createElement("div")
-  r.setAttribute(tabBar, "class", "state-tabs")
+  let tabBar = ui(r):
+    tdiv(class = "state-tabs"):
+      discard
   r.appendChild(parent, tabBar)
 
   for tab in [stLocals, stGlobals, stWatches]:
-    let btn = r.createElement("button")
-    r.setAttribute(btn, "class", tabCssClass(tab))
-    r.setTextContent(btn, tabLabel(tab))
-
-    r.addEventListener(btn, "click", makeTabClickHandler(vm, tab))
-
-    # Reactive "active" class update
-    createRenderEffect makeTabActiveEffect(r, btn, vm, tab)
-
+    let btn = ui(r):
+      button(class = tabCssClass(tab), onclick = makeTabClickHandler(vm, tab)):
+        text tabLabel(tab)
     r.appendChild(tabBar, btn)
+
+    # Reactive "active" class update — uses dynamic class toggling
+    # which must stay imperative.
+    createRenderEffect makeTabActiveEffect(r, btn, vm, tab)
 
 # ---------------------------------------------------------------------------
 # Watch input renderer — Karax-compatible DOM structure
@@ -233,19 +233,12 @@ proc renderWatchInput*[R, N](r: R; parent: N; vm: StateVM) =
   ##   div#gdb-evaluate
   ##     form
   ##       input#watch-0.ct-input-panel.ct-fill-available
-  let gdbEvaluate = r.createElement("div")
-  r.setAttribute(gdbEvaluate, "id", "gdb-evaluate")
+  let gdbEvaluate = ui(r):
+    tdiv(id = "gdb-evaluate"):
+      form:
+        input(`type` = "text", placeholder = "Enter a watch expression",
+              id = "watch-0", class = "ct-input-panel ct-fill-available")
   r.appendChild(parent, gdbEvaluate)
-
-  let form = r.createElement("form")
-  r.appendChild(gdbEvaluate, form)
-
-  let input = r.createElement("input")
-  r.setAttribute(input, "type", "text")
-  r.setAttribute(input, "placeholder", "Enter a watch expression")
-  r.setAttribute(input, "id", "watch-0")
-  r.setAttribute(input, "class", "ct-input-panel ct-fill-available")
-  r.appendChild(form, input)
 
   # Note: For MockRenderer, the submit/keydown wiring is a no-op.
   # Real browser wiring is done in mountIsoNimStatePanel via direct
@@ -257,9 +250,9 @@ proc renderWatchInput*[R, N](r: R; parent: N; vm: StateVM) =
 
 proc renderLoadingIndicator*[R, N](r: R; parent: N; vm: StateVM) =
   ## Render a loading spinner/text that appears when isLoading is true.
-  let indicator = r.createElement("div")
-  r.setAttribute(indicator, "class", "loading-indicator")
-  r.setTextContent(indicator, "Loading...")
+  let indicator = ui(r):
+    tdiv(class = "loading-indicator"):
+      text "Loading..."
   r.appendChild(parent, indicator)
 
   createRenderEffect proc() =
@@ -274,14 +267,15 @@ proc renderVariableList*[R, N](r: R; parent: N; vm: StateVM) =
   ## Render the variable list container.
   ## Uses indexEach for positional rendering: when the flattened variable
   ## list changes, rows are updated in place or added/removed.
-  let container = r.createElement("div")
-  r.setAttribute(container, "class", "value-components-container")
+  let container = ui(r):
+    tdiv(class = "value-components-container"):
+      discard
   r.appendChild(parent, container)
 
   # Empty overlay shown when there are no variables
-  let emptyOverlay = r.createElement("div")
-  r.setAttribute(emptyOverlay, "class", "empty-overlay")
-  r.setTextContent(emptyOverlay, "No local variables are present in the current point of execution.")
+  let emptyOverlay = ui(r):
+    tdiv(class = "empty-overlay"):
+      text "No local variables are present in the current point of execution."
   r.appendChild(container, emptyOverlay)
 
   createRenderEffect proc() =
@@ -405,22 +399,19 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
   ##
   ## All content is reactive: changing StateVM signals automatically
   ## updates the DOM tree via createRenderEffect.
-  let panel = r.createElement("div")
-  r.setAttribute(panel, "class", "state-component")
+  let panel = ui(r):
+    tdiv(class = "state-component"):
+      discard
 
   # Tab bar (Locals / Globals / Watches)
   renderTabBar(r, panel, vm)
 
   # Watch input container — visible only when the Watches tab is active.
   block buildWatchInputContainer:
-    let watchContainer = r.createElement("div")
-    r.setAttribute(watchContainer, "class", "watch-input-container")
+    let watchContainer = ui(r):
+      tdiv(class = "watch-input-container"):
+        input(class = "watch-input", placeholder = "Add watch expression...")
     r.appendChild(panel, watchContainer)
-
-    let input = r.createElement("input")
-    r.setAttribute(input, "class", "watch-input")
-    r.setAttribute(input, "placeholder", "Add watch expression...")
-    r.appendChild(watchContainer, input)
 
     createRenderEffect proc() =
       let visible = vm.activeTab.val == stWatches
@@ -447,25 +438,26 @@ when defined(js):
     ## Returns an `isonim_dom.Element` that can be appended to any live
     ## DOM container. All content is reactive: changing StateVM signals
     ## automatically updates the DOM tree via `createRenderEffect`.
-    let panel = r.createElement("div")
-    r.setAttribute(panel, "class", "state-component isonim-state")
+    let panel = ui(r):
+      tdiv(class = "state-component isonim-state"):
+        discard
 
     # Watch input (always visible, same as legacy Karax).
-    # Build the structure manually so we can wire up the form submit
-    # handler with access to the input element reference.
+    # The form structure is built with the DSL but the submit handler
+    # needs access to the input element reference, so we create the
+    # input separately and wire it up imperatively.
     block buildWatchInput:
-      let gdbEvaluate = r.createElement("div")
-      r.setAttribute(gdbEvaluate, "id", "gdb-evaluate")
+      let gdbEvaluate = ui(r):
+        tdiv(id = "gdb-evaluate"):
+          discard
       r.appendChild(panel, gdbEvaluate)
 
       let form = r.createElement("form")
       r.appendChild(gdbEvaluate, form)
 
-      let input = r.createElement("input")
-      r.setAttribute(input, "type", "text")
-      r.setAttribute(input, "placeholder", "Enter a watch expression")
-      r.setAttribute(input, "id", "watch-0")
-      r.setAttribute(input, "class", "ct-input-panel ct-fill-available")
+      let input = ui(r):
+        input(`type` = "text", placeholder = "Enter a watch expression",
+              id = "watch-0", class = "ct-input-panel ct-fill-available")
       r.appendChild(form, input)
 
       # Wire up form submission. Prevent default and read the input
