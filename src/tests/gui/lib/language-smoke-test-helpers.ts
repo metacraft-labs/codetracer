@@ -131,8 +131,10 @@ export async function assertVariableVisible(
   await entry.activate();
 
   if (stepForwardFirst) {
-    const stepOverBtn = page.locator("#next-debug");
-    await stepOverBtn.click();
+    // Use the layered click helper — under Xvfb the jstree filesystem
+    // panel can overlap the debug-toolbar and intercept the pointer
+    // event, so we need the same fallback chain as CallTracePane.clickTab.
+    await layout.clickNextButton();
 
     await retry(
       async () => {
@@ -213,9 +215,12 @@ export async function assertFlowValueVisible(
       }
 
       // Step over once to advance past variable initialization.
+      // Use the layered click helper — under Xvfb the jstree filesystem
+      // panel can overlap the debug-toolbar and intercept the pointer
+      // event ("jstree-icon ... intercepts pointer events"); without
+      // the fallback every sudoku-variant flow-value test fails here.
       if (stepsPerformed < maxSteps) {
-        const stepOverBtn = page.locator("#next-debug");
-        await stepOverBtn.click();
+        await layout.clickNextButton();
         stepsPerformed++;
 
         await retry(
@@ -307,8 +312,9 @@ export async function assertTerminalOutputAfterContinue(
   const layout = new LayoutPage(page);
   await layout.waitForBaseComponentsLoaded();
 
-  const continueBtn = page.locator("#continue-debug");
-  await continueBtn.click();
+  // Use the layered click helper — see notes on assertFlowValueVisible
+  // for why a plain click is not sufficient under Xvfb.
+  await layout.clickContinueButton();
 
   // Wait for the backend to finish processing (status returns to "ready").
   await retry(

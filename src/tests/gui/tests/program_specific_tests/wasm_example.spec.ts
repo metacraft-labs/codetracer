@@ -83,15 +83,6 @@ test.describe("wasm example — state and navigation", () => {
     await expect(statePanel.codeStateLine()).toContainText(`${ENTRY_LINE} | `);
   });
 
-  // FAILING: 2026-04-30 — clicking `#next-debug` is intercepted by the
-  // jstree filesystem panel ("element intercepts pointer events"). The
-  // GoldenLayout overlap between the bottom status strip and the
-  // filesystem tree leaves part of the tree on top of the debug
-  // toolbar at certain viewport sizes under Xvfb.
-  // TODO: either give `#next-debug` a higher z-index than the
-  // filesystem icons, or have the page object call .click({ force: true })
-  // when actionability fails. The page object already does this for
-  // `clickTab`; replicate the pattern for the debug-step buttons.
   test("state panel supports integer values", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
@@ -101,7 +92,7 @@ test.describe("wasm example — state and navigation", () => {
     // so both variables are assigned. Entry is at line 11; after two nexts
     // we should be at line 13 (`let result = add(x, y);`).
     for (let i = 0; i < 2; i++) {
-      await layout.nextButton().click();
+      await layout.clickNextButton();
       await retry(
         async () => {
           const status = ctPage.locator("#stable-status");
@@ -121,14 +112,11 @@ test.describe("wasm example — state and navigation", () => {
     expect(values.y.typeText).toBe("i32");
   });
 
-  // FAILING: 2026-04-30 — same root cause as "state panel supports
-  // integer values": the debug-toolbar buttons are blocked by the
-  // jstree filesystem panel under Xvfb. See TODO above.
   test("continue", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     const layout = new LayoutPage(ctPage);
-    await layout.continueButton().click();
+    await layout.clickContinueButton();
     await retry(
       async () => {
         const status = ctPage.locator("#stable-status");
@@ -141,9 +129,6 @@ test.describe("wasm example — state and navigation", () => {
     expect(newLocation.line).toBeGreaterThanOrEqual(1);
   });
 
-  // FAILING: 2026-04-30 — same root cause: jstree filesystem panel
-  // intercepts the click on the debug-toolbar `#next-debug` button.
-  // See TODO above; the fix is shared across all debug-step actions.
   test("next", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
@@ -151,7 +136,7 @@ test.describe("wasm example — state and navigation", () => {
     const layout = new LayoutPage(ctPage);
 
     // First next may stay on the same line (function entry in WASM traces)
-    await layout.nextButton().click();
+    await layout.clickNextButton();
     await retry(
       async () => {
         const status = ctPage.locator("#stable-status");
@@ -162,7 +147,7 @@ test.describe("wasm example — state and navigation", () => {
     );
 
     // Second next should advance to a different line
-    await layout.nextButton().click();
+    await layout.clickNextButton();
     await retry(
       async () => {
         const status = ctPage.locator("#stable-status");

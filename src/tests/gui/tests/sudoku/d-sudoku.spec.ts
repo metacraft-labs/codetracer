@@ -22,16 +22,6 @@ test.describe("DSudoku", () => {
     await helpers.assertCallTraceNavigation(ctPage, "main", "entrypoint.d");
   });
 
-  // FAILING: 2026-04-30 — `assertFlowValueVisible` clicks
-  // `#next-debug` to step past the entry point so flow annotations
-  // appear; under Xvfb the jstree filesystem panel intercepts the
-  // pointer event ("jstree-icon jstree-themeicon ... intercepts pointer
-  // events"). The same failure mode hits every sudoku variant that
-  // depends on stepping (D, Go, Rust, Nim, Python, Ruby).
-  // TODO: harden the helper by adding a `force: true` retry pass to
-  // `nextDebugButton.click()` (or equivalent) inside
-  // `assertFlowValueVisible`. The CallTracePane.clickTab page object
-  // already implements this fallback; mirror the pattern there.
   test("variable inspection testBoards", async ({ ctPage }) => {
     await helpers.assertFlowValueVisible(ctPage, "testBoards");
   });

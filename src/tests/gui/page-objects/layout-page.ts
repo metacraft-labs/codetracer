@@ -228,6 +228,89 @@ export class LayoutPage extends BasePage {
     return this.page.locator("#reverse-next-debug");
   }
 
+  /**
+   * Click a debug-toolbar button (next, continue, step-in/out, run-to-entry,
+   * or any reverse variant) with a layered fallback for click-interception
+   * issues.
+   *
+   * Under Xvfb the GoldenLayout strip overlap can leave a `jstree-icon` or
+   * an absolutely-positioned filesystem-pane element on top of the
+   * debug-toolbar buttons; Playwright then refuses the click with
+   * "<i class=jstree-themeicon> from <#root-container> subtree intercepts
+   * pointer events". The same three-step fallback that
+   * `CallTracePane.clickTab` uses works here:
+   *
+   *   1. Plain `.click()` first — fastest path; succeeds in headed runs
+   *      and on display configurations where the strip does not overlap.
+   *   2. `.click({ force: true })` — bypasses actionability checks but
+   *      Playwright still rejects when the element reports outside the
+   *      viewport on Xvfb.
+   *   3. `dispatchEvent('click')` — bypasses Playwright's pointer-event
+   *      simulation entirely. The debug buttons attach plain `click`
+   *      listeners (in `debug_controls.nim` / `event_jumper.nim`), so a
+   *      synthesized click event still triggers the corresponding
+   *      command without needing a real OS-level pointer event.
+   *
+   * The `name` argument is used purely for debug logging so failures in
+   * the chain can be attributed to the right button.
+   */
+  async clickDebugButton(button: Locator, name: string): Promise<void> {
+    try {
+      await button.click({ timeout: 5_000 });
+      return;
+    } catch (ex) {
+      debugLogger.log(
+        `LayoutPage.clickDebugButton('${name}'): plain click failed (${(ex as Error).message ?? ex}); retrying with force:true`,
+      );
+    }
+    try {
+      await button.click({ force: true, timeout: 5_000 });
+      return;
+    } catch (ex) {
+      debugLogger.log(
+        `LayoutPage.clickDebugButton('${name}'): force-click failed (${(ex as Error).message ?? ex}); falling through to dispatchEvent`,
+      );
+    }
+    await button.dispatchEvent("click");
+  }
+
+  async clickRunToEntryButton(): Promise<void> {
+    await this.clickDebugButton(this.runToEntryButton(), "run-to-entry-debug");
+  }
+  async clickContinueButton(): Promise<void> {
+    await this.clickDebugButton(this.continueButton(), "continue-debug");
+  }
+  async clickReverseContinueButton(): Promise<void> {
+    await this.clickDebugButton(
+      this.reverseContinueButton(),
+      "reverse-continue-debug",
+    );
+  }
+  async clickStepOutButton(): Promise<void> {
+    await this.clickDebugButton(this.stepOutButton(), "step-out-debug");
+  }
+  async clickReverseStepOutButton(): Promise<void> {
+    await this.clickDebugButton(
+      this.reverseStepOutButton(),
+      "reverse-step-out-debug",
+    );
+  }
+  async clickStepInButton(): Promise<void> {
+    await this.clickDebugButton(this.stepInButton(), "step-in-debug");
+  }
+  async clickReverseStepInButton(): Promise<void> {
+    await this.clickDebugButton(
+      this.reverseStepInButton(),
+      "reverse-step-in-debug",
+    );
+  }
+  async clickNextButton(): Promise<void> {
+    await this.clickDebugButton(this.nextButton(), "next-debug");
+  }
+  async clickReverseNextButton(): Promise<void> {
+    await this.clickDebugButton(this.reverseNextButton(), "reverse-next-debug");
+  }
+
   // ---------------------------------------------------------------------------
   // Status indicators
   // ---------------------------------------------------------------------------
