@@ -1,41 +1,30 @@
 ## views/isonim_debug_controls_view.nim
 ##
-## IsoNim DOM-rendering view for the Debug Controls toolbar.
+## IsoNim DOM-rendering view for the Debug Controls toolbar — primary
+## renderer.
 ##
-## Renders a live, reactive DOM tree driven by DebugControlsVM signals.
-## When the VM's memos change (canStepForward, statusText, etc.),
-## the DOM updates automatically via IsoNim's `createRenderEffect`.
+## Renders a live, reactive DOM tree driven by `DebugControlsVM`
+## signals. Button enabled/disabled state is reactive on the VM's
+## `canStepForward`, `canStepBackward`, `canContinue` memos; the
+## status text reads `vm.statusText.val`.
 ##
-## This view is the primary renderer for the debug controls toolbar,
-## replacing the legacy Karax debug controls component. It uses the
-## same CSS classes, element IDs and SVG icons so that Playwright
-## GUI tests continue to find buttons via their existing selectors
-## (e.g. `#next-debug`, `#continue-debug`).
+## Two structures are produced:
 ##
-## Button clicks are delegated to the DebugControlsVM's legacy bridge
-## callbacks (`onDapStep`, `onAction`) which route through the existing
-## DAP event mediator — the only path that reaches the replay backend
-## today. When the new `ct/step` backend path is wired end-to-end,
-## the callbacks can be replaced with direct VM action calls.
+## - `MockRenderer` — a minimal toolbar with text-glyph buttons used by
+##   headless unit tests.
+## - `WebRenderer` — the Karax-compatible toolbar with SVG icons,
+##   tooltips and `.separate-bar` dividers, IDs `{action}-debug` for
+##   Playwright targeting, and click handlers that delegate to the
+##   VM's legacy bridge callbacks (`onDapStep`, `onAction`).
 ##
-## Generic over the renderer type `R` so that:
-## - `MockRenderer` can be used for headless unit tests
-## - The web renderer can be used for real browser DOM
-##
-## Usage (test):
-##   let r = MockRenderer()
-##   let panel = renderDebugControlsPanel(r, debugControlsVM)
-##   check panel.textContent.contains("Idle")
-##
-## Usage (web):
-##   import isonim/web/web_renderer
-##   let r = WebRenderer()
-##   let panel = renderDebugControlsPanel(r, debugControlsVM)
-##   # panel is a dom_api.Element, append to any real DOM container
+## Each panel is expressed as a single `ui()` block; per-button
+## reactivity (the `disabled` attribute) is wired afterwards via the
+## `reactiveDisabled` helper so the structure remains visible at one
+## source location.
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
-import isonim/testing/mock_dom  # MockNode type used in generic signatures
+import isonim/testing/mock_dom
 
 when defined(js):
   import isonim/web/web_renderer
@@ -44,286 +33,258 @@ when defined(js):
 import ../viewmodels/debug_controls_vm
 
 # ---------------------------------------------------------------------------
-# Button renderer helper
+# Reactive disabled — a small helper used by both panels
 # ---------------------------------------------------------------------------
+#
+# Browsers treat any value of `disabled` (including the empty string)
+# as "disabled", so we must add the attribute when the condition is
+# true and *remove* it when false. The DSL's dynamic-attribute path
+# always emits `setAttribute`, so this case is wired imperatively
+# against an element captured via `ref = var` in the surrounding
+# `ui()` block.
 
-proc renderControlButton*[R, N](r: R; parent: N;
-                                 cssClass: string;
-                                 label: string;
-                                 enabled: proc(): bool;
-                                 onClick: proc()) =
-  ## Render a single debug control button with reactive enabled/disabled state.
-  ##
-  ## The button's "disabled" attribute is toggled reactively based on the
-  ## `enabled` thunk. When disabled, the button gets a "disabled" attribute;
-  ## when enabled, the attribute is removed.
-  let btn = ui(r):
-    button(class = cssClass, onclick = onClick):
-      text label
-  r.appendChild(parent, btn)
-
-  # Reactive disabled toggle — uses removeAttribute which the DSL
-  # does not support, so this effect stays imperative.
+proc reactiveDisabled[R, N](r: R; el: N; isDisabled: proc(): bool) =
+  ## Reactively toggle the `disabled` attribute on `el`. Call once per
+  ## button after the panel is built; the effect re-fires whenever a
+  ## signal read by `isDisabled()` changes.
   createRenderEffect proc() =
-    if enabled():
-      r.removeAttribute(btn, "disabled")
+    if isDisabled():
+      r.setAttribute(el, "disabled", "true")
     else:
-      r.setAttribute(btn, "disabled", "true")
+      r.removeAttribute(el, "disabled")
 
 # ---------------------------------------------------------------------------
-# Status text renderer
+# MockRenderer panel — minimal toolbar for headless tests
 # ---------------------------------------------------------------------------
 
-proc renderStatusText*[R, N](r: R; parent: N; vm: DebugControlsVM) =
-  ## Render the status text element that shows the current debugger state.
-  let status = ui(r):
-    span(class = "debug-status-text"):
-      text vm.statusText.val
-  r.appendChild(parent, status)
-
-# ---------------------------------------------------------------------------
-# Main panel renderer (MockRenderer — for headless unit tests)
-# ---------------------------------------------------------------------------
-
-proc renderDebugControlsPanel*(r: MockRenderer; vm: DebugControlsVM): MockNode =
-  ## Render the complete Debug Controls toolbar (mock version for tests).
+proc renderDebugControlsPanel*(r: MockRenderer;
+                               vm: DebugControlsVM): MockNode =
+  ## Render the complete Debug Controls toolbar for headless tests.
   ##
-  ## Structure mirrors the web version but uses plain text labels
-  ## instead of SVG images.
+  ## Structure:
+  ##   div.debug-controls
+  ##     button.step-backward[disabled reactive]   ◀
+  ##     button.step-forward[disabled reactive]    ▶
+  ##     button.step-in[disabled reactive]         ↓
+  ##     button.step-out[disabled reactive]        ↑
+  ##     button.continue-btn[disabled reactive]    ⏩
+  ##     button.reverse-continue[disabled reactive] ⏪
+  ##     span.debug-status-text                    text reactive
+  var stepBack, stepFwd, stepIn, stepOut, contBtn, revContBtn: MockNode
+
   let panel = ui(r):
     tdiv(class = "debug-controls"):
-      discard
-  # Attach child buttons to the panel via helper calls. The helpers
-  # handle reactive disabled state which the DSL cannot express.
-  renderControlButton(r, panel, "step-backward", "\u25C0",
-    proc(): bool = vm.canStepBackward.val,
-    proc() = vm.stepBackward())
-  renderControlButton(r, panel, "step-forward", "\u25B6",
-    proc(): bool = vm.canStepForward.val,
-    proc() = vm.stepForward())
-  renderControlButton(r, panel, "step-in", "\u2193",
-    proc(): bool = vm.canStepForward.val,
-    proc() = vm.stepIn())
-  renderControlButton(r, panel, "step-out", "\u2191",
-    proc(): bool = vm.canStepForward.val,
-    proc() = vm.stepOut())
-  renderControlButton(r, panel, "continue-btn", "\u23E9",
-    proc(): bool = vm.canContinue.val,
-    proc() = vm.continueExecution())
-  renderControlButton(r, panel, "reverse-continue", "\u23EA",
-    proc(): bool = vm.canContinue.val,
-    proc() = vm.reverseContinue())
-  renderStatusText(r, panel, vm)
+      button(ref = stepBack, class = "step-backward",
+             onclick = proc() = vm.stepBackward()):
+        text "◀"
+      button(ref = stepFwd, class = "step-forward",
+             onclick = proc() = vm.stepForward()):
+        text "▶"
+      button(ref = stepIn, class = "step-in",
+             onclick = proc() = vm.stepIn()):
+        text "↓"
+      button(ref = stepOut, class = "step-out",
+             onclick = proc() = vm.stepOut()):
+        text "↑"
+      button(ref = contBtn, class = "continue-btn",
+             onclick = proc() = vm.continueExecution()):
+        text "⏩"
+      button(ref = revContBtn, class = "reverse-continue",
+             onclick = proc() = vm.reverseContinue()):
+        text "⏪"
+      span(class = "debug-status-text"):
+        text vm.statusText.val
+
+  reactiveDisabled(r, stepBack,    proc(): bool = not vm.canStepBackward.val)
+  reactiveDisabled(r, stepFwd,     proc(): bool = not vm.canStepForward.val)
+  reactiveDisabled(r, stepIn,      proc(): bool = not vm.canStepForward.val)
+  reactiveDisabled(r, stepOut,     proc(): bool = not vm.canStepForward.val)
+  reactiveDisabled(r, contBtn,     proc(): bool = not vm.canContinue.val)
+  reactiveDisabled(r, revContBtn,  proc(): bool = not vm.canContinue.val)
+
   panel
 
 # ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
+# WebRenderer panel — Karax-compatible toolbar
 # ---------------------------------------------------------------------------
 #
-# The web version matches the Karax debug toolbar exactly:
-#   - Same element IDs (`{action}-debug`) so Playwright tests find them
-#   - Same SVG icon <img> elements
-#   - Same CSS classes (`ct-button-image-md-secondary ct-button-no-border`)
-#   - Same button grouping with `.separate-bar` dividers
-#   - Click handlers delegate to the VM's legacy bridge callbacks
-#     (`onDapStep`, `onAction`) so stepping actually reaches the
-#     replay backend via the DAP event mediator.
-# ---------------------------------------------------------------------------
+# The toolbar layout matches the legacy Karax debug controls exactly:
+#   [history-back] [history-forward] | [reverse-next] [next] |
+#   [reverse-step-in] [step-in] | [reverse-step-out] [step-out] |
+#   [reverse-continue] [continue] | [run-to-entry] |
+#   [reset-operation] | [run-tests] |
+#
+# All button IDs use the `{action}-debug` pattern that Playwright page
+# objects expect (e.g. `#next-debug`, `#continue-debug`).
 
 when defined(js):
-  # -----------------------------------------------------------------------
-  # Helper: create a separator bar (matches Karax `separateBar()`)
-  # -----------------------------------------------------------------------
-  proc addSeparator(r: WebRenderer; parent: isonim_dom.Element) =
-    let sep = ui(r):
-      tdiv(class = "separate-bar"):
-        discard
-    r.appendChild(parent, sep)
 
-  # -----------------------------------------------------------------------
-  # Helper: create a debug step button with SVG icon and tooltip
-  # -----------------------------------------------------------------------
-  proc addStepButton(r: WebRenderer; parent: isonim_dom.Element;
-                     vm: DebugControlsVM;
-                     actionId: string;
-                     imgSrc: string; imgHeight: string; imgWidth: string;
-                     tooltipText: string; shortcut: string;
-                     enabled: proc(): bool) =
-    ## Render a single debug step button that matches the Karax version.
-    ##
-    ## Structure per button:
-    ##   <button id="{actionId}-debug" class="ct-button-image-md-secondary ct-button-no-border">
-    ##     <img src="{imgSrc}" class="debug-button-svg" />
-    ##     <div class="custom-tooltip">{tooltipText} ({shortcut})</div>
-    ##   </button>
-    let tipText = if shortcut.len > 0: tooltipText & " (" & shortcut & ")"
-                  else: tooltipText
+  template stepClick(vm: DebugControlsVM; actionId: string): proc() =
+    ## Build a click handler that delegates to `vm.onDapStep`. Step
+    ## actions reach the replay backend through the DAP event mediator;
+    ## bypassing the bridge would break stepping until the new
+    ## `ct/step` backend path is wired end-to-end.
     let action = cstring(actionId)
-    let clickHandler = proc() =
+    proc() =
       if not vm.onDapStep.isNil:
         vm.onDapStep(action)
 
-    let btn = ui(r):
-      button(id = actionId & "-debug",
-             class = "ct-button-image-md-secondary ct-button-no-border",
-             onclick = clickHandler):
-        img(src = imgSrc, height = imgHeight, width = imgWidth,
-            class = "debug-button-svg")
-        tdiv(class = "custom-tooltip"):
-          text tipText
-    r.appendChild(parent, btn)
-
-    # Reactive disabled toggle — uses removeAttribute which the DSL
-    # does not support, so this effect stays imperative.
-    createRenderEffect proc() =
-      if enabled():
-        r.removeAttribute(btn, "disabled")
-      else:
-        r.setAttribute(btn, "disabled", "true")
-
-  # -----------------------------------------------------------------------
-  # Helper: create a debug action button (non-step, e.g. run-to-entry)
-  # -----------------------------------------------------------------------
-  proc addActionButton(r: WebRenderer; parent: isonim_dom.Element;
-                       vm: DebugControlsVM;
-                       actionId: string;
-                       imgSrc: string; imgHeight: string; imgWidth: string;
-                       tooltipText: string;
-                       disabled: bool = false) =
-    ## Render a non-step debug button (run-to-entry, reset-operation, etc.).
+  template actionClick(vm: DebugControlsVM; actionId: string): proc() =
+    ## Build a click handler for non-step actions (run-to-entry,
+    ## reset-operation, run-tests). Delegates to `vm.onAction`.
     let action = actionId
-    let clickHandler = proc() =
-      if not disabled and not vm.onAction.isNil:
+    proc() =
+      if not vm.onAction.isNil:
         vm.onAction(action)
 
-    let btn = ui(r):
-      button(id = actionId & "-debug",
-             class = "ct-button-image-md-secondary ct-button-no-border",
-             onclick = clickHandler):
-        img(src = imgSrc, height = imgHeight, width = imgWidth,
-            class = "debug-button-svg")
-        tdiv(class = "custom-tooltip"):
-          text tooltipText
-    if disabled:
-      r.setAttribute(btn, "disabled", "true")
-    r.appendChild(parent, btn)
-
-  # -----------------------------------------------------------------------
-  # Main panel renderer (WebRenderer)
-  # -----------------------------------------------------------------------
-
   proc renderDebugControlsPanel*(r: WebRenderer;
-                                  vm: DebugControlsVM): isonim_dom.Element =
-    ## Render the complete Debug Controls toolbar using real DOM elements.
-    ##
-    ## The button layout matches the Karax version exactly:
-    ##   [history-back] [history-forward] | [reverse-next] [next] |
-    ##   [reverse-step-in] [step-in] | [reverse-step-out] [step-out] |
-    ##   [reverse-continue] [continue] | [run-to-entry] |
-    ##   [reset-operation] | [run-tests] |
-    ##
-    ## All IDs follow the `{action}-debug` pattern expected by
-    ## Playwright page objects (e.g. `#next-debug`, `#continue-debug`).
+                                 vm: DebugControlsVM): isonim_dom.Element =
+    ## Render the complete Debug Controls toolbar using real DOM
+    ## elements. Every step button's `disabled` attribute is reactive
+    ## on the relevant VM memo; the structure itself is static.
+    var
+      revNextBtn, nextBtn:        isonim_dom.Element
+      revStepInBtn, stepInBtn:    isonim_dom.Element
+      revStepOutBtn, stepOutBtn:  isonim_dom.Element
+      revContBtn, contBtn:        isonim_dom.Element
+
     let panel = ui(r):
       tdiv(class = "ct-header isonim-debug-controls"):
-        discard
+        tdiv(class = "separate-bar"):
+          discard
+        # -- History navigation --
+        button(id = "history-back-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = actionClick(vm, "history-back")):
+          img(src = "public/resources/debug/history_back_black.svg",
+              height = "20px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "History back"
+        button(id = "history-forward-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = actionClick(vm, "history-forward")):
+          img(src = "public/resources/debug/history_forward_black.svg",
+              height = "20px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "History forward"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Reverse next / Next --
+        button(ref = revNextBtn, id = "reverse-next-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "reverse-next")):
+          img(src = "public/resources/debug/reverse_next_dark.svg",
+              height = "20px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Reverse next (Shift-F10)"
+        button(ref = nextBtn, id = "next-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "next")):
+          img(src = "public/resources/debug/next_dark.svg",
+              height = "20px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Next (F10)"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Reverse step-in / Step-in --
+        button(ref = revStepInBtn, id = "reverse-step-in-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "reverse-step-in")):
+          img(src = "public/resources/debug/reverse_step-in_dark.svg",
+              height = "14px", width = "16px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Reverse step in (Shift-F11)"
+        button(ref = stepInBtn, id = "step-in-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "step-in")):
+          img(src = "public/resources/debug/step-in_dark.svg",
+              height = "14px", width = "16px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Step in (F11)"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Reverse step-out / Step-out --
+        button(ref = revStepOutBtn, id = "reverse-step-out-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "reverse-step-out")):
+          img(src = "public/resources/debug/reverse_step-out_dark.svg",
+              height = "14px", width = "16px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Reverse step out (Shift-F12)"
+        button(ref = stepOutBtn, id = "step-out-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "step-out")):
+          img(src = "public/resources/debug/step-out_dark.svg",
+              height = "14px", width = "16px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Step out (F12)"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Reverse continue / Continue --
+        button(ref = revContBtn, id = "reverse-continue-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "reverse-continue")):
+          img(src = "public/resources/debug/reverse_continue_dark.svg",
+              height = "16px", width = "28px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Reverse continue (Shift-F8)"
+        button(ref = contBtn, id = "continue-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = stepClick(vm, "continue")):
+          img(src = "public/resources/debug/continue_dark.svg",
+              height = "16px", width = "28px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Continue (F8)"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Run to entry --
+        button(id = "run-to-entry-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = actionClick(vm, "run-to-entry")):
+          img(src = "public/resources/debug/run_to_entry_dark.svg",
+              height = "20px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Run to entry"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Reset operation --
+        button(id = "reset-operation-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = actionClick(vm, "reset-operation")):
+          img(src = "public/resources/debug/reset_operation_dark.svg",
+              height = "16px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Reset operation"
+        tdiv(class = "separate-bar"):
+          discard
+        # -- Run tests --
+        button(id = "run-tests-debug",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = actionClick(vm, "run-tests")):
+          img(src = "public/resources/shared/run_test_img.svg",
+              height = "12px", width = "18px", class = "debug-button-svg")
+          tdiv(class = "custom-tooltip"):
+            text "Record and replay tests in a new window"
+        tdiv(class = "separate-bar"):
+          discard
 
-    let alwaysEnabled = proc(): bool = true
-    let canStep = proc(): bool = vm.canStepForward.val
-    let canStepBack = proc(): bool = vm.canStepBackward.val
-    let canCont = proc(): bool = vm.canContinue.val
-
-    # -- History back / forward --
-    addSeparator(r, panel)
-
-    addActionButton(r, panel, vm, "history-back",
-      "public/resources/debug/history_back_black.svg", "20px", "18px",
-      "History back")
-
-    addActionButton(r, panel, vm, "history-forward",
-      "public/resources/debug/history_forward_black.svg", "20px", "18px",
-      "History forward")
-
-    addSeparator(r, panel)
-
-    # -- Reverse next / Next --
-    addStepButton(r, panel, vm, "reverse-next",
-      "public/resources/debug/reverse_next_dark.svg", "20px", "18px",
-      "Reverse next", "Shift-F10", canStepBack)
-
-    addStepButton(r, panel, vm, "next",
-      "public/resources/debug/next_dark.svg", "20px", "18px",
-      "Next", "F10", canStep)
-
-    addSeparator(r, panel)
-
-    # -- Reverse step-in / Step-in --
-    addStepButton(r, panel, vm, "reverse-step-in",
-      "public/resources/debug/reverse_step-in_dark.svg", "14px", "16px",
-      "Reverse step in", "Shift-F11", canStepBack)
-
-    addStepButton(r, panel, vm, "step-in",
-      "public/resources/debug/step-in_dark.svg", "14px", "16px",
-      "Step in", "F11", canStep)
-
-    addSeparator(r, panel)
-
-    # -- Reverse step-out / Step-out --
-    addStepButton(r, panel, vm, "reverse-step-out",
-      "public/resources/debug/reverse_step-out_dark.svg", "14px", "16px",
-      "Reverse step out", "Shift-F12", canStepBack)
-
-    addStepButton(r, panel, vm, "step-out",
-      "public/resources/debug/step-out_dark.svg", "14px", "16px",
-      "Step out", "F12", canStep)
-
-    addSeparator(r, panel)
-
-    # -- Reverse continue / Continue --
-    addStepButton(r, panel, vm, "reverse-continue",
-      "public/resources/debug/reverse_continue_dark.svg", "16px", "28px",
-      "Reverse continue", "Shift-F8", canCont)
-
-    addStepButton(r, panel, vm, "continue",
-      "public/resources/debug/continue_dark.svg", "16px", "28px",
-      "Continue", "F8", canCont)
-
-    addSeparator(r, panel)
-
-    # -- Run to entry --
-    addActionButton(r, panel, vm, "run-to-entry",
-      "public/resources/debug/run_to_entry_dark.svg", "20px", "18px",
-      "Run to entry")
-
-    addSeparator(r, panel)
-
-    # -- Reset operation --
-    addActionButton(r, panel, vm, "reset-operation",
-      "public/resources/debug/reset_operation_dark.svg", "16px", "18px",
-      "Reset operation")
-
-    addSeparator(r, panel)
-
-    # -- Run tests --
-    addActionButton(r, panel, vm, "run-tests",
-      "public/resources/shared/run_test_img.svg", "12px", "18px",
-      "Record and replay tests in a new window")
-
-    addSeparator(r, panel)
+    reactiveDisabled(r, revNextBtn,    proc(): bool = not vm.canStepBackward.val)
+    reactiveDisabled(r, nextBtn,       proc(): bool = not vm.canStepForward.val)
+    reactiveDisabled(r, revStepInBtn,  proc(): bool = not vm.canStepBackward.val)
+    reactiveDisabled(r, stepInBtn,     proc(): bool = not vm.canStepForward.val)
+    reactiveDisabled(r, revStepOutBtn, proc(): bool = not vm.canStepBackward.val)
+    reactiveDisabled(r, stepOutBtn,    proc(): bool = not vm.canStepForward.val)
+    reactiveDisabled(r, revContBtn,    proc(): bool = not vm.canContinue.val)
+    reactiveDisabled(r, contBtn,       proc(): bool = not vm.canContinue.val)
 
     panel
 
   proc mountIsoNimDebugControls*(container: isonim_dom.Element;
-                                  vm: DebugControlsVM) =
-    ## Mount the IsoNim debug controls view into a real DOM container.
-    ##
-    ## Creates the reactive DOM tree and appends it as a child of
-    ## `container`. The IsoNim reactive effects handle all subsequent
-    ## updates — no manual redraw is needed.
-    ##
-    ## Call this once after the DebugControlsVM has been created.
-    ## This view is the primary debug toolbar — the Karax debug controls
-    ## are hidden via `display: none` on `#debug`.
+                                 vm: DebugControlsVM) =
+    ## Mount the IsoNim debug controls toolbar as a child of
+    ## `container`. Reactive effects handle every subsequent update —
+    ## no manual redraw is needed. Call once after the
+    ## `DebugControlsVM` exists.
     let r = WebRenderer()
     let panel = renderDebugControlsPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
