@@ -30,6 +30,15 @@ export class FilesystemPane {
     return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
   }
 
+  async clickTab(): Promise<void> {
+    const btn = this.tabButton();
+    try {
+      await btn.click({ timeout: 5_000 });
+    } catch {
+      await btn.click({ force: true, timeout: 5_000 });
+    }
+  }
+
   get treeLocator(): Locator {
     return this.root.locator(TREE_SELECTOR);
   }

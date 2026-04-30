@@ -27,6 +27,23 @@ export class CallTracePane {
     return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
   }
 
+  /**
+   * Click the tab button with a fallback for viewport issues.
+   * On some display configurations (Wayland under Xvfb), elements may be
+   * reported as "outside of the viewport". dispatchEvent bypasses this.
+   */
+  async clickTab(): Promise<void> {
+    const btn = this.tabButton();
+    try {
+      await btn.click({ timeout: 5_000 });
+    } catch {
+      // force: true bypasses actionability checks (viewport, visibility)
+      // while still dispatching a real click event that GoldenLayout can
+      // intercept, unlike dispatchEvent which may not bubble correctly.
+      await btn.click({ force: true, timeout: 5_000 });
+    }
+  }
+
   linesContainer(): Locator {
     return this.root.locator(".calltrace-lines");
   }

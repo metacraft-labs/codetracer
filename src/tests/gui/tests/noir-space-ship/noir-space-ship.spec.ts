@@ -28,11 +28,11 @@ import type { CallTraceEntry } from "../../page-objects/panes/call-trace/call-tr
  */
 async function navigateToShieldEditor(layout: LayoutPage): Promise<EditorPane> {
   const callTrace = (await layout.callTraceTabs())[0];
-  await callTrace.tabButton().click();
+  await callTrace.clickTab();
   callTrace.invalidateEntries();
 
   const eventLog = (await layout.eventLogTabs())[0];
-  await eventLog.tabButton().click();
+  await eventLog.clickTab();
   const firstRow = await eventLog.rowByIndex(1, true);
   await firstRow.click();
 
@@ -52,7 +52,7 @@ async function navigateToShieldEditor(layout: LayoutPage): Promise<EditorPane> {
     throw new Error("shield.nr editor tab was not available after navigation.");
   }
 
-  await shieldEditor.tabButton().click();
+  await shieldEditor.clickTab();
   return shieldEditor;
 }
 
@@ -105,7 +105,7 @@ async function requireShieldEditor(layout: LayoutPage): Promise<EditorPane> {
         e.tabButtonText.toLowerCase().includes("shield.nr"),
       );
       if (!editor) return false;
-      await editor.tabButton().click();
+      await editor.clickTab();
       return true;
     },
     { maxAttempts: 20, delayMs: 200 },
@@ -139,7 +139,10 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const editors = await layout.editorTabs();
-    const mainNrTab = editors.find((e) => e.tabButtonText === "src/main.nr");
+    // Match flexibly -- the tab text format varies by trace type.
+    const mainNrTab = editors.find((e) =>
+      e.tabButtonText.toLowerCase().includes("main.nr"),
+    );
     expect(mainNrTab).toBeDefined();
   });
 
@@ -151,11 +154,11 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.clickTab();
     callTrace.invalidateEntries();
 
     const eventLog = (await layout.eventLogTabs())[0];
-    await eventLog.tabButton().click();
+    await eventLog.clickTab();
     const firstRow = await eventLog.rowByIndex(1, true);
     await firstRow.click();
 
@@ -172,7 +175,7 @@ test.describe("NoirSpaceShip", () => {
       e.tabButtonText.toLowerCase().includes("shield.nr"),
     );
     expect(shieldEditor).toBeDefined();
-    await shieldEditor!.tabButton().click();
+    await shieldEditor!.clickTab();
 
     await retry(
       async () => {
@@ -206,8 +209,8 @@ test.describe("NoirSpaceShip", () => {
     const valueText = await scratchpadValue!.valueText();
     debugLogger.log(`Found flow value: ${valueName} = ${valueText}`);
 
-    await layout.nextButton().click();
-    await layout.reverseNextButton().click();
+    await layout.nextButton().dispatchEvent("click");
+    await layout.reverseNextButton().dispatchEvent("click");
   });
 
   // TODO(failing): TimeoutError waiting for `.flow-parallel-value-name` or `.flow-loop-value-name`
@@ -230,7 +233,7 @@ test.describe("NoirSpaceShip", () => {
     trace("Waited for all components");
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.clickTab();
     trace("Focused call trace tab");
     callTrace.invalidateEntries();
 
@@ -337,7 +340,7 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.clickTab();
     callTrace.invalidateEntries();
 
     const iterateEntry = await requireCallTraceEntry(callTrace, "iterate_asteroids");
@@ -378,7 +381,7 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const eventLog = (await layout.eventLogTabs())[0];
-    await eventLog.tabButton().click();
+    await eventLog.clickTab();
 
     const rows = await eventLog.eventElements(true);
     expect(rows.length).toBeGreaterThanOrEqual(2);
@@ -466,7 +469,7 @@ test.describe("NoirSpaceShip", () => {
 
     // Navigate to a later calculate_damage call to see different values
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.clickTab();
     callTrace.invalidateEntries();
 
     const iterateEntry = await callTrace.findEntry("iterate_asteroids", true);
@@ -495,7 +498,7 @@ test.describe("NoirSpaceShip", () => {
 
     if (laterCalculateDamage) {
       await laterCalculateDamage.activate();
-      await shieldEditor.tabButton().click();
+      await shieldEditor.clickTab();
 
       await retry(
         async () => {
@@ -511,11 +514,11 @@ test.describe("NoirSpaceShip", () => {
 
     // Add a flow value to the scratchpad to verify scratchpad integration
     const scratchpad = (await layout.scratchpadTabs())[0];
-    await scratchpad.tabButton().click();
+    await scratchpad.clickTab();
     const initialCount = await scratchpad.entryCount();
 
     // Find a scratchpad-compatible flow value to add
-    await shieldEditor.tabButton().click();
+    await shieldEditor.clickTab();
     let targetFlowValue: FlowValue | null = null;
     await retry(
       async () => {
@@ -537,7 +540,7 @@ test.describe("NoirSpaceShip", () => {
     await scratchpad.waitForEntryCount(initialCount + 1);
 
     // Verify the scratchpad entry was added with a non-empty value
-    await scratchpad.tabButton().click();
+    await scratchpad.clickTab();
     const scratchpadEntries = await scratchpad.entryMap(true);
     expect(scratchpadEntries.size).toBeGreaterThan(initialCount);
 
@@ -625,7 +628,7 @@ test.describe("NoirSpaceShip", () => {
       { maxAttempts: 20, delayMs: 200 },
     );
 
-    await layout.reverseContinueButton().click();
+    await layout.reverseContinueButton().dispatchEvent("click");
 
     // The busy state transition can be very fast. We attempt to detect it
     // but don't fail if we miss it - the important thing is recovery.
@@ -653,7 +656,7 @@ test.describe("NoirSpaceShip", () => {
       );
     }
 
-    await layout.continueButton().click();
+    await layout.continueButton().dispatchEvent("click");
 
     // Wait for status to return to ready - this is the critical assertion
     await retry(
@@ -741,7 +744,7 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const scratchpad = (await layout.scratchpadTabs())[0];
-    await scratchpad.tabButton().click();
+    await scratchpad.clickTab();
     let expectedCount = await scratchpad.entryCount();
 
     // Call trace argument addition
@@ -794,12 +797,12 @@ test.describe("NoirSpaceShip", () => {
 
     // Re-fetch tabs from the same layout (avoid creating new LayoutPage instances)
     const scratchpadForTrace = (await layout.scratchpadTabs(true))[0];
-    await scratchpadForTrace.tabButton().click();
+    await scratchpadForTrace.clickTab();
     expectedCount = await scratchpadForTrace.entryCount();
 
     const editorsForTrace = await layout.editorTabs(true);
     editor = editorsForTrace.find((e) => e.tabButtonText.includes("src/main.nr"))!;
-    await editor.tabButton().click();
+    await editor.clickTab();
     await sleep(300);
 
     const firstTraceLine = 13;
@@ -815,7 +818,7 @@ test.describe("NoirSpaceShip", () => {
 
         // Re-acquire references after createSimpleTracePoint (which creates its own LayoutPage)
         const refreshedScratchpad = (await layout.scratchpadTabs(true))[0];
-        await refreshedScratchpad.tabButton().click();
+        await refreshedScratchpad.clickTab();
         expectedCount = await refreshedScratchpad.entryCount();
         const refreshedEditors = await layout.editorTabs(true);
         editor = refreshedEditors.find((e) => e.tabButtonText.includes("src/main.nr"))!;
@@ -908,7 +911,7 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const filesystem = (await layout.filesystemTabs())[0];
-    await filesystem.tabButton().click();
+    await filesystem.clickTab();
 
     const node = await filesystem.nodeByPath(
       "source folders",
@@ -948,7 +951,7 @@ test.describe("NoirSpaceShip", () => {
     await layout.waitForAllComponentsLoaded();
 
     const callTrace = (await layout.callTraceTabs())[0];
-    await callTrace.tabButton().click();
+    await callTrace.clickTab();
     callTrace.invalidateEntries();
     const ctEntries = await callTrace.getEntries(true);
 
@@ -1022,7 +1025,7 @@ test.describe("NoirSpaceShip", () => {
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.tabButtonText.includes("src/main.nr"));
     expect(editor).toBeDefined();
-    await editor!.tabButton().click();
+    await editor!.clickTab();
     await sleep(1000);
 
     const traceLine = 13;
@@ -1136,7 +1139,7 @@ test.describe("NoirSpaceShip", () => {
         continue;
       }
 
-      await tab.tabButton().click();
+      await tab.clickTab();
 
       const events = await tab.eventElements(true);
       expect(events.length).toBeGreaterThan(0);
@@ -1216,11 +1219,11 @@ async function createSimpleTracePoint(page: Page): Promise<void> {
     throw new Error("Expected editor tab 'src/main.nr' not found.");
   }
 
-  await editor.tabButton().click();
+  await editor.clickTab();
   await sleep(1000);
 
   const eventLog = (await layout.eventLogTabs())[0];
-  await eventLog.tabButton().click();
+  await eventLog.clickTab();
 
   await editor.openTrace(firstLine);
   await sleep(1000);

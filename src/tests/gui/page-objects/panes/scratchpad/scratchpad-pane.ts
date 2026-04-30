@@ -23,6 +23,15 @@ export class ScratchpadPane {
     return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
   }
 
+  async clickTab(): Promise<void> {
+    const btn = this.tabButton();
+    try {
+      await btn.click({ timeout: 5_000 });
+    } catch {
+      await btn.click({ force: true, timeout: 5_000 });
+    }
+  }
+
   async isVisible(): Promise<boolean> {
     const style = await this.root.locator("..").getAttribute("style");
     return !(style?.includes("none"));

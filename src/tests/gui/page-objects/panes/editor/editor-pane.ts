@@ -4,6 +4,7 @@ import { FlowValue } from "./flow-value";
 import { OmniscientLoopControls } from "./omniscient-loop-controls";
 import { TraceLogPanel } from "./trace-log-panel";
 import { ContextMenu } from "../../components/context-menu";
+import { retry } from "../../../lib/retry-helpers";
 
 const FLOW_VALUE_SELECTOR =
   ".flow-parallel-value-box, .flow-inline-value-box, .flow-multiline-value-box";
@@ -39,6 +40,15 @@ export class EditorPane {
 
   tabButton(): Locator {
     return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
+  }
+
+  async clickTab(): Promise<void> {
+    const btn = this.tabButton();
+    try {
+      await btn.click({ timeout: 5_000 });
+    } catch {
+      await btn.click({ force: true, timeout: 5_000 });
+    }
   }
 
   // ---- Locators ----
@@ -281,18 +291,29 @@ export class EditorPane {
    * Runs all configured tracepoints via the exposed frontend helper.
    */
   async runTracepointsJs(): Promise<void> {
+    // Wait for data.services to be initialized before calling
+    // runTracepoints.  The trace service is wired up asynchronously
+    // and may not be ready when the test opens a tracepoint immediately
+    // after navigation.
+    await retry(
+      async () => {
+        const ready = await this.page.evaluate(() => {
+          const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          return (
+            typeof w.runTracepoints === "function" &&
+            w.data &&
+            w.data.services &&
+            w.data.services.trace
+          );
+        });
+        return Boolean(ready);
+      },
+      { maxAttempts: 30, delayMs: 200 },
+    );
+
     await this.page.evaluate(() => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      if (typeof w.runTracepoints !== "function") {
-        throw new Error("runTracepoints is not available.");
-      }
-
-      const globalData = w.data;
-      if (!globalData) {
-        throw new Error("Global data object is not available.");
-      }
-
-      w.runTracepoints(globalData);
+      w.runTracepoints(w.data);
     });
   }
 

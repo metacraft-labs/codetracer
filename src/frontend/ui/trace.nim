@@ -295,6 +295,9 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
   let traceMain = document.getElementById(id)
   let expandedWindow = document.getElementById(cstring(fmt"trace-modal-window-{line}"))
 
+  if traceMain.isNil or expandedWindow.isNil:
+    return
+
   traceMain.innerHTML = ""
   traceMain.style.display = "block"
   expandedWindow.style.display = "block"
@@ -414,6 +417,11 @@ proc convertTracepointEventToProgramEvent(tracepointEvent: Stop): ProgramEvent =
   )
 
 proc runTracepoints*(data: Data) {.exportc.} =
+  # Guard against early invocation before services are fully initialized.
+  if data.sessions.len == 0 or data.services.isNil or data.services.trace.isNil:
+    echo "runTracepoints: services not yet initialized, skipping"
+    return
+
   tracepointStart = now()
   var tracepoints: seq[Tracepoint] = @[]
   var i = 0
