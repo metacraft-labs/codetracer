@@ -8,6 +8,11 @@
 ## M12: The "+" button creates a new empty ReplaySession and switches
 ## to it.  The new session inherits the current layout config so the
 ## panel arrangement is preserved.
+##
+## Rendering uses IsoNim WebRenderer for direct DOM construction,
+## replacing the legacy Karax buildHtml approach. The tab bar still
+## uses the same CSS classes and DOM structure for backward compatibility
+## with Playwright tests and CSS styling.
 
 import
   std/[strformat, strutils, jsffi],
@@ -16,6 +21,12 @@ import
   ../types
 
 from kdom import document, getElementById, Event, stopPropagation
+
+when defined(js):
+  import isonim/web/web_renderer
+  import isonim/web/dom_api as isonim_dom
+  from isonim/dsl/ui import ui
+  from isonim/core/computation import createRenderEffect
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -35,7 +46,27 @@ proc tabIndexFromId(id: cstring): int =
   return -1
 
 # ---------------------------------------------------------------------------
-# Post-render native click handler attachment
+# Click handler factories (avoid closure-in-loop capture issues)
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc makeTabClickHandler(data: Data; index: int): proc(ev: isonim_dom.Event) =
+    ## Factory for tab click handlers. Creates a separate closure for
+    ## each tab index to avoid the classic JS closure-in-loop bug.
+    let idx = index
+    result = proc(ev: isonim_dom.Event) =
+      switchSession(data, idx)
+
+  proc makeCloseClickHandler(data: Data; index: int): proc(ev: isonim_dom.Event) =
+    ## Factory for close button click handlers.
+    let idx = index
+    result = proc(ev: isonim_dom.Event) =
+      {.emit: "`ev`.stopPropagation();".}
+      closeSession(data, idx)
+
+# ---------------------------------------------------------------------------
+# Post-render native click handler attachment (legacy, still used by Karax
+# path when ?karax=1 is set)
 # ---------------------------------------------------------------------------
 
 proc attachTabClickHandlers*(data: Data) =
@@ -81,64 +112,85 @@ proc sessionLabel(session: ReplaySession, index: int): cstring =
     cstring(fmt"Trace {index + 1}")
 
 proc renderSessionTabs*(data: Data): VNode =
-  ## Build the virtual-DOM for the session tab bar.
-  ##
-  ## The bar is a simple flex row of tabs, each containing a label and
-  ## (when more than one session exists) a close button.  A trailing
-  ## "+" button is included as a placeholder for the future "open new
-  ## trace" action.
-  ##
-  ## **Note on click handlers:**  The ``proc onclick`` closures below
-  ## read the session index from the VNode's ``id`` attribute at click
-  ## time rather than from a captured loop variable.  The Nim JS backend
-  ## compiles all closures in a ``buildHtml`` for-loop to share one
-  ## environment object, so a captured ``let idx = i`` would always
-  ## resolve to the *last* iteration's value (classic JS closure-in-loop
-  ## bug).  As a belt-and-suspenders measure, ``attachTabClickHandlers``
-  ## also adds native DOM click handlers after each render.
-  let barClass: cstring =
-    if data.sessions.len <= 1: cstring"session-tab-bar single-session"
-    else:                      cstring"session-tab-bar"
-  buildHtml(tdiv(id = "session-tab-bar", class = barClass)):
+  ## Legacy Karax render stub. Returns an empty container.
+  ## The IsoNim renderer (renderIsoNimSessionTabs) is the primary
+  ## rendering path, mounted via layout.nim.
+  buildHtml(tdiv(id = "session-tab-bar", class = "session-tab-bar"))
+
+# ---------------------------------------------------------------------------
+# IsoNim WebRenderer rendering
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc renderIsoNimSessionTabs*(data: Data) =
+    ## Build the session tab bar DOM using IsoNim WebRenderer.
+    ## Renders directly into the #session-tab-bar element.
+    ##
+    ## Structure:
+    ##   div#session-tab-bar.session-tab-bar[.single-session]
+    ##     div.session-tab[.active]#session-tab-{i}
+    ##       span.session-tab-label  "Trace N"
+    ##       span.session-tab-close  "x"  (if multiple sessions)
+    ##     div.session-tab-add  "+"
+    let container = isonim_dom.getElementById(isonim_dom.document,
+                                               cstring"session-tab-bar")
+    if isonim_dom.isNodeNil(isonim_dom.Node(container)):
+      return
+
+    # Clear existing content for re-render.
+    let containerNode = isonim_dom.Node(container)
+    while not isonim_dom.isNodeNil(containerNode.firstChild):
+      discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
+
+    let r = WebRenderer()
+
+    # Update the container class based on session count.
+    let barClass =
+      if data.sessions.len <= 1: "session-tab-bar single-session"
+      else: "session-tab-bar"
+    r.setAttribute(container, "class", barClass)
+
+    # Render each session tab.
     for i in 0 ..< data.sessions.len:
       let session = data.sessions[i]
       let isActive = i == data.activeSessionIndex
-      let tabClass: cstring =
-        if isActive: cstring"session-tab active"
-        else:        cstring"session-tab"
-      tdiv(class = tabClass, id = cstring(tabIdPrefix & $i)):
-        proc onclick(ev: Event, n: VNode) =
-          # Derive the session index from the VNode id rather than a
-          # closure-captured loop variable.  See module docstring for why.
-          let clickedIdx = tabIndexFromId(n.id)
-          if clickedIdx >= 0:
-            switchSession(data, clickedIdx)
+      let tabClass =
+        if isActive: "session-tab active"
+        else: "session-tab"
+      let tabId = tabIdPrefix & $i
+      let tab = ui(r):
+        tdiv(class = tabClass, id = tabId):
+          discard
+      r.appendChild(container, tab)
+
+      # Click handler for tab selection (uses factory to avoid
+      # closure-in-loop capture issue).
+      isonim_dom.addEventListener(isonim_dom.Node(tab), cstring"click",
+        makeTabClickHandler(data, i))
+
+      # Tab label
+      let label = ui(r):
         span(class = "session-tab-label"):
-          text sessionLabel(session, i)
-        # Show the close button only when there are multiple sessions.
-        if data.sessions.len > 1:
+          text $sessionLabel(session, i)
+      r.appendChild(tab, label)
+
+      # Close button (only when multiple sessions exist)
+      if data.sessions.len > 1:
+        let closeBtn = ui(r):
           span(class = "session-tab-close"):
-            proc onclick(ev: Event, n: VNode) =
-              ev.stopPropagation()  # Don't trigger tab switch
-              # The close button's VNode doesn't carry the parent tab's
-              # id, so walk up the DOM from the event target to find the
-              # enclosing session-tab-N element and extract the index.
-              var targetIdx = -1
-              {.emit: [targetIdx, """ = (function() {
-                var el = """, ev, """.currentTarget || """, ev, """.target;
-                while (el) {
-                  if (el.id && el.id.startsWith('""", tabIdPrefix, """')) {
-                    return parseInt(el.id.substring(""", tabIdPrefix.len, """));
-                  }
-                  el = el.parentElement;
-                }
-                return -1;
-              })();"""].}
-              if targetIdx >= 0:
-                closeSession(data, targetIdx)
-            text "\u00D7"  # multiplication sign (×)
-    # M12: clicking "+" creates a new empty ReplaySession tab.
-    tdiv(class = "session-tab-add"):
-      proc onclick(ev: Event, n: VNode) =
+            text "\u00D7"
+        r.appendChild(tab, closeBtn)
+
+        # Close handler with stopPropagation to prevent tab switch.
+        isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
+          makeCloseClickHandler(data, i))
+
+    # "+" button to create a new session.
+    let addBtn = ui(r):
+      tdiv(class = "session-tab-add"):
+        text "+"
+    r.appendChild(container, addBtn)
+    isonim_dom.addEventListener(isonim_dom.Node(addBtn), cstring"click",
+      proc(ev: isonim_dom.Event) =
         createNewSession(data)
-      text "+"
+    )

@@ -18,6 +18,18 @@ import
   ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole, math]
 
+when defined(js):
+  import isonim/web/web_renderer
+  import isonim/web/dom_api as isonim_dom
+  from isonim/dsl/ui import ui
+  from isonim/core/computation import createRenderEffect
+
+# ---------------------------------------------------------------------------
+# IsoNim mount state
+# ---------------------------------------------------------------------------
+
+var isoNimCaptionBarMounted: bool = false
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -152,35 +164,175 @@ proc renderCompactView(self: CaptionBarProgressComponent): VNode =
 # ---------------------------------------------------------------------------
 
 method render*(self: CaptionBarProgressComponent): VNode =
-  ## Render the caption bar progress indicator.
-  ## Click toggles workspace view; hover expands milestone list.
-  let isActive = self.progress.state != AgentIdle
+  ## Legacy Karax render stub. The IsoNim renderer
+  ## (renderIsoNimCaptionBarProgress) is the primary rendering path.
+  ## This returns an empty container that GoldenLayout or vnodeToDom
+  ## can work with.
+  buildHtml(tdiv(class = "caption-progress-container"))
 
-  result = buildHtml(tdiv(
-    class = cstring(
+# ---------------------------------------------------------------------------
+# IsoNim WebRenderer rendering
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc renderIsoNimCaptionBarProgress*(
+      r: WebRenderer;
+      container: isonim_dom.Element;
+      self: CaptionBarProgressComponent) =
+    ## Build the caption bar progress DOM using IsoNim WebRenderer,
+    ## producing the same DOM structure as the legacy Karax render.
+    ##
+    ## Structure:
+    ##   div.caption-progress-container[.caption-progress-active]
+    ##     div.caption-progress-compact.{stateClass}
+    ##       span.caption-progress-state  "Working"
+    ##       span.caption-progress-task   "task name"  (if non-empty)
+    ##       div.caption-progress-bar
+    ##         div.caption-progress-bar-fill  (width: N%)
+    ##       span.caption-progress-count  "3/7"
+    ##       span.caption-progress-current "milestone"  (if non-empty)
+    ##     div.caption-progress-milestones  (if expanded)
+    ##       div.caption-progress-milestone-item.{statusClass} ...
+
+    # Clear existing content for re-render.
+    let containerNode = isonim_dom.Node(container)
+    while not isonim_dom.isNodeNil(containerNode.firstChild):
+      discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
+
+    let isActive = self.progress.state != AgentIdle
+    let outerClass =
       if isActive: "caption-progress-container caption-progress-active"
       else: "caption-progress-container"
-    ),
-    onclick = proc(ev: Event, n: VNode) =
-      # Toggle between user and agent workspace views.
-      self.viewState.activeView =
-        if self.viewState.activeView == UserWorkspace: AgentWorkspace
-        else: UserWorkspace
-      self.data.ipc.send(cstring(IPC_WORKSPACE_VIEW_SWITCH), js{
-        "view": cstring($self.viewState.activeView),
-        "sessionId": self.viewState.agentSessionId
-      })
-      redrawAll(),
-    onmouseenter = proc(ev: Event, n: VNode) =
-      self.expanded = true
-      redrawAll(),
-    onmouseleave = proc(ev: Event, n: VNode) =
-      self.expanded = false
-      redrawAll()
-  )):
-    renderCompactView(self)
+
+    let outer = ui(r):
+      tdiv(class = outerClass):
+        discard
+    r.appendChild(container, outer)
+
+    # Click handler: toggle workspace view
+    isonim_dom.addEventListener(isonim_dom.Node(outer), cstring"click",
+      proc(ev: isonim_dom.Event) =
+        self.viewState.activeView =
+          if self.viewState.activeView == UserWorkspace: AgentWorkspace
+          else: UserWorkspace
+        self.data.ipc.send(cstring(IPC_WORKSPACE_VIEW_SWITCH), js{
+          "view": cstring($self.viewState.activeView),
+          "sessionId": self.viewState.agentSessionId
+        })
+        redrawAll()
+    )
+
+    # Hover handlers: expand/collapse milestone list
+    isonim_dom.addEventListener(isonim_dom.Node(outer), cstring"mouseenter",
+      proc(ev: isonim_dom.Event) =
+        self.expanded = true
+        redrawAll()
+    )
+    isonim_dom.addEventListener(isonim_dom.Node(outer), cstring"mouseleave",
+      proc(ev: isonim_dom.Event) =
+        self.expanded = false
+        redrawAll()
+    )
+
+    # -- Compact view --
+    let stateClass = stateCssClass(self.progress.state)
+    let compactClass = "caption-progress-compact " & $stateClass
+    let compact = ui(r):
+      tdiv(class = compactClass):
+        discard
+    r.appendChild(outer, compact)
+
+    # State label
+    let stateSpan = ui(r):
+      span(class = "caption-progress-state"):
+        text $stateLabel(self.progress.state)
+    r.appendChild(compact, stateSpan)
+
+    # Task name (if non-empty)
+    if self.progress.taskName.len > 0:
+      let taskSpan = ui(r):
+        span(class = "caption-progress-task"):
+          text $self.progress.taskName
+      r.appendChild(compact, taskSpan)
+
+    # Progress bar
+    let pct = progressPercent(self.progress)
+    let widthStr = fmt"{pct:.1f}%"
+    let bar = ui(r):
+      tdiv(class = "caption-progress-bar"):
+        discard
+    r.appendChild(compact, bar)
+    let fill = ui(r):
+      tdiv(class = "caption-progress-bar-fill"):
+        discard
+    r.setStyle(fill, "width", widthStr)
+    r.appendChild(bar, fill)
+
+    # Progress count
+    let progressText =
+      if self.progress.milestonesTotal > 0:
+        fmt"{self.progress.milestonesCompleted}/{self.progress.milestonesTotal}"
+      else:
+        "0/0"
+    let countSpan = ui(r):
+      span(class = "caption-progress-count"):
+        text progressText
+    r.appendChild(compact, countSpan)
+
+    # Current milestone (if non-empty)
+    if self.progress.currentMilestone.len > 0:
+      let currentSpan = ui(r):
+        span(class = "caption-progress-current"):
+          text $self.progress.currentMilestone
+      r.appendChild(compact, currentSpan)
+
+    # -- Milestone list (expanded only) --
     if self.expanded and self.progress.milestones.len > 0:
-      renderMilestoneList(self)
+      let milestoneContainer = ui(r):
+        tdiv(class = "caption-progress-milestones"):
+          discard
+      r.appendChild(outer, milestoneContainer)
+
+      if self.progress.milestones.len == 0:
+        let emptyDiv = ui(r):
+          tdiv(class = "caption-progress-milestone-empty"):
+            text "No milestones defined"
+        r.appendChild(milestoneContainer, emptyDiv)
+      else:
+        for milestone in self.progress.milestones:
+          let statusClass = milestoneStatusClass(milestone.status)
+          let itemClass = "caption-progress-milestone-item " & $statusClass
+          let item = ui(r):
+            tdiv(class = itemClass):
+              discard
+          r.appendChild(milestoneContainer, item)
+
+          let iconSpan = ui(r):
+            span(class = "caption-progress-milestone-icon"):
+              text $milestoneStatusIcon(milestone.status)
+          r.appendChild(item, iconSpan)
+
+          let contentSpan = ui(r):
+            span(class = "caption-progress-milestone-content"):
+              text $milestone.content
+          r.appendChild(item, contentSpan)
+
+          if milestone.priority == cstring"high":
+            let prioritySpan = ui(r):
+              span(class = "caption-progress-milestone-priority"):
+                text "HIGH"
+            r.appendChild(item, prioritySpan)
+
+  proc tryMountCaptionBarProgress*(containerId: cstring;
+                                    self: CaptionBarProgressComponent) =
+    ## Mount the IsoNim caption bar progress into a DOM container.
+    ## Called from layout.nim when the GL component is created.
+    ## Re-renders on every call (used as the redraw callback).
+    let container = isonim_dom.getElementById(isonim_dom.document, containerId)
+    if isonim_dom.isNodeNil(isonim_dom.Node(container)):
+      return
+    let r = WebRenderer()
+    renderIsoNimCaptionBarProgress(r, container, self)
 
 # ---------------------------------------------------------------------------
 # IPC handler

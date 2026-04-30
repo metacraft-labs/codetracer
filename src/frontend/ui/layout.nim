@@ -3,6 +3,7 @@ import
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
+  caption_bar_progress,
   ../[ types, renderer, config ],
   ../lib/[ logging, misc_lib, jslib ]
 
@@ -262,10 +263,19 @@ proc ensureSharedRenderers() =
       if not data.ui.searchResults.isNil: data.ui.searchResults.render()
       else: buildHtml(tdiv()),
     "search-results", proc = discard)
+  # Session tab bar: render via IsoNim WebRenderer. The Karax
+  # renderSessionTabs returns an empty stub; the real DOM is built
+  # by renderIsoNimSessionTabs. Register a redraw callback so
+  # redrawAll() re-renders the tab bar when sessions change.
   kxiMap["session-tab-bar"] = setRenderer(
     proc: VNode = renderSessionTabs(data),
     "session-tab-bar",
-    proc = attachTabClickHandlers(data))
+    proc = discard)
+  vnodeToDomRedrawCallbacks.add(proc() =
+    renderIsoNimSessionTabs(data)
+  )
+  # Initial render after Karax creates the container element.
+  discard windowSetTimeout(proc() = renderIsoNimSessionTabs(data), 50)
 
   data.ui.menu.kxi = kxiMap["menu"]
   data.ui.status.kxi = kxiMap["status"]
@@ -530,6 +540,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.BuildErrors,
       Content.SearchResults,
       Content.Shell,
+      Content.CaptionBarProgress,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -582,6 +593,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
               let v = capturedComponent.render()
               let d = vnodeToDom(v, KaraxInstance())
               el.appendChild(d)
+          )
+
+        # CaptionBarProgress: render via IsoNim WebRenderer directly
+        # into the GL container. Register a redraw callback for updates.
+        if state.content == Content.CaptionBarProgress:
+          let capturedComp = CaptionBarProgressComponent(component)
+          let capturedId = containerId
+          tryMountCaptionBarProgress(capturedId, capturedComp)
+          vnodeToDomRedrawCallbacks.add(proc() =
+            tryMountCaptionBarProgress(capturedId, capturedComp)
           )
 
         discard component.afterInit()
@@ -967,5 +988,10 @@ proc ensureTabBarRenderer() =
     kxiMap["session-tab-bar"] = setRenderer(
       proc: VNode = renderSessionTabs(data),
       "session-tab-bar",
-      proc = attachTabClickHandlers(data))
+      proc = discard)
+    vnodeToDomRedrawCallbacks.add(proc() =
+      renderIsoNimSessionTabs(data)
+    )
+  # Always render via IsoNim to ensure tabs reflect current state.
+  renderIsoNimSessionTabs(data)
 setEnsureTabBarRendererProc(ensureTabBarRenderer)
