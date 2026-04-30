@@ -7,10 +7,10 @@
  * - The build panel renders within the Golden Layout container
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
-import { retry } from "../../lib/retry-helpers";
-import { BuildPane } from "../../page-objects/panes/build/build-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import { test, expect, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
+import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { BuildPane } from "../../tsc-ui-tests/page-objects/panes/build/build-pane";
+import { ensureDefaultLayout, restoreUserLayout } from "../../tsc-ui-tests/lib/layout-reset";
 
 test.describe("Build Output Panel", () => {
   test.setTimeout(120_000);

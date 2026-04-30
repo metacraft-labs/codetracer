@@ -28,10 +28,10 @@
  *     state preservation without breaking the layout.
  */
 
-import { test, expect } from "../../lib/fixtures";
-import { LayoutPage } from "../../page-objects/layout-page";
-import { StatusBar } from "../../page-objects/status_bar";
-import { retry } from "../../lib/retry-helpers";
+import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+import { StatusBar } from "../../tsc-ui-tests/page-objects/status_bar";
+import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers — extract session/debugger state via window.data

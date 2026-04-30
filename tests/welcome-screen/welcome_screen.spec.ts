@@ -1,4 +1,4 @@
-import { test, expect } from "../../lib/fixtures";
+import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

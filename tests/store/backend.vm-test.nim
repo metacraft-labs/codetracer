@@ -20,8 +20,8 @@
 import std/[json, unittest, asyncdispatch]
 import isonim/core/[signals, owner]
 import isonim/viewmodel
-import ../backend/backend_service
-import ../backend/mock_backend
+import backend/backend_service
+import backend/mock_backend
 
 # ---------------------------------------------------------------------------
 # Helpers

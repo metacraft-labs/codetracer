@@ -14,10 +14,10 @@
  *   5. Variable inspection at a compute_fibonacci step shows a, b, n.
  */
 
-import { test, expect } from "../../lib/fixtures";
-import { LayoutPage } from "../../page-objects/layout-page";
-import { retry } from "../../lib/retry-helpers";
-import { debugLogger } from "../../lib/debug-logger";
+import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { debugLogger } from "../../tsc-ui-tests/lib/debug-logger";
 
 // ---------------------------------------------------------------------------
 // Suite configuration

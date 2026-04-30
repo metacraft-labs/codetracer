@@ -21,8 +21,8 @@
  *   .layout-dropdown-node        — individual item inside the dropdown
  */
 
-import { test, expect, wait } from "../../lib/fixtures";
-import { LayoutPage } from "../../page-objects/layout-page";
+import { test, expect, wait } from "../../tsc-ui-tests/lib/fixtures";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
 
 // ---------------------------------------------------------------------------
 // Shared constants

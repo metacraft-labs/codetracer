@@ -44,9 +44,9 @@
 
 import * as path from "node:path";
 
-import { test, expect, recordTestProgram, testProgramsPath } from "../../lib/fixtures";
-import { LayoutPage } from "../../page-objects/layout-page";
-import { retry } from "../../lib/retry-helpers";
+import { test, expect, recordTestProgram, testProgramsPath } from "../../tsc-ui-tests/lib/fixtures";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers — session introspection via window.data

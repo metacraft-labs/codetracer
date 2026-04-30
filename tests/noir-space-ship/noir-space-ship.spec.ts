@@ -8,15 +8,15 @@
  */
 
 import type { Page } from "@playwright/test";
-import { test, expect } from "../../lib/fixtures";
-import { retry } from "../../lib/retry-helpers";
-import { debugLogger } from "../../lib/debug-logger";
-import { LayoutPage } from "../../page-objects/layout-page";
-import type { EditorPane } from "../../page-objects/panes/editor/editor-pane";
-import { TraceLogPanel } from "../../page-objects/panes/editor/trace-log-panel";
-import type { FlowValue } from "../../page-objects/panes/editor/flow-value";
-import type { CallTracePane } from "../../page-objects/panes/call-trace/call-trace-pane";
-import type { CallTraceEntry } from "../../page-objects/panes/call-trace/call-trace-entry";
+import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
+import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { debugLogger } from "../../tsc-ui-tests/lib/debug-logger";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+import type { EditorPane } from "../../tsc-ui-tests/page-objects/panes/editor/editor-pane";
+import { TraceLogPanel } from "../../tsc-ui-tests/page-objects/panes/editor/trace-log-panel";
+import type { FlowValue } from "../../tsc-ui-tests/page-objects/panes/editor/flow-value";
+import type { CallTracePane } from "../../tsc-ui-tests/page-objects/panes/call-trace/call-trace-pane";
+import type { CallTraceEntry } from "../../tsc-ui-tests/page-objects/panes/call-trace/call-trace-entry";
 
 // ---------------------------------------------------------------------------
 // Shared helpers

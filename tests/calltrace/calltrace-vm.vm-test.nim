@@ -20,11 +20,11 @@
 import std/[json, unittest, asyncdispatch, sets, options]
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
-import ../backend/backend_service
-import ../backend/mock_backend
-import ../store/types
-import ../store/replay_data_store
-import ../viewmodels/calltrace_vm
+import backend/backend_service
+import backend/mock_backend
+import store/types
+import store/replay_data_store
+import viewmodels/calltrace_vm
 
 # ---------------------------------------------------------------------------
 # Helpers

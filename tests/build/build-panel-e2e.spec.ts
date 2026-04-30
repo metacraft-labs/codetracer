@@ -7,10 +7,10 @@
  * - Clicking the PROBLEMS tab shows the problems panel (empty state)
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
-import { retry } from "../../lib/retry-helpers";
-import { LayoutPage } from "../../page-objects/layout-page";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import { test, expect, wait, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
+import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+import { ensureDefaultLayout, restoreUserLayout } from "../../tsc-ui-tests/lib/layout-reset";
 
 test.describe("Build panel tabs as auto-hide bottom tabs", () => {
   test.setTimeout(120_000);

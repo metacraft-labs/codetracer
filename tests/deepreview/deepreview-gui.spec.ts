@@ -18,7 +18,7 @@
  *   - The JSON fixture files in ``tests/deepreview/fixtures/``.
  */
 
-import { test, expect, wait } from "../../lib/fixtures";
+import { test, expect, wait } from "../../tsc-ui-tests/lib/fixtures";
 import * as path from "node:path";
 import * as fs from "node:fs";
 

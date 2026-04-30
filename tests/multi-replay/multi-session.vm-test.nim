@@ -37,9 +37,9 @@
 
 import std/[json, os, unittest, strutils, osproc, sequtils]
 import isonim/core/[signals, computation]
-import ../headless_session
-import ../store/[replay_data_store, types]
-import ../viewmodels/calltrace_vm
+import headless_session
+import store/[replay_data_store, types]
+import viewmodels/calltrace_vm
 
 # ---------------------------------------------------------------------------
 # Helpers — shared with other test files

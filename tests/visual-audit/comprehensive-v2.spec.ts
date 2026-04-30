@@ -22,12 +22,12 @@ import {
   expect,
   wait,
   codetracerInstallDir,
-} from "../../lib/fixtures";
-import { LayoutPage } from "../../page-objects/layout-page";
+} from "../../tsc-ui-tests/lib/fixtures";
+import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
 import {
   ensureDefaultLayout,
   restoreUserLayout,
-} from "../../lib/layout-reset";
+} from "../../tsc-ui-tests/lib/layout-reset";
 
 // ---------------------------------------------------------------------------
 // Constants
