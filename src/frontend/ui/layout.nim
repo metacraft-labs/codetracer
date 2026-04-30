@@ -558,6 +558,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             discard shellComponent.createShell()
 
         discard component.afterInit()
+
+        # Non-IsoNim components need an explicit redrawAll() after
+        # setRenderer to trigger the initial Karax render.
+        if not isIsoNimComponent:
+          discard windowSetTimeout(proc() = redrawAll(), 200)
       ), 200)
 
   layout.loadLayout(initialLayout)
