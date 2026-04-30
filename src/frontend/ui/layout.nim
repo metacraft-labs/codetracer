@@ -238,6 +238,7 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
 # These renderers (menu, status, fixed-search, search-results, session-tab-bar)
 # live outside the per-session GL container and only need to be set up once.
 var sharedRenderersInitialised = false
+var sessionTabBarCallbackRegistered = false
 
 proc ensureSharedRenderers() =
   ## Set up the Karax renderers for global chrome elements that live outside
@@ -271,6 +272,7 @@ proc ensureSharedRenderers() =
     proc: VNode = renderSessionTabs(data),
     "session-tab-bar",
     proc = discard)
+  sessionTabBarCallbackRegistered = true
   vnodeToDomRedrawCallbacks.add(proc() =
     renderIsoNimSessionTabs(data)
   )
@@ -989,9 +991,12 @@ proc ensureTabBarRenderer() =
       proc: VNode = renderSessionTabs(data),
       "session-tab-bar",
       proc = discard)
+  if not sessionTabBarCallbackRegistered:
+    sessionTabBarCallbackRegistered = true
     vnodeToDomRedrawCallbacks.add(proc() =
       renderIsoNimSessionTabs(data)
     )
-  # Always render via IsoNim to ensure tabs reflect current state.
-  renderIsoNimSessionTabs(data)
+  # Render via IsoNim to ensure tabs reflect current state.
+  # Use a short delay so the DOM element is ready.
+  discard windowSetTimeout(proc() = renderIsoNimSessionTabs(data), 50)
 setEnsureTabBarRendererProc(ensureTabBarRenderer)
