@@ -2,33 +2,20 @@
 ##
 ## IsoNim DOM-rendering view for the Timeline panel.
 ##
-## Renders a live, reactive DOM tree driven by TimelineVM signals.
+## Renders a live, reactive DOM tree driven by `TimelineVM` signals.
 ## When the VM's signals change (current position, zoom level,
-## hovered tick, markers), the DOM updates automatically via
-## IsoNim's `createRenderEffect`.
+## hovered tick, markers), the DOM updates automatically via IsoNim's
+## `createRenderEffect`.
 ##
-## Generic over the renderer type `R` so that:
-## - `MockRenderer` can be used for headless unit tests
-## - The web renderer can be used for real browser DOM
-##
-## This view is intended to eventually replace the Karax trace.nim
-## timeline component. It consumes the same TimelineVM but renders
-## through IsoNim's renderer API instead of Karax's VDOM.
-##
-## Usage (test):
-##   let r = MockRenderer()
-##   let panel = renderTimelinePanel(r, timelineVM)
-##   check findByClass(panel, "timeline-position") != nil
-##
-## Usage (web):
-##   import isonim/web/web_renderer
-##   let r = WebRenderer()
-##   let panel = renderTimelinePanel(r, timelineVM)
-##   # panel is a dom_api.Element, append to any real DOM container
+## Both renderer overloads (Mock and Web) produce the same structure;
+## the markup lives in a single template that is materialised into
+## one concrete proc per renderer so the `ui()` macro can resolve
+## element types at compile time.
 
 import std/options
 
 import isonim/core/[signals, computation]
+import isonim/dsl/ui
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -38,204 +25,119 @@ when defined(js):
 import ../viewmodels/timeline_vm
 
 # ---------------------------------------------------------------------------
-# Position indicator renderer
+# Reactive expression helpers
 # ---------------------------------------------------------------------------
 
-proc renderPositionIndicator*[R, N](r: R; parent: N; vm: TimelineVM) =
-  ## Render the current-position indicator element.
-  ## Shows the debugger's current rrTicks and the percentage through
-  ## the recording.
-  let posDiv = r.createElement("div")
-  r.setAttribute(posDiv, "class", "timeline-position")
-  r.appendChild(parent, posDiv)
+proc displayIf(cond: bool): string =
+  if cond: "block" else: "none"
 
-  let ticksSpan = r.createElement("span")
-  r.setAttribute(ticksSpan, "class", "position-ticks")
-  r.appendChild(posDiv, ticksSpan)
+proc positionTicksText(vm: TimelineVM): string =
+  "Tick: " & $vm.currentPosition.val
 
-  createRenderEffect proc() =
-    let pos = vm.currentPosition.val
-    r.setTextContent(ticksSpan, "Tick: " & $pos)
+proc positionPercent(vm: TimelineVM): float =
+  ## Percentage through the recording, 0..100. Returns 0 when the
+  ## marker range is invalid (no second marker, or markers in the
+  ## wrong order).
+  let marks = vm.markers.val
+  if marks.len < 2 or marks[1] <= marks[0]: return 0.0
+  let pos = vm.currentPosition.val
+  let minT = marks[0]
+  let maxT = marks[1]
+  let range = maxT - minT
+  if range == 0'u64: 0.0
+  else: float(pos - minT) / float(range) * 100.0
 
-  let percentSpan = r.createElement("span")
-  r.setAttribute(percentSpan, "class", "position-percent")
-  r.appendChild(posDiv, percentSpan)
+proc positionPercentText(vm: TimelineVM): string =
+  ## Format the percentage with one decimal place, or empty when the
+  ## marker range is unavailable.
+  let marks = vm.markers.val
+  if marks.len < 2 or marks[1] <= marks[0]: return ""
+  let pctInt = int(positionPercent(vm) * 10)
+  $(pctInt div 10) & "." & $(pctInt mod 10) & "%"
 
-  createRenderEffect proc() =
-    let pos = vm.currentPosition.val
-    let marks = vm.markers.val
-    if marks.len >= 2 and marks[1] > marks[0]:
-      let minT = marks[0]
-      let maxT = marks[1]
-      let range = maxT - minT
-      let pct =
-        if range > 0'u64:
-          float(pos - minT) / float(range) * 100.0
-        else:
-          0.0
-      # Format percentage to 1 decimal place
-      let pctInt = int(pct * 10)
-      let pctStr = $(pctInt div 10) & "." & $(pctInt mod 10) & "%"
-      r.setTextContent(percentSpan, pctStr)
-    else:
-      r.setTextContent(percentSpan, "")
+proc playheadLeft(vm: TimelineVM): string =
+  let marks = vm.markers.val
+  if marks.len < 2 or marks[1] <= marks[0]: "0%"
+  else: $int(positionPercent(vm)) & "%"
 
-# ---------------------------------------------------------------------------
-# Zoom controls renderer
-# ---------------------------------------------------------------------------
+proc zoomLevelText(vm: TimelineVM): string =
+  let levelInt = int(vm.zoomLevel.val * 10)
+  $(levelInt div 10) & "." & $(levelInt mod 10) & "x"
 
-proc renderZoomControls*[R, N](r: R; parent: N; vm: TimelineVM) =
-  ## Render zoom in/out buttons and a zoom level display.
-  let zoomBar = r.createElement("div")
-  r.setAttribute(zoomBar, "class", "timeline-zoom-controls")
-  r.appendChild(parent, zoomBar)
+proc hoverTooltipText(vm: TimelineVM): string =
+  let hovered = vm.hoveredTick.val
+  if hovered.isSome: "Tick: " & $hovered.get else: ""
 
-  # Zoom out button
-  let zoomOutBtn = r.createElement("button")
-  r.setAttribute(zoomOutBtn, "class", "zoom-out")
-  r.setTextContent(zoomOutBtn, "-")
-  r.appendChild(zoomBar, zoomOutBtn)
-  r.addEventListener(zoomOutBtn, "click", proc() =
-    vm.zoom(vm.zoomLevel.val / 2.0))
-
-  # Zoom level display
-  let zoomText = r.createElement("span")
-  r.setAttribute(zoomText, "class", "zoom-level")
-  r.appendChild(zoomBar, zoomText)
-
-  createRenderEffect proc() =
-    let level = vm.zoomLevel.val
-    # Format zoom level to 1 decimal place
-    let levelInt = int(level * 10)
-    r.setTextContent(zoomText, $(levelInt div 10) & "." & $(levelInt mod 10) & "x")
-
-  # Zoom in button
-  let zoomInBtn = r.createElement("button")
-  r.setAttribute(zoomInBtn, "class", "zoom-in")
-  r.setTextContent(zoomInBtn, "+")
-  r.appendChild(zoomBar, zoomInBtn)
-  r.addEventListener(zoomInBtn, "click", proc() =
-    vm.zoom(vm.zoomLevel.val * 2.0))
+proc hoverTooltipDisplay(vm: TimelineVM): string =
+  if vm.hoveredTick.val.isSome: "block" else: "none"
 
 # ---------------------------------------------------------------------------
-# Hover tooltip renderer
+# Click handlers
 # ---------------------------------------------------------------------------
 
-proc renderHoverTooltip*[R, N](r: R; parent: N; vm: TimelineVM) =
-  ## Render a tooltip that appears when hovering over the timeline.
-  ## Shows the tick value at the hovered position.
-  ## Hidden when no tick is hovered.
-  let tooltip = r.createElement("div")
-  r.setAttribute(tooltip, "class", "timeline-hover-tooltip")
-  r.appendChild(parent, tooltip)
+proc onZoomIn(vm: TimelineVM): proc() =
+  result = proc() = vm.zoom(vm.zoomLevel.val * 2.0)
 
-  createRenderEffect proc() =
-    let hovered = vm.hoveredTick.val
-    if hovered.isSome:
-      r.setStyle(tooltip, "display", "block")
-      r.setTextContent(tooltip, "Tick: " & $hovered.get)
-    else:
-      r.setStyle(tooltip, "display", "none")
-      r.setTextContent(tooltip, "")
+proc onZoomOut(vm: TimelineVM): proc() =
+  result = proc() = vm.zoom(vm.zoomLevel.val / 2.0)
 
 # ---------------------------------------------------------------------------
-# Timeline track renderer (placeholder for the visual bar)
+# Panel template — shared between Mock and Web renderers
 # ---------------------------------------------------------------------------
+#
+# Structure:
+#   div.timeline-component
+#     div.timeline-position
+#       span.position-ticks                  text reactive
+#       span.position-percent                text reactive
+#     div.timeline-zoom-controls
+#       button.zoom-out                      onclick = halve zoom level
+#       span.zoom-level                      text reactive
+#       button.zoom-in                       onclick = double zoom level
+#     div.timeline-track
+#       div.timeline-playhead                left % reactive
+#     div.timeline-hover-tooltip             display + text reactive
 
-proc renderTimelineTrack*[R, N](r: R; parent: N; vm: TimelineVM) =
-  ## Render the main timeline track area.
-  ## This is a placeholder — the actual visual representation (canvas,
-  ## SVG, or positioned divs) will be added when the timeline rendering
-  ## logic is ported.
-  let track = r.createElement("div")
-  r.setAttribute(track, "class", "timeline-track")
-  r.appendChild(parent, track)
-
-  # Playhead indicator within the track
-  let playhead = r.createElement("div")
-  r.setAttribute(playhead, "class", "timeline-playhead")
-  r.appendChild(track, playhead)
-
-  createRenderEffect proc() =
-    let marks = vm.markers.val
-    let pos = vm.currentPosition.val
-    if marks.len >= 2 and marks[1] > marks[0]:
-      let minT = marks[0]
-      let maxT = marks[1]
-      let range = maxT - minT
-      let pct =
-        if range > 0'u64:
-          float(pos - minT) / float(range) * 100.0
-        else:
-          0.0
-      r.setStyle(playhead, "left", $int(pct) & "%")
-    else:
-      r.setStyle(playhead, "left", "0%")
+template renderTimelinePanelImpl(r, vm, rootClass: untyped): untyped =
+  ui(r):
+    tdiv(class = rootClass):
+      tdiv(class = "timeline-position"):
+        span(class = "position-ticks"):
+          text positionTicksText(vm)
+        span(class = "position-percent"):
+          text positionPercentText(vm)
+      tdiv(class = "timeline-zoom-controls"):
+        button(class = "zoom-out", onclick = onZoomOut(vm)):
+          text "-"
+        span(class = "zoom-level"):
+          text zoomLevelText(vm)
+        button(class = "zoom-in", onclick = onZoomIn(vm)):
+          text "+"
+      tdiv(class = "timeline-track"):
+        tdiv(class = "timeline-playhead",
+             left = playheadLeft(vm)):
+          discard
+      tdiv(class = "timeline-hover-tooltip",
+           display = hoverTooltipDisplay(vm)):
+        text hoverTooltipText(vm)
 
 # ---------------------------------------------------------------------------
-# Main panel renderer — MockRenderer overload
+# Renderer overloads
 # ---------------------------------------------------------------------------
 
 proc renderTimelinePanel*(r: MockRenderer; vm: TimelineVM): MockNode =
-  ## Render the complete Timeline panel.
-  ##
-  ## Structure:
-  ##   div.timeline-component
-  ##     div.timeline-position
-  ##       span.position-ticks
-  ##       span.position-percent
-  ##     div.timeline-zoom-controls
-  ##       button.zoom-out
-  ##       span.zoom-level
-  ##       button.zoom-in
-  ##     div.timeline-track
-  ##       div.timeline-playhead
-  ##     div.timeline-hover-tooltip     (hidden when not hovering)
-  ##
-  ## All content is reactive: changing TimelineVM signals automatically
-  ## updates the DOM tree via createRenderEffect.
-  let panel = r.createElement("div")
-  r.setAttribute(panel, "class", "timeline-component")
-
-  # Position indicator
-  renderPositionIndicator(r, panel, vm)
-
-  # Zoom controls
-  renderZoomControls(r, panel, vm)
-
-  # Timeline track
-  renderTimelineTrack(r, panel, vm)
-
-  # Hover tooltip
-  renderHoverTooltip(r, panel, vm)
-
-  panel
-
-# ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
-# ---------------------------------------------------------------------------
+  ## Render the full Timeline panel for headless tests.
+  renderTimelinePanelImpl(r, vm, "timeline-component")
 
 when defined(js):
-  proc renderTimelinePanel*(r: WebRenderer;
-                             vm: TimelineVM): isonim_dom.Element =
-    ## Render the complete Timeline panel using real DOM elements.
-    let panel = r.createElement("div")
-    r.setAttribute(panel, "class", "timeline-component isonim-timeline")
+  proc renderTimelinePanel*(r: WebRenderer; vm: TimelineVM): isonim_dom.Element =
+    ## Render the Timeline panel into real DOM elements.
+    renderTimelinePanelImpl(r, vm, "timeline-component isonim-timeline")
 
-    renderPositionIndicator(r, panel, vm)
-    renderZoomControls(r, panel, vm)
-    renderTimelineTrack(r, panel, vm)
-    renderHoverTooltip(r, panel, vm)
-
-    panel
-
-  proc mountIsoNimTimeline*(container: isonim_dom.Element;
-                             vm: TimelineVM) =
-    ## Mount the IsoNim timeline view into a real DOM container.
-    ##
-    ## Creates the reactive DOM tree and appends it as a child of
-    ## `container`. The IsoNim reactive effects handle all subsequent
-    ## updates — no manual redraw is needed.
+  proc mountIsoNimTimeline*(container: isonim_dom.Element; vm: TimelineVM) =
+    ## Mount the IsoNim Timeline panel as a child of `container`.
+    ## Reactive effects handle every subsequent update — no manual
+    ## redraw is needed.
     let r = WebRenderer()
     let panel = renderTimelinePanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

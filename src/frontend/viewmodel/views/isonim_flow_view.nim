@@ -2,33 +2,18 @@
 ##
 ## IsoNim DOM-rendering view for the Flow panel.
 ##
-## Renders a live, reactive DOM tree driven by FlowVM signals.
-## When the VM's signals change (flow mode, iteration, hovered step,
+## Renders a live, reactive DOM tree driven by `FlowVM` signals. When
+## the VM's signals change (flow mode, iteration, hovered step,
 ## loading state), the DOM updates automatically via IsoNim's
 ## `createRenderEffect`.
 ##
-## Generic over the renderer type `R` so that:
-## - `MockRenderer` can be used for headless unit tests
-## - The web renderer can be used for real browser DOM
-##
-## This view is intended to eventually replace the Karax flow.nim
-## component. It consumes the same FlowVM but renders through
-## IsoNim's renderer API instead of Karax's VDOM.
-##
-## Usage (test):
-##   let r = MockRenderer()
-##   let panel = renderFlowPanel(r, flowVM)
-##   check panel.textContent.contains("Call")
-##
-## Usage (web):
-##   import isonim/web/web_renderer
-##   let r = WebRenderer()
-##   let panel = renderFlowPanel(r, flowVM)
-##   # panel is a dom_api.Element, append to any real DOM container
-
-import std/options
+## Both renderer overloads (Mock and Web) produce the same structure;
+## the markup lives in a single `renderFlowPanelImpl` template that is
+## materialised into one concrete proc per renderer so the `ui()`
+## macro can resolve element types at compile time.
 
 import isonim/core/[signals, computation]
+import isonim/dsl/ui
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -38,222 +23,129 @@ when defined(js):
 import ../viewmodels/flow_vm
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Static labels and class names
 # ---------------------------------------------------------------------------
 
 proc modeLabel(mode: FlowMode): string =
-  ## Display label for a flow mode button.
   case mode
   of fmCall:     "Call"
   of fmLine:     "Line"
   of fmFunction: "Function"
 
 proc modeCssClass(mode: FlowMode): string =
-  ## CSS class name for a flow mode button.
   case mode
   of fmCall:     "mode-call"
   of fmLine:     "mode-line"
   of fmFunction: "mode-function"
 
 # ---------------------------------------------------------------------------
-# Mode selector renderer
+# Reactive expression helpers
 # ---------------------------------------------------------------------------
 
-proc makeModeClickHandler(vm: FlowVM; mode: FlowMode): proc() =
-  ## Factory to create a click handler for a mode button.
+proc displayIf(cond: bool): string =
+  if cond: "block" else: "none"
+
+proc modeButtonClass(vm: FlowVM; mode: FlowMode): string =
+  ## Mode-button class with the optional `active` modifier.
+  let cls = modeCssClass(mode)
+  if vm.flowMode.val == mode: cls & " active" else: cls
+
+proc rawValueToggleClass(vm: FlowVM): string =
+  if vm.showRawValues.val: "raw-value-toggle active" else: "raw-value-toggle"
+
+proc rawValueToggleText(vm: FlowVM): string =
+  if vm.showRawValues.val: "Formatted" else: "Raw"
+
+proc iterationLabelText(vm: FlowVM): string =
+  "Iteration " & $vm.selectedIteration.val & " / " & $vm.totalIterations.val
+
+proc sliderMaxAttr(vm: FlowVM): string =
+  let maxVal = vm.totalIterations.val - 1
+  $(if maxVal >= 0: maxVal else: 0)
+
+# ---------------------------------------------------------------------------
+# Click handlers
+# ---------------------------------------------------------------------------
+
+proc onSetMode(vm: FlowVM; mode: FlowMode): proc() =
   let m = mode
-  result = proc() =
-    vm.setMode(m)
-
-proc makeModeActiveEffect[R, N](r: R; btn: N; vm: FlowVM;
-                                  mode: FlowMode): proc() =
-  ## Factory to create a reactive effect that updates the active CSS class.
-  let m = mode
-  result = proc() =
-    let isActive = vm.flowMode.val == m
-    let cls = modeCssClass(m) & (if isActive: " active" else: "")
-    r.setAttribute(btn, "class", cls)
-
-proc renderModeSelector*[R, N](r: R; parent: N; vm: FlowVM) =
-  ## Render the three flow mode buttons (Call, Line, Function) into `parent`.
-  ## The active mode gets the "active" CSS class reactively.
-  let modeBar = r.createElement("div")
-  r.setAttribute(modeBar, "class", "flow-mode-selector")
-  r.appendChild(parent, modeBar)
-
-  for mode in [fmCall, fmLine, fmFunction]:
-    let btn = r.createElement("button")
-    r.setAttribute(btn, "class", modeCssClass(mode))
-    r.setTextContent(btn, modeLabel(mode))
-    r.appendChild(modeBar, btn)
-
-    r.addEventListener(btn, "click", makeModeClickHandler(vm, mode))
-
-    # Reactive "active" class update
-    createRenderEffect makeModeActiveEffect(r, btn, vm, mode)
+  result = proc() = vm.setMode(m)
 
 # ---------------------------------------------------------------------------
-# Iteration slider renderer
+# Panel template — shared between Mock and Web renderers
 # ---------------------------------------------------------------------------
+#
+# Structure:
+#   div.flow-component
+#     div.flow-mode-selector
+#       button.mode-call[.active]
+#       button.mode-line[.active]
+#       button.mode-function[.active]
+#     div.flow-loading[display reactive]                "Loading..."
+#     div.flow-iteration-slider
+#       span.iteration-label                            text reactive
+#       input.iteration-range[type=range, min=0, max reactive, value reactive]
+#     div.flow-steps                                    placeholder
+#     div.flow-value-display
+#       span.flow-value-text
+#       button.raw-value-toggle                         class + text reactive
+#
+# All dynamic attributes / text become per-attribute
+# `createRenderEffect`s emitted by the DSL macro.
 
-proc renderIterationSlider*[R, N](r: R; parent: N; vm: FlowVM) =
-  ## Render the iteration slider and its label.
-  ## The slider range is [0, totalIterations - 1], and its position
-  ## is driven by the selectedIteration signal.
-  let sliderRow = r.createElement("div")
-  r.setAttribute(sliderRow, "class", "flow-iteration-slider")
-  r.appendChild(parent, sliderRow)
-
-  let label = r.createElement("span")
-  r.setAttribute(label, "class", "iteration-label")
-  r.appendChild(sliderRow, label)
-
-  createRenderEffect proc() =
-    let current = vm.selectedIteration.val
-    let total = vm.totalIterations.val
-    r.setTextContent(label, "Iteration " & $current & " / " & $total)
-
-  # The slider input itself. In a real browser we would wire up
-  # input/change events to call vm.selectIteration. With MockRenderer,
-  # the slider acts as a placeholder; tests exercise the VM directly.
-  let slider = r.createElement("input")
-  r.setAttribute(slider, "class", "iteration-range")
-  r.setAttribute(slider, "type", "range")
-  r.setAttribute(slider, "min", "0")
-  r.appendChild(sliderRow, slider)
-
-  createRenderEffect proc() =
-    let maxVal = vm.totalIterations.val - 1
-    r.setAttribute(slider, "max", $(if maxVal >= 0: maxVal else: 0))
-    r.setAttribute(slider, "value", $vm.selectedIteration.val)
-
-# ---------------------------------------------------------------------------
-# Flow step list renderer (placeholder — no flow step data yet)
-# ---------------------------------------------------------------------------
-
-proc renderFlowStepList*[R, N](r: R; parent: N; vm: FlowVM) =
-  ## Render the flow step list container.
-  ## Currently a placeholder — when flow step data is added to the VM,
-  ## this will use indexEach to render steps.
-  let container = r.createElement("div")
-  r.setAttribute(container, "class", "flow-steps")
-  r.appendChild(parent, container)
-
-  # The container is empty for now. When FlowVM gains a
-  # `visibleSteps` signal, steps will be rendered here.
-
-# ---------------------------------------------------------------------------
-# Value display renderer
-# ---------------------------------------------------------------------------
-
-proc renderValueDisplay*[R, N](r: R; parent: N; vm: FlowVM) =
-  ## Render the value display area that shows the value at the
-  ## current flow step. Includes a toggle for raw values.
-  let display = r.createElement("div")
-  r.setAttribute(display, "class", "flow-value-display")
-  r.appendChild(parent, display)
-
-  let valueText = r.createElement("span")
-  r.setAttribute(valueText, "class", "flow-value-text")
-  r.appendChild(display, valueText)
-
-  # Raw value toggle button
-  let toggleBtn = r.createElement("button")
-  r.setAttribute(toggleBtn, "class", "raw-value-toggle")
-  r.appendChild(display, toggleBtn)
-  r.addEventListener(toggleBtn, "click", proc() = vm.toggleRawValues())
-
-  createRenderEffect proc() =
-    let raw = vm.showRawValues.val
-    r.setTextContent(toggleBtn, if raw: "Formatted" else: "Raw")
-    let cls = "raw-value-toggle" & (if raw: " active" else: "")
-    r.setAttribute(toggleBtn, "class", cls)
+template renderFlowPanelImpl(r, vm, rootClass: untyped): untyped =
+  ui(r):
+    tdiv(class = rootClass):
+      tdiv(class = "flow-mode-selector"):
+        button(class = modeButtonClass(vm, fmCall),
+               onclick = onSetMode(vm, fmCall)):
+          text modeLabel(fmCall)
+        button(class = modeButtonClass(vm, fmLine),
+               onclick = onSetMode(vm, fmLine)):
+          text modeLabel(fmLine)
+        button(class = modeButtonClass(vm, fmFunction),
+               onclick = onSetMode(vm, fmFunction)):
+          text modeLabel(fmFunction)
+      tdiv(class = "flow-loading",
+           display = displayIf(vm.isLoading.val)):
+        text "Loading..."
+      tdiv(class = "flow-iteration-slider"):
+        span(class = "iteration-label"):
+          text iterationLabelText(vm)
+        # `min` and `max` collide with `system.min` / `system.max`,
+        # which is fine — the DSL's `attrNameStr` accepts symbol-choice
+        # nodes and reads the underlying identifier name.
+        input(class = "iteration-range",
+              `type` = "range",
+              min = "0",
+              max = sliderMaxAttr(vm),
+              value = $vm.selectedIteration.val)
+      tdiv(class = "flow-steps"):
+        discard
+      tdiv(class = "flow-value-display"):
+        span(class = "flow-value-text"):
+          discard
+        button(class = rawValueToggleClass(vm),
+               onclick = proc() = vm.toggleRawValues()):
+          text rawValueToggleText(vm)
 
 # ---------------------------------------------------------------------------
-# Loading indicator
-# ---------------------------------------------------------------------------
-
-proc renderFlowLoading*[R, N](r: R; parent: N; vm: FlowVM) =
-  ## Render a loading indicator that appears when flow data is loading.
-  let indicator = r.createElement("div")
-  r.setAttribute(indicator, "class", "flow-loading")
-  r.setTextContent(indicator, "Loading...")
-  r.appendChild(parent, indicator)
-
-  createRenderEffect proc() =
-    let loading = vm.isLoading.val
-    r.setStyle(indicator, "display", if loading: "block" else: "none")
-
-# ---------------------------------------------------------------------------
-# Main panel renderer — MockRenderer overload
+# Renderer overloads
 # ---------------------------------------------------------------------------
 
 proc renderFlowPanel*(r: MockRenderer; vm: FlowVM): MockNode =
-  ## Render the complete Flow panel.
-  ##
-  ## Structure:
-  ##   div.flow-component
-  ##     div.flow-mode-selector
-  ##       button.mode-call
-  ##       button.mode-line
-  ##       button.mode-function
-  ##     div.flow-loading               (hidden when not loading)
-  ##     div.flow-iteration-slider
-  ##       span.iteration-label
-  ##       input.iteration-range
-  ##     div.flow-steps                 (placeholder for step list)
-  ##     div.flow-value-display
-  ##       span.flow-value-text
-  ##       button.raw-value-toggle
-  ##
-  ## All content is reactive: changing FlowVM signals automatically
-  ## updates the DOM tree via createRenderEffect.
-  let panel = r.createElement("div")
-  r.setAttribute(panel, "class", "flow-component")
-
-  # Mode selector
-  renderModeSelector(r, panel, vm)
-
-  # Loading indicator
-  renderFlowLoading(r, panel, vm)
-
-  # Iteration slider
-  renderIterationSlider(r, panel, vm)
-
-  # Flow step list (placeholder)
-  renderFlowStepList(r, panel, vm)
-
-  # Value display
-  renderValueDisplay(r, panel, vm)
-
-  panel
-
-# ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
-# ---------------------------------------------------------------------------
+  ## Render the full Flow panel for headless tests.
+  renderFlowPanelImpl(r, vm, "flow-component")
 
 when defined(js):
-  proc renderFlowPanel*(r: WebRenderer;
-                         vm: FlowVM): isonim_dom.Element =
-    ## Render the complete Flow panel using real DOM elements.
-    let panel = r.createElement("div")
-    r.setAttribute(panel, "class", "flow-component isonim-flow")
+  proc renderFlowPanel*(r: WebRenderer; vm: FlowVM): isonim_dom.Element =
+    ## Render the Flow panel into real DOM elements.
+    renderFlowPanelImpl(r, vm, "flow-component isonim-flow")
 
-    renderModeSelector(r, panel, vm)
-    renderFlowLoading(r, panel, vm)
-    renderIterationSlider(r, panel, vm)
-    renderFlowStepList(r, panel, vm)
-    renderValueDisplay(r, panel, vm)
-
-    panel
-
-  proc mountIsoNimFlow*(container: isonim_dom.Element;
-                         vm: FlowVM) =
-    ## Mount the IsoNim flow view into a real DOM container.
-    ##
-    ## Creates the reactive DOM tree and appends it as a child of
-    ## `container`. The IsoNim reactive effects handle all subsequent
-    ## updates — no manual redraw is needed.
+  proc mountIsoNimFlow*(container: isonim_dom.Element; vm: FlowVM) =
+    ## Mount the IsoNim Flow panel as a child of `container`. Reactive
+    ## effects handle every subsequent update — no manual redraw is
+    ## needed.
     let r = WebRenderer()
     let panel = renderFlowPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

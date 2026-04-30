@@ -10,26 +10,15 @@
 ##
 ## The DOM structure is intentionally minimal — just the outer
 ## container div — because Monaco Editor manages its own internal DOM.
-## The IsoNim view's job is to create and maintain the container
-## element so that `createMonacoEditor(selector, options)` can find it
-## and attach the editor instance.
+## The IsoNim view's job is to create and maintain the container so
+## that `createMonacoEditor(selector, options)` can find it and attach
+## the editor instance.
 ##
-## Generic over the renderer type `R` so that:
-## - `MockRenderer` can be used for headless unit tests
-## - The web renderer can be used for real browser DOM
-##
-## Usage (test):
-##   let r = MockRenderer()
-##   let panel = renderEditorContainer(r, editorVM, 0, "/foo/bar.nim", false, 0)
-##   check findByAttr(panel, "id", "editorComponent-0") != nil
-##
-## Usage (web):
-##   import isonim/web/web_renderer
-##   let r = WebRenderer()
-##   let container = renderEditorContainer(r, editorVM, 0, "/foo/bar.nim", false, 0)
-##   # container is a dom_api.Element — append to a real DOM parent
+## The container shape is identical for both renderers, so the markup
+## lives in a single `renderEditorContainerImpl` template that is
+## materialised into one concrete proc per renderer (Mock / Web).
 
-import isonim/core/[signals, computation]
+import isonim/dsl/ui
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -39,75 +28,81 @@ when defined(js):
 import ../viewmodels/editor_vm
 
 # ---------------------------------------------------------------------------
-# Container renderer
+# Class composition
 # ---------------------------------------------------------------------------
 
-proc renderEditorContainer*[R, N](r: R;
-                                   vm: EditorVM;
-                                   index: int;
-                                   path: string;
-                                   isExpansion: bool;
-                                   expansionDepth: int): N =
-  ## Create the editor container div that Monaco attaches to.
-  ##
-  ## Produces the same DOM structure as the legacy Karax `editorView()`:
-  ##   div#editorComponent-{index}.editor.code-editor.tab
-  ##     [Monaco creates its own children here]
-  ##
-  ## The `data-label` attribute is set to `path` so that GoldenLayout
-  ## tab rendering and Playwright tests can locate the editor.
-  let expansionClass = if isExpansion: " expansion expansion-" & $expansionDepth else: ""
-  let panel = r.createElement("div")
-  r.setAttribute(panel, "id", "editorComponent-" & $index)
-  r.setAttribute(panel, "class", "editor code-editor tab" & expansionClass)
-  r.setAttribute(panel, "data-label", path)
-  r.setAttribute(panel, "tabindex", "2")
-
-  panel
+proc editorClass(isExpansion: bool; expansionDepth: int): string =
+  ## Static class string for the editor container. Includes the
+  ## optional `expansion expansion-{depth}` suffix when this editor
+  ## instance is hosted as an expansion view inside another editor.
+  result = "editor code-editor tab"
+  if isExpansion:
+    result.add " expansion expansion-"
+    result.add $expansionDepth
 
 # ---------------------------------------------------------------------------
-# MockRenderer overload
+# Container builder
+# ---------------------------------------------------------------------------
+#
+# Produces the same DOM structure as the legacy Karax `editorView()`:
+#
+#   div#editorComponent-{index}.editor.code-editor.tab[.expansion]
+#     [Monaco creates its own children here]
+#
+# The `data-label` attribute is set to `path` so that GoldenLayout tab
+# rendering and Playwright tests can locate the editor.
+
+template renderEditorContainerImpl(r, index, path,
+                                    isExpansion, expansionDepth: untyped):
+                                    untyped =
+  ui(r):
+    tdiv(id = "editorComponent-" & $index,
+         class = editorClass(isExpansion, expansionDepth),
+         `data-label` = path,
+         tabindex = "2"):
+      discard
+
+# ---------------------------------------------------------------------------
+# Renderer overloads
 # ---------------------------------------------------------------------------
 
-proc renderEditorPanel*(r: MockRenderer;
-                         vm: EditorVM;
-                         index: int;
-                         path: string;
-                         isExpansion: bool;
-                         expansionDepth: int): MockNode =
-  ## Render the editor container for tests.
-  renderEditorContainer[MockRenderer, MockNode](
-    r, vm, index, path, isExpansion, expansionDepth)
+proc renderEditorContainer*(r: MockRenderer; vm: EditorVM;
+                            index: int; path: string;
+                            isExpansion: bool; expansionDepth: int): MockNode =
+  ## Mock-renderer overload — used by headless tests.
+  discard vm
+  renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth)
 
-# ---------------------------------------------------------------------------
-# WebRenderer overload — renders into real browser DOM elements
-# ---------------------------------------------------------------------------
+proc renderEditorPanel*(r: MockRenderer; vm: EditorVM;
+                        index: int; path: string;
+                        isExpansion: bool; expansionDepth: int): MockNode =
+  ## Public name retained for symmetry with the other panel views.
+  renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth)
 
 when defined(js):
-  proc renderEditorPanel*(r: WebRenderer;
-                           vm: EditorVM;
-                           index: int;
-                           path: string;
-                           isExpansion: bool;
-                           expansionDepth: int): isonim_dom.Element =
-    ## Render the editor container using real DOM elements.
-    renderEditorContainer[WebRenderer, isonim_dom.Element](
-      r, vm, index, path, isExpansion, expansionDepth)
+  proc renderEditorContainer*(r: WebRenderer; vm: EditorVM;
+                              index: int; path: string;
+                              isExpansion: bool;
+                              expansionDepth: int): isonim_dom.Element =
+    discard vm
+    renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth)
+
+  proc renderEditorPanel*(r: WebRenderer; vm: EditorVM;
+                          index: int; path: string;
+                          isExpansion: bool;
+                          expansionDepth: int): isonim_dom.Element =
+    renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth)
 
   proc mountIsoNimEditor*(container: isonim_dom.Element;
-                           vm: EditorVM;
-                           index: int;
-                           path: string;
-                           isExpansion: bool;
-                           expansionDepth: int): isonim_dom.Element =
-    ## Mount the IsoNim editor container into a real DOM container.
-    ##
-    ## Creates the editor container div and appends it as a child of
-    ## `container`. Returns the created element so the caller can pass
-    ## its selector to `createMonacoEditor`.
-    ##
-    ## Unlike other panel mounts, this returns the element reference
-    ## because the editor needs it for Monaco initialization.
+                          vm: EditorVM;
+                          index: int; path: string;
+                          isExpansion: bool;
+                          expansionDepth: int): isonim_dom.Element =
+    ## Mount the IsoNim editor container as a child of `container` and
+    ## return the element so the caller can pass its selector to
+    ## `createMonacoEditor`. Unlike the other panel mounts, this view
+    ## returns the element reference because Monaco needs it for
+    ## initialisation.
     let r = WebRenderer()
     let panel = renderEditorPanel(r, vm, index, path, isExpansion, expansionDepth)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
