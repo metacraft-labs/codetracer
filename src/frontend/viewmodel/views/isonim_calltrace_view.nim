@@ -41,6 +41,7 @@
 import std/[json, options, tables, strutils]
 
 import isonim/core/[signals, computation]
+import isonim/dsl/ui
 import isonim/dsl/components
 import isonim/testing/mock_dom  # MockNode type used in generic signatures
 
@@ -81,8 +82,9 @@ proc makeDoubleClickHandler(vm: CalltraceVM; lineIndex: int64): proc() =
 proc renderScrollIndicatorAbove*[R, N](r: R; parent: N; vm: CalltraceVM) =
   ## Render the "more above" scroll indicator.
   ## Visible when there are calltrace entries above the viewport.
-  let indicator = r.createElement("div")
-  r.setAttribute(indicator, "class", "more-above")
+  let indicator = ui(r):
+    tdiv(class = "more-above"):
+      discard
   r.appendChild(parent, indicator)
 
   createRenderEffect proc() =
@@ -91,8 +93,9 @@ proc renderScrollIndicatorAbove*[R, N](r: R; parent: N; vm: CalltraceVM) =
 proc renderScrollIndicatorBelow*[R, N](r: R; parent: N; vm: CalltraceVM) =
   ## Render the "more below" scroll indicator.
   ## Visible when there are calltrace entries below the viewport.
-  let indicator = r.createElement("div")
-  r.setAttribute(indicator, "class", "more-below")
+  let indicator = ui(r):
+    tdiv(class = "more-below"):
+      discard
   r.appendChild(parent, indicator)
 
   createRenderEffect proc() =
@@ -104,14 +107,10 @@ proc renderScrollIndicatorBelow*[R, N](r: R; parent: N; vm: CalltraceVM) =
 
 proc renderSearchInput*[R, N](r: R; parent: N; vm: CalltraceVM) =
   ## Render the search input for filtering calltrace entries.
-  let inputRow = r.createElement("div")
-  r.setAttribute(inputRow, "class", "calltrace-search-row")
+  let inputRow = ui(r):
+    tdiv(class = "calltrace-search-row"):
+      input(class = "calltrace-search-input", placeholder = "Search calltrace...")
   r.appendChild(parent, inputRow)
-
-  let input = r.createElement("input")
-  r.setAttribute(input, "class", "calltrace-search-input")
-  r.setAttribute(input, "placeholder", "Search calltrace...")
-  r.appendChild(inputRow, input)
 
   # Note: In a real browser, we would read `input.value` on input events.
   # With MockRenderer, the input value isn't tracked — the actual
@@ -126,8 +125,9 @@ proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
   ## Render the calltrace line list container.
   ## Uses indexEach for positional rendering: when the visible lines
   ## change, rows are updated in place or added/removed.
-  let container = r.createElement("div")
-  r.setAttribute(container, "class", "calltrace-lines")
+  let container = ui(r):
+    tdiv(class = "calltrace-lines"):
+      discard
   r.appendChild(parent, container)
 
   indexEach[CallLine, R, N](r, container,
@@ -180,9 +180,9 @@ proc renderCallLineList*[R, N](r: R; parent: N; vm: CalltraceVM) =
 
 proc renderCalltraceLoading*[R, N](r: R; parent: N; vm: CalltraceVM) =
   ## Render a loading indicator that appears when calltrace data is loading.
-  let indicator = r.createElement("div")
-  r.setAttribute(indicator, "class", "calltrace-loading")
-  r.setTextContent(indicator, "Loading...")
+  let indicator = ui(r):
+    tdiv(class = "calltrace-loading"):
+      text "Loading..."
   r.appendChild(parent, indicator)
 
   createRenderEffect proc() =
@@ -208,22 +208,14 @@ proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
   ##
   ## All content is reactive: changing CalltraceVM signals automatically
   ## updates the DOM tree via createRenderEffect.
-  let panel = r.createElement("div")
-  r.setAttribute(panel, "class", "calltrace-component")
+  let panel = ui(r):
+    tdiv(class = "calltrace-component"):
+      discard
 
-  # Scroll indicator (above)
   renderScrollIndicatorAbove(r, panel, vm)
-
-  # Loading indicator
   renderCalltraceLoading(r, panel, vm)
-
-  # Call line list
   renderCallLineList(r, panel, vm)
-
-  # Scroll indicator (below)
   renderScrollIndicatorBelow(r, panel, vm)
-
-  # Search input
   renderSearchInput(r, panel, vm)
 
   panel
@@ -268,8 +260,9 @@ when defined(js):
                               vm: CalltraceVM) =
     ## Render the calltrace line list using Karax-compatible DOM structure.
     ## Wrapped in an indexEach for reactive list updates.
-    let container = r.createElement("div")
-    r.setAttribute(container, "class", "calltrace-lines")
+    let container = ui(r):
+      tdiv(class = "calltrace-lines"):
+        discard
     r.appendChild(parent, container)
     when defined(js):
       {.emit: "console.error('[PIPELINE] renderWebCallLineList: container created, starting indexEach');".}
@@ -365,20 +358,18 @@ when defined(js):
     ##       input.calltrace-search-input
     ##   div.call-search-results
     ##     div.search-result ...
-    let searchDiv = r.createElement("div")
-    r.setAttribute(searchDiv, "class", "calltrace-search")
+    let searchDiv = ui(r):
+      tdiv(class = "calltrace-search"):
+        discard
     r.appendChild(parent, searchDiv)
 
     let form = r.createElement("form")
     r.setAttribute(form, "class", "calltrace-search-form-0")
     r.appendChild(searchDiv, form)
 
-    let input = r.createElement("input")
-    r.setAttribute(input, "class",
-      "calltrace-search-input calltrace-search-input-0 ct-input-panel ct-input-search-image")
-    r.setAttribute(input, "type", "text")
-    r.setAttribute(input, "placeholder", "Search")
-    r.setAttribute(input, "tabindex", "0")
+    let input = ui(r):
+      input(class = "calltrace-search-input calltrace-search-input-0 ct-input-panel ct-input-search-image",
+            `type` = "text", placeholder = "Search", tabindex = "0")
     r.appendChild(form, input)
 
     # Wire up search form submission
@@ -407,8 +398,9 @@ when defined(js):
 
     # Search results container — Playwright queries `.call-search-results`
     # and `.search-result` inside it.
-    let resultsDiv = r.createElement("div")
-    r.setAttribute(resultsDiv, "class", "call-search-results hidden")
+    let resultsDiv = ui(r):
+      tdiv(class = "call-search-results hidden"):
+        discard
     r.appendChild(parent, resultsDiv)
 
     # Reactive update: show/hide results from backend search.
@@ -448,10 +440,9 @@ when defined(js):
 
   proc renderWebLoading(r: WebRenderer; parent: isonim_dom.Element;
                          vm: CalltraceVM) =
-    let indicator = r.createElement("div")
-    r.setAttribute(indicator, "class", "calltrace-loading")
-    r.setAttribute(indicator, "id", "calltrace-toggle-loading-0")
-    r.setTextContent(indicator, "Loading...")
+    let indicator = ui(r):
+      tdiv(class = "calltrace-loading", id = "calltrace-toggle-loading-0"):
+        text "Loading..."
     r.appendChild(parent, indicator)
 
     createRenderEffect proc() =
@@ -481,22 +472,23 @@ when defined(js):
     ## All IDs use the `-0` suffix matching the default component id=0.
     ## Playwright page objects (CallTracePane, CallTraceEntry) query
     ## these selectors unchanged.
-    let panel = r.createElement("div")
-    r.setAttribute(panel, "class",
-      "component-container calltrace-view isonim-calltrace")
-    r.setAttribute(panel, "data-label", "calltrace-data-label-0")
-    r.setAttribute(panel, "tabindex", "2")
+    let panel = ui(r):
+      tdiv(class = "component-container calltrace-view isonim-calltrace",
+           `data-label` = "calltrace-data-label-0", tabindex = "2"):
+        discard
 
     # Header section: search + async toggle placeholder
-    let header = r.createElement("div")
+    let header = ui(r):
+      tdiv:
+        discard
     r.appendChild(panel, header)
 
     renderWebSearchInput(r, header, vm)
 
     # Scroll container
-    let scrollContainer = r.createElement("div")
-    r.setAttribute(scrollContainer, "id", "calltraceScroll-0")
-    r.setAttribute(scrollContainer, "class", "local-calltrace-view")
+    let scrollContainer = ui(r):
+      tdiv(id = "calltraceScroll-0", class = "local-calltrace-view"):
+        discard
     r.appendChild(panel, scrollContainer)
 
     # Wire up scroll events to feed the VM
@@ -509,8 +501,9 @@ when defined(js):
     )
 
     # Inner wrapper: div.local-calltrace
-    let localCalltrace = r.createElement("div")
-    r.setAttribute(localCalltrace, "class", "local-calltrace")
+    let localCalltrace = ui(r):
+      tdiv(class = "local-calltrace"):
+        discard
     r.appendChild(scrollContainer, localCalltrace)
 
     # Reactive height based on totalCallsCount for virtual scrolling
