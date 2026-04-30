@@ -36,7 +36,13 @@ import * as net from "node:net";
 // Paths
 // ---------------------------------------------------------------------------
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+// __dirname for this file is `<repo>/src/tests/gui/tests/wasm-replay`,
+// which is five levels deep, so the repo root is five levels up. The
+// earlier three-level form resolved to `<repo>/src/tests/`, producing
+// paths like `<repo>/src/tests/src/db-backend/wasm-testing/...` (the
+// doubled `src/` is the giveaway) and aborting the test in
+// `beforeAll`.
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..", "..");
 const WASM_TESTING_DIR = path.join(REPO_ROOT, "src", "db-backend", "wasm-testing");
 
 // Materialized (JSON) trace fixture.
