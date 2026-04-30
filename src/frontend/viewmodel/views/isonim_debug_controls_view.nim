@@ -34,7 +34,7 @@
 ##   # panel is a dom_api.Element, append to any real DOM container
 
 import isonim/core/[signals, computation]
-discard  # isonim/dsl not needed for this simple view
+import isonim/dsl/ui
 import isonim/testing/mock_dom  # MockNode type used in generic signatures
 
 when defined(js):
@@ -57,13 +57,13 @@ proc renderControlButton*[R, N](r: R; parent: N;
   ## The button's "disabled" attribute is toggled reactively based on the
   ## `enabled` thunk. When disabled, the button gets a "disabled" attribute;
   ## when enabled, the attribute is removed.
-  let btn = r.createElement("button")
-  r.setAttribute(btn, "class", cssClass)
-  r.setTextContent(btn, label)
+  let btn = ui(r):
+    button(class = cssClass, onclick = onClick):
+      text label
   r.appendChild(parent, btn)
 
-  r.addEventListener(btn, "click", onClick)
-
+  # Reactive disabled toggle — uses removeAttribute which the DSL
+  # does not support, so this effect stays imperative.
   createRenderEffect proc() =
     if enabled():
       r.removeAttribute(btn, "disabled")
@@ -76,12 +76,10 @@ proc renderControlButton*[R, N](r: R; parent: N;
 
 proc renderStatusText*[R, N](r: R; parent: N; vm: DebugControlsVM) =
   ## Render the status text element that shows the current debugger state.
-  let status = r.createElement("span")
-  r.setAttribute(status, "class", "debug-status-text")
+  let status = ui(r):
+    span(class = "debug-status-text"):
+      text vm.statusText.val
   r.appendChild(parent, status)
-
-  createRenderEffect proc() =
-    r.setTextContent(status, vm.statusText.val)
 
 # ---------------------------------------------------------------------------
 # Main panel renderer (MockRenderer — for headless unit tests)
@@ -92,42 +90,30 @@ proc renderDebugControlsPanel*(r: MockRenderer; vm: DebugControlsVM): MockNode =
   ##
   ## Structure mirrors the web version but uses plain text labels
   ## instead of SVG images.
-  let panel = r.createElement("div")
-  r.setAttribute(panel, "class", "debug-controls")
-
-  # Step Backward
+  let panel = ui(r):
+    tdiv(class = "debug-controls"):
+      discard
+  # Attach child buttons to the panel via helper calls. The helpers
+  # handle reactive disabled state which the DSL cannot express.
   renderControlButton(r, panel, "step-backward", "\u25C0",
     proc(): bool = vm.canStepBackward.val,
     proc() = vm.stepBackward())
-
-  # Step Forward
   renderControlButton(r, panel, "step-forward", "\u25B6",
     proc(): bool = vm.canStepForward.val,
     proc() = vm.stepForward())
-
-  # Step In
   renderControlButton(r, panel, "step-in", "\u2193",
     proc(): bool = vm.canStepForward.val,
     proc() = vm.stepIn())
-
-  # Step Out
   renderControlButton(r, panel, "step-out", "\u2191",
     proc(): bool = vm.canStepForward.val,
     proc() = vm.stepOut())
-
-  # Continue
   renderControlButton(r, panel, "continue-btn", "\u23E9",
     proc(): bool = vm.canContinue.val,
     proc() = vm.continueExecution())
-
-  # Reverse Continue
   renderControlButton(r, panel, "reverse-continue", "\u23EA",
     proc(): bool = vm.canContinue.val,
     proc() = vm.reverseContinue())
-
-  # Status text
   renderStatusText(r, panel, vm)
-
   panel
 
 # ---------------------------------------------------------------------------
@@ -149,8 +135,9 @@ when defined(js):
   # Helper: create a separator bar (matches Karax `separateBar()`)
   # -----------------------------------------------------------------------
   proc addSeparator(r: WebRenderer; parent: isonim_dom.Element) =
-    let sep = r.createElement("div")
-    r.setAttribute(sep, "class", "separate-bar")
+    let sep = ui(r):
+      tdiv(class = "separate-bar"):
+        discard
     r.appendChild(parent, sep)
 
   # -----------------------------------------------------------------------
@@ -169,34 +156,25 @@ when defined(js):
     ##     <img src="{imgSrc}" class="debug-button-svg" />
     ##     <div class="custom-tooltip">{tooltipText} ({shortcut})</div>
     ##   </button>
-    let btn = r.createElement("button")
-    r.setAttribute(btn, "id", actionId & "-debug")
-    r.setAttribute(btn, "class", "ct-button-image-md-secondary ct-button-no-border")
-    r.appendChild(parent, btn)
-
-    # SVG icon image
-    let img = r.createElement("img")
-    r.setAttribute(img, "src", imgSrc)
-    r.setAttribute(img, "height", imgHeight)
-    r.setAttribute(img, "width", imgWidth)
-    r.setAttribute(img, "class", "debug-button-svg")
-    r.appendChild(btn, img)
-
-    # Tooltip
-    let tooltip = r.createElement("div")
-    r.setAttribute(tooltip, "class", "custom-tooltip")
     let tipText = if shortcut.len > 0: tooltipText & " (" & shortcut & ")"
                   else: tooltipText
-    r.setTextContent(tooltip, tipText)
-    r.appendChild(btn, tooltip)
-
-    # Click handler — delegate to the legacy DAP step path.
     let action = cstring(actionId)
-    r.addEventListener(btn, "click", proc() =
+    let clickHandler = proc() =
       if not vm.onDapStep.isNil:
-        vm.onDapStep(action))
+        vm.onDapStep(action)
 
-    # Reactive disabled state
+    let btn = ui(r):
+      button(id = actionId & "-debug",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = clickHandler):
+        img(src = imgSrc, height = imgHeight, width = imgWidth,
+            class = "debug-button-svg")
+        tdiv(class = "custom-tooltip"):
+          text tipText
+    r.appendChild(parent, btn)
+
+    # Reactive disabled toggle — uses removeAttribute which the DSL
+    # does not support, so this effect stays imperative.
     createRenderEffect proc() =
       if enabled():
         r.removeAttribute(btn, "disabled")
@@ -213,29 +191,22 @@ when defined(js):
                        tooltipText: string;
                        disabled: bool = false) =
     ## Render a non-step debug button (run-to-entry, reset-operation, etc.).
-    let btn = r.createElement("button")
-    r.setAttribute(btn, "id", actionId & "-debug")
-    r.setAttribute(btn, "class", "ct-button-image-md-secondary ct-button-no-border")
+    let action = actionId
+    let clickHandler = proc() =
+      if not disabled and not vm.onAction.isNil:
+        vm.onAction(action)
+
+    let btn = ui(r):
+      button(id = actionId & "-debug",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = clickHandler):
+        img(src = imgSrc, height = imgHeight, width = imgWidth,
+            class = "debug-button-svg")
+        tdiv(class = "custom-tooltip"):
+          text tooltipText
     if disabled:
       r.setAttribute(btn, "disabled", "true")
     r.appendChild(parent, btn)
-
-    let img = r.createElement("img")
-    r.setAttribute(img, "src", imgSrc)
-    r.setAttribute(img, "height", imgHeight)
-    r.setAttribute(img, "width", imgWidth)
-    r.setAttribute(img, "class", "debug-button-svg")
-    r.appendChild(btn, img)
-
-    let tooltip = r.createElement("div")
-    r.setAttribute(tooltip, "class", "custom-tooltip")
-    r.setTextContent(tooltip, tooltipText)
-    r.appendChild(btn, tooltip)
-
-    let action = actionId
-    r.addEventListener(btn, "click", proc() =
-      if not disabled and not vm.onAction.isNil:
-        vm.onAction(action))
 
   # -----------------------------------------------------------------------
   # Main panel renderer (WebRenderer)
@@ -253,8 +224,9 @@ when defined(js):
     ##
     ## All IDs follow the `{action}-debug` pattern expected by
     ## Playwright page objects (e.g. `#next-debug`, `#continue-debug`).
-    let panel = r.createElement("div")
-    r.setAttribute(panel, "class", "ct-header isonim-debug-controls")
+    let panel = ui(r):
+      tdiv(class = "ct-header isonim-debug-controls"):
+        discard
 
     let alwaysEnabled = proc(): bool = true
     let canStep = proc(): bool = vm.canStepForward.val
