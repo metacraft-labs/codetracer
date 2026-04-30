@@ -15,6 +15,7 @@ from ../viewmodel/store/types as vm_types import nil
 from ../viewmodel/store/replay_data_store import
   ReplayDataStore, createReplayDataStore, updateCalltraceSection,
   updateDebuggerPosition, makeCallLine, requestCalltraceSection
+from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
   scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns,
@@ -991,6 +992,10 @@ proc initCalltraceVMWithStore*(store: ReplayDataStore) =
     # remount the view with the new, real-backend VM instance.
     isoNimCalltraceMounted = false
   calltraceVMStore = store
+  # Clear any pending calltrace request in the shared store's tracker
+  # so the new VM's auto-load effect isn't deduplicated against a
+  # request that was sent through the old stub backend.
+  store.requestTracker.markComplete("load-calltrace")
   calltraceVMInstance = createCalltraceVM(store)
   {.emit: "console.error('[PIPELINE] initCalltraceVMWithStore: storeId=' + `store`.storeId);".}
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"
@@ -1072,12 +1077,32 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
 proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
+  ##
+  ## Also issues an explicit requestCalltraceSection call as a fallback
+  ## in case the CalltraceVM's auto-load effect doesn't re-fire (can
+  ## happen in web mode when the effect was created during VM replacement
+  ## and the reactive subscription tracking is incomplete).
   if calltraceVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
   let diagStoreId = calltraceVMStore.storeId
   calltraceVMStore.updateDebuggerPosition(ticks, $path, line)
   cerror fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
+
+  # Explicit fallback request: clear the request tracker so the next
+  # call is not deduplicated, then request the calltrace section with
+  # the updated position.  This ensures data loads even when the
+  # reactive auto-load effect fails to re-fire.
+  calltraceVMStore.requestTracker.markComplete("load-calltrace")
+  # Use sensible defaults matching the auto-load effect:
+  # effectiveHeight=50 (default when vpHeight=0), buffer=20*2=40,
+  # depth=DEFAULT_VIEWPORT_DEPTH=20.
+  calltraceVMStore.requestCalltraceSection(
+    0'i64, 90, 20,
+    rrTicks = ticks,
+    file = $path,
+    line = line,
+  )
 
 method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
   self.totalCallsCount = results.totalCallsCount

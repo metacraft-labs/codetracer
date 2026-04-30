@@ -1236,12 +1236,14 @@ proc onTraceLoaded(
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
 
-  # create Command objects from main menuNode
-  data.ui.commandPalette.interpreter.commands = getCommands(data.ui.menuNode)
-
-  # prepare command for fast search with fuzzysort
-  for key, command in data.ui.commandPalette.interpreter.commands:
-    data.ui.commandPalette.interpreter.commandsPrepared.add(fuzzysort.prepare(key))
+  # create Command objects from main menuNode — guard against nil
+  # commandPalette which can happen in web mode when createUIComponents
+  # fails due to a layout config serialization issue.
+  if not data.ui.commandPalette.isNil and not data.ui.commandPalette.interpreter.isNil:
+    data.ui.commandPalette.interpreter.commands = getCommands(data.ui.menuNode)
+    # prepare command for fast search with fuzzysort
+    for key, command in data.ui.commandPalette.interpreter.commands:
+      data.ui.commandPalette.interpreter.commandsPrepared.add(fuzzysort.prepare(key))
 
   duration("traceLoaded")
 
