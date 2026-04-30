@@ -1,7 +1,7 @@
 // Headless counterpart: src/frontend/viewmodel/tests/scenarios/welcome_screen.nim
 import type { Page } from "@playwright/test";
 import * as path from "node:path";
-import { test, expect, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
+import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

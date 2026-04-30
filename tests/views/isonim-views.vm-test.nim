@@ -14,30 +14,30 @@
 import std/[unittest, asyncdispatch, strutils, tables, options, sets]
 import isonim/core/[signals, owner]
 import isonim/testing/mock_dom
-import backend/backend_service
-import backend/mock_backend
-import store/types
-import store/replay_data_store
-import viewmodels/state_vm
-import viewmodels/calltrace_vm
-import viewmodels/debug_controls_vm
-import viewmodels/event_log_vm
-import viewmodels/flow_vm
-import viewmodels/timeline_vm
-import viewmodels/search_vm
-import viewmodels/point_list_vm
-import viewmodels/scratchpad_vm
-import viewmodels/shell_vm
-import views/isonim_state_view
-import views/isonim_calltrace_view
-import views/isonim_debug_controls_view
-import views/isonim_event_log_view
-import views/isonim_flow_view
-import views/isonim_timeline_view
-import views/isonim_search_view
-import views/isonim_point_list_view
-import views/isonim_scratchpad_view
-import views/isonim_shell_view
+import ../backend/backend_service
+import ../backend/mock_backend
+import ../store/types
+import ../store/replay_data_store
+import ../viewmodels/state_vm
+import ../viewmodels/calltrace_vm
+import ../viewmodels/debug_controls_vm
+import ../viewmodels/event_log_vm
+import ../viewmodels/flow_vm
+import ../viewmodels/timeline_vm
+import ../viewmodels/search_vm
+import ../viewmodels/point_list_vm
+import ../viewmodels/scratchpad_vm
+import ../viewmodels/shell_vm
+import ../views/isonim_state_view
+import ../views/isonim_calltrace_view
+import ../views/isonim_debug_controls_view
+import ../views/isonim_event_log_view
+import ../views/isonim_flow_view
+import ../views/isonim_timeline_view
+import ../views/isonim_search_view
+import ../views/isonim_point_list_view
+import ../views/isonim_scratchpad_view
+import ../views/isonim_shell_view
 
 # ---------------------------------------------------------------------------
 # Test helpers

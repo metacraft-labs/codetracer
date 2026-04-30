@@ -1,7 +1,7 @@
-import { test } from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
-import * as helpers from "../../tsc-ui-tests/lib/language-smoke-test-helpers";
+import { test } from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
+import { retry } from "../../lib/retry-helpers";
+import * as helpers from "../../lib/language-smoke-test-helpers";
 
 /**
  * Smoke tests for the Nim Sudoku Solver (nim_sudoku_solver).

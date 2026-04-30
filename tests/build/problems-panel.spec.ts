@@ -7,10 +7,10 @@
  * - Clicking a filter button changes the visible problems
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
-import { ProblemsPane } from "../../tsc-ui-tests/page-objects/panes/build/problems-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../tsc-ui-tests/lib/layout-reset";
+import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
+import { retry } from "../../lib/retry-helpers";
+import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
+import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 test.describe("Problems Panel", () => {
   test.setTimeout(120_000);

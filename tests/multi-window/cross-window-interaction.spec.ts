@@ -28,7 +28,7 @@ import {
 } from "@playwright/test";
 import { _electron } from "playwright";
 
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { retry } from "../../lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Path constants (duplicated from fixtures.ts -- these are not exported)

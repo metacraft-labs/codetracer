@@ -28,7 +28,7 @@
  *   - Optionally: ``CODETRACER_AGENTIC_E2E=1`` to enable live IPC tests.
  */
 
-import { test, expect, wait } from "../../tsc-ui-tests/lib/fixtures";
+import { test, expect, wait } from "../../lib/fixtures";
 import type { Page } from "@playwright/test";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -37,13 +37,13 @@ import {
   AgentWorkspacePage,
   CaptionBarProgressPage,
   ActivityDeepReviewPage,
-} from "./agentic-coding-page-objects/agentic-page";
+} from "./page-objects/agentic-page";
 
 // ---------------------------------------------------------------------------
 // Fixture loading
 // ---------------------------------------------------------------------------
 
-const fixturesDir = path.join(__dirname, "agentic-coding-fixtures");
+const fixturesDir = path.join(__dirname, "fixtures");
 const agentSessionPath = path.join(fixturesDir, "agent-session.json");
 
 const fixtureExists = fs.existsSync(agentSessionPath);
@@ -352,7 +352,7 @@ test.describe("test_acp_deepreview_extension", () => {
 
     // Launch in edit mode (the simplest mode that includes the agent
     // workspace components when the feature is compiled in).
-    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "agentic-coding-fixtures") });
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
     test("CoverageUpdate notification updates the activity pane", async ({ ctPage }) => {
       const fixture = loadFixture();
@@ -500,7 +500,7 @@ test.describe("test_workspace_view_switching", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "agentic-coding-fixtures") });
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
     test("clicking caption bar toggles workspace view", async ({ ctPage }) => {
       const fixture = loadFixture();
@@ -729,7 +729,7 @@ test.describe("test_caption_bar_progress", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "agentic-coding-fixtures") });
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
     test("progress bar width matches milestone completion", async ({ ctPage }) => {
       const fixture = loadFixture();
@@ -1000,7 +1000,7 @@ test.describe("test_activity_pane_deepreview", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "agentic-coding-fixtures") });
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
     test("summary cards display correct coverage, test, and function counts", async ({ ctPage }) => {
       const fixture = loadFixture();
@@ -1369,7 +1369,7 @@ test.describe("test_realtime_collection", () => {
       "Set CODETRACER_AGENTIC_E2E=1 to enable live IPC tests",
     );
 
-    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "agentic-coding-fixtures") });
+    test.use({ launchMode: "edit", editFolderPath: path.join(__dirname, "fixtures") });
 
     test("incremental notifications update UI in real-time", async ({ ctPage }) => {
       const fixture = loadFixture();

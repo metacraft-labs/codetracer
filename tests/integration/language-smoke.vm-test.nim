@@ -37,8 +37,8 @@
 ##   nim c -r src/frontend/viewmodel/tests/test_language_smoke.nim
 
 import std/[json, os, unittest, strutils, osproc, sequtils]
-import headless_session
-import store/types
+import ../headless_session
+import ../store/types
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -54,10 +54,10 @@ import {
   testProgramsPath,
   codetracerInstallDir,
   codetracerPath,
-} from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
-import { StatusBar } from "../../tsc-ui-tests/page-objects/status_bar";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+} from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
+import { StatusBar } from "../../page-objects/status_bar";
+import { retry } from "../../lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Path constants

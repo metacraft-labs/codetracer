@@ -4,8 +4,8 @@
  *   2. Bottom labels are IN the status bar footer (not a separate strip)
  *   3. GL container shrinks when strips have tabs
  */
-import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+import { test, expect } from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
 
 const DIR = "/tmp/strip-layout-verify";
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));

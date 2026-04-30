@@ -26,11 +26,11 @@
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
 
-import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../tsc-ui-tests/lib/fixtures";
-import { StatusBar } from "../../tsc-ui-tests/page-objects/status_bar";
-import { StatePanel } from "../../tsc-ui-tests/page-objects/state";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
+import { StatusBar } from "../../page-objects/status_bar";
+import { StatePanel } from "../../page-objects/state";
+import { LayoutPage } from "../../page-objects/layout-page";
+import { retry } from "../../lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards

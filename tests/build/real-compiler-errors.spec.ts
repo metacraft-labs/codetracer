@@ -17,11 +17,11 @@
  *   on specific toolchains being installed on the test machine.
  */
 
-import { test, expect, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
-import { BuildPane } from "../../tsc-ui-tests/page-objects/panes/build/build-pane";
-import { ProblemsPane } from "../../tsc-ui-tests/page-objects/panes/build/problems-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../tsc-ui-tests/lib/layout-reset";
+import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { retry } from "../../lib/retry-helpers";
+import { BuildPane } from "../../page-objects/panes/build/build-pane";
+import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
+import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 // ---------------------------------------------------------------------------
 // Realistic compiler output fixtures

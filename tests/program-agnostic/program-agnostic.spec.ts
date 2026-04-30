@@ -10,10 +10,10 @@
  * Each skip comment describes the specific failure.
  */
 
-import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
-import { CommandPalette } from "../../tsc-ui-tests/page-objects/command-palette/command-palette";
+import { test, expect } from "../../lib/fixtures";
+import { retry } from "../../lib/retry-helpers";
+import { LayoutPage } from "../../page-objects/layout-page";
+import { CommandPalette } from "../../page-objects/command-palette/command-palette";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

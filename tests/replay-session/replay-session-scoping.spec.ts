@@ -14,9 +14,9 @@
  *   4. After stepping, the debugger service holds a valid location.
  */
 
-import { test, expect } from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
+import { test, expect } from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
+import { retry } from "../../lib/retry-helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers

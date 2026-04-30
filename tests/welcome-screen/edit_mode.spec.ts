@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { test, expect, testProgramsPath } from "../../tsc-ui-tests/lib/fixtures";
+import { test, expect, testProgramsPath } from "../../lib/fixtures";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -10,8 +10,8 @@
  * but launched in web mode instead of Electron.
  */
 
-import { test } from "../../tsc-ui-tests/lib/fixtures";
-import * as helpers from "../../tsc-ui-tests/lib/language-smoke-test-helpers";
+import { test } from "../lib/fixtures";
+import * as helpers from "../lib/language-smoke-test-helpers";
 
 test.describe("browser-mcr-replay — browser web mode for C trace", () => {
   test.use({

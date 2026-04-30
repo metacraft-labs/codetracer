@@ -1,5 +1,5 @@
-import { test } from "../../tsc-ui-tests/lib/fixtures";
-import * as helpers from "../../tsc-ui-tests/lib/language-smoke-test-helpers";
+import { test } from "../../lib/fixtures";
+import * as helpers from "../../lib/language-smoke-test-helpers";
 
 /**
  * Smoke tests for the Rust Sudoku Solver (rs_sudoku_solver).

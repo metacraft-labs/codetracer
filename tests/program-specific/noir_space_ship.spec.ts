@@ -1,6 +1,6 @@
-import { test, readyOnEntryTest as readyOnEntry } from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout_page";
-import { extractLayoutPageModel } from "../../tsc-ui-tests/page-objects/layout_extractors";
+import { test, readyOnEntryTest as readyOnEntry } from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout_page";
+import { extractLayoutPageModel } from "../../page-objects/layout_extractors";
 
 // Use the noir example just like the other tests.
 test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });

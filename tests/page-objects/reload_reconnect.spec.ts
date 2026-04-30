@@ -1,8 +1,8 @@
 import {
   test,
   expect,
-} from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+} from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
 
 // Record/replay a known program before the suite.
 // Use browser mode (ct host + chromium) since this test exercises browser reload.

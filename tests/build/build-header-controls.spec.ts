@@ -6,10 +6,10 @@
  * - Stop, clear, and auto-scroll toggle buttons are visible
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
-import { BuildPane } from "../../tsc-ui-tests/page-objects/panes/build/build-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../tsc-ui-tests/lib/layout-reset";
+import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
+import { retry } from "../../lib/retry-helpers";
+import { BuildPane } from "../../page-objects/panes/build/build-pane";
+import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 test.describe("Build Header Controls", () => {
   test.setTimeout(120_000);

@@ -6,9 +6,9 @@
  * - The empty state is shown when no search has been performed
  */
 
-import { test, expect, wait, codetracerInstallDir } from "../../tsc-ui-tests/lib/fixtures";
-import { retry } from "../../tsc-ui-tests/lib/retry-helpers";
-import { ensureDefaultLayout, restoreUserLayout } from "../../tsc-ui-tests/lib/layout-reset";
+import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
+import { retry } from "../../lib/retry-helpers";
+import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 test.describe("Search Results Panel", () => {
   test.setTimeout(120_000);

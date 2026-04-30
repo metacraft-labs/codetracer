@@ -21,7 +21,7 @@ import * as process from "node:process";
 
 import { test as base, expect, chromium } from "@playwright/test";
 
-import { getFreeTcpPort } from "../../tsc-ui-tests/lib/port-allocator";
+import { getFreeTcpPort } from "../lib/port-allocator";
 
 // ---------------------------------------------------------------------------
 // Path constants

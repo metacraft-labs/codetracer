@@ -21,12 +21,12 @@ import {
   expect,
   wait,
   codetracerInstallDir,
-} from "../../tsc-ui-tests/lib/fixtures";
-import { LayoutPage } from "../../tsc-ui-tests/page-objects/layout-page";
+} from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
 import {
   ensureDefaultLayout,
   restoreUserLayout,
-} from "../../tsc-ui-tests/lib/layout-reset";
+} from "../../lib/layout-reset";
 
 const DIR = "/tmp/visual-review";
 
