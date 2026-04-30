@@ -1578,15 +1578,10 @@ proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
   ## Called by the backend when async thread groupings are discovered.
   self.asyncThreads = threads
 
-method render*(self: CalltraceComponent): VNode =
-  # IsoNim is the primary renderer. Return a minimal empty container
-  # with the correct class so that GoldenLayout's container exists and
-  # the IsoNim tryMountIsoNimCalltrace() can find and populate it.
-  # All rendering is handled by the IsoNim reactive view; Karax
-  # produces no DOM content for this panel.
-  result = buildHtml(
-    tdiv(id = cstring(fmt"calltraceComponent-{self.id}"),
-      class = componentContainerClass("calltrace-view")))
+# CalltraceComponent.render() removed: IsoNim is the primary renderer.
+# The base Component.render() returns a valid empty VNode for any
+# generic callers (auto-hide, vnodeToDom bridge). All real rendering
+# is handled by tryMountIsoNimCalltrace().
 
 proc renderRemoveButtonView(self: CallExpandedValuesComponent, key: cstring): VNode =
   buildHtml(

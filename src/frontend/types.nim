@@ -2244,7 +2244,13 @@ method dispose*(self: Component) {.base.} =
   discard
 
 method render*(self: Component): VNode {.base.} =
-  discard
+  # Default no-op render returns a valid empty div VNode. Components
+  # that have migrated to IsoNim no longer override this method -- their
+  # rendering is handled entirely by the IsoNim reactive view system.
+  # Returning a valid VNode (rather than nil) prevents crashes when
+  # layout infrastructure calls render() generically (e.g. auto-hide
+  # panel show, vnodeToDom bridge).
+  result = newVNode(VNodeKind.tdiv)
 
 method onUp*(self: Component) {.base, async.} =
   discard

@@ -228,13 +228,10 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
     self.redraw()
   )
 
-method render*(self: FlowComponent): VNode =
-  # IsoNim is the primary renderer. Return a minimal empty container
-  # so that GoldenLayout's container exists and the IsoNim
-  # tryMountIsoNimFlowPanel() can find and populate it.
-  # All rendering is handled by the IsoNim reactive view; Karax
-  # produces no DOM content for this panel.
-  result = buildHtml(tdiv(class="flow-component-container"))
+# FlowComponent.render() removed: IsoNim is the primary renderer.
+# The base Component.render() returns a valid empty VNode for any
+# generic callers (auto-hide, vnodeToDom bridge). All real rendering
+# is handled by tryMountIsoNimFlowPanel().
 
 
 proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =

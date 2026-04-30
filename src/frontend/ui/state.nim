@@ -273,15 +273,10 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
 proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
 
-method render*(self: StateComponent): VNode =
-  # IsoNim is the primary renderer. Return a minimal empty container
-  # with the correct ID so that GoldenLayout's container exists and
-  # the IsoNim tryMountIsoNimStatePanel() can find and populate it.
-  # All rendering is handled by the IsoNim reactive view; Karax
-  # produces no DOM content for this panel.
-  result = buildHtml(
-    tdiv(id = cstring(fmt"stateComponent-{self.id}"),
-      class = componentContainerClass("active-state") & cstring" " & cstring"state-component"))
+# StateComponent.render() removed: IsoNim is the primary renderer.
+# The base Component.render() returns a valid empty VNode for any
+# generic callers (auto-hide, vnodeToDom bridge). All real rendering
+# is handled by tryMountIsoNimStatePanel().
 
 # Show the current active debugger line on top of the search bar in the state component
 proc excerpt(self: StateComponent): VNode =

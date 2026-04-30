@@ -1387,14 +1387,10 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
   # if self.denseTable.scrollAreaHeight == 0:
   resizeEventLogHandler(self)
 
-method render*(self: EventLogComponent): VNode =
-  # IsoNim is the primary renderer. Return a minimal empty container
-  # with the correct class so that GoldenLayout's container exists and
-  # the IsoNim tryMountIsoNimEventLogPanel() can find and populate it.
-  # All rendering is handled by the IsoNim reactive view; Karax
-  # produces no DOM content for this panel.
-  result = buildHtml(
-    tdiv(class = componentContainerClass("eventLog")))
+# EventLogComponent.render() removed: IsoNim is the primary renderer.
+# The base Component.render() returns a valid empty VNode for any
+# generic callers (auto-hide, vnodeToDom bridge). All real rendering
+# is handled by tryMountIsoNimEventLogPanel().
 
 proc scrollOnMove*(self: EventLogComponent, rowSelected: int) =
   if rowSelected > self.denseTable.endRow - 1 or rowSelected < self.denseTable.startRow:
