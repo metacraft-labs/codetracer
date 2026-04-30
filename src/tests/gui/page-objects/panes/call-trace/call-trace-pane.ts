@@ -28,20 +28,37 @@ export class CallTracePane {
   }
 
   /**
-   * Click the tab button with a fallback for viewport issues.
-   * On some display configurations (Wayland under Xvfb), elements may be
-   * reported as "outside of the viewport". dispatchEvent bypasses this.
+   * Click the tab button with a layered fallback for viewport issues.
+   *
+   * On Xvfb (and on some Windows display configurations) the GoldenLayout
+   * tab strip can be reported as "outside of the viewport" even when
+   * the tab is structurally present and the parent window is sized.
+   * Empirically:
+   *   1. A normal `.click()` is attempted first — fastest, dispatches
+   *      a real OS-level pointer event.
+   *   2. If that fails we retry with `force: true`, which skips
+   *      actionability checks but Playwright still rejects when the
+   *      element is reported outside the viewport on Xvfb.
+   *   3. Final fallback is `dispatchEvent('click')` which sidesteps
+   *      Playwright's viewport handling entirely. GoldenLayout's tab
+   *      handler listens for ordinary click events on the title span,
+   *      so this still triggers the tab activation reliably.
    */
   async clickTab(): Promise<void> {
     const btn = this.tabButton();
     try {
       await btn.click({ timeout: 5_000 });
+      return;
     } catch {
-      // force: true bypasses actionability checks (viewport, visibility)
-      // while still dispatching a real click event that GoldenLayout can
-      // intercept, unlike dispatchEvent which may not bubble correctly.
-      await btn.click({ force: true, timeout: 5_000 });
+      // fall through to force: true
     }
+    try {
+      await btn.click({ force: true, timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to dispatchEvent
+    }
+    await btn.dispatchEvent("click");
   }
 
   linesContainer(): Locator {

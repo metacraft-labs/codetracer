@@ -23,6 +23,28 @@ export class VariableStatePane {
     return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
   }
 
+  /**
+   * Click the tab button with a layered fallback for viewport issues.
+   * Mirrors CallTracePane.clickTab — see the rationale comment there.
+   * Layered: normal click → click with force:true → dispatchEvent.
+   */
+  async clickTab(): Promise<void> {
+    const btn = this.tabButton();
+    try {
+      await btn.click({ timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to force: true
+    }
+    try {
+      await btn.click({ force: true, timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to dispatchEvent
+    }
+    await btn.dispatchEvent("click");
+  }
+
   watchExpressionTextBox(): Locator {
     return this.root.locator("#watch");
   }
