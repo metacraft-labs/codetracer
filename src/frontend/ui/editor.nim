@@ -118,6 +118,7 @@ proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehavio
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
 proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
 proc editorAfterRedraw(self: EditorViewComponent)
+proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
@@ -1948,23 +1949,28 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     if expandedInstance.isExpanded:
       expandedInstance.renderer.redraw()
 
-proc tryMountIsoNimEditorPanel(self: EditorViewComponent) =
-  ## Take over an editor's container from Karax, making IsoNim the
-  ## primary renderer.
+proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
+  ## Mount the IsoNim editor view as the primary renderer, following
+  ## the calltrace panel pattern. Karax renders the initial container
+  ## div, Monaco initializes on it, then IsoNim takes ownership by
+  ## removing the Karax instance from the rendering loop.
   ##
-  ## This must be called AFTER Karax has rendered the container and
-  ## Monaco has been initialised (i.e. `tabInfo.monacoEditor` is not nil).
-  ## We remove the kxiMap entry so `redrawAll()` no longer triggers
-  ## Karax VDOM diffing for this component (which would corrupt the
-  ## Monaco-managed DOM).
+  ## Called from `editorView()`'s afterRedraws callback after Monaco
+  ## has been initialised. The proc is exported so `layout.nim` can
+  ## also schedule a delayed mount as a safety net.
   ##
-  ## The per-redraw work (flow, styles, test actions) is triggered from
-  ## `onCompleteMove` directly via `editorAfterRedraw`.
+  ## What this does:
+  ## - Removes the kxiMap entry so `redrawAll()` no longer triggers
+  ##   Karax VDOM diffing for this component (protecting Monaco's DOM).
+  ## - Marks the editor as IsoNim-mounted so `render()` returns a stub.
   ##
   ## Safe to call multiple times per editor — mounts only once per id.
   let editorId = self.id
   if isoNimEditorMountedIds.hasKey(editorId):
     return
+
+  # Ensure the EditorVM is available before taking ownership.
+  initEditorVM()
   if editorVMInstance.isNil:
     return
 
@@ -1977,8 +1983,6 @@ proc tryMountIsoNimEditorPanel(self: EditorViewComponent) =
   if tabInfo.monacoEditor.isNil:
     return
 
-  let containerId = cstring(&"editorComponent-{editorId}")
-
   # Remove the Karax instance so redrawAll() skips this component.
   # Editor tabs use the file path (self.name) as the kxiMap key.
   # This prevents Karax VDOM diffing from corrupting the IsoNim/Monaco
@@ -1988,7 +1992,7 @@ proc tryMountIsoNimEditorPanel(self: EditorViewComponent) =
 
   isoNimEditorMountedIds[editorId] = true
 
-  clog "IsoNim editor: mounted as primary renderer in #" & containerId
+  clog "IsoNim editor: mounted as primary renderer for editorComponent-" & cstring($editorId)
 
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
