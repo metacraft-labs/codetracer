@@ -17,21 +17,13 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_backend.nim
 
-import std/[json, unittest, asyncdispatch]
+import std/json
+import std/unittest
+import vm_test_helpers
 import isonim/core/[signals, owner]
 import isonim/viewmodel
 import backend/backend_service
 import backend/mock_backend
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-proc waitFor[T](f: Future[T]): T =
-  ## Synchronously drain the async event loop until f completes.
-  while not f.finished:
-    poll(0)
-  return f.read
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -44,7 +36,7 @@ suite "BackendService interface":
     mock.expect("ct/step", %*{"direction": "forward"})
     let svc = mock.toBackendService()
 
-    let resp = waitFor svc.send("ct/step", %*{"direction": "forward"})
+    let resp = waitForTest svc.send("ct/step", %*{"direction": "forward"})
     check resp == %*{"direction": "forward"}
 
   test "onEvent delegates to onEventProc":
@@ -71,7 +63,7 @@ suite "MockBackendService":
     mock.expect("ct/load-locals", %*{"locals": [1, 2, 3]})
     let svc = mock.toBackendService()
 
-    let resp = waitFor svc.send("ct/load-locals", %*{})
+    let resp = waitForTest svc.send("ct/load-locals", %*{})
     check resp == %*{"locals": [1, 2, 3]}
 
   test "consumes expectations in FIFO order":
@@ -80,8 +72,8 @@ suite "MockBackendService":
     mock.expect("ct/step", %*{"seq": 2})
     let svc = mock.toBackendService()
 
-    let r1 = waitFor svc.send("ct/step", %*{})
-    let r2 = waitFor svc.send("ct/step", %*{})
+    let r1 = waitForTest svc.send("ct/step", %*{})
+    let r2 = waitForTest svc.send("ct/step", %*{})
     check r1 == %*{"seq": 1}
     check r2 == %*{"seq": 2}
 
@@ -89,8 +81,8 @@ suite "MockBackendService":
     let mock = newMockBackendService(autoRespond = true)
     let svc = mock.toBackendService()
 
-    discard waitFor svc.send("ct/step", %*{"a": 1})
-    discard waitFor svc.send("ct/load-locals", %*{"b": 2})
+    discard waitForTest svc.send("ct/step", %*{"a": 1})
+    discard waitForTest svc.send("ct/load-locals", %*{"b": 2})
 
     check mock.receivedCommands.len == 2
     check mock.receivedCommands[0].command == "ct/step"
@@ -102,22 +94,25 @@ suite "MockBackendService":
     let mock = newMockBackendService(strict = true)
     let svc = mock.toBackendService()
 
-    let fut = svc.send("ct/unknown", %*{})
+    # On JS, the mock raises AssertionDefect synchronously from send().
+    # On native, it returns a failed future that raises on read.
+    # Either way, the exception should be AssertionDefect.
     expect(AssertionDefect):
-      discard waitFor fut
+      let fut = svc.send("ct/unknown", %*{})
+      discard waitForTest fut
 
   test "autoRespond returns empty object for unmatched commands":
     let mock = newMockBackendService(autoRespond = true)
     let svc = mock.toBackendService()
 
-    let resp = waitFor svc.send("ct/anything", %*{})
+    let resp = waitForTest svc.send("ct/anything", %*{})
     check resp == %*{}
 
   test "returns null for unmatched non-strict non-autoRespond":
     let mock = newMockBackendService()
     let svc = mock.toBackendService()
 
-    let resp = waitFor svc.send("ct/anything", %*{})
+    let resp = waitForTest svc.send("ct/anything", %*{})
     check resp.kind == JNull
 
   test "emitEvent reaches multiple handlers":
@@ -147,10 +142,7 @@ suite "IsoNim integration":
       let lastResponse = createSignal[JsonNode](newJNull())
 
       let fut = svc.send("ct/load-locals", %*{})
-      # In the native backend the future is already complete.
-      while not fut.finished:
-        poll(0)
-      lastResponse.val = fut.read
+      lastResponse.val = waitForTest fut
 
       check lastResponse.val == %*{"x": 42}
       dispose()
@@ -175,9 +167,7 @@ suite "IsoNim integration":
       )
 
     let fut = vm.svc.send("ct/step", %*{})
-    while not fut.finished:
-      poll(0)
-    vm.lastResponse.val = fut.read
+    vm.lastResponse.val = waitForTest fut
 
     check vm.lastResponse.val == %*{"ok": true}
     vm.dispose()

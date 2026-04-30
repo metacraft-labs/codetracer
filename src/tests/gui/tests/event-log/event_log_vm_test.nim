@@ -17,7 +17,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_event_log_vm.nim
 
-import std/[json, unittest, asyncdispatch, options]
+import std/[json, unittest, options]
+import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
@@ -30,14 +31,6 @@ import viewmodels/event_log_vm
 # Helpers
 # ---------------------------------------------------------------------------
 
-proc drain() =
-  ## Drain the async event loop so that all synchronously-completed
-  ## futures fire their callbacks.
-  try:
-    poll(0)
-  except ValueError:
-    # "No handles or timers registered in dispatcher" — nothing to drain.
-    discard
 
 proc makeStoreWithMock(autoRespond: bool = true):
     tuple[store: ReplayDataStore, mock: MockBackendService] =

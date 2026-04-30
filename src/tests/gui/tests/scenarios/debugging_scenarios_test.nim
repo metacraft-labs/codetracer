@@ -29,7 +29,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_debugging_scenarios.nim
 
-import std/[json, unittest, asyncdispatch, options, sets]
+import std/[json, unittest, options, sets]
+import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
@@ -52,15 +53,6 @@ import viewmodels/[
 # Helpers
 # ---------------------------------------------------------------------------
 
-proc drain() =
-  ## Drain the async event loop so that all synchronously-completed
-  ## futures fire their callbacks.  In the native (C) backend, mock
-  ## futures complete synchronously, so a single poll(0) suffices.
-  try:
-    poll(0)
-  except ValueError:
-    # "No handles or timers registered in dispatcher" — nothing to drain.
-    discard
 
 proc makeCallLine(index: int64; name: string; depth: int = 0;
                   rrTicks: uint64 = 0; file: string = "";

@@ -11,7 +11,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_isonim_views.nim
 
-import std/[unittest, asyncdispatch, strutils, tables, options, sets]
+import std/[unittest, strutils, tables, options, sets]
+import vm_test_helpers
 import isonim/core/[signals, owner]
 import isonim/testing/mock_dom
 import backend/backend_service
@@ -43,13 +44,6 @@ import views/isonim_shell_view
 # Test helpers
 # ---------------------------------------------------------------------------
 
-proc drain() =
-  ## Drain the async event loop so that all synchronously-completed
-  ## futures fire their callbacks.
-  try:
-    poll(0)
-  except ValueError:
-    discard
 
 proc makeStoreWithMock(autoRespond: bool = true):
     tuple[store: ReplayDataStore, mock: MockBackendService] =

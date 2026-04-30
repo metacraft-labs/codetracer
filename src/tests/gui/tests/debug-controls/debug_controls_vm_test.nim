@@ -20,7 +20,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_debug_controls_vm.nim
 
-import std/[json, unittest, asyncdispatch, sets]
+import std/[json, unittest, sets]
+import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
@@ -33,14 +34,6 @@ import viewmodels/debug_controls_vm
 # Helpers
 # ---------------------------------------------------------------------------
 
-proc drain() =
-  ## Drain the async event loop so that all synchronously-completed
-  ## futures fire their callbacks.
-  try:
-    poll(0)
-  except ValueError:
-    # "No handles or timers registered in dispatcher" — nothing to drain.
-    discard
 
 const DAP_STEP_COMMANDS = ["next", "stepBack", "stepIn", "stepOut",
                             "continue", "reverseContinue"].toHashSet

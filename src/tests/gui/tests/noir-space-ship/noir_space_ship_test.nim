@@ -30,7 +30,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_noir_space_ship.nim
 
-import std/[json, os, unittest, strutils, osproc, sequtils, asyncdispatch]
+import std/[json, os, unittest, strutils, osproc, sequtils]
+import vm_test_helpers
 import isonim/core/computation
 import headless_session
 import store/types
@@ -705,10 +706,7 @@ suite "Noir Space Ship: calltrace search":
     session.session.calltraceVM.setSearchQuery("main")
 
     # Drain reactive updates.
-    try:
-      poll(0)
-    except ValueError:
-      discard
+    drain()
 
     let matches = session.session.calltraceVM.highlightedMatches.val
     echo "  Search 'main' matches: ", matches.len

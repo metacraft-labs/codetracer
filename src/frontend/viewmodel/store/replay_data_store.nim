@@ -87,7 +87,8 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
   withViewModel proc(dispose: proc()): ReplayDataStore =
     inc storeIdCounter
     let assignedId = storeIdCounter
-    {.emit: "console.error('[PIPELINE] createReplayDataStore: creating store id=' + `assignedId`);".}
+    when defined(js):
+      {.emit: "console.error('[PIPELINE] createReplayDataStore: creating store id=' + `assignedId`);".}
     let store = ReplayDataStore(
       storeId: assignedId,
       # -- top-level state --
@@ -263,7 +264,8 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   let current = store.debugger.val
   let diagOldTicks = current.rrTicks
   let diagStoreId = store.storeId
-  {.emit: "console.error('[PIPELINE] updateDebuggerPosition: storeId=' + `diagStoreId` + ' setting rrTicks=' + `rrTicks` + ' (was ' + `diagOldTicks` + ') file=' + `file` + ' line=' + `line` + ' observers=' + (`store`.debugger.observers ? `store`.debugger.observers.length : 'N/A'));".}
+  when defined(js):
+    {.emit: "console.error('[PIPELINE] updateDebuggerPosition: storeId=' + `diagStoreId` + ' setting rrTicks=' + `rrTicks` + ' (was ' + `diagOldTicks` + ') file=' + `file` + ' line=' + `line` + ' observers=' + (`store`.debugger.observers ? `store`.debugger.observers.length : 'N/A'));".}
   # Construct a NEW object — on JS backend, var = signal.val gets a
   # reference, so mutating and writing back the same object doesn't
   # trigger the signal's equality check (it compares to itself).
@@ -280,7 +282,8 @@ proc updateLocals*(store: ReplayDataStore;
   ## Used by legacy UI code to mirror locals responses into the
   ## ViewModel layer.
   let diagCount = variables.len
-  {.emit: "console.error('[PIPELINE] updateLocals: setting ' + `diagCount` + ' variables');".}
+  when defined(js):
+    {.emit: "console.error('[PIPELINE] updateLocals: setting ' + `diagCount` + ' variables');".}
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
 
@@ -307,7 +310,8 @@ proc updateCalltraceSection*(store: ReplayDataStore;
   let diagOldCount = store.calltrace.lines.val.len
   let diagNewCount = lines.len
   let diagStoreId = store.storeId
-  {.emit: "console.error('[PIPELINE] updateCalltraceSection: storeId=' + `diagStoreId` + ' setting ' + `diagNewCount` + ' lines (was ' + `diagOldCount` + '), startIndex=' + `startIndex` + ' totalCount=' + `totalCount`);".}
+  when defined(js):
+    {.emit: "console.error('[PIPELINE] updateCalltraceSection: storeId=' + `diagStoreId` + ' setting ' + `diagNewCount` + ' lines (was ' + `diagOldCount` + '), startIndex=' + `startIndex` + ' totalCount=' + `totalCount`);".}
   store.calltrace.lines.val = lines
   store.calltrace.startLineIndex.val = startIndex
   store.calltrace.totalCallsCount.val = totalCount

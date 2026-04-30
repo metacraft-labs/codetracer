@@ -15,7 +15,8 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_store.nim
 
-import std/[json, unittest, asyncdispatch]
+import std/[json, unittest]
+import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
@@ -23,21 +24,6 @@ import backend/mock_backend
 import store/types
 import store/request_tracker
 import store/replay_data_store
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-proc drain() =
-  ## Drain the async event loop so that all synchronously-completed
-  ## futures fire their callbacks.  Silently ignores the case where
-  ## there is nothing pending in the dispatcher (which happens when
-  ## mock futures complete synchronously via callSoon).
-  try:
-    poll(0)
-  except ValueError:
-    # "No handles or timers registered in dispatcher" — nothing to drain.
-    discard
 
 # ---------------------------------------------------------------------------
 # RequestTracker tests
@@ -252,12 +238,9 @@ suite "Loading state transitions":
       let svc = mock.toBackendService()
 
       # Override sendProc to return a failed future.
-      let origSend = svc.sendProc
       svc.sendProc = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
         mock.receivedCommands.add((command, args))
-        var fut = newFuture[JsonNode]("fail-test")
-        fut.fail(newException(CatchableError, "backend down"))
-        return fut
+        newFailedFuture[JsonNode]("backend down")
 
       let store = createReplayDataStore(svc)
       store.requestLocals(10'u64)

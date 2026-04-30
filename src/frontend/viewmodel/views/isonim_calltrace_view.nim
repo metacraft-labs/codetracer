@@ -271,12 +271,14 @@ when defined(js):
     let container = r.createElement("div")
     r.setAttribute(container, "class", "calltrace-lines")
     r.appendChild(parent, container)
-    {.emit: "console.error('[PIPELINE] renderWebCallLineList: container created, starting indexEach');".}
+    when defined(js):
+      {.emit: "console.error('[PIPELINE] renderWebCallLineList: container created, starting indexEach');".}
 
     indexEach[CallLine, WebRenderer, isonim_dom.Element](r, container,
       proc(): seq[CallLine] =
         let lines = vm.visibleLines.val
-        {.emit: "console.error('[PIPELINE] renderWebCallLineList indexEach source: visibleLines.len=' + `lines`.length);".}
+        when defined(js):
+          {.emit: "console.error('[PIPELINE] renderWebCallLineList indexEach source: visibleLines.len=' + `lines`.length);".}
         lines,
       proc(item: proc(): CallLine, index: int): isonim_dom.Element =
         let row = r.createElement("div")
@@ -535,9 +537,12 @@ when defined(js):
     ## Call this once after the CalltraceVM has been created.
     ## This view is the primary calltrace renderer — the Karax
     ## calltrace render() returns an empty stub when this is mounted.
-    {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: starting, container=', `container`);".}
+    when defined(js):
+      {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: starting, container=', `container`);".}
     let r = WebRenderer()
     let calltracePanel = renderCalltracePanel(r, vm)
-    {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: panel created, children=', `calltracePanel`.childNodes ? `calltracePanel`.childNodes.length : 0);".}
+    when defined(js):
+      {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: panel created, children=', `calltracePanel`.childNodes ? `calltracePanel`.childNodes.length : 0);".}
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(calltracePanel))
-    {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: appended to container, container.children=', `container`.childNodes ? `container`.childNodes.length : 0);".}
+    when defined(js):
+      {.emit: "console.error('[PIPELINE] mountIsoNimCalltrace: appended to container, container.children=', `container`.childNodes ? `container`.childNodes.length : 0);".}

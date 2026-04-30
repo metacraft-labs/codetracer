@@ -996,5 +996,111 @@ sync-design-tokens:
 #
 # Pass --without-bpf to skip BPF setup:
 #   just developer-setup --without-bpf
+# ====
+# ViewModel headless tests (Nim)
+#
+# These tests exercise the ViewModel layer (signals, stores, VMs) without
+# a browser or Electron.  They run with both the native (C) and JavaScript
+# backends to catch platform-specific bugs like JS serialization issues.
+#
+# Skip patterns:
+#   integration/real_backend_test  — requires stdio_backend (native process spawning)
+#   integration/language_smoke_test — requires headless_session + ct binary
+#   multi-replay/multi_session_test — requires headless_session
+#   noir-space-ship/noir_space_ship_test — requires headless_session
+
+# Compile and run all ViewModel headless tests with the native (C) backend.
+test-vm-native:
+  #!/usr/bin/env bash
+  set -e
+  echo "=== ViewModel tests (native backend) ==="
+  failed=0
+  passed=0
+  for f in $(find src/tests/gui/tests -name '*_test.nim' \
+    ! -name 'vm_test_helpers.nim' \
+    ! -path '*/integration/real_backend_test.nim' \
+    ! -path '*/integration/language_smoke_test.nim' \
+    ! -path '*/multi-replay/*' \
+    ! -path '*/noir-space-ship/*' \
+    | sort); do
+    name=$(basename "$f" .nim)
+    cache="/tmp/ct-nim-cache/vm-native-$name"
+    echo -n "  $f ... "
+    output=$(nim c -r --hints:off \
+      --path:src/frontend/viewmodel \
+      --nimcache:"$cache" \
+      -o:"$cache/$name" \
+      "$f" 2>&1) || true
+    oks=$(echo "$output" | grep -c '\[OK\]' || true)
+    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
+    if [ "$oks" -eq 0 ] && [ "$fails" -eq 0 ]; then
+      echo "COMPILE ERROR"
+      echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$fails" -gt 0 ]; then
+      echo "PARTIAL ($oks OK, $fails FAILED)"
+      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    else
+      echo "OK ($oks tests)"
+      passed=$((passed + 1))
+    fi
+  done
+  echo ""
+  echo "Native: $passed passed, $failed failed"
+  [ "$failed" -eq 0 ]
+
+# Compile and run JS-compatible ViewModel headless tests via nim js + node.
+# Skips tests that require native process spawning (stdio_backend, headless_session).
+test-vm-js:
+  #!/usr/bin/env bash
+  set -e
+  echo "=== ViewModel tests (JS backend) ==="
+  failed=0
+  passed=0
+  for f in $(find src/tests/gui/tests -name '*_test.nim' \
+    ! -name 'vm_test_helpers.nim' \
+    ! -path '*/integration/real_backend_test.nim' \
+    ! -path '*/integration/language_smoke_test.nim' \
+    ! -path '*/multi-replay/*' \
+    ! -path '*/noir-space-ship/*' \
+    | sort); do
+    name=$(basename "$f" .nim)
+    cache="/tmp/ct-nim-cache/vm-js-$name"
+    echo -n "  $f ... "
+    if ! nim js --hints:off \
+      --path:src/frontend/viewmodel \
+      --nimcache:"$cache" \
+      -o:"$cache/$name.js" \
+      "$f" >/dev/null 2>&1; then
+      echo "COMPILE ERROR"
+      nim js --hints:off \
+        --path:src/frontend/viewmodel \
+        --nimcache:"$cache" \
+        -o:"$cache/$name.js" \
+        "$f" 2>&1 | grep 'Error:' | head -2 | sed 's/^/    /'
+      failed=$((failed + 1))
+      continue
+    fi
+    output=$(node "$cache/$name.js" 2>&1)
+    exitcode=$?
+    oks=$(echo "$output" | grep -c '\[OK\]' || true)
+    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
+    if [ "$fails" -gt 0 ] || [ "$exitcode" -ne 0 ]; then
+      echo "PARTIAL ($oks OK, $fails FAILED)"
+      echo "$output" | grep '\[FAILED\]' | head -5 | sed 's/^/    /'
+      failed=$((failed + 1))
+    else
+      echo "OK ($oks tests)"
+      passed=$((passed + 1))
+    fi
+  done
+  echo ""
+  echo "JS: $passed passed, $failed failed"
+  [ "$failed" -eq 0 ]
+
+# Run ViewModel headless tests on both native and JS backends.
+test-vm: test-vm-native test-vm-js
+
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
