@@ -32,13 +32,13 @@
 import std/[json, unittest, asyncdispatch, options, sets]
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
-import ../backend/backend_service
-import ../backend/mock_backend
-import ../store/types
-import ../store/replay_data_store
-import ../store/request_tracker
-import ../session_vm
-import ../viewmodels/[
+import backend/backend_service
+import backend/mock_backend
+import store/types
+import store/replay_data_store
+import store/request_tracker
+import session_vm
+import viewmodels/[
   state_vm,
   calltrace_vm,
   debug_controls_vm,

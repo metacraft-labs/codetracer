@@ -37,8 +37,8 @@
 
 import std/[json, os, unittest, strutils]
 import isonim/core/[signals, computation]
-import ../headless_session
-import ../store/types
+import headless_session
+import store/types
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -23,14 +23,14 @@
 import std/[json, unittest, asyncdispatch, options, strutils]
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
-import ../backend/backend_service
-import ../backend/mock_backend
-import ../backend/dap_commands
-import ../store/types
-import ../store/replay_data_store
-import ../store/request_tracker
-import ../session_vm
-import ../viewmodels/[state_vm, calltrace_vm, debug_controls_vm,
+import backend/backend_service
+import backend/mock_backend
+import backend/dap_commands
+import store/types
+import store/replay_data_store
+import store/request_tracker
+import session_vm
+import viewmodels/[state_vm, calltrace_vm, debug_controls_vm,
                       event_log_vm, flow_vm, shell_vm, timeline_vm]
 
 # ---------------------------------------------------------------------------

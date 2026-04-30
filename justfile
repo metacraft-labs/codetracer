@@ -492,24 +492,24 @@ test-e2e *args:
       fi
       ;;
   esac
-  cd "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests" && \
+  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
     npm install --no-audit --no-fund && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
       {{args}}
 
 dev-tools-test-e2e *args:
-  cd ${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests && \
+  cd ${CODETRACER_REPO_ROOT_PATH}/src/tests/gui && \
     env CODETRACER_DEV_TOOLS=1 npx playwright test --workers=1 \
       {{args}}
 
 # Show accumulated test timing statistics.
 test-stats *args:
-  cd "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests" && \
+  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
     node scripts/analyze-stats.mjs {{args}}
 
 # Delete all accumulated test stats.
 test-stats-reset:
-  rm -rf "${CODETRACER_REPO_ROOT_PATH}/tsc-ui-tests/test-stats"
+  rm -rf "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui/test-stats"
 
 # ====
 # Python recorder tests
@@ -674,7 +674,7 @@ test-wasm-replay *args:
     cd ../..
   fi
   echo "Running WASM client-side replay tests..."
-  cd tsc-ui-tests && \
+  cd src/tests/gui && \
     npm install --no-audit --no-fund && \
     npx playwright test tests/wasm-replay/ {{args}}
 

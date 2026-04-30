@@ -32,9 +32,9 @@
 
 import std/[json, os, unittest, strutils, osproc, sequtils, asyncdispatch]
 import isonim/core/computation
-import ../headless_session
-import ../store/types
-import ../viewmodels/calltrace_vm
+import headless_session
+import store/types
+import viewmodels/calltrace_vm
 
 # ---------------------------------------------------------------------------
 # Helpers

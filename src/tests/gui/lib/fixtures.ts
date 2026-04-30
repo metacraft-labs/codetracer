@@ -51,7 +51,10 @@ const isWindows = process.platform === "win32";
 // ---------------------------------------------------------------------------
 
 const currentDir = path.resolve();
-const codetracerInstallDir = path.dirname(currentDir);
+// The test package lives at src/tests/gui/ — go up 3 levels to reach
+// the repo root (codetracer/).  Previously it was at tsc-ui-tests/
+// (1 level up).
+const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
 
