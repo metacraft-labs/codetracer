@@ -78,6 +78,10 @@ suite "StateVM initial state":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
+      # See calltrace's "isLoading starts false" — the auto-load
+      # effect briefly sets lsLoading; drain() lets the mock backend's
+      # response callback flip it back to lsIdle.
+      drain()
       check vm.isLoading.val == false
       dispose()
 
@@ -354,6 +358,9 @@ suite "StateVM isLoading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
+      # Drain to flush the auto-load response and reach the
+      # idle-after-load baseline before manually asserting transitions.
+      drain()
 
       check vm.isLoading.val == false
 

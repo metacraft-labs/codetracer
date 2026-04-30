@@ -277,9 +277,11 @@ suite "Integration: calltrace double-click triggers navigation":
       drain()
 
       # Should have sent a calltrace-jump command to the backend.
+      # The backend Location struct uses `path` (not `file`); see
+      # CalltraceVM.doubleClickEntry.
       let navCmd = mock.findCommand("ct/calltrace-jump")
       check navCmd.isSome
-      check navCmd.get.args["file"].getStr == "solver.py"
+      check navCmd.get.args["path"].getStr == "solver.py"
       check navCmd.get.args["line"].getInt == 10
       check navCmd.get.args["rrTicks"].getBiggestInt == 200
 

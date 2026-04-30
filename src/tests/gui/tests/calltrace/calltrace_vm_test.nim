@@ -96,6 +96,13 @@ suite "CalltraceVM initial state":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
+      # `createCalltraceVM` installs an auto-load effect that fires
+      # immediately and sets `loadingState = lsLoading`. The mock
+      # backend resolves the request synchronously, but the response
+      # callback is queued onto the async dispatcher / pendingCallbacks
+      # queue and only fires after `drain()`. Without drain(), the
+      # observed `isLoading` value here is *true* on the JS backend.
+      drain()
       check vm.isLoading.val == false
       dispose()
 
@@ -295,12 +302,15 @@ suite "CalltraceVM doubleClickEntry":
       vm.doubleClickEntry(1)
       drain()
 
-      # Should have sent a calltrace-jump command.
+      # Should have sent a calltrace-jump command. The backend expects
+      # a Location struct with camelCase field names — `path` (not
+      # `file`), plus `highLevelPath` / `highLevelLine` mirrors of the
+      # primary path/line — so the assertions match those keys.
       let jumpCmds = mock.receivedCommands[cmdCountBefore .. ^1]
       var found = false
       for cmd in jumpCmds:
         if cmd.command == "ct/calltrace-jump":
-          check cmd.args["file"].getStr == "foo.nim"
+          check cmd.args["path"].getStr == "foo.nim"
           check cmd.args["line"].getInt == 20
           check cmd.args["rrTicks"].getBiggestInt == 100
           found = true

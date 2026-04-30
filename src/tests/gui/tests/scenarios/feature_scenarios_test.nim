@@ -1244,7 +1244,8 @@ suite "Editor: multi-file navigation and state":
 
       let cmd = mock.findCommand("ct/calltrace-jump")
       check cmd.isSome
-      check cmd.get.args["file"].getStr == "math_utils.py"
+      # Backend Location struct uses `path` (not `file`); see calltrace_vm.
+      check cmd.get.args["path"].getStr == "math_utils.py"
       check cmd.get.args["line"].getInt == 42
       check cmd.get.args["rrTicks"].getBiggestInt == 200
 
@@ -1524,7 +1525,7 @@ suite "Full workflow: record -> replay -> debug":
 
       let navCmd = mock.findCommand("ct/calltrace-jump")
       check navCmd.isSome
-      check navCmd.get.args["file"].getStr == "fibonacci.py"
+      check navCmd.get.args["path"].getStr == "fibonacci.py"
       check navCmd.get.args["line"].getInt == 20
 
       # ---- Step 6: Add watch expression ----

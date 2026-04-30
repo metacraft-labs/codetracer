@@ -157,6 +157,7 @@ suite "IsoNim State Panel — structure":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
+      drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
       let panel = renderStatePanel(r, vm)
@@ -400,6 +401,7 @@ suite "IsoNim State Panel — loading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
+      drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
       let panel = renderStatePanel(r, vm)
@@ -557,6 +559,7 @@ suite "IsoNim Calltrace Panel — structure":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
+      drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
       let panel = renderCalltracePanel(r, vm)

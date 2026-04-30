@@ -187,6 +187,9 @@ suite "StateViewState basic":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
+      # Flush the auto-load response so isLoading settles back to
+      # false on JS, where mock-future callbacks defer until drain().
+      drain()
 
       let vs = getStateViewState(vm)
       check vs.activeTab == "Locals"
@@ -226,6 +229,7 @@ suite "StateViewState basic":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
+      drain()
 
       check getStateViewState(vm).isLoading == false
 
