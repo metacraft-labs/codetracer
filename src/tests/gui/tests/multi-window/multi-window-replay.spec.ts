@@ -87,20 +87,20 @@ test.describe("Multi-window infrastructure (Phase 3)", () => {
         hasTrace: session?.trace != null,
         hasServices: session?.services != null,
         hasViewsApi: session?.viewsApi != null,
-        // The forwarding template on data should delegate to activeSession.
-        traceMatchesSession:
-          d.trace != null && session?.trace != null
-            ? d.trace === session.trace
-            : false,
       };
     });
 
+    // The Nim-side `data.trace` / `data.services` / etc. are templates
+    // that expand to `data.sessions[data.activeSessionIndex].xxx` at the
+    // call site. They do not generate JavaScript-level getters on the
+    // `data` object, so we cannot directly observe the forwarding from
+    // `ctPage.evaluate(...)`. Verifying the active session's own fields
+    // is the closest behavioural check available from the test side; the
+    // template-level forwarding is verified at compile time in Nim code
+    // that reads `data.trace`.
     expect(result.hasTrace).toBe(true);
     expect(result.hasServices).toBe(true);
     expect(result.hasViewsApi).toBe(true);
-    // Forwarding template: data.trace should be the same object as
-    // activeSession.trace (not a separate copy).
-    expect(result.traceMatchesSession).toBe(true);
   });
 
   // -------------------------------------------------------------------------
