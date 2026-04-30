@@ -3,6 +3,7 @@
   inputs',
   self',
   config,
+  includeSui ? false,
 }:
 let
   ourPkgs = self'.packages;
@@ -66,7 +67,6 @@ mkShell {
     ourPkgs.forc # Sway/Fuel compiler (needed by codetracer-fuel-recorder)
     ourPkgs.miden # Miden compiler (needed by codetracer-miden-recorder)
     ourPkgs.cargo-build-sbf # Solana BPF compiler (needed by codetracer-solana-recorder)
-    ourPkgs.sui # Sui compiler (needed by codetracer-move-recorder)
 
     # codex acp agent client
     ourPkgs.codex-acp
@@ -228,6 +228,11 @@ mkShell {
     inputs'.appimage-channel.legacyPackages.appimagekit
     appimage-run
     pax-utils
+  ]
+  ++ pkgs.lib.optionals includeSui [
+    # Sui is only needed for Move recorder work and is expensive enough to
+    # make the default shell fragile when the blockchain toolchain input drifts.
+    ourPkgs.sui
   ]
   ++ pkgs.lib.optionals stdenv.isDarwin [
     # Building AppImage
