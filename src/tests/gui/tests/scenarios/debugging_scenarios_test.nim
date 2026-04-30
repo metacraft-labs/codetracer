@@ -93,6 +93,10 @@ suite "Scenario 1: Step through a function and inspect variables":
       let session = createSessionVM(mock.toBackendService())
       drain()
 
+      # The auto-load effect fires on creation at rrTicks=0.
+      # Clear initial commands to isolate the position change.
+      mock.clearReceivedCommands()
+
       # 1. Load trace — debugger at entry point (line 1, rrTicks 100).
       session.store.updateDebuggerPosition(100'u64, "example.py", 1)
       drain()
@@ -461,6 +465,11 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       let mock = newMockBackendService(autoRespond = false)
       let session = createSessionVM(mock.toBackendService())
       drain()
+
+      # The auto-load effect fires on creation at rrTicks=0.
+      # Mark the initial request complete so the tracker allows new ones.
+      session.store.requestTracker.markComplete("load-locals")
+      mock.clearReceivedCommands()
 
       # First step — rrTicks 200.  This triggers a requestLocals.
       session.store.updateDebuggerPosition(200'u64, "main.py", 5)
@@ -899,6 +908,10 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
       let mock = newMockBackendService(autoRespond = true)
       let session = createSessionVM(mock.toBackendService())
       drain()
+
+      # The auto-load effect fires on creation at rrTicks=0.
+      # Clear initial commands so we can count from the position change.
+      mock.clearReceivedCommands()
 
       # Move to initial position and let locals load.
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)

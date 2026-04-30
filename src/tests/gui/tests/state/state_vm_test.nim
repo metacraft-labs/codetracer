@@ -385,12 +385,11 @@ suite "StateVM auto-load effect":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createStateVM(store)
-
-      # Initially rrTicks is 0, so the effect should not have sent
-      # a request (the guard skips rrTicks == 0).
       drain()
-      let initialCount = mock.receivedCommands.len
-      check initialCount == 0
+
+      # The auto-load effect fires on creation (no rrTicks guard),
+      # so clear initial commands to isolate the position change.
+      mock.clearReceivedCommands()
 
       # Simulate the debugger moving to a new position.
       var dbg = store.debugger.val
@@ -411,35 +410,38 @@ suite "StateVM auto-load effect":
       let vm = createStateVM(store)
       drain()
 
+      # The auto-load effect no longer guards on rrTicks > 0, so
+      # the initial effect run at rrTicks=0 also fires a request.
+      let initialCount = mock.receivedCommands.len
+
       # First move.
       var dbg = store.debugger.val
       dbg.rrTicks = 50'u64
       store.debugger.val = dbg
       drain()
-      check mock.receivedCommands.len == 1
+      check mock.receivedCommands.len == initialCount + 1
 
       # Second move — different rrTicks, so a new request should fire.
       dbg = store.debugger.val
       dbg.rrTicks = 75'u64
       store.debugger.val = dbg
       drain()
-      check mock.receivedCommands.len == 2
-      check mock.receivedCommands[1].args["rrTicks"].getBiggestInt == 75
+      check mock.receivedCommands.len == initialCount + 2
+      check mock.receivedCommands[^1].args["rrTicks"].getBiggestInt == 75
 
       dispose()
 
-  test "auto-load effect does not fire for rrTicks == 0":
+  test "auto-load effect fires even for rrTicks == 0 (DB-based traces)":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createStateVM(store)
       drain()
 
-      # Explicitly set rrTicks to 0 (should be a no-op).
-      var dbg = store.debugger.val
-      dbg.rrTicks = 0'u64
-      store.debugger.val = dbg
-      drain()
-
-      check mock.receivedCommands.len == 0
+      # The auto-load effect no longer guards on rrTicks > 0 because
+      # DB-based traces always have rrTicks=0. RequestTracker handles
+      # deduplication of redundant requests.
+      # The initial effect run at rrTicks=0 fires a request.
+      check mock.receivedCommands.len >= 1
+      check mock.receivedCommands[0].command == "ct/load-locals"
 
       dispose()

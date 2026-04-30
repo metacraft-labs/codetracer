@@ -162,29 +162,30 @@ suite "CalltraceVM scroll":
       let vm = createCalltraceVM(store)
       drain()
 
-      # Initially viewportHeight is 0, so no request should fire.
-      let initialCount = mock.receivedCommands.len
-      check initialCount == 0
+      # The auto-load effect fires on creation (no rrTicks guard).
+      # Clear initial commands so we can track new ones.
+      mock.clearReceivedCommands()
 
-      # Set a debugger position so the auto-load effect's guard passes.
+      # Set a debugger position so the auto-load effect re-fires.
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
 
       # Set viewport height so the effect will request data.
       vm.setViewportHeight(25)
       drain()
 
-      # The effect should have fired a calltrace section request.
-      check mock.receivedCommands.len == 1
-      check mock.receivedCommands[0].command == "ct/load-calltrace-section"
+      # The effect should have fired calltrace section requests.
+      let countAfterSetup = mock.receivedCommands.len
+      check countAfterSetup >= 1
+      check mock.receivedCommands[^1].command == "ct/load-calltrace-section"
 
       # Now scroll — this should trigger another request.
       vm.scroll(100)
       drain()
 
-      check mock.receivedCommands.len == 2
-      check mock.receivedCommands[1].command == "ct/load-calltrace-section"
+      check mock.receivedCommands.len == countAfterSetup + 1
+      check mock.receivedCommands[^1].command == "ct/load-calltrace-section"
       # The start index should account for the buffer.
-      let startIdx = mock.receivedCommands[1].args["startCallLineIndex"].getBiggestInt
+      let startIdx = mock.receivedCommands[^1].args["startCallLineIndex"].getBiggestInt
       check startIdx == 100 - CALLTRACE_BUFFER
 
       dispose()
@@ -563,6 +564,7 @@ suite "CalltraceVM isLoading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
+      drain()  # flush the auto-load effect's loading→idle transition
 
       check vm.isLoading.val == false
 
@@ -596,52 +598,58 @@ suite "CalltraceVM auto-load effect":
       let vm = createCalltraceVM(store)
       drain()
 
-      # No request yet — viewport height is 0.
-      check mock.receivedCommands.len == 0
+      # The auto-load effect fires on creation (no rrTicks guard).
+      # Clear initial commands so we can track the viewport-triggered one.
+      mock.clearReceivedCommands()
 
-      # Set a debugger position so the auto-load effect's guard passes.
+      # Set a debugger position so the auto-load effect re-fires.
       store.updateDebuggerPosition(100'u64, "main.nim", 1)
 
       vm.setViewportHeight(30)
       drain()
 
-      # Now the effect should have fired.
-      check mock.receivedCommands.len == 1
-      check mock.receivedCommands[0].command == "ct/load-calltrace-section"
-      check mock.receivedCommands[0].args["height"].getInt ==
+      # The effect should have fired with the explicit viewport height.
+      let cmd = mock.receivedCommands[^1]
+      check cmd.command == "ct/load-calltrace-section"
+      check cmd.args["height"].getInt ==
             30 + CALLTRACE_BUFFER * 2
 
       dispose()
 
-  test "effect does not fire when viewport height is 0":
+  test "effect uses default height when viewport height is 0":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
       drain()
 
-      # Set a debugger position; the guard should still skip because
-      # viewport height is 0.
-      store.updateDebuggerPosition(100'u64, "main.nim", 1)
+      # The auto-load effect fires even with viewport height 0,
+      # using effectiveHeight=50 as fallback. Clear initial commands.
+      mock.clearReceivedCommands()
 
-      # Scroll without setting viewport height — effect should skip.
-      vm.scroll(50)
+      # Set a debugger position; the effect fires with default height.
+      store.updateDebuggerPosition(100'u64, "main.nim", 1)
       drain()
 
-      check mock.receivedCommands.len == 0
+      check mock.receivedCommands.len >= 1
+      # The height should use the default (50) + buffer.
+      let cmd = mock.receivedCommands[^1]
+      check cmd.command == "ct/load-calltrace-section"
+      check cmd.args["height"].getInt == 50 + CALLTRACE_BUFFER * 2
 
       dispose()
 
-  test "effect does not fire when rrTicks is 0":
+  test "effect fires even when rrTicks is 0 (DB-based traces)":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
       drain()
 
-      # Set viewport height but leave debugger at rrTicks=0.
-      vm.setViewportHeight(20)
-      drain()
-
-      check mock.receivedCommands.len == 0
+      # The auto-load effect no longer guards on rrTicks > 0 because
+      # DB-based traces always have rrTicks=0. RequestTracker handles
+      # deduplication of redundant requests. The effect fires on
+      # creation, so at least one request should already exist.
+      check mock.receivedCommands.len >= 1
+      check mock.receivedCommands[0].command == "ct/load-calltrace-section"
 
       dispose()
 

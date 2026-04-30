@@ -66,16 +66,17 @@ suite "Integration: debugger move loads locals and calltrace":
       let session = createSessionVM(mock.toBackendService())
       drain()
 
-      # Initially no commands should have been sent (rrTicks == 0).
-      check mock.receivedCommands.len == 0
+      # The auto-load effects fire on creation (no rrTicks guard).
+      # Both locals and calltrace requests should have been sent.
+      check mock.receivedCommands.len >= 1
 
       # Set a viewport height on calltrace so its auto-load effect
       # will fire when the debugger position changes.
       session.calltraceVM.setViewportHeight(25)
       drain()
 
-      # Still no commands -- rrTicks is 0 so both guards skip.
-      check mock.receivedCommands.len == 0
+      # Clear initial commands to isolate the position change.
+      mock.clearReceivedCommands()
 
       # Simulate the debugger moving to a position (entry loaded).
       session.store.updateDebuggerPosition(100, "main.py", 10)

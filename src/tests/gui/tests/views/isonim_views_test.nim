@@ -596,7 +596,7 @@ suite "IsoNim Calltrace Panel — call lines":
       let container = findByClass(panel, "calltrace-lines")
       check container != nil
 
-      let rows = findAllByClass(container, "call-line")
+      let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 3
 
       check "main" in rows[0].textContent
@@ -624,7 +624,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
-      let rows = findAllByClass(container, "call-line")
+      let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 2
 
       # depth 0 => "0px", depth 3 => "48px"
@@ -652,7 +652,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
-      let rows = findAllByClass(container, "call-line")
+      let rows = findAllByClass(container, "calltrace-call-line")
 
       check vm.selectedEntry.val.isNone
 
@@ -683,7 +683,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
-      let rows = findAllByClass(container, "call-line")
+      let rows = findAllByClass(container, "calltrace-call-line")
 
       # Select entry 0
       vm.selectEntry(some(0'i64))
@@ -711,7 +711,7 @@ suite "IsoNim Calltrace Panel — call lines":
 
       let panel = renderCalltracePanel(r, vm)
       let container = findByClass(panel, "calltrace-lines")
-      let rows = findAllByClass(container, "call-line")
+      let rows = findAllByClass(container, "calltrace-call-line")
 
       let beforeCount = mock.receivedCommands.len
 
@@ -823,6 +823,7 @@ suite "IsoNim Calltrace Panel — loading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
+      drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
       let panel = renderCalltracePanel(r, vm)
