@@ -75,6 +75,13 @@ proc makeDoubleClickHandler(vm: CalltraceVM; lineIndex: int64): proc() =
   result = proc() =
     vm.doubleClickEntry(idx)
 
+proc makeToggleHandler(vm: CalltraceVM; lineIndex: int64): proc() =
+  ## Factory to create a toggle click handler for expand/collapse.
+  ## Sends expand or collapse request to the backend via the VM.
+  let idx = lineIndex
+  result = proc() =
+    vm.toggleExpandCallChildren(idx)
+
 # ---------------------------------------------------------------------------
 # Scroll indicator renderers
 # ---------------------------------------------------------------------------
@@ -307,16 +314,25 @@ when defined(js):
           r.setAttribute(callBox, "class", "call-child-box")
           r.appendChild(callChild, callBox)
 
-          # Toggle area: span.toggle-call > div.dot-call-img
-          # For now all entries show a dot (leaf marker). Expand/collapse
-          # toggle will be added when the VM exposes child counts.
+          # Toggle area: span.toggle-call > div.(dot|collapse|expand)-call-img
+          # Leaf calls show dot-call-img; expandable calls show either
+          # collapse-call-img (expanded) or dot-call-img with a click
+          # handler to trigger expansion.
           let toggleSpan = r.createElement("span")
           r.setAttribute(toggleSpan, "class", "toggle-call")
           r.appendChild(callBox, toggleSpan)
 
-          let dotDiv = r.createElement("div")
-          r.setAttribute(dotDiv, "class", "dot-call-img")
-          r.appendChild(toggleSpan, dotDiv)
+          let toggleIcon = r.createElement("div")
+          if line.hasChildren:
+            if line.isExpanded:
+              r.setAttribute(toggleIcon, "class", "collapse-call-img")
+            else:
+              r.setAttribute(toggleIcon, "class", "dot-call-img")
+            r.addEventListener(toggleSpan, "click",
+              makeToggleHandler(vm, line.index))
+          else:
+            r.setAttribute(toggleIcon, "class", "dot-call-img")
+          r.appendChild(toggleSpan, toggleIcon)
 
           # Call text: div.call-text#local-call-text-{index}
           # Shows "functionName #key" matching the Karax format.

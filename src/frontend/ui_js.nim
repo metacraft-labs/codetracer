@@ -47,6 +47,16 @@ const EDITOR_GUTTER_PADDING = 2 #px
 
 var disconnectedNotification: Notification
 
+proc rrBackendPath(data: Data): cstring =
+  ## Safely retrieve the RR backend executable path from the config.
+  ## Returns an empty string when config or rrBackend is nil — this can
+  ## happen in web mode when DapInitialized arrives before onInit has
+  ## populated data.config (bootstrap-cache replay timing race).
+  if not data.config.isNil and not data.config.rrBackend.isNil:
+    data.config.rrBackend.path
+  else:
+    cstring""
+
 proc connectionDetailMessage(reason: ConnectionLossReason, detail: cstring): cstring =
   if detail.len > 0:
     return detail
@@ -1280,7 +1290,7 @@ proc onTraceLoaded(
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
           rawDiffIndex: data.startOptions.rawDiffIndex,
-          ctRRWorkerExe: data.config.rrBackend.path,
+          ctRRWorkerExe: data.rrBackendPath,
         })
       dapReplayHandlerRegistered = true
 
@@ -1302,7 +1312,7 @@ proc onTraceLoaded(
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
           rawDiffIndex: data.startOptions.rawDiffIndex,
-          ctRRWorkerExe: data.config.rrBackend.path,
+          ctRRWorkerExe: data.rrBackendPath,
         })
       dapReplayHandlerRegistered = true
 
@@ -2812,7 +2822,7 @@ when not defined(ctInExtension):
             data.dapApi.sendCtRequest(DapLaunch, js{
               traceFolder: trace.outputFolder,
               rawDiffIndex: data.startOptions.rawDiffIndex,
-              ctRRWorkerExe: data.config.rrBackend.path,
+              ctRRWorkerExe: data.rrBackendPath,
             })
           dapReplayHandlerRegistered = true
 

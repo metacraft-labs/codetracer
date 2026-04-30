@@ -4,7 +4,8 @@ import
   lib/jslib,
   types,
   communication, dap,
-  event_helpers
+  event_helpers,
+  ui/calltrace
 
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
@@ -76,10 +77,18 @@ when not defined(ctInExtension):
       else:
         # in this case, it should just jump to entry
         cast[JsObject](nil) # Location(path: "", line: NO_LINE)
+    # Guard against config or rrBackend being nil — this can happen in web
+    # mode when the DapInitialized response arrives before onInit has set
+    # data.config (race between bootstrap-cache replay and DAP handshake).
+    let rrWorkerPath = if not data.config.isNil and
+                          not data.config.rrBackend.isNil:
+        data.config.rrBackend.path
+      else:
+        cstring""
     data.dapApi.sendCtRequest(DapLaunch, js{
       traceFolder: data.trace.outputFolder,
       rawDiffIndex: data.startOptions.rawDiffIndex,
-      ctRRWorkerExe: data.config.rrBackend.path,
+      ctRRWorkerExe: rrWorkerPath,
       restoreLocation: restoreLocation
     })
 
@@ -133,7 +142,13 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(DapStopped, proc(kind: CtEventKind, value: DapStoppedEvent) = viewsApi.emit(DapStopped, value))
   dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind, value: CtLoadLocalsResponseBody) = viewsApi.emit(CtLoadLocalsResponse, value))
   dapApi.on(CtUpdatedTable, proc(kind: CtEventKind, value: CtUpdatedTableResponseBody) = viewsApi.emit(CtUpdatedTable, value))
-  dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) = viewsApi.emit(CtUpdatedCalltrace, value))
+  dapApi.on(CtUpdatedCalltrace, proc(kind: CtEventKind, value: CtUpdatedCalltraceResponseBody) =
+    viewsApi.emit(CtUpdatedCalltrace, value)
+    # Feed calltrace data directly into the ViewModel store so the IsoNim
+    # calltrace view receives it. This bridges the gap when the legacy
+    # CalltraceComponent's register() subscription hasn't fired yet.
+    syncCalltraceData(value)
+  )
   dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
   dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =

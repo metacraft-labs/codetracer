@@ -31,7 +31,7 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../backend/backend_service
-import ../store/[replay_data_store, types]
+import ../store/[replay_data_store, request_tracker, types]
 
 const
   ## Default panel depth (columns) used when requesting calltrace sections.
@@ -117,6 +117,53 @@ proc toggleExpand*(vm: CalltraceVM; lineIndex: int64) =
     nodes.incl(lineIndex)
   vm.expandedNodes.val = nodes
 
+proc toggleExpandCallChildren*(vm: CalltraceVM; lineIndex: int64) =
+  ## Send an expand or collapse request to the backend for the calltrace
+  ## entry at `lineIndex`. Looks up the line in the store to determine
+  ## its current expand state and call key, then sends the appropriate
+  ## DAP command ("ct/expand-calls" or "ct/collapse-calls").
+  ##
+  ## After changing the expand state, sends a calltrace section reload
+  ## request so the backend returns the updated line data. This matches
+  ## the legacy Karax pattern: toggleCalls() + loadLines().
+  let lines = vm.store.calltrace.lines.val
+  let startIdx = vm.store.calltrace.startLineIndex.val
+  let offset = lineIndex - startIdx
+  if offset >= 0 and offset < lines.len.int64:
+    let line = lines[offset.int]
+    if not line.hasChildren:
+      return
+    let command = if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"
+    # nonExpandedKind is serialized as a u8 ordinal:
+    #   Callstack=0, Children=1, Siblings=2, Calls=3,
+    #   CallstackInternal=4, CallstackInternalChild=5
+    let toggleArgs = %*{
+      "callKey": line.callKey,
+      "nonExpandedKind": 1,  # Children
+      "count": 0,
+    }
+    discard vm.store.backend.send(command, toggleArgs)
+
+    # Reload the calltrace section. Clear the request tracker first so
+    # the store doesn't deduplicate this as a redundant request (the
+    # auto-load effect may have already sent the same parameters).
+    vm.store.requestTracker.markComplete("load-calltrace")
+    let scrollPos = vm.scrollPosition.val
+    let vpHeight = vm.viewportHeight.val
+    let depth = vm.viewportDepth.val
+    let dbg = vm.store.debugger.val
+    let patterns = vm.rawIgnorePatterns.val
+    let effectiveHeight = if vpHeight > 0: vpHeight else: 50
+    let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
+    let totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
+    vm.store.requestCalltraceSection(
+      bufferStart, totalHeight, depth,
+      rrTicks = dbg.rrTicks,
+      file = dbg.location.file,
+      line = dbg.location.line,
+      rawIgnorePatterns = patterns,
+    )
+
 proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
   ## Navigate to the source location of the calltrace entry at `lineIndex`.
   ## Looks up the line in the store's calltrace data and sends a
@@ -126,9 +173,13 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
   let offset = lineIndex - startIdx
   if offset >= 0 and offset < lines.len.int64:
     let line = lines[offset.int]
+    # The backend expects a Location struct with camelCase field names:
+    #   path (not file), line, rrTicks, highLevelPath, highLevelLine, etc.
     let args = %*{
-      "file": line.location.file,
+      "path": line.location.file,
       "line": line.location.line,
+      "highLevelPath": line.location.file,
+      "highLevelLine": line.location.line,
       "rrTicks": line.rrTicks,
     }
     discard vm.store.backend.send("ct/calltrace-jump", args)

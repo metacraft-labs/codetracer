@@ -59,7 +59,17 @@ export class EventRow {
     debugLogger.log(`EventRow: clicking row index ${idx}`);
     // Use noWaitAfter to avoid blocking on "waiting for scheduled navigations"
     // which can hang when the click triggers backend position updates via WebSocket.
-    await this.root.click({ noWaitAfter: true });
+    try {
+      await this.root.click({ noWaitAfter: true, timeout: 5_000 });
+    } catch {
+      // When the element is outside the viewport (common on Linux/headless
+      // where the Electron window may be smaller than expected), dispatch a
+      // click event directly via JavaScript which bypasses viewport checks.
+      debugLogger.log(
+        `EventRow: direct click failed for row ${idx}, using dispatchEvent fallback`,
+      );
+      await this.root.dispatchEvent("click");
+    }
     debugLogger.log(`EventRow: click completed for row index ${idx}`);
   }
 }

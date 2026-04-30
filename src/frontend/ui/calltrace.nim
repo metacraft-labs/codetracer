@@ -1031,6 +1031,8 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
   ## so the CalltraceVM's visibleLines memo sees the same data.
   let diagSyncStoreId = if calltraceVMStore.isNil: -1 else: calltraceVMStore.storeId
+  when defined(js):
+    {.emit: "console.error('[PIPELINE] syncCalltraceData: CALLED storeId=' + `diagSyncStoreId` + ' lines=' + `results`.callLines.length + ' totalCalls=' + `results`.totalCallsCount);".}
   cerror fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={isoNimCalltraceMounted}"
   if calltraceVMStore.isNil:
     cerror "[PIPELINE] syncCalltraceData: store is nil, returning early"
@@ -1039,12 +1041,24 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   for i, callLine in results.callLines:
     let call = callLine.content.call
     let loc = call.location
+    # Determine children count and expand state matching legacy callView logic.
+    let childrenCount = callLine.content.count
+    let hiddenChildren = callLine.content.hiddenChildren
+    let count = if childrenCount > 0: childrenCount else: call.children.len
+    let lineHasChildren = count > 0
+    # A call is shown as expanded (collapse toggle visible) when it has
+    # children that are not hidden, or when the call itself has loaded
+    # children (call.children.len > 0).
+    let lineIsExpanded = lineHasChildren and (not hiddenChildren or call.children.len > 0)
     var cl = makeCallLine(
       name = $loc.highLevelFunctionName,
       depth = callLine.depth,
       rrTicks = cast[uint64](loc.rrTicks),
       file = $loc.highLevelPath,
       line = loc.highLevelLine,
+      hasChildren = lineHasChildren,
+      isExpanded = lineIsExpanded,
+      callKey = $call.key,
     )
     cl.index = i.int64
     vmLines.add(cl)

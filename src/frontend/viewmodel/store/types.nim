@@ -77,6 +77,9 @@ type
     depth*: int
     rrTicks*: uint64
     location*: Location
+    hasChildren*: bool      ## Whether this call has children that can be expanded
+    isExpanded*: bool       ## Whether children are currently shown (collapse toggle visible)
+    callKey*: string        ## The call key used by the legacy expand/collapse system
 
   Variable* = object
     ## A local / global variable entry (recursive for compound types).

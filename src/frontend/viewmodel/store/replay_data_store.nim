@@ -318,7 +318,9 @@ proc updateCalltraceSection*(store: ReplayDataStore;
   store.calltrace.loadingState.val = lsIdle
 
 proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
-                   file: string = ""; line: int = 0): CallLine =
+                   file: string = ""; line: int = 0;
+                   hasChildren: bool = false; isExpanded: bool = false;
+                   callKey: string = ""): CallLine =
   ## Convenience constructor for CallLine — avoids the need for callers
   ## to import store/types.
   CallLine(
@@ -327,6 +329,9 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
     depth: depth,
     rrTicks: rrTicks,
     location: Location(file: file, line: line),
+    hasChildren: hasChildren,
+    isExpanded: isExpanded,
+    callKey: callKey,
   )
 
 proc stepDirectionToDapCommand*(direction: StepDirection): string =
