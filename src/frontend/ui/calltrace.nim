@@ -934,12 +934,10 @@ proc tryMountIsoNimCalltrace() =
   ## Mount the IsoNim calltrace view into the GoldenLayout-managed
   ## calltrace component container. The container is created by
   ## GoldenLayout with the id `calltraceComponent-0`. The IsoNim view
-  ## replaces all Karax content and becomes the primary renderer.
+  ## is the primary renderer — no Karax renderer is involved.
   ##
   ## After mounting:
   ## - `isoNimCalltraceMounted` is set to true
-  ## - The Karax render() returns a minimal stub
-  ## - The kxiMap entry is removed so redrawAll() skips this component
   ## - onUpdatedCalltrace / onCompleteMove still feed data into the
   ##   store, and IsoNim's reactive effects update the DOM automatically
   ##
@@ -949,12 +947,8 @@ proc tryMountIsoNimCalltrace() =
     cerror "[PIPELINE] tryMountIsoNimCalltrace: skipping (already mounted or VM nil)"
     return
 
-  # Wait for both the DOM container and the Karax kxiMap entry to exist
-  # before mounting. GoldenLayout creates the container immediately but
-  # calls setRenderer inside a 200ms windowSetTimeout. If we mount before
-  # setRenderer runs, our kxiMap.del is a no-op and Karax later overwrites
-  # the IsoNim DOM. By waiting for the kxiMap entry, we guarantee we can
-  # delete it atomically with the mount.
+  # Wait for the DOM container to exist. GoldenLayout creates it when
+  # the component is registered. IsoNim mounts directly into it.
   let key = cstring"calltraceComponent-0"
   var calltraceRetryCount = 0
   proc doMount() =
@@ -962,27 +956,21 @@ proc tryMountIsoNimCalltrace() =
       return
     calltraceRetryCount += 1
     let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+    if dom_api.isNodeNil(dom_api.Node(container)):
       if calltraceRetryCount mod 10 == 0:
         cerror "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &
-          ", container=" & (if dom_api.isNodeNil(dom_api.Node(container)): "nil" else: "found") &
-          ", kxiMap=" & (if kxiMap.hasKey(key): "found" else: "nil")
+          ", container=nil"
       if calltraceRetryCount > 200:
         cerror "[PIPELINE] tryMountIsoNimCalltrace: not ready after 200 retries, giving up"
         return
       discard setTimeout(proc() = doMount(), 10)
       return
 
-    # Both container and kxiMap entry exist. Remove the Karax instance
-    # FIRST so that no concurrent redrawAll() can interfere, then clear
-    # the container and mount the IsoNim view.
-    kxiMap.del(key)
-
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    cerror "[PIPELINE] tryMountIsoNimCalltrace: container + kxiMap found, mounting now"
+    cerror "[PIPELINE] tryMountIsoNimCalltrace: container found, mounting now"
     isoNimCalltraceMounted = true
     mountIsoNimCalltrace(container, calltraceVMInstance)
     cerror "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
@@ -1575,12 +1563,6 @@ proc setContinuationLinks*(self: CalltraceComponent, links: seq[ContinuationLink
 proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
   ## Called by the backend when async thread groupings are discovered.
   self.asyncThreads = threads
-
-method redrawForSinglePage*(self: CalltraceComponent) =
-  # IsoNim is the primary renderer. Suppress Karax redraws so that
-  # the IsoNim-managed DOM tree is not overwritten. Data flows through
-  # the reactive store signals and IsoNim effects handle all updates.
-  discard
 
 method render*(self: CalltraceComponent): VNode =
   # IsoNim is the primary renderer. Return a minimal empty container

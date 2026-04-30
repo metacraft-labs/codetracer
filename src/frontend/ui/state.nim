@@ -90,12 +90,11 @@ when defined(ctInExtension):
 proc tryMountIsoNimStatePanel() =
   ## Mount the IsoNim state panel view into the GoldenLayout-managed
   ## state component container. The container is created by GoldenLayout
-  ## with the id `stateComponent-0`. The IsoNim view replaces all Karax
-  ## content and becomes the primary renderer.
+  ## with the id `stateComponent-0`. The IsoNim view is the primary
+  ## renderer — no Karax renderer is involved.
   ##
   ## After mounting:
   ## - `isoNimStateMounted` is set to true
-  ## - `redrawDynamically` / `redrawForSinglePage` become no-ops
   ## - `registerLocals` still feeds data into the store, and IsoNim's
   ##   reactive effects update the DOM automatically
   ##
@@ -105,6 +104,8 @@ proc tryMountIsoNimStatePanel() =
     cerror "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
     return
 
+  # Wait for the DOM container to exist. GoldenLayout creates it when
+  # the component is registered. IsoNim mounts directly into it.
   let key = cstring"stateComponent-0"
   var stateRetryCount = 0
   proc doMount() =
@@ -112,7 +113,7 @@ proc tryMountIsoNimStatePanel() =
       return
     stateRetryCount += 1
     let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+    if dom_api.isNodeNil(dom_api.Node(container)):
       if stateRetryCount mod 10 == 0:
         cerror "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $stateRetryCount
       if stateRetryCount > 200:
@@ -121,12 +122,11 @@ proc tryMountIsoNimStatePanel() =
       discard setTimeout(proc() = doMount(), 10)
       return
 
-    kxiMap.del(key)
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-    cerror "[PIPELINE] tryMountIsoNimStatePanel: container + kxiMap found, mounting now"
+    cerror "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
     isoNimStateMounted = true
     mountIsoNimStatePanel(container, stateVMInstance)
     cerror "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
@@ -225,18 +225,11 @@ proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {
       # value.charts = JsAssoc[cstring, ChartComponent]{}
 
   self.completeMoveIndex += 1
-  self.redraw()
 
 proc redrawDynamically*(self: StateComponent) =
   # IsoNim is the primary renderer. All DOM updates are handled by
   # IsoNim reactive effects when the store signals change (via
   # syncStoreLocals). No Karax DOM manipulation needed.
-  discard
-
-method redrawForSinglePage*(self: StateComponent) =
-  # IsoNim is the primary renderer. Data flow:
-  # registerLocals -> syncStoreLocals -> store signals ->
-  # IsoNim reactive effects automatically update the DOM.
   discard
 
 const LOCALS_RR_DEPTH_LIMIT: int = 7
@@ -255,14 +248,10 @@ proc loadLocals*(self: StateComponent) =
   self.api.emit(CtLoadLocals, arguments)
 
 method onMove(self: StateComponent) {.async.} =
-  # The legacy self.loadLocals() call has been removed.  Data loading
-  # is now driven by the StateVM's auto-load effect which fires when
-  # syncStoreDebuggerPosition (called in onCompleteMove) updates the
-  # store's rrTicks signal.  The effect calls store.requestLocals()
-  # which sends the ct/load-locals command through the real backend.
-  # The response still arrives via the CtLoadLocalsResponse event-bus
-  # subscription → registerLocals, so rendering is unchanged.
-  self.redraw()
+  # Data loading is driven by the StateVM's auto-load effect which fires
+  # when syncStoreDebuggerPosition (called in onCompleteMove) updates the
+  # store's rrTicks signal. IsoNim reactive effects handle all DOM updates.
+  discard
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api

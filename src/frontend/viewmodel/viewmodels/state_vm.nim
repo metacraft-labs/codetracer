@@ -169,6 +169,6 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
       {.emit: "console.error('[PIPELINE] StateVM.autoLoad: storeId=' + `diagStoreId` + ' rrTicks=' + `ticks` + ' watches=' + `watches`.length);".}
       # No rrTicks guard — DB-based traces always have rrTicks=0.
       # RequestTracker deduplicates redundant backend requests.
-        store.requestLocals(ticks, watchExpressions = watches)
+      store.requestLocals(ticks, watchExpressions = watches)
 
     vm

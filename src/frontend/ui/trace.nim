@@ -84,18 +84,17 @@ proc tryMountIsoNimTimelinePanel() =
   ## Mount the IsoNim timeline panel view into the GoldenLayout-managed
   ## timeline component container. The container is created by
   ## GoldenLayout with the id `timelineComponent-0`. The IsoNim view
-  ## replaces all Karax content and becomes the primary renderer,
-  ## creating the `div#timeline` that the legacy render() produced.
+  ## is the primary renderer — no Karax renderer is involved.
   ##
   ## After mounting:
   ## - `isoNimTimelineMounted` is set to true
-  ## - The Karax render() in ui_js.nim returns a minimal stub
-  ## - The kxiMap entry is removed so redrawAll() skips this component
   ##
   ## Safe to call multiple times — mounts only once.
   if isoNimTimelineMounted or timelineVMInstance.isNil:
     return
 
+  # Wait for the DOM container to exist. GoldenLayout creates it when
+  # the component is registered. IsoNim mounts directly into it.
   let key = cstring"timelineComponent-0"
   var timelineRetryCount = 0
   proc doMount() =
@@ -103,14 +102,13 @@ proc tryMountIsoNimTimelinePanel() =
       return
     timelineRetryCount += 1
     let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+    if dom_api.isNodeNil(dom_api.Node(container)):
       if timelineRetryCount > 200:
         clog "IsoNim timeline panel: not ready after 200 retries, giving up"
         return
       discard setTimeout(proc() = doMount(), 10)
       return
 
-    kxiMap.del(key)
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)

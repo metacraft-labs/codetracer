@@ -59,9 +59,14 @@ import ../viewmodels/calltrace_vm
 proc makeSelectHandler(vm: CalltraceVM; lineIndex: int64): proc() =
   ## Factory to create a click handler with its own closure environment,
   ## avoiding the Nim closure-in-loop capture issue.
+  ## Matches the legacy Karax calltrace where a single click on `.call-text`
+  ## both selects the entry AND navigates (calltraceJump) to its source
+  ## location. Without the navigation, Playwright's `activate()` would
+  ## select the row but the editor would not open the target file.
   let idx = lineIndex
   result = proc() =
     vm.selectEntry(some(idx))
+    vm.doubleClickEntry(idx)
 
 proc makeDoubleClickHandler(vm: CalltraceVM; lineIndex: int64): proc() =
   ## Factory to create a double-click handler with its own closure environment.

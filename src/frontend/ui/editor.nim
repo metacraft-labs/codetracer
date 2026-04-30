@@ -1954,10 +1954,9 @@ proc tryMountIsoNimEditorPanel(self: EditorViewComponent) =
   ##
   ## This must be called AFTER Karax has rendered the container and
   ## Monaco has been initialised (i.e. `tabInfo.monacoEditor` is not nil).
-  ## The Karax-rendered element already has the correct id, class,
-  ## data-label and tabindex attributes. We simply remove the kxiMap
-  ## entry so `redrawAll()` no longer triggers Karax VDOM diffing for
-  ## this component (which would corrupt the Monaco-managed DOM).
+  ## We remove the kxiMap entry so `redrawAll()` no longer triggers
+  ## Karax VDOM diffing for this component (which would corrupt the
+  ## Monaco-managed DOM).
   ##
   ## The per-redraw work (flow, styles, test actions) is triggered from
   ## `onCompleteMove` directly via `editorAfterRedraw`.

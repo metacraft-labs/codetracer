@@ -83,7 +83,10 @@ export async function assertCallTraceNavigation(
   expectedFile: string,
 ): Promise<void> {
   const layout = new LayoutPage(page);
-  await layout.waitForBaseComponentsLoaded();
+  // Wait only for the calltrace component — not all base components.
+  // Some traces (e.g. Python sudoku) have slow event-log loading which
+  // would consume the entire test timeout if we waited for everything.
+  await layout.waitForCallTraceLoaded();
 
   const callTrace = (await layout.callTraceTabs())[0];
   await clickTabButton(callTrace.tabButton());

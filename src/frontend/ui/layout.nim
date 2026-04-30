@@ -223,8 +223,11 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
 
-  # remove component karax instance
-  discard jsDelete(kxiMap[convertComponentLabel(content, id)])
+  # remove component karax instance (only for components that still use Karax,
+  # e.g. editor tabs — IsoNim GL components no longer have kxiMap entries)
+  let label = convertComponentLabel(content, id)
+  if kxiMap.hasKey(label):
+    discard jsDelete(kxiMap[label])
 
   # remove component from open components registry from the same content type (if there is any)
   if data.ui.openComponentIds[content].find(id) != -1:
@@ -477,7 +480,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
         discard component.afterInit()
 
-      discard windowSetTimeout((proc = redrawAll()), 200)), 200)
+      ), 200)
 
   layout.registerComponent(cstring"genericUiComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:
@@ -515,13 +518,24 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
 
+    # IsoNim-migrated components (Calltrace, State, EventLog, Timeline)
+    # mount directly into the GoldenLayout container — no Karax
+    # setRenderer needed. Other components still use Karax rendering.
+    let isIsoNimComponent = state.content in {
+      Content.Calltrace,
+      Content.State,
+      Content.EventLog,
+      Content.Timeline,
+    }
+
     # When a background tab becomes visible, force Karax to redraw into the
-    # now-visible DOM element.  Without this, panels like BUILD, PROBLEMS and
-    # SEARCH RESULTS stay blank if they were initialised while hidden.
-    let label = state.label
-    container.on(cstring"show") do ():
-      if kxiMap.hasKey(label):
-        redrawSync(kxiMap[label])
+    # now-visible DOM element. Only needed for non-IsoNim components that
+    # still use Karax rendering.
+    if not isIsoNimComponent:
+      let label = state.label
+      container.on(cstring"show") do ():
+        if kxiMap.hasKey(label):
+          redrawSync(kxiMap[label])
 
     var containerId: cstring
     containerId = state.label
@@ -529,7 +543,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     discard windowSetTimeout((proc =
       if not data.ui.componentMapping[state.content][state.id].isNil:
         let component = data.ui.componentMapping[state.content][state.id]
-        if state.content != Content.Shell:
+
+        if not isIsoNimComponent and state.content != Content.Shell:
           kxiMap[state.label] = setRenderer(
             (proc: VNode = component.render()),
             containerId,
@@ -543,7 +558,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             discard shellComponent.createShell()
 
         discard component.afterInit()
-      discard windowSetTimeout((proc = redrawAll()), 200)), 200)
+      ), 200)
 
   layout.loadLayout(initialLayout)
 

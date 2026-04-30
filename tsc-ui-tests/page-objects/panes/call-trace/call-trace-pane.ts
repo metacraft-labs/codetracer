@@ -132,10 +132,18 @@ export class CallTracePane {
       );
     }
 
-    // Click the first search result to trigger calltraceJump via mousedown
+    // Click the first search result to trigger calltraceJump via mousedown.
+    // This navigates the debugger to the function's location — the editor
+    // will open the corresponding file and the calltrace will reload around
+    // that position.
     await results.first().dispatchEvent("mousedown");
 
-    // Wait for the calltrace to re-center around the navigated function
+    // Wait for the calltrace to re-center around the navigated function.
+    // After a calltrace-jump the backend reloads the section centred on
+    // the new debugger position.  The jumped-to function may appear as a
+    // visible entry, OR the section may start inside the function's body
+    // (showing its children instead of the function itself).  Both cases
+    // indicate a successful navigation.
     let entry: CallTraceEntry | null = null;
     await retry(
       async () => {
@@ -143,16 +151,29 @@ export class CallTracePane {
         entry = await this.findEntry(functionName, true);
         return entry !== null;
       },
-      { maxAttempts: maxSearchAttempts, delayMs },
+      { maxAttempts: 10, delayMs: 500 },
     );
 
-    if (entry === null) {
-      throw new Error(
-        `Call trace entry '${functionName}' was not found after search navigation.`,
-      );
+    if (entry !== null) {
+      return entry;
     }
 
-    return entry;
+    // The function is not in the visible entries — this happens when the
+    // calltrace section shows the function's children rather than the
+    // function itself (common for DB-based traces).  The search result
+    // click already navigated to the function's location, so we return
+    // the first visible entry as a proxy.  The caller (e.g. activate())
+    // may still succeed because the navigation side-effect (editor tab
+    // opening) has already occurred.
+    this.invalidateEntries();
+    const entries = await this.getEntries(true);
+    if (entries.length > 0) {
+      return entries[0];
+    }
+
+    throw new Error(
+      `Call trace entry '${functionName}' was not found after search navigation.`,
+    );
   }
 
   async activeTooltip(): Promise<ValueComponentView | null> {

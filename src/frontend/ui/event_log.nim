@@ -111,6 +111,9 @@ proc tryMountIsoNimEventLogPanel() =
     cerror "tryMountIsoNimEventLogPanel: skipping (eventLogComponentRef is nil)"
     return
 
+  # Wait for the DOM container to exist. GoldenLayout creates it when
+  # the component is registered. IsoNim mounts directly into it —
+  # no Karax renderer is involved.
   let key = cstring"eventLogComponent-0"
   var eventLogRetryCount = 0
   proc doMount() =
@@ -118,17 +121,13 @@ proc tryMountIsoNimEventLogPanel() =
       return
     eventLogRetryCount += 1
     let container = dom_api.getElementById(dom_api.document, key)
-    # Wait for both the GoldenLayout container and the Karax kxiMap
-    # entry (created by setRenderer in a 200ms windowSetTimeout).
-    if dom_api.isNodeNil(dom_api.Node(container)) or not kxiMap.hasKey(key):
+    if dom_api.isNodeNil(dom_api.Node(container)):
       if eventLogRetryCount > 200:
         cerror "tryMountIsoNimEventLogPanel: not ready after 200 retries, giving up"
         return
       discard setTimeout(proc() = doMount(), 10)
       return
 
-    # Remove the Karax renderer so redrawAll() skips this component.
-    kxiMap.del(key)
     let containerNode = dom_api.Node(container)
     while not dom_api.isNodeNil(containerNode.firstChild):
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
@@ -136,10 +135,6 @@ proc tryMountIsoNimEventLogPanel() =
     isoNimEventLogMounted = true
 
     let comp = eventLogComponentRef
-    # Null the Karax instance reference so that self.redraw() (called
-    # from onUpdatedTable, onUpdatedEvents, etc.) is a no-op instead
-    # of triggering Karax to re-render the empty stub over IsoNim content.
-    comp.kxi = nil
     let denseId = "eventLog-" & $comp.id & "-dense-table-" & $comp.index
     let detailedId = "eventLog-" & $comp.id & "-detailed-table-" & $comp.index
     let searchId = "eventLog-" & $comp.id & "-search"
@@ -158,24 +153,6 @@ proc tryMountIsoNimEventLogPanel() =
           comp.eventLogAfterRedraws()
       )
       cerror "tryMountIsoNimEventLogPanel: mount COMPLETE in #eventLogComponent-0"
-
-      # GoldenLayout's genericUiComponent callback calls setRenderer
-      # inside a 200ms windowSetTimeout.  If we mounted BEFORE that
-      # timeout fired, the kxiMap.del above was a no-op (the entry
-      # didn't exist yet).  When the timeout fires, setRenderer adds
-      # the kxiMap entry, and the next redrawAll() would let Karax
-      # re-render its empty stub — wiping out the IsoNim content.
-      # Poll for and remove late kxiMap entries so the IsoNim-managed
-      # DOM is never overwritten.
-      proc deferredKxiCleanup(attempt: int) =
-        if attempt > 20:
-          return
-        if kxiMap.hasKey(key):
-          kxiMap.del(key)
-        else:
-          discard setTimeout(proc() = deferredKxiCleanup(attempt + 1), 50)
-
-      discard setTimeout(proc() = deferredKxiCleanup(0), 50)
 
     except:
       cerror "tryMountIsoNimEventLogPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
