@@ -32,6 +32,8 @@ when not defined(js):
 
 import isonim/web/dom_api as isonim_dom
 import isonim/web/web_renderer
+import isonim/dsl/ui
+import isonim/core/computation  # createRenderEffect — emitted by the DSL
 
 import ../session_vm
 
@@ -80,20 +82,15 @@ proc addPanelSection(r: WebRenderer; parent: isonim_dom.Element;
   ##   </div>
   ##
   ## Returns the inner content div so the caller can mount the panel into it.
-  let section = r.createElement("div")
-  r.setAttribute(section, "class", "isonim-panel-section")
-  r.setAttribute(section, "id", "isonim-section-" & panelId)
+  var content: isonim_dom.Element
+  let section = ui(r):
+    tdiv(class = "isonim-panel-section",
+         id = "isonim-section-" & panelId):
+      h3(class = "isonim-section-header"):
+        text title
+      tdiv(ref = content, class = "isonim-section-content"):
+        discard
   r.appendChild(parent, section)
-
-  let header = r.createElement("h3")
-  r.setAttribute(header, "class", "isonim-section-header")
-  r.setTextContent(header, title)
-  r.appendChild(section, header)
-
-  let content = r.createElement("div")
-  r.setAttribute(content, "class", "isonim-section-content")
-  r.appendChild(section, content)
-
   content
 
 # ---------------------------------------------------------------------------
@@ -119,9 +116,9 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   let r = WebRenderer()
 
   # App header — identifies this as the IsoNim rendering surface
-  let appHeader = r.createElement("div")
-  r.setAttribute(appHeader, "class", "isonim-app-header")
-  r.setTextContent(appHeader, "IsoNim Rendering (experimental)")
+  let appHeader = ui(r):
+    tdiv(class = "isonim-app-header"):
+      text "IsoNim Rendering (experimental)"
   r.appendChild(root, appHeader)
 
   # Debug controls are mounted separately into `#isonim-debug-controls`
