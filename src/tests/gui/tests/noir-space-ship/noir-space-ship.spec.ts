@@ -125,6 +125,38 @@ function sleep(ms: number): Promise<void> {
 // Tests
 // ---------------------------------------------------------------------------
 
+// FAILING (timing-flake, 16 of ~18 tests): 2026-04-30 — every test in
+// this suite that performs more than a basic editor check fails on
+// `CallTracePane.clickTab` with "Element is outside of the viewport"
+// or hits the 7-second `waitForReady` 60-attempt limit on the
+// calltrace lines container. The trace records and the editor opens
+// (e.g. "editor loaded main.nr file" passes), but subsequent panel
+// interactions race against `nargo`'s slower trace generation: the
+// panels mount before the calltrace data has been published, the
+// page object scrolls into view to click, and GoldenLayout reflows
+// the tab strip out from under it.
+//
+// The handoff documents this as the long-standing noir-space-ship
+// flake (~16 tests, timing-dependent, hardened with clickTab() force
+// fallback but still flaky under sweep load). Targeted reruns of the
+// individual failing tests sometimes pass; the full suite essentially
+// never passes end-to-end on a busy CI box.
+//
+// TODO: lower flake to zero by:
+//   1. Wait for an explicit "calltrace ready" signal (e.g. a
+//      VM `dataLoaded`-style memo) before any `.clickTab()` —
+//      `waitForReady` polling for `.calltrace-call-line` count > 0
+//      catches the populated state but still races on tab visibility.
+//   2. Replace direct `.clickTab()` calls inside the test body with
+//      a helper that retries the tab click via `force: true` if
+//      `clickTab` throws — same hardening already in place for
+//      `CallTracePane.clickTab` itself, but the per-test
+//      sequence (clickTab → invalidate → expand → activate) still
+//      has unguarded steps.
+//   3. Pre-record the noir trace once at suite setup and reuse it
+//      across all 18 tests rather than re-recording per test (each
+//      retry currently re-runs `nargo trace`, multiplying flake
+//      probability).
 test.describe("NoirSpaceShip", () => {
   test.setTimeout(90_000);
   test.describe.configure({ retries: 2 });

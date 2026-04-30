@@ -23,6 +23,17 @@ test.describe("ProgramAgnostic", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
 
+  // FAILING: 2026-05-01 — the inner `retry()` waits for
+  // `table.dataTable tbody tr` count > 0, which is the populated
+  // event-log state. For noir_space_ship the DataTables widget mounts
+  // (the `table.dataTable` exists) but the body never gets rows
+  // populated within the retry budget. Same root cause as the
+  // page_object.spec.ts "Event Log Rows" failure and the noir_example
+  // event-count fixme: DB-trace event log does not flow into the
+  // DataTables tbody.
+  // TODO: this test will start passing automatically once the
+  // DB-trace event-log loader is fixed (see noir_example.spec.ts
+  // "expected event count" TODO). No action needed in this file.
   test("view menu opens event log and scratchpad", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();

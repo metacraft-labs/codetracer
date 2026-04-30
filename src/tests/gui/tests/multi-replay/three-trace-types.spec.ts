@@ -345,6 +345,21 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
   // Session 0 is loaded by the fixture (Python DB trace).
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
 
+  // FAILING: 2026-05-01 — long-running multi-session test (~70 s per
+  // attempt, 2 attempts due to `retries: 1`). All three sessions
+  // record successfully, the C/RR trace metadata is verified, and the
+  // first-phase assertions pass. The test then steps in session 0 and
+  // checks the new line — under sweep load the step does not register
+  // ("step did not change line (known limitation — replay may have
+  // been stopped)") and the subsequent panel/IPC checks time out.
+  // The handoff documents this as a multi-replay flake (~6 multi-replay
+  // failures in the historical baseline; this one is the most stubborn).
+  // TODO: stabilise step-after-launch in multi-session traces. Two
+  // angles: (a) wait for an explicit `complete-move` event before the
+  // step's position assertion (the fixture already exposes a similar
+  // `waitForReady` helper); (b) skip this test under
+  // CODETRACER_DB_TESTS_ONLY-style env when the multi-session DAP
+  // replay is incomplete on the build-host display server.
   test("Python DB + C/RR + MCR portable in separate tabs with full verification", async ({ ctPage }, testInfo) => {
     // -----------------------------------------------------------------
     // Guard: skip if the RR backend is not available.

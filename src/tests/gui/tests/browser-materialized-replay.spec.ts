@@ -21,6 +21,23 @@ test.describe("browser-materialized-replay — browser web mode for Python DB tr
     deploymentMode: "web",
   });
 
+  // FAILING: 2026-04-30 (entire describe block) — the equivalent
+  // C-trace web-mode tests (`browser-mcr-replay.spec.ts`) pass cleanly
+  // for editor + event log, so the bug is specific to the Python DB
+  // trace pipeline running through `ct host`. Fail mode: the editor
+  // shell loads but `assertEditorLoadsFile` hits its timeout because
+  // the trace bytes are loaded into the in-memory VFS but the WASM
+  // DAP server never publishes a `loaded`/`stopped` event back to the
+  // renderer for DB traces — Monaco never receives main.py contents.
+  // The same trace replays fine in the native Electron path
+  // (sudoku/python-sudoku.spec.ts records and replays it locally).
+  // TODO: trace the WASM `replay-server` boot path for DB traces in
+  // `src/db-backend/src/wasm.rs` / `dap_server.rs`. The `setup() ->
+  // run_to_entry() -> complete_move()` sequence runs for `.ct` traces
+  // (browser-mcr-replay passes); for materialized DB traces the same
+  // sequence either is not invoked or its events do not propagate
+  // through the WebSocket bridge. Compare the launch handler against
+  // the MCR path and add the missing `complete_move()` emission.
   test("editor loads main.py", async ({ ctPage }) => {
     await helpers.assertEditorLoadsFile(ctPage, "main.py");
   });

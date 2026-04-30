@@ -57,6 +57,18 @@ test.describe("wasm example — state and navigation", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
+  // FAILING: 2026-04-30 — `#code-state-line-0` never appears for WASM DB
+  // traces. The trace records and Electron launches successfully (record
+  // ~250ms, components load ~1s) but the state panel's code-state line
+  // is missing from the DOM. The same code path renders correctly for
+  // C / Rust / Python sudoku traces, so this is a WASM-specific gap in
+  // the state-panel population — likely a `LangRustWasm` branch that
+  // never feeds StatePanelComponent the current location.
+  // TODO: investigate why state panel isn't populated for LangRustWasm
+  // traces. Look for the path in `state.nim` / `viewmodel/store/replay_data_store.nim`
+  // that populates `codeStateLine`; it likely conditions on the language
+  // having an RR backend or DB locals API that wasm-recorder doesn't
+  // implement.
   test("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statePanel = new StatePanel(ctPage);
@@ -71,6 +83,15 @@ test.describe("wasm example — state and navigation", () => {
     await expect(statePanel.codeStateLine()).toContainText(`${ENTRY_LINE} | `);
   });
 
+  // FAILING: 2026-04-30 — clicking `#next-debug` is intercepted by the
+  // jstree filesystem panel ("element intercepts pointer events"). The
+  // GoldenLayout overlap between the bottom status strip and the
+  // filesystem tree leaves part of the tree on top of the debug
+  // toolbar at certain viewport sizes under Xvfb.
+  // TODO: either give `#next-debug` a higher z-index than the
+  // filesystem icons, or have the page object call .click({ force: true })
+  // when actionability fails. The page object already does this for
+  // `clickTab`; replicate the pattern for the debug-step buttons.
   test("state panel supports integer values", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
@@ -100,6 +121,9 @@ test.describe("wasm example — state and navigation", () => {
     expect(values.y.typeText).toBe("i32");
   });
 
+  // FAILING: 2026-04-30 — same root cause as "state panel supports
+  // integer values": the debug-toolbar buttons are blocked by the
+  // jstree filesystem panel under Xvfb. See TODO above.
   test("continue", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
@@ -117,6 +141,9 @@ test.describe("wasm example — state and navigation", () => {
     expect(newLocation.line).toBeGreaterThanOrEqual(1);
   });
 
+  // FAILING: 2026-04-30 — same root cause: jstree filesystem panel
+  // intercepts the click on the debug-toolbar `#next-debug` button.
+  // See TODO above; the fix is shared across all debug-step actions.
   test("next", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));

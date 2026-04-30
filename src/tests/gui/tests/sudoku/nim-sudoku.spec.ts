@@ -23,6 +23,11 @@ test.describe("NimSudoku", () => {
     await helpers.assertEventLogPopulated(ctPage);
   });
 
+  // FAILING: 2026-05-01 — `callTrace.tabButton().click()` (raw click)
+  // bypasses the page-object `clickTab()` viewport fallback. Same
+  // root cause documented in fortran-sudoku.spec.ts; same one-line
+  // fix: replace with `await callTrace.clickTab()`.
+  // TODO: switch to `await callTrace.clickTab()`.
   test("call trace has Nim runtime entries", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
@@ -56,6 +61,11 @@ test.describe("NimSudoku", () => {
     }
   });
 
+  // FAILING: 2026-05-01 — `statePane.tabButton().click()` raw click
+  // hits the same viewport-clipping issue. Replace with the
+  // page-object `clickTab()` (or `click({ force: true })`) to pick up
+  // the viewport-fallback retry path used by other panes.
+  // TODO: switch to `await clickTabButton(statePane.tabButton())`.
   test("variable inspection - state pane has variables", async ({
     ctPage,
   }) => {

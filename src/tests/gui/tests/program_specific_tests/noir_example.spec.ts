@@ -32,6 +32,17 @@ test.describe("noir example — state and navigation", () => {
   test.setTimeout(90_000);
   test.use({ sourcePath: "noir_example/", launchMode: "trace" });
 
+  // FAILING: 2026-04-30 — `loadedEventLog` waits 30s and times out
+  // because the event log footer never reports a non-zero row count
+  // for noir DB traces. Trace recording is fast (~170ms), Electron
+  // launches fine, but the DataTables footer counter stays at 0 — the
+  // same symptom the wasm_example "expected event count" test
+  // documents (see test.fixme there).
+  // TODO: The DB-trace event-log population path doesn't update the
+  // `.data-tables-footer-rows-count` element for noir/wasm. Find where
+  // the footer is updated for RR-based traces (likely in `event_log.nim`
+  // / `eventLogAfterRedraws`) and ensure the same code runs after the
+  // DB-trace event load handler in the IsoNim event_log_view too.
   test("expected event count", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 
@@ -49,6 +60,17 @@ test.describe("noir example — state and navigation", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
+  // FAILING: 2026-04-30 — `readyOnEntry` waits up to 30s for
+  // `.location-path` to appear in the status bar. For noir DB traces
+  // the status bar never receives the entry-point location, so the
+  // helper times out. The trace itself is recorded successfully and
+  // Electron launches; the missing piece is the StatusBar path
+  // update for DB traces (RR traces work fine in the same suite).
+  // TODO: investigate the entry-point status update for DB traces in
+  // `status.nim` / the StatusBar component. Likely conditioned on RR
+  // tick events that DB traces never emit. The fix is to also update
+  // the status bar from `CtCompleteMove` events (which DB traces do
+  // emit) on initial load.
   test("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statePanel = new StatePanel(ctPage);

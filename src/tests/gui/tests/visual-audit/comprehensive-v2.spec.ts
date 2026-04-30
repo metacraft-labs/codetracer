@@ -520,6 +520,19 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await dismissOverlay(ctPage);
   });
 
+  // FAILING: 2026-05-01 — `#auto-hide-strip-left .auto-hide-strip-tab`
+  // never becomes visible. The pin-to-left helper succeeds (the
+  // `__ctPinPanel` IPC returns true), but the strip never receives a
+  // child tab — so the auto-hide-strip's `has-tabs` class is set
+  // (the previous `expect(leftStrip).toHaveClass(/has-tabs/)`
+  // assertion passes) yet `.auto-hide-strip-tab` is empty.
+  // TODO: investigate the auto-hide pin → strip-tab rendering path.
+  // Likely a regression in the auto-hide strip view that lays out the
+  // class but skips the tab DOM. Check
+  // `src/frontend/ui/auto_hide_strip*.nim` (or similar) for a render
+  // proc that reads from the same component-mapping the helper just
+  // pinned to. The other 7 screens of this Visual Audit suite pass,
+  // so the rest of the layout pipeline works.
   test("Screen 6: Auto-hide left overlay (FILESYSTEM)", async ({
     ctPage,
   }) => {
@@ -634,6 +647,21 @@ test.describe("Visual Audit v2 — DeepReview", () => {
   );
   test.use({ launchMode: "deepreview", deepreviewJsonPath: reviewPath });
 
+  // FAILING: 2026-05-01 — `waitForSelector` for either
+  // `.deepreview-file-item` or `div[id^="filesystemComponent"]`
+  // exhausts its 30s budget. The DeepReview launchMode does load
+  // (`# launching deepreview mode` is logged) but neither the
+  // filesystem panel nor any deepreview file items render in the
+  // headless harness. Targeted reruns of the deepreview/* suite all
+  // pass — that suite uses fixture-injected review JSON in the
+  // standard ctPage flow. The visual-audit launch path goes through
+  // a different bootstrap.
+  // TODO: trace the deepreview-mode launch path in
+  // `src/frontend/index.nim` to find why the filesystem component
+  // does not mount when entered via `launchMode: "deepreview"`. The
+  // deepreview-gui.spec.ts suite (113 passing tests) uses the same
+  // fixture JSON, so the difference is in how comprehensive-v2 boots
+  // Electron in deepreview mode.
   test("Screen 8: DeepReview layout", async ({ ctPage }) => {
     // Wait for DeepReview file items to load. The deepreview mode renders
     // changed files in the filesystem panel with diff badges.

@@ -49,6 +49,18 @@ test("page object test", async ({ ctPage }) => {
   await extractLayoutPageModel(layout);
 });
 
+// FAILING: 2026-05-01 — `getRows()` returns 0 because the test calls
+// it immediately after `readyOnEntry`, before the noir trace's event
+// log has finished streaming. The matching `expected event count`
+// test in noir_example.spec.ts shows the same DataTables footer
+// reads 0 even after a 30s wait, which is a deeper bug in the
+// DB-trace event-log population path (also documented there).
+// TODO: either (a) use the existing `loadedEventLog(ctPage)` helper
+// in place of `readyOnEntry` so the test waits for the row count to
+// reach > 0, or (b) wait until the underlying DB-trace event-log
+// loader is fixed so the row count actually grows. Option (a) is the
+// lighter fix and will start producing meaningful failures once the
+// loader is correct.
 test("Event Log Rows", async ({ ctPage }) => {
   await readyOnEntry(ctPage);
 

@@ -27,6 +27,15 @@ test.describe("FortranSudoku", () => {
     await helpers.assertEventLogPopulated(ctPage);
   });
 
+  // FAILING: 2026-05-01 — direct `callTrace.tabButton().click()` here
+  // bypasses the `CallTracePane.clickTab` page-object method that has
+  // viewport-fallback hardening, so it throws "element is outside of
+  // the viewport" 60 times in a row. Most other call-trace tests use
+  // `clickTab()` and pass.
+  // TODO: replace `callTrace.tabButton().click()` with
+  // `await callTrace.clickTab()` to pick up the `force: true`
+  // fallback. The same one-line fix applies to
+  // nim-sudoku.spec.ts "call trace has Nim runtime entries".
   test("call trace has entries", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();

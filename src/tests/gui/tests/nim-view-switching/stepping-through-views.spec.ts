@@ -361,6 +361,21 @@ test.describe("SteppingThroughViews", () => {
     }
   });
 
+  // FAILING (PRE-EXISTING): 2026-04-30 — `switchToInstructionsView`
+  // never reports success: the Nim source -> assembly view switch
+  // requires the debugger to expose an "Assembly name" for the
+  // current frame, which the current debugger build does not provide
+  // for Nim traces. The retry exhausts 10 attempts and the test
+  // intends to call `test.skip` from inside the test body, but the
+  // skip happens too late — the retry's `Error: Condition was not
+  // satisfied after 10 attempts.` is thrown before the skip lands.
+  // Listed as "Nim view switching: assembly view (pre-existing, not
+  // related to IsoNim migration)" in the project handoff.
+  // TODO: fix the underlying assembly-name resolution in the
+  // db-backend / native-backend handler for Nim traces (the C-view
+  // works, the assembly-view doesn't), OR convert this to a top-level
+  // `test.skip(!assemblyAvailable, ...)` guard at collection time so
+  // the suite reports a skip rather than a thrown failure.
   test("step forward in assembly view", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
@@ -407,6 +422,9 @@ test.describe("SteppingThroughViews", () => {
     expect(positionChanged).toBe(true);
   });
 
+  // FAILING (PRE-EXISTING): 2026-04-30 — same root cause as
+  // "step forward in assembly view"; the assembly-view switch never
+  // succeeds for Nim traces. See TODO above.
   test("step backward in assembly view", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
@@ -459,6 +477,18 @@ test.describe("SteppingThroughViews", () => {
     }
   });
 
+  // FAILING (PRE-EXISTING): 2026-04-30 — although this test does not
+  // require the assembly view, it shares the suite-level
+  // `waitForNimEditorReady` setup which is timing out under sweep
+  // load. The underlying issue is the same Nim-view stepping plumbing
+  // that also breaks the assembly-view tests. Targeted reruns are
+  // less flaky than the full sweep.
+  // TODO: stabilise the Nim source-line stepping path. The handoff
+  // notes this as a long-standing flake; consider increasing the
+  // `waitForNimEditorReady` timeout, adding a `complete-move` event
+  // wait between the editor-ready signal and the first step, or
+  // reproducing locally with `just test-gui tests/nim-view-switching/`
+  // to capture a deterministic failure.
   test("stepping in Nim view moves by Nim lines", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));

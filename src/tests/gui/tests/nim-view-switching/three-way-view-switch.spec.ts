@@ -308,6 +308,18 @@ test.describe("NimViewSwitching", () => {
     expect(statusPath).toMatch(/\.(c|h)$/);
   });
 
+  // FAILING (PRE-EXISTING): 2026-04-30 — `switchToInstructionsView`
+  // exhausts its 10 retries because the debugger never exposes an
+  // assembly name for the current Nim frame, so the view-switch
+  // command-palette command silently no-ops. The intended skip path
+  // (`test.skip(true, ...)` inside the body) cannot be reached after
+  // the retry helper has already thrown.
+  // TODO: Either (a) wire the db-backend / native-backend to expose
+  // an assembly name for Nim frames so ViewInstructions actually
+  // switches, or (b) move the assembly-availability probe into a
+  // collection-time skip guard at the top of the describe block, so
+  // the suite reports `skipped` rather than `failed` on machines
+  // where the trace lacks DWARF disassembly.
   test("switch to assembly view shows disassembly", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
@@ -362,6 +374,11 @@ test.describe("NimViewSwitching", () => {
     expect(asmContent.length).toBeGreaterThan(0);
   });
 
+  // FAILING (PRE-EXISTING): 2026-04-30 — same root cause as
+  // "switch to assembly view shows disassembly"; this test depends on
+  // the assembly-view switch working in order to verify
+  // line-vs-instruction granularity in the status bar after a step.
+  // See TODO above.
   test("view synchronization - stepping updates views consistently", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();

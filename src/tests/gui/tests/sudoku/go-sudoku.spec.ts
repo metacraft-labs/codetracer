@@ -22,6 +22,9 @@ test.describe("GoSudoku", () => {
     await helpers.assertCallTraceNavigation(ctPage, "main.main", "sudoku.go");
   });
 
+  // FAILING: 2026-05-01 — `#next-debug` click intercepted by jstree
+  // filesystem panel under Xvfb. See d-sudoku.spec.ts for the shared
+  // root cause and TODO.
   test("variable inspection testBoards", async ({ ctPage }) => {
     await helpers.assertFlowValueVisible(ctPage, "testBoards");
   });

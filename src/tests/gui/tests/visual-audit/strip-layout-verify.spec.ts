@@ -42,6 +42,15 @@ test.describe("Strip layout verification", () => {
   test.setTimeout(120_000);
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
 
+  // FAILING: 2026-05-01 — same root cause as
+  // comprehensive-v2.spec.ts "Screen 6: Auto-hide left overlay".
+  // After `pinToEdge("Left", 0)` the auto-hide strip's `has-tabs`
+  // class is set but the strip is empty / zero-width, so the
+  // `expect(leftStripBox!.width).toBeGreaterThanOrEqual(20)`
+  // assertion fails (width is 0).
+  // TODO: see comprehensive-v2.spec.ts "Screen 6" TODO. Fix the
+  // auto-hide pin → strip-tab rendering path; this test will pass
+  // automatically.
   test("strips tile with GL, bottom tabs in status bar", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
