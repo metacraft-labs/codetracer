@@ -8,6 +8,7 @@
 
 import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
+import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 test.describe("Search Results Panel", () => {
@@ -18,7 +19,7 @@ test.describe("Search Results Panel", () => {
   test.afterAll(() => restoreUserLayout());
 
   test("Search results panel renders", async ({ ctPage }) => {
-    const layout = new (await import("../../page-objects/layout-page")).LayoutPage(ctPage);
+    const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
@@ -63,7 +64,7 @@ test.describe("Search Results Panel", () => {
   });
 
   test("Empty state when no search performed", async ({ ctPage }) => {
-    const layout = new (await import("../../page-objects/layout-page")).LayoutPage(ctPage);
+    const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 

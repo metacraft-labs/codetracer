@@ -10,6 +10,7 @@
 import { test, expect, wait, codetracerInstallDir } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
+import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 test.describe("Problems Panel", () => {
@@ -20,7 +21,7 @@ test.describe("Problems Panel", () => {
   test.afterAll(() => restoreUserLayout());
 
   test("problems panel is present as auto-hide bottom tab", async ({ ctPage }) => {
-    const layout = new (await import("../../page-objects/layout-page")).LayoutPage(ctPage);
+    const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
@@ -37,7 +38,7 @@ test.describe("Problems Panel", () => {
   test("problems appear when build output contains errors", async ({
     ctPage,
   }) => {
-    const layout = new (await import("../../page-objects/layout-page")).LayoutPage(ctPage);
+    const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
@@ -86,7 +87,7 @@ test.describe("Problems Panel", () => {
   });
 
   test("filter buttons change visible problems", async ({ ctPage }) => {
-    const layout = new (await import("../../page-objects/layout-page")).LayoutPage(ctPage);
+    const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
 
