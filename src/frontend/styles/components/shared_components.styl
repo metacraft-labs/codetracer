@@ -1,7 +1,7 @@
 @import "../generated/index"
 
 generateSpacing(prefix, property)
-  for key in 0 2 4 6 8
+  for key in 0 1 2 4 6 8
     val = unit(key / 4, 'em')
 
     .{prefix}-{key}
@@ -46,6 +46,7 @@ generateGap(prefix)
   flex-shrink: 0 !important
   box-sizing: border-box
   flex: 0 0 1.75em
+  gap: 0.25em
 
 [class*="ct-gap-"]
   display: flex

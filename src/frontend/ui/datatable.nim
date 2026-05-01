@@ -270,7 +270,7 @@ proc tableFooter*(table: DataTableComponent): VNode =
     tdiv(class = "data-tables-footer-info"):
       text "Rows"
       input(
-        class = "ct-input-small mx-2",
+        class = "data-tables-footer-input ct-input-small mx-2",
         onkeydown = proc(ev: KeyboardEvent, et: VNode) =
           if ev.keyCode == ENTER_KEY_CODE:
             table.inputFieldChange = false
