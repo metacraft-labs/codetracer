@@ -46,11 +46,12 @@ test.describe("RubySudoku", () => {
     );
   });
 
-  // FAILING (2026-05-01): same empty-calltrace recorder gap as
-  // the previous test (TODO 5.2(m)), plus the IsoNim calltrace
-  // view does not yet render the per-argument `.call-arg` DOM
-  // elements that CallTraceEntry.arguments() expects (it emits a
-  // static "()" placeholder).  See TODO 5.2(l) in handoff.
+  // PASSING after 1.22 (CTFS register_call_arg pipeline):
+  // the Ruby native recorder now stages each method parameter via
+  // `TraceWriter::register_call_arg` immediately after the matching
+  // `register_variable_cbor`, so the call record's args field
+  // reaches the frontend non-empty.  CallTraceEntry.arguments()
+  // returns the `board` argument as expected.
   test("variable inspection board via call trace argument", async ({
     ctPage,
   }) => {

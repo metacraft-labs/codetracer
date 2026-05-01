@@ -295,10 +295,48 @@ impl CTFSTraceReader {
                 children_keys.push(CallKey(child_key as i64));
             }
 
+            // Pull the captured call arguments via the structured FFI so
+            // the frontend can render `format_board(board=...)` instead of
+            // an empty `format_board()`.  The recorder stages each
+            // argument's (name, CBOR-encoded value) pair on the call
+            // record at write time; here we decode them back into
+            // `FullValueRecord`s sharing the same varname interning
+            // table that step variables use.
+            let arg_count = reader.call_arg_count(key);
+            let mut args: Vec<FullValueRecord> = Vec::with_capacity(arg_count as usize);
+            for arg_idx in 0..arg_count {
+                match reader.call_arg(key, arg_idx) {
+                    Ok((varname_id, data)) => {
+                        let value = if data.is_empty() {
+                            ValueRecord::None { type_id: TypeId(0) }
+                        } else {
+                            match cbor4ii::serde::from_reader::<ValueRecord, _>(data.as_slice()) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    log::warn!("call {key} arg {arg_idx}: CBOR decode failed: {e}, using Raw fallback");
+                                    ValueRecord::Raw {
+                                        r: format!("<cbor decode error: {e}>"),
+                                        type_id: TypeId(0),
+                                    }
+                                }
+                            }
+                        };
+                        args.push(FullValueRecord {
+                            variable_id: VariableId(varname_id as usize),
+                            value,
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!("call {key} arg {arg_idx}: read failed: {e}");
+                        break;
+                    }
+                }
+            }
+
             db.calls.push(DbCall {
                 key: CallKey(key as i64),
                 function_id: FunctionId(function_id as usize),
-                args: vec![], // TODO: call args not yet exposed via structured FFI
+                args,
                 return_value: ValueRecord::None { type_id: TypeId(0) }, // TODO: return values
                 step_id: StepId(entry_step as i64),
                 depth: depth as usize,

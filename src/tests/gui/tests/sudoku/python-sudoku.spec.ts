@@ -15,16 +15,15 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
 // As of 2026-05-01 the Python recorder venv is healthy again. The
 // editor / event-log / calltrace navigation smoke tests pass.
 //
-// FAILING (2 of 5 tests as of 2026-05-01):
-//   - "variable inspection board via call trace argument" — the
-//     calltrace navigation succeeds (the parent function is in the
-//     visible window after the autoLoad fix below) but the IsoNim
-//     calltrace view still emits a static `<div class="call-args">()
-//     </div>` per row instead of iterating the per-call args data.
-//     `CallTraceEntry.arguments()` returns []; the test fails waiting
-//     for a `board` argument.  See TODO 5.2(l).
+// FAILING (1 of 5 tests as of 2026-05-01):
 //   - "terminal output shows solved board" — terminal pane never gets
 //     populated for this DB trace; separate from calltrace.
+//
+// PASSING after 1.22 (CTFS register_call_arg pipeline):
+//   - "variable inspection board via call trace argument" — args now
+//     reach `CallTraceEntry.arguments()` via the
+//     `trace_writer_register_call_arg` Nim FFI and the new
+//     `ct_reader_call_arg` reader path.
 //
 // Structural calltrace fixes already in place:
 //   * caa8155d (1.14): `syncCalltraceData` passes the backend's
