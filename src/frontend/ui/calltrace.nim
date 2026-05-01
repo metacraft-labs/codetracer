@@ -543,7 +543,7 @@ proc searchCalltraceView(self: CalltraceComponent): VNode =
       self.submitCalltraceSearch()
 
   buildHtml(
-    tdiv(class = "calltrace-search")
+    tdiv(class = "calltrace-search ct-px-1")
   ):
     form(
       class = &"calltrace-search-form-{self.id}",
@@ -555,7 +555,7 @@ proc searchCalltraceView(self: CalltraceComponent): VNode =
       input(
         tabIndex = "0",
         id = self.calltraceSearchInputId(),
-        class = fmt"calltrace-search-input calltrace-search-input-{self.id} ct-input-panel ct-input-search-image",
+        class = fmt"calltrace-search-input calltrace-search-input-{self.id} ct-input-panel ct-px-2 ct-input-search-image",
         `type` = "text",
         value = if self.searchText.isNil: cstring"" else: self.searchText,
         placeholder = "Search",

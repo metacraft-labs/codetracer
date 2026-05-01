@@ -596,6 +596,7 @@ type
     service*:       EventLogService
     dropDowns*: array[EventDropDownBox, bool]
     focusedDropDowns*: array[EventDropDownBox, bool]
+    dropdownOutsideHandlerInstalled*: bool
     selectedKinds*: array[EventLogKind, bool]
     isOptionalColumnsMenuOpen*: bool
     resizeObserver*: ResizeObserver

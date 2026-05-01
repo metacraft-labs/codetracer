@@ -88,6 +88,14 @@ proc detailedId*(context: EventLogComponent): cstring =
 template local*(expression: untyped): untyped {.dirty.} =
   cstring(self.type.name[0 .. 0].toLowerAscii() & self.type.name[1..^10] & "-" & expression)
 
+proc stopPropagationSafe(e: Event) =
+  if not e.isNil and e.toJs != jsUndefined:
+    e.stopPropagation()
+
+proc preventDefaultSafe(e: Event) =
+  if not e.isNil and e.toJs != jsUndefined:
+    e.preventDefault()
+
 proc recalculateKinds(self: EventLogComponent)
 
 proc resizeEventLogHandler*(self: EventLogComponent) =
@@ -711,16 +719,18 @@ proc eventLogColumnView*(self: EventLogComponent, column: EventOptionalColumn): 
       span(class="checkmark")
       text $column
 
-proc switchEventKindSelection(self: EventLogComponent, kind: EventLogKind) =
+proc switchEventKindSelection(self: EventLogComponent, kind: EventLogKind, redraw: bool = true) =
   self.selectedKinds[kind] = not self.selectedKinds[kind]
-  self.redraw()
+  if redraw:
+    self.redraw()
 
-proc changeAllEventKinds(self: EventLogComponent, value: bool) =
+proc changeAllEventKinds(self: EventLogComponent, value: bool, redraw: bool = true) =
   for tag, _ in self.tags:
     for kind in tagKinds[tag]:
       self.selectedKinds[kind] = value
 
-  self.redraw()
+  if redraw:
+    self.redraw()
 
 proc isTagSelected(self: EventLogComponent, tag: EventTag): bool =
   var isChecked = true
@@ -732,13 +742,14 @@ proc isTagSelected(self: EventLogComponent, tag: EventTag): bool =
 
   return isChecked
 
-proc switchEventTagSelection(self: EventLogComponent, tag: EventTag, value: bool = false) =
+proc switchEventTagSelection(self: EventLogComponent, tag: EventTag, value: bool = false, redraw: bool = true) =
   let isChecked = if not value: not self.isTagSelected(tag) else: true
 
   for kind in tagKinds[tag]:
     self.selectedKinds[kind] = isChecked
 
-  self.redraw()
+  if redraw:
+    self.redraw()
 
 proc checkIndeterminateCheckbox(self: EventLogComponent, tag: EventTag): (bool, string) =
   var isChecked = true
@@ -786,24 +797,59 @@ proc isOnlyRecordedEventSelected(self: EventLogComponent): bool =
 
   return true
 
-proc onlyTrace(self: EventLogComponent) =
+proc onlyTrace(self: EventLogComponent, redraw: bool = true) =
   let traceTags = [EventTrace]
 
-  self.changeAllEventKinds(false)
+  self.changeAllEventKinds(false, redraw = false)
 
   for tag in traceTags:
-    self.switchEventTagSelection(tag, true)
+    self.switchEventTagSelection(tag, true, redraw = false)
 
-proc onlyRecordedEvent(self: EventLogComponent) =
+  if redraw:
+    self.redraw()
+
+proc onlyRecordedEvent(self: EventLogComponent, redraw: bool = true) =
   let eventTags = [EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents]
 
-  self.changeAllEventKinds(false)
+  self.changeAllEventKinds(false, redraw = false)
 
   for tag in eventTags:
-    self.switchEventTagSelection(tag, true)
+    self.switchEventTagSelection(tag, true, redraw = false)
+
+  if redraw:
+    self.redraw()
 
 proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox): VNode =
-  proc showDropdown(e: Event, et: VNode)
+  proc showDropdown()
+  proc hideDropdown()
+  proc installDropdownOutsideHandler()
+  proc refreshOpenDropdown() =
+    if self.dropDowns[event]:
+      showDropdown()
+  proc redrawEventLogAndDropdown() =
+    if self.kxi.isNil:
+      refreshOpenDropdown()
+      return
+
+    # The filter popup is mounted under document.body, so a normal component redraw
+    # updates the trigger state but not the popup DOM itself. Queue a popup refresh
+    # for the redraw completion so the visible checkmarks and active preset buttons
+    # stay in sync with selectedKinds on the same click.
+    self.kxi.afterRedraws.add(proc() =
+      refreshOpenDropdown()
+    )
+    self.redraw()
+  proc reloadEventLogTables(redrawComponent: bool = true) =
+    if redrawComponent:
+      redrawEventLogAndDropdown()
+    else:
+      refreshOpenDropdown()
+
+    if not self.denseTable.isNil and not self.denseTable.context.isNil:
+      self.denseTable.context.ajax.reload(nil, false)
+    if not self.detailedTable.isNil and not self.detailedTable.context.isNil:
+      self.detailedTable.context.ajax.reload(nil, false)
+    self.autoScrollUpdate = true
   let category = event
   let categoryName = ($event).toLowerAscii()
   let dropDownId = "category-image"
@@ -813,6 +859,45 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
   var dropDownContainerClass = "dropdown-container"
   var dropDownContainerId = "dropdown-container-id"
   var text = EVENT_LOG_BUTTON_NAMES[event]
+
+  proc isDropdownTarget(target: Node, dropdownElem: Element, filterButton: Element): bool =
+    var current = target
+
+    while not current.isNil:
+      if current == cast[Node](dropdownElem) or current == cast[Node](filterButton):
+        return true
+      current = current.parentNode
+
+    return false
+
+  proc installDropdownOutsideHandler() =
+    if self.dropdownOutsideHandlerInstalled:
+      return
+
+    self.dropdownOutsideHandlerInstalled = true
+    document.addEventListener(cstring"mousedown", proc(ev: Event) =
+      if not self.dropDowns[category]:
+        return
+
+      let dropdownElem = document.getElementById(dropDownContainerId)
+      let filterButton = document.getElementById(dropDownId)
+      if dropdownElem.isNil or filterButton.isNil:
+        self.dropDowns[category] = false
+        self.focusedDropDowns[category] = false
+        hideDropdown()
+        return
+
+      let target = cast[Node](ev.target)
+      if target.isNil:
+        return
+
+      if isDropdownTarget(target, dropdownElem, filterButton):
+        return
+
+      self.dropDowns[category] = false
+      self.focusedDropDowns[category] = false
+      hideDropdown()
+    )
 
   proc eventLogKindButtonCheckboxView(
     self: EventLogComponent,
@@ -828,7 +913,7 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
         "unchecked"
 
     buildHtml(
-      li(class = "dropdown-list-item")
+      tdiv(class = "dropdown-list-item")
     ):
       label(
         `for` = checkBoxName,
@@ -842,10 +927,8 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
           checked = toChecked(isChecked),
           value = ($kind),
           onchange = proc (e: Event, et: VNode) =
-            self.switchEventKindSelection(kind)
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
+            self.switchEventKindSelection(kind, redraw = false)
+            reloadEventLogTables()
         )
         span(
           class = "ct-checkmark",
@@ -877,7 +960,7 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
       self.switchEventTagSelection(tag)
 
     buildHtml(
-      li(class = "dropdown-list-item")
+      tdiv(class = "dropdown-list-item")
     ):
       label(
         `for` = checkBoxName,
@@ -891,10 +974,8 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
           checked = toChecked(isChecked),
           value = ($tag),
           onchange = proc (e: Event, et: VNode) =
-            self.switchEventTagSelection(tag)
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
+            self.switchEventTagSelection(tag, redraw = false)
+            reloadEventLogTables()
         )
         span(
           class = "ct-checkmark",
@@ -912,53 +993,14 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
     buildHtml(
       tdiv(class = dropDownContainerClass, id = dropDownContainerId)
     ):
-      ul(
-        id = dropDownListId,
-        class = dropDownListClass,
-        onmousedown = proc (ev: Event, et: VNode) =
-          ev.preventDefault(),
-        onclick = proc (ev: Event, et: VNode) =
-          ev.stopPropagation()
-      ):
-        tdiv(class = "dropdown-list-tag"):
-          for tag, _ in self.tags:
-            eventLogTagButtonCheckboxView(self, tag)
-        tdiv(class = "dropdown-kind-container"):
-          for tag, _ in self.tags:
-            tdiv(class = "dropdown-list-kind"):
-              for kind in tagKinds[tag]:
-                eventLogKindButtonCheckboxView(self, tag, kind)
       tdiv(class = "toggle-buttons"):
         button(
-          id = local("category-onlytrace"),
-          class = buttonClass & fmt" {activeTraceClass} ct-mx-2",
-          tabIndex = "0",
-          onmousedown = proc (e: Event, et: VNode) =
-            e.preventDefault(),
-          onclick = proc (e: Event, et: VNode) =
-            e.stopPropagation()
-            self.onlyTrace()
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et),
-        ):
-          text(EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyTrace])
-          tdiv(
-            id = "eventLog-tooltip-trace",
-            class = "custom-tooltip",
-          ): text("Display only trace logs: events that happened as part of the debugging")
-        button(
           id=local("category-only-recorded-event"),
-          class = buttonClass & fmt" {activeEventsClass} ct-mr-2",
+          class = buttonClass & fmt" {activeEventsClass}",
           tabIndex = "0",
-          onmousedown = proc (e: Event, et: VNode) =
-            e.preventDefault(),
           onclick = proc (e: Event, et: VNode) =
-            e.stopPropagation()
-            self.onlyRecordedEvent()
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
+            self.onlyRecordedEvent(redraw = false)
+            reloadEventLogTables()
         ):
           text(EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyRecordedEvent])
           tdiv(
@@ -966,29 +1008,53 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
             class = "custom-tooltip",
           ): text("Display only recorded events: events from the original record")
         button(
+          id = local("category-onlytrace"),
+          class = buttonClass & fmt" {activeTraceClass}",
+          tabIndex = "0",
+          onclick = proc (e: Event, et: VNode) =
+            self.onlyTrace(redraw = false)
+            reloadEventLogTables(),
+        ):
+          text(EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyTrace])
+          tdiv(
+            id = "eventLog-tooltip-trace",
+            class = "custom-tooltip",
+          ): text("Display only trace logs: events that happened as part of the debugging")
+        button(
           id = local("category-enabledisable"),
           class = buttonClass,
           tabIndex = "0",
-          onmousedown = proc (e: Event, et: VNode) =
-            e.preventDefault(),
           onclick = proc (e: Event, et: VNode) =
-            e.stopPropagation()
-            self.changeAllEventKinds(self.enableOrDisable())
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
+            self.changeAllEventKinds(self.enableOrDisable(), redraw = false)
+            reloadEventLogTables()
         ):
           text(if self.enableOrDisable(): "Enable All" else: "Disable All")
+      tdiv(id = dropDownListId, class = dropDownListClass):
+        for tag, _ in self.tags:
+          tdiv(class = "dropdown-list-row"):
+            tdiv(class = "dropdown-list-tag"):
+              eventLogTagButtonCheckboxView(self, tag)
+            tdiv(class = "dropdown-list-kind"):
+              for kind in tagKinds[tag]:
+                eventLogKindButtonCheckboxView(self, tag, kind)
 
-  proc showDropdown(e: Event, et: VNode) =
+  proc showDropdown() =
+    installDropdownOutsideHandler()
+
     var dropdownElem = document.getElementById(dropDownContainerId)
+    let renderedDropdown = vnodeToDom(dropdownVNode(), KaraxInstance())
 
     if dropdownElem == nil:
-      document.body.appendChild(vnodeToDom(dropdownVNode(), KaraxInstance()))
+      document.body.appendChild(renderedDropdown)
       dropdownElem = document.getElementById(dropDownContainerId)
     else:
-      dropdownElem.innerHTML = ""
-      dropdownElem.appendChild(vnodeToDom(dropdownVNode(), KaraxInstance()))
+      # Keep the body-mounted workaround, but refresh the popup in place.
+      # Nesting a second .dropdown-container inside the first one breaks with the
+      # new absolute-positioned styling and can clip the visible popup contents.
+      let dropdownParent = dropdownElem.parentNode
+      if dropdownParent != nil:
+        cast[Element](dropdownParent).replaceChild(cast[Node](renderedDropdown), cast[Node](dropdownElem))
+      dropdownElem = document.getElementById(dropDownContainerId)
 
     let filterButton = document.getElementById(dropDownId)
     let rect = filterButton.getBoundingClientRect()
@@ -998,10 +1064,10 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
     dropdownElem.style.left = &"{rect.left}px"
     dropdownElem.style.zIndex = 1000
     dropdownElem.style.display = "block"
+    self.dropDowns[category] = true
+    self.focusedDropDowns[category] = true
 
-    filterButton.focus()
-
-  proc hideDropdown(e: Event, et: VNode) =
+  proc hideDropdown() =
     let dropdownElem = document.getElementById(dropDownContainerId)
     if dropdownElem != nil:
       dropdownElem.style.display = "none"
@@ -1012,19 +1078,12 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
       class = dropDownClass,
       tabindex = "0",
       onclick = proc (e: Event, et: VNode) =
-        for categoryType, value in self.dropDowns:
-          if categoryType == category:
-            self.dropDowns[categoryType] = not self.dropDowns[category]
-        if not self.dropDowns[category] and self.focusedDropDowns[category]:
-          cast[Element](e.target).blur(),
-      onfocus = proc (e: Event, et: VNode) =
-        self.focusedDropDowns[category] = true
-        showDropdown(e, et),
-      onblur = proc (e: Event, et: VNode) =
-        if self.dropDowns[category] or self.focusedDropDowns[category]:
+        if self.dropDowns[category]:
           self.focusedDropDowns[category] = false
           self.dropDowns[category] = false
-          hideDropdown(e, et),
+          hideDropdown()
+        else:
+          showDropdown(),
     )
   )
 
@@ -1222,7 +1281,7 @@ method render*(self: EventLogComponent): VNode =
       class = componentContainerClass("eventLog"),
       tabIndex = "2",
       onclick = proc(ev: Event, v:VNode) =
-        ev.stopPropagation()
+        stopPropagationSafe(ev)
         if self.data.ui.activeFocus != self:
           self.data.ui.activeFocus = self
     )

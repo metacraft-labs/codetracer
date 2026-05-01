@@ -281,7 +281,7 @@ proc excerpt(self: StateComponent): VNode =
 
 proc watchView(self: StateComponent): VNode =
   result = buildHtml(
-    tdiv(id = "gdb-evaluate")
+    tdiv(class = "ct-px-1")
   ):
     form(
       onsubmit = proc(ev: Event, v: VNode) =

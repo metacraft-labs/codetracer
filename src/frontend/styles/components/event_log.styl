@@ -130,58 +130,160 @@
   position: absolute
   display: flex
   flex-direction: column
-  border-radius: 10px
-  background: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
-  color: DROPDOWN_TEXT_BACKGROUND_COLOR
-  // right: 0
-  min-width: fit-content
+  width: unquote("min(56em, calc(100vw - 2em))")
+  max-width: unquote("calc(100vw - 2em)")
+  border-radius: 1em
+  border: 0.0625em solid colors-ui-border-primary
+  background: colors-ui-surface-canvas
+  color: colors-ui-text-primary-body
   z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
   user-select: none
   transform-origin: top left
+  overflow: hidden
+  box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
   top: 100%
-  // right: 0
 
 .dropdown-list
-  if !IS_EXTENSION
-    width: 150px !important
-  list-style-type: none
-  padding-left: 0.5em
-  position: relative
   display: flex
-  flex-direction: row
-  margin-bottom: 0.5em !important
-  margin-top: 0.5em !important
+  flex-direction: column
+  width: 100%
+  margin: 0 !important
+  padding: 0
+  background: colors-ui-surface-primary-default-hover
 
   .dropdown-list-item
-    width: inherit
-    if IS_EXTENSION
-      align-items: center
-    else
-      align-items: normal
-    justify-content: start
-    // padding-left: 20px
-  .dropdown-list-tag
-    margin-right: 0.5em
+    width: 100%
+    min-width: 0
+    display: flex
+    align-items: center
 
-  .dropdown-list-kind
-    .dropdown-list-item
-      margin-right: 0.5em
+    .ct-checkmark-field
+      width: 100%
+      min-width: 0
+      align-items: center
+      gap: 0.625em
+      color: colors-ui-text-primary-body
+      font-family: "SpaceGrotesk"
+      font-size: 1em
+      line-height: 1.15
+
+    .ct-checkmark
+      --ct-checkmark-size: 1.3em
+      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
+      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
+      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+
+    .ct-checkmark-label
+      min-width: 0
+      white-space: nowrap
+
+.dropdown-list-row
+  display: grid
+  grid-template-columns: minmax(14em, 1.2fr) minmax(0, 3fr)
+  align-items: stretch
+  min-height: 3.1em
+  border-top: 0.0625em solid colors-ui-border-primary
+
+  &:first-child
+    border-top: none
 
 .toggle-buttons
   display: flex
   justify-content: start
-  background: DROPDOWN_TOGGLE_BUTTONS_BACKGROUND
-  padding-top: 10px
-  padding-bottom: 10px
+  gap: 0.25em
+  padding: 0 1.25em
+  background: colors-ui-surface-canvas
   align-items: center
-  border-bottom-left-radius: 10px
-  border-bottom-right-radius: 10px
+  min-height: 3.6em
+  border-bottom: 0.0625em solid colors-ui-border-primary
+
+  button
+    flex: 0 0 auto !important
+    height: 100%
+    padding: 0.875em 0.25em 0.8125em
+    border-radius: 0 !important
+    border: none !important
+    background: colors-ui-surface-canvas !important
+    color: colors-ui-text-primary-body-subtle
+    font-family: "SpaceGrotesk"
+    font-size: 1.05em
+    font-weight: 500
+    line-height: 1.1
+    position: relative
+    white-space: nowrap
+
+    &:hover
+      color: colors-ui-text-primary-body
+      background: colors-ui-surface-primary-default-hover !important
+
+    &.active
+      color: colors-ui-border-action
+      background: colors-ui-surface-primary-default-hover !important
+
+      &::after
+        content: ""
+        position: absolute
+        left: 0
+        right: 0
+        bottom: -0.0625em
+        height: 0.125em
+        border-radius: 999em
+        background: colors-ui-border-action
 
 .eventLog
   font-family: Arial, Helvetica, sans-serif
   height: 100%
   display: flex
   flex-direction: column
+
+  > .data-tables-footer
+    flex: 0 0 auto
+    min-height: 2.75em
+    align-items: center
+    font-family: "SpaceGrotesk"
+    font-size: 1em
+    line-height: 1.1
+    color: colors-ui-text-primary-body
+
+    .data-tables-footer-info
+      margin-right: 0
+      gap: 0.375em
+      align-items: center
+      font-variant-numeric: tabular-nums
+
+      .data-tables-footer-end-row,
+      .data-tables-footer-rows-count
+        padding-left: 0
+        padding-right: 0
+
+    .data-tables-footer-input
+      width: 4.5em
+      min-width: 4.5em
+      max-width: 4.5em
+      height: 2.125em
+      max-height: 2.125em
+      margin: 0 0.75em
+      padding: 0 0.75em
+      border-radius: 0.5em
+      border: 0.03125em solid transparent
+      background: colors-editor-surface-select
+      color: colors-ui-text-primary-body !important
+      font-family: "SpaceGrotesk"
+      font-size: 1em !important
+      line-height: 1
+      text-align: left
+      box-sizing: border-box
+
+      &:hover
+        border-color: colors-ui-surface-primary-tertiary
+        background: colors-editor-surface-select
+
+      &:focus,
+      &:focus-visible
+        outline: none !important
+        border-color: colors-ui-surface-primary-tertiary
+        background: colors-editor-surface-select
+        box-shadow: 0 0 0 0.0625em colors-ui-surface-primary-tertiary
 
   .eventLog-detailed-table
     display: none // TODO: show
@@ -364,14 +466,18 @@ label
 
 .dropdown-list-tag
   display: flex
-  flex-direction: column
+  align-items: center
+  padding: 0.5em 0 0.5em 1em
 
-.dropdown-kind-container
-  display: flex
-  flex-direction: column
+  .ct-checkmark-field
+    font-weight: 500
 
 .dropdown-list-kind
-  display: flex
+  display: grid
+  grid-template-columns: repeat(3, minmax(0, 1fr))
+  gap: 0.625em 1.25em
+  align-items: center
+  padding: 0.5em 1em 0.5em 1.25em
 
 .paging-menu
   display: flex

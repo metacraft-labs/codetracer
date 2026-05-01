@@ -658,10 +658,24 @@ proc renderAutoHideRightStrip*(): VNode =
 proc renderBottomAutoHideTabs*(): VNode =
   ## Render bottom auto-hide tabs as a container to be placed inside
   ## the status bar. Returns an empty div when there are no bottom tabs.
-  let tabs = renderStripTabsInto(AutoHideEdge.Bottom)
   buildHtml(tdiv(class = "auto-hide-bottom-tabs")):
-    for tab in tabs:
-      tab
+    let panels = if not autoHideState.isNil:
+        autoHideState.panelsForEdge(AutoHideEdge.Bottom)
+      else:
+        @[]
+    for panel in panels:
+      let handler = makeStripTabClickHandler(panel)
+      let isActive =
+        not autoHideState.isNil and
+        autoHideState.overlayVisible and
+        autoHideState.activeOverlay == panel
+      let activeClass = if isActive: " active" else: ""
+      button(
+        `type` = "button",
+        class = cstring("auto-hide-bottom-tab ct-button-sm-tertiary" & activeClass),
+        onclick = handler
+      ):
+        text panel.title
 
 proc makeIconClickHandler(panel: AutoHidePanel): proc(e: Event, tg: VNode) =
   ## Create a click handler for a status bar icon that opens the overlay
