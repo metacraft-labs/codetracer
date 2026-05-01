@@ -357,7 +357,7 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       # No rrTicks guard — DB-based traces always have rrTicks=0.
       # RequestTracker deduplicates redundant backend requests.
       let effectiveHeight = if vpHeight > 0: vpHeight else: 50
-      let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
+      var bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
       var totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
       # When the store already knows the total number of calls (this
       # happens after the first response arrives), expand the request
@@ -373,10 +373,20 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       # lives well past row 25 of the global call-line index.  Once a
       # translateY-based virtualised renderer lands the cap can be
       # lowered again.
+      #
+      # When we're loading the entire trace, also pin `bufferStart=0`.
+      # Otherwise scrollPos>BUFFER (after a `calltraceJump` that
+      # re-anchors the view inside a function's body) makes the request
+      # start mid-trace and the response — even with `height=totalCalls`
+      # — only covers `[scrollPos-BUFFER .. totalCalls)`, dropping the
+      # caller frames that came before.  Playwright's `findEntry` then
+      # races a DOM that lacks the parent function entirely.  See
+      # TODO 5.1(a) in the migration handoff.
       const FULL_WINDOW_CAP = 500
       let totalCalls = store.calltrace.totalCallsCount.val
       if totalCalls > 0'u64 and totalCalls.int <= FULL_WINDOW_CAP:
         totalHeight = max(totalHeight, totalCalls.int)
+        bufferStart = 0'i64
       store.requestCalltraceSection(
         bufferStart, totalHeight, depth,
         rrTicks = dbg.rrTicks,

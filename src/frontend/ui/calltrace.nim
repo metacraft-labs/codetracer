@@ -1086,31 +1086,24 @@ proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
   ##
-  ## Also issues an explicit requestCalltraceSection call as a fallback
-  ## in case the CalltraceVM's auto-load effect doesn't re-fire (can
-  ## happen in web mode when the effect was created during VM replacement
-  ## and the reactive subscription tracking is incomplete).
+  ## Updating `store.debugger` invalidates the CalltraceVM's auto-load
+  ## effect, which then issues a single `requestCalltraceSection` with
+  ## the up-to-date totalCallsCount-aware window.  Earlier revisions
+  ## also issued an explicit fallback `requestCalltraceSection` here
+  ## (start=0, height=90), but that fired in parallel with the legacy
+  ## `loadLines` path and the auto-load effect's own request.  The
+  ## three concurrent requests returned different-sized responses
+  ## (90 / 45 / 65 / 100 lines) which clobbered the store mid-render
+  ## and left Playwright's `findEntry` racing against an oscillating
+  ## DOM (the python/ruby sudoku navigation regression — see TODO 5.1(a)
+  ## in the migration handoff).  Trust the auto-load effect to fire on
+  ## debugger changes (it depends on `store.debugger.val`).
   if calltraceVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
   let diagStoreId = calltraceVMStore.storeId
   calltraceVMStore.updateDebuggerPosition(ticks, $path, line)
   cerror fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
-
-  # Explicit fallback request: clear the request tracker so the next
-  # call is not deduplicated, then request the calltrace section with
-  # the updated position.  This ensures data loads even when the
-  # reactive auto-load effect fails to re-fire.
-  calltraceVMStore.requestTracker.markComplete("load-calltrace")
-  # Use sensible defaults matching the auto-load effect:
-  # effectiveHeight=50 (default when vpHeight=0), buffer=20*2=40,
-  # depth=DEFAULT_VIEWPORT_DEPTH=20.
-  calltraceVMStore.requestCalltraceSection(
-    0'i64, 90, 20,
-    rrTicks = ticks,
-    file = $path,
-    line = line,
-  )
 
 method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
   self.totalCallsCount = results.totalCallsCount
@@ -1584,14 +1577,21 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
   elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
     self.lastSelectedCallKey = response.location.key
     self.forceCollapse = true
-    # The CalltraceVM's auto-load effect will also request data when
-    # the store's rrTicks signal changes, but as a safety net we still
-    # call loadLines here.  The legacy path sends CtLoadCalltraceSection
-    # through the mediator and the response arrives via onUpdatedCalltrace
-    # → syncCalltraceData, which feeds data into the IsoNim store.
-    # Without this fallback, data may never load when the auto-load
-    # effect skips (e.g. viewportHeight not yet set).
-    self.loadLines(fromScroll=false)
+    # When the IsoNim view is the active renderer, the CalltraceVM's
+    # auto-load effect (in `createCalltraceVM`) is the single source of
+    # truth for calltrace section requests.  It depends on
+    # `store.debugger.val` so the position write above already
+    # invalidates it, scheduling exactly one request with the correct
+    # totalCallsCount-aware window.  The legacy `loadLines` was kept as
+    # a parallel safety net but its smaller response (panelHeight +
+    # CALL_BUFFER ≈ 45 lines vs the auto-load's totalCalls-aware ~100)
+    # arrived after the auto-load response and clobbered the store with
+    # truncated data, so Playwright's `findEntry` raced an oscillating
+    # DOM during navigation tests (python/ruby sudoku — TODO 5.1(a)).
+    # Skip the legacy call when the VM is wired; the legacy path is
+    # only needed for the (unused) Karax-only fallback.
+    if calltraceVMInstance.isNil:
+      self.loadLines(fromScroll=false)
   self.redraw()
 
 proc asyncFlowToggleView(self: CalltraceComponent): VNode =
