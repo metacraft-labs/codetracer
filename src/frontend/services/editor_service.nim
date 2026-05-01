@@ -17,7 +17,16 @@ proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) 
 data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveState) {.async.} =
   if response.location.path.len > 0 and not response.location.isExpanded: # TODO: exists path
     if not response.location.missingPath:
-      self.data.openTab(response.location.path)
+      # Pass the active line through to ``openTab`` so a freshly opened
+      # editor (e.g. a calltrace-jump landing on a file that was not yet
+      # open — the noir-space-ship "calculate damage" navigation jumps
+      # to ``shield.nr:22`` from an open ``main.nr``) seeds the Monaco
+      # cursor at the right line.  ``openTab`` only forwards the line
+      # when creating the editor for the first time, so already-open
+      # editors are unaffected — the per-component
+      # ``onCompleteMove`` subscription handles their position update
+      # via ``service.changeLine`` and the periodic ``gotoLine`` interval.
+      self.data.openTab(response.location.path, line = response.location.line)
     else:
       # eventually TODO(alexander: I wrote this: a more elegant way to pass
       # to the component)

@@ -41,22 +41,23 @@ import viewmodels/calltrace_vm
 # Helpers
 # ---------------------------------------------------------------------------
 
+proc repoRoot(): string =
+  ## Resolve the repository root from this test's path.  The test lives at
+  ## ``src/tests/gui/tests/noir-space-ship/`` so we strip 6 path components
+  ## (file → noir-space-ship → tests → gui → tests → src → repo).
+  currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
+
 proc findReplayServer(): string =
   ## Locate the replay-server binary.
   let envBin = getEnv("REPLAY_SERVER_BIN", "")
   if envBin.len > 0 and fileExists(envBin):
     return envBin
-  let thisFile = currentSourcePath()
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir
-  let candidate = repoRoot / "src" / "build-debug" / "bin" / "replay-server"
+  let candidate = repoRoot() / "src" / "build-debug" / "bin" / "replay-server"
   if fileExists(candidate):
     return candidate
   raise newException(IOError,
     "Could not find replay-server binary. Set REPLAY_SERVER_BIN or " &
     "build it with 'cargo build' in src/db-backend/. Tried: " & candidate)
-
-proc repoRoot(): string =
-  currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
 
 proc findCtFile(dir: string): string =
   for kind, path in walkDir(dir):
@@ -77,7 +78,9 @@ proc isUsableTraceDir(dir: string): bool =
 
 proc findExistingTrace(programPattern: string): string =
   ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
-  ## metadata program field contains ``programPattern``.
+  ## metadata program OR workdir field contains ``programPattern``.
+  ## (Noir traces have ``program = "zk_shields"`` but ``workdir`` includes
+  ## ``noir_space_ship`` — match either to find them.)
   let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
   if not dirExists(baseDir):
     return ""
@@ -90,6 +93,7 @@ proc findExistingTrace(programPattern: string): string =
     if not isUsableTraceDir(path):
       continue
     var program = ""
+    var workdir = ""
     for metaName in ["trace_metadata.json", "trace_db_metadata.json"]:
       let metaPath = path / metaName
       if not fileExists(metaPath):
@@ -97,11 +101,12 @@ proc findExistingTrace(programPattern: string): string =
       try:
         let meta = parseFile(metaPath)
         program = meta.getOrDefault("program").getStr("")
-        if program.len > 0:
+        workdir = meta.getOrDefault("workdir").getStr("")
+        if program.len > 0 or workdir.len > 0:
           break
       except:
         discard
-    if programPattern in program:
+    if programPattern in program or programPattern in workdir:
       return path
   return ""
 
@@ -299,6 +304,59 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
           hasNamedEntry = true
           break
       check hasNamedEntry
+
+  test "calltrace jump to calculate_damage lands on shield.nr line 22":
+    ## Tight headless mirror of the failing GUI test
+    ## ``calculate damage calltrace navigation``: jump to the
+    ## calculate_damage entry and verify the debugger position is
+    ## exactly ``shield.nr:22`` (the function header line in the
+    ## noir_space_ship trace).  This isolates the calltrace-jump →
+    ## complete-move → editor flow at the VM/backend layer so we
+    ## can tell whether the bug is in the backend (wrong location)
+    ## or purely in the DOM rendering layer (active-line marker).
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    for i in 0 ..< 10:
+      session.stepForward()
+
+    session.requestAndLoadCalltrace(depth = 30)
+    let lines = session.getCalltraceLines()
+
+    # Pick the first calltrace entry whose function name is exactly
+    # ``calculate_damage``.  We don't relax the match here — the GUI
+    # test is just as strict.
+    var targetIdx = -1
+    for i, line in lines:
+      if line.name.toLowerAscii() == "calculate_damage":
+        targetIdx = i
+        break
+
+    check targetIdx >= 0
+    let target = lines[targetIdx]
+    echo "  calculate_damage entry: ", target.name,
+         " @ ", target.location.file, ":", target.location.line,
+         " rrTicks=", target.rrTicks
+
+    # The CallLine itself should already report shield.nr:22 since the
+    # backend's load_location uses the call's first step record.
+    check "shield.nr" in target.location.file
+    check target.location.line == 22
+
+    # Now perform the actual jump that the GUI exercises.
+    session.calltraceJumpByLine(target)
+
+    let file = session.getCurrentFile()
+    let line = session.getCurrentLine()
+    echo "  After calltrace_jump: ", file, ":", line
+
+    check session.getDebuggerStatus() == dsIdle
+    check "shield.nr" in file
+    # The expected active line is 22 — the GUI test's
+    # ``activeLine === 22`` assertion in noir-space-ship.spec.ts.
+    check line == 22
 
 # ---------------------------------------------------------------------------
 # Suite 3: Loop iteration / iterate_asteroids
