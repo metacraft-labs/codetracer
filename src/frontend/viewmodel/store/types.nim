@@ -108,3 +108,30 @@ type
     kind*: string
     line*: int
     value*: string
+
+  TerminalEventFragment* = object
+    ## One text fragment within a terminal-output line.
+    ##
+    ## Mirrors the legacy ``TerminalEvent`` ref-object (see
+    ## ``frontend/types.nim``) but in the simpler value-type shape the
+    ## ViewModel layer uses.
+    ##
+    ## ``htmlText`` carries the already-ANSI-converted HTML string the
+    ## view emits verbatim (the legacy view uses ``verbatim``); the
+    ## fragment is associated with one ``ProgramEvent`` via
+    ## ``eventIndex`` so click handlers can dispatch a navigation jump.
+    ## ``rrTicks`` is the source event's ``directLocationRRTicks`` —
+    ## the view compares it against the current debugger position to
+    ## colour the fragment as ``past`` / ``active`` / ``future``.
+    htmlText*: string
+    eventIndex*: int
+    rrTicks*: uint64
+
+  TerminalLine* = object
+    ## One rendered line of terminal output. Contains zero or more
+    ## ``TerminalEventFragment`` entries (one per ANSI run within the
+    ## line). The view emits a ``<div class="terminal-line"
+    ## id="terminal-line-{lineIndex}">`` element with one child div per
+    ## fragment.
+    lineIndex*: int
+    fragments*: seq[TerminalEventFragment]

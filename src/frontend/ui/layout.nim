@@ -543,6 +543,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.SearchResults,
       Content.Shell,
       Content.CaptionBarProgress,
+      Content.TerminalOutput,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the

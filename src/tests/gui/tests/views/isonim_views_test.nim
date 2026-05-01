@@ -11,7 +11,7 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_isonim_views.nim
 
-import std/[unittest, strutils, tables, options, sets]
+import std/[unittest, strutils, tables, options, sets, json]
 import vm_test_helpers
 import isonim/core/[signals, owner]
 import isonim/testing/mock_dom
@@ -29,6 +29,7 @@ import viewmodels/search_vm
 import viewmodels/point_list_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
+import viewmodels/terminal_output_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -39,6 +40,7 @@ import views/isonim_search_view
 import views/isonim_point_list_view
 import views/isonim_scratchpad_view
 import views/isonim_shell_view
+import views/isonim_terminal_output_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -2587,5 +2589,264 @@ suite "IsoNim Shell Panel — interactions":
 
       check scrollInd.styles["display"] == "inline"
       check "10" in scrollInd.textContent
+
+# ===========================================================================
+# Terminal Output panel tests
+# ===========================================================================
+#
+# Cover:
+# - Outer structure (root class, <pre> body, empty-overlay div).
+# - Initial pre-load state ("Loading record output...") and post-load
+#   empty state ("The current record does not print anything ...").
+# - Per-line / per-fragment DOM produced by ``setLines``.
+# - Fragment colour class flips when ``currentRRTicks`` changes.
+# - Click handler routes through ``jumpToEvent`` to the backend mock.
+#
+# The render-effect that builds the ``<pre>`` body fires synchronously
+# inside the reactive root, so no ``drain()`` is needed between
+# mutations and assertions.
+
+# ---------------------------------------------------------------------------
+# Terminal Output helpers
+# ---------------------------------------------------------------------------
+
+proc makeTerminalLine(lineIndex: int;
+                      fragments: seq[TerminalEventFragment]): TerminalLine =
+  TerminalLine(lineIndex: lineIndex, fragments: fragments)
+
+proc makeTerminalFragment(text: string; eventIndex: int = 0;
+                          rrTicks: uint64 = 100'u64): TerminalEventFragment =
+  TerminalEventFragment(
+    htmlText: text,
+    eventIndex: eventIndex,
+    rrTicks: rrTicks,
+  )
+
+# ---------------------------------------------------------------------------
+# Terminal Output structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Terminal Output Panel — structure":
+
+  test "renders root with terminal component-container class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "component-container" in panel.attributes["class"]
+      check "terminal" in panel.attributes["class"]
+
+      dispose()
+
+  test "renders <pre> body and empty overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      let preNode = findByTag(panel, "pre")
+      check preNode != nil
+
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay != nil
+
+      dispose()
+
+  test "initial state shows the loading-record overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+      let overlay = findByClass(panel, "empty-overlay")
+
+      check overlay.styles["display"] == "block"
+      check "Loading record output" in overlay.textContent
+
+      dispose()
+
+  test "post-load empty state swaps to the no-output overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+      vm.setLines(@[])  # marks initialLoad = false but leaves lines empty
+
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay.styles["display"] == "block"
+      check "does not print anything" in overlay.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Terminal Output line rendering tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Terminal Output Panel — line rendering":
+
+  test "setLines populates one terminal-line per line with the expected id":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      vm.setLines(@[
+        makeTerminalLine(0, @[makeTerminalFragment("hello")]),
+        makeTerminalLine(1, @[makeTerminalFragment("world")]),
+      ])
+
+      let lineNodes = findAllByClass(panel, "terminal-line")
+      check lineNodes.len == 2
+      check lineNodes[0].attributes["id"] == "terminal-line-0"
+      check lineNodes[1].attributes["id"] == "terminal-line-1"
+
+      # Empty overlay is hidden once lines are present.
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay.styles["display"] == "none"
+
+      dispose()
+
+  test "fragments render with the line's text content":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      vm.setLines(@[
+        makeTerminalLine(0, @[
+          makeTerminalFragment("Sudoku solved:"),
+          makeTerminalFragment(" 1 2 3"),
+        ]),
+      ])
+
+      let lineNode = findByClass(panel, "terminal-line")
+      check lineNode != nil
+      check lineNode.children.len == 2
+      # Concatenated text content of the line spans both fragments.
+      check "Sudoku solved" in lineNode.textContent
+      check "1 2 3" in lineNode.textContent
+
+      dispose()
+
+  test "fragment class reflects past/active/future relative to currentRRTicks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      # Three fragments at increasing rrTicks; pin the focus to the
+      # middle one and expect past / active / future in order.
+      vm.setLines(@[
+        makeTerminalLine(0, @[
+          makeTerminalFragment("a", eventIndex = 0, rrTicks = 5'u64),
+          makeTerminalFragment("b", eventIndex = 1, rrTicks = 10'u64),
+          makeTerminalFragment("c", eventIndex = 2, rrTicks = 15'u64),
+        ]),
+      ])
+      vm.setCurrentRRTicks(10'u64)
+
+      let lineNode = findByClass(panel, "terminal-line")
+      check lineNode != nil
+      check lineNode.children.len == 3
+      check lineNode.children[0].attributes["class"] == "past"
+      check lineNode.children[1].attributes["class"] == "active"
+      check lineNode.children[2].attributes["class"] == "future"
+
+      dispose()
+
+  test "fragment classes update reactively when currentRRTicks changes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      vm.setLines(@[
+        makeTerminalLine(0, @[
+          makeTerminalFragment("a", eventIndex = 0, rrTicks = 100'u64),
+        ]),
+      ])
+      vm.setCurrentRRTicks(50'u64)
+      var lineNode = findByClass(panel, "terminal-line")
+      check lineNode.children[0].attributes["class"] == "future"
+
+      # Move past the fragment — class should flip to ``past``.
+      vm.setCurrentRRTicks(200'u64)
+      lineNode = findByClass(panel, "terminal-line")
+      check lineNode.children[0].attributes["class"] == "past"
+
+      dispose()
+
+  test "clearLines returns the panel to the initial loading state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      vm.setLines(@[makeTerminalLine(0, @[makeTerminalFragment("x")])])
+      check findAllByClass(panel, "terminal-line").len == 1
+
+      vm.clearLines()
+
+      check findAllByClass(panel, "terminal-line").len == 0
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay.styles["display"] == "block"
+      check "Loading record output" in overlay.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Terminal Output interaction tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Terminal Output Panel — interactions":
+
+  test "fragment click dispatches ct/event-jump via the backend":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTerminalOutputVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTerminalOutputPanel(r, vm)
+
+      vm.setLines(@[
+        makeTerminalLine(0, @[
+          makeTerminalFragment("hello",
+                                eventIndex = 7,
+                                rrTicks = 42'u64),
+        ]),
+      ])
+
+      let lineNode = findByClass(panel, "terminal-line")
+      let fragNode = lineNode.children[0]
+
+      mock.clearReceivedCommands()
+      fragNode.fireEvent("click")
+
+      let req = mock.findCommand("ct/event-jump")
+      check req.isSome
+      check req.get.args["eventIndex"].getInt == 7
+      check req.get.args["rrTicks"].getInt == 42
+
+      dispose()
 
       dispose()
