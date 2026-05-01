@@ -3274,10 +3274,23 @@ proc makeLoopLine(
 
   let bStyle = style()
 
+  # NOTE: keep the `flow-multiline-value-container` class on the outer
+  # element.  It is part of the public DOM contract of the flow loop
+  # control and used as a stable selector by Playwright suites
+  # (e.g. tests/noir-space-ship/noir-space-ship.spec.ts:
+  # "loop iteration slider tracks remaining shield" /
+  # "simple loop iteration jump").  The 0ac4fdda
+  # (feat: Omniscience design redo) commit dropped this class in favour
+  # of the new `ct-flex ct-p-0` design-system utilities — that is how
+  # the noir-space-ship loop tests started to fail to find the loop
+  # control.  Both class names are preserved together: the design
+  # utilities for layout, the legacy class for tests + styling
+  # consistency with the (post-fix-1.12) flow-parallel-value-box DOM
+  # contract.
   let vNode = buildHtml(
     tdiv(
       id = &"flow-multiline-value-{step.position}-{step.stepCount}",
-      class = "ct-flex ct-p-0"
+      class = "flow-multiline-value-container ct-flex ct-p-0"
     )
   ):
     if step.rrTicks != -1:
