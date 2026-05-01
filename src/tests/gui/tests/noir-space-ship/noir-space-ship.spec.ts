@@ -125,42 +125,65 @@ function sleep(ms: number): Promise<void> {
 // Tests
 // ---------------------------------------------------------------------------
 
-// FAILING (timing-flake, 16 of ~18 tests): 2026-04-30 — every test in
-// this suite that performs more than a basic editor check fails on
-// `CallTracePane.clickTab` with "Element is outside of the viewport"
-// or hits the 7-second `waitForReady` 60-attempt limit on the
-// calltrace lines container. The trace records and the editor opens
-// (e.g. "editor loaded main.nr file" passes), but subsequent panel
-// interactions race against `nargo`'s slower trace generation: the
-// panels mount before the calltrace data has been published, the
-// page object scrolls into view to click, and GoldenLayout reflows
-// the tab strip out from under it.
+// HARDENING (TODO 5.2(h) — noir-space-ship suite-level flake):
 //
-// The handoff documents this as the long-standing noir-space-ship
-// flake (~16 tests, timing-dependent, hardened with clickTab() force
-// fallback but still flaky under sweep load). Targeted reruns of the
-// individual failing tests sometimes pass; the full suite essentially
-// never passes end-to-end on a busy CI box.
+// Originally this suite saw 16 of ~18 tests fail under sweep load
+// with "Element is outside of the viewport" on `CallTracePane.clickTab`
+// or with the 60-attempt 1s `waitForReady` budget exhausted on the
+// `.calltrace-call-line` container.  Root cause: panels mount before
+// the calltrace data is published, the page object scrolls into view
+// to click, and GoldenLayout reflows the tab strip out from under it.
 //
-// TODO: lower flake to zero by:
-//   1. Wait for an explicit "calltrace ready" signal (e.g. a
-//      VM `dataLoaded`-style memo) before any `.clickTab()` —
-//      `waitForReady` polling for `.calltrace-call-line` count > 0
-//      catches the populated state but still races on tab visibility.
-//   2. Replace direct `.clickTab()` calls inside the test body with
-//      a helper that retries the tab click via `force: true` if
-//      `clickTab` throws — same hardening already in place for
-//      `CallTracePane.clickTab` itself, but the per-test
-//      sequence (clickTab → invalidate → expand → activate) still
-//      has unguarded steps.
-//   3. Pre-record the noir trace once at suite setup and reuse it
-//      across all 18 tests rather than re-recording per test (each
-//      retry currently re-runs `nargo trace`, multiplying flake
-//      probability).
+// Mitigations applied (sweep load can still surface secondary races,
+// but the structural causes are addressed):
+//
+//   1. Pre-recording is already worker-scoped via fixtures.ts'
+//      module-level `recordingCache`: the first test in a worker
+//      records the noir trace once, every subsequent test in the
+//      same worker reuses the cached `traceId`.  No per-test
+//      `nargo trace` invocation.
+//
+//   2. `LayoutPage.waitForCallTraceReady()` (added with this
+//      hardening) waits until at least one `.calltrace-call-line`
+//      DOM element has been published — not just until the
+//      GoldenLayout `calltraceComponent` div has mounted.  The
+//      `before` hook below calls it after `waitForAllComponentsLoaded`,
+//      so every test starts from a state where the calltrace store
+//      has actually populated lines before any
+//      `clickTab → invalidate → expand → activate` sequence runs.
+//
+//   3. `EditorPane.clickTab` and `FilesystemPane.clickTab` were
+//      brought in line with `CallTracePane.clickTab`,
+//      `EventLogPane.clickTab`, `ScratchpadPane.clickTab`, and
+//      `VariableStatePane.clickTab` — all of which now have the
+//      three-step `plain → force → dispatchEvent` fallback.  The
+//      final `dispatchEvent('click')` step is critical under Xvfb
+//      because Playwright's `force:true` does NOT redirect the
+//      click to the underlying button when an `lm_header` overlay
+//      sits on top — only a synthesized DOM click reliably
+//      activates the tab in that situation.
+//
+// Per-test annotations below describe failures whose root cause is
+// product-side (recorder gaps, traceMain DOM lifecycle, etc.) and
+// not the suite-level flake.
 test.describe("NoirSpaceShip", () => {
   test.setTimeout(90_000);
   test.describe.configure({ retries: 2 });
   test.use({ sourcePath: "noir_space_ship/", launchMode: "trace" });
+
+  // Wait for the call-trace store to have published lines BEFORE any
+  // test body runs.  Tests that exercise call-trace tabs (most of this
+  // suite) race against the backend's `ct/load-calltrace-section`
+  // round-trip when they call `clickTab()` immediately after
+  // `waitForAllComponentsLoaded()` — the latter only checks for the
+  // GoldenLayout component div.  Pulling the readiness wait into a
+  // shared hook removes the race for every test in the suite without
+  // duplicating the wait boilerplate per body.
+  test.beforeEach(async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+    await layout.waitForCallTraceReady();
+  });
 
   // TODO(failing): expect(mainNrTab).toBeDefined() fails -- Received: undefined.
   //   The layout.editorTabs() call does not find a tab with tabButtonText === "src/main.nr".
