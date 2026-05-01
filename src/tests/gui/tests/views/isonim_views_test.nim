@@ -468,6 +468,109 @@ suite "IsoNim State Panel — text content":
 
       dispose()
 
+# ---------------------------------------------------------------------------
+# Code-state-line tests
+#
+# The legacy Karax ``StateComponent.excerpt`` proc rendered a
+# ``#code-state-line-{id}`` element above the variables list with text
+# "<line> | <sourceCode>" (or empty + ``no-code`` class when source
+# was unavailable).  Several Playwright tests assert this element's
+# presence / text — the IsoNim view must emit the same DOM contract.
+# ---------------------------------------------------------------------------
+
+suite "IsoNim State Panel — code-state-line":
+
+  proc findCodeStateLine(panel: MockNode): MockNode =
+    ## Walk the rendered tree looking for the ``code-state-line``
+    ## div regardless of whether it carries the ``no-code`` modifier.
+    let populated = findByClass(panel, "code-state-line")
+    if populated != nil:
+      return populated
+    # Fall back: when the element only carries the ``no-code``
+    # modifier the ``findByClass`` whole-word match still succeeds
+    # because both classes are present, but be defensive in case
+    # someone tweaks the markup.
+    findByClass(panel, "no-code")
+
+  test "renders #code-state-line-0 element regardless of trace state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStatePanel(r, vm)
+
+      let line = findCodeStateLine(panel)
+      check line != nil
+      check line.attributes["id"] == "code-state-line-0"
+
+      dispose()
+
+  test "starts in no-code state when source is empty":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStatePanel(r, vm)
+      let line = findCodeStateLine(panel)
+
+      # Initial value: empty string → no-code class is present.
+      check "no-code" in line.attributes["class"]
+      # Inner span is empty so the legacy "no source loaded yet"
+      # behaviour is preserved — the element is in the DOM but its
+      # text content is empty.
+      check line.textContent == ""
+
+      dispose()
+
+  test "DB-trace move populates #code-state-line-0 with formatted text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStatePanel(r, vm)
+      let line = findCodeStateLine(panel)
+
+      # Simulate the DB-trace move handler in ``state.nim``: it pushes
+      # the resolved source-line into the store. The view must update
+      # reactively (matching the wasm_example "state panel loaded
+      # initially" GUI assertion which waits for the text).
+      store.updateCodeStateLine(11, "let x = 3;")
+
+      # After the update the element no longer carries the ``no-code``
+      # modifier and its text matches the legacy ``excerpt`` markup.
+      check "no-code" notin line.attributes["class"]
+      check "code-state-line" in line.attributes["class"]
+      check line.textContent == "11 | let x = 3;"
+      # Mirrors the Playwright assertion shape: the test waits for
+      # ``${ENTRY_LINE} | `` to appear in the locator's text.
+      check "11 | " in line.textContent
+
+      dispose()
+
+  test "code-state-line text falls back to no-code when source clears":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStatePanel(r, vm)
+      let line = findCodeStateLine(panel)
+
+      store.updateCodeStateLine(10, "fn main() {")
+      check "no-code" notin line.attributes["class"]
+      check line.textContent == "10 | fn main() {"
+
+      # Editor unloaded / source no longer available — fall back to
+      # the no-code state so the element is still present in the DOM.
+      store.updateCodeStateLine(10, "")
+      check "no-code" in line.attributes["class"]
+      check line.textContent == ""
+
+      dispose()
+
 # ===========================================================================
 # Calltrace panel tests
 # ===========================================================================

@@ -62,6 +62,12 @@ type
     # -- Derived state --
     currentVariables*: Memo[seq[Variable]]
     isLoading*: Memo[bool]
+    codeStateLine*: Memo[string]
+      ## Pre-formatted "<line> | <sourceCode>" string mirrored from
+      ## the store. Empty when there is no source for the current
+      ## position — the view renders the ``no-code`` fallback in that
+      ## case so the ``#code-state-line-{id}`` element is always
+      ## present in the DOM (Playwright tests rely on its presence).
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -148,6 +154,14 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
     let isLoading = createMemo[bool] proc(): bool =
       store.locals.loadingState.val == lsLoading
 
+    # Derived: pre-formatted code-state-line text. The view uses the
+    # presence of this string to decide between the populated and the
+    # ``no-code`` fallback markup. Wrapped through a memo so any future
+    # transformation (e.g. truncation or HTML escaping) has a single
+    # site, and so the view's reactive reads observe a stable signal.
+    let codeStateLine = createMemo[string] proc(): string =
+      store.locals.codeStateLine.val
+
     let vm = StateVM(
       store: store,
       activeTab: activeTab,
@@ -156,6 +170,7 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
       watchExpressions: watchExpressions,
       currentVariables: currentVariables,
       isLoading: isLoading,
+      codeStateLine: codeStateLine,
       disposeProc: dispose,
     )
 

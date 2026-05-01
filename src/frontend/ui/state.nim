@@ -180,21 +180,133 @@ proc initStateVM() =
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()
 
+proc valueDisplayText(v: Value): string =
+  ## Rendered text representation matching what the legacy Karax
+  ## ``value-component`` emitted in ``atomValueView``.
+  ##
+  ## Atomic kinds are stringified via ``$v`` (which dispatches into
+  ## ``common_types/utils/text_representation.text(value, depth)`` —
+  ## that pulls `value.i` for ``Int``, `value.f` for ``Float``,
+  ## ``"\"<text>\""`` for ``String``, etc.).  The legacy code relied on
+  ## the same proc, so the IsoNim view shows the exact same text the
+  ## Karax code did, including for languages whose recorder fills
+  ## ``value.i`` (wasm `i32`) but leaves ``value.text`` empty.
+  ##
+  ## Compound kinds (Seq, Instance, etc.) come back here as the
+  ## composite text representation produced by ``$v``; the row's
+  ## "expanded" rendering still happens via the ``hasChildren`` flag
+  ## populated below.
+  if v.isNil:
+    return ""
+  $v
+
+proc valueDisplayType(v: Value): string =
+  ## Original-language type name (``i32``, ``int``, ``string`` …)
+  ## matching the legacy ``span.value-type`` text. The legacy code
+  ## used ``value.typ.langType`` directly inside ``atomValueView``;
+  ## fall back to the ``TypeKind`` enum string when the type metadata
+  ## is missing so something useful still shows up in the view.
+  if v.isNil:
+    return ""
+  if not v.typ.isNil and v.typ.langType.len > 0:
+    return $v.typ.langType
+  $v.kind
+
 proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the
   ## StateVM's currentVariables memo sees the same data.
+  ##
+  ## Both RR and Materialized (DB) traces flow through this path;
+  ## the only difference is *which* values arrive, not how the sync
+  ## happens. Earlier versions of this proc read ``v.value.text`` as
+  ## the rendered text — that field is only populated for Strings, so
+  ## DB traces (whose primitives expose ``value.i`` / ``value.f`` /
+  ## ``value.b``) reached the IsoNim view as empty rows.  The
+  ## ``valueDisplayText`` helper now mirrors the legacy
+  ## ``atomValueView`` ``$value`` call which dispatches into the
+  ## proper field per ``TypeKind``.
   if stateVMStore.isNil:
     return
   var vmLocals = newVariableSeq()
   for v in legacyLocals:
     vmLocals.add(makeVariable(
       name = $v.expression,
-      value = (if v.value.isNil: "" else: $v.value.text),
-      typeName = (if v.value.isNil: "" else: $v.value.kind),
+      value = valueDisplayText(v.value),
+      typeName = valueDisplayType(v.value),
       hasChildren = (if v.value.isNil: false else: v.value.elements.len > 0),
     ))
   stateVMStore.updateLocals(vmLocals)
   cerror fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
+
+proc lookupSourceLine(path: cstring; line: int): string =
+  ## Look up the source code at `<path>:<line>` from the editor cache.
+  ## Mirrors the legacy ``StateComponent.excerpt`` lookup which read
+  ## ``data.ui.editors[path].tabInfo.sourceLines[line - 1]``. Returns
+  ## an empty string when:
+  ##   * the editor for this file has not been opened / its source
+  ##     lines have not yet been populated, or
+  ##   * the requested line is outside the source-lines bounds (1-based
+  ##     line numbers, so ``line < 1`` or ``line > sourceLines.len``).
+  ## In either case the caller (``syncStoreCodeStateLine``) routes the
+  ## empty string into the IsoNim view's ``no-code`` fallback so the
+  ## ``#code-state-line-{id}`` element is still emitted.
+  if line < 1:
+    return ""
+  if not data.ui.editors.hasKey(path):
+    return ""
+  let editor = data.ui.editors[path]
+  if editor.isNil or editor.tabInfo.isNil:
+    return ""
+  let lines = editor.tabInfo.sourceLines
+  if line > lines.len:
+    return ""
+  $lines[line - 1]
+
+proc syncStoreCodeStateLine*(path: cstring; line: int) =
+  ## Mirror the active source line into the ViewModel store so the
+  ## IsoNim state view can render the ``#code-state-line-{id}``
+  ## element. The lookup uses the in-memory editor cache populated as
+  ## the user opens files; that cache is shared with the legacy
+  ## ``StateComponent.excerpt`` proc.  Pushed unconditionally on every
+  ## move event — DB-trace traces (where rrTicks is always 0) need
+  ## this signal to flip from "no source" to "populated" when the
+  ## editor finishes loading, just like RR traces.
+  ##
+  ## When the editor for ``path`` has not yet loaded its source lines
+  ## (a typical race on the very first CtCompleteMove of a session),
+  ## we schedule short retries so the populated text shows up as soon
+  ## as the source arrives.  The retries stop once source is found or
+  ## after a small budget — the caller will hit this proc again on
+  ## the next move event.
+  if stateVMStore.isNil:
+    return
+  let initial = lookupSourceLine(path, line)
+  stateVMStore.updateCodeStateLine(line, initial)
+  if initial.len > 0:
+    return
+
+  # Re-poll every 100 ms for up to ~3 s. The editor's source-lines
+  # field is populated synchronously when the file content arrives
+  # (see frontend/utils.nim ~line 1160 and renderer.nim
+  # ``onTabReloaded``); the IsoNim view stays on the ``no-code``
+  # fallback until then. The captured ``path`` / ``line`` are stable
+  # for the duration of this scheduled re-check; any subsequent move
+  # cancels the relevance of older retries because the next call to
+  # ``syncStoreCodeStateLine`` overwrites the signal anyway.
+  let capturedPath = path
+  let capturedLine = line
+  var attempts = 0
+  proc retry() =
+    if stateVMStore.isNil:
+      return
+    attempts += 1
+    let cur = lookupSourceLine(capturedPath, capturedLine)
+    if cur.len > 0:
+      stateVMStore.updateCodeStateLine(capturedLine, cur)
+      return
+    if attempts < 30:
+      discard setTimeout(proc() = retry(), 100)
+  discard setTimeout(proc() = retry(), 100)
 
 proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
@@ -203,6 +315,7 @@ proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
     return
   let ticks = cast[uint64](rrTicks)
   stateVMStore.updateDebuggerPosition(ticks, $path, line)
+  syncStoreCodeStateLine(path, line)
   cerror fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
 
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =

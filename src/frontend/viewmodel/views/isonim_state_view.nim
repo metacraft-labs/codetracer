@@ -56,6 +56,36 @@ proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
 # ---------------------------------------------------------------------------
+# Code-state-line helpers
+# ---------------------------------------------------------------------------
+#
+# The legacy Karax ``StateComponent.excerpt`` rendered the active source
+# line above the variables list as
+#   <div id="code-state-line-{id}" class="code-state-line">
+#     <span>{line} | {sourceCode}</span>
+#     <show_code .../>
+#   </div>
+# falling back to ``class="code-state-line no-code"`` and a blank span
+# when the source for the current file was not yet loaded.  Keeping the
+# `#code-state-line-{id}` element in the DOM regardless of source
+# availability is important because Playwright tests assert
+# ``locator('#code-state-line-0')`` exists before they read its text.
+# Only the *class* changes between the populated and fallback states,
+# matching the legacy behaviour.
+
+proc codeStateLineClass(vm: StateVM): string =
+  if vm.codeStateLine.val.len == 0: "code-state-line no-code"
+  else: "code-state-line"
+
+proc codeStateLineText(vm: StateVM): string =
+  ## The formatted text rendered inside the inner ``<span>``. Empty
+  ## when there is no source for the current position — matching the
+  ## legacy ``excerpt`` proc's no-code branch which emitted an empty
+  ## ``<span>`` so the outer wrapper still occupies a stable slot in
+  ## the layout.
+  vm.codeStateLine.val
+
+# ---------------------------------------------------------------------------
 # Reactive expressions (used inside DSL attributes)
 # ---------------------------------------------------------------------------
 #
@@ -217,6 +247,14 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
         button(class = tabClass(vm, stWatches),
                onclick = onSelectTab(vm, stWatches)):
           text tabLabel(stWatches)
+      # Code-state-line: always present in the DOM so Playwright can
+      # locate `#code-state-line-0` regardless of trace kind. The
+      # inner span text and outer class are reactive on
+      # vm.codeStateLine.val (empty -> "no-code" fallback).
+      tdiv(id = "code-state-line-0",
+           class = codeStateLineClass(vm)):
+        span:
+          text codeStateLineText(vm)
       tdiv(class = "watch-input-container",
            display = displayIf(vm.activeTab.val == stWatches)):
         input(class = "watch-input",
@@ -277,6 +315,17 @@ when defined(js):
 
     let panel = ui(r):
       tdiv(class = "state-component isonim-state"):
+        # Code-state-line: rendered before the watch input so that the
+        # Playwright `#code-state-line-0` lookup finds the populated
+        # element (with text "<line> | <source>") matching the legacy
+        # `excerpt` proc output. Outer class flips between
+        # `code-state-line` and `code-state-line no-code` depending on
+        # whether source is available; inner span text mirrors
+        # `vm.codeStateLine.val`.
+        tdiv(id = "code-state-line-0",
+             class = codeStateLineClass(vm)):
+          span:
+            text codeStateLineText(vm)
         tdiv(id = "gdb-evaluate"):
           form(ref = formEl):
             input(ref = inputEl,

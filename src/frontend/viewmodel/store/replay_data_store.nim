@@ -70,6 +70,16 @@ type
       ## The rrTicks value that the currently loaded data corresponds to.
       ## Lets the UI know whether the data is stale relative to the
       ## debugger position.
+    codeStateLine*: Signal[string]
+      ## Pre-formatted "<line> | <sourceCode>" string shown above the
+      ## variables list (rendered as the `#code-state-line-{id}`
+      ## element in the IsoNim state view).  The legacy Karax
+      ## ``StateComponent.excerpt`` proc rendered the same text from
+      ## ``data.ui.editors[path].sourceLines[line - 1]``; mirroring it
+      ## into the store lets the IsoNim view emit the DOM the
+      ## Playwright tests look for, regardless of whether the trace is
+      ## RR or Materialized.  Empty string means "no source" — the
+      ## view falls back to the ``no-code`` class with a blank label.
 
   ReplayDataStore* = ref object of ViewModel
     ## Central reactive store.  Created via `createReplayDataStore`.
@@ -129,6 +139,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         globals: createSignal(newSeq[Variable]()),
         loadingState: createSignal(lsIdle),
         loadedForRRTicks: createSignal(0'u64),
+        codeStateLine: createSignal(""),
       ),
 
       # -- services --
@@ -293,6 +304,24 @@ proc updateLocals*(store: ReplayDataStore;
     {.emit: "console.error('[PIPELINE] updateLocals: setting ' + `diagCount` + ' variables');".}
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
+
+proc updateCodeStateLine*(store: ReplayDataStore;
+                          line: int;
+                          sourceCode: string) =
+  ## Update the formatted "<line> | <sourceCode>" string displayed above
+  ## the variables list. Empty ``sourceCode`` means "no source available
+  ## yet" — callers pass it that way when the editor for the current
+  ## file has not loaded its source lines yet, or when the trace's
+  ## position is on a synthetic location with no source mapping.
+  ## The IsoNim state view reads this signal to decide between the
+  ## populated ``code-state-line`` markup and the ``no-code`` fallback.
+  let formatted =
+    if sourceCode.len == 0: ""
+    else: $line & " | " & sourceCode
+  let diagStoreId = store.storeId
+  when defined(js):
+    {.emit: "console.error('[PIPELINE] updateCodeStateLine: storeId=' + `diagStoreId` + ' line=' + `line` + ' has_source=' + (`sourceCode`.length > 0));".}
+  store.locals.codeStateLine.val = formatted
 
 proc makeVariable*(name, value, typeName: string;
                    hasChildren: bool = false;

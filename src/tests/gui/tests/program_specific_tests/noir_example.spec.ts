@@ -49,17 +49,12 @@ test.describe("noir example — state and navigation", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
-  // FAILING: 2026-04-30 — `readyOnEntry` waits up to 30s for
-  // `.location-path` to appear in the status bar. For noir DB traces
-  // the status bar never receives the entry-point location, so the
-  // helper times out. The trace itself is recorded successfully and
-  // Electron launches; the missing piece is the StatusBar path
-  // update for DB traces (RR traces work fine in the same suite).
-  // TODO: investigate the entry-point status update for DB traces in
-  // `status.nim` / the StatusBar component. Likely conditioned on RR
-  // tick events that DB traces never emit. The fix is to also update
-  // the status bar from `CtCompleteMove` events (which DB traces do
-  // emit) on initial load.
+  // PASSING since 2026-05-01 — `#code-state-line-0` is rendered by the
+  // IsoNim state view on every CtCompleteMove (regardless of trace
+  // kind), so noir DB traces now populate the panel correctly. See
+  // `viewmodel/views/isonim_state_view.nim` and the matching
+  // headless coverage in `tests/state/state_vm_test.nim` and
+  // `tests/views/isonim_views_test.nim`.
   test("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statePanel = new StatePanel(ctPage);

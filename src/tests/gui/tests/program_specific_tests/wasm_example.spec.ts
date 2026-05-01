@@ -65,18 +65,13 @@ test.describe("wasm example — state and navigation", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
-  // FAILING: 2026-04-30 — `#code-state-line-0` never appears for WASM DB
-  // traces. The trace records and Electron launches successfully (record
-  // ~250ms, components load ~1s) but the state panel's code-state line
-  // is missing from the DOM. The same code path renders correctly for
-  // C / Rust / Python sudoku traces, so this is a WASM-specific gap in
-  // the state-panel population — likely a `LangRustWasm` branch that
-  // never feeds StatePanelComponent the current location.
-  // TODO: investigate why state panel isn't populated for LangRustWasm
-  // traces. Look for the path in `state.nim` / `viewmodel/store/replay_data_store.nim`
-  // that populates `codeStateLine`; it likely conditions on the language
-  // having an RR backend or DB locals API that wasm-recorder doesn't
-  // implement.
+  // PASSING since 2026-05-01 — `#code-state-line-0` is now rendered by
+  // the IsoNim state view from a `codeStateLine` signal pushed by
+  // `state.nim`'s `syncStoreCodeStateLine` on every CtCompleteMove,
+  // independent of trace kind (RR or Materialized). See
+  // `viewmodel/views/isonim_state_view.nim` and the matching
+  // headless coverage in `tests/state/state_vm_test.nim` and
+  // `tests/views/isonim_views_test.nim`.
   test("state panel loaded initially", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const statePanel = new StatePanel(ctPage);
@@ -91,6 +86,16 @@ test.describe("wasm example — state and navigation", () => {
     await expect(statePanel.codeStateLine()).toContainText(`${ENTRY_LINE} | `);
   });
 
+  // FAILING: 2026-05-01 — the state-panel pipeline now correctly
+  // populates the `value-name` / `value-expanded-text` / `value-type`
+  // DOM with the variable name, integer value and `i32` type (verified
+  // against the post-fix DOM dump: `x: 0` shows up with type `i32`).
+  // The test still fails because the WASM DB-trace `Next` request is
+  // a no-op for the LangRustWasm path: two `clickNextButton()` calls
+  // leave the debugger position at line 11 (entry point) where x is
+  // still `0`. See TODO 5.2(i) in `/tmp/isonim-migration.txt` —
+  // investigate `src/db-backend/src/dap_server.rs` around the
+  // step handler for materialized WASM traces.
   test("state panel supports integer values", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
