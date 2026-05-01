@@ -683,9 +683,19 @@ test.describe("Visual Audit v2 — DeepReview", () => {
   // fixture JSON, so the difference is in how comprehensive-v2 boots
   // Electron in deepreview mode.
   test("Screen 8: DeepReview layout", async ({ ctPage }) => {
-    // Wait for DeepReview file items to load. The deepreview mode renders
-    // changed files in the filesystem panel with diff badges.
-    await ctPage.waitForSelector(".deepreview-file-item, div[id^='filesystemComponent']", {
+    // The standard DeepReview ready signal is the `.deepreview-container`
+    // element — that's what `DeepReviewPage.waitForReady` (used by the
+    // 113-test deepreview-gui.spec.ts suite) polls.  The previous
+    // selector here (`.deepreview-file-item, div[id^='filesystemComponent']`)
+    // tried to wait for the file list which is rendered AFTER the
+    // container materialises and on a longer pipeline (file diffing,
+    // etc.); under headless harness that pipeline could miss the 30 s
+    // budget while the container itself was already visible — see the
+    // matching 113/113 pass rate of `tests/deepreview/deepreview-gui.spec.ts`.
+    //
+    // Wait for the container first (matching the working suite's
+    // contract), then take the screenshot.
+    await ctPage.waitForSelector(".deepreview-container", {
       timeout: 30_000,
     });
     await wait(3000);
