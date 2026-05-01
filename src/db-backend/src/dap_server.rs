@@ -1305,9 +1305,22 @@ fn task_thread(
     cached_launch: bool,
     run_to_entry: bool,
 ) -> Result<(), Box<dyn Error>> {
+    // Track the trace folder + file currently loaded into `handler` so we can
+    // skip a redundant `setup()` reload when the renderer issues a duplicate
+    // launch for the SAME trace.  Without this, every materialized DB trace
+    // pays the full CTFS Db population cost twice (once from
+    // backend-manager's dap_init and once from the renderer's
+    // `dap-replay-selected` handshake), which can stretch ct-host startup
+    // to 80+ seconds for non-trivial traces and time out tests waiting on
+    // `ct/event-load` and `ct/load-calltrace-section` responses that are
+    // queued behind the second reload.
+    let mut loaded_trace_folder: Option<PathBuf> = None;
+    let mut loaded_trace_file: Option<PathBuf> = None;
+    let mut loaded_raw_diff_index: Option<String> = None;
+
     let mut handler = if cached_launch {
         let for_launch = false;
-        setup(
+        let h = setup(
             &ctx_with_cached_launch.launch_trace_folder,
             &ctx_with_cached_launch.launch_trace_file,
             ctx_with_cached_launch.launch_raw_diff_index.clone(),
@@ -1320,7 +1333,11 @@ fn task_thread(
         .map_err(|e| {
             error!("launch error: {e:?}");
             format!("launch error: {e:?}")
-        })?
+        })?;
+        loaded_trace_folder = Some(ctx_with_cached_launch.launch_trace_folder.clone());
+        loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
+        loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
+        h
     } else {
         // `.initialized` is false
         Handler::new(
@@ -1383,21 +1400,47 @@ fn task_thread(
                 };
                 let restore_location = args.restore_location.clone();
 
-                let for_launch = run_to_entry;
-                handler = setup(
-                    &launch_trace_folder,
-                    &launch_trace_file,
-                    launch_raw_diff_index.clone(),
-                    &recreator_exe,
-                    restore_location,
-                    sender.clone(),
-                    for_launch,
-                    name,
-                )
-                .map_err(|e| {
-                    error!("launch error: {e:?}");
-                    format!("launch error: {e:?}")
-                })?;
+                // Skip a redundant `setup()` reload when this launch targets
+                // the exact trace that the existing handler already serves.
+                // Comparison is conservative: same folder + same trace file +
+                // same raw_diff_index, and the previous setup completed
+                // (`handler.initialized`).  When the launch carries a
+                // restore_location we still rerun setup so the position is
+                // applied via run_to_entry's restore branch.
+                let same_trace = loaded_trace_folder.as_ref() == Some(&launch_trace_folder)
+                    && loaded_trace_file.as_ref() == Some(&launch_trace_file)
+                    && loaded_raw_diff_index == launch_raw_diff_index
+                    && handler.initialized
+                    && restore_location.is_none();
+
+                if same_trace {
+                    info!(
+                        "skipping duplicate launch for already-loaded trace {launch_trace_folder:?}/{launch_trace_file:?}"
+                    );
+                    // The renderer expects the launch acknowledgement to
+                    // happen at the protocol level (handled by the receiving
+                    // thread/main thread). We only need to avoid re-running
+                    // the expensive CTFS Db population here.
+                } else {
+                    let for_launch = run_to_entry;
+                    handler = setup(
+                        &launch_trace_folder,
+                        &launch_trace_file,
+                        launch_raw_diff_index.clone(),
+                        &recreator_exe,
+                        restore_location,
+                        sender.clone(),
+                        for_launch,
+                        name,
+                    )
+                    .map_err(|e| {
+                        error!("launch error: {e:?}");
+                        format!("launch error: {e:?}")
+                    })?;
+                    loaded_trace_folder = Some(launch_trace_folder);
+                    loaded_trace_file = Some(launch_trace_file);
+                    loaded_raw_diff_index = launch_raw_diff_index;
+                }
             }
         } else if handler.initialized {
             let res = handle_request(&mut handler, request.clone(), sender.clone());
