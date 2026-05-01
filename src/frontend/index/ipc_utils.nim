@@ -230,16 +230,45 @@ proc ready*(): Future[void] {.async.} =
       else:
         value
 
-    proc recordBootstrap(id: cstring, serialized: cstring) =
+    proc recordBootstrap(id, key, serialized: cstring) =
+      ## Cache a payload for replay on socket reconnect.
+      ##
+      ## ``key`` differentiates multiple payloads on the same channel
+      ## (used by ``dap-receive-event`` so distinct DAP events do not
+      ## clobber each other in the cache).  For the legacy single-
+      ## payload channels listed in ``bootstrapEvents`` the key is empty.
       if id in bootstrapEvents:
-        let payload = BootstrapPayload(id: id, payload: serialized)
+        let payload = BootstrapPayload(id: id, key: cstring"", payload: serialized)
         upsertBootstrap(data.bootstrapMessages, payload)
+      elif id == cstring"CODETRACER::dap-receive-event" and key.len > 0:
+        let payload = BootstrapPayload(id: id, key: key, payload: serialized)
+        upsertBootstrap(data.bootstrapMessages, payload)
+
+    proc dapReceiveEventKey(response: js): cstring =
+      ## Extract the inner DAP event name from a ``dap-receive-event``
+      ## payload, returning an empty string when the event is not one
+      ## of the bootstrap-critical kinds we want to cache.
+      if response.isNil:
+        return cstring""
+      let raw = response[cstring"event"]
+      if raw.isUndefined or raw.isNull:
+        return cstring""
+      let eventName = cast[cstring](raw)
+      for candidate in bootstrapDapEvents:
+        if candidate == eventName:
+          return eventName
+      return cstring""
 
     mainWindow.webContents.send = proc(id: cstring, response: js) =
       debugPrint cstring"frontend ... <=== index: ", id, response
       let serialized = JSON.stringify(response, replacer, 2.toJs)
       debugIndex fmt"frontend ... <=== index: {id}"  # TODO? too big: {serialized}"
-      recordBootstrap(id, serialized)
+      let dapKey =
+        if id == cstring"CODETRACER::dap-receive-event":
+          dapReceiveEventKey(response)
+        else:
+          cstring""
+      recordBootstrap(id, dapKey, serialized)
       ipc.emit(id, serialized)
 
   # bootstrap payloads that may need replay after reconnect

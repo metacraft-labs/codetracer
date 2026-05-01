@@ -2,7 +2,16 @@ type
   BootstrapPayload* = object
     ## Serialized IPC payload (already JSON.stringify-ed) that
     ## should be replayed to a reconnecting socket.
+    ##
+    ## ``id`` is the IPC channel name (e.g. ``CODETRACER::trace-loaded``).
+    ## ``key`` distinguishes multiple payloads on the same channel — for
+    ## ``CODETRACER::dap-receive-event`` it carries the inner DAP event
+    ## name (e.g. ``ct/complete-move``) so we can cache the latest of
+    ## several distinct DAP events without one overwriting the other.
+    ## For other channels ``key`` is left empty and only ``id`` is used
+    ## as the upsert/dedup discriminator.
     id*: cstring
+    key*: cstring
     payload*: cstring
 
 const
@@ -24,10 +33,26 @@ const
     cstring"CODETRACER::complete-move"
   ]
 
+  ## DAP events (delivered via ``CODETRACER::dap-receive-event``) that
+  ## carry critical bootstrap state.  After a browser reload the Backend
+  ## Manager sits at the same trace position but does not spontaneously
+  ## re-emit these one-shot events, so the host must cache the latest
+  ## payload per kind and replay it to the reconnecting client.
+  ##
+  ## ``ct/complete-move`` is the canonical one — without it the editor
+  ## tab never opens after a reload because
+  ## ``editor_service.onCompleteMove`` is the only path that calls
+  ## ``data.openTab``.
+  bootstrapDapEvents* = @[
+    cstring"ct/complete-move"
+  ]
+
 proc upsertBootstrap*(cache: var seq[BootstrapPayload], payload: BootstrapPayload) =
-  ## Replace an existing payload for the same IPC id or append if unseen.
+  ## Replace an existing payload for the same (id, key) tuple or append
+  ## if unseen.  ``key`` is empty for legacy single-payload-per-id
+  ## entries, so the behaviour for those is unchanged.
   for i, entry in cache.mpairs:
-    if entry.id == payload.id:
+    if entry.id == payload.id and entry.key == payload.key:
       entry = payload
       return
   cache.add(payload)

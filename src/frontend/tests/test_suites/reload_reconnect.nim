@@ -131,9 +131,55 @@ proc assertBootstrapReplayKeepsLatestState() =
   if traceMessages.len != 1 or traceMessages[0] != "CODETRACER::trace-loaded:{\"trace\":2}":
     raiseAssert "bootstrap replay did not keep the latest trace payload"
 
+proc assertDapReceiveEventKeyedUpsert() =
+  ## A reload-reconnect regression: distinct DAP events delivered over
+  ## the same ``CODETRACER::dap-receive-event`` channel must not clobber
+  ## one another in the bootstrap cache.  Without the ``key`` field the
+  ## second payload would replace the first (both share the same id),
+  ## so the reloaded client would only receive one of them.
+  ##
+  ## We also assert that re-recording the same DAP event upserts in
+  ## place (latest payload wins) instead of accumulating duplicates.
+  var payloads: seq[BootstrapPayload] = @[]
+  upsertBootstrap(payloads, BootstrapPayload(
+    id: cstring"CODETRACER::dap-receive-event",
+    key: cstring"ct/complete-move",
+    payload: cstring"""{"event":"ct/complete-move","body":{"loc":1}}"""))
+  upsertBootstrap(payloads, BootstrapPayload(
+    id: cstring"CODETRACER::dap-receive-event",
+    key: cstring"ct/updated-events",
+    payload: cstring"""{"event":"ct/updated-events","body":[]}"""))
+  # A new ct/complete-move arrives with an updated location: it must
+  # replace the previous payload, not append.
+  upsertBootstrap(payloads, BootstrapPayload(
+    id: cstring"CODETRACER::dap-receive-event",
+    key: cstring"ct/complete-move",
+    payload: cstring"""{"event":"ct/complete-move","body":{"loc":2}}"""))
+
+  if payloads.len != 2:
+    raiseAssert "keyed upsert should keep one payload per (id, key) tuple"
+
+  var ipc = initFrontendIPC()
+  let client = newFakeClient()
+  ipc.attachSocket(cast[WebSocket](client.socket))
+  replayBootstrap(payloads, proc(id: cstring, payload: cstring) =
+    ipc.emit(id, payload))
+
+  if client.received.len != 2:
+    raiseAssert "both keyed dap-receive-event payloads should replay"
+  let dapMessages = client.received.filterIt(it.startsWith("CODETRACER::dap-receive-event"))
+  if dapMessages.len != 2:
+    raiseAssert "expected both dap-receive-event payloads to be emitted"
+  let completeMoveMessages = dapMessages.filterIt(it.contains("ct/complete-move"))
+  if completeMoveMessages.len != 1:
+    raiseAssert "ct/complete-move replay should be deduplicated to the latest payload"
+  if not completeMoveMessages[0].contains("\"loc\":2"):
+    raiseAssert "ct/complete-move replay should carry the latest payload, not the stale one"
+
 proc run*() =
   assertOnlyNewSocketReceivesStarted()
   assertMidRequestDisconnectRecovers()
   assertBootstrapReplayKeepsLatestState()
+  assertDapReceiveEventKeyedUpsert()
 
 run()
