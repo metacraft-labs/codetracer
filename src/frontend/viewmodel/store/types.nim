@@ -206,3 +206,21 @@ type
     line*: int
     col*: int
     message*: string
+
+  # -------------------------------------------------------------------
+  # Errors / Problems panel value types
+  #
+  # The Errors panel renders the same ``BuildProblemLine`` rows the
+  # Build panel produces, so it reuses ``BuildProblemLine`` directly.
+  # Its panel-specific state is the active filter and the
+  # group-by-file toggle, both captured below.
+  # -------------------------------------------------------------------
+
+  ProblemFilterTag* = enum
+    ## Severity filter for the Problems panel.  Mirrors the legacy
+    ## ``ProblemFilter`` enum in ``frontend/types.nim`` but lives in
+    ## the platform-neutral viewmodel layer so it does not depend on
+    ## the JS-only Karax types.
+    pfAll       ## Show every problem regardless of severity.
+    pfErrors    ## Show only ``blsError`` rows.
+    pfWarnings  ## Show only ``blsWarning`` rows.

@@ -1,4 +1,4 @@
-import ui_imports, ../[types, communication], build_location_parser, auto_hide
+import ui_imports, ../[types, communication], build_location_parser, auto_hide, errors
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — IsoNim is the primary renderer.
@@ -145,17 +145,25 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
       locationLine: location.line,
       rawLocation: safeStr(rawLocation),
       other: safeStr(other)))
+  # Reset the ErrorsVM problem list ahead of the bulk replay so we
+  # don't double-up rows when E2E tests inject the legacy ``build``
+  # record multiple times.
+  errors.syncErrorsClear()
   for prob in self.build.problems:
     let sev = case prob.severity
               of ProbError:   blsError
               of ProbWarning: blsWarning
               of ProbInfo:    blsInfo
-    buildVMInstance.appendProblem(BuildProblemLine(
+    let problemRow = BuildProblemLine(
       severity: sev,
       path: safeStr(prob.path),
       line: prob.line,
       col: prob.col,
-      message: safeStr(prob.message)))
+      message: safeStr(prob.message))
+    buildVMInstance.appendProblem(problemRow)
+    # Mirror into the ErrorsVM so the Problems panel reflects the
+    # bulk-replay path that ``__ctRenderPanel`` uses for E2E tests.
+    errors.syncErrorsAppendProblem(problemRow)
 
 proc tryMountIsoNimBuildPanel*() =
   ## Mount the IsoNim build view into the GoldenLayout-managed (or
@@ -393,13 +401,17 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
         line: parsed.line,
         col: parsed.col,
         message: cstring(parsed.message)))
+      let problemRow = BuildProblemLine(
+        severity: parserSeverityToVM(parsed.severity),
+        path: parsed.path,
+        line: parsed.line,
+        col: parsed.col,
+        message: parsed.message)
       if not buildVMInstance.isNil:
-        buildVMInstance.appendProblem(BuildProblemLine(
-          severity: parserSeverityToVM(parsed.severity),
-          path: parsed.path,
-          line: parsed.line,
-          col: parsed.col,
-          message: parsed.message))
+        buildVMInstance.appendProblem(problemRow)
+      # Mirror the structured diagnostic into the IsoNim ErrorsVM so
+      # the Problems panel renders it without a separate sync pass.
+      errors.syncErrorsAppendProblem(problemRow)
   else:
     if buildLine.len > 0:
       self.build.output.add((cstring(buildLine), stdout))
@@ -432,6 +444,10 @@ method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
     # New builds clear the previous output so failures from one run
     # don't bleed into the next.
     buildVMInstance.clearOutput()
+
+  # Mirror the per-build clear into the IsoNim ErrorsVM so the
+  # Problems panel resets at the same instant the Build panel does.
+  errors.syncErrorsClear()
 
   self.data.redraw()
 

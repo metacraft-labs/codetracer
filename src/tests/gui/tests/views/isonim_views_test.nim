@@ -31,6 +31,7 @@ import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/terminal_output_vm
 import viewmodels/build_vm
+import viewmodels/errors_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -43,6 +44,7 @@ import views/isonim_scratchpad_view
 import views/isonim_shell_view
 import views/isonim_terminal_output_view
 import views/isonim_build_view
+import views/isonim_errors_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -3201,5 +3203,474 @@ suite "IsoNim Build Panel — interactions":
       scrollBtn.fireEvent("click")
       check vm.autoScroll.val == true
       check "active" in scrollBtn.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Errors / Problems panel — value helpers and tests
+# ---------------------------------------------------------------------------
+
+proc makeProblem(severity: BuildLineSeverity;
+                 path: string = "src/main.nim";
+                 line: int = 1;
+                 col: int = 1;
+                 message: string = "diagnostic"): BuildProblemLine =
+  BuildProblemLine(
+    severity: severity,
+    path: path,
+    line: line,
+    col: col,
+    message: message,
+  )
+
+# ---------------------------------------------------------------------------
+# Structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Errors Panel — structure":
+
+  test "renders root with problems-panel class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "problems-panel" in panel.attributes["class"]
+
+      dispose()
+
+  test "renders header with counts and controls":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      check findByClass(panel, "problems-header") != nil
+      check findByClass(panel, "problems-counts") != nil
+      check findByClass(panel, "problems-controls") != nil
+      check findByClass(panel, "problems-count-error") != nil
+      check findByClass(panel, "problems-count-warning") != nil
+
+      let listContainer = findByClass(panel, "problems-list")
+      check listContainer != nil
+      check listContainer.attributes["id"] == "problems-list"
+
+      dispose()
+
+  test "renders three filter buttons plus a Group by File toggle":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+      check buttons.len == 4
+      # Order matches the legacy view: All, Errors, Warnings, Group by File.
+      check buttons[0].textContent == "All"
+      check buttons[1].textContent == "Errors"
+      check buttons[2].textContent == "Warnings"
+      check buttons[3].textContent == "Group by File"
+
+      dispose()
+
+  test "starts with the All filter active and group-by-file off":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+
+      check "active" in buttons[0].attributes["class"]
+      check "active" notin buttons[1].attributes["class"]
+      check "active" notin buttons[2].attributes["class"]
+      check "active" notin buttons[3].attributes["class"]
+
+      dispose()
+
+  test "renders the empty-state overlay when there are no problems":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+      let empty = findByClass(panel, "problems-empty")
+      check empty != nil
+      check empty.textContent == "No problems detected."
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Header reactivity
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Errors Panel — header reactivity":
+
+  test "count badges reflect setProblems updates":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError),
+        makeProblem(blsError),
+        makeProblem(blsWarning),
+      ])
+
+      let errorBadge = findByClass(panel, "problems-count-error")
+      let warningBadge = findByClass(panel, "problems-count-warning")
+      check errorBadge != nil
+      check warningBadge != nil
+      check "2" in errorBadge.textContent
+      check "1" in warningBadge.textContent
+
+      # Total badge mirrors problems.len.
+      let badges = findAllByClass(panel, "problems-count-badge")
+      # The third badge (no severity modifier) carries the Total label.
+      var totalBadge: MockNode = nil
+      for b in badges:
+        if "problems-count-error" notin b.attributes["class"] and
+           "problems-count-warning" notin b.attributes["class"]:
+          totalBadge = b
+          break
+      check totalBadge != nil
+      check totalBadge.textContent == "Total: 3"
+
+      dispose()
+
+  test "appendProblem updates the badges incrementally":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+      let errorBadge = findByClass(panel, "problems-count-error")
+      check "0" in errorBadge.textContent
+
+      vm.appendProblem(makeProblem(blsError))
+      check "1" in errorBadge.textContent
+
+      vm.appendProblem(makeProblem(blsError))
+      check "2" in errorBadge.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Errors Panel — row rendering":
+
+  test "setProblems populates one row per problem":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "a.nim", line = 10, col = 1, message = "boom"),
+        makeProblem(blsWarning, path = "b.nim", line = 2, col = 5, message = "shrug"),
+      ])
+
+      let listContainer = findByClass(panel, "problems-list")
+      check listContainer.children.len == 2
+
+      let firstClass = listContainer.children[0].attributes["class"]
+      let secondClass = listContainer.children[1].attributes["class"]
+      check "problems-row" in firstClass
+      check "problems-severity-error" in firstClass
+      check "problems-severity-warning" in secondClass
+
+      dispose()
+
+  test "row text content carries path, location, and message":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "src/main.nim", line = 42, col = 7,
+                    message = "undeclared identifier"),
+      ])
+
+      let listContainer = findByClass(panel, "problems-list")
+      let row = listContainer.children[0]
+      let pathDiv = findByClass(row, "problems-path")
+      let locDiv = findByClass(row, "problems-location")
+      let msgDiv = findByClass(row, "problems-message")
+      check pathDiv != nil
+      check locDiv != nil
+      check msgDiv != nil
+      check pathDiv.textContent == "src/main.nim"
+      check locDiv.textContent == "42:7"
+      check msgDiv.textContent == "undeclared identifier"
+
+      dispose()
+
+  test "negative col falls back to line-only location text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "x.nim", line = 9, col = -1,
+                    message = "no col"),
+      ])
+
+      let listContainer = findByClass(panel, "problems-list")
+      let row = listContainer.children[0]
+      let locDiv = findByClass(row, "problems-location")
+      check locDiv.textContent == "9"
+
+      dispose()
+
+  test "clearProblems empties the list and shows the empty overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError),
+        makeProblem(blsWarning),
+      ])
+      let listContainer = findByClass(panel, "problems-list")
+      check listContainer.children.len == 2
+
+      vm.clearProblems()
+
+      # After clearing the empty-state overlay is the only child.
+      check listContainer.children.len == 1
+      check "problems-empty" in listContainer.children[0].attributes["class"]
+      check listContainer.children[0].textContent == "No problems detected."
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Filter behaviour
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Errors Panel — filter behaviour":
+
+  test "Errors filter button hides warning rows reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "a.nim", line = 1),
+        makeProblem(blsWarning, path = "b.nim", line = 2),
+        makeProblem(blsError, path = "c.nim", line = 3),
+      ])
+
+      let listContainer = findByClass(panel, "problems-list")
+      check listContainer.children.len == 3
+
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+      buttons[1].fireEvent("click")
+      check vm.filter.val == pfErrors
+
+      check listContainer.children.len == 2
+      for row in listContainer.children:
+        check "problems-severity-error" in row.attributes["class"]
+      check "active" in buttons[1].attributes["class"]
+      check "active" notin buttons[0].attributes["class"]
+
+      dispose()
+
+  test "Warnings filter button hides error rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError),
+        makeProblem(blsWarning),
+        makeProblem(blsWarning),
+      ])
+
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+      buttons[2].fireEvent("click")
+
+      let listContainer = findByClass(panel, "problems-list")
+      check listContainer.children.len == 2
+      for row in listContainer.children:
+        check "problems-severity-warning" in row.attributes["class"]
+
+      dispose()
+
+  test "All filter restores every row after a narrower filter":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError),
+        makeProblem(blsWarning),
+      ])
+
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+      buttons[1].fireEvent("click")
+      check findByClass(panel, "problems-list").children.len == 1
+
+      buttons[0].fireEvent("click")
+      check vm.filter.val == pfAll
+      check findByClass(panel, "problems-list").children.len == 2
+
+      dispose()
+
+  test "Empty filtered result shows the empty-state overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsWarning),
+      ])
+
+      # Filter to errors -> the single warning row drops out.
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+      buttons[1].fireEvent("click")
+
+      let listContainer = findByClass(panel, "problems-list")
+      check listContainer.children.len == 1
+      check "problems-empty" in listContainer.children[0].attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Group by file behaviour
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Errors Panel — group-by-file":
+
+  test "Group by File toggles the grouped layout reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "a.nim", line = 1),
+        makeProblem(blsError, path = "a.nim", line = 9),
+        makeProblem(blsWarning, path = "b.nim", line = 7),
+      ])
+
+      let buttons = findAllByClass(panel, "problems-filter-btn")
+      buttons[3].fireEvent("click")
+      check vm.groupByFile.val == true
+
+      let listContainer = findByClass(panel, "problems-list")
+      # Grouped wrapper exists, with one file group per distinct path.
+      let grouped = findByClass(listContainer, "problems-grouped")
+      check grouped != nil
+
+      let headers = findAllByClass(panel, "problems-file-header")
+      check headers.len == 2
+      check headers[0].textContent == "a.nim (2)"
+      check headers[1].textContent == "b.nim (1)"
+
+      # Each group contains the rows for its path.
+      let groups = findAllByClass(panel, "problems-file-group")
+      check groups.len == 2
+      let firstGroupRows = findAllByClass(groups[0], "problems-row")
+      check firstGroupRows.len == 2
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Interactions — row click dispatches a backend request
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Errors Panel — interactions":
+
+  test "row click dispatches ct/jump-location with path + line":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "src/main.nim", line = 17),
+      ])
+      mock.clearReceivedCommands()
+
+      let listContainer = findByClass(panel, "problems-list")
+      let row = listContainer.children[0]
+      row.fireEvent("click")
+
+      let req = mock.findCommand("ct/jump-location")
+      check req.isSome
+      check req.get.args{"path"}.getStr == "src/main.nim"
+      check req.get.args{"line"}.getInt == 17
+
+      dispose()
+
+  test "row click captures the right problem under group-by-file":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+
+      vm.setProblems(@[
+        makeProblem(blsError, path = "a.nim", line = 5),
+        makeProblem(blsError, path = "b.nim", line = 9),
+      ])
+      vm.setGroupByFile(true)
+      mock.clearReceivedCommands()
+
+      # Click the second row which lives under the "b.nim" group.
+      let groups = findAllByClass(panel, "problems-file-group")
+      check groups.len == 2
+      let bGroupRows = findAllByClass(groups[1], "problems-row")
+      check bGroupRows.len == 1
+      bGroupRows[0].fireEvent("click")
+
+      let req = mock.findCommand("ct/jump-location")
+      check req.isSome
+      check req.get.args{"path"}.getStr == "b.nim"
+      check req.get.args{"line"}.getInt == 9
 
       dispose()

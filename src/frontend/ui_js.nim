@@ -1013,6 +1013,8 @@ when not defined(ctInExtension):
       terminal_output.initTerminalOutputVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initBuildVMWithStore');".}
       build.initBuildVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initErrorsVMWithStore');".}
+      errors.initErrorsVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

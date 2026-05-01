@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
-  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build,
+  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -591,10 +591,17 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           build.syncLegacyBuildIntoVM(BuildComponent(component))
           build.tryMountIsoNimBuildPanel()
 
-        # BuildErrors, SearchResults: render via vnodeToDom into the GL
-        # container since they no longer use Karax setRenderer.  Also
-        # register a redraw callback so redrawAll() re-renders them.
-        if state.content in {Content.BuildErrors, Content.SearchResults}:
+        # BuildErrors is now an IsoNim view -- its DOM is mounted by
+        # ``errors.tryMountIsoNimErrorsPanel`` against the
+        # ``errorsComponent-{id}`` container, and reactive effects keep
+        # it in sync.  No vnodeToDom bridge or redraw callback is
+        # needed here.
+        if state.content == Content.BuildErrors:
+          errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
+          errors.tryMountIsoNimErrorsPanel()
+
+        # SearchResults still uses the Karax bridge.
+        if state.content == Content.SearchResults:
           let target = kdom.document.getElementById(containerId)
           if not target.isNil:
             target.innerHTML = cstring""
@@ -664,6 +671,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
       build.isoNimBuildMounted = false
       build.tryMountIsoNimBuildPanel()
+      return
+    if panel.content == Content.BuildErrors:
+      let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
+      if not errorsComp.isNil:
+        errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
+      errors.isoNimErrorsMounted = false
+      errors.tryMountIsoNimErrorsPanel()
       return
     let component = data.ui.componentMapping[panel.content][0]
     if not component.isNil:
@@ -798,6 +812,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           build.tryMountIsoNimBuildPanel()
         except:
           cerror "auto_hide: tryMountIsoNimBuildPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      elif panelDef.content == Content.BuildErrors:
+        try:
+          let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
+          if not errorsComp.isNil:
+            errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
+          errors.isoNimErrorsMounted = false
+          errors.tryMountIsoNimErrorsPanel()
+        except:
+          cerror "auto_hide: tryMountIsoNimErrorsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
       else:
         let component = data.ui.componentMapping[panelDef.content][0]
         if not component.isNil:
@@ -831,10 +854,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   proc renderAutoHidePanelById(contentId: int) =
     ## Re-render a standalone auto-hide panel by content ID.
     ## Uses vnodeToDom to bypass Karax's broken hidden-host rendering
-    ## for the Karax-only panels (BuildErrors, SearchResults).  The
-    ## Build panel is an IsoNim view: sync any legacy ``build.output``
-    ## state (E2E tests inject directly into that array) into the
-    ## ``BuildVM`` and then re-mount.
+    ## for the Karax-only panels (SearchResults).  The Build and
+    ## BuildErrors panels are IsoNim views: sync any legacy state
+    ## (E2E tests inject directly into ``build.output`` /
+    ## ``build.problems``) into the VM and then re-mount.
     if contentId == int(Content.Build):
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
@@ -842,8 +865,20 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       build.isoNimBuildMounted = false
       build.tryMountIsoNimBuildPanel()
       return
+    if contentId == int(Content.BuildErrors):
+      # ``syncLegacyBuildIntoVM`` already pushed the bulk-replay path
+      # for the Build panel into both ``BuildVM`` and ``ErrorsVM``;
+      # explicitly re-syncing here covers the case where E2E tests
+      # call ``__ctRenderPanel(21)`` after mutating
+      # ``build.problems`` directly without re-rendering the Build
+      # panel first.
+      let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
+      if not errorsComp.isNil:
+        errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
+      errors.isoNimErrorsMounted = false
+      errors.tryMountIsoNimErrorsPanel()
+      return
     let labels = [
-      (21, cstring"errorsComponent-0"),
       (20, cstring"searchResultsComponent-0"),
     ]
     for (cid, label) in labels:
