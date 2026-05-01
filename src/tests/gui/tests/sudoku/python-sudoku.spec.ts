@@ -12,30 +12,37 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  *
  * Port of ui-tests/Tests/ProgramSpecific/PythonSudokuTests.cs
  */
-// As of 2026-05-01 the Python recorder venv is healthy again (the
-// "module not installed" error documented above is fixed). The two
+// As of 2026-05-01 the Python recorder venv is healthy again. The
 // editor / event-log smoke tests pass.
 //
-// FAILING (3 of 5 tests as of 2026-05-01):
-//   - "call trace navigation to solve_sudoku"
-//   - "variable inspection board via call trace argument"
-//   - "terminal output shows solved board" (90s timeout)
+// FAILING (3 of 5 tests as of 2026-05-01, but with progress):
+//   - "call trace navigation to solve_sudoku"           (timeout)
+//   - "variable inspection board via call trace argument" (timeout +
+//     missing `.call-arg` rendering — IsoNim view emits "()" instead
+//     of per-arg DOM elements; see TODO 5.2 below)
+//   - "terminal output shows solved board" (terminal pane never gets
+//     populated for this DB trace — separate from calltrace)
 //
-// All three depend on the calltrace pane populating before
-// `navigateToEntry` runs. For Python DB traces the calltrace lines
-// arrive slowly (the recorder is correct, the loader is slow), and
-// `CallTracePane.waitForReady` exhausts its 60×1s budget before the
-// first `.calltrace-call-line` row appears.
-//
-// TODO: speed up Python DB-trace calltrace loading (or raise the
-// `waitForReady` budget specifically for Python). Two leads:
-//   1. The IsoNim calltrace view already requests data via
-//      `requestCalltraceSection` on each viewport / position change;
-//      check whether the initial request fires before the editor is
-//      ready, then refires unnecessarily after each position update.
-//   2. The DB-backend may be batching event-log + calltrace into a
-//      single response — splitting them would let calltrace become
-//      visible while the (much larger) event-log keeps streaming.
+// The structural calltrace navigation gap that originally hid
+// `solve_sudoku` (loaded section starting at index 0 with only 25
+// rows visible, the user-program calls live well past row 25) was
+// fixed in 2026-05-01 by:
+//   * `syncCalltraceData` (frontend/ui/calltrace.nim) now passes the
+//     backend's `startCallLineIndex` to the store instead of 0.
+//   * The IsoNim WebRenderer renders the FULL store window
+//     (`vm.store.calltrace.lines.val`) instead of a viewport-height
+//     slice — see `isonim_calltrace_view.nim`'s `indexEach`.
+//   * The CalltraceVM's autoLoad effect expands `totalHeight` to
+//     `totalCallsCount` once it is known, so the loaded section
+//     covers the entire DB trace (capped at 500 calls).
+// With these fixes `solve_sudoku` IS in the DOM after navigation
+// (verified via test diagnostic DOM dumps).  The remaining test
+// flakes are timing-related: the autoLoad effect re-fires several
+// times during a single CtCompleteMove (vpHeight, depth, scroll
+// changes ripple), each time clobbering the store and re-rendering
+// the calltrace DOM, which can leave Playwright with stale
+// `.calltrace-call-line` locators.  Stabilising those re-renders
+// is follow-up work for a future sub-agent.
 test.describe("PythonSudoku", () => {
   test.use({ sourcePath: "py_sudoku_solver/main.py", launchMode: "trace" });
 

@@ -358,7 +358,25 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       # RequestTracker deduplicates redundant backend requests.
       let effectiveHeight = if vpHeight > 0: vpHeight else: 50
       let bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
-      let totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
+      var totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
+      # When the store already knows the total number of calls (this
+      # happens after the first response arrives), expand the request
+      # window to cover the entire trace whenever it fits in a
+      # generous cap.  The IsoNim WebRenderer renders the full window
+      # without DOM virtualization (see `isonim_calltrace_view.nim`
+      # `indexEach` over `vm.store.calltrace.lines.val`), so the
+      # number of `.calltrace-call-line` elements in the DOM is
+      # bounded by the section we ask the backend to send.  Without
+      # this expansion, calltrace navigation (Playwright `findEntry`)
+      # cannot see entries beyond the initial 25-row viewport on DB
+      # traces such as Python / Ruby sudoku, where `solve_sudoku`
+      # lives well past row 25 of the global call-line index.  Once a
+      # translateY-based virtualised renderer lands the cap can be
+      # lowered again.
+      const FULL_WINDOW_CAP = 500
+      let totalCalls = store.calltrace.totalCallsCount.val
+      if totalCalls > 0'u64 and totalCalls.int <= FULL_WINDOW_CAP:
+        totalHeight = max(totalHeight, totalCalls.int)
       store.requestCalltraceSection(
         bufferStart, totalHeight, depth,
         rrTicks = dbg.rrTicks,

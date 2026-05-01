@@ -1067,12 +1067,19 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
     )
     cl.index = i.int64
     vmLines.add(cl)
+  # Mirror the backend's startCallLineIndex into the store so that the
+  # visibleLines memo can correctly slice based on the global index.
+  # Without this, after a calltrace-jump (search-result click) the
+  # backend returns a section centered around the jumped-to position,
+  # but the store stored startIndex=0 so the visible window kept showing
+  # rows [0..24] of the section, not rows around the jumped-to function.
+  let backendStartIndex = cast[int64](results.startCallLineIndex)
   calltraceVMStore.updateCalltraceSection(
     vmLines,
-    startIndex = 0'i64,
+    startIndex = backendStartIndex,
     totalCount = cast[uint64](results.totalCallsCount),
   )
-  cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store"
+  cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store, startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
 
 proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so

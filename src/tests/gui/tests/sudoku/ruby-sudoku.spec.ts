@@ -26,11 +26,11 @@ test.describe("RubySudoku", () => {
     await helpers.assertEventLogPopulated(ctPage);
   });
 
-  // FAILING: 2026-05-01 — calltrace pane never reports ready
-  // (`waitForReady` 60-attempt timeout). Same root cause as the
-  // Python sudoku calltrace tests: DB-trace calltrace data arrives
-  // too slowly for the page object's 60-second budget. See
-  // python-sudoku.spec.ts for the full TODO.
+  // FAILING (timing, 2026-05-01): see python-sudoku.spec.ts.  The
+  // structural calltrace-loading gap that originally hid the user-
+  // program calls is fixed; remaining flakes are caused by the
+  // CalltraceVM autoLoad effect re-firing several times per
+  // CtCompleteMove and clobbering the store mid-render.
   test("call trace navigation to SudokuSolver#solve", async ({ ctPage }) => {
     await helpers.assertCallTraceNavigation(
       ctPage,
@@ -39,10 +39,11 @@ test.describe("RubySudoku", () => {
     );
   });
 
-  // FAILING: 2026-05-01 — same DB-trace calltrace-loading lag as
-  // the previous test; `navigateToEntry` cannot find
-  // `SudokuSolver#initialize` because the calltrace lines have not
-  // been published yet. See TODO in python-sudoku.spec.ts.
+  // FAILING (2026-05-01): same auto-load re-render flake as the
+  // previous test, plus the IsoNim calltrace view does not yet
+  // render the per-argument `.call-arg` DOM elements that
+  // CallTraceEntry.arguments() expects (it emits a static "()"
+  // placeholder).  See TODO 5.2 in handoff.
   test("variable inspection board via call trace argument", async ({
     ctPage,
   }) => {

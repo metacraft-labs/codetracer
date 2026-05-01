@@ -321,8 +321,23 @@ when defined(js):
              display = displayIf(vm.isLoading.val)):
           text "Loading..."
 
+    # Render the full window the store currently holds, not a
+    # viewport-height-based slice.  The legacy Karax calltrace view
+    # virtualised rendering by leveraging `translateY` and the DOM scroll
+    # container (`#calltraceScroll-0`); the IsoNim view does not yet
+    # implement that scroll-window translation, so a slicing memo here
+    # would render only the first 25 lines and the remaining ~65 would
+    # never enter the DOM.  That broke calltrace navigation for DB traces
+    # (Python / Ruby sudoku): after a search-result click the calltrace
+    # cursor moves inside the loaded section but the visible 25 rows
+    # stayed at the top of the section, so Playwright's `findEntry` (which
+    # only sees `.calltrace-call-line` elements that are in the DOM)
+    # never observed the navigated function.  See:
+    # `vm.visibleLines` (calltrace_vm.nim) — the slicing memo that the
+    # Mock renderer still uses for its viewport-aware unit tests, and
+    # `syncCalltraceData` (calltrace.nim) — which feeds the store.
     indexEach[CallLine, WebRenderer, isonim_dom.Element](r, linesContainer,
-      proc(): seq[CallLine] = vm.visibleLines.val,
+      proc(): seq[CallLine] = vm.store.calltrace.lines.val,
       proc(item: proc(): CallLine, index: int): isonim_dom.Element =
         renderCallLineRowWeb(r, vm, item))
 
