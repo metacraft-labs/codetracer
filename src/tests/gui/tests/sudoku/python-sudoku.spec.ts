@@ -12,12 +12,17 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
  *
  * Port of ui-tests/Tests/ProgramSpecific/PythonSudokuTests.cs
  */
-// As of 2026-05-01 the Python recorder venv is healthy again. The
-// editor / event-log / calltrace navigation smoke tests pass.
+// As of 2026-05-01: PYTHON-SUDOKU SUITE FULL GREEN (5/5 passing).
 //
-// FAILING (1 of 5 tests as of 2026-05-01):
-//   - "terminal output shows solved board" — terminal pane never gets
-//     populated for this DB trace; separate from calltrace.
+// History of fixes that got us here:
+//
+// PASSING after 1.27 (codetracer-python-recorder a852330):
+//   - "terminal output shows solved board" — Python `print(...)`
+//     calls now land in the trace.  IO chunks were previously sent
+//     via `TraceWriter::add_event(...)` which is a no-op on the
+//     Nim multi-stream backend; switched to
+//     `register_special_event(kind, metadata, content)` mirroring
+//     the Ruby native recorder's `record_event` path.
 //
 // PASSING after 1.22 (CTFS register_call_arg pipeline):
 //   - "variable inspection board via call trace argument" — args now
