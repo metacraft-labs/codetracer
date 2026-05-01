@@ -39,6 +39,7 @@ const TAB_LIMIT = 20
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
 import viewmodel/app/isonim_app
+from isonim/core/batch as isoBatch import batch
 var activeSessionVM: SessionViewModel
 var activeIsoNimApp: IsoNimApp
 const MIN_FONTSIZE = 6
@@ -1030,10 +1031,18 @@ when not defined(ctInExtension):
       data.viewsApi.subscribe(CtCompleteMove,
         proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
           {.emit: "console.error('[PIPELINE] viewsApi.CtCompleteMove: rrTicks=' + `response`.location.rrTicks + ' file=' + `response`.location.path + ' line=' + `response`.location.line);".}
-          calltrace.syncCalltraceDebuggerPosition(
-            response.location.rrTicks, response.location.path, response.location.line)
-          state.syncStoreDebuggerPosition(
-            response.location.rrTicks, response.location.path, response.location.line))
+          # Batch the calltrace + state store writes so the parallel
+          # ViewModels' autoLoad effects fire at most once per move.
+          # Without batching each write schedules its own observer
+          # invalidation, producing several backend round-trips that can
+          # clobber the store mid-render and leave Playwright with stale
+          # locators (the python/ruby sudoku navigation regression).
+          let rrTicks = response.location.rrTicks
+          let path = response.location.path
+          let line = response.location.line
+          isoBatch.batch proc() =
+            calltrace.syncCalltraceDebuggerPosition(rrTicks, path, line)
+            state.syncStoreDebuggerPosition(rrTicks, path, line))
 
       # -----------------------------------------------------------------
       # IsoNim app shell: mount the parallel IsoNim renderer.

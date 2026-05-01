@@ -21,6 +21,7 @@ from ../viewmodel/viewmodels/calltrace_vm import
   scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns,
   setBackendSearchResults
 from isonim/web/dom_api import nil
+from isonim/core/batch as isoBatch import batch
 from ../viewmodel/views/isonim_calltrace_view import
   mountIsoNimCalltrace
 
@@ -1283,10 +1284,18 @@ proc setCalltraceMutationObserver(self: CalltraceComponent) =
             self.startCallLineIndex = index
             # Update the VM's scroll position and viewport dimensions
             # so the auto-load effect re-requests data for the new size.
+            # Wrap the three writes in `batch(...)` so the autoLoad effect
+            # invalidates and re-runs at most once for this resize event
+            # (see the matching comment in onCompleteMove).
             if calltraceVMInstance != nil:
-              calltraceVMInstance.setViewportHeight(self.panelHeight())
-              calltraceVMInstance.setViewportDepth(self.panelDepth())
-              calltraceVMInstance.scroll(index.int64)
+              let vm = calltraceVMInstance
+              let viewportHeight = self.panelHeight()
+              let viewportDepth = self.panelDepth()
+              let scrollIndex = index.int64
+              isoBatch.batch proc() =
+                vm.setViewportHeight(viewportHeight)
+                vm.setViewportDepth(viewportDepth)
+                vm.scroll(scrollIndex)
             else:
               self.loadLines(fromScroll=false)
           except:
@@ -1524,22 +1533,37 @@ method onFindOrFilter*(self: CalltraceComponent) {.async.} =
 method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} =
   self.location = response.location
 
-  # Mirror the debugger position into the parallel ViewModel store.
-  # This update triggers the CalltraceVM's auto-load effect which calls
-  # store.requestCalltraceSection — so we no longer need to call
-  # self.loadLines(fromScroll=false) directly here.  The backend will
-  # respond with CtUpdatedCalltrace which is still handled by the
-  # existing onUpdatedCalltrace subscription.
-  syncCalltraceDebuggerPosition(
-    response.location.rrTicks, response.location.path, response.location.line)
-
-  # Sync the viewport dimensions and filter patterns to the VM so the
-  # auto-load effect can include them in its request.
-  if calltraceVMInstance != nil:
-    calltraceVMInstance.setViewportHeight(self.panelHeight())
-    calltraceVMInstance.setViewportDepth(self.panelDepth())
-    if not self.rawIgnorePatterns.isNil:
-      calltraceVMInstance.setRawIgnorePatterns($self.rawIgnorePatterns)
+  # Wrap every signal write that feeds the CalltraceVM's autoLoad effect
+  # in a single `batch(...)`.  The autoLoad effect depends on
+  # viewportHeight, viewportDepth, scrollPosition (via store), the
+  # debugger position (rrTicks/file/line), and rawIgnorePatterns — without
+  # batching, each individual write schedules its own autoLoad re-run,
+  # producing several backend round-trips per CtCompleteMove that
+  # overwrite the calltrace store mid-render and leave Playwright holding
+  # stale `.calltrace-call-line` locators (the python/ruby sudoku
+  # navigation regression).
+  let location = response.location
+  let hasVM = calltraceVMInstance != nil
+  let vm = calltraceVMInstance
+  let viewportHeight = self.panelHeight()
+  let viewportDepth = self.panelDepth()
+  let hasIgnorePatterns = hasVM and not self.rawIgnorePatterns.isNil
+  let ignorePatterns = if hasIgnorePatterns: $self.rawIgnorePatterns else: ""
+  isoBatch.batch proc() =
+    # Mirror the debugger position into the parallel ViewModel store.
+    # Triggers the CalltraceVM's auto-load effect which calls
+    # store.requestCalltraceSection.  The backend will respond with
+    # CtUpdatedCalltrace handled by the existing onUpdatedCalltrace
+    # subscription.
+    syncCalltraceDebuggerPosition(
+      location.rrTicks, location.path, location.line)
+    # Sync the viewport dimensions and filter patterns to the VM so the
+    # auto-load effect can include them in its request.
+    if hasVM:
+      vm.setViewportHeight(viewportHeight)
+      vm.setViewportDepth(viewportDepth)
+      if hasIgnorePatterns:
+        vm.setRawIgnorePatterns(ignorePatterns)
 
   #TODO: pass explicitly in trace as trace kind/in init/other way?
   let lang = toLangFromFilename(self.location.path)

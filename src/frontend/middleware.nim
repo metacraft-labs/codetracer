@@ -6,6 +6,7 @@ import
   communication, dap,
   event_helpers,
   ui/calltrace
+from isonim/core/batch as isoBatch import batch
 
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);
@@ -153,7 +154,20 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     {.emit: "console.error('[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=' + (`value`.location ? `value`.location.rrTicks : 'no-location') + ', emitting to viewsApi');".}
-    viewsApi.emit(CtCompleteMove, value)
+    # Wrap the entire CtCompleteMove fan-out in a single isonim batch.
+    # Subscribers (the legacy CalltraceComponent / StateComponent
+    # `onCompleteMove` methods, the viewsApi-level fallback that calls
+    # `syncCalltraceDebuggerPosition` + `syncStoreDebuggerPosition`, and
+    # any future ones) all write to ReplayDataStore signals that drive
+    # the CalltraceVM/StateVM autoLoad effects.  Without batching, each
+    # subscriber's writes flush observers immediately, producing several
+    # redundant backend round-trips per move.  Those round-trips clobber
+    # the calltrace store mid-render and leave Playwright with stale
+    # `.calltrace-call-line` locators (the python/ruby sudoku navigation
+    # regression).  See `isonim/core/batch.nim` for the semantics.
+    let captured = value
+    isoBatch.batch proc() =
+      viewsApi.emit(CtCompleteMove, captured)
     lastCompleteMove = value
 
     when not defined(ctInExtension):
