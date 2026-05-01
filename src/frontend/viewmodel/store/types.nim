@@ -135,3 +135,74 @@ type
     ## fragment.
     lineIndex*: int
     fragments*: seq[TerminalEventFragment]
+
+  # -------------------------------------------------------------------
+  # Build panel value types
+  #
+  # The Build panel renders three logical lists: stdout/stderr output
+  # lines (with optional clickable source-location parsing), structured
+  # build errors that a user can jump to, and severity-tagged problems
+  # surfaced in the Problems panel.  The legacy ``Build`` object on
+  # ``frontend/types.nim`` keeps tuple-shaped data; the ViewModel layer
+  # uses these named value types so signals stay readable and the
+  # headless view tests can assert against well-named fields.
+  # -------------------------------------------------------------------
+
+  BuildLineSeverity* = enum
+    ## Severity tag attached to a parsed build line. Matches the
+    ## ``BuildSeverity`` enum in ``frontend/ui/build_location_parser``;
+    ## kept independent so the ViewModel layer does not depend on the
+    ## legacy ui module.
+    blsNone     ## No diagnostic — plain stdout / stderr line.
+    blsError    ## Compiler error.
+    blsWarning  ## Compiler warning.
+    blsInfo     ## Informational note.
+
+  BuildOutputLine* = object
+    ## One rendered line in the Build panel's output stream.
+    ##
+    ## ``htmlText`` carries the ANSI-converted HTML the legacy view
+    ## inserts via Karax's ``verbatim`` (the JS-side ``ansi_up``
+    ## library produces ``<span style="color:...">`` runs).  The view's
+    ## Web overload writes this string into ``innerHTML``; the Mock
+    ## overload assigns it to ``textContent`` so headless tests can
+    ## assert on the text directly.
+    ##
+    ## ``isStdout`` selects the ``build-stdout`` vs ``build-stderr``
+    ## CSS class — stderr is rendered in red/orange in production CSS.
+    ##
+    ## ``severity`` is ``blsNone`` for unparseable output; otherwise it
+    ## carries the diagnostic level extracted by ``parseBuildLocation``
+    ## so the view can apply ``build-line-error`` / ``build-line-warning``
+    ## / ``build-line-info`` classes.  When the line carries a parsed
+    ## location the view turns it into a clickable jump target.
+    ##
+    ## ``locationPath`` / ``locationLine`` describe the source location
+    ## referenced by the line.  ``locationPath`` is empty when the line
+    ## has no parsed location.  ``locationLine`` is 1-based; 0 means
+    ## unknown.
+    htmlText*: string
+    isStdout*: bool
+    severity*: BuildLineSeverity
+    locationPath*: string
+    locationLine*: int
+
+  BuildErrorLine* = object
+    ## One row in the Problems / Errors view.  ``rawLocation`` is the
+    ## ``"path(line, col)"``-style display string the legacy view
+    ## emitted; ``other`` carries the diagnostic message text.  Click
+    ## navigates to ``locationPath`` : ``locationLine``.
+    locationPath*: string
+    locationLine*: int
+    rawLocation*: string
+    other*: string
+
+  BuildProblemLine* = object
+    ## One BuildProblem row.  Mirrors the legacy ``BuildProblem`` object
+    ## but with ``string`` instead of ``cstring`` so the value lives on
+    ## both native and JS backends without conversion noise.
+    severity*: BuildLineSeverity
+    path*: string
+    line*: int
+    col*: int
+    message*: string

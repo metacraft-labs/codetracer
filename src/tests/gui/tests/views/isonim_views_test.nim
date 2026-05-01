@@ -13,7 +13,7 @@
 
 import std/[unittest, strutils, tables, options, sets, json]
 import vm_test_helpers
-import isonim/core/[signals, owner]
+import isonim/core/[signals, computation, owner]
 import isonim/testing/mock_dom
 import backend/backend_service
 import backend/mock_backend
@@ -30,6 +30,7 @@ import viewmodels/point_list_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/terminal_output_vm
+import viewmodels/build_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -41,6 +42,7 @@ import views/isonim_point_list_view
 import views/isonim_scratchpad_view
 import views/isonim_shell_view
 import views/isonim_terminal_output_view
+import views/isonim_build_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -2848,5 +2850,356 @@ suite "IsoNim Terminal Output Panel — interactions":
       check req.get.args["rrTicks"].getInt == 42
 
       dispose()
+
+      dispose()
+
+# ===========================================================================
+# Build panel tests
+# ===========================================================================
+#
+# Cover:
+# - Outer structure (root class, header, header controls, output container).
+# - Header text + class flips for the four BuildStatus values
+#   (idle, running, succeeded, failed).
+# - Per-line DOM produced by ``appendLine`` and the line-class hook
+#   for parseable / stdout / stderr lines.
+# - Reactive updates when ``output`` / ``code`` / ``running`` change.
+# - Click handlers route to ``cancelBuild`` / ``clearOutput`` /
+#   ``toggleAutoScroll`` via the mock backend or VM signal flips.
+#
+# The render-effect that builds the output container body fires
+# synchronously inside the reactive root, so no ``drain()`` is needed
+# between mutations and assertions.
+
+# ---------------------------------------------------------------------------
+# Build helpers
+# ---------------------------------------------------------------------------
+
+proc makeBuildLine(text: string;
+                   isStdout: bool = true;
+                   severity: BuildLineSeverity = blsNone;
+                   path: string = "";
+                   line: int = 0): BuildOutputLine =
+  BuildOutputLine(
+    htmlText: text,
+    isStdout: isStdout,
+    severity: severity,
+    locationPath: path,
+    locationLine: line,
+  )
+
+# ---------------------------------------------------------------------------
+# Build structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Build Panel — structure":
+
+  test "renders root with build-panel class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "build-panel" in panel.attributes["class"]
+
+      dispose()
+
+  test "renders header with controls and output container":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      check findByClass(panel, "build-header") != nil
+      check findByClass(panel, "build-header-controls") != nil
+      check findByClass(panel, "build-stop-btn") != nil
+      check findByClass(panel, "build-clear-btn") != nil
+      check findByClass(panel, "build-scroll-btn") != nil
+
+      let outputContainer = findByClass(panel, "build-output-container")
+      check outputContainer != nil
+      check outputContainer.attributes["id"] == "build"
+
+      dispose()
+
+  test "header label is empty in the idle state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+      let label = findByClass(panel, "build-command-label")
+      check label != nil
+      check label.textContent == ""
+
+      dispose()
+
+  test "stop button starts disabled when no build is running":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+      let stopBtn = findByClass(panel, "build-stop-btn")
+      check stopBtn != nil
+      # The disabled modifier class is present in the idle state.
+      check "disabled" in stopBtn.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Build header reactive transitions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Build Panel — header reactivity":
+
+  test "running build shows 'running <command>' header":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.setCommand("cargo build")
+      vm.setRunning(true)
+
+      let label = findByClass(panel, "build-command-label")
+      check label.textContent == "running cargo build"
+
+      let header = findByClass(panel, "build-header")
+      # No success / failure modifier while running.
+      check "build-failed" notin header.attributes["class"]
+      check "build-succeeded" notin header.attributes["class"]
+
+      # Stop button leaves the disabled modifier when running.
+      let stopBtn = findByClass(panel, "build-stop-btn")
+      check "disabled" notin stopBtn.attributes["class"]
+
+      dispose()
+
+  test "successful build flips header to build-succeeded":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine("Compiling foo"))
+      vm.setCode(0)
+
+      let label = findByClass(panel, "build-command-label")
+      check label.textContent == "build succeeded"
+      let header = findByClass(panel, "build-header")
+      check "build-succeeded" in header.attributes["class"]
+
+      dispose()
+
+  test "failed build flips header to build-failed with exit code":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine("Compiling foo"))
+      vm.setCode(7)
+
+      let label = findByClass(panel, "build-command-label")
+      check label.textContent == "build failed (exit code 7)"
+      let header = findByClass(panel, "build-header")
+      check "build-failed" in header.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Build line rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Build Panel — line rendering":
+
+  test "appendLine populates one output-container child per line":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine("hello", isStdout = true))
+      vm.appendLine(makeBuildLine("world", isStdout = false))
+
+      let outputContainer = findByClass(panel, "build-output-container")
+      check outputContainer.children.len == 2
+      # First line is stdout.
+      check outputContainer.children[0].attributes["class"] == "build-stdout"
+      check outputContainer.children[0].textContent == "hello"
+      # Second line is stderr.
+      check outputContainer.children[1].attributes["class"] == "build-stderr"
+      check outputContainer.children[1].textContent == "world"
+
+      dispose()
+
+  test "line with parsed location gets build-clickable + severity class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine(
+        "src/main.nim(42, 5) Error: undeclared identifier",
+        isStdout = false,
+        severity = blsError,
+        path = "src/main.nim",
+        line = 42))
+
+      let outputContainer = findByClass(panel, "build-output-container")
+      check outputContainer.children.len == 1
+      let cls = outputContainer.children[0].attributes["class"]
+      check "build-output-line" in cls
+      check "build-clickable" in cls
+      check "build-line-error" in cls
+
+      dispose()
+
+  test "warning severity picks build-line-warning":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine(
+        "src/main.nim(7) Warning: unused import",
+        isStdout = false,
+        severity = blsWarning,
+        path = "src/main.nim",
+        line = 7))
+
+      let outputContainer = findByClass(panel, "build-output-container")
+      check "build-line-warning" in outputContainer.children[0].attributes["class"]
+
+      dispose()
+
+  test "clearOutput empties the output container and returns to idle":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine("first"))
+      vm.appendLine(makeBuildLine("second"))
+      vm.setCode(1)
+
+      let outputContainer = findByClass(panel, "build-output-container")
+      check outputContainer.children.len == 2
+      check vm.status.val == bsFailed
+
+      vm.clearOutput()
+
+      check outputContainer.children.len == 0
+      check vm.status.val == bsIdle
+      let label = findByClass(panel, "build-command-label")
+      check label.textContent == ""
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Build interactions — controls map to backend / VM actions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Build Panel — interactions":
+
+  test "stop button click dispatches ct/build-cancel while running":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      # Stop is a no-op when the panel is idle.  Flip to running and
+      # confirm the click actually reaches the backend.
+      vm.setRunning(true)
+      mock.clearReceivedCommands()
+
+      let stopBtn = findByClass(panel, "build-stop-btn")
+      stopBtn.fireEvent("click")
+
+      let req = mock.findCommand("ct/build-cancel")
+      check req.isSome
+
+      dispose()
+
+  test "stop button is a no-op when no build is running":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      mock.clearReceivedCommands()
+      let stopBtn = findByClass(panel, "build-stop-btn")
+      stopBtn.fireEvent("click")
+
+      check mock.findCommand("ct/build-cancel").isNone
+
+      dispose()
+
+  test "clear button empties the output via the VM action":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+
+      vm.appendLine(makeBuildLine("noise"))
+      let outputContainer = findByClass(panel, "build-output-container")
+      check outputContainer.children.len == 1
+
+      let clearBtn = findByClass(panel, "build-clear-btn")
+      clearBtn.fireEvent("click")
+
+      check outputContainer.children.len == 0
+      check vm.output.val.len == 0
+
+      dispose()
+
+  test "auto-scroll button toggles the active modifier":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+
+      let panel = renderBuildPanel(r, vm)
+      let scrollBtn = findByClass(panel, "build-scroll-btn")
+
+      # autoScroll defaults to true; the active class is present.
+      check "active" in scrollBtn.attributes["class"]
+
+      scrollBtn.fireEvent("click")
+      check vm.autoScroll.val == false
+      check "active" notin scrollBtn.attributes["class"]
+
+      scrollBtn.fireEvent("click")
+      check vm.autoScroll.val == true
+      check "active" in scrollBtn.attributes["class"]
 
       dispose()

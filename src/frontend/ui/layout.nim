@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
-  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs,
+  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -575,10 +575,26 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           if shellComponent.shell.isNil:
             discard shellComponent.createShell()
 
-        # Build, BuildErrors, SearchResults: render via vnodeToDom
-        # into the GL container since they no longer use Karax setRenderer.
-        # Also register a redraw callback so redrawAll() re-renders them.
-        if state.content in {Content.Build, Content.BuildErrors, Content.SearchResults}:
+        # Build is now an IsoNim view — its DOM is mounted by
+        # `build.tryMountIsoNimBuildPanel` against the `buildComponent-{id}`
+        # container, and reactive effects keep it in sync.  No vnodeToDom
+        # bridge or redraw callback is needed here.
+        if state.content == Content.Build:
+          # The IsoNim view mounts itself once `buildComponentRef` and
+          # the VM are both available (the registration order between
+          # `register()` and `configureMiddleware` is non-deterministic
+          # under different layouts).  Calling tryMount here is safe and
+          # idempotent — it short-circuits when already mounted.  Also
+          # sync any data the legacy ``build`` record already carries
+          # (e.g. when the GL container appears after a recorded build
+          # already finished).
+          build.syncLegacyBuildIntoVM(BuildComponent(component))
+          build.tryMountIsoNimBuildPanel()
+
+        # BuildErrors, SearchResults: render via vnodeToDom into the GL
+        # container since they no longer use Karax setRenderer.  Also
+        # register a redraw callback so redrawAll() re-renders them.
+        if state.content in {Content.BuildErrors, Content.SearchResults}:
           let target = kdom.document.getElementById(containerId)
           if not target.isNil:
             target.innerHTML = cstring""
@@ -639,7 +655,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     # reliably because the element starts in a hidden/offscreen host.
     # Instead, render the component's VNode directly into the container
     # using vnodeToDom, which bypasses Karax's diffing and produces fresh
-    # DOM nodes.
+    # DOM nodes.  The Build panel is now an IsoNim view: re-mount it
+    # against the visible label so the reactive root attaches inside
+    # the container that the auto-hide overlay just made visible.
+    if panel.content == Content.Build:
+      let buildComp = data.ui.componentMapping[Content.Build][0]
+      if not buildComp.isNil:
+        build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
+      build.isoNimBuildMounted = false
+      build.tryMountIsoNimBuildPanel()
+      return
     let component = data.ui.componentMapping[panel.content][0]
     if not component.isNil:
       let target = kdom.document.getElementById(label)
@@ -760,22 +785,36 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # Render the component via vnodeToDom (no Karax setRenderer).
       # Also register a redraw callback so redrawAll() re-renders it.
-      let component = data.ui.componentMapping[panelDef.content][0]
-      if not component.isNil:
-        let vnode = component.render()
-        let dom = vnodeToDom(vnode, KaraxInstance())
-        innerDiv.appendChild(dom)
+      # The Build panel is an IsoNim view, so it mounts itself against
+      # the inner div the next time `tryMountIsoNimBuildPanel` runs (no
+      # vnodeToDom redraw callback needed — the reactive root keeps the
+      # DOM in sync automatically).
+      if panelDef.content == Content.Build:
+        try:
+          let buildComp = data.ui.componentMapping[Content.Build][0]
+          if not buildComp.isNil:
+            build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
+          build.isoNimBuildMounted = false
+          build.tryMountIsoNimBuildPanel()
+        except:
+          cerror "auto_hide: tryMountIsoNimBuildPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      else:
+        let component = data.ui.componentMapping[panelDef.content][0]
+        if not component.isNil:
+          let vnode = component.render()
+          let dom = vnodeToDom(vnode, KaraxInstance())
+          innerDiv.appendChild(dom)
 
-        let capturedComponent = component
-        let capturedLabel = panelDef.label
-        vnodeToDomRedrawCallbacks.add(proc() =
-          let el = kdom.document.getElementById(capturedLabel)
-          if not el.isNil:
-            el.innerHTML = cstring""
-            let v = capturedComponent.render()
-            let d = vnodeToDom(v, KaraxInstance())
-            el.appendChild(d)
-        )
+          let capturedComponent = component
+          let capturedLabel = panelDef.label
+          vnodeToDomRedrawCallbacks.add(proc() =
+            let el = kdom.document.getElementById(capturedLabel)
+            if not el.isNil:
+              el.innerHTML = cstring""
+              let v = capturedComponent.render()
+              let d = vnodeToDom(v, KaraxInstance())
+              el.appendChild(d)
+          )
 
       addStandaloneAutoHidePanel(
         panelDef.title,
@@ -791,9 +830,19 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Expose helper functions on window for E2E tests.
   proc renderAutoHidePanelById(contentId: int) =
     ## Re-render a standalone auto-hide panel by content ID.
-    ## Uses vnodeToDom to bypass Karax's broken hidden-host rendering.
+    ## Uses vnodeToDom to bypass Karax's broken hidden-host rendering
+    ## for the Karax-only panels (BuildErrors, SearchResults).  The
+    ## Build panel is an IsoNim view: sync any legacy ``build.output``
+    ## state (E2E tests inject directly into that array) into the
+    ## ``BuildVM`` and then re-mount.
+    if contentId == int(Content.Build):
+      let buildComp = data.ui.componentMapping[Content.Build][0]
+      if not buildComp.isNil:
+        build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
+      build.isoNimBuildMounted = false
+      build.tryMountIsoNimBuildPanel()
+      return
     let labels = [
-      (11, cstring"buildComponent-0"),
       (21, cstring"errorsComponent-0"),
       (20, cstring"searchResultsComponent-0"),
     ]

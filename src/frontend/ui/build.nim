@@ -1,6 +1,205 @@
-import ui_imports, ../types, build_location_parser, auto_hide
+import ui_imports, ../[types, communication], build_location_parser, auto_hide
+
+# ---------------------------------------------------------------------------
+# ViewModel layer — IsoNim is the primary renderer.
+#
+# The legacy Karax `method render` was dropped in favour of an IsoNim
+# view (`viewmodel/views/isonim_build_view.nim`) that mounts directly
+# into the GoldenLayout container.  The legacy `BuildComponent` retains
+# its IPC subscriptions so the existing wiring (build-command,
+# build-stdout, build-stderr, build-code) keeps feeding data; the
+# component now mirrors every update into a `BuildVM` whose signals
+# drive the IsoNim view.
+# ---------------------------------------------------------------------------
+
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import
+  BuildOutputLine, BuildErrorLine, BuildProblemLine, BuildLineSeverity,
+  blsNone, blsError, blsWarning, blsInfo
+from ../viewmodel/viewmodels/build_vm import
+  BuildVM, BuildStatus, createBuildVM,
+  setCommand, setRunning, setBuildStartTime, setCode, appendLine,
+  appendError, appendProblem, clearOutput
+from isonim/web/dom_api import nil
+from ../viewmodel/views/isonim_build_view import mountIsoNimBuild
 
 export build_location_parser
+
+# Module-level VM/store/component slots so the IsoNim mount and the
+# legacy event-bus handlers can find each other across calls.  Mirrors
+# the pattern used by the terminal-output, event-log and calltrace
+# migrations.
+var buildVMInstance*: BuildVM
+var buildVMStore: ReplayDataStore
+var buildComponentRef: BuildComponent
+var isoNimBuildMounted*: bool = false
+
+proc tryMountIsoNimBuildPanel*()
+proc parserSeverityToVM(sev: BuildSeverity): BuildLineSeverity
+proc ansiToHtml(raw: cstring): cstring
+
+# ---------------------------------------------------------------------------
+# VM bootstrap
+# ---------------------------------------------------------------------------
+
+proc initBuildVMWithStore*(store: ReplayDataStore) =
+  ## Initialise the parallel ``BuildVM`` using an externally-provided
+  ## ``ReplayDataStore`` (typically the shared store from
+  ## ``SessionViewModel``).  If a stub-backed instance already exists
+  ## (created by ``initBuildVM`` before the real backend was available)
+  ## it is replaced so the panel uses the real backend.
+  if buildVMInstance != nil:
+    clog "BuildVM: replacing existing instance with shared-store version"
+    isoNimBuildMounted = false
+  buildVMStore = store
+  buildVMInstance = createBuildVM(store)
+  clog "BuildVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimBuildPanel()
+
+proc initBuildVM() =
+  ## Lazily create the parallel ``BuildVM`` backed by a stub
+  ## ``BackendService``.  Fallback when no shared store has been
+  ## provided via ``initBuildVMWithStore``.
+  if buildVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  buildVMStore = createReplayDataStore(stubBackend)
+  buildVMInstance = createBuildVM(buildVMStore)
+  clog "BuildVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimBuildPanel()
+
+proc safeStr(s: cstring): string =
+  ## Convert a possibly-null cstring to an empty string.  E2E tests
+  ## inject objects directly into the legacy ``build`` record without
+  ## populating every field, so cstring fields can land as ``null`` /
+  ## ``undefined`` in JS — naive ``$`` would throw inside
+  ## ``cstrToNimstr``.
+  if s.isNil:
+    ""
+  else:
+    $s
+
+proc syncLegacyBuildIntoVM*(self: BuildComponent) =
+  ## Mirror the legacy ``self.build`` data structure into the IsoNim
+  ## ``BuildVM``.  Used by the layout's `__ctRenderPanel` helper after
+  ## E2E tests inject pre-built output directly into ``build.output``
+  ## without going through ``appendBuild``.  Production code paths use
+  ## the per-event ``syncBuildOutputAppend`` path; this proc covers the
+  ## bulk-replace scenario.
+  if buildVMInstance.isNil or self.isNil:
+    return
+  buildVMInstance.clearOutput()
+  buildVMInstance.setCommand(safeStr(self.build.command))
+  buildVMInstance.setRunning(self.build.running)
+  buildVMInstance.setCode(self.build.code)
+  for entry in self.build.output:
+    let raw = entry[0]
+    let isStdout = entry[1]
+    let rawText = safeStr(raw)
+    let parsed = parseBuildLocation(rawText)
+    var sevTag = blsNone
+    var locPath = ""
+    var locLine = 0
+    var htmlText = rawText
+    if parsed.found:
+      sevTag = parserSeverityToVM(parsed.severity)
+      locPath = parsed.path
+      locLine = parsed.line
+    when defined(js):
+      # Convert ANSI escapes to HTML so the Web renderer can innerHTML
+      # the line content.  The parsed-location case still uses the
+      # original `raw` (unconverted) text because the legacy view did
+      # the same — its `verbatim ansiToHtml(raw)` call passed `raw`
+      # which was already the rendered display string for that line.
+      if not raw.isNil:
+        htmlText = $ansiToHtml(raw)
+    buildVMInstance.appendLine(BuildOutputLine(
+      htmlText: htmlText,
+      isStdout: isStdout,
+      severity: sevTag,
+      locationPath: locPath,
+      locationLine: locLine))
+  for err in self.build.errors:
+    let location = err[0]
+    let rawLocation = err[1]
+    let other = err[2]
+    buildVMInstance.appendError(BuildErrorLine(
+      locationPath: safeStr(location.path),
+      locationLine: location.line,
+      rawLocation: safeStr(rawLocation),
+      other: safeStr(other)))
+  for prob in self.build.problems:
+    let sev = case prob.severity
+              of ProbError:   blsError
+              of ProbWarning: blsWarning
+              of ProbInfo:    blsInfo
+    buildVMInstance.appendProblem(BuildProblemLine(
+      severity: sev,
+      path: safeStr(prob.path),
+      line: prob.line,
+      col: prob.col,
+      message: safeStr(prob.message)))
+
+proc tryMountIsoNimBuildPanel*() =
+  ## Mount the IsoNim build view into the GoldenLayout-managed (or
+  ## standalone auto-hide) container.  The container's id is
+  ## ``buildComponent-{id}``; the build panel is a singleton (id always
+  ## 0) but we still resolve through the registered component's id
+  ## field for symmetry with the other IsoNim mounts.
+  ##
+  ## Safe to call multiple times — mounts only once.  Retries until the
+  ## DOM container appears (capped at 200 attempts, ~2 s) since
+  ## GoldenLayout creates the host slightly after the layout state
+  ## changes.
+  if isoNimBuildMounted or buildVMInstance.isNil:
+    return
+  if buildComponentRef.isNil:
+    return
+
+  let key = cstring("buildComponent-" & $buildComponentRef.id)
+  var retryCount = 0
+  proc doMount() =
+    if isoNimBuildMounted:
+      return
+    retryCount += 1
+    let container = dom_api.getElementById(dom_api.document, key)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      if retryCount > 200:
+        cerror "tryMountIsoNimBuildPanel: not ready after 200 retries, giving up"
+        return
+      discard setTimeout(proc() = doMount(), 10)
+      return
+
+    # Replace any prior content (the layout bridge may have planted a
+    # stub element before the IsoNim mount fires).
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    isoNimBuildMounted = true
+    try:
+      mountIsoNimBuild(container, buildVMInstance)
+    except:
+      cerror "tryMountIsoNimBuildPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
+
+  doMount()
 
 # ---------------------------------------------------------------------------
 # BP-M6: Auto-hide integration state
@@ -137,15 +336,53 @@ proc buildElapsedStr(self: BuildComponent): string =
   let secs = elapsedSec - float(mins * 60)
   return &"{mins}m {secs:.1f}s"
 
+proc parserSeverityToVM(sev: BuildSeverity): BuildLineSeverity =
+  ## Convert the build_location_parser severity into the
+  ## platform-neutral ``BuildLineSeverity`` consumed by the IsoNim
+  ## view.  Kept separate from ``buildSeverityToProblem`` so the
+  ## Problems-panel and the build-line tagging stay independently
+  ## evolvable.
+  case sev
+  of SevError:   blsError
+  of SevWarning: blsWarning
+  of SevInfo:    blsInfo
+
+proc syncBuildOutputAppend(self: BuildComponent, htmlText: cstring,
+                           isStdout: bool, severity: BuildLineSeverity = blsNone,
+                           locationPath: cstring = cstring"",
+                           locationLine: int = 0) =
+  ## Mirror a single rendered output line into the IsoNim ``BuildVM``.
+  ## The legacy data structures are still updated by the caller so any
+  ## non-IsoNim consumers (Problems panel, etc.) keep working — the VM
+  ## sync is purely additive.
+  if buildVMInstance.isNil:
+    return
+  buildVMInstance.appendLine(BuildOutputLine(
+    htmlText: $htmlText,
+    isStdout: isStdout,
+    severity: severity,
+    locationPath: $locationPath,
+    locationLine: locationLine))
+
 template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): untyped =
   let klass = if stdout: "build-stdout" else: "build-stderr"
   let (match, location, rawLocation, other) = self.matchLocation(buildLine)
   if match:
     if rawLocation.len > 0:
       self.build.output.add((rawLocation, stdout))
+      let parsed0 = parseBuildLocation(buildLine)
+      let sevTag = if parsed0.found: parserSeverityToVM(parsed0.severity) else: blsNone
+      self.syncBuildOutputAppend(rawLocation, stdout, sevTag, location.path, location.line)
     if other.len > 0:
       self.build.output.add((other, stdout))
+      self.syncBuildOutputAppend(other, stdout)
     self.build.errors.add((location, rawLocation, other))
+    if not buildVMInstance.isNil:
+      buildVMInstance.appendError(BuildErrorLine(
+        locationPath: $location.path,
+        locationLine: location.line,
+        rawLocation: $rawLocation,
+        other: $other))
 
     # BP-M4: Publish a structured Problem for the Problems panel.
     let parsed = parseBuildLocation(buildLine)
@@ -156,9 +393,24 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
         line: parsed.line,
         col: parsed.col,
         message: cstring(parsed.message)))
+      if not buildVMInstance.isNil:
+        buildVMInstance.appendProblem(BuildProblemLine(
+          severity: parserSeverityToVM(parsed.severity),
+          path: parsed.path,
+          line: parsed.line,
+          col: parsed.col,
+          message: parsed.message))
   else:
     if buildLine.len > 0:
       self.build.output.add((cstring(buildLine), stdout))
+      # The Web renderer's per-line div uses innerHTML, so feed the
+      # ANSI-converted HTML rather than the raw text. Falls back to the
+      # plain text when ansiUp is unavailable (e.g. on the native code
+      # path during tests where this file is not compiled).
+      when defined(js):
+        self.syncBuildOutputAppend(ansiToHtml(cstring(buildLine)), stdout)
+      else:
+        self.syncBuildOutputAppend(cstring(buildLine), stdout)
 
 method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   self.build.command = response.command
@@ -169,6 +421,17 @@ method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
 
   # BP-M6: Auto-reveal the build pane if it is pinned to an auto-hide strip.
   autoRevealBuildPanel()
+
+  # Mirror the start-of-build state into the IsoNim VM. The legacy
+  # ``self.build`` record stays the source of truth for the Karax-driven
+  # Problems panel; the VM mirrors only what the IsoNim view needs.
+  if not buildVMInstance.isNil:
+    buildVMInstance.setCommand($response.command)
+    buildVMInstance.setBuildStartTime(self.build.buildStartTime)
+    buildVMInstance.setRunning(true)
+    # New builds clear the previous output so failures from one run
+    # don't bleed into the next.
+    buildVMInstance.clearOutput()
 
   self.data.redraw()
 
@@ -194,6 +457,8 @@ method onBuildStderr*(self: BuildComponent, response: BuildOutput) {.async.} =
 method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
   self.build.code = response.code
   self.build.running = false
+  if not buildVMInstance.isNil:
+    buildVMInstance.setCode(response.code)
   if self.build.code != 0:
     self.focusBuild()
     # Also focus the build errors tab via the component mapping,
@@ -218,109 +483,18 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
     self.data.functions.switchToDebug(self.data)
 
 
-proc buildLocationView(self: BuildComponent, location: types.Location, raw: cstring, klass: string): VNode =
-  result = buildHtml(tdiv(class = &"build-location {klass}", onclick = proc =
-      discard jumpLocation(location))):
-    text raw
+# BuildComponent.render() removed: IsoNim is the primary renderer.
+# The base ``Component.render()`` returns a valid empty VNode for any
+# generic callers (auto-hide, vnodeToDom bridge); all real DOM
+# construction happens in ``viewmodel/views/isonim_build_view.nim``.
 
-proc buildErrorView(self: BuildComponent, location: types.Location, rawLocation: cstring, other: cstring): VNode =
-  result = buildHtml(tdiv(class = "build-error",
-    onclick = proc = discard jumpLocation(location))):
-      tdiv(class="build-location"):
-        text rawLocation
-      tdiv(class="build-other"):
-        text other
-
-proc buildHeaderControls(self: BuildComponent): VNode =
-  ## Render the compact header control buttons: stop, clear, auto-scroll toggle,
-  ## and elapsed duration display.
-  let isRunning = self.build.running
-  result = buildHtml(tdiv(class="build-header-controls")):
-    # Stop button — sends IPC to cancel the running build process.
-    if isRunning:
-      tdiv(class="build-ctrl-btn build-stop-btn", title="Stop build",
-           onclick = proc =
-             if not self.data.ipc.isNil:
-               self.data.ipc.send(cstring"CODETRACER::build-cancel", js{})
-      ):
-        text "\u25A0" # ■ square stop icon
-    else:
-      tdiv(class="build-ctrl-btn build-stop-btn disabled", title="No build running"):
-        text "\u25A0"
-
-    # Clear button — empties all build output.
-    tdiv(class="build-ctrl-btn build-clear-btn", title="Clear build output",
-         onclick = proc =
-           self.build.output = @[]
-           self.build.errors = @[]
-           self.build.problems = @[]
-           self.data.redraw()
-    ):
-      text "\u2715" # ✕ clear icon
-
-    # Auto-scroll toggle — toggles sticky scrolling behaviour.
-    let scrollClass = if self.build.autoScroll: "build-ctrl-btn build-scroll-btn active"
-                      else: "build-ctrl-btn build-scroll-btn"
-    tdiv(class=scrollClass, title="Toggle auto-scroll",
-         onclick = proc =
-           self.build.autoScroll = not self.build.autoScroll
-           if self.build.autoScroll:
-             self.scrollBuildToBottom()
-           self.data.redraw()
-    ):
-      text "\u2193" # ↓ down-arrow icon
-
-    # Elapsed duration display — shown while a build is running.
-    if isRunning:
-      let elapsed = self.buildElapsedStr()
-      if elapsed.len > 0:
-        tdiv(class="build-duration"):
-          text elapsed
-
-method render*(self: BuildComponent): VNode =
-  result = buildHtml(tdiv(class="build-panel")):
-    if self.build.running:
-      tdiv(class="build-header"):
-        tdiv(class="build-command-label"):
-          text "running " & self.build.command
-        buildHeaderControls(self)
-    elif self.build.code != 0 and self.build.output.len > 0:
-      tdiv(class="build-header build-failed"):
-        tdiv(class="build-command-label"):
-          text "build failed (exit code " & $self.build.code & ")"
-        buildHeaderControls(self)
-    elif self.build.output.len > 0:
-      tdiv(class="build-header build-succeeded"):
-        tdiv(class="build-command-label"):
-          text "build succeeded"
-        buildHeaderControls(self)
-    else:
-      # No build output yet — still show the controls row so clear/scroll
-      # are always accessible.
-      tdiv(class="build-header"):
-        tdiv(class="build-command-label"):
-          text ""
-        buildHeaderControls(self)
-    tdiv(id="build", class="build-output-container"):
-      for (raw, stdout) in self.build.output:
-        let parsed = parseBuildLocation($raw)
-        if parsed.found:
-          # Clickable line -- navigate to the parsed location on click.
-          let loc = types.Location(path: cstring(parsed.path), line: parsed.line)
-          let colorClass = case parsed.severity
-            of SevError: "build-line-error"
-            of SevWarning: "build-line-warning"
-            of SevInfo: "build-line-info"
-          tdiv(class = "build-output-line build-clickable " & colorClass,
-               onclick = proc = discard jumpLocation(loc)):
-            verbatim ansiToHtml(raw)
-        else:
-          let klass = if stdout: "build-stdout" else: "build-stderr"
-          tdiv(class=klass):
-            verbatim ansiToHtml(raw)
-
-proc renderErrorsView*(self: BuildComponent): VNode =
-  result = buildHtml(tdiv):
-    tdiv(id="build-errors"):
-      for (location, rawLocation, other) in self.build.errors:
-        buildErrorView(self, location, rawLocation, other)
+method register*(self: BuildComponent, api: MediatorWithSubscribers) =
+  ## Register the BuildComponent with the mediator.  Bring up the
+  ## IsoNim BuildVM lazily so the mount procedure can find it; the
+  ## shared-store version is installed by ``configureMiddleware`` if the
+  ## ViewModel layer is enabled.
+  self.api = api
+  initBuildVM()
+  if buildComponentRef.isNil:
+    buildComponentRef = self
+    tryMountIsoNimBuildPanel()
