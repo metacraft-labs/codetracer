@@ -16,7 +16,7 @@
 ##   # issue a command — signals update asynchronously
 ##   store.requestStep(sdForward)
 
-import std/json
+import std/[json, tables]
 
 import isonim/core/[signals, owner, async_compat]
 import isonim/viewmodel
@@ -50,6 +50,12 @@ type
   CalltraceStore* = object
     ## Reactive state for the calltrace panel.
     lines*: Signal[seq[CallLine]]
+    ## Per-call argument values keyed by ``CallLine.callKey``. The legacy
+    ## Karax view (``frontend/ui/calltrace.nim`` ``callArgsView``) reads
+    ## the same map (``CalltraceComponent.args``) to render each row's
+    ## ``.call-arg`` children. Mirroring it into the store lets the
+    ## IsoNim view emit identical DOM driven purely by reactive data.
+    args*: Signal[Table[string, seq[CallArg]]]
     startLineIndex*: Signal[int64]
     totalCallsCount*: Signal[uint64]
     finished*: Signal[bool]
@@ -110,6 +116,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       # -- calltrace --
       calltrace: CalltraceStore(
         lines: createSignal(newSeq[CallLine]()),
+        args: createSignal(initTable[string, seq[CallArg]]()),
         startLineIndex: createSignal(0'i64),
         totalCallsCount: createSignal(0'u64),
         finished: createSignal(false),
@@ -303,19 +310,48 @@ proc newVariableSeq*(): seq[Variable] =
 proc updateCalltraceSection*(store: ReplayDataStore;
                              lines: seq[CallLine];
                              startIndex: int64;
-                             totalCount: uint64) =
+                             totalCount: uint64;
+                             args: Table[string, seq[CallArg]] =
+                                 initTable[string, seq[CallArg]]()) =
   ## Replace the store's calltrace signals with new section data.
   ## Used by legacy UI code to mirror calltrace responses into the
   ## ViewModel layer.
+  ##
+  ## ``args`` holds per-call argument values keyed by ``CallLine.callKey``.
+  ## When omitted, the args signal is left untouched so callers that only
+  ## know about lines (the legacy headless tests) still work; callers that
+  ## carry args (notably ``syncCalltraceData`` in
+  ## ``frontend/ui/calltrace.nim``) pass the parsed map alongside lines.
   let diagOldCount = store.calltrace.lines.val.len
   let diagNewCount = lines.len
   let diagStoreId = store.storeId
   when defined(js):
     {.emit: "console.error('[PIPELINE] updateCalltraceSection: storeId=' + `diagStoreId` + ' setting ' + `diagNewCount` + ' lines (was ' + `diagOldCount` + '), startIndex=' + `startIndex` + ' totalCount=' + `totalCount`);".}
   store.calltrace.lines.val = lines
+  # Replace args atomically with the new section's args.  If the caller
+  # didn't supply any (the VM tests that only know about lines), the
+  # existing args are cleared so stale entries from a prior section
+  # don't bleed into the freshly loaded rows.
+  store.calltrace.args.val = args
   store.calltrace.startLineIndex.val = startIndex
   store.calltrace.totalCallsCount.val = totalCount
   store.calltrace.loadingState.val = lsIdle
+
+proc updateCalltraceArgs*(store: ReplayDataStore;
+                          args: Table[string, seq[CallArg]]) =
+  ## Replace the store's per-call argument map. Separate from
+  ## ``updateCalltraceSection`` for callers that already have lines but
+  ## want to feed args separately (e.g. when args arrive on a follow-up
+  ## response). The signal is set unconditionally so empty maps overwrite
+  ## stale data on a fresh navigation.
+  store.calltrace.args.val = args
+
+proc makeCallArg*(name, text: string): CallArg =
+  ## Convenience constructor for the ViewModel ``CallArg``. Mirrors the
+  ## ``makeCallLine`` helper above so callers in ``frontend/ui`` don't
+  ## have to import ``store/types`` directly (which would clash with the
+  ## legacy ``CallArg`` ref-object name).
+  CallArg(name: name, text: text)
 
 proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
                    file: string = ""; line: int = 0;

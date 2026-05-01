@@ -33,7 +33,7 @@
 ## raw `Event` object, scroll listeners — uses imperative wiring on
 ## elements captured via `ref = var`.
 
-import std/[json, options]
+import std/[json, options, tables]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -110,19 +110,67 @@ proc displayIf(cond: bool): string =
 # MockRenderer renderer — simple structure for headless unit tests
 # ---------------------------------------------------------------------------
 
+proc argsForRow(vm: CalltraceVM; item: proc(): CallLine): seq[CallArg] =
+  ## Look up the per-call argument list for the row's CallLine. Reads
+  ## ``vm.store.calltrace.args.val`` reactively so views that wrap this
+  ## inside a ``createRenderEffect`` re-run whenever the args map
+  ## changes (a new calltrace section was loaded), or whenever the row's
+  ## underlying CallLine swaps to a different ``callKey`` (indexEach
+  ## reuses row elements as the visible-lines slice shifts).
+  let line = item()
+  let argsTable = vm.store.calltrace.args.val
+  if line.callKey.len == 0:
+    return @[]
+  if line.callKey notin argsTable:
+    return @[]
+  argsTable[line.callKey]
+
 proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
                            item: proc(): CallLine): MockNode =
   ## Render a single calltrace row in the Mock-friendly structure.
   ## Only the row class, padding, name text and click handlers are
   ## reactive; all attribute updates are wired via the DSL.
   let h = rowHandlers(vm, item)
-  ui(r):
+  var argsContainer: MockNode
+  let row = ui(r):
     tdiv(class = selectedRowClass("calltrace-call-line", vm, item),
          padding_left = paddingForDepth(item, 16),
          onclick = h.onSelect,
          ondblclick = h.onDblClick):
       span(class = "call-name"):
         text item().name
+      tdiv(class = "call-args", ref = argsContainer):
+        discard
+
+  # Reactively populate the args container with one ``.call-arg`` element
+  # per call argument. Mirrors the legacy ``callArgsView`` markup
+  # (``frontend/ui/calltrace.nim``) so headless tests can assert the
+  # same DOM contract Playwright relies on.  We rebuild children from
+  # scratch on each fire — this stays cheap because typical call-arg
+  # counts are small (<10) and the effect only fires when the row's args
+  # actually change.
+  createRenderEffect proc() =
+    let line = item()
+    let callArgs = argsForRow(vm, item)
+    r.clearChildren(argsContainer)
+    # Iterate by index and copy the arg value into a local ``let``: the
+    # DSL macro emits closures for each dynamic attribute, which can't
+    # capture a ``lent T`` (Nim's default iteration view for ref-free
+    # value types).  A plain ``let`` decouples the closures from the seq.
+    for idx in 0 ..< callArgs.len:
+      let argName = callArgs[idx].name
+      let argText = callArgs[idx].text
+      let argEl = ui(r):
+        tdiv(class = "call-arg",
+             id = "call-arg-" & line.callKey & "-" & argName):
+          tdiv(class = "call-arg-header"):
+            tdiv(class = "call-arg-name"):
+              text argName & "="
+            tdiv(class = "call-arg-text"):
+              text argText
+      r.appendChild(argsContainer, argEl)
+
+  row
 
 proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
   ## Render the complete Calltrace panel for Mock-based tests.
@@ -209,7 +257,8 @@ when defined(js):
     ## be reactive. Reading `item()` inside the DSL achieves that
     ## automatically.
     let h = rowHandlers(vm, item)
-    ui(r):
+    var argsContainer: isonim_dom.Element
+    let row = ui(r):
       tdiv(class = rowClassWeb(vm, item)):
         span(min_width = $(item().depth * 8) & "px"):
           discard
@@ -221,8 +270,60 @@ when defined(js):
             tdiv(id = "local-call-text-" & $item().index, class = "call-text",
                  onclick = h.onSelect, ondblclick = h.onDblClick):
               text item().name & " #" & $item().index
-            tdiv(class = "call-args"):
-              text "()"
+            tdiv(ref = argsContainer, class = "call-args"):
+              discard
+
+    # Reactively populate the args container with one ``.call-arg``
+    # element per argument. Mirrors the legacy ``callArgsView`` Karax
+    # markup in ``frontend/ui/calltrace.nim`` so Playwright's
+    # ``CallTraceEntry.arguments()`` (page object) can locate each
+    # arg via ``.call-arg`` and read the name from ``.call-arg-name``
+    # (with the trailing ``=`` stripped) and the value from
+    # ``.call-arg-text``. The effect re-runs whenever the args signal
+    # changes (new section loaded) or the row's underlying CallLine
+    # swaps to a different ``callKey`` (indexEach reuse on scroll).
+    createRenderEffect proc() =
+      let line = item()
+      let callArgs = argsForRow(vm, item)
+      r.clearChildren(argsContainer)
+      # Opening "(": the legacy view emitted these as bare text nodes
+      # inside the same ``.call-args`` container so the rendered string
+      # reads ``(name=value, name2=value2)``.  Tests only locate the
+      # ``.call-arg`` children, but the parens are part of the legacy
+      # contract so we preserve them.
+      let openParen = ui(r):
+        span:
+          text "("
+      r.appendChild(argsContainer, openParen)
+      # Iterate by index and copy each arg's fields into local ``let``s
+      # so the DSL closures can capture them.  See the matching comment
+      # in ``renderCallLineRowMock`` above for the lent-capture rationale.
+      for i in 0 ..< callArgs.len:
+        let argName = callArgs[i].name
+        let argText = callArgs[i].text
+        let argEl = ui(r):
+          tdiv(class = "call-arg",
+               id = "call-arg-" & line.callKey & "-" & argName):
+            tdiv(class = "call-arg-header",
+                 id = "call-arg-header-" & line.callKey & "-" & argName):
+              tdiv(class = "call-arg-name",
+                   id = "call-arg-name-" & line.callKey & "-" & argName):
+                text argName & "="
+              tdiv(class = "call-arg-text",
+                   id = "call-arg-text-" & line.callKey & "-" & argName):
+                text argText
+        r.appendChild(argsContainer, argEl)
+        if i < callArgs.len - 1:
+          let sep = ui(r):
+            span:
+              text ", "
+          r.appendChild(argsContainer, sep)
+      let closeParen = ui(r):
+        span:
+          text ")"
+      r.appendChild(argsContainer, closeParen)
+
+    row
 
   proc renderSearchResultsList(r: WebRenderer; container: isonim_dom.Element;
                                vm: CalltraceVM) =

@@ -81,6 +81,19 @@ type
     isExpanded*: bool       ## Whether children are currently shown (collapse toggle visible)
     callKey*: string        ## The call key used by the legacy expand/collapse system
 
+  CallArg* = object
+    ## One argument value attached to a call. Mirrors the legacy
+    ## ``common_types/debugger_features/call.nim`` ``CallArg`` ref-object
+    ## but in the simpler value-type shape the ViewModel layer uses.
+    ##
+    ## The ``text`` field holds the rendered text representation of the
+    ## value at the moment the calltrace section was loaded, so the view
+    ## layer can render it verbatim without re-evaluating the ``Value``
+    ## type tree. This matches the ``arg.value.textRepr`` call the legacy
+    ## ``callArgView`` made in ``frontend/ui/calltrace.nim``.
+    name*: string
+    text*: string
+
   Variable* = object
     ## A local / global variable entry (recursive for compound types).
     name*: string

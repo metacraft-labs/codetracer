@@ -478,13 +478,14 @@ suite "IsoNim State Panel — text content":
 
 proc makeTestCallLine(index: int64; name: string; depth: int = 0;
                       rrTicks: uint64 = 100; file: string = "test.nim";
-                      line: int = 1): CallLine =
+                      line: int = 1; callKey: string = ""): CallLine =
   CallLine(
     index: index,
     name: name,
     depth: depth,
     rrTicks: rrTicks,
     location: Location(file: file, line: line),
+    callKey: callKey,
   )
 
 # ---------------------------------------------------------------------------
@@ -752,6 +753,180 @@ suite "IsoNim Calltrace Panel — call lines":
 
       check container.children.len == 1
       check "start" in container.children[0].textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Calltrace call argument rendering tests
+# ---------------------------------------------------------------------------
+#
+# Backs TODO 5.2(l): the IsoNim calltrace view must emit one ``.call-arg``
+# element per argument with nested ``.call-arg-name`` / ``.call-arg-text``
+# children, so Playwright's ``CallTraceEntry.arguments()`` page object
+# can locate args after navigating to a function in the calltrace.
+# Mirrors the legacy Karax ``callArgsView`` markup
+# (``frontend/ui/calltrace.nim`` ~line 464).
+
+suite "IsoNim Calltrace Panel — call arguments":
+
+  test "syncs args into store via updateCalltraceSection":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+
+      var argsTable = initTable[string, seq[CallArg]]()
+      argsTable["call-key-foo"] = @[
+        CallArg(name: "board", text: "[1,2,3]"),
+        CallArg(name: "depth", text: "0"),
+      ]
+
+      store.updateCalltraceSection(
+        @[
+          makeTestCallLine(0, "solve_sudoku", depth = 0,
+                           callKey = "call-key-foo"),
+        ],
+        startIndex = 0'i64,
+        totalCount = 1'u64,
+        args = argsTable,
+      )
+
+      let stored = store.calltrace.args.val
+      check stored.len == 1
+      check "call-key-foo" in stored
+      check stored["call-key-foo"].len == 2
+      check stored["call-key-foo"][0].name == "board"
+      check stored["call-key-foo"][0].text == "[1,2,3]"
+      check stored["call-key-foo"][1].name == "depth"
+      check stored["call-key-foo"][1].text == "0"
+
+      dispose()
+
+  test "renders one .call-arg element per arg in row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      var argsTable = initTable[string, seq[CallArg]]()
+      argsTable["k-main"] = @[
+        CallArg(name: "argc", text: "1"),
+        CallArg(name: "argv", text: "[\"prog\"]"),
+      ]
+      argsTable["k-solve"] = @[
+        CallArg(name: "board", text: "[[1,2,3]]"),
+      ]
+
+      store.updateCalltraceSection(
+        @[
+          makeTestCallLine(0, "main", depth = 0, callKey = "k-main"),
+          makeTestCallLine(1, "solve_sudoku", depth = 1,
+                           callKey = "k-solve"),
+        ],
+        startIndex = 0'i64,
+        totalCount = 2'u64,
+        args = argsTable,
+      )
+
+      vm.setViewportHeight(10)
+
+      let panel = renderCalltracePanel(r, vm)
+      let container = findByClass(panel, "calltrace-lines")
+      let rows = findAllByClass(container, "calltrace-call-line")
+      check rows.len == 2
+
+      # First row (main) has two args.
+      let mainArgs = findAllByClass(rows[0], "call-arg")
+      check mainArgs.len == 2
+
+      let mainNames = findAllByClass(rows[0], "call-arg-name")
+      check mainNames.len == 2
+      check mainNames[0].textContent == "argc="
+      check mainNames[1].textContent == "argv="
+
+      let mainTexts = findAllByClass(rows[0], "call-arg-text")
+      check mainTexts.len == 2
+      check mainTexts[0].textContent == "1"
+      check mainTexts[1].textContent == "[\"prog\"]"
+
+      # Second row (solve_sudoku) has a single ``board`` arg — exactly
+      # the case the python-sudoku ``variable inspection board via call
+      # trace argument`` GUI test exercises.
+      let solveArgs = findAllByClass(rows[1], "call-arg")
+      check solveArgs.len == 1
+
+      let solveNames = findAllByClass(rows[1], "call-arg-name")
+      check solveNames.len == 1
+      check solveNames[0].textContent == "board="
+
+      let solveTexts = findAllByClass(rows[1], "call-arg-text")
+      check solveTexts.len == 1
+      check solveTexts[0].textContent == "[[1,2,3]]"
+
+      dispose()
+
+  test "row with unknown callKey renders no .call-arg children":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      # No args supplied for this row — the args container must remain
+      # empty so we don't emit stale ``.call-arg`` elements that the
+      # legacy view's ``()`` placeholder used to mask.
+      store.updateCalltraceSection(
+        @[
+          makeTestCallLine(0, "noargs", depth = 0, callKey = "k-noargs"),
+        ],
+        startIndex = 0'i64,
+        totalCount = 1'u64,
+      )
+
+      vm.setViewportHeight(10)
+
+      let panel = renderCalltracePanel(r, vm)
+      let container = findByClass(panel, "calltrace-lines")
+      let rows = findAllByClass(container, "calltrace-call-line")
+      check rows.len == 1
+
+      let argEntries = findAllByClass(rows[0], "call-arg")
+      check argEntries.len == 0
+
+      dispose()
+
+  test "args update reactively when store changes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      store.updateCalltraceSection(
+        @[
+          makeTestCallLine(0, "fn", depth = 0, callKey = "k-fn"),
+        ],
+        startIndex = 0'i64,
+        totalCount = 1'u64,
+      )
+
+      vm.setViewportHeight(10)
+
+      let panel = renderCalltracePanel(r, vm)
+      let container = findByClass(panel, "calltrace-lines")
+      let rows = findAllByClass(container, "calltrace-call-line")
+      check rows.len == 1
+      check findAllByClass(rows[0], "call-arg").len == 0
+
+      # Now feed args for the same row and confirm the DOM updates.
+      var freshArgs = initTable[string, seq[CallArg]]()
+      freshArgs["k-fn"] = @[CallArg(name: "x", text: "42")]
+      store.updateCalltraceArgs(freshArgs)
+
+      let argsAfter = findAllByClass(rows[0], "call-arg")
+      check argsAfter.len == 1
+      let nameEl = findByClass(argsAfter[0], "call-arg-name")
+      check nameEl != nil
+      check nameEl.textContent == "x="
+      let textEl = findByClass(argsAfter[0], "call-arg-text")
+      check textEl != nil
+      check textEl.textContent == "42"
 
       dispose()
 

@@ -9,12 +9,12 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # The CalltraceVM drives the IsoNim reactive DOM tree; the legacy Karax
 # render() returns an empty stub once the IsoNim view is mounted.
 # ---------------------------------------------------------------------------
-import std/json
+import std/[json, tables]
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 from ../viewmodel/store/types as vm_types import nil
 from ../viewmodel/store/replay_data_store import
   ReplayDataStore, createReplayDataStore, updateCalltraceSection,
-  updateDebuggerPosition, makeCallLine, requestCalltraceSection
+  updateDebuggerPosition, makeCallLine, makeCallArg, requestCalltraceSection
 from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
@@ -1075,12 +1075,56 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   # but the store stored startIndex=0 so the visible window kept showing
   # rows [0..24] of the section, not rows around the jumped-to function.
   let backendStartIndex = cast[int64](results.startCallLineIndex)
+  # Mirror the per-call argument values into the store so the IsoNim
+  # calltrace view can render one ``.call-arg`` element per arg per row
+  # (matching the legacy Karax ``callArgsView`` markup that Playwright's
+  # ``CallTraceEntry.arguments()`` reads). Without this, the args column
+  # collapses to a static ``()`` and the ``variable inspection board via
+  # call trace argument`` test fails to find the named arg.
+  #
+  # The args data has TWO independent sources, mirroring the lookup
+  # ``callView`` (~line 665) does in the legacy Karax view:
+  #
+  #   1. ``results.args`` — a TableLike keyed by callKey, populated by
+  #      the backend for callstack-loaded calls.
+  #   2. ``call.args`` — embedded directly on each Call object when the
+  #      call was loaded via the materialized-trace pipeline (the case
+  #      for Python / Ruby DB traces, where ``results.args`` is empty
+  #      but each ``CallLine.content.call.args`` carries the argument
+  #      seq).
+  #
+  # We collect both and feed the merged table into the store; rows
+  # without args entries simply render no ``.call-arg`` children.
+  proc convertCallArgs(args: seq[CallArg]): seq[vm_types.CallArg] =
+    result = @[]
+    for arg in args:
+      # ``arg.value.textRepr`` mirrors what the legacy ``callArgView``
+      # used to render inside ``.call-arg-text``. Pre-rendering the text
+      # here keeps the view layer pure and avoids re-evaluating the
+      # ``Value`` type tree on every reactive update.
+      let rendered = $arg.value.textRepr
+      result.add(makeCallArg($arg.name, rendered))
+
+  var vmArgs = initTable[string, seq[vm_types.CallArg]]()
+  for key, callArgs in results.args:
+    vmArgs[$key] = convertCallArgs(callArgs)
+  for callLine in results.callLines:
+    let call = callLine.content.call
+    if call.isNil:
+      continue
+    let key = $call.key
+    if key in vmArgs:
+      continue  # response-table entry takes precedence (matches legacy lookup)
+    if call.args.len == 0:
+      continue
+    vmArgs[key] = convertCallArgs(call.args)
   calltraceVMStore.updateCalltraceSection(
     vmLines,
     startIndex = backendStartIndex,
     totalCount = cast[uint64](results.totalCallsCount),
+    args = vmArgs,
   )
-  cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store, startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
+  cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store ({vmArgs.len} arg entries), startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
 
 proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## Mirror the legacy debugger position into the ViewModel store so
