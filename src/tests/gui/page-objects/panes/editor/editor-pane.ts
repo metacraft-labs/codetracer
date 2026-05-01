@@ -43,12 +43,35 @@ export class EditorPane {
   }
 
   async clickTab(): Promise<void> {
+    // Layered click: plain → force → dispatchEvent.  Mirrors
+    // `CallTracePane.clickTab` and `EventLogPane.clickTab`.
+    //
+    // Under Xvfb (and on some Windows display configurations) the
+    // GoldenLayout tab strip can be reported as "outside of the
+    // viewport" even when the tab is structurally present.  A plain
+    // `force:true` click does NOT redirect the click to the underlying
+    // tab title — it only bypasses Playwright's actionability checks;
+    // the real OS pointer event still lands on whatever overlay sits
+    // on top (`lm_header`, `jstree-icon`, etc.).
+    //
+    // `dispatchEvent('click')` synthesizes a click event directly on
+    // the title span.  GoldenLayout listens for plain `click` events
+    // on `.lm_title`, so the synthesized event still activates the
+    // tab regardless of viewport / overlay state.
     const btn = this.tabButton();
     try {
       await btn.click({ timeout: 5_000 });
+      return;
     } catch {
-      await btn.click({ force: true, timeout: 5_000 });
+      // fall through to force: true
     }
+    try {
+      await btn.click({ force: true, timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to dispatchEvent
+    }
+    await btn.dispatchEvent("click");
   }
 
   // ---- Locators ----

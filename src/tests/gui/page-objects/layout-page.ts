@@ -97,6 +97,44 @@ export class LayoutPage extends BasePage {
     await this.waitForComponent("calltrace", "div[id^='calltraceComponent']");
   }
 
+  /**
+   * Wait until the call-trace store has actually populated lines.
+   *
+   * `waitForCallTraceLoaded()` only verifies that the GoldenLayout
+   * `calltraceComponent` div has mounted; it does NOT wait for the
+   * backend `ct/load-calltrace-section` round-trip to complete and
+   * the `.calltrace-call-line` elements to render inside it.
+   *
+   * Tests that interact with the call-trace pane (clickTab → expand
+   * → activate sequences) need this stronger signal: clicking a tab
+   * before the lines exist races against the GoldenLayout reflow
+   * and intermittently throws "Element is outside of the viewport"
+   * under sweep load — see the noir-space-ship suite-level flake
+   * (TODO 5.2(h)).
+   *
+   * This method polls until at least one `.calltrace-call-line`
+   * exists inside any `calltraceComponent` div, or the retry budget
+   * is exhausted (60 attempts × 1s = 60s).
+   */
+  async waitForCallTraceReady(): Promise<void> {
+    const lines = this.page.locator(
+      "div[id^='calltraceComponent'] .calltrace-lines .calltrace-call-line",
+    );
+    try {
+      await retry(
+        async () => (await lines.count()) > 0,
+        { maxAttempts: 60, delayMs: 1000 },
+      );
+      debugLogger.log("LayoutPage: call-trace data ready (lines present).");
+    } catch (ex) {
+      const lineCount = await lines.count();
+      throw new Error(
+        `Call-trace data did not populate; final .calltrace-call-line count=${lineCount}.`,
+        { cause: ex instanceof Error ? ex : undefined },
+      );
+    }
+  }
+
   async waitForEventLogLoaded(): Promise<void> {
     await this.waitForComponent("event-log", "div[id^='eventLogComponent']");
 

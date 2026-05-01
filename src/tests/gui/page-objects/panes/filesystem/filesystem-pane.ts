@@ -31,12 +31,25 @@ export class FilesystemPane {
   }
 
   async clickTab(): Promise<void> {
+    // Layered click: plain → force → dispatchEvent.  See
+    // `CallTracePane.clickTab` for the rationale — Xvfb sometimes
+    // rejects even force-clicks with "outside of the viewport"; the
+    // GoldenLayout title span listens for plain `click` events, so
+    // a synthesized DOM click still activates the tab.
     const btn = this.tabButton();
     try {
       await btn.click({ timeout: 5_000 });
+      return;
     } catch {
-      await btn.click({ force: true, timeout: 5_000 });
+      // fall through to force: true
     }
+    try {
+      await btn.click({ force: true, timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to dispatchEvent
+    }
+    await btn.dispatchEvent("click");
   }
 
   get treeLocator(): Locator {
