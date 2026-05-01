@@ -316,7 +316,7 @@ proc tableFooterDom*(table: DataTableComponent): Node =
   info.appendFooterText(cstring"Rows")
 
   let input = document.createElement(cstring"input")
-  input.setAttribute(cstring"class", cstring"ct-input-small mx-2 data-tables-footer-input")
+  input.setAttribute(cstring"class", cstring"data-tables-footer-input ct-input-small mx-2")
   input.value = cstring($(table.startRow))
   input.addEventListener(cstring"keydown", proc(ev: Event) =
     let keyboardEvent = cast[KeyboardEvent](ev)
