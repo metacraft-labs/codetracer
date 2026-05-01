@@ -204,7 +204,19 @@ body
   background-color: colors-ui-surface-primary-default !important
   color: TEXT_CONTENT_COLOR
   height: 100%
-  width: calc(100vw - 0.5em)
+  // Participate in `#auto-hide-layout-row`'s flex row so the GL
+  // container shrinks when the auto-hide side strips appear.  The
+  // older `width: calc(100vw - 0.5em)` pinned ROOT to viewport
+  // width regardless of sibling strip widths, which broke the
+  // strip-tile-with-GL layout: pinning a panel to the left edge
+  // showed the 28px strip but ROOT stayed at full width and
+  // overlapped (visual-audit/strip-layout-verify TODO 5.1(b)).
+  // `flex: 1; min-width: 0` lets ROOT take the remaining flex
+  // space; `min-width: 0` is required because flex items default
+  // to `min-width: auto` which prevents shrinking below content
+  // intrinsic size.
+  flex: 1
+  min-width: 0
   position: relative
   padding-right: 0.25em
   padding-left: 0.25em
