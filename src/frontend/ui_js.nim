@@ -4,7 +4,7 @@ import
   ui/[agent_activity, layout, editor, trace, events, event_log,
       state, calltrace, loading, start, menu,
       debug, flow, filesystem, vcs, value, repl,
-      build, errors, welcome_screen, point_list, scratchpad,
+      build, errors, search_results, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       session_switch],
@@ -1015,6 +1015,8 @@ when not defined(ctInExtension):
       build.initBuildVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initErrorsVMWithStore');".}
       errors.initErrorsVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initSearchResultsVMWithStore');".}
+      search_results.initSearchResultsVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

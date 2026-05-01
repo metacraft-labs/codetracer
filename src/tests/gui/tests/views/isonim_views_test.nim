@@ -32,6 +32,7 @@ import viewmodels/shell_vm
 import viewmodels/terminal_output_vm
 import viewmodels/build_vm
 import viewmodels/errors_vm
+import viewmodels/search_results_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -45,6 +46,7 @@ import views/isonim_shell_view
 import views/isonim_terminal_output_view
 import views/isonim_build_view
 import views/isonim_errors_view
+import views/isonim_search_results_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -3672,5 +3674,463 @@ suite "IsoNim Errors Panel — interactions":
       check req.isSome
       check req.get.args{"path"}.getStr == "b.nim"
       check req.get.args{"line"}.getInt == 9
+
+      dispose()
+
+# ===========================================================================
+# IsoNim Search Results Panel — tests
+#
+# Cover the IsoNim Search Results view introduced in section 1.X of the
+# migration handoff (the third and final ``vnodeToDom`` Karax bridge to
+# come off after build / errors).  Verifies the same flows the legacy
+# Karax view used to support: panel structure, header count badge,
+# match-row rendering with grouping by file, query highlighting, filter
+# narrowing, active / inactive root modifier, and click → jump-location
+# routing.
+# ===========================================================================
+
+proc makeResult(path: string = "src/main.nim";
+                line: int = 1;
+                text: string = "match snippet"): SearchResultLine =
+  SearchResultLine(text: text, path: path, line: line)
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Results Panel — structure":
+
+  test "renders root with component-container + search-results classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      let cls = panel.attributes["class"]
+      check "component-container" in cls
+      check "search-results" in cls
+
+      dispose()
+
+  test "starts inactive (search-results-non-active modifier)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      check "search-results-non-active" in panel.attributes["class"]
+      check "search-results-active" notin panel.attributes["class"]
+
+      dispose()
+
+  test "renders header, find-query input, and body container":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      check findByClass(panel, "search-results-header") != nil
+      check findByClass(panel, "search-results-count") != nil
+      check findByClass(panel, "search-results-find-query") != nil
+      check findByClass(panel, "search-results-body") != nil
+
+      dispose()
+
+  test "header count starts at \"No results\" with no rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      let count = findByClass(panel, "search-results-count")
+      check count != nil
+      check count.textContent == "No results"
+
+      dispose()
+
+  test "renders the empty-state overlay when there are no results":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      let empty = findByClass(panel, "search-results-empty")
+      check empty != nil
+      check empty.textContent == "Run a search to see results here."
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Header reactivity
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Results Panel — header reactivity":
+
+  test "header count badge reflects setResults updates":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "a.nim", line = 1),
+        makeResult(path = "a.nim", line = 2),
+        makeResult(path = "b.nim", line = 7),
+      ])
+
+      let count = findByClass(panel, "search-results-count")
+      check count != nil
+      check count.textContent == "3 results"
+
+      dispose()
+
+  test "single-result count uses the singular noun":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      vm.setResults(@[makeResult()])
+      let count = findByClass(panel, "search-results-count")
+      check count.textContent == "1 result"
+
+      dispose()
+
+  test "appendResults updates the badge incrementally":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      let count = findByClass(panel, "search-results-count")
+      check count.textContent == "No results"
+
+      vm.appendResults(@[makeResult()])
+      check count.textContent == "1 result"
+
+      vm.appendResults(@[makeResult(line = 9), makeResult(line = 10)])
+      check count.textContent == "3 results"
+
+      dispose()
+
+  test "panel root flips to search-results-active when results arrive":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+      check "search-results-non-active" in panel.attributes["class"]
+
+      vm.setResults(@[makeResult()])
+
+      check "search-results-active" in panel.attributes["class"]
+      check "search-results-non-active" notin panel.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering — grouped by file
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Results Panel — row rendering":
+
+  test "setResults populates one match row per result, grouped by path":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "a.nim", line = 1, text = "let x = 1"),
+        makeResult(path = "a.nim", line = 9, text = "let y = 2"),
+        makeResult(path = "b.nim", line = 3, text = "echo z"),
+      ])
+
+      let rows = findAllByClass(panel, "search-results-match-row")
+      check rows.len == 3
+
+      let groups = findAllByClass(panel, "search-results-file-group")
+      check groups.len == 2
+
+      dispose()
+
+  test "file-header preserves first-appearance order with row count":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "z.nim", line = 1),
+        makeResult(path = "a.nim", line = 2),
+        makeResult(path = "z.nim", line = 5),
+      ])
+
+      let headers = findAllByClass(panel, "search-results-file-header")
+      check headers.len == 2
+
+      let firstPath = findByClass(headers[0], "search-results-file-path")
+      let firstCount = findByClass(headers[0], "search-results-file-count")
+      check firstPath != nil
+      check firstCount != nil
+      check firstPath.textContent == "z.nim"
+      check firstCount.textContent == " (2)"
+
+      let secondPath = findByClass(headers[1], "search-results-file-path")
+      let secondCount = findByClass(headers[1], "search-results-file-count")
+      check secondPath.textContent == "a.nim"
+      check secondCount.textContent == " (1)"
+
+      dispose()
+
+  test "row text content carries line number and snippet":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[makeResult(path = "main.nim", line = 42,
+                                 text = "let foo = 1")])
+
+      let rows = findAllByClass(panel, "search-results-match-row")
+      check rows.len == 1
+      let lineNum = findByClass(rows[0], "search-results-line-number")
+      let matchText = findByClass(rows[0], "search-results-match-text")
+      check lineNum != nil
+      check matchText != nil
+      check lineNum.textContent == "42"
+      check matchText.textContent == "let foo = 1"
+
+      dispose()
+
+  test "clearResults empties the list and re-shows the empty overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[makeResult(), makeResult(line = 2)])
+      check findAllByClass(panel, "search-results-match-row").len == 2
+
+      vm.clearResults()
+
+      let body = findByClass(panel, "search-results-body")
+      check body.children.len == 1
+      check "search-results-empty" in body.children[0].attributes["class"]
+      # And the panel root flips back to non-active.
+      check "search-results-non-active" in panel.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Query highlighting
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Results Panel — query highlighting":
+
+  test "matched substring is wrapped in a search-results-highlight span":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setQuery("foo")
+      vm.setResults(@[makeResult(text = "let foo = 1")])
+
+      let highlight = findByClass(panel, "search-results-highlight")
+      check highlight != nil
+      check highlight.textContent == "foo"
+
+      dispose()
+
+  test "case-insensitive match still highlights with original casing":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setQuery("FOO")
+      vm.setResults(@[makeResult(text = "let foo = 1")])
+
+      let highlight = findByClass(panel, "search-results-highlight")
+      check highlight != nil
+      # The highlighted substring carries the source-text casing, not the
+      # query casing — same behaviour as the legacy ``highlightMatch``.
+      check highlight.textContent == "foo"
+
+      dispose()
+
+  test "no highlight span is emitted when the query does not match":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setQuery("bar")
+      vm.setResults(@[makeResult(text = "let foo = 1")])
+
+      check findByClass(panel, "search-results-highlight") == nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Filter behaviour
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Results Panel — filter behaviour":
+
+  test "setFilter narrows the visible rows reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "a.nim", line = 1, text = "alpha"),
+        makeResult(path = "b.nim", line = 2, text = "beta"),
+        makeResult(path = "c.nim", line = 3, text = "alpha gamma"),
+      ])
+
+      check findAllByClass(panel, "search-results-match-row").len == 3
+
+      vm.setFilter("alpha")
+
+      let visible = findAllByClass(panel, "search-results-match-row")
+      check visible.len == 2
+
+      # The header count tracks the unfiltered total — same as the
+      # legacy view (the count is "results" from the search service,
+      # the filter narrows display only).
+      let count = findByClass(panel, "search-results-count")
+      check count.textContent == "3 results"
+
+      dispose()
+
+  test "filter that excludes everything re-shows the empty overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "a.nim", line = 1, text = "alpha"),
+      ])
+      check findAllByClass(panel, "search-results-match-row").len == 1
+
+      vm.setFilter("nothingmatchesthis")
+      let body = findByClass(panel, "search-results-body")
+      check body.children.len == 1
+      check "search-results-empty" in body.children[0].attributes["class"]
+
+      dispose()
+
+  test "empty filter restores every row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "a.nim", line = 1, text = "alpha"),
+        makeResult(path = "b.nim", line = 2, text = "beta"),
+      ])
+
+      vm.setFilter("alpha")
+      check findAllByClass(panel, "search-results-match-row").len == 1
+
+      vm.setFilter("")
+      check findAllByClass(panel, "search-results-match-row").len == 2
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Interactions — row click dispatches a backend request
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Search Results Panel — interactions":
+
+  test "row click dispatches ct/jump-location with path + line":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[makeResult(path = "src/main.nim", line = 17,
+                                 text = "let foo = 1")])
+      mock.clearReceivedCommands()
+
+      let rows = findAllByClass(panel, "search-results-match-row")
+      check rows.len == 1
+      rows[0].fireEvent("click")
+
+      let req = mock.findCommand("ct/jump-location")
+      check req.isSome
+      check req.get.args{"path"}.getStr == "src/main.nim"
+      check req.get.args{"line"}.getInt == 17
+
+      dispose()
+
+  test "row click captures the right result under file grouping":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel(r, vm)
+
+      vm.setResults(@[
+        makeResult(path = "a.nim", line = 5, text = "first"),
+        makeResult(path = "b.nim", line = 9, text = "second"),
+        makeResult(path = "b.nim", line = 12, text = "third"),
+      ])
+      mock.clearReceivedCommands()
+
+      # Click the third row, which lives under the second file group.
+      let groups = findAllByClass(panel, "search-results-file-group")
+      check groups.len == 2
+      let bGroupRows = findAllByClass(groups[1], "search-results-match-row")
+      check bGroupRows.len == 2
+      bGroupRows[1].fireEvent("click")
+
+      let req = mock.findCommand("ct/jump-location")
+      check req.isSome
+      check req.get.args{"path"}.getStr == "b.nim"
+      check req.get.args{"line"}.getInt == 12
 
       dispose()

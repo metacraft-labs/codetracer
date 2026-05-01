@@ -600,26 +600,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
           errors.tryMountIsoNimErrorsPanel()
 
-        # SearchResults still uses the Karax bridge.
+        # SearchResults is now an IsoNim view -- its DOM is mounted by
+        # ``search_results.tryMountIsoNimSearchResultsPanel`` against
+        # the ``searchResultsComponent-{id}`` container, and reactive
+        # effects keep it in sync.  No vnodeToDom bridge or redraw
+        # callback is needed here.
         if state.content == Content.SearchResults:
-          let target = kdom.document.getElementById(containerId)
-          if not target.isNil:
-            target.innerHTML = cstring""
-            let vnode = component.render()
-            let dom = vnodeToDom(vnode, KaraxInstance())
-            target.appendChild(dom)
-
-          # Register a vnodeToDom redraw callback for this component.
-          let capturedComponent = component
-          let capturedContainerId = containerId
-          vnodeToDomRedrawCallbacks.add(proc() =
-            let el = kdom.document.getElementById(capturedContainerId)
-            if not el.isNil:
-              el.innerHTML = cstring""
-              let v = capturedComponent.render()
-              let d = vnodeToDom(v, KaraxInstance())
-              el.appendChild(d)
-          )
+          search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
+          search_results.tryMountIsoNimSearchResultsPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.
@@ -678,6 +666,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
       errors.isoNimErrorsMounted = false
       errors.tryMountIsoNimErrorsPanel()
+      return
+    if panel.content == Content.SearchResults:
+      let srComp = data.ui.componentMapping[Content.SearchResults][0]
+      if not srComp.isNil:
+        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
+      search_results.isoNimSearchResultsMounted = false
+      search_results.tryMountIsoNimSearchResultsPanel()
       return
     let component = data.ui.componentMapping[panel.content][0]
     if not component.isNil:
@@ -777,7 +772,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # Panel is not in GL — create a standalone auto-hide panel with
       # its own DOM container. Build/BuildErrors/SearchResults are now
-      # IsoNim-migrated and render via vnodeToDom instead of Karax.
+      # IsoNim-migrated and mount via the IsoNim reactive root.  No
+      # vnodeToDom redraw callback is needed because the IsoNim view
+      # keeps the DOM in sync automatically.
 
       # Create a wrapper element that the auto-hide overlay will
       # reparent when the panel is shown.
@@ -797,12 +794,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not host.isNil:
         host.appendChild(wrapper)
 
-      # Render the component via vnodeToDom (no Karax setRenderer).
-      # Also register a redraw callback so redrawAll() re-renders it.
-      # The Build panel is an IsoNim view, so it mounts itself against
-      # the inner div the next time `tryMountIsoNimBuildPanel` runs (no
-      # vnodeToDom redraw callback needed — the reactive root keeps the
-      # DOM in sync automatically).
+      # All three standalone auto-hide panels (Build, BuildErrors,
+      # SearchResults) are now IsoNim views.  Each mounts itself
+      # against the inner div the next time its ``tryMountIsoNim*``
+      # runs — no vnodeToDom redraw callback is needed because the
+      # reactive root keeps the DOM in sync automatically.
       if panelDef.content == Content.Build:
         try:
           let buildComp = data.ui.componentMapping[Content.Build][0]
@@ -821,6 +817,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           errors.tryMountIsoNimErrorsPanel()
         except:
           cerror "auto_hide: tryMountIsoNimErrorsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      elif panelDef.content == Content.SearchResults:
+        try:
+          let srComp = data.ui.componentMapping[Content.SearchResults][0]
+          if not srComp.isNil:
+            search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
+          search_results.isoNimSearchResultsMounted = false
+          search_results.tryMountIsoNimSearchResultsPanel()
+        except:
+          cerror "auto_hide: tryMountIsoNimSearchResultsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
       else:
         let component = data.ui.componentMapping[panelDef.content][0]
         if not component.isNil:
@@ -853,11 +858,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Expose helper functions on window for E2E tests.
   proc renderAutoHidePanelById(contentId: int) =
     ## Re-render a standalone auto-hide panel by content ID.
-    ## Uses vnodeToDom to bypass Karax's broken hidden-host rendering
-    ## for the Karax-only panels (SearchResults).  The Build and
-    ## BuildErrors panels are IsoNim views: sync any legacy state
-    ## (E2E tests inject directly into ``build.output`` /
-    ## ``build.problems``) into the VM and then re-mount.
+    ## Build, BuildErrors, and SearchResults are all IsoNim views:
+    ## sync any legacy state (E2E tests inject directly into
+    ## ``build.output`` / ``build.problems`` / search service results)
+    ## into the VM and then re-mount.  No vnodeToDom panels remain.
     if contentId == int(Content.Build):
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
@@ -878,20 +882,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       errors.isoNimErrorsMounted = false
       errors.tryMountIsoNimErrorsPanel()
       return
-    let labels = [
-      (20, cstring"searchResultsComponent-0"),
-    ]
-    for (cid, label) in labels:
-      if contentId == cid:
-        let component = data.ui.componentMapping[Content(cid)][0]
-        if not component.isNil:
-          let target = kdom.document.getElementById(label)
-          if not target.isNil:
-            target.innerHTML = cstring""
-            let vnode = component.render()
-            let dom = vnodeToDom(vnode, KaraxInstance())
-            target.appendChild(dom)
-        break
+    if contentId == int(Content.SearchResults):
+      let srComp = data.ui.componentMapping[Content.SearchResults][0]
+      if not srComp.isNil:
+        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
+      search_results.isoNimSearchResultsMounted = false
+      search_results.tryMountIsoNimSearchResultsPanel()
+      return
 
   # Expose a helper to pin a GL content item to an auto-hide edge.
   # Used by E2E tests to bypass the dropdown UI which has blur race issues.

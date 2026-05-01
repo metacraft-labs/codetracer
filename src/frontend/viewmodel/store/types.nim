@@ -224,3 +224,28 @@ type
     pfAll       ## Show every problem regardless of severity.
     pfErrors    ## Show only ``blsError`` rows.
     pfWarnings  ## Show only ``blsWarning`` rows.
+
+  # -------------------------------------------------------------------
+  # Search results panel value types
+  #
+  # The Search Results panel renders a flat list of file/line/snippet
+  # rows produced by a workspace-wide search (``data.services.search``
+  # in the legacy world).  ``SearchResultLine`` is the simple, platform-
+  # neutral shape the view layer needs without dragging the JS-only
+  # ``SearchResult`` Karax record into the ViewModel layer.
+  # -------------------------------------------------------------------
+
+  SearchResultLine* = object
+    ## One row in the Search Results panel.  Mirrors the legacy
+    ## ``SearchResult`` object in ``frontend/types.nim`` but uses
+    ## ``string`` instead of ``cstring`` so the same value works on
+    ## both the native and JS backends.
+    ##
+    ## ``text`` is the matched line snippet (the panel highlights any
+    ## occurrence of the active query inside it).  ``path`` is the
+    ## absolute / project-relative source path; clicking a row asks
+    ## the backend to navigate to ``path : line`` via
+    ## ``ct/jump-location``.  ``line`` is 1-based.
+    text*: string
+    path*: string
+    line*: int
