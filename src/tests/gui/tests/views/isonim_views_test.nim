@@ -33,6 +33,7 @@ import viewmodels/terminal_output_vm
 import viewmodels/build_vm
 import viewmodels/errors_vm
 import viewmodels/search_results_vm
+import viewmodels/no_source_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -47,6 +48,7 @@ import views/isonim_terminal_output_view
 import views/isonim_build_view
 import views/isonim_errors_view
 import views/isonim_search_results_view
+import views/isonim_no_source_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -4132,5 +4134,309 @@ suite "IsoNim Search Results Panel — interactions":
       check req.isSome
       check req.get.args{"path"}.getStr == "b.nim"
       check req.get.args{"line"}.getInt == 12
+
+      dispose()
+
+# ===========================================================================
+# No-source panel tests
+# ===========================================================================
+#
+# Cover:
+# - Outer structure (root class, header text, content wrapper).
+# - Default empty state — no message, default location, no history.
+# - Reactive updates when ``message``, ``location``, ``history``,
+#   ``originatingAddress``, and ``stopSignalText`` change.
+# - The Jump-back button click forwards through to the backend via
+#   ``ct/history-jump`` carrying the previous-path metadata.
+#
+# The render-effects that own the body and the trailing rows fire
+# whenever any of their input signals change, so each test mutates a
+# signal after rendering and asserts the resulting tree.
+
+suite "IsoNim No-Source Panel — structure":
+
+  test "renders root with the unknown-location class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "unknown-location" in panel.attributes["class"]
+
+      dispose()
+
+  test "renders the Whoops! header and the content wrapper":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      let header = findByClass(panel, "unknown-location-header")
+      check header != nil
+      check "Whoops" in header.textContent
+
+      let content = findByClass(panel, "unknown-location-content")
+      check content != nil
+
+      dispose()
+
+  test "default state renders only the location border (no message, no history)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      let borders = findAllByClass(panel, "unknown-border")
+      # Only the location border (no message border, no history blocks).
+      check borders.len == 1
+
+      let messageNode = findByClass(panel, "unknown-location-message")
+      check messageNode == nil
+
+      let buttonNode = findByClass(panel, "jump-back-button")
+      check buttonNode == nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# No-source content tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim No-Source Panel — content":
+
+  test "setMessage adds the unknown-location-message paragraph":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setMessage("Source not available for this frame")
+
+      let messageNode = findByClass(panel, "unknown-location-message")
+      check messageNode != nil
+      check "Source not available" in messageNode.textContent
+
+      dispose()
+
+  test "setLocation populates the function/path/line rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setLocation(NoSourceLocationInfo(
+        functionName: "main",
+        path: "src/example.nim",
+        line: 42,
+      ))
+
+      check "Function: 'main'" in panel.textContent
+      check "Path: 'src/example.nim'" in panel.textContent
+      check "Line: '42'" in panel.textContent
+
+      dispose()
+
+  test "setLocation hides path row when path is empty":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setLocation(NoSourceLocationInfo(
+        functionName: "main",
+        path: "",
+        line: 42,
+      ))
+
+      check "Function: 'main'" in panel.textContent
+      check "Path:" notin panel.textContent
+      check "Line: '42'" in panel.textContent
+
+      dispose()
+
+  test "setLocation hides line row when line is negative":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setLocation(NoSourceLocationInfo(
+        functionName: "main",
+        path: "src/example.nim",
+        line: -1,
+      ))
+
+      check "Function: 'main'" in panel.textContent
+      check "Path: 'src/example.nim'" in panel.textContent
+      check "Line:" notin panel.textContent
+
+      dispose()
+
+  test "setOriginatingAddress adds the trailing address paragraph":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setOriginatingAddress("0xdeadbeef")
+
+      let addressNode = findByClass(panel, "unknown-location-address")
+      check addressNode != nil
+      check "Originating address: 0xdeadbeef" in addressNode.textContent
+
+      dispose()
+
+  test "setStopSignalText adds the trailing signal paragraph":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setStopSignalText("SIGSEGV")
+
+      let signalNode = findByClass(panel, "unknown-location-signal")
+      check signalNode != nil
+      check "Signal received: SIGSEGV" in signalNode.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# No-source history tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim No-Source Panel — history":
+
+  test "setHistory(hasHistory=true) adds the context block and Jump-back button":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setHistory(NoSourceHistoryInfo(
+        hasHistory: true,
+        previousPath: "src/main.nim",
+        action: "step",
+      ))
+
+      check "We were in 'src/main.nim'" in panel.textContent
+      check "operation: 'step'" in panel.textContent
+
+      let buttonNode = findByClass(panel, "jump-back-button")
+      check buttonNode != nil
+      check "Jump back" in buttonNode.textContent
+
+      dispose()
+
+  test "setHistory(hasHistory=false) removes the history blocks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      # First populate.
+      vm.setHistory(NoSourceHistoryInfo(
+        hasHistory: true,
+        previousPath: "src/main.nim",
+        action: "step",
+      ))
+      check findByClass(panel, "jump-back-button") != nil
+
+      # Then clear.
+      vm.setHistory(NoSourceHistoryInfo())
+      check findByClass(panel, "jump-back-button") == nil
+      check "We were in" notin panel.textContent
+
+      dispose()
+
+  test "history block is hidden when action is empty (matches legacy guard)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      # ``hasHistory`` true but no action — the legacy view kept the
+      # history block hidden under the same circumstance.
+      vm.setHistory(NoSourceHistoryInfo(
+        hasHistory: true,
+        previousPath: "src/main.nim",
+        action: "",
+      ))
+
+      check findByClass(panel, "jump-back-button") == nil
+      check "We were in" notin panel.textContent
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# No-source interaction tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim No-Source Panel — interactions":
+
+  test "Jump-back click dispatches ct/history-jump via the backend":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      vm.setHistory(NoSourceHistoryInfo(
+        hasHistory: true,
+        previousPath: "src/main.nim",
+        action: "step",
+      ))
+      mock.clearReceivedCommands()
+
+      let buttonNode = findByClass(panel, "jump-back-button")
+      check buttonNode != nil
+      buttonNode.fireEvent("click")
+
+      let req = mock.findCommand("ct/history-jump")
+      check req.isSome
+      check req.get.args{"previousPath"}.getStr == "src/main.nim"
+      check req.get.args{"action"}.getStr == "step"
+
+      dispose()
+
+  test "Jump-back is a no-op when there is no history":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createNoSourceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderNoSourcePanel(r, vm)
+
+      mock.clearReceivedCommands()
+      vm.jumpBack()
+
+      let req = mock.findCommand("ct/history-jump")
+      check req.isNone
 
       dispose()

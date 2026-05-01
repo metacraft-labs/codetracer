@@ -249,3 +249,45 @@ type
     text*: string
     path*: string
     line*: int
+
+  # -------------------------------------------------------------------
+  # No-source panel value types
+  #
+  # The "no source" panel is shown inside the editor tab when the
+  # debugger lands on a location whose source file cannot be opened
+  # (no debug-info path, jumped into a stripped binary, etc.).  The
+  # legacy Karax view in ``frontend/ui/no_source.nim`` rendered a
+  # fixed "Whoops!" header followed by a free-form message, the
+  # current high-level function/path/line trio, and — if jump history
+  # was available — the previous location with a "Jump back" button.
+  # The value types below mirror that contract without dragging the
+  # JS-only Karax structures (``Component`` / ``VNode``) into the
+  # view-model layer.
+  # -------------------------------------------------------------------
+
+  NoSourceLocationInfo* = object
+    ## High-level context the no-source panel renders below the
+    ## "Whoops!" header.  Mirrors the legacy
+    ## ``data.services.debugger.location`` lookup; using a value type
+    ## keeps the panel tests from depending on the live debugger
+    ## service.
+    ##
+    ## ``functionName`` is shown unconditionally (legacy view used
+    ## ``- Function: '<name>'`` even when the name is empty).
+    ## ``path`` and ``line`` are shown only when populated — empty
+    ## strings / negative line numbers omit the row, matching the
+    ## ``NO_PATH``/``NO_CODE`` guards in the legacy code.
+    functionName*: string
+    path*: string
+    line*: int
+
+  NoSourceHistoryInfo* = object
+    ## Optional jump-history context the no-source panel shows when
+    ## ``jumpHistory`` had at least two entries.  Mirrors the legacy
+    ## render's ``history[^2].location`` + ``history[^1].lastOperation``
+    ## fan-out.  The "Jump back" button is rendered only when
+    ## ``hasHistory`` is true and ``action`` is non-empty (matching the
+    ## legacy ``if hasHistory and action != ""`` guard).
+    hasHistory*: bool
+    previousPath*: string
+    action*: string
