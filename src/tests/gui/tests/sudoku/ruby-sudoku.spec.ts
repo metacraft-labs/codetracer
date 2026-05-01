@@ -26,11 +26,18 @@ test.describe("RubySudoku", () => {
     await helpers.assertEventLogPopulated(ctPage);
   });
 
-  // FAILING (timing, 2026-05-01): see python-sudoku.spec.ts.  The
-  // structural calltrace-loading gap that originally hid the user-
-  // program calls is fixed; remaining flakes are caused by the
-  // CalltraceVM autoLoad effect re-firing several times per
-  // CtCompleteMove and clobbering the store mid-render.
+  // FAILING (2026-05-01): the Ruby DB recorder is currently
+  // emitting an empty calltrace for rb_sudoku_solver — the
+  // frontend's `[PIPELINE] syncCalltraceData` log reports
+  // `received 0 lines, totalCalls=0` for every CtUpdatedCalltrace
+  // response, so the IsoNim calltrace view renders an empty
+  // `.calltrace-lines` container and `waitForReady` (60-attempt
+  // retry on `.calltrace-call-line` count > 0) times out without
+  // the test issuing a search.  Editor + event-log tests pass for
+  // the same trace, so this is recorder-side.  See TODO 5.2(m).
+  // Calltrace fan-out batching is in place (commit 27dcef26 /
+  // section 1.15) so once the recorder produces calls the tests
+  // should run cleanly.
   test("call trace navigation to SudokuSolver#solve", async ({ ctPage }) => {
     await helpers.assertCallTraceNavigation(
       ctPage,
@@ -39,11 +46,11 @@ test.describe("RubySudoku", () => {
     );
   });
 
-  // FAILING (2026-05-01): same auto-load re-render flake as the
-  // previous test, plus the IsoNim calltrace view does not yet
-  // render the per-argument `.call-arg` DOM elements that
-  // CallTraceEntry.arguments() expects (it emits a static "()"
-  // placeholder).  See TODO 5.2 in handoff.
+  // FAILING (2026-05-01): same empty-calltrace recorder gap as
+  // the previous test (TODO 5.2(m)), plus the IsoNim calltrace
+  // view does not yet render the per-argument `.call-arg` DOM
+  // elements that CallTraceEntry.arguments() expects (it emits a
+  // static "()" placeholder).  See TODO 5.2(l) in handoff.
   test("variable inspection board via call trace argument", async ({
     ctPage,
   }) => {

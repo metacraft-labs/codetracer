@@ -15,34 +15,32 @@ import * as helpers from "../../lib/language-smoke-test-helpers";
 // As of 2026-05-01 the Python recorder venv is healthy again. The
 // editor / event-log smoke tests pass.
 //
-// FAILING (3 of 5 tests as of 2026-05-01, but with progress):
-//   - "call trace navigation to solve_sudoku"           (timeout)
-//   - "variable inspection board via call trace argument" (timeout +
-//     missing `.call-arg` rendering — IsoNim view emits "()" instead
-//     of per-arg DOM elements; see TODO 5.2 below)
-//   - "terminal output shows solved board" (terminal pane never gets
-//     populated for this DB trace — separate from calltrace)
+// FAILING (3 of 5 tests as of 2026-05-01):
+//   - "call trace navigation to solve_sudoku" — after CtCalltraceJump
+//     the loaded section is anchored INSIDE solve_sudoku's body, so
+//     the visible entries are children (`_box_index #0/#1/...`).
+//     `findEntry("solve_sudoku")` returns null and `navigateToEntry`
+//     falls back to the first child as a proxy; the editor-tab
+//     retry then times out.  See TODO 5.1(a) — fix is recorder-side
+//     (widen the response window upward to include the parent call)
+//     OR test-side (recognise "search jumped me into the body" via
+//     debugger location).
+//   - "variable inspection board via call trace argument" — same
+//     navigation issue PLUS missing `.call-arg` rendering — IsoNim
+//     view emits "()" instead of per-arg DOM elements; see TODO 5.2(l).
+//   - "terminal output shows solved board" — terminal pane never gets
+//     populated for this DB trace; separate from calltrace.
 //
-// The structural calltrace navigation gap that originally hid
-// `solve_sudoku` (loaded section starting at index 0 with only 25
-// rows visible, the user-program calls live well past row 25) was
-// fixed in 2026-05-01 by:
-//   * `syncCalltraceData` (frontend/ui/calltrace.nim) now passes the
-//     backend's `startCallLineIndex` to the store instead of 0.
-//   * The IsoNim WebRenderer renders the FULL store window
-//     (`vm.store.calltrace.lines.val`) instead of a viewport-height
-//     slice — see `isonim_calltrace_view.nim`'s `indexEach`.
-//   * The CalltraceVM's autoLoad effect expands `totalHeight` to
-//     `totalCallsCount` once it is known, so the loaded section
-//     covers the entire DB trace (capped at 500 calls).
-// With these fixes `solve_sudoku` IS in the DOM after navigation
-// (verified via test diagnostic DOM dumps).  The remaining test
-// flakes are timing-related: the autoLoad effect re-fires several
-// times during a single CtCompleteMove (vpHeight, depth, scroll
-// changes ripple), each time clobbering the store and re-rendering
-// the calltrace DOM, which can leave Playwright with stale
-// `.calltrace-call-line` locators.  Stabilising those re-renders
-// is follow-up work for a future sub-agent.
+// Structural calltrace fixes already in place (kept here for reference
+// because the failure mode is now distinct):
+//   * caa8155d (1.14): `syncCalltraceData` passes the backend's
+//     `startCallLineIndex` instead of 0; IsoNim WebRenderer renders
+//     the FULL store window; autoLoad expands totalHeight to
+//     totalCallsCount once it is known.
+//   * 27dcef26 (1.15): the entire CtCompleteMove fan-out is now
+//     wrapped in an `isonim/core/batch.batch`, so the autoLoad effect
+//     fires ONCE per move with coherent params.  Verified via
+//     `[PIPELINE] CalltraceVM.autoLoad` log entries.
 test.describe("PythonSudoku", () => {
   test.use({ sourcePath: "py_sudoku_solver/main.py", launchMode: "trace" });
 
