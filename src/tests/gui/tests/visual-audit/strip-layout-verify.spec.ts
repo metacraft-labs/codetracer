@@ -57,6 +57,19 @@ test.describe("Strip layout verification", () => {
     await layout.waitForTraceLoaded();
     await wait(1000);
 
+    // Force collapsed mode OFF before pinning.  Under Xvfb the heuristic
+    // in `updateCollapsedMode` (layout.nim ~880) thinks the window is
+    // maximized (Xvfb's virtual display matches the Electron window
+    // size, so `window.outerWidth >= screen.availWidth - 8` is true).
+    // That puts the auto-hide strip into the 1px collapsed-mode
+    // rendering instead of the 28px text-tab strip this test asserts
+    // on.  See same pattern in comprehensive-v2.spec.ts Screen 6.
+    await ctPage.evaluate(() => {
+      const f = (window as any).__ctForceCollapsedMode;
+      if (typeof f === "function") f(false);
+    });
+    await wait(200);
+
     // --- Baseline: no strips, capture initial GL width ---
     const rootBefore = await ctPage.evaluate(() => {
       const el = document.getElementById("ROOT");

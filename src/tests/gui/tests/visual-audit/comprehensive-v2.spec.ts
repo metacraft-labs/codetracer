@@ -541,6 +541,26 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     await layout.waitForTraceLoaded();
     await wait(1000);
 
+    // Force collapsed mode OFF before pinning.  Under Xvfb the heuristic
+    // in `updateCollapsedMode` (layout.nim ~880) thinks the window is
+    // maximized — `window.outerWidth >= screen.availWidth - 8` is true
+    // because Xvfb's virtual display matches the Electron window size.
+    // That puts the auto-hide strip into the 1px collapsed-mode rendering
+    // (`<div class="collapsed-strip-line">`) instead of the 28px text-tab
+    // strip the test asserts on.  The `__ctForceCollapsedMode(false)`
+    // helper (registered in layout.nim ~869) bypasses the heuristic and
+    // sets `collapsedMode = false` + clears `leftBounded`/`rightBounded`.
+    //
+    // The wait after the force-off lets Karax flush its redraw queue
+    // (`onChanged` → `redraw(kxiMap[…])` is async) so the next
+    // `pinPanel` runs against a strip that is already in the 28px
+    // text-tab rendering mode, not the 1px collapsed line.
+    await ctPage.evaluate(() => {
+      const f = (window as any).__ctForceCollapsedMode;
+      if (typeof f === "function") f(false);
+    });
+    await wait(200);
+
     // Pin the FILESYSTEM panel to the left edge programmatically.
     // Using __ctPinPanel (exposed on window by layout.nim) avoids the
     // dropdown blur race condition that can cause the UI-driven pin to
