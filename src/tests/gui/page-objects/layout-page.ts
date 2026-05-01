@@ -260,17 +260,22 @@ export class LayoutPage extends BasePage {
       return;
     } catch (ex) {
       debugLogger.log(
-        `LayoutPage.clickDebugButton('${name}'): plain click failed (${(ex as Error).message ?? ex}); retrying with force:true`,
+        `LayoutPage.clickDebugButton('${name}'): plain click failed (${(ex as Error).message ?? ex}); falling through to dispatchEvent`,
       );
     }
-    try {
-      await button.click({ force: true, timeout: 5_000 });
-      return;
-    } catch (ex) {
-      debugLogger.log(
-        `LayoutPage.clickDebugButton('${name}'): force-click failed (${(ex as Error).message ?? ex}); falling through to dispatchEvent`,
-      );
-    }
+    // When the plain click is intercepted by an overlapping `lm_header`
+    // (GoldenLayout tab strip) or jstree icon, `force:true` does NOT
+    // redirect the click to the underlying button — it only bypasses
+    // Playwright's actionability checks. The real OS mouse event still
+    // lands on whatever is on top, so the button's `click` listener
+    // never fires (the symptom that hid TODO 5.2(i): wasm `next` clicks
+    // succeeded silently but the IsoNim handler was never invoked).
+    //
+    // `dispatchEvent('click')` synthesizes a click event directly on
+    // the resolved element, bypassing the OS pointer layer entirely.
+    // The IsoNim toolbar attaches plain `click` listeners via
+    // `addEventListener`, so a synthesized event triggers the handler
+    // reliably regardless of viewport / overlay state.
     await button.dispatchEvent("click");
   }
 

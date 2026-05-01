@@ -25,6 +25,26 @@ var debugControlsVMInstance: DebugControlsVM
 var debugControlsVMStore: ReplayDataStore
 var isoNimDebugMounted: bool = false
 
+# Reference to the live `DebugComponent` (and its mediator API) that
+# was wired with `register()`. Captured by `register()` and consulted
+# by every code path that creates a fresh `DebugControlsVM` so the new
+# instance gets the `onDapStep` / `onAction` bridge re-applied.
+#
+# Without this, replacing the stub-backed VM with the shared-store VM
+# in `initDebugControlsVMWithStore` leaves the new instance's bridge
+# callbacks nil — the IsoNim toolbar's click handlers then call
+# `vm.onDapStep` (which is nil) and silently drop the step request.
+# That is the root cause of TODO 5.2(i): wasm DB-trace `next` clicks
+# never reach the backend.
+var debugComponentForBridge: DebugComponent
+var debugApiForBridge: MediatorWithSubscribers
+
+# Forward declarations: `initDebugControlsVMWithStore` (defined below)
+# needs to call `dapStep` and `action` (both also below) when
+# re-applying the bridge after replacing the VM instance.
+proc dapStep*(api: MediatorWithSubscribers, action: cstring)
+proc action(self: DebugComponent, id: string)
+
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
@@ -79,12 +99,26 @@ proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## If a stub-backed instance already exists (created by initDebugControlsVM
   ## before the real backend was available), it is replaced so that the
   ## panel uses the real DapApi instead of the no-op stub.
+  ##
+  ## After the replacement, re-apply the `onDapStep` / `onAction` bridge
+  ## callbacks if `register()` has already wired the `DebugComponent` to
+  ## the middleware API. Without this, IsoNim toolbar clicks call a nil
+  ## `onDapStep` on the new instance and the DAP step request is silently
+  ## dropped — TODO 5.2(i).
   if debugControlsVMInstance != nil:
     clog "DebugControlsVM: replacing existing instance with shared-store version"
     isoNimDebugMounted = false
   debugControlsVMStore = store
   debugControlsVMInstance = createDebugControlsVM(store)
   clog "DebugControlsVM: parallel ViewModel instance created (shared store)"
+  if not debugComponentForBridge.isNil and not debugApiForBridge.isNil:
+    let component = debugComponentForBridge
+    let api = debugApiForBridge
+    debugControlsVMInstance.onDapStep = proc(action: cstring) =
+      dapStep(api, action)
+    debugControlsVMInstance.onAction = proc(id: string) =
+      component.action(id)
+    clog "DebugControlsVM: re-wired onDapStep/onAction bridge after replacement"
   tryMountIsoNimDebugControls()
 
 proc initDebugControlsVM() =
@@ -416,7 +450,14 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
 
   # Wire up the legacy bridge callbacks on the DebugControlsVM so that
   # IsoNim view button clicks route through the existing DAP event mediator.
+  # We also memoise `self` and `api` so that any later
+  # `initDebugControlsVMWithStore` call (which replaces the VM instance
+  # with a shared-store one) can re-apply the bridge — see the
+  # `debugComponentForBridge` / `debugApiForBridge` doc above for the
+  # TODO 5.2(i) failure mode this fixes.
   initDebugControlsVM()
+  debugComponentForBridge = self
+  debugApiForBridge = api
   if not debugControlsVMInstance.isNil:
     debugControlsVMInstance.onDapStep = proc(action: cstring) =
       dapStep(api, action)
