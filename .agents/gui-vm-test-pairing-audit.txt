@@ -1,0 +1,530 @@
+# GUI ↔ Headless ViewModel Test Pairing Audit
+
+> Date: 2026-05-02
+> Branch: codetracer-viewmodel
+> Mission goal: #2 — "Each GUI test must have a corresponding headless ViewModel test"
+> Scope: inventory-only. No new VM tests are written by this iteration; the
+> goal is to surface the gap surface so future iterations can target specific
+> clusters.
+
+## 1. Methodology
+
+### 1.1 Discovery
+
+Specs and VM tests were discovered by glob (no execution):
+
+```
+find src/tests/gui/tests -name "*.spec.ts"   # GUI specs (Playwright)
+find src/tests/gui/tests -name "*_test.nim"  # Headless VM tests (Nim unittest)
+```
+
+Per-spec test counts come from a `^\s*test\(` Grep across each `.spec.ts`.
+Per-suite mapping in `isonim_views_test.nim` comes from a `^suite "` grep.
+
+### 1.2 What counts as a "matching VM test"
+
+Per `codetracer-specs/Testing/Test-Co-Location-Convention.md` (rule 1) and
+`Testing-Guidelines.md` (Headless-First Policy):
+
+A spec `tests/<topic>/<name>.spec.ts` has a matching VM test when there
+exists a Nim test that:
+
+  (a) Lives in the **same directory** OR exercises the same panel via the
+      shared `views/isonim_views_test.nim` (the de-facto cross-panel
+      view-rendering test file, despite the convention suggesting one
+      `<topic>.vm-test.nim` per topic).
+  (b) Drives the same VM/store signal flow via `MockBackendService` or the
+      VM constructors (`createCalltraceVM`, `createStateVM`, etc.).
+  (c) Covers at least one of the spec's test names by intent — either the
+      same trigger (action, click, scroll, search input) or the same
+      observable result (selection signal, visible row count, dispatched
+      DAP command).
+
+### 1.3 Confidence labels
+
+* **PAIRED** — same directory + name overlap + same flow.  High confidence
+    the VM test reproduces the GUI test's failure shape.  One-to-one or
+    near-one-to-one with the spec.
+* **PARTIAL** — VM coverage exists for the panel but doesn't exercise the
+    same flow / scenario as the spec (e.g. structure-only, missing the
+    user action the GUI spec triggers).
+* **GAP** — no VM test for this spec's panel/flow.  A GUI failure here
+    cannot be reproduced at the headless layer.
+* **SHARED** — multiple specs are covered by a single broad VM test
+    (typically `views/isonim_views_test.nim` or
+    `scenarios/feature_scenarios_test.nim`).  Coverage exists but is not
+    co-located per the convention.
+
+### 1.4 Limits of this audit
+
+* No tests are run; coverage is judged from file names, suite/test titles
+    and reading commit messages of the migration commits (1.1–1.51).
+* Some specs have many sub-tests; only the spec as a whole is rated.
+* The mapping is a starting map for follow-up iterations, not a final
+    unit-by-unit audit.
+
+---
+
+## 2. Inventory
+
+### 2.1 Spec count by directory
+
+| Directory | Spec files | Total `test(` calls |
+|---|---:|---:|
+| `program_specific_tests/` | 17 | ~146 |
+| `sudoku/` | 13 | 65 |
+| `build/` | 6 | 23 |
+| `multi-replay/` | 5 | 12 |
+| `welcome-screen/` | 3 | 21 |
+| `visual-audit/` | 3 | 19 |
+| `nim-view-switching/` | 3 | 11 |
+| `multi-window/` | 3 | 17 |
+| `(top-level)` | 3 | 9 |
+| `page-objects-tests/` | 2 | 3 |
+| `wasm-replay/` | 1 | 7 |
+| `streaming/` | 1 | 5 |
+| `replay-session/` | 1 | 2 |
+| `program-agnostic/` | 1 | 1 |
+| `noir-space-ship/` | 1 | 18 |
+| `layout/` | 1 | 6 |
+| `deepreview/` | 1 | 21 |
+| `benchmarks/` | 1 | 1 |
+| `auto-hide/` | 1 | 6 |
+| `agentic-coding/` | 1 | 40 |
+| **Total** | **67 specs** | **~433 test() calls** |
+
+### 2.2 VM test count by directory
+
+| Directory | VM test files | Notes |
+|---|---:|---|
+| `views/` | 2 | `isonim_views_test.nim` (~290 tests, 87 suites — the cross-panel rendering test), `views_test.nim` (legacy) |
+| `scenarios/` | 3 | `debugging_scenarios_test.nim`, `feature_scenarios_test.nim`, `integration_test.nim` |
+| `store/` | 2 | `store_test.nim`, `backend_test.nim` |
+| `integration/` | 2 | `real_backend_test.nim`, `language_smoke_test.nim` |
+| `calltrace/` | 1 | `calltrace_vm_test.nim` |
+| `state/` | 1 | `state_vm_test.nim` |
+| `flow/` | 1 | `flow_vm_test.nim` |
+| `editor/` | 1 | `editor_vm_test.nim` |
+| `timeline/` | 1 | `timeline_vm_test.nim` |
+| `event-log/` | 1 | `event_log_vm_test.nim` |
+| `debug-controls/` | 1 | `debug_controls_vm_test.nim` |
+| `search/` | 1 | `search_vm_test.nim` |
+| `point-list/` | 1 | `point_list_vm_test.nim` |
+| `scratchpad/` | 1 | `scratchpad_vm_test.nim` |
+| `shell/` | 1 | `shell_vm_test.nim` |
+| `multi-replay/` | 1 | `multi_session_test.nim` |
+| `noir-space-ship/` | 1 | `noir_space_ship_test.nim` (9 suites) |
+| **Total** | **23 VM test files** | claim of 568+ tests is suite-counted, not file-counted |
+
+### 2.3 Per-directory pairing (spec → matching VM test)
+
+#### `sudoku/` — 13 specs, 65 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `c-sudoku.spec.ts` | `scenarios/feature_scenarios_test.nim` (sudoku scenario) + `views/isonim_views_test.nim` (cross-panel) | SHARED | same 5-test shape across all sudoku specs (editor, event-log, calltrace, locals, output) |
+| `cpp-sudoku.spec.ts` | (same) | SHARED | |
+| `d-sudoku.spec.ts` | (same) | SHARED | |
+| `rust-sudoku.spec.ts` | (same) | SHARED | |
+| `nim-sudoku.spec.ts` | (same) | SHARED | |
+| `python-sudoku.spec.ts` | (same) | SHARED | |
+| `ruby-sudoku.spec.ts` | (same) | SHARED | |
+| `go-sudoku.spec.ts` | (same) | SHARED | testBoards still failing — see 5.9 |
+| `fortran-sudoku.spec.ts` | (same) | SHARED | |
+| `pascal-sudoku.spec.ts` | (same) | SHARED | |
+| `ada-sudoku.spec.ts` | (same) | SHARED | |
+| `crystal-sudoku.spec.ts` | (same) | SHARED | |
+| `lean-sudoku.spec.ts` | (same) | SHARED | |
+
+The 13 sudoku specs are language permutations of the same 5-scenario flow.
+There is no per-language VM test, but `feature_scenarios_test.nim` covers
+the cross-language smoke shape.  Co-location convention violated (no
+`<lang>-sudoku.vm-test.nim` siblings exist).
+
+#### `program_specific_tests/` — 17 specs, ~146 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `noir_space_ship.spec.ts` | `noir-space-ship/noir_space_ship_test.nim` | PAIRED | dedicated VM test exists; only 1 spec test here, the larger noir-space-ship spec is in `noir-space-ship/` |
+| `noir_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | language smoke exists, no per-spec VM test |
+| `js_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
+| `wasm_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
+| `solidity_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
+| `aiken_example.spec.ts` | (none) | GAP | recorder-side audit done in 1.48 but no VM test |
+| `cadence_example.spec.ts` | (none) | GAP | recorder audit 1.52 |
+| `cairo_example.spec.ts` | (none) | GAP | recorder audit 1.50 |
+| `circom_example.spec.ts` | (none) | GAP | recorder audit 1.58 |
+| `leo_example.spec.ts` | (none) | GAP | recorder audit 1.59 |
+| `masm_example.spec.ts` | (none) | GAP | recorder audit 1.56 |
+| `move_example.spec.ts` | (none) | GAP | recorder audit 1.46 |
+| `polkavm_example.spec.ts` | (none) | GAP | recorder audit 1.55 |
+| `solana_example.spec.ts` | (none) | GAP | recorder audit 1.44 |
+| `stylus_example.spec.ts` | (none) | GAP | wazero recorder audit 1.60 |
+| `sway_example.spec.ts` | (none) | GAP | recorder audit 1.53 |
+| `tolk_example.spec.ts` | (none) | GAP | recorder audit 1.57 |
+
+Each `<lang>_example.spec.ts` has 6–10 tests. 12/17 specs are pure GAPs.
+This is the largest GAP cluster by spec count.
+
+#### `noir-space-ship/` — 1 spec, 18 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `noir-space-ship.spec.ts` | `noir-space-ship/noir_space_ship_test.nim` (9 suites) | PARTIAL | VM test exists co-located, but covers ~9 of the 18 spec scenarios.  Sub-flows covered: editor-loads, calltrace-nav, loop-iteration, event-log, step-fwd-back, locals, calltrace-depth, calltrace-search, full-workflow.  Spec adds: trace-log records, scratchpad compare, step-controls reverse recovery, exhaustive scratchpad, FS context menu, calltrace context menu, flow context menu, trace-log context menu, value-history context menu, jump-to-all-events, simple-tracepoint creation. |
+
+#### `welcome-screen/` — 3 specs, 21 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `welcome_screen.spec.ts` | (none) | GAP | no welcome-screen VM exists at all |
+| `edit_mode.spec.ts` | (none) | GAP | |
+| `launch_config.spec.ts` | (none) | GAP | |
+
+This is a clean GAP cluster — there is no `welcome-screen/` VM test
+directory at all.  Would need a new `WelcomeScreenVM` (recent-traces,
+recent-folders, start-options) to back the 21 tests.
+
+#### `build/` — 6 specs, 23 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `build-panel-e2e.spec.ts` | `views/isonim_views_test.nim` (Build Panel suites — structure / header / line rendering / interactions) | PAIRED | rendering covered |
+| `build-output.spec.ts` | (same) | PAIRED | |
+| `build-header-controls.spec.ts` | (same) | PAIRED | |
+| `real-compiler-errors.spec.ts` | `views/isonim_views_test.nim` (Errors Panel + Build Panel suites) | PARTIAL | rendering covered; live-compiler driving not covered |
+| `problems-panel.spec.ts` | `views/isonim_views_test.nim` (Errors Panel suites) | PAIRED | |
+| `search-results-e2e.spec.ts` | `views/isonim_views_test.nim` (Search Results Panel suites) | PAIRED | |
+
+Build/Errors/SearchResults panels were migrated 1.33/1.34/1.35 with
+co-located rendering coverage in `isonim_views_test.nim`.  All but
+`real-compiler-errors` are well covered.  Convention violated only in
+that the VM tests live under `views/`, not `build/`.
+
+#### `multi-replay/` — 5 specs, 12 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `tabbed-replay.spec.ts` | `multi-replay/multi_session_test.nim` | PAIRED | tab bar / switch / close |
+| `real-tab-switching.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | switchSession covered; "real" tab semantics not |
+| `multi-trace-load.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | session-data-model covered; load lifecycle not |
+| `comprehensive-tabbed-replay.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | |
+| `three-trace-types.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
+
+#### `multi-window/` — 3 specs, 17 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `multi-window-replay.spec.ts` | (none) | GAP | window-sessions infra/IPC is BrowserWindow-level — no VM-layer mock |
+| `panel-transfer.spec.ts` | (none) | GAP | |
+| `cross-window-interaction.spec.ts` | (none) | GAP | |
+
+This area is fundamentally Electron BrowserWindow-bound; the headless
+ViewModel layer doesn't model multi-window state at all. Likely
+out-of-scope for the headless-first policy without an architectural
+change.
+
+#### `visual-audit/` — 3 specs, 19 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `comprehensive-v2.spec.ts` | `views/isonim_views_test.nim` (per-panel suites) | PARTIAL | visual screen layouts; VM tests cover panel structure but not screen composition |
+| `final-fixes.spec.ts` | (same) | PARTIAL | |
+| `strip-layout-verify.spec.ts` | `views/isonim_views_test.nim` (auto-hide-strip rendering) | PARTIAL | strip rendering migrated in 1.x; not 1:1 with the spec |
+
+Visual layouts are intrinsically rendering-only and don't map to VM
+state cleanly.  Headless-first applicability is limited for these.
+
+#### `nim-view-switching/` — 3 specs, 11 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `three-way-view-switch.spec.ts` | `editor/editor_vm_test.nim` + `views/isonim_views_test.nim` (No-Source / Low Level Code suites) | PARTIAL | view-mode VM signal exists, three-way enumeration not exercised end-to-end |
+| `stepping-through-views.spec.ts` | `state/state_vm_test.nim` (stepping) + `editor/editor_vm_test.nim` | PARTIAL | |
+| `macro-expansion-stepping.spec.ts` | (none) | GAP | macro-expansion is unique flow not modelled in any VM |
+
+#### `auto-hide/` — 1 spec, 6 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `auto-hide-panes.spec.ts` | (none) | GAP | strip-tab/overlay state machine has no headless test |
+
+#### `layout/` — 1 spec, 6 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `layout_resilience.spec.ts` | (none) | GAP | Golden-Layout JSON validation/recovery has no headless equivalent |
+
+#### `agentic-coding/` — 1 spec, 40 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `agentic-deepreview.spec.ts` | (none) | GAP | DeepReview panel is Karax-only (section 5.4) — no VM exists yet |
+
+This single spec carries 40 tests; closing the gap requires migrating the
+DeepReview panel itself (multi-day project per section 5.4).
+
+#### `deepreview/` — 1 spec, 21 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `deepreview-gui.spec.ts` | (none) | GAP | same blocker as agentic-coding (panel not migrated) |
+
+#### `streaming/` — 1 spec, 5 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `streaming-recording.spec.ts` | (none) | GAP | streaming recorder lifecycle has no VM model |
+
+#### `replay-session/` — 1 spec, 2 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `replay-session-scoping.spec.ts` | `multi-replay/multi_session_test.nim` | PARTIAL | session scoping covered partially |
+
+#### `wasm-replay/` — 1 spec, 7 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `wasm-client-replay.spec.ts` | `integration/language_smoke_test.nim` (wasm) + `views/isonim_views_test.nim` | PARTIAL | wasm DB-backed flow covered in language smoke; client-side replay specifics not |
+
+#### `page-objects-tests/` — 2 specs, 3 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `page_object.spec.ts` | (none) | GAP | tests the page-object infra itself; not a VM concern |
+| `reload_reconnect.spec.ts` | (none) | GAP | reconnect flow closed in 1.37 but no VM-layer test |
+
+#### `program-agnostic/` — 1 spec, 1 test
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `program-agnostic.spec.ts` | `scenarios/feature_scenarios_test.nim` | PARTIAL | cross-cutting smoke; matches scenario file by intent |
+
+#### `benchmarks/` — 1 spec, 1 test
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `panel-loading-times.spec.ts` | (none) | GAP | wall-clock benchmark, headless-equivalent would be a perf harness |
+
+#### Top-level (`src/tests/gui/tests/`) — 3 specs, 9 tests
+
+| Spec | Candidate VM test | Status | Notes |
+|---|---|---|---|
+| `cross-platform-replay.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
+| `browser-materialized-replay.spec.ts` | (none) | GAP | browser materialized-replay is web-mode specific |
+| `browser-mcr-replay.spec.ts` | (none) | GAP | |
+
+### 2.4 Aggregate counts
+
+| Status | Specs | % of 67 |
+|---|---:|---:|
+| PAIRED | 7 | 10% |
+| PARTIAL | 16 | 24% |
+| SHARED | 13 | 19% |
+| GAP | 31 | 46% |
+| **Total** | **67** | **100%** |
+
+Reasonable coverage exists for ~53% of specs (PAIRED + PARTIAL + SHARED);
+~46% are pure GAPs concentrated in two clusters: `program_specific_tests/`
+language examples (12) and panel-not-yet-migrated areas (deepreview /
+welcome-screen / multi-window / auto-hide / layout / streaming / browser
+materialized).
+
+---
+
+## 3. Gap clusters
+
+GAP specs grouped by panel/area, with effort estimate and leverage
+assessment for follow-up iterations.
+
+### 3.1 Cluster A — Per-language `*_example.spec.ts` smoke (12 GAPs, ~110 tests)
+
+**Specs:** aiken, cadence, cairo, circom, leo, masm, move, polkavm,
+solana, stylus, sway, tolk.
+
+**Common shape:** each spec has 6–10 tests checking editor-loads,
+event-log-populated, calltrace-navigation, locals-populated,
+flow-renders, output-contains-X.  Same shape as the SHARED sudoku
+cluster.
+
+**Effort:** **small per language**.  Pattern is mechanical: extend
+`integration/language_smoke_test.nim` (or split into per-language
+`<lang>-example.vm-test.nim` siblings) with a single trace fixture per
+recorder.  All 12 recorders are already audited.
+
+**Leverage:** ★★★★★ — closes 12 spec rows, ~110 GUI test scenarios with
+one extension to the shared smoke harness.
+
+### 3.2 Cluster B — Welcome screen (3 GAPs, 21 tests)
+
+**Specs:** `welcome_screen`, `edit_mode`, `launch_config`.
+
+**Common shape:** recent-traces / recent-folders / start-options /
+tooltips / launch-config fields.  All view+state, no real backend.
+
+**Effort:** **medium**.  Need a `WelcomeScreenVM` (signals: recentTraces,
+recentFolders, startOptions, hoveredTrace, editMode, launchConfig) plus
+co-located `welcome-screen/welcome_screen_vm_test.nim`.  Likely 1–2 days.
+
+**Leverage:** ★★★★ — single VM closes 3 spec rows, 21 tests.
+
+### 3.3 Cluster C — DeepReview / agentic (2 GAPs, 61 tests)
+
+**Specs:** `deepreview-gui` (21 tests), `agentic-deepreview` (40 tests).
+
+**Blocker:** DeepReview panel still Karax (section 5.4).  GAP cannot
+close until the panel is migrated.
+
+**Effort:** **large**.  Multi-day panel migration per section 5.4
+(VM + view + headless tests).  Same shape as the 1.31–1.51 sequence.
+
+**Leverage:** ★★★★★ in absolute test count (61 tests), but blocked on
+the panel migration.  Should be done as part of the next migration
+step, not as a standalone audit-closing task.
+
+### 3.4 Cluster D — Layout / strips / auto-hide / multi-window (8 GAPs, 35 tests)
+
+**Specs:** `layout_resilience` (6), `auto-hide-panes` (6),
+`multi-window-replay` (4), `panel-transfer` (4),
+`cross-window-interaction` (9), `strip-layout-verify` (1) PARTIAL,
+`comprehensive-v2` (8) PARTIAL, `final-fixes` (10) PARTIAL.
+
+**Effort:** **medium-large**.  Layout/strip/window state is currently
+held by Golden-Layout JS and Electron BrowserWindow; there is no
+ViewModel that owns it.  Closing this cluster requires building a
+`LayoutVM` (panel pin/unpin, strip tabs, overlay state, window/session
+mapping) — which is a new architectural piece.
+
+**Leverage:** ★★★ — meaningful test count but high architectural cost.
+Triage before committing.
+
+### 3.5 Cluster E — Browser/materialized/streaming (3 GAPs, 13 tests)
+
+**Specs:** `browser-materialized-replay` (3),
+`browser-mcr-replay` (5), `streaming-recording` (5).
+
+**Effort:** **medium**.  Web-mode and streaming flows have store-level
+hooks but no VM tests covering them end-to-end.  Could likely be added
+to `integration/real_backend_test.nim` in web-mode, plus a streaming
+fixture.
+
+**Leverage:** ★★ — small absolute test count, but covers an entire
+operating mode (web/MCR/streaming) that is currently untested
+headlessly.
+
+### 3.6 Cluster F — Misc small GAPs (3 GAPs, 6 tests)
+
+`macro-expansion-stepping` (2), `panel-loading-times` (1) (benchmark),
+`page_object` (2), `reload_reconnect` (1) PARTIAL.
+
+**Effort:** mixed.  Macro-expansion needs a VM extension; benchmark and
+page-object infra tests are arguably out-of-scope for the headless-
+first policy.
+
+**Leverage:** ★ — low.
+
+---
+
+## 4. Suggested next-iteration order
+
+Highest-leverage clusters first, scoped to single sub-agent iterations:
+
+  1. **Cluster A (per-language smoke)** — extend `integration/
+     language_smoke_test.nim` with one-test-per-recorder smoke
+     coverage.  12 specs / ~110 tests addressed in ~1 iteration.
+  2. **Cluster B (welcome screen)** — build `WelcomeScreenVM` +
+     co-located `welcome-screen/welcome_screen_vm_test.nim`.  Closes
+     3 specs / 21 tests in 1–2 iterations.
+  3. **Cluster E (browser/materialized/streaming)** — extend the
+     integration tests for web mode + add a streaming fixture.  3
+     specs / 13 tests in 1 iteration.
+  4. **Noir-Space-Ship spec coverage gap** (PARTIAL → PAIRED) — add
+     ~9 missing scenarios (trace-log, scratchpad compare, step-controls
+     reverse, context-menu actions, jump-to-all-events, tracepoint
+     creation) to `noir-space-ship/noir_space_ship_test.nim`.  Single
+     panel, ~9 new tests, very high leverage on the most-cited
+     full-debugging flow.
+  5. **Cluster C (DeepReview)** is gated on the panel migration in
+     section 5.4 and should be coordinated with that work, not picked up
+     as a pure audit-closing task.
+
+Cluster D (layout/multi-window) and Cluster F (misc) are intentionally
+deferred — they need new architectural pieces (a `LayoutVM`) before
+headless-first becomes meaningful.
+
+---
+
+## 5. Recommendations
+
+### 5.1 Co-location convention compliance
+
+The convention in `Test-Co-Location-Convention.md` requires
+`<topic>.vm-test.nim` siblings of `<topic>.spec.ts`.  Observed
+violations:
+
+* **All 13 sudoku specs** lack co-located VM siblings; coverage
+    is centralised in `scenarios/feature_scenarios_test.nim` and
+    `views/isonim_views_test.nim`.  Either accept the centralisation
+    (and amend the convention to allow shared-language smoke files) or
+    split per-language.
+* **All 17 program_specific specs** lack co-located VM siblings.
+* **build/** specs are paired only via `views/isonim_views_test.nim`,
+    not via co-located `build/build-panel.vm-test.nim`.
+* **VM test naming uses `_test.nim`** (e.g. `calltrace_vm_test.nim`)
+    rather than the convention's prescribed `.vm-test.nim` (e.g.
+    `calltrace-vm.vm-test.nim`).  The convention document itself notes
+    its status as "Proposed — Directory restructuring pending".
+
+**Recommendation:** the convention document should be **amended** to
+acknowledge that:
+
+  (a) Cross-panel rendering tests (`views/isonim_views_test.nim`)
+      legitimately cover many `<topic>.spec.ts` files at once.  The
+      "one .vm-test.nim per .spec.ts" rule is too strict.
+  (b) Per-language smoke is a well-defined family that legitimately
+      lives in a shared file (`integration/language_smoke_test.nim`).
+  (c) The actual filename pattern in the repo is `<topic>_<vm>_test.nim`
+      (e.g. `calltrace_vm_test.nim`); update the convention to reflect
+      this or schedule a `git mv` migration.
+
+### 5.2 Tooling gap — no CI check
+
+No CI script enforces the spec ↔ VM-test pairing.  The convention
+document proposes a check but it is not wired up:
+
+```bash
+for spec in tests/**/*.spec.ts; do
+  vm_test="${spec%.spec.ts}.vm-test.nim"
+  [ -f "$vm_test" ] || echo "MISSING: $vm_test"
+done
+```
+
+**Recommendation:** add a soft check (warning, not failure) to CI that
+flags new specs landing without a VM sibling.  Until the convention is
+ratified to allow shared files, the check should accept either a
+co-located sibling OR an entry in a small mapping table (e.g.
+`tests/.spec-vm-mapping.json`) pointing at a shared VM test file.
+This is the lowest-friction way to prevent coverage regression.
+
+### 5.3 Sub-agent attack order
+
+For the next sub-agent picking this up, **start with Cluster A**:
+12 GAP rows can be closed by one extension to a single Nim file
+(`integration/language_smoke_test.nim`), against trace fixtures that
+already exist in the recorders' test directories.  No new VMs, no
+architectural pieces.  This is the lowest-friction / highest-test-count
+option.
+
+---
+
+## 6. Data sources
+
+* `find src/tests/gui/tests -name "*.spec.ts" | sort`
+* `find src/tests/gui/tests -name "*_test.nim" | sort`
+* Per-spec `test(` counts from a `^\s*test\(` Grep across each spec.
+* Suite list of `views/isonim_views_test.nim` from a `^suite "` Grep.
+* Migration history from `git log --oneline` between commits
+    `0970ff43` (1.31 terminal_output) and `3d4bf57c` (1.51
+    request_panel).
+* Section 5.4 (remaining Karax panels) and 5.5 (open audit) of
+    `/tmp/isonim-migration.txt`.
