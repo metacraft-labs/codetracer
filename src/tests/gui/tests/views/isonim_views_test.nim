@@ -35,6 +35,7 @@ import viewmodels/errors_vm
 import viewmodels/search_results_vm
 import viewmodels/no_source_vm
 import viewmodels/step_list_vm
+import viewmodels/calltrace_editor_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -51,6 +52,7 @@ import views/isonim_errors_view
 import views/isonim_search_results_view
 import views/isonim_no_source_view
 import views/isonim_step_list_view
+import views/isonim_calltrace_editor_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -4956,5 +4958,161 @@ suite "IsoNim Step List Panel — interactions":
       check req.get.args{"path"}.getStr == "x.nim"
       check req.get.args{"line"}.getInt == 4
       check req.get.args{"rrTicks"}.getInt == 7
+
+      dispose()
+
+# ===========================================================================
+# Calltrace Editor panel tests
+# ===========================================================================
+#
+# Cover the IsoNim Calltrace Editor placeholder view introduced in
+# section 1.45 of the IsoNim migration handoff.  The legacy Karax
+# ``method render`` emitted only an empty
+# ``<div class="component-container calltrace-editor">`` and the
+# per-call helpers (``openNewCall`` / ``callView``) were not invoked
+# from anywhere — they were dead-or-rarely-used helpers preserved
+# across earlier refactors.  The IsoNim view keeps the same parity-
+# faithful empty container so any CSS rules and Playwright selectors
+# keyed on either class continue to work.
+#
+# Suites:
+# - structure         — root class + childlessness + container constant
+# - lifecycle         — markMounted / markUnmounted reactivity
+# - vm                — defaults + signal independence
+
+suite "IsoNim Calltrace Editor Panel — structure":
+
+  test "renders root with the component-container and calltrace-editor classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCalltraceEditorPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      let cls = panel.attributes["class"]
+      check "component-container" in cls
+      check "calltrace-editor" in cls
+
+      dispose()
+
+  test "container constant matches the legacy componentContainerClass output":
+    # ``CalltraceEditorContainerClass`` mirrors what
+    # ``componentContainerClass("calltrace-editor")`` produced in the
+    # legacy Karax render (``"component-container calltrace-editor"``).
+    # If the legacy template ever changes shape this regression test
+    # will tell us before the panel-mounted DOM diverges.
+    check CalltraceEditorContainerClass == "component-container calltrace-editor"
+
+  test "renders no children — placeholder shell only":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCalltraceEditorPanel(r, vm)
+
+      # Match the legacy Karax ``method render`` which emitted an
+      # empty container.  No headers, no buttons, no nested editors.
+      check panel.children.len == 0
+
+      dispose()
+
+  test "renders nothing additional after re-evaluation (idempotent shell)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCalltraceEditorPanel(r, vm)
+      let initialChildCount = panel.children.len
+
+      # Touching the lifecycle signal must not introduce new DOM
+      # children — the placeholder is intentionally inert.
+      vm.markMounted()
+      vm.markUnmounted()
+
+      check panel.children.len == initialChildCount
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Calltrace Editor lifecycle tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Calltrace Editor Panel — lifecycle":
+
+  test "markMounted flips the mounted signal to true":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+
+      check vm.mounted.val == false
+      vm.markMounted()
+      check vm.mounted.val == true
+
+      dispose()
+
+  test "markUnmounted flips the mounted signal back to false":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+
+      vm.markMounted()
+      check vm.mounted.val == true
+      vm.markUnmounted()
+      check vm.mounted.val == false
+
+      dispose()
+
+  test "render-effect runs on mount transitions without errors":
+    # The placeholder view subscribes to ``mounted`` so future readers
+    # establish the dependency edge.  Toggling the signal exercises
+    # the reactive subscription and must not throw.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+      let r = MockRenderer()
+
+      discard renderCalltraceEditorPanel(r, vm)
+      vm.markMounted()
+      vm.markUnmounted()
+      vm.markMounted()
+
+      check vm.mounted.val == true
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Calltrace Editor VM defaults
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Calltrace Editor Panel — vm":
+
+  test "createCalltraceEditorVM defaults mounted to false":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceEditorVM(store)
+
+      check vm.mounted.val == false
+      check not vm.store.isNil
+
+      dispose()
+
+  test "two VM instances have independent mounted signals":
+    # Single-instance panels in production share one VM, but the
+    # constructor itself must produce isolated reactive state —
+    # otherwise headless tests would leak between cases.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vmA = createCalltraceEditorVM(store)
+      let vmB = createCalltraceEditorVM(store)
+
+      vmA.markMounted()
+
+      check vmA.mounted.val == true
+      check vmB.mounted.val == false
 
       dispose()
