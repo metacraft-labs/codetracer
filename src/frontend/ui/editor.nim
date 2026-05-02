@@ -2181,7 +2181,24 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     if not self.flow.isNil:
       self.flow.activeStep = FlowStep(rrTicks: -1)
 
-    if (response.resetFlow or self.flow.isNil) and self.supportsFlow():
+    # When the debugger position changes within an already-open editor,
+    # a stale FlowComponent may still be present from the previous
+    # position.  ``redrawFlow()`` only re-renders the existing flow data
+    # without re-fetching from the backend, so the loop iteration
+    # widgets (.flow-multiline-value-container) computed at the OLD
+    # rrTicks would persist or be empty for the NEW rrTicks.  Force a
+    # reload whenever the rrTicks differs from what the flow last
+    # loaded — this is what the GUI loop-iteration tests
+    # (``loop iteration slider tracks remaining shield`` and
+    # ``simple loop iteration jump``) depend on after a calltrace jump
+    # to ``iterate_asteroids``.  See /tmp/isonim-migration.txt §1.54.
+    let needsFlowReload =
+      self.supportsFlow() and (
+        response.resetFlow or
+        self.flow.isNil or
+        self.flow.location.rrTicks != response.location.rrTicks
+      )
+    if needsFlowReload:
       if not self.flow.isNil:
         self.flow.clear()
       cdebug "flow: create flow again"

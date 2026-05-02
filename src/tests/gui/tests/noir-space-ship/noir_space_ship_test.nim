@@ -414,6 +414,180 @@ suite "Noir Space Ship: loop iteration via calltrace":
           break
       check hasNamed
 
+  test "ct/load-flow after iterate_asteroids jump returns loop steps":
+    ## Mirrors the failing GUI tests "loop iteration slider tracks
+    ## remaining shield" and "simple loop iteration jump".  Both
+    ## activate the iterate_asteroids calltrace entry and wait on
+    ## ``.flow-multiline-value-container`` to become visible.  That
+    ## DOM element is rendered by ``flow.nim::addLoopInfo`` only when
+    ## ``EditorViewComponent.loadFlow`` -> ``ct/load-flow`` returns a
+    ## ``FlowUpdate`` whose ``view_updates[ViewSource].steps`` contains
+    ## a step at the loop's ``registeredLine``.
+    ##
+    ## This headless test isolates the data layer: after a calltrace
+    ## jump to iterate_asteroids, send the same ``ct/load-flow`` the
+    ## frontend would send and verify the response carries:
+    ##   - a non-empty ``flow`` body for at least one editor view
+    ##     (steps + loops),
+    ##   - at least one loop entry, and
+    ##   - at least one step whose ``loop`` index is non-negative
+    ##     (i.e., a step inside the loop).
+    ##
+    ## If this test passes but the GUI test still fails, the bug is in
+    ## the View layer: ``onCompleteMove`` is not invoking ``loadFlow``
+    ## (or the resulting ``CtUpdatedFlow`` is being dropped) under the
+    ## IsoNim editor mount.  See ``/tmp/isonim-migration.txt`` §1.54
+    ## and §5.8 for the broader investigation.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    for i in 0 ..< 10:
+      session.stepForward()
+
+    session.requestAndLoadCalltrace(depth = 30)
+    let lines = session.getCalltraceLines()
+
+    let iterIdx = findCallLineByName(lines, "iterate_asteroids")
+    if iterIdx < 0:
+      echo "  iterate_asteroids not present in calltrace; skipping"
+      check lines.len > 0
+    else:
+      let target = lines[iterIdx]
+      echo "  iterate_asteroids entry: ", target.name,
+           " @ ", target.location.file, ":", target.location.line,
+           " rrTicks=", target.rrTicks
+
+      session.calltraceJumpByLine(target)
+      check session.getDebuggerStatus() == dsIdle
+
+      let postFile = session.getCurrentFile()
+      let postLine = session.getCurrentLine()
+      let postTicks = session.getCurrentRRTicks()
+      echo "  After jump: ", postFile, ":", postLine, " rrTicks=", postTicks
+      check postTicks > 0'u64
+
+      # Send the ct/load-flow command using the schema the backend
+      # deserializes (``CtLoadFlowArguments`` in
+      # ``src/db-backend/src/task.rs``).  ``flowMode`` is the integer
+      # ``repr(u8)`` form of ``FlowMode`` (0 = Call, 1 = Diff) and
+      # ``location`` carries at minimum the path, line, and rrTicks.
+      # The backend's flow preloader resolves the loop layout from the
+      # rrTicks; the GUI loop-iteration widget rendering depends on
+      # the resulting ``view_updates[ViewSource]`` payload.
+      let resp = session.sendRawDapRequest("ct/load-flow", %*{
+        "flowMode": 0,
+        "location": {
+          "path": postFile,
+          "line": postLine,
+          "functionName": "",
+          "highLevelPath": postFile,
+          "highLevelLine": postLine,
+          "highLevelFunctionName": "",
+          "lowLevelPath": "",
+          "lowLevelLine": 0,
+          "rrTicks": postTicks.int64,
+          "functionFirst": 0,
+          "functionLast": 0,
+          "event": 0,
+          "expression": "",
+          "offset": 0,
+          "error": false,
+          "callstackDepth": 0,
+          "originatingInstructionAddress": 0,
+          "key": "",
+          "globalCallKey": "",
+          "expansionParents": [],
+          "missingPath": false,
+        },
+      })
+      check resp.getOrDefault("success").getBool(false)
+
+      let body = resp.getOrDefault("body")
+      check (not body.isNil) and body.kind == JObject
+      var bodyKeys: seq[string] = @[]
+      for k, _ in body:
+        bodyKeys.add(k)
+      echo "  ct/load-flow body keys: ", bodyKeys
+
+      # Drain any pre-existing CtUpdatedFlow events that may have been
+      # emitted by the backend in response to our request, in case the
+      # response carries the FlowUpdate via the event channel.  The
+      # frontend wires the event to viewsApi.emit(CtUpdatedFlow, ...)
+      # at middleware.nim:182, so the same payload structure applies.
+      var flowUpdate: JsonNode = body
+      let viewUpdates = body.getOrDefault("viewUpdates")
+      if viewUpdates.isNil or viewUpdates.kind != JObject:
+        # Some backends ship the FlowUpdate via an event after the
+        # response.  Try to drain one and use that instead.
+        let drained = session.drainEvents()
+        for ev in drained:
+          let evKind = ev.getOrDefault("event").getStr("")
+          if evKind == "ct/updated-flow":
+            let evBody = ev.getOrDefault("body")
+            if not evBody.isNil and evBody.kind == JObject:
+              flowUpdate = evBody
+              break
+
+      let vu = flowUpdate.getOrDefault("viewUpdates")
+      echo "  flowUpdate.viewUpdates kind: ",
+           (if vu.isNil: "nil" else: $vu.kind)
+      doAssert (not vu.isNil)
+      doAssert (vu.kind == JArray or vu.kind == JObject)
+      echo "  vu length: ", vu.len
+
+      var foundLoopStep = false
+      var loopCount = 0
+      var totalSteps = 0
+
+      echo "  collecting entries..."
+      var entries: seq[(string, JsonNode)] = @[]
+      if vu.kind == JArray:
+        echo "  array path, len=", vu.elems.len
+        var i = 0
+        for entry in vu.elems:
+          entries.add(($i, entry))
+          inc i
+      elif vu.kind == JObject:
+        echo "  object path"
+        for k, v in vu.pairs:
+          entries.add((k, v))
+      echo "  collected ", entries.len, " entries"
+
+      for (tag, viewBody) in entries:
+        if viewBody.isNil or viewBody.kind != JObject:
+          continue
+        let stepsNode = viewBody.getOrDefault("steps")
+        let loopsNode = viewBody.getOrDefault("loops")
+        if not stepsNode.isNil and stepsNode.kind == JArray:
+          totalSteps += stepsNode.len
+          for st in stepsNode.elems:
+            let loopIdx = st.getOrDefault("loop").getInt(-1)
+            if loopIdx >= 0:
+              foundLoopStep = true
+        if not loopsNode.isNil and loopsNode.kind == JArray:
+          loopCount += loopsNode.len
+        echo "  view ", tag, ": steps=",
+             (if stepsNode.isNil: 0 else: stepsNode.len),
+             " loops=",
+             (if loopsNode.isNil: 0 else: loopsNode.len)
+
+      echo "  total steps=", totalSteps, " loops=", loopCount,
+           " any-loop-step=", foundLoopStep
+
+      # Data-layer contract: at iterate_asteroids the FlowPreloader
+      # must return at least one loop and at least one step that
+      # participates in a loop.  This is the foundation the GUI
+      # loop-iteration widgets are built on.  When this contract is
+      # satisfied but the GUI test fails, investigate the View layer
+      # (editor.nim onCompleteMove → loadFlow wiring) — that's the
+      # §1.54 wiring blocker tracked in
+      # ``/tmp/isonim-migration.txt``.
+      check totalSteps > 0
+      check loopCount > 0
+      check foundLoopStep
+
 # ---------------------------------------------------------------------------
 # Suite 4: Event log populated
 # Mirrors: "event log jump highlights active row"
