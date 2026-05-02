@@ -7,7 +7,7 @@ import
       build, errors, search_results, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
-      session_switch],
+      request_panel, session_switch],
   lib/[ jslib ],
   types, lang, utils, renderer, config, dap,
   ../common/ct_logging,
@@ -1027,6 +1027,8 @@ when not defined(ctInExtension):
       repl.initReplVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initLowLevelCodeVMWithStore');".}
       low_level_code.initLowLevelCodeVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initRequestPanelVMWithStore');".}
+      request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

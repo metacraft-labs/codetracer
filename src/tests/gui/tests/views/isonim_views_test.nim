@@ -38,6 +38,7 @@ import viewmodels/step_list_vm
 import viewmodels/calltrace_editor_vm
 import viewmodels/repl_vm
 import viewmodels/low_level_code_vm
+import viewmodels/request_panel_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -57,6 +58,7 @@ import views/isonim_step_list_view
 import views/isonim_calltrace_editor_view
 import views/isonim_repl_view
 import views/isonim_low_level_code_view
+import views/isonim_request_panel_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -6028,5 +6030,534 @@ suite "IsoNim Low Level Code Panel — vm":
     check displayName(makeInstr("ret")) == "ret"
 
   test "rowClass adds the active-instruction modifier when active":
-    check rowClass(false) == "low-level-code-instruction"
-    check rowClass(true) == "low-level-code-instruction active-instruction"
+    check isonim_low_level_code_view.rowClass(false) == "low-level-code-instruction"
+    check isonim_low_level_code_view.rowClass(true) == "low-level-code-instruction active-instruction"
+
+# ===========================================================================
+# Request Panel tests
+# ===========================================================================
+#
+# Cover:
+# - Outer structure (root carries the legacy ``component-container
+#   request-panel`` class string, header + filters + table-header +
+#   table-body containers present, empty state).
+# - Reactive list rendering: ``addRequest`` populates the body, row
+#   columns carry the right text.
+# - Selection: ``selectRequest`` flips the ``selected`` modifier on
+#   exactly the matching row.
+# - Filter mutations: ``setFilterMethod`` / ``setFilterStatus`` /
+#   ``setSearchText`` narrow ``filteredRequests`` and reset the
+#   selection.
+# - ``clearRequests`` resets state and re-shows the empty body.
+# - ``statusClass`` covers the canonical HTTP status buckets.
+
+const RequestPanelClass = "request-panel"
+
+proc makeReq(httpMethod: string = "GET"; url: string = "/";
+             status: int = 200; durationMs: int = 0;
+             responseSize: int = 0; startGeid: int64 = 0;
+             id: int = 0): RequestRecord =
+  ## Helper: build a ``RequestRecord`` with sensible defaults so each
+  ## test only spells out the fields it asserts on.  ``id`` defaults
+  ## to ``0`` because the tests that need a deterministic numbering
+  ## use ``addRequest`` (which assigns ids) rather than constructing
+  ## ``RequestRecord``s by hand.
+  RequestRecord(
+    id: id,
+    httpMethod: httpMethod,
+    url: url,
+    statusCode: status,
+    durationMs: durationMs,
+    responseSize: responseSize,
+    startGeid: startGeid,
+  )
+
+# ---------------------------------------------------------------------------
+# Structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — structure":
+
+  test "root carries component-container + request-panel classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+
+      check "component-container" in panel.attributes["class"]
+      check RequestPanelClass in panel.attributes["class"]
+
+      dispose()
+
+  test "container constant matches the legacy componentContainerClass output":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/request_panel.scss
+    # (and any test/page-object selectors keyed on the exact class
+    # string).
+    check RequestPanelContainerClass == "component-container request-panel"
+
+  test "empty VM renders headers + empty body":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+
+      check findByClass(panel, "request-panel-header") != nil
+      check findByClass(panel, "request-panel-filters") != nil
+      check findByClass(panel, "request-table-header") != nil
+      let body = findByClass(panel, "request-table-body")
+      check body != nil
+      check body.children.len == 0
+
+      dispose()
+
+  test "count badge renders 0 / 0 requests in the empty state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      let count = findByClass(panel, "request-panel-count-text")
+      check count != nil
+      check count.textContent == "0 / 0 requests"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — row rendering":
+
+  test "addRequest populates the table body reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      let body = findByClass(panel, "request-table-body")
+      check body.children.len == 0
+
+      vm.addRequest("GET", "/api/users", 200, 25, 512, 100)
+      vm.addRequest("POST", "/api/items", 201, 60, 4096, 200)
+
+      check body.children.len == 2
+
+      dispose()
+
+  test "row columns render id / method / url / status / duration / size":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("POST", "/api/x", 201, 1500, 2048, 1)
+
+      let body = findByClass(panel, "request-table-body")
+      let row = body.children[0]
+      check findByClass(row, "request-col-id").textContent == "1"
+      check findByClass(row, "request-col-method").textContent == "POST"
+      check findByClass(row, "request-col-url").textContent == "/api/x"
+      check findByClass(row, "request-col-status").textContent == "201"
+      # 1500 ms -> "1.5s" via formatDuration's truncated 1-decimal form.
+      check findByClass(row, "request-col-duration").textContent == "1.5s"
+      # 2048 B -> "2.0 KB" via formatSize's KB branch.
+      check findByClass(row, "request-col-size").textContent == "2.0 KB"
+
+      dispose()
+
+  test "addRequest assigns sequential ids starting at 1":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("GET", "/b", 200, 0, 0, 0)
+      vm.addRequest("GET", "/c", 200, 0, 0, 0)
+
+      let entries = vm.requests.val
+      check entries[0].id == 1
+      check entries[1].id == 2
+      check entries[2].id == 3
+
+      dispose()
+
+  test "count badge updates as rows arrive":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      let count = findByClass(panel, "request-panel-count-text")
+
+      check count.textContent == "0 / 0 requests"
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      check count.textContent == "1 / 1 requests"
+      vm.addRequest("POST", "/b", 500, 0, 0, 0)
+      check count.textContent == "2 / 2 requests"
+
+      dispose()
+
+  test "status column wraps the code in a request-status-<bucket> span":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/ok", 200, 0, 0, 0)
+      vm.addRequest("GET", "/redirect", 301, 0, 0, 0)
+      vm.addRequest("GET", "/missing", 404, 0, 0, 0)
+      vm.addRequest("GET", "/boom", 500, 0, 0, 0)
+
+      let body = findByClass(panel, "request-table-body")
+      check findByClass(body.children[0], "request-status-success") != nil
+      check findByClass(body.children[1], "request-status-redirect") != nil
+      check findByClass(body.children[2], "request-status-client-error") != nil
+      check findByClass(body.children[3], "request-status-server-error") != nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Selection
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — selection":
+
+  test "selectRequest flips the selected class on exactly the matching row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("GET", "/b", 200, 0, 0, 0)
+      vm.addRequest("GET", "/c", 200, 0, 0, 0)
+
+      let body = findByClass(panel, "request-table-body")
+      for row in body.children:
+        check "selected" notin row.attributes["class"]
+
+      vm.selectRequest(1)
+      check "selected" notin body.children[0].attributes["class"]
+      check "selected" in body.children[1].attributes["class"]
+      check "selected" notin body.children[2].attributes["class"]
+
+      vm.selectRequest(2)
+      check "selected" notin body.children[1].attributes["class"]
+      check "selected" in body.children[2].attributes["class"]
+
+      dispose()
+
+  test "NO_SELECTED_INDEX clears every row's selected class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+
+      vm.selectRequest(0)
+      let body = findByClass(panel, "request-table-body")
+      check "selected" in body.children[0].attributes["class"]
+
+      vm.selectRequest(NO_SELECTED_INDEX)
+      check "selected" notin body.children[0].attributes["class"]
+
+      dispose()
+
+  test "row click dispatches selectRequest with the filtered-list index":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("GET", "/b", 200, 0, 0, 0)
+
+      let body = findByClass(panel, "request-table-body")
+      body.children[1].fireEvent("click")
+
+      check vm.selectedIndex.val == 1
+      check "selected" in body.children[1].attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Filter behaviour
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — filters":
+
+  test "setFilterMethod narrows the filtered list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("POST", "/b", 200, 0, 0, 0)
+      vm.addRequest("GET", "/c", 200, 0, 0, 0)
+
+      let body = findByClass(panel, "request-table-body")
+      check body.children.len == 3
+
+      vm.setFilterMethod("GET")
+      check vm.filteredRequests.val.len == 2
+      check body.children.len == 2
+      # Both rendered rows are GETs.
+      for row in body.children:
+        check findByClass(row, "request-col-method").textContent == "GET"
+
+      vm.setFilterMethod("")
+      check body.children.len == 3
+
+      dispose()
+
+  test "setFilterStatus filters by status-class bucket":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/ok", 200, 0, 0, 0)
+      vm.addRequest("GET", "/missing", 404, 0, 0, 0)
+      vm.addRequest("GET", "/boom", 500, 0, 0, 0)
+
+      let body = findByClass(panel, "request-table-body")
+
+      vm.setFilterStatus("4xx")
+      check body.children.len == 1
+      check findByClass(body.children[0], "request-col-status").textContent == "404"
+
+      vm.setFilterStatus("5xx")
+      check body.children.len == 1
+      check findByClass(body.children[0], "request-col-status").textContent == "500"
+
+      vm.setFilterStatus("")
+      check body.children.len == 3
+
+      dispose()
+
+  test "setSearchText filters URLs case-insensitively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/api/Users", 200, 0, 0, 0)
+      vm.addRequest("GET", "/api/items", 200, 0, 0, 0)
+
+      let body = findByClass(panel, "request-table-body")
+
+      # Lower-case query — should still match "/api/Users".
+      vm.setSearchText("users")
+      check body.children.len == 1
+      check findByClass(body.children[0], "request-col-url").textContent ==
+        "/api/Users"
+
+      vm.setSearchText("/api/")
+      check body.children.len == 2
+
+      vm.setSearchText("nothing")
+      check body.children.len == 0
+
+      dispose()
+
+  test "count badge tracks filteredRequests vs total":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("POST", "/b", 200, 0, 0, 0)
+      vm.addRequest("GET", "/c", 200, 0, 0, 0)
+
+      let count = findByClass(panel, "request-panel-count-text")
+      check count.textContent == "3 / 3 requests"
+
+      vm.setFilterMethod("POST")
+      check count.textContent == "1 / 3 requests"
+
+      vm.setFilterMethod("")
+      check count.textContent == "3 / 3 requests"
+
+      dispose()
+
+  test "filter mutation resets the selection":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("POST", "/b", 200, 0, 0, 0)
+      vm.selectRequest(1)
+      check vm.selectedIndex.val == 1
+
+      vm.setFilterMethod("GET")
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      vm.selectRequest(0)
+      vm.setFilterStatus("2xx")
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      vm.selectRequest(0)
+      vm.setSearchText("/a")
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# clearRequests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — clearRequests":
+
+  test "clearRequests wipes the body and resets the selection":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 0)
+      vm.addRequest("GET", "/b", 200, 0, 0, 0)
+      vm.selectRequest(0)
+
+      let body = findByClass(panel, "request-table-body")
+      check body.children.len == 2
+
+      vm.clearRequests()
+      check body.children.len == 0
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+      check vm.requests.val.len == 0
+
+      dispose()
+
+  test "clearRequests preserves the active filters":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+
+      vm.setFilterMethod("GET")
+      vm.setFilterStatus("2xx")
+      vm.setSearchText("/api/")
+
+      vm.addRequest("GET", "/api/users", 200, 0, 0, 0)
+      vm.clearRequests()
+
+      check vm.filterMethod.val == "GET"
+      check vm.filterStatus.val == "2xx"
+      check vm.searchText.val == "/api/"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Backend interactions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — interactions":
+
+  test "double-clicking a row dispatches ct/seek-to-geid with startGeid":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel(r, vm)
+      vm.addRequest("GET", "/a", 200, 0, 0, 12345)
+      vm.addRequest("POST", "/b", 200, 0, 0, 67890)
+
+      mock.clearReceivedCommands()
+      let body = findByClass(panel, "request-table-body")
+      body.children[1].fireEvent("dblclick")
+
+      let req = mock.findCommand("ct/seek-to-geid")
+      check req.isSome
+      check req.get.args["geid"].getInt == 67890
+      check req.get.args["url"].getStr == "/b"
+      check req.get.args["httpMethod"].getStr == "POST"
+
+      dispose()
+
+  test "jumpToHandler with an out-of-range index is a no-op":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+
+      mock.clearReceivedCommands()
+      vm.jumpToHandler(0)
+      vm.jumpToHandler(-1)
+      check mock.findCommand("ct/seek-to-geid").isNone
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / formatting helpers
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Request Panel — vm":
+
+  test "createRequestPanelVM defaults reflect the empty-state branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+
+      check vm.requests.val.len == 0
+      check vm.filterMethod.val == ""
+      check vm.filterStatus.val == ""
+      check vm.searchText.val == ""
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+      check vm.filteredRequests.val.len == 0
+      check not vm.store.isNil
+
+      dispose()
+
+  test "statusBucket / statusClass cover the canonical HTTP status ranges":
+    check statusBucket(200) == "success"
+    check statusBucket(204) == "success"
+    check statusBucket(301) == "redirect"
+    check statusBucket(404) == "client-error"
+    check statusBucket(500) == "server-error"
+    check statusBucket(599) == "server-error"
+    check statusBucket(100) == "unknown"
+    check statusBucket(600) == "unknown"
+
+    check statusClass(200) == "request-status-success"
+    check statusClass(404) == "request-status-client-error"
+
+  test "formatDuration / formatSize match the legacy column shapes":
+    check formatDuration(0) == "0ms"
+    check formatDuration(999) == "999ms"
+    check formatDuration(1000) == "1.0s"
+    check formatDuration(1500) == "1.5s"
+
+    check formatSize(0) == "0 B"
+    check formatSize(1023) == "1023 B"
+    check formatSize(1024) == "1.0 KB"
+    check formatSize(2048) == "2.0 KB"
+    check formatSize(1024 * 1024) == "1.0 MB"
+
+  test "rowClass adds the selected modifier when selected":
+    check isonim_request_panel_view.rowClass(false) == "request-row"
+    check isonim_request_panel_view.rowClass(true) == "request-row selected"
+
+  test "countText renders the legacy '<filtered> / <total> requests' shape":
+    check countText(0, 0) == "0 / 0 requests"
+    check countText(2, 5) == "2 / 5 requests"

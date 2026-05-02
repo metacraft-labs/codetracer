@@ -396,3 +396,46 @@ type
     address*: int
     instructions*: seq[LowLevelInstruction]
     error*: string
+
+  # -------------------------------------------------------------------
+  # HTTP Request panel — captured HTTP request inspector.
+  #
+  # Mirrors the legacy ``HttpRequestEntry`` record in
+  # ``frontend/types.nim`` but uses ``string`` instead of ``cstring``
+  # so the same value works on both native and JS backends without
+  # conversion noise.  Used by ``RequestPanelVM`` to drive the IsoNim
+  # view that replaces the legacy Karax ``method render`` on
+  # ``RequestPanelComponent``.
+  # -------------------------------------------------------------------
+
+  RequestRecord* = object
+    ## One captured HTTP request displayed in the inspector table.
+    ##
+    ## ``id``           — sequential 1-based number assigned at
+    ##                    capture time; rendered in the ``#`` column.
+    ## ``httpMethod``   — request verb (``"GET"``, ``"POST"`` …).
+    ##                    Drives both the column text and the method
+    ##                    filter dropdown.
+    ## ``url``          — request URL.  The free-text search filter
+    ##                    matches case-insensitively on this field.
+    ## ``statusCode``   — HTTP response status code.  The status
+    ##                    bucket filter ("2xx", "3xx", "4xx", "5xx")
+    ##                    classifies on this value, and the view
+    ##                    derives the ``request-status-<bucket>`` CSS
+    ##                    class from it.
+    ## ``durationMs``   — wall-clock time spent serving the request,
+    ##                    in milliseconds.  Rendered as ``"NNNms"`` /
+    ##                    ``"N.Ns"`` in the duration column.
+    ## ``responseSize`` — size of the response body in bytes.
+    ##                    Rendered as ``"N B"`` / ``"N.N KB"`` /
+    ##                    ``"N.N MB"`` in the size column.
+    ## ``startGeid``    — Global Event ID at the handler entry point;
+    ##                    used by ``jumpToHandler`` so the debugger
+    ##                    can seek to the captured handler frame.
+    id*: int
+    httpMethod*: string
+    url*: string
+    statusCode*: int
+    durationMs*: int
+    responseSize*: int
+    startGeid*: int64

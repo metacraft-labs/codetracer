@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
-  calltrace_editor, repl, low_level_code,
+  calltrace_editor, repl, low_level_code, request_panel,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -549,6 +549,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.CalltraceEditor,
       Content.Repl,
       Content.LowLevelCode,
+      Content.RequestPanel,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -656,6 +657,20 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           low_level_code.syncLegacyLowLevelCodeIntoVM(
             LowLevelCodeComponent(component))
           low_level_code.tryMountIsoNimLowLevelCodePanel()
+
+        # RequestPanel is now an IsoNim view -- its DOM is mounted by
+        # ``request_panel.tryMountIsoNimRequestPanel`` against the
+        # ``requestPanelComponent-{id}`` container, and reactive
+        # effects keep it in sync.  No vnodeToDom bridge or redraw
+        # callback is needed here.  The legacy ``RequestPanelComponent``
+        # remains as the event-bus carrier (M6 will subscribe to
+        # ``CtUpdatedHttpRequests``) and its mutators feed the VM via
+        # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
+        # any rows already accumulated when the panel becomes visible.
+        if state.content == Content.RequestPanel:
+          request_panel.syncLegacyRequestPanelIntoVM(
+            RequestPanelComponent(component))
+          request_panel.tryMountIsoNimRequestPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

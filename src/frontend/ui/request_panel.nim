@@ -1,66 +1,76 @@
-## HTTP Request Panel — displays captured HTTP requests in a filterable,
-## sortable table.  Double-clicking a row will eventually seek the debugger
-## to the handler entry point (wired in M6).
+## HTTP Request Panel — captured HTTP requests, filterable / sortable.
 ##
-## Design follows the same Component patterns as `event_log.nim` and
-## `scratchpad.nim`: inherits from Component, rendered via Karax buildHtml,
-## registered through the standard `register` / mediator infrastructure.
+## ---------------------------------------------------------------------------
+## ViewModel layer — IsoNim is the primary renderer.
+##
+## The legacy Karax ``method render`` was dropped in favour of an IsoNim
+## view (``viewmodel/views/isonim_request_panel_view.nim``) that mounts
+## directly into the GoldenLayout container.  The legacy
+## ``RequestPanelComponent`` retains its event-bus-carrier methods so the
+## frontend's existing wiring (M6 will subscribe to
+## ``CtUpdatedHttpRequests``) keeps feeding the panel; every state
+## mutation now mirrors into the parallel ``RequestPanelVM`` so the
+## IsoNim view is the single source of truth for the panel's DOM.
+##
+## Lifecycle:
+## 1. ``utils.nim::makeRequestPanelComponent`` constructs the legacy
+##    ``RequestPanelComponent`` and registers it under
+##    ``Content.RequestPanel`` (one instance per panel id).
+## 2. ``layout.nim`` registers the GL container, then detects
+##    ``Content.RequestPanel`` is in ``isIsoNimComponent`` and calls
+##    ``tryMountIsoNimRequestPanel`` instead of invoking Karax.
+## 3. The mount helper appends the IsoNim panel inside the
+##    ``requestPanelComponent-{id}`` container and the reactive
+##    effects keep the DOM in sync with the VM.
+## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
+##    store version of the VM via ``initRequestPanelVMWithStore`` so
+##    the panel uses the production ``ReplayDataStore``.
+## ---------------------------------------------------------------------------
 
 import
   ui_imports,
   ../[ types, communication ],
   ../../common/ct_event
 
-# ---------------------------------------------------------------------------
-# Helper formatters
-# ---------------------------------------------------------------------------
-
-proc statusClass(code: int): cstring =
-  ## CSS class suffix for the HTTP status badge.
-  if code >= 200 and code < 300: cstring"request-status-success"
-  elif code >= 300 and code < 400: cstring"request-status-redirect"
-  elif code >= 400 and code < 500: cstring"request-status-client-error"
-  elif code >= 500: cstring"request-status-server-error"
-  else: cstring"request-status-unknown"
-
-proc statusColor(code: int): kstring =
-  ## Inline color matching the dark theme palette.
-  if code >= 200 and code < 300: kstring"#3fb950"    # green
-  elif code >= 300 and code < 400: kstring"#58a6ff"   # blue
-  elif code >= 400 and code < 500: kstring"#d29922"   # yellow
-  elif code >= 500: kstring"#f85149"                  # red
-  else: kstring"#8b949e"                              # grey
-
-proc methodColor(m: cstring): kstring =
-  ## Per-verb color inspired by the Swagger / OpenAPI convention.
-  case $m
-  of "GET":    kstring"#61affe"
-  of "POST":   kstring"#49cc90"
-  of "PUT":    kstring"#fca130"
-  of "DELETE": kstring"#f93e3e"
-  of "PATCH":  kstring"#50e3c2"
-  of "HEAD":   kstring"#9012fe"
-  of "OPTIONS": kstring"#0d5aa7"
-  else: kstring"#8b949e"
-
-proc formatDuration(ms: int): cstring =
-  if ms < 1000:
-    cstring($ms & "ms")
-  else:
-    cstring(fmt"{ms div 1000}.{(ms mod 1000) div 100}s")
-
-proc formatSize(bytes: int): cstring =
-  if bytes < 1024:
-    cstring($bytes & " B")
-  elif bytes < 1024 * 1024:
-    cstring(fmt"{bytes div 1024}.{(bytes mod 1024) * 10 div 1024} KB")
-  else:
-    let mb = bytes div (1024 * 1024)
-    let remainder = (bytes mod (1024 * 1024)) * 10 div (1024 * 1024)
-    cstring(fmt"{mb}.{remainder} MB")
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import RequestRecord
+from ../viewmodel/viewmodels/request_panel_vm import
+  RequestPanelVM, createRequestPanelVM, NO_SELECTED_INDEX,
+  setRequests, clearRequests, addRequest, selectRequest,
+  jumpToHandler, setFilterMethod, setFilterStatus, setSearchText
+when defined(js):
+  from isonim/web/dom_api import nil
+  from ../viewmodel/views/isonim_request_panel_view import
+    mountIsoNimRequestPanel
 
 # ---------------------------------------------------------------------------
-# Component extension (ctInExtension boiler-plate)
+# Module-level VM/store/component slots so the IsoNim mount and the
+# legacy event-bus handlers can find each other across calls.  Mirrors
+# the pattern used by step_list / search_results / no_source / repl /
+# low_level_code.
+# ---------------------------------------------------------------------------
+
+var requestPanelVMInstance*: RequestPanelVM
+var requestPanelVMStore: ReplayDataStore
+var requestPanelComponentRef: RequestPanelComponent
+# Track which RequestPanelComponent ids have already mounted their
+# IsoNim view.  The GL container is keyed by
+# ``requestPanelComponent-{id}`` so each panel instance gets its own
+# mount.
+var isoNimRequestPanelMountedIds {.used.}: JsAssoc[int, bool] =
+  JsAssoc[int, bool]{}
+
+proc tryMountIsoNimRequestPanel*()
+
+# ---------------------------------------------------------------------------
+# Component extension (ctInExtension boiler-plate).
+#
+# Preserved from the legacy module so the extension entry-point still
+# resolves to a valid ``RequestPanelComponent``; the in-extension
+# render path falls back to the base ``Component.render()`` (empty
+# VNode) since the IsoNim view is the production renderer.
 # ---------------------------------------------------------------------------
 
 when defined(ctInExtension):
@@ -74,53 +84,51 @@ when defined(ctInExtension):
     result = requestPanelComponentForExtension
 
 # ---------------------------------------------------------------------------
-# Filtering
+# Legacy → VM translation helpers.
 # ---------------------------------------------------------------------------
 
-proc matchesFilter(self: RequestPanelComponent, req: HttpRequestEntry): bool =
-  ## Returns true when `req` passes the currently active filters.
-  let state = self.panelState
+proc safeStr(s: cstring): string =
+  ## Convert a possibly-null cstring to an empty string.  Mirrors the
+  ## helper used by step_list / repl / low_level_code — E2E paths can
+  ## land a null cstring in the legacy record, and naive ``$`` would
+  ## throw inside ``cstrToNimstr``.
+  if s.isNil:
+    ""
+  else:
+    $s
 
-  # Method filter
-  if state.filterMethod.len > 0 and req.httpMethod != state.filterMethod:
-    return false
+proc legacyEntryToVm(entry: HttpRequestEntry): RequestRecord =
+  ## Map the legacy ``HttpRequestEntry`` (cstring fields) to the
+  ## platform-neutral ``RequestRecord`` value type the ViewModel
+  ## layer consumes.
+  RequestRecord(
+    id: entry.id,
+    httpMethod: safeStr(entry.httpMethod),
+    url: safeStr(entry.url),
+    statusCode: entry.statusCode,
+    durationMs: entry.durationMs,
+    responseSize: entry.responseSize,
+    startGeid: entry.startGEID,
+  )
 
-  # Status-class filter (e.g. "2xx", "4xx")
-  if state.filterStatus.len > 0:
-    let s = $state.filterStatus
-    case s
-    of "2xx":
-      if req.statusCode < 200 or req.statusCode >= 300: return false
-    of "3xx":
-      if req.statusCode < 300 or req.statusCode >= 400: return false
-    of "4xx":
-      if req.statusCode < 400 or req.statusCode >= 500: return false
-    of "5xx":
-      if req.statusCode < 500 or req.statusCode >= 600: return false
-    else:
-      discard
-
-  # Free-text search on URL (case-insensitive)
-  if state.searchText.len > 0:
-    if ($state.searchText).toLowerAscii notin ($req.url).toLowerAscii:
-      return false
-
-  return true
-
-proc filteredRequests(self: RequestPanelComponent): seq[HttpRequestEntry] =
-  for req in self.panelState.requests:
-    if self.matchesFilter(req):
-      result.add(req)
+proc legacyEntriesToVm(entries: seq[HttpRequestEntry]): seq[RequestRecord] =
+  result = newSeqOfCap[RequestRecord](entries.len)
+  for entry in entries:
+    result.add(legacyEntryToVm(entry))
 
 # ---------------------------------------------------------------------------
-# Public API — called by the backend when new data arrives
+# Public API — called by the backend bridge when new data arrives.
+# Mirrors the legacy proc surface so any historical caller keeps
+# compiling; each mutator now feeds the parallel VM.
 # ---------------------------------------------------------------------------
 
 proc addRequest*(self: RequestPanelComponent,
                  httpMethod, url: cstring,
                  statusCode, durationMs, responseSize: int,
                  startGEID: int64) =
-  ## Append a captured request. Called from the backend bridge (M6).
+  ## Append a captured request.  Updates the legacy cache (still
+  ## carried for any non-render legacy callers) AND mirrors into the
+  ## VM so the IsoNim view re-renders.
   let id = self.panelState.requests.len + 1
   self.panelState.requests.add(HttpRequestEntry(
     id: id,
@@ -132,131 +140,183 @@ proc addRequest*(self: RequestPanelComponent,
     startGEID: startGEID,
     sliceFile: cstring"",
   ))
-  self.redraw()
+  if not requestPanelVMInstance.isNil:
+    requestPanelVMInstance.addRequest(
+      $httpMethod, $url, statusCode, durationMs, responseSize, startGEID)
 
 proc clearRequests*(self: RequestPanelComponent) =
-  ## Remove all entries (e.g. on session restart).
+  ## Wipe every captured entry and reset the selection.  Mirrored
+  ## into the VM so the IsoNim view re-renders the empty state.
   self.panelState.requests = @[]
   self.panelState.selectedIndex = -1
-  self.redraw()
+  if not requestPanelVMInstance.isNil:
+    requestPanelVMInstance.clearRequests()
 
 proc selectRequest*(self: RequestPanelComponent, index: int) =
+  ## Refresh the selected-row reference.  Mirrored into the VM.
   self.panelState.selectedIndex = index
-  self.redraw()
+  if not requestPanelVMInstance.isNil:
+    requestPanelVMInstance.selectRequest(index)
 
 proc jumpToHandler*(self: RequestPanelComponent, index: int) =
-  ## Seek the debugger to the handler entry point (double-click action).
-  ## Full wiring happens in M6; for now we just log.
-  let filtered = self.filteredRequests()
-  if index >= 0 and index < filtered.len:
-    let req = filtered[index]
-    console.log(cstring"RequestPanel: jump to handler at GEID ", req.startGEID)
-    # M6 will replace this with:
-    #   self.api.emit(CtSeekToGEID, req.startGEID)
+  ## Seek the debugger to the captured handler entry point.  The
+  ## legacy implementation only logged because M6 wiring was
+  ## outstanding; we keep the same behaviour at the legacy entry
+  ## point and let the VM layer dispatch the canonical
+  ## ``ct/seek-to-geid`` envelope (used by headless tests and the
+  ## eventual M6 production path).
+  if not requestPanelVMInstance.isNil:
+    requestPanelVMInstance.jumpToHandler(index)
 
 # ---------------------------------------------------------------------------
-# Render
+# IsoNim VM bridge
 # ---------------------------------------------------------------------------
 
-proc renderFilterBar(self: RequestPanelComponent): VNode =
-  ## Toolbar: method dropdown, status dropdown, URL search, count badge.
-  buildHtml(tdiv(class = "request-panel-header")):
-    tdiv(class = "request-panel-filters"):
-      # -- Method filter --
-      select(class = "request-filter-select"):
-        proc onchange(ev: Event, n: VNode) =
-          self.panelState.filterMethod = cast[cstring](ev.target.toJs.value)
-          self.redraw()
-        option(value = ""): text "All Methods"
-        for m in ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]:
-          option(value = cstring(m)): text cstring(m)
-
-      # -- Status filter --
-      select(class = "request-filter-select"):
-        proc onchange(ev: Event, n: VNode) =
-          self.panelState.filterStatus = cast[cstring](ev.target.toJs.value)
-          self.redraw()
-        option(value = ""): text "All Status"
-        option(value = "2xx"): text "2xx Success"
-        option(value = "3xx"): text "3xx Redirect"
-        option(value = "4xx"): text "4xx Client Error"
-        option(value = "5xx"): text "5xx Server Error"
-
-      # -- URL search --
-      input(class = "request-filter-search", `type` = "text",
-            placeholder = "Search URL..."):
-        proc oninput(ev: Event, n: VNode) =
-          self.panelState.searchText = cast[cstring](ev.target.toJs.value)
-          self.redraw()
-
-    tdiv(class = "request-panel-count"):
-      let filtered = self.filteredRequests()
-      text cstring(fmt"{filtered.len} / {self.panelState.requests.len} requests")
-
-proc renderTableHeader(self: RequestPanelComponent): VNode =
-  ## Column headings row.
-  buildHtml(tdiv(class = "request-table-header")):
-    tdiv(class = "request-col-id"):   text "#"
-    tdiv(class = "request-col-method"): text "Method"
-    tdiv(class = "request-col-url"):    text "URL"
-    tdiv(class = "request-col-status"): text "Status"
-    tdiv(class = "request-col-duration"): text "Duration"
-    tdiv(class = "request-col-size"):   text "Size"
-
-proc renderTableBody(self: RequestPanelComponent): VNode =
-  ## Scrollable list of request rows.
-  let filtered = self.filteredRequests()
-  buildHtml(tdiv(class = "request-table-body")):
-    for i, req in filtered:
-      let isSelected = i == self.panelState.selectedIndex
-      let rowClass = if isSelected: "request-row selected" else: "request-row"
-      # Capture loop variable for closures
-      let capturedIndex = i
-      tdiv(class = cstring(rowClass)):
-        proc onclick(ev: Event, node: VNode) =
-          self.selectRequest(capturedIndex)
-        proc ondblclick(ev: Event, node: VNode) =
-          self.jumpToHandler(capturedIndex)
-
-        tdiv(class = "request-col-id"):
-          text cstring($req.id)
-        tdiv(class = "request-col-method"):
-          span(style = style(StyleAttr.color, methodColor(req.httpMethod))):
-            text req.httpMethod
-        tdiv(class = "request-col-url"):
-          text req.url
-        tdiv(class = "request-col-status"):
-          span(class = statusClass(req.statusCode),
-               style = style(StyleAttr.color, statusColor(req.statusCode))):
-            text cstring($req.statusCode)
-        tdiv(class = "request-col-duration"):
-          text formatDuration(req.durationMs)
-        tdiv(class = "request-col-size"):
-          text formatSize(req.responseSize)
-
-method render*(self: RequestPanelComponent): VNode =
-  buildHtml(
-    tdiv(
-      class = componentContainerClass("request-panel"),
-      tabIndex = "2",
-      onclick = proc(ev: Event, v: VNode) =
-        ev.stopPropagation()
-        if self.data.ui.activeFocus != self:
-          self.data.ui.activeFocus = self
-    )
-  ):
-    self.renderFilterBar()
-    self.renderTableHeader()
-    self.renderTableBody()
+proc syncLegacyRequestPanelIntoVM*(self: RequestPanelComponent) =
+  ## Bulk-replay the legacy ``self.panelState.requests`` cache into
+  ## the VM.  Used by the layout when the panel container becomes
+  ## visible (or is rebuilt) so the panel reflects every entry
+  ## already accumulated by the previous IPC stream.  Per-entry
+  ## updates go through ``addRequest`` directly; this proc covers
+  ## the bulk-replace scenario (e.g. opening the panel after some
+  ## captures already happened).
+  if requestPanelVMInstance.isNil or self.isNil:
+    return
+  requestPanelVMInstance.setRequests(legacyEntriesToVm(self.panelState.requests))
+  requestPanelVMInstance.setFilterMethod(safeStr(self.panelState.filterMethod))
+  requestPanelVMInstance.setFilterStatus(safeStr(self.panelState.filterStatus))
+  requestPanelVMInstance.setSearchText(safeStr(self.panelState.searchText))
+  requestPanelVMInstance.selectRequest(self.panelState.selectedIndex)
 
 # ---------------------------------------------------------------------------
-# Registration (mediator / event bus)
+# VM bootstrap
+# ---------------------------------------------------------------------------
+
+proc initRequestPanelVMWithStore*(store: ReplayDataStore) =
+  ## Initialise (or replace) the parallel ``RequestPanelVM`` using an
+  ## externally-provided ``ReplayDataStore`` (typically the shared
+  ## store from ``SessionViewModel``).  Called from
+  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
+  ## exists (created by ``initRequestPanelVM`` before the real backend
+  ## was available) it is replaced so the panel uses the real backend.
+  if requestPanelVMInstance != nil:
+    clog "RequestPanelVM: replacing existing instance with shared-store version"
+    isoNimRequestPanelMountedIds = JsAssoc[int, bool]{}
+  requestPanelVMStore = store
+  requestPanelVMInstance = createRequestPanelVM(store)
+  clog "RequestPanelVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimRequestPanel()
+
+proc initRequestPanelVM*() =
+  ## Lazy fallback used when no shared store has been provided yet.
+  ## Same shape as ``initStepListVM`` / ``initReplVM`` /
+  ## ``initLowLevelCodeVM`` — a stub backend so the panel can still
+  ## render before ``configureMiddleware`` runs.
+  if requestPanelVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  requestPanelVMStore = createReplayDataStore(stubBackend)
+  requestPanelVMInstance = createRequestPanelVM(requestPanelVMStore)
+  clog "RequestPanelVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimRequestPanel()
+
+# ---------------------------------------------------------------------------
+# Mount helper — Web only
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc tryMountIsoNimRequestPanel*() =
+    ## Mount the IsoNim Request panel view into the GoldenLayout-
+    ## managed container.  The container's id is
+    ## ``requestPanelComponent-{id}`` — each open Request panel
+    ## instance has its own mount.
+    ##
+    ## Safe to call multiple times — mounts only once per component
+    ## id.  Retries via ``setTimeout`` until the DOM container appears
+    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
+    ## host slightly after the layout state changes (mirrors
+    ## ``tryMountIsoNimReplPanel``).
+    if requestPanelVMInstance.isNil:
+      return
+    if requestPanelComponentRef.isNil:
+      return
+    let componentId = requestPanelComponentRef.id
+    if isoNimRequestPanelMountedIds.hasKey(componentId):
+      return
+
+    let key = cstring("requestPanelComponent-" & $componentId)
+    var retryCount = 0
+    proc doMount() =
+      if isoNimRequestPanelMountedIds.hasKey(componentId):
+        return
+      retryCount += 1
+      let container = dom_api.getElementById(dom_api.document, key)
+      if dom_api.isNodeNil(dom_api.Node(container)):
+        if retryCount > 200:
+          cerror "tryMountIsoNimRequestPanel: not ready after 200 retries, giving up"
+          return
+        discard setTimeout(proc() = doMount(), 10)
+        return
+
+      # Replace any prior content (Karax may have planted a stub
+      # element before the IsoNim mount fires).
+      let containerNode = dom_api.Node(container)
+      while not dom_api.isNodeNil(containerNode.firstChild):
+        discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+      isoNimRequestPanelMountedIds[componentId] = true
+      try:
+        mountIsoNimRequestPanel(container, requestPanelVMInstance)
+      except:
+        cerror "tryMountIsoNimRequestPanel: mount EXCEPTION: " &
+          getCurrentExceptionMsg()
+
+      # Re-sync any rows the legacy component already carries so the
+      # freshly-mounted view reflects the latest list.
+      if not requestPanelComponentRef.isNil:
+        syncLegacyRequestPanelIntoVM(requestPanelComponentRef)
+
+    doMount()
+else:
+  proc tryMountIsoNimRequestPanel*() =
+    ## Native compilation has no DOM — keep the proc available so
+    ## callers (``initRequestPanelVM*``) compile on every backend.
+    discard
+
+# ---------------------------------------------------------------------------
+# Component registration — IsoNim primary renderer; no Karax method
+# render.  The base ``Component.render()`` returns a valid empty VNode
+# for any generic callers.
 # ---------------------------------------------------------------------------
 
 method register*(self: RequestPanelComponent, api: MediatorWithSubscribers) =
+  ## Register the RequestPanelComponent with the mediator.  Bring up
+  ## the IsoNim RequestPanelVM lazily so the mount procedure can find
+  ## it; the shared-store version is installed by
+  ## ``configureMiddleware`` if the ViewModel layer is enabled.
+  ##
+  ## M6 will subscribe to backend events here, e.g.:
+  ##   api.subscribe(CtUpdatedHttpRequests, ...)
   self.api = api
-  # M6 will subscribe to backend events here, e.g.:
-  #   api.subscribe(CtUpdatedHttpRequests, ...)
+  initRequestPanelVM()
+  if requestPanelComponentRef.isNil:
+    requestPanelComponentRef = self
+    tryMountIsoNimRequestPanel()
 
 method restart*(self: RequestPanelComponent) =
   self.clearRequests()
