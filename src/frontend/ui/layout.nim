@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
-  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors,
+  state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -544,6 +544,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Shell,
       Content.CaptionBarProgress,
       Content.TerminalOutput,
+      Content.StepList,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -608,6 +609,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if state.content == Content.SearchResults:
           search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
           search_results.tryMountIsoNimSearchResultsPanel()
+
+        # StepList is now an IsoNim view -- its DOM is mounted by
+        # ``step_list.tryMountIsoNimStepListPanel`` against the
+        # ``stepListComponent-{id}`` container, and reactive effects
+        # keep it in sync.  No vnodeToDom bridge or redraw callback
+        # is needed here.
+        if state.content == Content.StepList:
+          step_list.syncLegacyStepListIntoVM(StepListComponent(component))
+          step_list.tryMountIsoNimStepListPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

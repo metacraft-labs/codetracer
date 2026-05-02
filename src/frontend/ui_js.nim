@@ -1019,6 +1019,8 @@ when not defined(ctInExtension):
       search_results.initSearchResultsVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initNoSourceVMWithStore');".}
       no_source.initNoSourceVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initStepListVMWithStore');".}
+      step_list.initStepListVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

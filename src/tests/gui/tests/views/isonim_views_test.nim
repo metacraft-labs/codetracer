@@ -34,6 +34,7 @@ import viewmodels/build_vm
 import viewmodels/errors_vm
 import viewmodels/search_results_vm
 import viewmodels/no_source_vm
+import viewmodels/step_list_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -49,6 +50,7 @@ import views/isonim_build_view
 import views/isonim_errors_view
 import views/isonim_search_results_view
 import views/isonim_no_source_view
+import views/isonim_step_list_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -4438,5 +4440,521 @@ suite "IsoNim No-Source Panel — interactions":
 
       let req = mock.findCommand("ct/history-jump")
       check req.isNone
+
+      dispose()
+
+# ===========================================================================
+# Step List panel tests
+# ===========================================================================
+#
+# Cover:
+# - Outer structure (root .step-list class, .step-lines container,
+#   default empty state).
+# - VM ordering invariants: ``setLineSteps`` sorts by ``delta`` and
+#   ``appendLineSteps`` re-sorts after a streamed append.
+# - Row variants: Line / Call / Return each emit the legacy class
+#   hooks (``.step-line-flow-value``, ``.step-line-args``,
+#   ``.step-line-return-value``) so any CSS / Playwright selector
+#   keeps working.
+# - Active-row highlight: ``setCurrentLocation`` flips the
+#   ``active-step-line`` modifier on the row whose location matches
+#   the live debugger position (rrTicks + path + line).
+# - Click-to-jump: clicking a Line row dispatches ``ct/line-step-jump``
+#   with the row's ``delta`` / ``rrTicks`` / ``path`` / ``line``.
+# - Backend request shape: ``loadStepLinesFor`` emits
+#   ``ct/load-step-lines`` with ``path`` / ``line`` / ``rrTicks`` /
+#   ``count`` and the panel-height plumbing.
+
+proc makeLineStep(delta: int; path: string; line: int; rrTicks: int;
+                  fn: string = "f"; src: string = "x = 1"): StepLine =
+  StepLine(
+    kind: slkLine,
+    delta: delta,
+    location: StepLineLocation(
+      path: path,
+      line: line,
+      functionName: fn,
+      rrTicks: rrTicks,
+    ),
+    sourceLine: src,
+    values: @[],
+  )
+
+proc makeCallStep(delta: int; src: string;
+                  args: seq[StepLineFlowValue]): StepLine =
+  StepLine(
+    kind: slkCall,
+    delta: delta,
+    location: StepLineLocation(),
+    sourceLine: src,
+    values: args,
+  )
+
+proc makeReturnStep(delta: int; src: string;
+                    ret: seq[StepLineFlowValue]): StepLine =
+  StepLine(
+    kind: slkReturn,
+    delta: delta,
+    location: StepLineLocation(),
+    sourceLine: src,
+    values: ret,
+  )
+
+suite "IsoNim Step List Panel — structure":
+
+  test "renders root with the step-list class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "step-list" in panel.attributes["class"]
+
+      dispose()
+
+  test "renders step-list-lines-box and step-lines containers":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      check findByClass(panel, "step-list-lines-box") != nil
+      check findByClass(panel, "step-lines") != nil
+
+      dispose()
+
+  test "default state renders no rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      let rows = findAllByClass(panel, "step-line")
+      check rows.len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM ordering invariants
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Step List Panel — ordering":
+
+  test "setLineSteps sorts rows by delta":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        makeLineStep(2, "a.nim", 10, 100),
+        makeLineStep(-1, "a.nim", 9, 99),
+        makeLineStep(0, "a.nim", 9, 99),
+      ])
+
+      check vm.lineSteps.val.len == 3
+      check vm.lineSteps.val[0].delta == -1
+      check vm.lineSteps.val[1].delta == 0
+      check vm.lineSteps.val[2].delta == 2
+
+      let rows = findAllByClass(panel, "step-line")
+      check rows.len == 3
+
+      dispose()
+
+  test "appendLineSteps re-sorts after streamed append":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      discard renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        makeLineStep(0, "a.nim", 9, 99),
+        makeLineStep(2, "a.nim", 10, 100),
+      ])
+
+      # Streamed batch arrives out of order — appendLineSteps must
+      # re-sort by delta so the panel stays in display order.
+      vm.appendLineSteps(@[
+        makeLineStep(-1, "a.nim", 8, 98),
+        makeLineStep(1, "a.nim", 10, 100),
+      ])
+
+      check vm.lineSteps.val.len == 4
+      check vm.lineSteps.val[0].delta == -1
+      check vm.lineSteps.val[1].delta == 0
+      check vm.lineSteps.val[2].delta == 1
+      check vm.lineSteps.val[3].delta == 2
+
+      dispose()
+
+  test "appendLineSteps with empty input is a no-op":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+
+      vm.setLineSteps(@[
+        makeLineStep(0, "a.nim", 9, 99),
+        makeLineStep(1, "a.nim", 10, 100),
+      ])
+      vm.appendLineSteps(@[])
+
+      check vm.lineSteps.val.len == 2
+
+      dispose()
+
+  test "clearLineSteps empties the row list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+      vm.setLineSteps(@[makeLineStep(0, "a.nim", 9, 99)])
+      check findAllByClass(panel, "step-line").len == 1
+
+      vm.clearLineSteps()
+      check findAllByClass(panel, "step-line").len == 0
+      check vm.isEmpty.val == true
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering — Line / Call / Return variants.
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Step List Panel — row rendering":
+
+  test "Line row emits delta + location + source code spans":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        StepLine(
+          kind: slkLine,
+          delta: -2,
+          location: StepLineLocation(
+            path: "src/example.nim",
+            line: 42,
+            functionName: "main",
+            rrTicks: 100,
+          ),
+          sourceLine: "echo 1",
+          values: @[],
+        )
+      ])
+
+      check findByClass(panel, "step-line-delta") != nil
+      check findByClass(panel, "step-line-location") != nil
+      check findByClass(panel, "step-line-source-code") != nil
+      check "-2" in panel.textContent
+      check "example.nim:42[main]" in panel.textContent
+      check "echo 1" in panel.textContent
+
+      dispose()
+
+  test "Line row renders flow values inline":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      var line = makeLineStep(0, "a.nim", 9, 99)
+      line.values = @[
+        StepLineFlowValue(expression: "x", value: "1"),
+        StepLineFlowValue(expression: "y", value: "2"),
+      ]
+      vm.setLineSteps(@[line])
+
+      let flows = findAllByClass(panel, "step-line-flow-value")
+      check flows.len == 2
+      check "x" in flows[0].textContent
+      check "1" in flows[0].textContent
+      check "y" in flows[1].textContent
+      check "2" in flows[1].textContent
+
+      dispose()
+
+  test "Call row emits step-line-call class and args":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        makeCallStep(0, "f(x, y)", @[
+          StepLineFlowValue(expression: "x", value: "1"),
+          StepLineFlowValue(expression: "y", value: "2"),
+        ])
+      ])
+
+      let callRow = findByClass(panel, "step-line-call")
+      check callRow != nil
+      check "f(x, y)" in callRow.textContent
+      let args = findAllByClass(panel, "step-line-value")
+      check args.len == 2
+      check "x" in args[0].textContent
+      check "1" in args[0].textContent
+
+      dispose()
+
+  test "Return row renders only the first value":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        makeReturnStep(0, "return 42", @[
+          StepLineFlowValue(expression: "->", value: "42"),
+          # Extra entries past the first must NOT be rendered (legacy
+          # guard: ``if values.len > 0: text values[0].expression``).
+          StepLineFlowValue(expression: "ignored", value: "99"),
+        ])
+      ])
+
+      let returnRow = findByClass(panel, "step-line-return")
+      check returnRow != nil
+      check "return 42" in returnRow.textContent
+
+      let retValue = findByClass(panel, "step-line-return-value")
+      check retValue != nil
+      check "->" in retValue.textContent
+      check "42" in retValue.textContent
+      # The second entry must be absent.
+      check "ignored" notin returnRow.textContent
+      check "99" notin returnRow.textContent
+
+      dispose()
+
+  test "Return row with no values omits the return-value span":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[makeReturnStep(0, "return", @[])])
+
+      check findByClass(panel, "step-line-return") != nil
+      check findByClass(panel, "step-line-return-value") == nil
+
+      dispose()
+
+  test "renders Line / Call / Return rows together in delta order":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        makeReturnStep(2, "return 1", @[]),
+        makeLineStep(0, "a.nim", 9, 99),
+        makeCallStep(1, "f()", @[]),
+      ])
+
+      let rows = findAllByClass(panel, "step-line")
+      check rows.len == 3
+      # Sort by delta: 0, 1, 2.
+      check "active-step-line" notin rows[0].attributes["class"]
+        # placeholder: Line at delta 0 is not current because no
+        # currentLocation has been set yet (default rrTicks = 0).
+      check "step-line-call" in rows[1].attributes["class"]
+      check "step-line-return" in rows[2].attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Active-row highlight
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Step List Panel — active row":
+
+  test "setCurrentLocation flips the active-step-line modifier":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      vm.setLineSteps(@[
+        makeLineStep(-1, "a.nim", 9, 98),
+        makeLineStep(0, "a.nim", 10, 99),
+        makeLineStep(1, "a.nim", 11, 100),
+      ])
+      vm.setCurrentLocation(StepLineLocation(
+        path: "a.nim", line: 10, rrTicks: 99))
+
+      let rows = findAllByClass(panel, "step-line")
+      check rows.len == 3
+      check "active-step-line" notin rows[0].attributes["class"]
+      check "active-step-line" in rows[1].attributes["class"]
+      check "active-step-line" notin rows[2].attributes["class"]
+
+      # The active row's <pre> wrapper also flips classes.
+      let pres = findAllByClass(panel, "step-line-pre")
+      check pres.len == 3
+      check "active-step-line-pre" in pres[1].attributes["class"]
+      check "inactive-step-line-pre" in pres[0].attributes["class"]
+
+      dispose()
+
+  test "isCurrentRow matches on rrTicks + path + line triple":
+    let line = makeLineStep(0, "a.nim", 10, 99)
+
+    # Exact match.
+    check isCurrentRow(line, StepLineLocation(
+      path: "a.nim", line: 10, rrTicks: 99))
+    # Mismatched rrTicks.
+    check not isCurrentRow(line, StepLineLocation(
+      path: "a.nim", line: 10, rrTicks: 100))
+    # Mismatched path.
+    check not isCurrentRow(line, StepLineLocation(
+      path: "b.nim", line: 10, rrTicks: 99))
+    # Mismatched line.
+    check not isCurrentRow(line, StepLineLocation(
+      path: "a.nim", line: 11, rrTicks: 99))
+
+# ---------------------------------------------------------------------------
+# Backend request shape
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Step List Panel — backend requests":
+
+  test "loadStepLinesFor emits ct/load-step-lines with location + count":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+
+      vm.setPanelHeight(20)
+      mock.clearReceivedCommands()
+
+      vm.loadStepLinesFor(StepLineLocation(
+        path: "src/main.nim", line: 7, rrTicks: 42))
+
+      let req = mock.findCommand("ct/load-step-lines")
+      check req.isSome
+      check req.get.args{"path"}.getStr == "src/main.nim"
+      check req.get.args{"line"}.getInt == 7
+      check req.get.args{"rrTicks"}.getInt == 42
+      check req.get.args{"count"}.getInt == 20
+
+      # Also resets the row list and refreshes the current location.
+      check vm.lineSteps.val.len == 0
+      check vm.currentLocation.val.path == "src/main.nim"
+      check vm.currentLocation.val.line == 7
+      check vm.currentLocation.val.rrTicks == 42
+
+      dispose()
+
+  test "loadStepLinesFor falls back to default panel height when unset":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+
+      # Force the panelHeight signal to 0 so the legacy
+      # offset-not-yet-measured path engages.
+      vm.setPanelHeight(0)
+      mock.clearReceivedCommands()
+
+      vm.loadStepLinesFor(StepLineLocation(
+        path: "a.nim", line: 1, rrTicks: 1))
+
+      let req = mock.findCommand("ct/load-step-lines")
+      check req.isSome
+      # The default is the conservative 16-row capacity from the VM.
+      check req.get.args{"count"}.getInt > 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Click → jump
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Step List Panel — interactions":
+
+  test "clicking a Line row dispatches ct/line-step-jump with delta + location":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderStepListPanel(r, vm)
+
+      let target = StepLine(
+        kind: slkLine,
+        delta: 3,
+        location: StepLineLocation(
+          path: "src/main.nim",
+          line: 17,
+          functionName: "main",
+          rrTicks: 142,
+        ),
+        sourceLine: "x = 1",
+        values: @[],
+      )
+      vm.setLineSteps(@[target])
+      mock.clearReceivedCommands()
+
+      let row = findByClass(panel, "step-line")
+      check row != nil
+      row.fireEvent("click")
+
+      let req = mock.findCommand("ct/line-step-jump")
+      check req.isSome
+      check req.get.args{"delta"}.getInt == 3
+      check req.get.args{"path"}.getStr == "src/main.nim"
+      check req.get.args{"line"}.getInt == 17
+      check req.get.args{"rrTicks"}.getInt == 142
+
+      dispose()
+
+  test "jumpToStepLine sends the same payload when invoked directly":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createStepListVM(store)
+
+      mock.clearReceivedCommands()
+      vm.jumpToStepLine(StepLine(
+        kind: slkLine,
+        delta: -1,
+        location: StepLineLocation(
+          path: "x.nim", line: 4, rrTicks: 7),
+        sourceLine: "echo",
+        values: @[],
+      ))
+
+      let req = mock.findCommand("ct/line-step-jump")
+      check req.isSome
+      check req.get.args{"delta"}.getInt == -1
+      check req.get.args{"path"}.getStr == "x.nim"
+      check req.get.args{"line"}.getInt == 4
+      check req.get.args{"rrTicks"}.getInt == 7
 
       dispose()
