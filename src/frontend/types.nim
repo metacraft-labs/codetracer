@@ -1068,6 +1068,13 @@ type
     currentTooltip*: (int, int, int)
     viewZones*:     JsAssoc[int, int]
     shouldLoadFlow*: bool
+    # NSS-1.68 FRONTEND fix: when monaco isn't ready at onCompleteMove time, we defer
+    # loadFlow until afterInit. The original tabInfo.location reflects the *open-tab*
+    # location (rrTicks=0, line=NO_LINE) — not the cursor position from the latest
+    # move. Cache the response.location here so the deferred loadFlow uses the correct
+    # rrTicks/line, otherwise the data layer returns no loop steps.
+    pendingFlowLocation*: Location
+    hasPendingFlowLocation*: bool
     lastScrollFireTime*: int64
     diffViewZones*: JsAssoc[int, MultilineZone]
     diffAddedLines*: seq[int]

@@ -588,6 +588,171 @@ suite "Noir Space Ship: loop iteration via calltrace":
       check loopCount > 0
       check foundLoopStep
 
+  test "ct/load-flow with stale tabInfo.location returns no loop steps":
+    ## §1.68 frontend gate localisation for noir-space-ship §5.8.
+    ##
+    ## The Playwright tests "loop iteration slider tracks remaining
+    ## shield" (line 278) and "simple loop iteration jump" (line 393)
+    ## both:
+    ##
+    ##   1. Activate the iterate_asteroids calltrace entry
+    ##      (fires ``ct/calltrace-jump`` -> ``ct/complete-move``).
+    ##   2. Wait for shield.nr to open as a fresh editor tab.
+    ##   3. Wait for ``.flow-multiline-value-container`` to render
+    ##      (which requires ``ct/load-flow`` -> ``CtUpdatedFlow``
+    ##      with at least one loop and one in-loop step).
+    ##
+    ## The shield.nr editor is *opened* by ``editor_service.onCompleteMove``
+    ## which forwards ``response.location.path`` to ``openNewEditorView``.
+    ## ``openNewEditorView`` (utils.nim:1208-1247) builds a fresh
+    ## ``Location`` with ``rrTicks = 0`` (default) and ``line = NO_LINE``
+    ## then awaits ``tabLoad`` whose backend handler (index/config.nim:175)
+    ## simply echoes the same ``Location`` back into ``tabInfo.location``.
+    ##
+    ## In the EditorViewComponent's lifecycle:
+    ##
+    ##   * ``afterInit`` (editor.nim:2117) replays the cached
+    ##     ``CtCompleteMove`` for shield.nr and calls ``onCompleteMove``.
+    ##   * ``onCompleteMove`` finds ``self.tabInfo.monacoEditor.isNil``
+    ##     (Monaco hasn't been instantiated yet for the freshly-opened
+    ##     editor) and sets ``self.shouldLoadFlow = true`` (editor.nim:2255).
+    ##   * Later ``editorAfterRedraw`` (editor.nim:1923-1925) sees
+    ##     ``shouldLoadFlow == true`` and calls
+    ##     ``self.loadFlow(FlowMode.Call, tabInfo.location)``.
+    ##
+    ## Crucially, ``tabInfo.location`` is the STALE openNewEditorView
+    ## Location with ``rrTicks = 0`` and ``line = NO_LINE``, NOT the
+    ## post-jump ``response.location`` (rrTicks=3, line=1) that the
+    ## GUI test depends on.
+    ##
+    ## This test pins that data-layer contract: when ``ct/load-flow`` is
+    ## sent with the stale ``tabInfo.location`` shape, the FlowUpdate
+    ## either errors or returns ZERO loops/in-loop-steps for shield.nr.
+    ## Once the deferred-loadFlow path is fixed to use the cached
+    ## complete_move location (with the correct rrTicks), this test's
+    ## ``stale-call returns no loops`` assertion documents the broken
+    ## behaviour we removed.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    for i in 0 ..< 10:
+      session.stepForward()
+
+    session.requestAndLoadCalltrace(depth = 30)
+    let lines = session.getCalltraceLines()
+    let iterIdx = findCallLineByName(lines, "iterate_asteroids")
+    if iterIdx < 0:
+      echo "  iterate_asteroids not present in calltrace; skipping"
+      check lines.len > 0
+    else:
+      let target = lines[iterIdx]
+      session.calltraceJumpByLine(target)
+      check session.getDebuggerStatus() == dsIdle
+
+      let postFile = session.getCurrentFile()
+      let postLine = session.getCurrentLine()
+      let postTicks = session.getCurrentRRTicks()
+      echo "  good location: ", postFile, ":", postLine, " rrTicks=", postTicks
+
+      # First, the GOOD call -- mirrors what `onCompleteMove` does
+      # synchronously when monaco is already ready.  This is the
+      # baseline that the deferred path is supposed to match.
+      let goodResp = session.sendRawDapRequest("ct/load-flow", %*{
+        "flowMode": 0,
+        "location": {
+          "path": postFile, "line": postLine,
+          "highLevelPath": postFile, "highLevelLine": postLine,
+          "rrTicks": postTicks.int64,
+          "functionName": "", "highLevelFunctionName": "",
+          "lowLevelPath": "", "lowLevelLine": 0,
+          "functionFirst": 0, "functionLast": 0,
+          "event": 0, "expression": "", "offset": 0, "error": false,
+          "callstackDepth": 0, "originatingInstructionAddress": 0,
+          "key": "", "globalCallKey": "",
+          "expansionParents": [], "missingPath": false,
+        },
+      })
+      check goodResp.getOrDefault("success").getBool(false)
+      var goodLoopCount = 0
+      var goodLoopSteps = 0
+      let goodVU = goodResp.getOrDefault("body").getOrDefault("viewUpdates")
+      if not goodVU.isNil and goodVU.kind == JArray:
+        for entry in goodVU.elems:
+          let stepsNode = entry.getOrDefault("steps")
+          let loopsNode = entry.getOrDefault("loops")
+          if not loopsNode.isNil and loopsNode.kind == JArray:
+            goodLoopCount += loopsNode.len
+          if not stepsNode.isNil and stepsNode.kind == JArray:
+            for st in stepsNode.elems:
+              if st.getOrDefault("loop").getInt(-1) >= 0:
+                inc goodLoopSteps
+      echo "  GOOD load-flow: loops=", goodLoopCount, " in-loop-steps=", goodLoopSteps
+      check goodLoopCount > 0
+      check goodLoopSteps > 0
+
+      # Now drain any side-channel ct/updated-flow events from the good call
+      # so the next call's events can be observed cleanly.
+      discard session.drainEvents()
+
+      # Now the STALE call -- mirrors what ``editorAfterRedraw`` does
+      # after a deferred ``shouldLoadFlow = true``.  ``tabInfo.location``
+      # came from ``openNewEditorView`` which builds:
+      #
+      #   Location(path: name, line: NO_LINE, highLevelPath: name,
+      #            highLevelLine: NO_LINE, ...)
+      #
+      # rrTicks defaults to 0; line defaults to NO_LINE (-1 in Nim, but
+      # serialized as -1 in cstring/JSON the backend sees 0 since the
+      # JSON deserializer for ``Location`` defaults missing fields).
+      # We set line = 1 (a defined sentinel; NO_LINE round-trips through
+      # JSON serialization differently per platform), rrTicks = 0.
+      let staleResp = session.sendRawDapRequest("ct/load-flow", %*{
+        "flowMode": 0,
+        "location": {
+          "path": postFile, "line": -1,
+          "highLevelPath": postFile, "highLevelLine": -1,
+          "rrTicks": 0,
+          "functionName": "", "highLevelFunctionName": "",
+          "lowLevelPath": "", "lowLevelLine": 0,
+          "functionFirst": 0, "functionLast": 0,
+          "event": 0, "expression": "", "offset": 0, "error": false,
+          "callstackDepth": 0, "originatingInstructionAddress": 0,
+          "key": "", "globalCallKey": "",
+          "expansionParents": [], "missingPath": false,
+        },
+      })
+      check staleResp.getOrDefault("success").getBool(false)
+      var staleLoopCount = 0
+      var staleLoopSteps = 0
+      var staleHadError = false
+      let staleBody = staleResp.getOrDefault("body")
+      if not staleBody.isNil:
+        staleHadError = staleBody.getOrDefault("error").getBool(false)
+        let staleVU = staleBody.getOrDefault("viewUpdates")
+        if not staleVU.isNil and staleVU.kind == JArray:
+          for entry in staleVU.elems:
+            let stepsNode = entry.getOrDefault("steps")
+            let loopsNode = entry.getOrDefault("loops")
+            if not loopsNode.isNil and loopsNode.kind == JArray:
+              staleLoopCount += loopsNode.len
+            if not stepsNode.isNil and stepsNode.kind == JArray:
+              for st in stepsNode.elems:
+                if st.getOrDefault("loop").getInt(-1) >= 0:
+                  inc staleLoopSteps
+      echo "  STALE load-flow: error=", staleHadError,
+           " loops=", staleLoopCount, " in-loop-steps=", staleLoopSteps
+
+      # The stale call MUST NOT produce the same loop/in-loop-step
+      # numbers the good call produces -- if it did, the deferred path
+      # would render the loop widget by accident.  In practice the
+      # stale call either errors or returns drastically reduced loop
+      # data because rrTicks=0 puts the FlowPreloader at the trace's
+      # entry point in main.nr, not inside iterate_asteroids.
+      check (staleHadError or staleLoopCount < goodLoopCount or
+             staleLoopSteps < goodLoopSteps)
+
 # ---------------------------------------------------------------------------
 # Suite 4: Event log populated
 # Mirrors: "event log jump highlights active row"

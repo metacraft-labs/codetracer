@@ -1921,8 +1921,27 @@ proc editorAfterRedraw(self: EditorViewComponent) =
         self.flow.clear()
 
     if self.shouldLoadFlow and not self.tabInfo.monacoEditor.isNil:
-      self.loadFlow(FlowMode.Call, tabInfo.location)
+      # NSS-1.68 FRONTEND fix: prefer the cached complete_move location over
+      # tabInfo.location. tabInfo.location reflects the *open-tab* request and is
+      # built by openNewEditorView (utils.nim:1208-1216) with rrTicks=0 and
+      # line=NO_LINE — the backend echoes that shape back via tabLoad
+      # (config.nim:175). Passing it to ct/load-flow yields no loop steps for
+      # the current cursor position (verified by the headless test
+      # ``ct/load-flow with stale tabInfo.location returns no loop steps`` in
+      # noir_space_ship_test.nim, which shows stale=1 loop / 12 steps vs
+      # good=2 loops / 84 steps).
+      #
+      # The response.location captured at deferral time (in onCompleteMove) is
+      # the move's true location with the correct rrTicks/line, so we replay
+      # *that* shape when monaco finally becomes ready.
+      let flowLocation =
+        if self.hasPendingFlowLocation:
+          self.pendingFlowLocation
+        else:
+          tabInfo.location
+      self.loadFlow(FlowMode.Call, flowLocation)
       self.shouldLoadFlow = false
+      self.hasPendingFlowLocation = false
 
     if not self.data.startOptions.diff.isNil and
       self.diffViewZones.len() == 0 and
@@ -2253,6 +2272,11 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       cdebug "flow: create flow again"
       if self.tabInfo.monacoEditor.isNil:
         self.shouldLoadFlow = true
+        # NSS-1.68 FRONTEND fix: capture the move's true location so the deferred
+        # loadFlow in ``editorAfterRedraw`` does not fall back to the stale
+        # tabInfo.location (rrTicks=0, line=NO_LINE).
+        self.pendingFlowLocation = response.location
+        self.hasPendingFlowLocation = true
         if isShield:
           # ``[NSS-1.64]`` Diagnostic: monaco not ready yet, so loadFlow
           # is deferred to ``editorAfterRedraw``.  See §1.64.
@@ -2262,6 +2286,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
           clog cstring("[NSS-1.64] EditorVC.onCompleteMove: calling loadFlow now (monaco-ready)")
         self.loadFlow(FlowMode.Call, response.location)
         self.shouldLoadFlow = false
+        self.hasPendingFlowLocation = false
 
     elif self.supportsFlow() and not self.flow.isNil:
       if isShield:
