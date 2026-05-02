@@ -2115,9 +2115,39 @@ proc loadingEditorView(index: int, tab: cstring): VNode =
   )
 
 method afterInit*(self: EditorViewComponent) {.async.} =
+  # ``[NSS-1.64]`` Diagnostic: the noir-space-ship loop-iteration GUI tests
+  # ("loop iteration slider tracks remaining shield" and "simple loop
+  # iteration jump") open shield.nr fresh via a calltrace-jump to
+  # iterate_asteroids and then wait on ``.flow-multiline-value-container``.
+  # That widget is rendered by ``flow.nim::makeLoopLine`` only after the
+  # ``loadFlow`` -> ``CtUpdatedFlow`` -> ``onUpdatedFlow`` chain runs for
+  # the freshly-opened editor.  The replay below is the moment the cached
+  # CtCompleteMove (stored by editor_service keyed on
+  # ``response.location.highLevelPath`` -- editor_service.nim:42) is
+  # delivered to the new EditorViewComponent.  See
+  # ``/tmp/isonim-migration.txt`` §5.8 / §1.54 / §1.64.
+  let isShield = ($self.path).contains("shield.nr")
+  if isShield:
+    clog cstring("[NSS-1.64] afterInit: path=" & $self.path &
+                 " hasCachedMove=" & $self.service.completeMoveResponses.hasKey(self.path))
   if self.service.completeMoveResponses.hasKey(self.path):
+    if isShield:
+      let cached = self.service.completeMoveResponses[self.path]
+      clog cstring("[NSS-1.64] afterInit: replaying cachedMove rrTicks=" &
+                   $cached.location.rrTicks & " line=" & $cached.location.line &
+                   " resetFlow=" & $cached.resetFlow &
+                   " highLevelPath=" & $cached.location.highLevelPath)
     await self.onCompleteMove(self.service.completeMoveResponses[self.path])
     discard jsDelete(self.service.completeMoveResponses[self.path])
+  elif isShield:
+    # Diagnostic: the cached move may have been stored under
+    # ``highLevelPath`` while we look it up by ``self.path``.  Walk the
+    # responses map and report any entries whose key contains shield.nr
+    # so we can spot a key/path mismatch under the IsoNim mount.
+    for k, _ in self.service.completeMoveResponses:
+      if ($k).contains("shield.nr"):
+        clog cstring("[NSS-1.64] afterInit: cachedMove present under key " & $k &
+                     " (self.path=" & $self.path & ") -- KEY MISMATCH")
 
 func multilineFlowLines*: JsAssoc[int, KaraxInstance] =
   JsAssoc[int, KaraxInstance]{}
@@ -2129,6 +2159,25 @@ method onFindOrFilter*(self: EditorViewComponent) {.async.} =
   self.monacoEditor.trigger("keyboard".cstring, "actions.find".cstring)
 
 method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.} =
+  # ``[NSS-1.64]`` Diagnostic for the noir-space-ship loop-iteration GUI
+  # blocker (§5.8).  Both failing tests (lines 278, 393 in
+  # ``noir-space-ship.spec.ts``) gate on
+  # ``.flow-multiline-value-container`` rendered by
+  # ``flow.nim::makeLoopLine``.  This log line lets us confirm whether
+  # the per-component CtCompleteMove subscription (editor.nim:711) is
+  # delivering the iterate_asteroids jump to the shield.nr editor.
+  let isShield = ($self.path).contains("shield.nr") or
+                 ($response.location.path).contains("shield.nr")
+  if isShield:
+    clog cstring("[NSS-1.64] EditorVC.onCompleteMove: self.path=" &
+                 $self.path & " editorView=" & $self.editorView &
+                 " response.path=" & $response.location.path &
+                 " line=" & $response.location.line &
+                 " rrTicks=" & $response.location.rrTicks &
+                 " resetFlow=" & $response.resetFlow &
+                 " flowIsNil=" & $self.flow.isNil &
+                 " monacoNil=" & $self.tabInfo.isNil)
+
   # Feed the same position into the parallel ViewModel store.
   initEditorVM()
   syncEditorDebuggerPosition(
@@ -2204,11 +2253,19 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       cdebug "flow: create flow again"
       if self.tabInfo.monacoEditor.isNil:
         self.shouldLoadFlow = true
+        if isShield:
+          # ``[NSS-1.64]`` Diagnostic: monaco not ready yet, so loadFlow
+          # is deferred to ``editorAfterRedraw``.  See §1.64.
+          clog cstring("[NSS-1.64] EditorVC.onCompleteMove: shouldLoadFlow=true (monaco-not-ready)")
       else:
+        if isShield:
+          clog cstring("[NSS-1.64] EditorVC.onCompleteMove: calling loadFlow now (monaco-ready)")
         self.loadFlow(FlowMode.Call, response.location)
         self.shouldLoadFlow = false
 
     elif self.supportsFlow() and not self.flow.isNil:
+      if isShield:
+        clog cstring("[NSS-1.64] EditorVC.onCompleteMove: elif branch -- redrawFlow only (no fresh fetch)")
       self.flow.redrawFlow()
       self.adjustEditorWidth()
 

@@ -3315,6 +3315,17 @@ proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   self.makeSlider(step.position)
 
 proc addLoopInfo(self: FlowComponent, step: FlowStep) =
+  # ``[NSS-1.64]`` Diagnostic: this proc creates the
+  # ``.flow-multiline-value-container`` view zone the noir-space-ship
+  # loop-iteration tests gate on (§5.8).  Logging the entry point lets
+  # the next session confirm whether the legacy rendering path runs
+  # under the IsoNim mount when the calltrace-jump activates
+  # iterate_asteroids in shield.nr.
+  let isShield = ($self.editorUI.name).contains("shield.nr")
+  if isShield:
+    clog cstring("[NSS-1.64] addLoopInfo: position=" & $step.position &
+                 " loop=" & $step.loop &
+                 " alreadyHasZone=" & $self.flowLoops.hasKey(step.position))
   # create viewZone for this step if there is not any yet
   if not self.flowLoops.hasKey(step.position):
     self.flowLoops[step.position] = FlowLoop(loopStep: step)
@@ -3335,6 +3346,9 @@ proc addLoopInfo(self: FlowComponent, step: FlowStep) =
     cast[Element](newZoneDom).classList.add("flow-content-widget")
 
     self.makeFlowLoops(step)
+    if isShield:
+      clog cstring("[NSS-1.64] addLoopInfo: created zone + makeFlowLoops for position " &
+                   $step.position)
 
 proc getClosestIterationStepCount*(self: FlowComponent, loop: Loop, stepCount: int): int =
   var steps = self.flow.steps
@@ -3530,9 +3544,51 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
         # should be always path:name
         update.location.highLevelPath & cstring":" & update.location.functionName
 
-    if not self.inExtension and self.editorUI.name != updateLocationName:
+    # ``[NSS-1.64]`` Diagnostic for the noir-space-ship loop-iteration
+    # blocker (§5.8): trace the path-comparison guard.  If the update
+    # is for shield.nr we want to know whether it gets past this gate
+    # so we can localise where ``.flow-multiline-value-container``
+    # rendering drops out.
+    let isShield = ($self.editorUI.name).contains("shield.nr") or
+                   ($update.location.highLevelPath).contains("shield.nr")
+    if isShield:
+      clog cstring("[NSS-1.64] FlowComponent.onUpdatedFlow: editorUI.name=" &
+                   $self.editorUI.name &
+                   " updateLocationName=" & $updateLocationName &
+                   " update.location.path=" & $update.location.path &
+                   " update.location.highLevelPath=" & $update.location.highLevelPath &
+                   " update.location.functionName=" & $update.location.functionName &
+                   " editorView=" & $self.editorUI.editorView &
+                   " inExtension=" & $self.inExtension &
+                   " viewUpdates=" & $update.view_updates.len)
+    # ``[NSS-1.64]`` Accept the update if EITHER:
+    #
+    #   * the editor name matches the update's resolved location
+    #     (the historic equality check), OR
+    #   * the FlowComponent was created for a location whose
+    #     ``highLevelPath`` matches the editor name (i.e. this is the
+    #     response for a request the editor itself originated).
+    #
+    # The second branch is required for Noir traces (and any backend
+    # that rewrites ``location.high_level_path`` via
+    # ``find_function_location``) where a call into ``iterate_asteroids``
+    # in ``shield.nr`` is resolved by the backend to the enclosing
+    # function in ``main.nr``.  Without this relaxation the
+    # ``ct/updated-flow`` event for a shield.nr load is dropped here
+    # and ``.flow-multiline-value-container`` never renders.
+    # See /tmp/isonim-migration.txt §1.64 (noir-space-ship §5.8).
+    let locationMatchesRequest =
+      not self.location.toJs.isNil and
+      $self.location.highLevelPath == $self.editorUI.name
+    if not self.inExtension and
+        self.editorUI.name != updateLocationName and
+        not locationMatchesRequest:
+      if isShield:
+        clog cstring("[NSS-1.64] FlowComponent.onUpdatedFlow: NAME MISMATCH -- dropping update")
       cdebug "flow: editor name not equal to update location name: stopping"
       return
+    if isShield and self.editorUI.name != updateLocationName:
+      clog cstring("[NSS-1.64] FlowComponent.onUpdatedFlow: NAME MISMATCH but locationMatchesRequest=true -- accepting update")
 
     self.status = update.status
 
