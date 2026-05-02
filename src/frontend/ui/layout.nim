@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
-  calltrace_editor,
+  calltrace_editor, repl,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -547,6 +547,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.TerminalOutput,
       Content.StepList,
       Content.CalltraceEditor,
+      Content.Repl,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -629,6 +630,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # legacy state to sync into the VM.
         if state.content == Content.CalltraceEditor:
           calltrace_editor.tryMountIsoNimCalltraceEditorPanel()
+
+        # Repl is now an IsoNim view -- its DOM is mounted by
+        # ``repl.tryMountIsoNimReplPanel`` against the
+        # ``replComponent-{id}`` container, and reactive effects
+        # keep it in sync.  No vnodeToDom bridge or redraw callback
+        # is needed here.
+        if state.content == Content.Repl:
+          repl.syncLegacyReplIntoVM(ReplComponent(component))
+          repl.syncReplConfigIntoVM()
+          repl.tryMountIsoNimReplPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

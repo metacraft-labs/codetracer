@@ -36,6 +36,7 @@ import viewmodels/search_results_vm
 import viewmodels/no_source_vm
 import viewmodels/step_list_vm
 import viewmodels/calltrace_editor_vm
+import viewmodels/repl_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -53,6 +54,7 @@ import views/isonim_search_results_view
 import views/isonim_no_source_view
 import views/isonim_step_list_view
 import views/isonim_calltrace_editor_view
+import views/isonim_repl_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -5116,3 +5118,460 @@ suite "IsoNim Calltrace Editor Panel — vm":
       check vmB.mounted.val == false
 
       dispose()
+
+# ---------------------------------------------------------------------------
+# REPL Panel — display-mode dispatch
+# ---------------------------------------------------------------------------
+#
+# These tests exercise ``renderReplPanel`` against ``ReplVM`` for each of
+# the three legacy Karax branches (materialised / enabled / disabled),
+# plus the imperative submit handler and the bounded-10 history slice
+# rendered by ``renderHistoryEntriesMock``.  Mirrors the legacy
+# ``ReplComponent.render`` shape and the ``self.history[^1].output =
+# response`` mutation in ``onDebugOutput``.
+
+suite "IsoNim REPL Panel — structure":
+
+  test "renders root with repl-component class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == "repl-component"
+
+      dispose()
+
+  test "defaults to disabled message branch":
+    # Both ``materialized`` and ``replEnabled`` default to false in
+    # ``createReplVM`` so the body should be the "REPL disabled" copy
+    # — matches the legacy Karax ``else`` branch.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      check vm.displayMode.val == rdmReplDisabled
+      let msg = findByClass(panel, "repl-disabled-msg")
+      check msg != nil
+      # Single text child carrying the verbatim disabled message.
+      check msg.children.len == 1
+      check msg.children[0].kind == mnkText
+      check msg.children[0].text == REPL_DISABLED_MESSAGE
+
+  # Materialised-trace branch wins over the ``replEnabled`` flag —
+  # mirrors the legacy ``if usesMaterializedTraces ... elif config.repl
+  # ... else ...`` ordering.
+  test "materialised flag takes precedence over replEnabled":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+      vm.setMaterialized(true)
+      vm.setLangName("noir")
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      check vm.displayMode.val == rdmMaterializedDisabled
+      let msg = findByClass(panel, "repl-disabled-msg")
+      check msg != nil
+      check msg.children[0].text ==
+        "The Repl Component is not supported for Db based traces 'noir'"
+      # The form / history container belong to the enabled branch and
+      # must not appear here.
+      check findByTag(panel, "form") == nil
+      check findByClass(panel, "repl-input-history") == nil
+
+  test "enabled flag (without materialised) renders prompt + history":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      check vm.displayMode.val == rdmReplEnabled
+      check findByClass(panel, "repl-disabled-msg") == nil
+
+      # ``div#repl`` shell, ``form`` with ``input#repl-input`` child,
+      # ``div#repl-history`` sibling — same shape as the legacy view.
+      let shell = findByTag(panel, "div").children[0]
+      check shell.attributes.getOrDefault("id", "") == "repl"
+
+      let formEl = findByTag(panel, "form")
+      check formEl != nil
+      let inputEl = findByTag(panel, "input")
+      check inputEl != nil
+      check inputEl.attributes.getOrDefault("id", "") == "repl-input"
+      check inputEl.attributes.getOrDefault("type", "") == "text"
+
+      # ``#repl-history`` container exists and is empty for a fresh VM.
+      var historyEl: MockNode = nil
+      for c in shell.children:
+        if c.attributes.getOrDefault("id", "") == "repl-history":
+          historyEl = c
+          break
+      check historyEl != nil
+      check historyEl.children.len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# REPL Panel — display-mode reactivity
+# ---------------------------------------------------------------------------
+
+suite "IsoNim REPL Panel — display mode reactivity":
+
+  test "flipping replEnabled swaps disabled message for prompt form":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      # Initially disabled — no form, message visible.
+      check findByTag(panel, "form") == nil
+      check findByClass(panel, "repl-disabled-msg") != nil
+
+      vm.setReplEnabled(true)
+
+      # Effect must rebuild the body in-place.
+      check findByClass(panel, "repl-disabled-msg") == nil
+      check findByTag(panel, "form") != nil
+      check findByTag(panel, "input") != nil
+
+      dispose()
+
+  test "flipping materialised hides the prompt form":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      check findByTag(panel, "form") != nil
+
+      vm.setMaterialized(true)
+      vm.setLangName("ruby")
+
+      check findByTag(panel, "form") == nil
+      let msg = findByClass(panel, "repl-disabled-msg")
+      check msg != nil
+      check msg.children[0].text ==
+        "The Repl Component is not supported for Db based traces 'ruby'"
+
+      dispose()
+
+  test "langName updates rerender materialised message":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setMaterialized(true)
+      vm.setLangName("noir")
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      var msg = findByClass(panel, "repl-disabled-msg")
+      check msg.children[0].text ==
+        "The Repl Component is not supported for Db based traces 'noir'"
+
+      vm.setLangName("cadence")
+      msg = findByClass(panel, "repl-disabled-msg")
+      check msg.children[0].text ==
+        "The Repl Component is not supported for Db based traces 'cadence'"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# REPL Panel — submitInput dispatch
+# ---------------------------------------------------------------------------
+
+suite "IsoNim REPL Panel — submit input":
+
+  test "submit handler dispatches to the registered closure and appends history":
+    # Headless dispatcher captures the expression so we can assert it
+    # was forwarded.  Mirrors the legacy ``debugRepl`` callout.
+    createRoot proc(dispose: proc()) =
+      var captured: seq[string] = @[]
+      let dispatcher: ReplDispatcher = proc(input: string) =
+        captured.add(input)
+
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store, dispatcher)
+      vm.setReplEnabled(true)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+      let formEl = findByTag(panel, "form")
+      let inputEl = findByTag(panel, "input")
+      check formEl != nil
+      check inputEl != nil
+
+      # ``MockNode.fireEvent`` calls ``proc()`` listeners with no event
+      # arg, so the submit handler reads ``inputEl.attributes["value"]``
+      # — set it explicitly here.
+      r.setAttribute(inputEl, "value", "print x")
+      formEl.fireEvent("submit")
+
+      check captured == @["print x"]
+
+      # History should have grown by one entry with rokLoading output.
+      let entries = vm.history.val
+      check entries.len == 1
+      check entries[0].input == "print x"
+      check entries[0].output.kind == rokLoading
+      check entries[0].output.output == ""
+
+      # The handler clears the input value so the next submit starts
+      # from an empty prompt.
+      check inputEl.attributes.getOrDefault("value", "") == ""
+
+      dispose()
+
+  test "submit ignores empty input":
+    createRoot proc(dispose: proc()) =
+      var captured: seq[string] = @[]
+      let dispatcher: ReplDispatcher = proc(input: string) =
+        captured.add(input)
+
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store, dispatcher)
+      vm.setReplEnabled(true)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+      let formEl = findByTag(panel, "form")
+
+      # Without setting the value the handler reads "" and short-
+      # circuits.  Both the dispatcher and the history must remain
+      # untouched.
+      formEl.fireEvent("submit")
+
+      check captured.len == 0
+      check vm.history.val.len == 0
+
+      dispose()
+
+  test "submitInput appended interaction renders into history container":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+
+      vm.submitInput("p y")
+
+      # The render-effect should have re-rendered the body and
+      # populated ``#repl-history`` with the input + output rows.
+      let inputRow = findByClass(panel, "repl-input-history")
+      check inputRow != nil
+      check inputRow.children.len == 1
+      check inputRow.children[0].kind == mnkText
+      check inputRow.children[0].text == ">p y"
+
+      let outputRow = findByClass(panel, "repl-output-history")
+      check outputRow != nil
+      let preEl = findByTag(outputRow, "pre")
+      check preEl != nil
+      # rokLoading -> "repl-output-loading" CSS class.
+      check preEl.attributes.getOrDefault("class", "") == "repl-output-loading"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# REPL Panel — onDebugOutput
+# ---------------------------------------------------------------------------
+
+suite "IsoNim REPL Panel — onDebugOutput":
+
+  test "onDebugOutput mutates last interaction's output":
+    # Mirrors the legacy ``self.history[^1].output = response`` line in
+    # ``ReplComponent.onDebugOutput``.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+
+      vm.submitInput("expr1")
+      check vm.history.val[^1].output.kind == rokLoading
+
+      vm.onDebugOutput(ReplOutput(kind: rokResult, output: "42"))
+
+      let entries = vm.history.val
+      check entries.len == 1
+      check entries[^1].output.kind == rokResult
+      check entries[^1].output.output == "42"
+
+      dispose()
+
+  test "onDebugOutput updates rendered <pre> class + text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+      let r = MockRenderer()
+
+      let panel = renderReplPanel(r, vm)
+      vm.submitInput("err")
+
+      vm.onDebugOutput(ReplOutput(kind: rokError, output: "boom"))
+
+      let outputRow = findByClass(panel, "repl-output-history")
+      check outputRow != nil
+      let preEl = findByTag(outputRow, "pre")
+      check preEl.attributes.getOrDefault("class", "") == "repl-output-error"
+      check preEl.children.len == 1
+      check preEl.children[0].text == "boom"
+
+      dispose()
+
+  test "onDebugOutput on empty history is a silent no-op":
+    # Defensive guard against an out-of-order response that arrives
+    # before any submit fired.  Matches the legacy guard implicitly:
+    # the ``self.history[^1]`` indexer would crash on an empty list,
+    # so the new VM checks the length explicitly.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+
+      vm.onDebugOutput(ReplOutput(kind: rokResult, output: "ignored"))
+
+      check vm.history.val.len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# REPL Panel — bounded-10 history rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim REPL Panel — bounded history":
+
+  test "renders only the last REPL_HISTORY_VISIBLE_LEN entries newest-first":
+    # Push 12 interactions, expect the rendered list to contain only
+    # the last 10 in newest-first order — mirrors the legacy
+    # ``(history.len-1).countdown(history.len-10)`` slice.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+
+      var entries: seq[ReplInteraction] = @[]
+      for i in 0 ..< 12:
+        entries.add(ReplInteraction(
+          input: "cmd" & $i,
+          output: ReplOutput(kind: rokResult, output: "out" & $i),
+        ))
+      vm.setHistory(entries)
+
+      let r = MockRenderer()
+      let panel = renderReplPanel(r, vm)
+
+      let inputRows = findAllByClass(panel, "repl-input-history")
+      let outputRows = findAllByClass(panel, "repl-output-history")
+      check inputRows.len == REPL_HISTORY_VISIBLE_LEN
+      check outputRows.len == REPL_HISTORY_VISIBLE_LEN
+
+      # Newest first: row 0 must be the last appended interaction.
+      check inputRows[0].children[0].text == ">cmd11"
+      check inputRows[^1].children[0].text == ">cmd2"
+
+      # Output ordering must mirror the input ordering.
+      check findByTag(outputRows[0], "pre").children[0].text == "out11"
+      check findByTag(outputRows[^1], "pre").children[0].text == "out2"
+
+      dispose()
+
+  test "history shorter than the limit renders every entry":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+
+      vm.setHistory(@[
+        ReplInteraction(input: "a",
+          output: ReplOutput(kind: rokResult, output: "1")),
+        ReplInteraction(input: "b",
+          output: ReplOutput(kind: rokMove, output: "2")),
+      ])
+
+      let r = MockRenderer()
+      let panel = renderReplPanel(r, vm)
+
+      let inputRows = findAllByClass(panel, "repl-input-history")
+      check inputRows.len == 2
+      check inputRows[0].children[0].text == ">b"
+      check inputRows[1].children[0].text == ">a"
+
+      let outputRows = findAllByClass(panel, "repl-output-history")
+      check findByTag(outputRows[0], "pre").attributes.getOrDefault(
+        "class", "") == "repl-output-move"
+      check findByTag(outputRows[1], "pre").attributes.getOrDefault(
+        "class", "") == "repl-output-result"
+
+      dispose()
+
+  test "clearHistory wipes the rendered list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+      vm.setReplEnabled(true)
+
+      vm.setHistory(@[
+        ReplInteraction(input: "a",
+          output: ReplOutput(kind: rokResult, output: "1")),
+      ])
+      let r = MockRenderer()
+      let panel = renderReplPanel(r, vm)
+      check findAllByClass(panel, "repl-input-history").len == 1
+
+      vm.clearHistory()
+      check findAllByClass(panel, "repl-input-history").len == 0
+      check findAllByClass(panel, "repl-output-history").len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# REPL VM — defaults
+# ---------------------------------------------------------------------------
+
+suite "IsoNim REPL Panel — vm":
+
+  test "createReplVM defaults reflect the disabled branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createReplVM(store)
+
+      check vm.history.val.len == 0
+      check vm.replEnabled.val == false
+      check vm.materialized.val == false
+      check vm.langName.val == ""
+      check vm.displayMode.val == rdmReplDisabled
+      check not vm.store.isNil
+
+      dispose()
+
+  test "outputClass mirrors legacy repl-output-<kind> mapping":
+    # Documenting the legacy CSS contract — a regression here would
+    # break the existing scss rules under static/styles/repl.scss.
+    check outputClass(rokLoading) == "repl-output-loading"
+    check outputClass(rokResult) == "repl-output-result"
+    check outputClass(rokMove) == "repl-output-move"
+    check outputClass(rokError) == "repl-output-error"
+
+  test "inputDisplayText prefixes with '>' (legacy echo shape)":
+    check inputDisplayText("p x") == ">p x"
+    check inputDisplayText("") == ">"

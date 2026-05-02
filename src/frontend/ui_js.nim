@@ -1023,6 +1023,8 @@ when not defined(ctInExtension):
       step_list.initStepListVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCalltraceEditorVMWithStore');".}
       calltrace_editor.initCalltraceEditorVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initReplVMWithStore');".}
+      repl.initReplVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator
