@@ -439,3 +439,121 @@ type
     durationMs*: int
     responseSize*: int
     startGeid*: int64
+
+  # -------------------------------------------------------------------
+  # Welcome screen — recent traces, recent folders, start options,
+  # edit-mode + launch-config state.
+  #
+  # Mirrors the legacy ``WelcomeScreenComponent`` (see
+  # ``frontend/ui/welcome_screen.nim``) but with plain ``string`` value
+  # types so the same data works on both native (``test-vm-native``)
+  # and JS (``test-vm-js``) backends without ``cstring`` /
+  # ``langstring`` conversion noise.  The Karax view keeps its own
+  # ``Trace``/``RecentFolder``/``WelcomeScreenOption`` ref-objects in
+  # ``frontend/types.nim``; the legacy bridge translates those into
+  # the value types below before mirroring them into the VM signals.
+  # -------------------------------------------------------------------
+
+  RecentTraceRecord* = object
+    ## One trace listed in the welcome-screen "RECENT TRACES" panel.
+    ##
+    ## ``id``       — unique trace identifier (matches
+    ##                ``Trace.id`` on the legacy ref-object).
+    ## ``program``  — captured program path / name; rendered in the
+    ##                ``recent-trace-title-content`` span.
+    ## ``args``     — command-line arguments captured for the recording.
+    ##                Joined with spaces in the tooltip's ``Args`` line.
+    ## ``workdir``  — working directory the recording ran from.
+    ## ``date``     — recorded date string (``"yyyy/MM/dd"`` or
+    ##                ``"yyyy/MM/dd HH:mm:ss"``).  ``formatTimeAgo`` in
+    ##                the legacy view turns this into the
+    ##                ``recent-trace-title-time`` "N minutes/hours/days
+    ##                ago" string.
+    ## ``duration`` — recorded duration string (free text, may be
+    ##                empty).  Surfaced verbatim in the tooltip.
+    id*: int
+    program*: string
+    args*: seq[string]
+    workdir*: string
+    date*: string
+    duration*: string
+
+  RecentFolderRecord* = object
+    ## One folder listed in the welcome-screen "RECENT FOLDERS" panel.
+    ##
+    ## ``id``   — unique identifier for the folder entry.
+    ## ``name`` — display name (rendered in the
+    ##            ``recent-folder-name`` div).
+    ## ``path`` — absolute folder path; the legacy click handler
+    ##            sends ``CODETRACER::load-recent-folder`` with this
+    ##            path.
+    id*: int
+    name*: string
+    path*: string
+
+  WelcomeStartOptionRecord* = object
+    ## One button in the start-options strip below the recent panels.
+    ##
+    ## Mirrors ``WelcomeScreenOption`` from ``frontend/types.nim`` but
+    ## drops the per-render ``hovered`` flag — the IsoNim view derives
+    ## the hover modifier from the VM's ``hoveredOption`` signal so
+    ## the option records themselves stay immutable in the
+    ## ``startOptions`` signal.
+    ##
+    ## ``key``      — stable identifier used in click dispatch and
+    ##                CSS class derivation (e.g. ``"open-folder"``,
+    ##                ``"record-new-trace"``).  The Karax view derives
+    ##                this from ``toLowerAscii($name).split.join("-")``.
+    ## ``name``     — visible label (e.g. ``"Open folder"``).
+    ## ``inactive`` — when true, the button is rendered with the
+    ##                ``inactive-start-option`` modifier and clicks
+    ##                are no-ops.
+    key*: string
+    name*: string
+    inactive*: bool
+
+  WelcomeScreenMode* = enum
+    ## Which top-level surface the welcome screen is rendering.
+    ##
+    ## Mirrors the three mutually-exclusive Karax flags
+    ## (``welcomeScreen`` / ``newRecordScreen`` / ``openOnlineTrace``)
+    ## as a single typed enum so the VM cannot fall into the
+    ## "all three false" fallthrough state the Karax method
+    ## allowed.
+    wsmWelcome     ## "welcome-screen" surface (recent traces / folders / start options)
+    wsmNewRecord   ## "new-record-screen" surface (record-form)
+    wsmOnlineTrace ## "new-record-screen" surface (online-download form)
+    wsmEdit        ## edit-mode (no welcome surface; main UI is shown)
+
+  LaunchConfigEntry* = object
+    ## One entry in the "Debug → Launch Configurations" submenu.
+    ##
+    ## Mirrors the entries the GUI ``launch_config.spec.ts`` asserts
+    ## on (``.menu-element-python-fibonacci`` /
+    ## ``.menu-element-ruby-fibonacci`` etc.).  ``slug`` is the kebab-
+    ## case suffix the spec's locator uses; ``label`` is the rendered
+    ## menu text; ``language`` is the preconfigured language tag
+    ## (``"python"``, ``"ruby"`` …); ``program`` is the script the
+    ## launch config will run.
+    slug*: string
+    label*: string
+    language*: string
+    program*: string
+    enabled*: bool
+
+  LaunchConfigState* = object
+    ## Reactive launch-config state.
+    ##
+    ## ``configs``        — full list of available launch
+    ##                      configurations (typically populated from
+    ##                      ``examples/launch.json`` or the IDE's
+    ##                      ``.codetracer/launch.json``).
+    ## ``selectedSlug``   — currently-selected launch config slug.
+    ##                      Empty string means "no selection".
+    ## ``editFolderPath`` — folder path the IDE is editing (mirrors
+    ##                      the GUI spec's ``editFolderPath`` fixture
+    ##                      param).  Empty string in welcome /
+    ##                      record / online-trace mode.
+    configs*: seq[LaunchConfigEntry]
+    selectedSlug*: string
+    editFolderPath*: string
