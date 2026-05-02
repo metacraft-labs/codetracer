@@ -291,3 +291,72 @@ type
     hasHistory*: bool
     previousPath*: string
     action*: string
+
+  # -------------------------------------------------------------------
+  # Step List panel value types
+  #
+  # The Step List panel renders a linear list of step lines around the
+  # current debugger position.  Each entry has a relative ``delta``
+  # offset from the current position, a source location, the source
+  # text the step lands on, and zero or more ``StepLineFlowValue``
+  # entries (the legacy view used these for inline expression / value
+  # repr strings — for ``Line`` rows they are the captured flow values,
+  # for ``Call`` rows the function arguments, for ``Return`` rows the
+  # single returned expression).  The shape mirrors the legacy
+  # ``LineStep`` record in ``common_types/debugger_features/stepping``
+  # but uses ``string`` instead of ``langstring`` so the same value
+  # works on both native and JS backends without conversion noise.
+  # -------------------------------------------------------------------
+
+  StepLineKind* = enum
+    ## Mirrors ``LineStepKind`` from
+    ## ``common_types/debugger_features/stepping.nim`` (Line / Call /
+    ## Return).  Kept as a plain (non-pure) enum so the ``$`` produces
+    ## the bare names the legacy CSS classes used (``step-line``,
+    ## ``step-line-call``, ``step-line-return``).
+    slkLine
+    slkCall
+    slkReturn
+
+  StepLineFlowValue* = object
+    ## One ``expression = repr`` pair attached to a step line.  The
+    ## legacy view used ``stepFlowValue.expression`` and
+    ## ``stepFlowValue.value.textRepr``; the VM caller pre-renders the
+    ## value to text so the view layer does not depend on the JS-only
+    ## ``Value`` type tree.
+    expression*: string
+    value*: string
+
+  StepLineLocation* = object
+    ## Minimal location info the Step List panel needs.  ``rrTicks``
+    ## drives the active-step highlight (the legacy view compared the
+    ## current debugger ``rrTicks`` + ``path`` + ``line`` against each
+    ## row's location).  ``functionName`` feeds the ``filename:line[fn]``
+    ## label rendered for ``Line`` rows.
+    path*: string
+    line*: int
+    functionName*: string
+    rrTicks*: int
+
+  StepLine* = object
+    ## One row in the Step List panel.
+    ##
+    ## ``delta`` is the signed offset from the current debugger position
+    ## (negative = backward, positive = forward).  It also drives the
+    ## ``lineStepJump`` step request (``repeat = delta``,
+    ## ``reverse = delta < 0``).
+    ##
+    ## ``sourceLine`` is the rendered source / description text the
+    ## panel emits inside the ``<pre><code>`` block (Line rows) or the
+    ## ``step-line-description`` span (Call / Return rows).
+    ##
+    ## ``values`` is the list of ``expression = repr`` pairs the legacy
+    ## view rendered alongside the row.  ``Line`` rows render every
+    ## entry inside ``.step-line-flow-value``; ``Call`` rows render
+    ## every entry inside ``.step-line-args``; ``Return`` rows render
+    ## only the first entry inside ``.step-line-return-value``.
+    kind*: StepLineKind
+    delta*: int
+    location*: StepLineLocation
+    sourceLine*: string
+    values*: seq[StepLineFlowValue]
