@@ -100,7 +100,7 @@ exists a Nim test that:
 | `views/` | 2 | `isonim_views_test.nim` (~290 tests, 87 suites — the cross-panel rendering test), `views_test.nim` (legacy) |
 | `scenarios/` | 3 | `debugging_scenarios_test.nim`, `feature_scenarios_test.nim`, `integration_test.nim` |
 | `store/` | 2 | `store_test.nim`, `backend_test.nim` |
-| `integration/` | 2 | `real_backend_test.nim`, `language_smoke_test.nim` |
+| `integration/` | 3 | `real_backend_test.nim`, `language_smoke_test.nim`, `language_smoke_mock_test.nim` (added 1.63 — 12 Mock-driven per-language smoke suites for cluster A) |
 | `calltrace/` | 1 | `calltrace_vm_test.nim` |
 | `state/` | 1 | `state_vm_test.nim` |
 | `flow/` | 1 | `flow_vm_test.nim` |
@@ -114,7 +114,7 @@ exists a Nim test that:
 | `shell/` | 1 | `shell_vm_test.nim` |
 | `multi-replay/` | 1 | `multi_session_test.nim` |
 | `noir-space-ship/` | 1 | `noir_space_ship_test.nim` (9 suites) |
-| **Total** | **23 VM test files** | claim of 568+ tests is suite-counted, not file-counted |
+| **Total** | **24 VM test files** | claim of 568+ tests is suite-counted, not file-counted; +1 file / +12 tests in 1.63 |
 
 ### 2.3 Per-directory pairing (spec → matching VM test)
 
@@ -150,18 +150,18 @@ the cross-language smoke shape.  Co-location convention violated (no
 | `js_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
 | `wasm_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
 | `solidity_example.spec.ts` | `integration/language_smoke_test.nim` | PARTIAL | |
-| `aiken_example.spec.ts` | (none) | GAP | recorder-side audit done in 1.48 but no VM test |
-| `cadence_example.spec.ts` | (none) | GAP | recorder audit 1.52 |
-| `cairo_example.spec.ts` | (none) | GAP | recorder audit 1.50 |
-| `circom_example.spec.ts` | (none) | GAP | recorder audit 1.58 |
-| `leo_example.spec.ts` | (none) | GAP | recorder audit 1.59 |
-| `masm_example.spec.ts` | (none) | GAP | recorder audit 1.56 |
-| `move_example.spec.ts` | (none) | GAP | recorder audit 1.46 |
-| `polkavm_example.spec.ts` | (none) | GAP | recorder audit 1.55 |
-| `solana_example.spec.ts` | (none) | GAP | recorder audit 1.44 |
-| `stylus_example.spec.ts` | (none) | GAP | wazero recorder audit 1.60 |
-| `sway_example.spec.ts` | (none) | GAP | recorder audit 1.53 |
-| `tolk_example.spec.ts` | (none) | GAP | recorder audit 1.57 |
+| `aiken_example.spec.ts` | `integration/language_smoke_mock_test.nim` (aiken_example smoke) | PAIRED (smoke, 1.63) | recorder-side audit 1.48; smoke VM test 1.63 |
+| `cadence_example.spec.ts` | `integration/language_smoke_mock_test.nim` (cadence_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.52; smoke VM test 1.63 |
+| `cairo_example.spec.ts` | `integration/language_smoke_mock_test.nim` (cairo_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.50; smoke VM test 1.63 |
+| `circom_example.spec.ts` | `integration/language_smoke_mock_test.nim` (circom_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.58; smoke VM test 1.63 |
+| `leo_example.spec.ts` | `integration/language_smoke_mock_test.nim` (leo_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.59; smoke VM test 1.63 |
+| `masm_example.spec.ts` | `integration/language_smoke_mock_test.nim` (masm_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.56; smoke VM test 1.63 |
+| `move_example.spec.ts` | `integration/language_smoke_mock_test.nim` (move_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.46; smoke VM test 1.63 |
+| `polkavm_example.spec.ts` | `integration/language_smoke_mock_test.nim` (polkavm_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.55; smoke VM test 1.63 |
+| `solana_example.spec.ts` | `integration/language_smoke_mock_test.nim` (solana_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.44; smoke VM test 1.63 |
+| `stylus_example.spec.ts` | `integration/language_smoke_mock_test.nim` (stylus_example smoke) | PAIRED (smoke, 1.63) | wazero recorder audit 1.60; smoke VM test 1.63 |
+| `sway_example.spec.ts` | `integration/language_smoke_mock_test.nim` (sway_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.53; smoke VM test 1.63 |
+| `tolk_example.spec.ts` | `integration/language_smoke_mock_test.nim` (tolk_example smoke) | PAIRED (smoke, 1.63) | recorder audit 1.57; smoke VM test 1.63 |
 
 Each `<lang>_example.spec.ts` has 6–10 tests. 12/17 specs are pure GAPs.
 This is the largest GAP cluster by spec count.
@@ -318,17 +318,19 @@ DeepReview panel itself (multi-day project per section 5.4).
 
 | Status | Specs | % of 67 |
 |---|---:|---:|
-| PAIRED | 7 | 10% |
+| PAIRED | 19 | 28% |
 | PARTIAL | 16 | 24% |
 | SHARED | 13 | 19% |
-| GAP | 31 | 46% |
+| GAP | 19 | 28% |
 | **Total** | **67** | **100%** |
 
-Reasonable coverage exists for ~53% of specs (PAIRED + PARTIAL + SHARED);
-~46% are pure GAPs concentrated in two clusters: `program_specific_tests/`
-language examples (12) and panel-not-yet-migrated areas (deepreview /
-welcome-screen / multi-window / auto-hide / layout / streaming / browser
-materialized).
+After Cluster A closure in 1.63 (12 program_specific_tests
+`*_example.spec.ts` files moved GAP → PAIRED at smoke level via
+`integration/language_smoke_mock_test.nim`), reasonable headless
+coverage now exists for ~72% of specs.  Remaining GAPs are the
+panel-not-yet-migrated areas (deepreview / welcome-screen / multi-
+window / auto-hide / layout / streaming / browser materialized) plus
+a small misc tail (macro-expansion, page-object infra, benchmarks).
 
 ---
 
@@ -337,7 +339,7 @@ materialized).
 GAP specs grouped by panel/area, with effort estimate and leverage
 assessment for follow-up iterations.
 
-### 3.1 Cluster A — Per-language `*_example.spec.ts` smoke (12 GAPs, ~110 tests)
+### 3.1 Cluster A — Per-language `*_example.spec.ts` smoke (12 GAPs, ~110 tests) — CLOSED at smoke level (1.63, 2026-05-02)
 
 **Specs:** aiken, cadence, cairo, circom, leo, masm, move, polkavm,
 solana, stylus, sway, tolk.
@@ -354,6 +356,26 @@ recorder.  All 12 recorders are already audited.
 
 **Leverage:** ★★★★★ — closes 12 spec rows, ~110 GUI test scenarios with
 one extension to the shared smoke harness.
+
+**Closure (1.63, 2026-05-02):** added
+`integration/language_smoke_mock_test.nim` with 12 Mock-driven smoke
+suites — one per language — that drive a `MockBackendService`-fronted
+`ReplayDataStore` and assert on the four observable signal flows the
+specs exercise (editor settles on `.<ext>` source file via
+`activeFileName` memo, calltrace populates with the language's expected
+entry function via `visibleLines` memo, state panel exposes locals via
+`currentVariables` memo, event log surfaces a row via `eventRows`
+signal).  All 12 pass on both `just test-vm-native` and
+`just test-vm-js`.  The existing real-backend
+`language_smoke_test.nim` is intentionally untouched — it is excluded
+from the VM harnesses (see the `! -path '*/integration/language_smoke_test.nim'`
+filter in the justfile) because it spawns a real `replay-server`.
+The new file is the Mock complement and lives alongside it in
+`integration/`.  Cluster A specs move from GAP → PAIRED at the smoke
+level; per-language deeper assertions (e.g. specific event count,
+exact stack-frame contents on masm, ecalli register staging on
+polkavm) remain as follow-ups under §3 / §5 of this audit and as the
+next-iteration cluster A.1 in §5.5 of the migration doc.
 
 ### 3.2 Cluster B — Welcome screen (3 GAPs, 21 tests)
 
@@ -429,9 +451,10 @@ first policy.
 
 Highest-leverage clusters first, scoped to single sub-agent iterations:
 
-  1. **Cluster A (per-language smoke)** — extend `integration/
-     language_smoke_test.nim` with one-test-per-recorder smoke
-     coverage.  12 specs / ~110 tests addressed in ~1 iteration.
+  1. ~~Cluster A (per-language smoke)~~ — CLOSED at smoke level in 1.63
+     via `integration/language_smoke_mock_test.nim` (12 Mock-driven
+     suites, 12/12 green on both `just test-vm-native` and
+     `just test-vm-js`).  Cluster B is now the top "next attack" item.
   2. **Cluster B (welcome screen)** — build `WelcomeScreenVM` +
      co-located `welcome-screen/welcome_screen_vm_test.nim`.  Closes
      3 specs / 21 tests in 1–2 iterations.
@@ -508,12 +531,19 @@ This is the lowest-friction way to prevent coverage regression.
 
 ### 5.3 Sub-agent attack order
 
-For the next sub-agent picking this up, **start with Cluster A**:
-12 GAP rows can be closed by one extension to a single Nim file
-(`integration/language_smoke_test.nim`), against trace fixtures that
-already exist in the recorders' test directories.  No new VMs, no
-architectural pieces.  This is the lowest-friction / highest-test-count
-option.
+For the next sub-agent picking this up, **start with Cluster B**:
+Cluster A was closed at the smoke level in 1.63 (see §3.1).  Cluster B
+(welcome-screen) is now the top "next attack" item — 3 specs / 21
+tests close with a single new `WelcomeScreenVM` (recent-traces,
+recent-folders, start-options, hovered-trace, edit-mode, launch-config
+signals) plus a co-located `welcome-screen/welcome_screen_vm_test.nim`.
+Estimated 1–2 iterations.
+
+Historical guidance, retained for reference: Cluster A's 12 GAP rows
+were closed by one new file (`integration/language_smoke_mock_test.nim`)
+driven by `MockBackendService` — no recorder dependency, no new VMs,
+no architectural pieces — confirming the audit's prediction that
+this was the lowest-friction / highest-test-count starting point.
 
 ---
 
