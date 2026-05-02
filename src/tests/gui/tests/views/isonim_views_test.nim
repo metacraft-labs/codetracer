@@ -37,6 +37,7 @@ import viewmodels/no_source_vm
 import viewmodels/step_list_vm
 import viewmodels/calltrace_editor_vm
 import viewmodels/repl_vm
+import viewmodels/low_level_code_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -55,6 +56,7 @@ import views/isonim_no_source_view
 import views/isonim_step_list_view
 import views/isonim_calltrace_editor_view
 import views/isonim_repl_view
+import views/isonim_low_level_code_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -5575,3 +5577,456 @@ suite "IsoNim REPL Panel — vm":
   test "inputDisplayText prefixes with '>' (legacy echo shape)":
     check inputDisplayText("p x") == ">p x"
     check inputDisplayText("") == ">"
+
+# ===========================================================================
+# Low Level Code panel tests
+# ===========================================================================
+#
+# Cover:
+# - Outer structure (root class matches the legacy
+#   ``componentContainerClass("low-level-code")`` output, empty-state
+#   instruction list).
+# - Reactive updates: ``setInstructions`` populates the list,
+#   ``setActiveOffset`` toggles the ``active-instruction`` class on
+#   the matching row, ``setNoirProject`` swaps the offset display.
+# - Address / error overlays render reactively from
+#   ``setAddress`` / ``setErrorMessage``.
+# - Click handler routes through ``jumpToInstruction`` to the
+#   backend mock with the row's offset / source cross-reference.
+# - VM defaults reflect the empty-state branch and the address /
+#   error / Noir signals start inert.
+
+const LowLevelCodePanelClass = "low-level-code"
+
+proc makeInstr(name: string; offset: int = 0; args: string = "";
+                other: string = ""; highLevelPath: string = "";
+                highLevelLine: int = 0): LowLevelInstruction =
+  ## Helper: synthesise a ``LowLevelInstruction`` with sensible
+  ## defaults so each test can spell out only the fields it asserts.
+  LowLevelInstruction(
+    name: name,
+    args: args,
+    other: other,
+    offset: offset,
+    highLevelPath: highLevelPath,
+    highLevelLine: highLevelLine,
+  )
+
+# ---------------------------------------------------------------------------
+# Structure tests
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Low Level Code Panel — structure":
+
+  test "root carries component-container + low-level-code classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+
+      check "component-container" in panel.attributes["class"]
+      check LowLevelCodePanelClass in panel.attributes["class"]
+
+      dispose()
+
+  test "container constant matches the legacy componentContainerClass output":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/low_level_code.scss
+    # (and any test/page-object selectors keyed on the exact class
+    # string).
+    check LowLevelCodeContainerClass == "component-container low-level-code"
+
+  test "empty VM renders an empty instruction list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      check listContainer != nil
+      check listContainer.children.len == 0
+      check vm.isEmpty.val == true
+
+      dispose()
+
+  test "header overlay is empty when no address / error is set":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+
+      let headerContainer = findByClass(panel, "low-level-code-header")
+      check headerContainer != nil
+      check headerContainer.children.len == 0
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Instruction list rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Low Level Code Panel — instruction list":
+
+  test "setInstructions populates the row list reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      check listContainer.children.len == 0
+
+      vm.setInstructions(@[
+        makeInstr("mov", offset = 0, args = "rax, 1"),
+        makeInstr("add", offset = 1, args = "rax, rbx"),
+        makeInstr("ret", offset = 2),
+      ])
+
+      check listContainer.children.len == 3
+
+      dispose()
+
+  test "row spans render offset / name / args / other columns":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[
+        makeInstr("mov", offset = 4, args = "rax, 1", other = "; init"),
+      ])
+
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      let row = listContainer.children[0]
+      check findByClass(row, "low-level-code-instruction-offset").textContent == "4"
+      check findByClass(row, "low-level-code-instruction-name").textContent == "mov"
+      check findByClass(row, "low-level-code-instruction-args").textContent == "rax, 1"
+      check findByClass(row, "low-level-code-instruction-other").textContent == "; init"
+
+      dispose()
+
+  test "empty instruction name renders the legacy <no instructions> placeholder":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[
+        makeInstr("", offset = 0),
+      ])
+
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      let row = listContainer.children[0]
+      check findByClass(row, "low-level-code-instruction-name").textContent ==
+        "<no instructions>"
+
+      dispose()
+
+  test "Noir project flag swaps offset display to StepId(<offset>)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+
+      vm.setInstructions(@[
+        makeInstr("acir", offset = 7),
+      ])
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      check findByClass(listContainer, "low-level-code-instruction-offset")
+        .textContent == "7"
+
+      vm.setNoirProject(true)
+      check findByClass(listContainer, "low-level-code-instruction-offset")
+        .textContent == "StepId(7)"
+
+      dispose()
+
+  test "source cross-ref span only renders when highLevelLine > 0":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[
+        makeInstr("call", offset = 0, highLevelPath = "src/main.nim",
+                   highLevelLine = 12),
+        makeInstr("nop", offset = 1),
+      ])
+
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      let firstRow = listContainer.children[0]
+      let secondRow = listContainer.children[1]
+      check findByClass(firstRow, "low-level-code-instruction-source")
+        .textContent == "src/main.nim:12"
+      check findByClass(secondRow, "low-level-code-instruction-source") == nil
+
+      dispose()
+
+  test "clearInstructions wipes the rendered list and resets the active offset":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
+      vm.setActiveOffset(0)
+
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      check listContainer.children.len == 1
+
+      vm.clearInstructions()
+      check listContainer.children.len == 0
+      check vm.activeOffset.val == NO_ACTIVE_OFFSET
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Active row highlighting
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Low Level Code Panel — active row":
+
+  test "setActiveOffset toggles the active-instruction class on the matching row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[
+        makeInstr("mov", offset = 0),
+        makeInstr("add", offset = 1),
+        makeInstr("ret", offset = 2),
+      ])
+
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      for row in listContainer.children:
+        check "active-instruction" notin row.attributes["class"]
+
+      vm.setActiveOffset(1)
+      check "active-instruction" notin listContainer.children[0].attributes["class"]
+      check "active-instruction" in listContainer.children[1].attributes["class"]
+      check "active-instruction" notin listContainer.children[2].attributes["class"]
+
+      vm.setActiveOffset(2)
+      check "active-instruction" notin listContainer.children[1].attributes["class"]
+      check "active-instruction" in listContainer.children[2].attributes["class"]
+
+      dispose()
+
+  test "negative active offset clears every row's active-instruction class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
+
+      vm.setActiveOffset(0)
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      check "active-instruction" in listContainer.children[0].attributes["class"]
+
+      vm.setActiveOffset(NO_ACTIVE_OFFSET)
+      check "active-instruction" notin listContainer.children[0].attributes["class"]
+
+      dispose()
+
+  test "isActiveRow uses offset equality and ignores negative offsets":
+    # Documenting the legacy contract — ``findHighlight`` returned -1
+    # ("no row") when no instruction matched the live debugger line.
+    let instr = makeInstr("nop", offset = 5)
+    check isActiveRow(instr, 5) == true
+    check isActiveRow(instr, 4) == false
+    check isActiveRow(instr, NO_ACTIVE_OFFSET) == false
+
+# ---------------------------------------------------------------------------
+# Address / error overlays
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Low Level Code Panel — overlays":
+
+  test "setAddress renders the Originating address overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      check findByClass(panel, "low-level-code-address") == nil
+
+      vm.setAddress(0x1000)
+      let addrDiv = findByClass(panel, "low-level-code-address")
+      check addrDiv != nil
+      check addrDiv.textContent == "Originating address: 0x" & toHex(0x1000)
+
+      dispose()
+
+  test "address overlay disappears when address is reset to 0":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setAddress(0xABCD)
+      check findByClass(panel, "low-level-code-address") != nil
+
+      vm.setAddress(0)
+      check findByClass(panel, "low-level-code-address") == nil
+
+      dispose()
+
+  test "setErrorMessage renders the error overlay reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      check findByClass(panel, "low-level-code-error") == nil
+
+      vm.setErrorMessage("function not found")
+      let errDiv = findByClass(panel, "low-level-code-error")
+      check errDiv != nil
+      check errDiv.textContent == "function not found"
+
+      vm.setErrorMessage("")
+      check findByClass(panel, "low-level-code-error") == nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Backend interactions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Low Level Code Panel — interactions":
+
+  test "loadAsmFor sends ct/load-asm-function with path / name / key payload":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+
+      mock.clearReceivedCommands()
+      vm.loadAsmFor("src/main.nim", "main", key = "k1", forceReload = true)
+
+      let req = mock.findCommand("ct/load-asm-function")
+      check req.isSome
+      check req.get.args["path"].getStr == "src/main.nim"
+      check req.get.args["name"].getStr == "main"
+      check req.get.args["key"].getStr == "k1"
+      check req.get.args["forceReload"].getBool == true
+
+      dispose()
+
+  test "loadAsmFor pre-clears the row list before the response arrives":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+
+      vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
+      vm.setActiveOffset(0)
+      vm.setErrorMessage("stale error")
+
+      vm.loadAsmFor("src/main.nim", "main")
+
+      check vm.instructions.val.len == 0
+      check vm.activeOffset.val == NO_ACTIVE_OFFSET
+      check vm.errorMessage.val == ""
+
+      dispose()
+
+  test "clicking a row dispatches ct/asm-instruction-jump with the offset / cross-ref":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+      let r = MockRenderer()
+
+      let panel = renderLowLevelCodePanel(r, vm)
+      vm.setInstructions(@[
+        makeInstr("mov", offset = 0, highLevelPath = "src/a.nim",
+                   highLevelLine = 3),
+        makeInstr("ret", offset = 1, highLevelPath = "src/a.nim",
+                   highLevelLine = 4),
+      ])
+
+      mock.clearReceivedCommands()
+      let listContainer = findByClass(panel, "low-level-code-instructions")
+      listContainer.children[1].fireEvent("click")
+
+      let req = mock.findCommand("ct/asm-instruction-jump")
+      check req.isSome
+      check req.get.args["offset"].getInt == 1
+      check req.get.args["highLevelPath"].getStr == "src/a.nim"
+      check req.get.args["highLevelLine"].getInt == 4
+
+      dispose()
+
+  test "jumpToInstruction direct call sends the same payload shape":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+
+      mock.clearReceivedCommands()
+      vm.jumpToInstruction(makeInstr("call", offset = 9,
+                                      highLevelPath = "src/x.nim",
+                                      highLevelLine = 21))
+
+      let req = mock.findCommand("ct/asm-instruction-jump")
+      check req.isSome
+      check req.get.args["offset"].getInt == 9
+      check req.get.args["highLevelPath"].getStr == "src/x.nim"
+      check req.get.args["highLevelLine"].getInt == 21
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / formatting helpers
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Low Level Code Panel — vm":
+
+  test "createLowLevelCodeVM defaults reflect the empty-state branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createLowLevelCodeVM(store)
+
+      check vm.instructions.val.len == 0
+      check vm.activeOffset.val == NO_ACTIVE_OFFSET
+      check vm.address.val == 0
+      check vm.errorMessage.val == ""
+      check vm.noirProject.val == false
+      check vm.isEmpty.val == true
+      check not vm.store.isNil
+
+      dispose()
+
+  test "formatOffset mirrors legacy isNoirProject / no-step-id branches":
+    let regular = makeInstr("nop", offset = 4)
+    check formatOffset(regular, false) == "4"
+    check formatOffset(regular, true) == "StepId(4)"
+
+    let noStepId = makeInstr("nop", offset = -1)
+    check formatOffset(noStepId, false) == "<no step id>"
+    check formatOffset(noStepId, true) == "<no step id>"
+
+  test "displayName returns <no instructions> for an empty name":
+    check displayName(makeInstr("")) == "<no instructions>"
+    check displayName(makeInstr("ret")) == "ret"
+
+  test "rowClass adds the active-instruction modifier when active":
+    check rowClass(false) == "low-level-code-instruction"
+    check rowClass(true) == "low-level-code-instruction active-instruction"

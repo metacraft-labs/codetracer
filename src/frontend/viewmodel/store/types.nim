@@ -360,3 +360,39 @@ type
     location*: StepLineLocation
     sourceLine*: string
     values*: seq[StepLineFlowValue]
+
+  # -------------------------------------------------------------------
+  # Low Level Code panel — assembly / IR view.
+  #
+  # Mirrors the legacy ``Instruction`` / ``Instructions`` records in
+  # ``common_types/language_features/code.nim`` but uses ``string``
+  # instead of ``langstring`` so the same value works on both native
+  # and JS backends without conversion noise.  Used by
+  # ``LowLevelCodeVM`` to drive the IsoNim view that replaces the
+  # legacy Karax ``method render`` on ``LowLevelCodeComponent``.
+  # -------------------------------------------------------------------
+
+  LowLevelInstruction* = object
+    ## One row in the asm/bytecode listing.  ``offset`` is the
+    ## program-counter offset / step id used to flag the active row
+    ## (``LowLevelCodeVM.activeOffset`` matches this column for the
+    ## ``active-instruction`` highlight).  ``highLevelPath`` /
+    ## ``highLevelLine`` carry the back-pointer to the source line the
+    ## instruction was generated from — the legacy view used these to
+    ## populate Monaco view zones; the IsoNim view exposes them so the
+    ## same source-line cross-reference can be rendered as a list.
+    name*: string
+    args*: string
+    other*: string
+    offset*: int
+    highLevelPath*: string
+    highLevelLine*: int
+
+  LowLevelInstructionList* = object
+    ## The full asm-load response payload.  ``address`` is the
+    ## function's load address (rendered as the panel's
+    ## "Originating address" hex string); ``error`` carries any
+    ## backend-side load failure that should replace the listing.
+    address*: int
+    instructions*: seq[LowLevelInstruction]
+    error*: string

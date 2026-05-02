@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
-  calltrace_editor, repl,
+  calltrace_editor, repl, low_level_code,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -548,6 +548,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.StepList,
       Content.CalltraceEditor,
       Content.Repl,
+      Content.LowLevelCode,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -640,6 +641,21 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           repl.syncLegacyReplIntoVM(ReplComponent(component))
           repl.syncReplConfigIntoVM()
           repl.tryMountIsoNimReplPanel()
+
+        # LowLevelCode is now an IsoNim view -- its outer container
+        # is mounted by ``low_level_code.tryMountIsoNimLowLevelCodePanel``
+        # against the ``lowLevelCodeComponent-{id}`` GoldenLayout host,
+        # and reactive effects keep it in sync.  The Monaco-driven
+        # asm buffer still lives inside the editor sub-tree (the
+        # EditorViewComponent owns that DOM); the IsoNim view here
+        # exposes the parity-faithful container shell + a fallback
+        # row list so headless tests can exercise the same data flow
+        # without Monaco.  Closes the no_source asm sub-tree
+        # follow-up tracked from 1.40.
+        if state.content == Content.LowLevelCode:
+          low_level_code.syncLegacyLowLevelCodeIntoVM(
+            LowLevelCodeComponent(component))
+          low_level_code.tryMountIsoNimLowLevelCodePanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.
