@@ -177,49 +177,41 @@ proc pinActiveContentItem(layout: js, stack: js, edge: AutoHideEdge) =
     return
   pinPanel(cast[GoldenLayout](layout), cast[GoldenContentItem](activeItem), edge)
 
-proc makeNestedButton(layout: js, ev: Event): VNode =
-  buildHtml(
-    tdiv(
-      class = "layout-dropdown hidden",
-      id = "layout-dropdown-toggle"
+proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
+  ## Build the GoldenLayout stack-header dropdown directly.
+  ##
+  ## This intentionally preserves the legacy class names and labels used by
+  ## the auto-hide GUI specs while avoiding a one-off Karax VNode island.
+  result = kdom.document.createElement("div")
+  result.class = cstring"layout-dropdown hidden"
+  result.id = cstring"layout-dropdown-toggle"
+
+  template appendDropdownItem(label: cstring, body: untyped) =
+    let item = kdom.document.createElement("div")
+    item.class = cstring"layout-dropdown-node"
+    item.innerHTML = label
+    item.addEventListener(cstring"click", proc(e {.inject.}: Event) =
+      body
     )
-  ):
-    tdiv(
-      class = "layout-dropdown-node",
-      onclick = proc(e: Event, tg: VNode) =
-        ev.toJs.target.parent.removeChild(ev.target)
-      ):
-      text "Close all"
-    tdiv(
-      class = "layout-dropdown-node",
-      onclick = proc(e: Event, tg: VNode) =
-        if cast[bool](ev.toJs.target.isMaximised):
-          ev.toJs.target.minimise()
-          e.target.innerHTML = "Maximise container"
-        else:
-          ev.toJs.target.maximise()
-          e.target.innerHTML = "Minimise container"
-    ):
-      text "Maximise container"
-    # Auto-hide: pin the active tab to an edge strip.
-    tdiv(
-      class = "layout-dropdown-node",
-      onclick = proc(e: Event, tg: VNode) =
-        pinActiveContentItem(layout, ev.toJs.target, AutoHideEdge.Bottom)
-    ):
-      text "Pin to Bottom"
-    tdiv(
-      class = "layout-dropdown-node",
-      onclick = proc(e: Event, tg: VNode) =
-        pinActiveContentItem(layout, ev.toJs.target, AutoHideEdge.Left)
-    ):
-      text "Pin to Left"
-    tdiv(
-      class = "layout-dropdown-node",
-      onclick = proc(e: Event, tg: VNode) =
-        pinActiveContentItem(layout, ev.toJs.target, AutoHideEdge.Right)
-    ):
-      text "Pin to Right"
+    result.appendChild(item)
+
+  appendDropdownItem(cstring"Close all"):
+    stackCreatedEvent.toJs.target.parent.removeChild(stackCreatedEvent.target)
+
+  appendDropdownItem(cstring"Maximise container"):
+    if cast[bool](stackCreatedEvent.toJs.target.isMaximised):
+      stackCreatedEvent.toJs.target.minimise()
+      e.toJs.target.innerHTML = cstring"Maximise container"
+    else:
+      stackCreatedEvent.toJs.target.maximise()
+      e.toJs.target.innerHTML = cstring"Minimise container"
+
+  appendDropdownItem(cstring"Pin to Bottom"):
+    pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Bottom)
+  appendDropdownItem(cstring"Pin to Left"):
+    pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Left)
+  appendDropdownItem(cstring"Pin to Right"):
+    pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Right)
 
 proc closeLayoutTab*(data: Data, content: Content, id: int) =
   if not data.ui.componentMapping[content].hasKey(id):
@@ -347,7 +339,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Create nested buttons in header
   layout.on(cstring"stackCreated") do (ev: Event):
     let newElement = kdom.document.createElement("div")
-    let hiddenDropdown = vnodeToDom(makeNestedButton(layout, ev), KaraxInstance())
+    let hiddenDropdown = createLayoutDropdown(layout, ev)
     newElement.classList.add("layout-buttons-container")
     newElement.setAttribute("tabindex", "0")
     newElement.onclick = proc(e: Event) {.nimcall.} =
