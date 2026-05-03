@@ -77,6 +77,7 @@ import views/isonim_agent_workspace_view
 import views/isonim_deepreview_view
 import views/isonim_welcome_screen_view
 import views/isonim_session_tabs_view
+import views/isonim_debug_shell_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -125,6 +126,25 @@ proc findByTag*(node: MockNode; tag: string): MockNode =
     if found != nil:
       return found
   return nil
+
+suite "IsoNim Debug Shell — structure":
+
+  test "renders static debug host with command palette mount":
+    let r = MockRenderer()
+    let panel = renderDebugChromePanel(r, commandPaletteComponentId = 7)
+
+    check panel.attributes["id"] == DebugShellId
+    check panel.attributes["class"] == DebugShellClass
+    let host = findByClass(panel, DebugCommandPaletteHostClass)
+    check host != nil
+    check host.attributes["id"] == commandPaletteHostId(7)
+
+  test "omits command palette mount until the component exists":
+    let r = MockRenderer()
+    let panel = renderDebugChromePanel(r, commandPaletteComponentId = -1)
+
+    check panel.attributes["id"] == DebugShellId
+    check findByClass(panel, DebugCommandPaletteHostClass).isNil
 
 suite "IsoNim Session Tabs — structure":
 

@@ -474,21 +474,19 @@ proc renderMenu*(self: MenuComponent): VNode =
   ## Render the global menu chrome.
   ##
   ## This remains a Karax VNode tree because the shared ``#menu`` renderer
-  ## outside GoldenLayout still expects one, but it is intentionally a regular
-  ## proc rather than a generic Component.render override.  The menu no longer
-  ## participates in the generic Karax component render-dispatch audit.
+  ## outside GoldenLayout still expects one.  The debug shell is mounted
+  ## directly into the static ``#debug`` host so this proc does not embed a
+  ## DebugComponent VNode subtree.
   if not self.data.ui.menuNode.isNil and
     not self.data.isNil:
       self.prepared = prepareSearch(self.data.ui.menuNode)
       self.nameMap = generateNameMap(self.data.ui.menuNode)
+  if not self.data.startOptions.shellUi:
+    self.debug.kxi = self.kxi
+    data.ui.commandPalette.kxi = self.kxi
+    self.debug.requestDebugShellRender()
   buildHtml(tdiv()):
     if not self.data.ui.menuNode.isNil and not defined(ctmacos):
       navigationMenuView(self)
-
-    if not self.data.startOptions.shellUi:
-      self.debug.kxi = self.kxi
-      data.ui.commandPalette.kxi = self.kxi
-      let debug = self.debug.renderDebugShell()
-      debug
 
     windowMenu(self.data)

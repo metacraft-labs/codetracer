@@ -17,6 +17,9 @@ from ../viewmodel/viewmodels/debug_controls_vm import
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_debug_controls_view import
   mountIsoNimDebugControls
+from ../viewmodel/views/isonim_debug_shell_view import
+  DebugShellId, renderDebugChromeInto
+from isonim/web/web_renderer import WebRenderer
 
 # Module-level DebugControlsVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy data
@@ -24,6 +27,7 @@ from ../viewmodel/views/isonim_debug_controls_view import
 var debugControlsVMInstance: DebugControlsVM
 var debugControlsVMStore: ReplayDataStore
 var isoNimDebugMounted: bool = false
+var debugShellMountedCommandPaletteId: int = -2
 
 # Reference to the live `DebugComponent` (and its mediator API) that
 # was wired with `register()`. Captured by `register()` and consulted
@@ -91,6 +95,27 @@ proc tryMountIsoNimDebugControls() =
     # `DebugComponent.render`.
 
   doMount()
+
+proc requestDebugShellRender*(self: DebugComponent) =
+  ## Ensure the direct IsoNim debug shell exists.
+  ##
+  ## The shell itself lives outside the Karax-owned ``#menu`` renderer. It is
+  ## mounted once into the static ``#debug`` host from ``index.html`` so menu
+  ## redraws cannot erase the command palette's IsoNim mount point.
+  let commandPaletteId =
+    if not data.ui.commandPalette.isNil: data.ui.commandPalette.id else: -1
+  if debugShellMountedCommandPaletteId == commandPaletteId:
+    return
+
+  let container = dom_api.getElementById(
+    dom_api.document,
+    cstring DebugShellId)
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    return
+
+  let r = WebRenderer()
+  renderDebugChromeInto(r, container, commandPaletteId)
+  debugShellMountedCommandPaletteId = commandPaletteId
 
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel DebugControlsVM using an externally-provided
@@ -463,25 +488,3 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
       dapStep(api, action)
     debugControlsVMInstance.onAction = proc(id: string) =
       self.action(id)
-
-
-proc renderDebugShell*(self: DebugComponent): VNode =
-  ## Render the shared debug chrome shell.
-  ##
-  ## IsoNim owns the actual debug controls in ``#isonim-debug-controls``.
-  ## This Karax VNode tree is still needed so the command palette remains
-  ## attached to the global menu renderer, but it intentionally does not
-  ## override the generic component ``render`` method.
-  # IsoNim is the primary renderer for debug controls (mounted in
-  # `#isonim-debug-controls`). Karax only renders the `#debug` div
-  # as a minimal shell so the command palette (which lives inside it)
-  # remains in the Karax VDOM tree for keyboard shortcut activation.
-  result = buildHtml(
-    tdiv(
-      id="debug",
-      class="ct-header"
-    )):
-      if not data.ui.commandPalette.isNil:
-        tdiv(
-          id = cstring("commandPaletteComponent-" & $data.ui.commandPalette.id),
-          class = "component-container")
