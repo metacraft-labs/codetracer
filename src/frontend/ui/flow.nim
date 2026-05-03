@@ -1894,14 +1894,10 @@ proc makeFlowLineContainer*(self: FlowComponent, step: FlowStep) =
   discard self.addContentWidget(dom, step.position, 0, id)
 
 proc shrinkedLoopIterationView(self: FlowComponent, iteration: int) : Node =
-  let vNode = buildHtml(
-    tdiv(
-      class = "flow-loop-shrinked-iteration",
-      id = &"flow-loop-shrinked-iteration-{iteration}"
-    )
-  ):
-    text ""
-  return vnodeToDom(vNode, KaraxInstance())
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring"flow-loop-shrinked-iteration")
+  result.setAttribute(cstring"id", cstring(&"flow-loop-shrinked-iteration-{iteration}"))
+  result.appendChild(document.createTextNode(cstring""))
 
 proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int) =
   let state = self.loopStates[loopIndex]
