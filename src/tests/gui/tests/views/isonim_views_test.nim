@@ -82,6 +82,7 @@ import views/isonim_auto_hide_overlay_tabs_view
 import views/isonim_auto_hide_collapsed_icons_view
 import views/isonim_auto_hide_bottom_tabs_view
 import views/isonim_auto_hide_side_strip_view
+import views/isonim_status_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -332,6 +333,105 @@ suite "IsoNim Auto-hide Side Strips — structure":
 
     panel.children[0].fireEvent("click")
     check clicked
+
+suite "IsoNim Status Shell — structure":
+
+  proc baseStatusModel(): StatusShellModel =
+    StatusShellModel(
+      base: StatusBaseModel(
+        language: "Nim",
+        encoding: "UTF-8",
+        processClass: "ready-status",
+        processText: "stable: ready",
+        showTestMovement: true,
+        testMovementText: "7",
+        showDisconnected: true,
+        disconnectedText: "Disconnected",
+        disconnectedTitle: "Lost connection to the host.",
+        showFinished: false,
+        locationText: "/tmp/main.nim:12#44",
+        locationTitle: "/tmp/main.nim:12#44",
+        copyTooltipActive: true))
+
+  test "renders status base hosts and right-side location state":
+    let r = MockRenderer()
+    let panel = renderStatusShell(r, baseStatusModel())
+
+    check panel.attributes["class"] == StatusRootClass
+    check findByClass(panel, CollapsedIconZoneClass).attributes["id"] ==
+      CollapsedIconZoneHostId
+    check findByClass(panel, BottomTabsClass).attributes["id"] ==
+      BottomTabsHostId
+    check findByClass(panel, "file-info-status-language").textContent == "Nim"
+    check findByClass(panel, "file-info-status-encoding").textContent == "UTF-8"
+    check findByClass(panel, "test-movement").textContent == "7"
+    check findByClass(panel, "disconnected-status").textContent == "Disconnected"
+    check findByClass(panel, "location-path").textContent == "/tmp/main.nim:12#44"
+    check findByClass(panel, "custom-tooltip").attributes["class"] ==
+      "custom-tooltip active"
+
+  test "active notification callbacks preserve dismiss and action indices":
+    let r = MockRenderer()
+    var dismissed = -1
+    var actionHit = (-1, -1)
+    let model = StatusShellModel(
+      activeNotifications: @[
+        StatusNotificationRecord(
+          index: 3,
+          kindClass: "warning",
+          variantClass: "primary",
+          text: "Reconnect?",
+          dismissible: true,
+          actions: @[StatusNotificationActionRecord(label: "Retry")])
+      ],
+      base: StatusBaseModel())
+    let panel = renderStatusShell(
+      r,
+      model,
+      StatusShellCallbacks(
+        onDismissNotification: proc(index: int) = dismissed = index,
+        onNotificationAction: proc(index: int; actionIndex: int) =
+          actionHit = (index, actionIndex)))
+
+    let dismissButton = findByClass(panel, "dismiss-notification-button")
+    let actionButton = findByClass(panel, "notification-action-button")
+    check dismissButton != nil
+    check actionButton != nil
+    if not dismissButton.isNil:
+      dismissButton.fireEvent("click")
+    if not actionButton.isNil:
+      actionButton.fireEvent("click")
+
+    check dismissed == 3
+    check actionHit == (3, 0)
+
+  test "notification history renders newest-first records from model":
+    let r = MockRenderer()
+    let model = StatusShellModel(
+      showNotifications: true,
+      notificationHistory: @[
+        StatusNotificationRecord(
+          index: 2,
+          kindClass: "error",
+          variantClass: "secondary",
+          text: "second",
+          dismissible: false),
+        StatusNotificationRecord(
+          index: 1,
+          kindClass: "info",
+          variantClass: "secondary",
+          text: "first",
+          dismissible: false)
+      ],
+      base: StatusBaseModel())
+    let panel = renderStatusShell(r, model)
+    let messages = findAllByClass(panel, "notification-message")
+
+    check findByClass(panel, "status-notification-header").textContent ==
+      "NOTIFICATIONS:"
+    check messages.len == 2
+    check messages[0].textContent == "second"
+    check messages[1].textContent == "first"
 
 suite "IsoNim Session Tabs — structure":
 

@@ -238,9 +238,9 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   if data.ui.openComponentIds[content].find(id) != -1:
     data.ui.openComponentIds[content].delete(id)
 
-# Track whether the shared (non-GL) Karax renderers have been initialised.
-# These renderers (menu, status, fixed-search, search-results, session-tab-bar)
-# live outside the per-session GL container and only need to be set up once.
+# Track whether the shared (non-GL) global renderers have been initialised.
+# Menu/fixed-search/search-results/session-tab-bar still use Karax setRenderer
+# stubs; status is refreshed directly through IsoNim.
 var sharedRenderersInitialised = false
 
 proc renderLayoutComponent(component: Component, content: Content): VNode =
@@ -267,11 +267,6 @@ proc ensureSharedRenderers() =
       if not data.ui.menu.isNil: data.ui.menu.renderMenu()
       else: buildHtml(tdiv()),
     "menu", proc = discard)
-  kxiMap["status"] = setRenderer(
-    proc: VNode =
-      if not data.ui.status.isNil: data.ui.status.renderStatus()
-      else: buildHtml(tdiv()),
-    "status", proc = discard)
   kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
   kxiMap["search-results"] = setRenderer(
     proc: VNode =
@@ -288,8 +283,9 @@ proc ensureSharedRenderers() =
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 
   data.ui.menu.kxi = kxiMap["menu"]
-  data.ui.status.kxi = kxiMap["status"]
   data.ui.searchResults.kxi = kxiMap["search-results"]
+  if not data.ui.status.isNil:
+    discard windowSetTimeout(proc() = data.ui.status.requestStatusRender(), 0)
 
 # Triage: rename to initGoldenLayout
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
@@ -854,9 +850,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     requestAutoHideSideStripRender(
       cstring"auto-hide-strip-right",
       AutoHideEdge.Right)
-    # Bottom tabs are rendered inside the status bar; trigger a status redraw.
-    if kxiMap.hasKey(cstring"status"):
-      redraw(kxiMap[cstring"status"])
+    # Bottom tabs are rendered inside the status bar; refresh the direct
+    # IsoNim status shell so its nested auto-hide hosts are recreated before
+    # the bottom-tab view is mounted into them.
+    if not data.ui.status.isNil:
+      data.ui.status.requestStatusRender()
 
   requestAutoHideSideStripRender(
     cstring"auto-hide-strip-left",
