@@ -272,16 +272,17 @@ state cleanly.  Headless-first applicability is limited for these.
 
 | Spec | Candidate VM test | Status | Notes |
 |---|---|---|---|
-| `agentic-deepreview.spec.ts` | (none) | GAP | DeepReview panel is Karax-only (section 5.4) — no VM exists yet |
+| `agentic-deepreview.spec.ts` | (none) | GAP | ACP/agentic orchestration still has no direct VM-pairing smoke for the 40-test GUI spec; migrated AgentActivity/AgentWorkspace/AgentActivityDeepReview VMs cover their panel state but not the combined agentic-deepreview scenario |
 
-This single spec carries 40 tests; closing the gap requires migrating the
-DeepReview panel itself (multi-day project per section 5.4).
+This single spec carries 40 tests; closing the gap requires a bounded
+VM-level companion around agent session/workspace/DeepReview notification
+flows, or several smaller PARTIAL pairings against the migrated agent VMs.
 
 #### `deepreview/` — 1 spec, 21 tests
 
 | Spec | Candidate VM test | Status | Notes |
 |---|---|---|---|
-| `deepreview-gui.spec.ts` | (none) | GAP | same blocker as agentic-coding (panel not migrated) |
+| `deepreview-gui.spec.ts` | `deepreview/deepreview_vm_test.nim` | PARTIAL (smoke, 1.108) | offline review header/context metadata, file rows, selected file, unified file sections and hunk-selection toolbar state covered via `DeepReviewVM`; Monaco decorations, expand-context buttons and full GUI fixture loading remain GUI/integration-only |
 
 #### `streaming/` — 1 spec, 5 tests
 
@@ -333,9 +334,9 @@ DeepReview panel itself (multi-day project per section 5.4).
 | Status | Specs | % of 67 |
 |---|---:|---:|
 | PAIRED | 25 | 37% |
-| PARTIAL | 17 | 25% |
+| PARTIAL | 18 | 27% |
 | SHARED | 13 | 19% |
-| GAP | 12 | 18% |
+| GAP | 11 | 16% |
 | **Total** | **67** | **100%** |
 
 After Cluster A closure in 1.63 (12 program_specific_tests
@@ -348,10 +349,11 @@ adds browser materialized/MCR and streaming lifecycle coverage via
 `ReplayLifecycleVM`, `browser_replay_vm_test.nim` and
 `streaming/streaming_recording_vm_test.nim`.  The 1.93 reload reconnect
 contract test moves `reload_reconnect.spec.ts` GAP → PARTIAL by covering
-the pure host bootstrap cache behavior.  Remaining GAPs are the
-panel-not-yet-migrated areas (deepreview / multi-window / auto-hide /
-layout) plus a small misc tail (macro-expansion, page-object infra,
-benchmarks).
+the pure host bootstrap cache behavior.  The 1.108 DeepReview smoke test
+moves `deepreview-gui.spec.ts` GAP → PARTIAL by covering the offline
+review file/hunk-selection state at the `DeepReviewVM` layer.  Remaining
+GAPs are agentic-coding / multi-window / auto-hide / layout plus a small
+misc tail (macro-expansion, page-object infra, benchmarks).
 
 ---
 
@@ -434,19 +436,27 @@ new-record / online-trace / stylus-explorer surfaces) is structurally
 complex enough to warrant a dedicated iteration; the Karax bridge can
 mirror its own state into the VM in a follow-up.
 
-### 3.3 Cluster C — DeepReview / agentic (2 GAPs, 61 tests)
+### 3.3 Cluster C — DeepReview / agentic (1 GAP, 1 PARTIAL, 61 tests)
 
 **Specs:** `deepreview-gui` (21 tests), `agentic-deepreview` (40 tests).
 
-**Blocker:** DeepReview panel still Karax (section 5.4).  GAP cannot
-close until the panel is migrated.
+**Status:** standalone `deepreview-gui` is PARTIAL as of 1.108 via
+`deepreview/deepreview_vm_test.nim`, which covers the offline review
+header/context metadata, file rows, selected file, unified diff sections,
+mode switch, and hunk-selection toolbar state through `DeepReviewVM`.
+`agentic-deepreview` remains GAP because the combined ACP session,
+workspace switching, progress, and notification flow is not yet paired
+headlessly.
 
-**Effort:** **large**.  Multi-day panel migration per section 5.4
-(VM + view + headless tests).  Same shape as the 1.31–1.51 sequence.
+**Effort:** **medium-large remaining**.  The panel migration blocker is
+closed by 1.77; further progress should be sliced across concrete
+migrated VM seams (`AgentActivityVM`, `AgentWorkspaceVM`,
+`AgentActivityDeepReviewVM`, `DeepReviewVM`) rather than attempting all
+61 GUI scenarios at once.
 
-**Leverage:** ★★★★★ in absolute test count (61 tests), but blocked on
-the panel migration.  Should be done as part of the next migration
-step, not as a standalone audit-closing task.
+**Leverage:** ★★★★★ in absolute test count (61 tests), with the
+standalone DeepReview smoke now represented and the agentic-coding
+combined flow still open.
 
 ### 3.4 Cluster D — Layout / strips / auto-hide / multi-window (8 GAPs, 35 tests)
 
@@ -534,9 +544,11 @@ Highest-leverage clusters first, scoped to single sub-agent iterations:
      to the existing `WelcomeScreenVM`.  Closes mission goal #3 for
      this panel.  Likely 1–2 dedicated iterations given the four
      surfaces (welcome / new-record / online-trace / stylus-explorer).
-  6. **Cluster C (DeepReview)** is gated on the panel migration in
-     section 5.4 and should be coordinated with that work, not picked up
-     as a pure audit-closing task.
+  6. **Cluster C (DeepReview / agentic)** — standalone DeepReview is
+     PARTIAL at smoke level in 1.108.  Continue with bounded agentic
+     slices against the migrated Agent Activity / Workspace /
+     DeepReview VMs rather than trying to cover all 61 scenarios in one
+     pass.
 
 Cluster D (layout/multi-window) and Cluster F (misc) are intentionally
 deferred — they need new architectural pieces (a `LayoutVM`) before

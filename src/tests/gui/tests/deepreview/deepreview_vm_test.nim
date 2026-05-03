@@ -13,16 +13,56 @@ proc makeStoreWithMock(autoRespond: bool = true):
   let store = createReplayDataStore(mock.toBackendService())
   (store, mock)
 
-proc makeFile(path: string; status = "M"; coverage = "1/2"):
+proc makeFile(path: string; status = "M"; coverage = "1/2";
+              added = 3; removed = 1):
     DeepReviewFileEntry =
   DeepReviewFileEntry(
     path: path,
     diffStatus: status,
-    linesAdded: 3,
-    linesRemoved: 1,
+    linesAdded: added,
+    linesRemoved: removed,
     coverageText: coverage,
     hasCoverage: true,
     hasFlow: false,
+  )
+
+proc makeUnifiedFile(fileIndex: int; path, status: string;
+                     added, removed: int; hunkHeader: tuple[
+                       oldStart, oldCount, newStart, newCount: int]):
+    DeepReviewUnifiedFileEntry =
+  DeepReviewUnifiedFileEntry(
+    fileIndex: fileIndex,
+    path: path,
+    diffStatus: status,
+    linesAdded: added,
+    linesRemoved: removed,
+    hunks: @[
+      DeepReviewHunkEntry(
+        oldStart: hunkHeader.oldStart,
+        oldCount: hunkHeader.oldCount,
+        newStart: hunkHeader.newStart,
+        newCount: hunkHeader.newCount,
+        lines: @[
+          DeepReviewDiffLineEntry(
+            lineType: "removed",
+            content: "let oldValue = parse(input)",
+            oldLine: hunkHeader.oldStart,
+          ),
+          DeepReviewDiffLineEntry(
+            lineType: "added",
+            content: "let newValue = parseChecked(input)",
+            newLine: hunkHeader.newStart,
+            values: @[
+              DeepReviewFlowValueEntry(
+                name: "newValue",
+                value: "42",
+                truncated: false,
+              ),
+            ],
+          ),
+        ],
+      )
+    ],
   )
 
 suite "DeepReviewVM initial state":
@@ -121,6 +161,67 @@ suite "DeepReviewVM setters":
       check vm.selectedHunks.val.len == 0
       check not vm.hunkToolbarVisible.val
       check not vm.hunkCopyFeedback.val
+
+      dispose()
+
+suite "DeepReviewVM smoke pairing":
+
+  test "offline review rows mode switch and hunk selection stay in VM state":
+    ## Smoke-level companion for deepreview-gui.spec.ts:
+    ## header metadata, trace-context options, file rows, file selection,
+    ## unified diff sections, and hunk selection are all user-visible
+    ## DeepReview flows, but are deterministic VM state here.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+
+      vm.setHasData(true)
+      vm.setHeader("DeepReview: parser cleanup",
+                   "a1b2c3d4e5f6...",
+                   "3 files | 2 recordings | 1542ms")
+      vm.setTraceContexts(@[
+        DeepReviewTraceContextEntry(id: 101, label: "latest passing run"),
+        DeepReviewTraceContextEntry(id: 77, label: "previous run"),
+      ])
+      vm.setSelectedTraceContextId(101)
+      vm.setFiles(@[
+        makeFile("src/main.rs", status = "M", coverage = "5/8",
+                 added = 8, removed = 3),
+        makeFile("src/utils.rs", status = "A", coverage = "8/8",
+                 added = 8, removed = 0),
+        makeFile("src/config.rs", status = "D", coverage = "0/7",
+                 added = 0, removed = 7),
+      ])
+      vm.setSelectedFileIndex(1)
+      vm.setUnifiedFiles(@[
+        makeUnifiedFile(0, "src/main.rs", "M", 8, 3, (2, 5, 2, 10)),
+        makeUnifiedFile(1, "src/utils.rs", "A", 8, 0, (0, 0, 1, 8)),
+        makeUnifiedFile(2, "src/config.rs", "D", 0, 7, (1, 7, 0, 0)),
+      ])
+      vm.setViewMode(drpvmUnified)
+      vm.setSelectedHunks(@[(1, 0)])
+
+      check vm.hasData.val
+      check vm.sessionTitle.val == "DeepReview: parser cleanup"
+      check vm.commitDisplay.val == "a1b2c3d4e5f6..."
+      check vm.statsText.val == "3 files | 2 recordings | 1542ms"
+      check vm.traceContexts.val.len == 2
+      check vm.traceContexts.val[0].label == "latest passing run"
+      check vm.selectedTraceContextId.val == 101
+      check vm.fileCount.val == 3
+      check vm.selectedFileIndex.val == 1
+      check vm.selectedFile.val.path == "src/utils.rs"
+      check vm.selectedFile.val.diffStatus == "A"
+      check vm.selectedFile.val.linesAdded == 8
+      check vm.selectedFile.val.linesRemoved == 0
+      check vm.viewMode.val == drpvmUnified
+      check vm.unifiedFiles.val.len == 3
+      check vm.unifiedFiles.val[0].path == "src/main.rs"
+      check vm.unifiedFiles.val[0].hunks[0].oldStart == 2
+      check vm.unifiedFiles.val[1].hunks[0].newCount == 8
+      check vm.unifiedFiles.val[2].diffStatus == "D"
+      check vm.selectedHunks.val == @[(1, 0)]
+      check vm.hunkToolbarVisible.val
 
       dispose()
 
