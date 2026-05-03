@@ -10,8 +10,9 @@
 ## ``data.deepReviewSelectedFileIndex`` which the DeepReview component reads
 ## to decide which file's diff to render.
 ##
-## Git data is fetched by shelling out to `git` via Node.js `child_process`
-## (available in Electron's renderer process with nodeIntegration enabled).
+## Git data is fetched with structured `git` argv calls via Node.js
+## `child_process` (available in Electron's renderer process with
+## nodeIntegration enabled).
 
 import
   ui_imports
@@ -26,15 +27,15 @@ type
     encoding*: cstring
     timeout*: int
 
-proc execSyncRaw(cmd: cstring, opts: ExecSyncOptions): cstring
-  {.importjs: "require('child_process').execSync(#, #).toString()".}
+proc execFileSyncRaw(program: cstring, args: seq[cstring], opts: ExecSyncOptions): cstring
+  {.importjs: "require('child_process').execFileSync(#, #, #).toString()".}
 
-proc gitExec(cmd: cstring, cwd: cstring): cstring =
+proc gitExec(args: seq[cstring], cwd: cstring): cstring =
   ## Run a git command in the given working directory.
   ## Returns the trimmed stdout output, or an empty string on error.
   try:
     let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
-    let raw = execSyncRaw(cmd, opts)
+    let raw = execFileSyncRaw(cstring"git", args, opts)
     if raw.isNil:
       return cstring""
     # Trim trailing whitespace / newlines.
@@ -44,7 +45,7 @@ proc gitExec(cmd: cstring, cwd: cstring): cstring =
 
 proc isGitRepository(cwd: cstring): bool =
   ## Check whether `cwd` is inside a git working tree.
-  let result_str = gitExec(cstring"git rev-parse --is-inside-work-tree", cwd)
+  let result_str = gitExec(@[cstring"rev-parse", cstring"--is-inside-work-tree"], cwd)
   return result_str == cstring"true"
 
 # ---------------------------------------------------------------------------
@@ -62,13 +63,13 @@ const
 # ---------------------------------------------------------------------------
 
 proc loadCurrentBranch(self: VCSComponent, cwd: cstring) =
-  self.currentBranch = gitExec(cstring"git branch --show-current", cwd)
+  self.currentBranch = gitExec(@[cstring"branch", cstring"--show-current"], cwd)
   if self.currentBranch.len == 0:
     # Detached HEAD -- show abbreviated hash instead.
-    self.currentBranch = gitExec(cstring"git rev-parse --short HEAD", cwd)
+    self.currentBranch = gitExec(@[cstring"rev-parse", cstring"--short", cstring"HEAD"], cwd)
 
 proc loadBranches(self: VCSComponent, cwd: cstring) =
-  let raw = gitExec(cstring"git branch --format=%(refname:short)", cwd)
+  let raw = gitExec(@[cstring"branch", cstring"--format=%(refname:short)"], cwd)
   self.branches = @[]
   if raw.len > 0:
     for line in ($raw).splitLines():
@@ -82,7 +83,7 @@ proc loadCommits(self: VCSComponent, cwd: cstring) =
   ## pipe characters that may appear in commit messages.
   const sep = "\x1e"
   let raw = gitExec(
-    cstring("git log --pretty=format:%h" & sep & "%s" & sep & "%cr -30"), cwd)
+    @[cstring("log"), cstring("--pretty=format:%h" & sep & "%s" & sep & "%cr"), cstring"-30"], cwd)
   self.commits = @[]
   if raw.len > 0:
     for line in ($raw).splitLines():
@@ -110,8 +111,8 @@ proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
   ## Load the files changed in a specific commit with diff --stat style info.
   ## Uses `git diff-tree` which works for any commit without needing a parent
   ## check (root commits are handled with --root).
-  let cmd = cstring("git diff-tree --no-commit-id -r --numstat " & $commitHash)
-  let raw = gitExec(cmd, cwd)
+  let raw = gitExec(
+    @[cstring"diff-tree", cstring"--no-commit-id", cstring"-r", cstring"--numstat", commitHash], cwd)
   self.changedFiles = @[]
   if raw.len > 0:
     for line in ($raw).splitLines():
@@ -143,8 +144,8 @@ proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
 
   # If no numstat output, fall back to --name-status.
   if self.changedFiles.len == 0:
-    let cmd2 = cstring("git diff-tree --no-commit-id -r --name-status " & $commitHash)
-    let raw2 = gitExec(cmd2, cwd)
+    let raw2 = gitExec(
+      @[cstring"diff-tree", cstring"--no-commit-id", cstring"-r", cstring"--name-status", commitHash], cwd)
     if raw2.len > 0:
       for line in ($raw2).splitLines():
         let trimmed = line.strip()
@@ -352,7 +353,7 @@ proc loadGitDiffForUnifiedView(self: VCSComponent) =
   ## Run ``git diff HEAD`` and parse the output into ``self.gitDiffData``
   ## so the DeepReview unified diff renderer can display it.
   let cwd = self.getWorkingDirectory()
-  let raw = gitExec(cstring"git diff HEAD", cwd)
+  let raw = gitExec(@[cstring"diff", cstring"HEAD"], cwd)
   let files = parseGitDiffHunks($raw)
 
   self.gitDiffData = DeepReviewData(
@@ -383,9 +384,9 @@ proc debouncedRefreshGitData(self: VCSComponent) =
 
   let cwd = self.getWorkingDirectory()
   # Build a lightweight snapshot of volatile git state to detect changes.
-  let statusRaw = gitExec(cstring"git status --porcelain", cwd)
+  let statusRaw = gitExec(@[cstring"status", cstring"--porcelain"], cwd)
   let logRaw = gitExec(
-    cstring"git log --pretty=format:%H -30", cwd)
+    @[cstring"log", cstring"--pretty=format:%H", cstring"-30"], cwd)
   let snapshot = cstring($statusRaw & "\n---\n" & $logRaw)
 
   if snapshot != self.lastStatusSnapshot:
@@ -422,8 +423,8 @@ proc startFileWatching(self: VCSComponent) =
 
   # Store initial snapshot so the first tick can detect changes.
   let cwd = self.getWorkingDirectory()
-  let statusRaw = gitExec(cstring"git status --porcelain", cwd)
-  let logRaw = gitExec(cstring"git log --pretty=format:%H -30", cwd)
+  let statusRaw = gitExec(@[cstring"status", cstring"--porcelain"], cwd)
+  let logRaw = gitExec(@[cstring"log", cstring"--pretty=format:%H", cstring"-30"], cwd)
   self.lastStatusSnapshot = cstring($statusRaw & "\n---\n" & $logRaw)
 
   # Initialize timer IDs.
@@ -570,7 +571,7 @@ proc renderBranchPicker(self: VCSComponent): VNode =
                  self.branchDropdownOpen = false
                  # Checkout branch via git.
                  let cwd = self.getWorkingDirectory()
-                 discard gitExec(cstring("git checkout " & $branchCopy), cwd)
+                 discard gitExec(@[cstring"checkout", branchCopy], cwd)
                  self.refreshVCSData()
                  data.redraw()):
             let isActive = branch == self.currentBranch

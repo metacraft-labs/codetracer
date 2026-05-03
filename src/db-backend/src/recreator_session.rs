@@ -124,6 +124,10 @@ impl ReplayWorker {
         eprintln!("[rr-worker] spawned worker pid={}", worker_pid);
         self.process = Some(ct_worker);
         if let Err(err) = self.setup_worker_sockets() {
+            let worker_stderr = std::fs::read_to_string(&log_path)
+                .ok()
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty());
             if let Some(child) = self.process.as_mut() {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -131,9 +135,13 @@ impl ReplayWorker {
             self.process = None;
             self.stream = None;
             self.active = false;
+            let detail = match worker_stderr {
+                Some(stderr) => format!("{err}; worker stderr: {stderr}"),
+                None => err.to_string(),
+            };
             return Err(format!(
                 "failed to initialize replay-worker transport for pid {}: {}",
-                worker_pid, err
+                worker_pid, detail
             )
             .into());
         }
