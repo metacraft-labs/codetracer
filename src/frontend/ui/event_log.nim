@@ -969,11 +969,23 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
   var dropDownContainerId = "dropdown-container-id"
   var text = EVENT_LOG_BUTTON_NAMES[event]
 
-  proc eventLogKindButtonCheckboxView(
+  proc appendText(parent: Element, value: string) =
+    parent.appendChild(document.createTextNode(value))
+
+  proc newDropdownElement(tag, className: string): Element =
+    result = document.createElement(tag)
+    result.setAttribute(cstring"class", cstring className)
+
+  proc reloadDenseTableAndRefresh(e: Event, et: VNode) =
+    self.denseTable.context.ajax.reload(nil, false)
+    self.autoScrollUpdate = true
+    showDropdown(e, et)
+
+  proc eventLogKindButtonCheckboxDom(
     self: EventLogComponent,
     tag: EventTag,
     kind: EventLogKind
-  ): VNode =
+  ): Element =
     let checkBoxName = local($tag & "-" & $kind & "-checkbox")
     let isChecked = self.selectedKinds[kind]
     let checkmarkState =
@@ -982,39 +994,37 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
       else:
         "unchecked"
 
-    buildHtml(
-      li(class = "dropdown-list-item")
-    ):
-      label(
-        `for` = checkBoxName,
-        class = "ct-checkmark-field"
-      ):
-        input(
-          id = checkBoxName,
-          name = checkBoxName,
-          `type` = "checkbox",
-          class = "ct-checkmark-input",
-          checked = toChecked(isChecked),
-          value = ($kind),
-          onchange = proc (e: Event, et: VNode) =
-            self.switchEventKindSelection(kind)
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
-        )
-        span(
-          class = "ct-checkmark",
-          `data-state` = checkmarkState,
-          `aria-hidden` = "true"
-        )
-        span(class = "ct-checkmark-label"):
-          text(EVENT_LOG_KIND_NAMES[kind])
+    result = newDropdownElement("li", "dropdown-list-item")
+    let label = newDropdownElement("label", "ct-checkmark-field")
+    label.setAttribute(cstring"for", checkBoxName)
 
+    let input = newDropdownElement("input", "ct-checkmark-input")
+    input.setAttribute(cstring"id", checkBoxName)
+    input.setAttribute(cstring"name", checkBoxName)
+    input.setAttribute(cstring"type", cstring"checkbox")
+    input.setAttribute(cstring"value", cstring($kind))
+    if isChecked:
+      input.setAttribute(cstring"checked", cstring"checked")
+    input.addEventListener(cstring"change", proc(e: Event) =
+      self.switchEventKindSelection(kind)
+      reloadDenseTableAndRefresh(e, nil))
 
-  proc eventLogTagButtonCheckboxView(
+    let checkmark = newDropdownElement("span", "ct-checkmark")
+    checkmark.setAttribute(cstring"data-state", cstring checkmarkState)
+    checkmark.setAttribute(cstring"aria-hidden", cstring"true")
+
+    let labelText = newDropdownElement("span", "ct-checkmark-label")
+    labelText.appendText(EVENT_LOG_KIND_NAMES[kind])
+
+    label.appendChild(input)
+    label.appendChild(checkmark)
+    label.appendChild(labelText)
+    result.appendChild(label)
+
+  proc eventLogTagButtonCheckboxDom(
     self: EventLogComponent,
     tag: EventTag
-  ): VNode =
+  ): Element =
     let checkBoxName = local($tag & "-checkbox")
     let checkBoxState = self.checkIndeterminateCheckbox(tag)
     let isChecked = checkBoxState[0]
@@ -1031,119 +1041,124 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
     if not isChecked and isChecked != self.isTagSelected(tag):
       self.switchEventTagSelection(tag)
 
-    buildHtml(
-      li(class = "dropdown-list-item")
-    ):
-      label(
-        `for` = checkBoxName,
-        class = "ct-checkmark-field"
-      ):
-        input(
-          id = checkBoxName,
-          name = checkBoxName,
-          `type` = "checkbox",
-          class = "ct-checkmark-input",
-          checked = toChecked(isChecked),
-          value = ($tag),
-          onchange = proc (e: Event, et: VNode) =
-            self.switchEventTagSelection(tag)
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
-        )
-        span(
-          class = "ct-checkmark",
-          `data-state` = checkmarkState,
-          `aria-hidden` = "true"
-        )
-        span(class = "ct-checkmark-label"):
-          text(EVENT_LOG_TAG_NAMES[tag])
+    result = newDropdownElement("li", "dropdown-list-item")
+    let label = newDropdownElement("label", "ct-checkmark-field")
+    label.setAttribute(cstring"for", checkBoxName)
 
-  proc dropdownVNode(): VNode =
+    let input = newDropdownElement("input", "ct-checkmark-input")
+    input.setAttribute(cstring"id", checkBoxName)
+    input.setAttribute(cstring"name", checkBoxName)
+    input.setAttribute(cstring"type", cstring"checkbox")
+    input.setAttribute(cstring"value", cstring($tag))
+    if isChecked:
+      input.setAttribute(cstring"checked", cstring"checked")
+    input.addEventListener(cstring"change", proc(e: Event) =
+      self.switchEventTagSelection(tag)
+      reloadDenseTableAndRefresh(e, nil))
+
+    let checkmark = newDropdownElement("span", "ct-checkmark")
+    checkmark.setAttribute(cstring"data-state", cstring checkmarkState)
+    checkmark.setAttribute(cstring"aria-hidden", cstring"true")
+
+    let labelText = newDropdownElement("span", "ct-checkmark-label")
+    labelText.appendText(EVENT_LOG_TAG_NAMES[tag])
+
+    label.appendChild(input)
+    label.appendChild(checkmark)
+    label.appendChild(labelText)
+    result.appendChild(label)
+
+  proc eventLogToggleButtonDom(
+    id: cstring,
+    className: string,
+    label: string,
+    tooltipId: cstring = cstring"",
+    tooltipText: string = "",
+    onClick: proc(e: Event)
+  ): Element =
+    result = newDropdownElement("button", className)
+    result.setAttribute(cstring"id", id)
+    result.setAttribute(cstring"tabindex", cstring"0")
+    result.addEventListener(cstring"mousedown", proc(e: Event) =
+      e.preventDefault())
+    result.addEventListener(cstring"click", proc(e: Event) =
+      e.stopPropagation()
+      onClick(e))
+    result.appendText(label)
+
+    if tooltipText.len > 0:
+      let tooltip = newDropdownElement("div", "custom-tooltip")
+      tooltip.setAttribute(cstring"id", tooltipId)
+      tooltip.appendText(tooltipText)
+      result.appendChild(tooltip)
+
+  proc renderDropdownDom(): Element =
     var activeTraceClass = if self.isOnlyTraceSelected(): "active" else: ""
     var activeEventsClass = if self.isOnlyRecordedEventSelected(): "active" else: ""
     var buttonClass = "ct-button-sm-secondary"
 
-    buildHtml(
-      tdiv(class = dropDownContainerClass, id = dropDownContainerId)
-    ):
-      ul(
-        id = dropDownListId,
-        class = dropDownListClass,
-        onmousedown = proc (ev: Event, et: VNode) =
-          ev.preventDefault(),
-        onclick = proc (ev: Event, et: VNode) =
-          ev.stopPropagation()
-      ):
-        tdiv(class = "dropdown-list-tag"):
-          for tag, _ in self.tags:
-            eventLogTagButtonCheckboxView(self, tag)
-        tdiv(class = "dropdown-kind-container"):
-          for tag, _ in self.tags:
-            tdiv(class = "dropdown-list-kind"):
-              for kind in tagKinds[tag]:
-                eventLogKindButtonCheckboxView(self, tag, kind)
-      tdiv(class = "toggle-buttons"):
-        button(
-          id = local("category-onlytrace"),
-          class = buttonClass & fmt" {activeTraceClass} ct-mx-2",
-          tabIndex = "0",
-          onmousedown = proc (e: Event, et: VNode) =
-            e.preventDefault(),
-          onclick = proc (e: Event, et: VNode) =
-            e.stopPropagation()
-            self.onlyTrace()
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et),
-        ):
-          text(EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyTrace])
-          tdiv(
-            id = "eventLog-tooltip-trace",
-            class = "custom-tooltip",
-          ): text("Display only trace logs: events that happened as part of the debugging")
-        button(
-          id=local("category-only-recorded-event"),
-          class = buttonClass & fmt" {activeEventsClass} ct-mr-2",
-          tabIndex = "0",
-          onmousedown = proc (e: Event, et: VNode) =
-            e.preventDefault(),
-          onclick = proc (e: Event, et: VNode) =
-            e.stopPropagation()
-            self.onlyRecordedEvent()
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
-        ):
-          text(EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyRecordedEvent])
-          tdiv(
-            id = "eventLog-tooltip-event",
-            class = "custom-tooltip",
-          ): text("Display only recorded events: events from the original record")
-        button(
-          id = local("category-enabledisable"),
-          class = buttonClass,
-          tabIndex = "0",
-          onmousedown = proc (e: Event, et: VNode) =
-            e.preventDefault(),
-          onclick = proc (e: Event, et: VNode) =
-            e.stopPropagation()
-            self.changeAllEventKinds(self.enableOrDisable())
-            self.denseTable.context.ajax.reload(nil, false)
-            self.autoScrollUpdate = true
-            showDropdown(e, et)
-        ):
-          text(if self.enableOrDisable(): "Enable All" else: "Disable All")
+    result = newDropdownElement("div", dropDownContainerClass)
+    result.setAttribute(cstring"id", cstring dropDownContainerId)
+
+    let list = newDropdownElement("ul", dropDownListClass)
+    list.setAttribute(cstring"id", cstring dropDownListId)
+    list.addEventListener(cstring"mousedown", proc(ev: Event) =
+      ev.preventDefault())
+    list.addEventListener(cstring"click", proc(ev: Event) =
+      ev.stopPropagation())
+
+    let tagList = newDropdownElement("div", "dropdown-list-tag")
+    for tag, _ in self.tags:
+      tagList.appendChild(eventLogTagButtonCheckboxDom(self, tag))
+    list.appendChild(tagList)
+
+    let kindContainer = newDropdownElement("div", "dropdown-kind-container")
+    for tag, _ in self.tags:
+      let kindList = newDropdownElement("div", "dropdown-list-kind")
+      for kind in tagKinds[tag]:
+        kindList.appendChild(eventLogKindButtonCheckboxDom(self, tag, kind))
+      kindContainer.appendChild(kindList)
+    list.appendChild(kindContainer)
+    result.appendChild(list)
+
+    let toggleButtons = newDropdownElement("div", "toggle-buttons")
+    toggleButtons.appendChild(eventLogToggleButtonDom(
+      local("category-onlytrace"),
+      buttonClass & fmt" {activeTraceClass} ct-mx-2",
+      EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyTrace],
+      cstring"eventLog-tooltip-trace",
+      "Display only trace logs: events that happened as part of the debugging",
+      proc(e: Event) =
+        self.onlyTrace()
+        reloadDenseTableAndRefresh(e, nil)))
+    toggleButtons.appendChild(eventLogToggleButtonDom(
+      local("category-only-recorded-event"),
+      buttonClass & fmt" {activeEventsClass} ct-mr-2",
+      EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyRecordedEvent],
+      cstring"eventLog-tooltip-event",
+      "Display only recorded events: events from the original record",
+      proc(e: Event) =
+        self.onlyRecordedEvent()
+        reloadDenseTableAndRefresh(e, nil)))
+    toggleButtons.appendChild(eventLogToggleButtonDom(
+      local("category-enabledisable"),
+      buttonClass,
+      if self.enableOrDisable(): "Enable All" else: "Disable All",
+      onClick = proc(e: Event) =
+        self.changeAllEventKinds(self.enableOrDisable())
+        reloadDenseTableAndRefresh(e, nil)))
+    result.appendChild(toggleButtons)
 
   proc showDropdown(e: Event, et: VNode) =
     var dropdownElem = document.getElementById(dropDownContainerId)
 
     if dropdownElem == nil:
-      document.body.appendChild(vnodeToDom(dropdownVNode(), KaraxInstance()))
+      document.body.appendChild(renderDropdownDom())
       dropdownElem = document.getElementById(dropDownContainerId)
     else:
-      dropdownElem.innerHTML = ""
-      dropdownElem.appendChild(vnodeToDom(dropdownVNode(), KaraxInstance()))
+      let refreshedDropdown = renderDropdownDom()
+      document.body.replaceChild(refreshedDropdown, dropdownElem)
+      dropdownElem = refreshedDropdown
 
     let filterButton = document.getElementById(dropDownId)
     let rect = filterButton.getBoundingClientRect()
