@@ -771,14 +771,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
-        # into the GL container. Register a direct-DOM redraw hook for updates.
+        # into the GL container. Progress and hover mutation paths refresh
+        # this direct mount explicitly.
         if state.content == Content.CaptionBarProgress:
-          let capturedComp = CaptionBarProgressComponent(component)
-          let capturedId = containerId
-          tryMountCaptionBarProgress(capturedId, capturedComp)
-          directDomRedrawCallbacks.add(proc() =
-            tryMountCaptionBarProgress(capturedId, capturedComp)
-          )
+          tryMountCaptionBarProgress(
+            containerId,
+            CaptionBarProgressComponent(component))
 
         discard component.afterInit()
 

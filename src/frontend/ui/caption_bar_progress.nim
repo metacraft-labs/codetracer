@@ -25,13 +25,6 @@ when defined(js):
   from isonim/core/computation import createRenderEffect
 
 # ---------------------------------------------------------------------------
-# IsoNim mount state
-# ---------------------------------------------------------------------------
-
-var isoNimCaptionBarMounted: bool = false
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -105,6 +98,8 @@ proc updateProgress*(self: CaptionBarProgressComponent, progress: AgentProgress)
 
 when defined(js):
 
+  proc requestCaptionBarProgressRender*(self: CaptionBarProgressComponent)
+
   proc onContainerClick(self: CaptionBarProgressComponent): proc() =
     ## DSL `onclick = ...` shape factory. Toggles the workspace view
     ## and notifies the caller via IPC.
@@ -116,17 +111,18 @@ when defined(js):
         "view": cstring($self.viewState.activeView),
         "sessionId": self.viewState.agentSessionId
       })
+      requestCaptionBarProgressRender(self)
       redrawAll()
 
   proc onContainerMouseEnter(self: CaptionBarProgressComponent): proc() =
     result = proc() =
       self.expanded = true
-      redrawAll()
+      requestCaptionBarProgressRender(self)
 
   proc onContainerMouseLeave(self: CaptionBarProgressComponent): proc() =
     result = proc() =
       self.expanded = false
-      redrawAll()
+      requestCaptionBarProgressRender(self)
 
   proc renderIsoNimCaptionBarProgress*(
       r: WebRenderer;
@@ -147,11 +143,12 @@ when defined(js):
     ##     div.caption-progress-milestones  (if expanded)
     ##       div.caption-progress-milestone-item.{statusClass} ...
     ##
-    ## The caller invokes this whenever progress state changes; the
-    ## function clears the container and rebuilds the panel each time.
+    ## The caller invokes this whenever progress or local expanded state
+    ## changes; the function clears the container and rebuilds the panel each
+    ## time.
     ## (This is plain re-render rather than fine-grained reactivity
-    ## because the upstream signal is a Karax-managed redraw, not an
-    ## IsoNim signal.)
+    ## because the upstream progress payload is stored on the legacy
+    ## component carrier, not an IsoNim signal.)
 
     # Clear existing content for re-render.
     let containerNode = isonim_dom.Node(container)
@@ -217,12 +214,23 @@ when defined(js):
                                     self: CaptionBarProgressComponent) =
     ## Mount the IsoNim caption bar progress into a DOM container.
     ## Called from layout.nim when the GL component is created.
-    ## Re-renders on every call (used as the redraw callback).
+    ## Re-renders on every call.
+    self.containerId = containerId
     let container = isonim_dom.getElementById(isonim_dom.document, containerId)
     if isonim_dom.isNodeNil(isonim_dom.Node(container)):
       return
     let r = WebRenderer()
     renderIsoNimCaptionBarProgress(r, container, self)
+
+  proc requestCaptionBarProgressRender*(self: CaptionBarProgressComponent) =
+    ## Refresh the direct IsoNim caption-bar mount after explicit progress or
+    ## local UI-state changes. This replaces the old global redrawAll hook.
+    if self.containerId.len == 0:
+      return
+    tryMountCaptionBarProgress(self.containerId, self)
+else:
+  proc requestCaptionBarProgressRender*(self: CaptionBarProgressComponent) =
+    discard
 
 # ---------------------------------------------------------------------------
 # IPC handler
@@ -328,4 +336,4 @@ proc onAcpAgentProgress*(sender: js, response: JsObject) {.async.} =
   for _, comp in data.ui.componentMapping[Content.CaptionBarProgress]:
     let captionBar = CaptionBarProgressComponent(comp)
     captionBar.updateProgress(progress)
-  redrawAll()
+    requestCaptionBarProgressRender(captionBar)

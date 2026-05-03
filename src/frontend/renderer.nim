@@ -165,13 +165,6 @@ proc redrawAll* =
   if e != kxiMap.len:
     cerror "redrawAll: not all redrawed, e != kxiMap.len"
 
-  # Re-render direct-DOM surfaces that sit outside Karax's renderer map.
-  for cb in directDomRedrawCallbacks:
-    try:
-      cb()
-    except:
-      cerror "redrawAll: error in direct DOM redraw callback"
-
   data.ui.lastRedraw = now()
   # echo "## FINISH REDRAW"
 data.redraw = redrawAll

@@ -9,10 +9,6 @@ proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#
 
 var kxiMap* = JsAssoc[cstring, KaraxInstance]{}
 
-# Direct-DOM redraw hooks for surfaces that are not owned by a Karax
-# renderer instance, such as IsoNim chrome mounted into fixed hosts.
-# redrawAll() iterates these after processing kxiMap entries.
-var directDomRedrawCallbacks*: seq[proc()] = @[]
 const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
@@ -820,6 +816,7 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
       agentWorkspacePath: cstring"",
       agentSessionId: cstring""
     ),
+    containerId: cstring"",
     animationFrame: 0,
     expanded: false,
     lastUpdateMs: 0

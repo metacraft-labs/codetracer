@@ -987,6 +987,7 @@ type
     ## user workspace and agent workspace views.
     progress*: AgentProgress
     viewState*: WorkspaceViewState
+    containerId*: cstring
     animationFrame*: int
     expanded*: bool
     lastUpdateMs*: int
