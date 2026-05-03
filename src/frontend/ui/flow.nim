@@ -2454,15 +2454,16 @@ proc makeMultilineLoopFlow(self: FlowComponent, step: FlowStep) =
     container.style.width = &"{self.calculateLoopContainerWidth(step.loop)}px"
 
 proc makeFlowLoopBackgroundDom(self: FlowComponent, loopIndex: int): Node =
-  let vNode = buildHtml(
-    tdiv(
-      id = &"flow-loop-{loopIndex}-background",
-      class = "flow-loop-background",
-      style = self.flowLoopBackgroundStyle(loopIndex)
-    )
-  ): text ""
+  let props = self.prepareBackgroundStyleProps(loopIndex)
 
-  return vnodeToDom(vNode, KaraxInstance())
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(&"flow-loop-{loopIndex}-background"))
+  result.setAttribute(cstring"class", cstring"flow-loop-background")
+  result.style.left = cstring($(props.left) & "px")
+  result.style.top = cstring($(props.top) & "px")
+  result.style.width = cstring($(props.width) & "px")
+  result.style.height = cstring($(props.height) & "px")
+  result.appendChild(document.createTextNode(cstring""))
 
 proc makeFlowLoopBackground(self: FlowComponent, loopIndex: int) =
   let backgroundDom = self.makeFlowLoopBackgroundDom(loopIndex)
