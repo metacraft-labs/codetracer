@@ -577,9 +577,12 @@ method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   )
 
 
-method render*(self: StatusComponent): VNode =
-  var value: string
-
+proc renderStatus*(self: StatusComponent): VNode =
+  ## Render the shared status bar chrome.
+  ##
+  ## The status bar still returns a Karax VNode tree for the shared ``#status``
+  ## renderer, but this is intentionally a regular proc rather than a generic
+  ## ``method render*: VNode`` override.
   result = buildHtml(tdiv):
     activeNotificationsView(self)
     if self.notifications != @[] and self.notifications[^1].isOperationStatus:

@@ -258,7 +258,7 @@ proc ensureSharedRenderers() =
     "menu", proc = discard)
   kxiMap["status"] = setRenderer(
     proc: VNode =
-      if not data.ui.status.isNil: data.ui.status.render()
+      if not data.ui.status.isNil: data.ui.status.renderStatus()
       else: buildHtml(tdiv()),
     "status", proc = discard)
   kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
