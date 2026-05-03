@@ -76,6 +76,7 @@ import views/isonim_agent_activity_deepreview_view
 import views/isonim_agent_workspace_view
 import views/isonim_deepreview_view
 import views/isonim_welcome_screen_view
+import views/isonim_session_tabs_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -124,6 +125,76 @@ proc findByTag*(node: MockNode; tag: string): MockNode =
     if found != nil:
       return found
   return nil
+
+suite "IsoNim Session Tabs — structure":
+
+  test "single session uses hidden modifier and renders add button":
+    let r = MockRenderer()
+    let panel = renderSessionTabsPanel(
+      r,
+      @[SessionTabRecord(label: "main.py")],
+      activeIndex = 0)
+
+    check panel.attributes["id"] == SessionTabBarId
+    check panel.attributes["class"] == SessionTabBarSingleClass
+    check findAllByClass(panel, SessionTabClass).len == 1
+    check findByClass(panel, SessionTabAddClass).textContent == "+"
+    check panel.textContent.contains("main.py")
+
+  test "multiple sessions mark the active tab and show close buttons":
+    let r = MockRenderer()
+    let panel = renderSessionTabsPanel(
+      r,
+      @[
+        SessionTabRecord(label: "Trace 1"),
+        SessionTabRecord(label: "server.rb")
+      ],
+      activeIndex = 1)
+
+    check panel.attributes["class"] == SessionTabBarClass
+    let tabs = findAllByClass(panel, SessionTabClass)
+    check tabs.len == 2
+    check tabs[0].attributes["class"] == SessionTabClass
+    check tabs[1].attributes["class"] == SessionTabActiveClass
+    check findAllByClass(panel, SessionTabCloseClass).len == 2
+    check panel.textContent.contains("server.rb")
+
+  test "click callbacks receive selected, closed, and add actions":
+    var selected: seq[int] = @[]
+    var closed: seq[int] = @[]
+    var addCount = 0
+    let callbacks = SessionTabsCallbacks(
+      onSelect: proc(index: int) = selected.add(index),
+      onClose: proc(index: int) = closed.add(index),
+      onAdd: proc() = inc addCount)
+    let r = MockRenderer()
+    let panel = renderSessionTabsPanel(
+      r,
+      @[
+        SessionTabRecord(label: "Trace 1"),
+        SessionTabRecord(label: "Trace 2")
+      ],
+      activeIndex = 0,
+      callbacks = callbacks)
+
+    let tabs = findAllByClass(panel, SessionTabClass)
+    let closeButtons = findAllByClass(panel, SessionTabCloseClass)
+    let addButton = findByClass(panel, SessionTabAddClass)
+
+    tabs[1].fireEvent("click")
+    closeButtons[0].fireEvent("click")
+    addButton.fireEvent("click")
+
+    check selected == @[1]
+    check closed == @[0]
+    check addCount == 1
+
+  test "helper class functions preserve legacy CSS contract":
+    check tabBarClass(0) == SessionTabBarSingleClass
+    check tabBarClass(1) == SessionTabBarSingleClass
+    check tabBarClass(2) == SessionTabBarClass
+    check tabClass(false) == SessionTabClass
+    check tabClass(true) == SessionTabActiveClass
 
 proc findAllByTag*(node: MockNode; tag: string): seq[MockNode] =
   ## Find all descendants (including self) with the given tag name.

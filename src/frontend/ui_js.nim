@@ -7,7 +7,7 @@ import
       build, errors, search_results, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
-      request_panel, session_switch, command],
+      request_panel, session_switch, session_tabs, command],
   lib/[ jslib ],
   types, lang, utils, renderer, config, dap,
   ../common/ct_logging,
@@ -1269,6 +1269,7 @@ proc onTraceLoaded(
   # console.log response.withDiff, response.diff, response.rawDiffIndex
 
   data.trace = response.trace
+  requestSessionTabsRender(data)
   data.setEditorsReadOnlyState(true)
   data.services.debugger.functions = response.functions
   data.services.editor.tags = response.tags
@@ -1664,6 +1665,7 @@ proc onUpdatePathContent(
 
 proc onUpdateTrace(sender: js, response: jsobject(trace=Trace)) =
   data.trace = response.trace
+  requestSessionTabsRender(data)
   data.ui.readOnly = false
   let oldPaths = data.services.debugger.paths
   let oldTags = data.services.editor.tags
@@ -1696,6 +1698,7 @@ proc onNoTrace(
       save=Save)) {.async.} =
 
   data.trace = nil
+  requestSessionTabsRender(data)
   data.ui.readOnly = false
   data.startOptions = response.startOptions
   data.homedir = response.home

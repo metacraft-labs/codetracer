@@ -16,7 +16,6 @@ import
   ../types,
   ../dap,
   ../renderer,
-  ../utils,
   ../lib/[logging, jslib]
 
 import kdom except Location
@@ -40,8 +39,12 @@ proc setInitLayoutProc*(p: InitLayoutProc) =
 proc setEnsureTabBarRendererProc*(p: EnsureTabBarRendererProc) =
   ## Called once from layout.nim to wire in the tab-bar renderer setup.
   ## This allows session creation to ensure the session-tab-bar
-  ## Karax renderer exists even when ``initLayout`` is not called.
+  ## direct mount exists even when ``initLayout`` is not called.
   ensureTabBarRendererImpl = p
+
+proc refreshSessionTabBar() =
+  if not ensureTabBarRendererImpl.isNil:
+    ensureTabBarRendererImpl()
 
 # ---------------------------------------------------------------------------
 # Session container helpers
@@ -312,6 +315,7 @@ proc closeSession*(data: Data, targetIndex: int) =
         if not oldContainer.isNil:
           oldContainer.id = sessionContainerId(i)
 
+  refreshSessionTabBar()
   kxi.redraw()
 
 proc switchSession*(data: Data, targetIndex: int) =
@@ -358,10 +362,7 @@ proc switchSession*(data: Data, targetIndex: int) =
           cwarn "switchSession: initLayout failed for session " & $targetIndex
       elif session.ui.layout.isNil:
         # Empty session (no trace) — ensure the tab bar renderer is alive.
-        if not ensureTabBarRendererImpl.isNil:
-          ensureTabBarRendererImpl()
-          if kxiMap.hasKey(cstring"session-tab-bar"):
-            redrawSync(kxiMap[cstring"session-tab-bar"])
+        refreshSessionTabBar()
 
   # Show the target container.
   targetContainer.classList.remove(cstring"hidden")
@@ -371,7 +372,6 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    If the target is an empty session (no layout/no trace), only
   #    redraw the tab bar — shared renderers (menu, status) reference
   #    per-session state that may not be initialised and would crash.
-  if kxiMap.hasKey(cstring"session-tab-bar"):
-    redrawSync(kxiMap[cstring"session-tab-bar"])
+  refreshSessionTabBar()
   if not data.activeSession.ui.layout.isNil:
     redrawAll()
