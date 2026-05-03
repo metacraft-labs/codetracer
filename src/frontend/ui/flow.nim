@@ -3586,25 +3586,49 @@ proc varStyle(self: FlowComponent, fields: seq[cstring]): VStyle =
   let width = 70 / fields.len.float
   style((StyleAttr.cssFloat, cstring"left"))
 
+proc makeLoopSliderChildDom(self: FlowComponent, position: int, includeEmptyText: bool = false): Node =
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring"flow-loop-slider")
+  result.setAttribute(cstring"id", cstring(&"flow-loop-slider-{position}"))
+
+  if not self.inExtension:
+    var leftValue = cast[Element](self.flowLoops[position].flowDom).clientWidth
+    var widthValue = cstring"0px"
+
+    if leftValue != 0:
+      widthValue = cstring(fmt"{calculateLoopSliderWidth(self, leftValue)}px")
+    else:
+      self.shouldRecalcFlow = true
+
+    result.style.width = fmt"calc({widthValue} - {SLIDER_OFFSET}ch)".cstring
+    result.style.fontSize = cstring($data.ui.fontSize)
+    result.style.fontFamily = cstring"SpaceGrotesk"
+    result.style.marginLeft = cstring"4ch"
+    result.style.height = cstring($self.lineHeight & "px")
+    result.style.lineHeight = cstring($self.lineHeight & "px")
+
+  if includeEmptyText:
+    result.appendChild(document.createTextNode(cstring""))
+
+proc makeLoopSliderContainerDom(self: FlowComponent, position: int): Node =
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring"flow-loop-slider-container")
+  result.setAttribute(cstring"id", cstring(&"flow-loop-slider-container-{position}"))
+
+  if not self.inExtension:
+    let flowDomWidth = self.flowLoops[position].flowDom.toJs.clientWidth
+    result.style.left = cstring(fmt"calc({flowDomWidth}px - 2ch)")
+    result.style.fontSize = cstring($data.ui.fontSize & "px")
+
+  result.appendChild(self.makeLoopSliderChildDom(position))
+
 proc makeSliderDom(self: FlowComponent, position: int): Node =
   var dom = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
-  var style = if self.inExtension: style() else: loopSliderStyle(self, position)
-  var leftStyle = if self.inExtension: style() else: flowLeftStyle(self, position, true)
   if dom.isNil:
-    let vNode = buildHtml(tdiv(class = "flow-loop-slider-container",
-      id = &"flow-loop-slider-container-{position}",
-      style = leftStyle)):
-        tdiv(class = "flow-loop-slider",
-             id = &"flow-loop-slider-{position}",
-             style = style)
-
-    dom = vnodeToDom(vNode, KaraxInstance())
+    dom = self.makeLoopSliderContainerDom(position)
   let domCheck = cast[Node](jq(&"flow-loop-slider-{position}"))
   if domCheck.isNil:
-    let childVNode = buildHtml(tdiv(class = "flow-loop-slider",
-      id = &"flow-loop-slider-{position}",
-      style = style)): text ""
-    let childDom = vnodeToDom(childVNode, KaraxInstance())
+    let childDom = self.makeLoopSliderChildDom(position, includeEmptyText = true)
 
     dom.appendChild(childDom)
 
