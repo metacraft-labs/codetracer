@@ -40,6 +40,7 @@ import viewmodels/repl_vm
 import viewmodels/low_level_code_vm
 import viewmodels/request_panel_vm
 import viewmodels/trace_log_vm except NO_SELECTED_INDEX
+import viewmodels/filesystem_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -61,6 +62,7 @@ import views/isonim_repl_view
 import views/isonim_low_level_code_view
 import views/isonim_request_panel_view
 import views/isonim_trace_log_view
+import views/isonim_filesystem_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -7278,3 +7280,468 @@ suite "IsoNim Trace Log Panel — vm":
   test "rowClass adds the selected modifier when selected":
     check isonim_trace_log_view.rowClass(false) == "trace-log-row"
     check isonim_trace_log_view.rowClass(true) == "trace-log-row selected"
+
+# ===========================================================================
+# Filesystem panel tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Filesystem panel tests — closes section 5.4 entry "filesystem" (§1.71)
+#
+# Mirrors the legacy ``FilesystemComponent`` (``frontend/ui/filesystem.nim``)
+# which rendered a jstree-backed source tree plus a parallel
+# ``diff-files-list`` and a deep-review compact list.  The IsoNim view
+# replaces the Karax ``method render``; these tests cover the structural
+# shell, the collapsible tree (toggle / expand / collapse), the diff-list
+# section, the deep-review compact rows, and the empty-state placeholder.
+# The rich jstree affordances (animated open/close, contextmenu plugin,
+# search plugin) are deliberately not exercised here — they remain a
+# follow-up captured in the VM doc-comment.
+# ---------------------------------------------------------------------------
+
+proc makeFsEntry(text: string;
+                 path: string = "";
+                 isFolder: bool = false;
+                 children: seq[FilesystemEntryNode] = @[];
+                 diffClass: FilesystemDiffClass = fdcNone;
+                 icon: string = ""): FilesystemEntryNode =
+  ## Test fixture builder for ``FilesystemEntryNode`` rows.
+  FilesystemEntryNode(
+    id: "",
+    text: text,
+    path: (if path.len > 0: path else: text),
+    icon: icon,
+    isFolder: isFolder,
+    isExpanded: false,
+    diffClass: diffClass,
+    children: children,
+  )
+
+proc makeFsRoot(children: seq[FilesystemEntryNode]): FilesystemEntryNode =
+  ## Build a synthetic non-empty root (text != "" so ``isEmpty`` is
+  ## false) holding ``children`` so the view renders them at the top
+  ## level.  Mirrors the shape the legacy
+  ## ``filesystem-loaded`` event handler produced.
+  FilesystemEntryNode(
+    id: "0",
+    text: "/",
+    path: "/",
+    icon: "",
+    isFolder: true,
+    isExpanded: true,
+    diffClass: fdcNone,
+    children: children,
+  )
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Filesystem Panel — structure":
+
+  test "root carries component-container + filesystem-container classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "component-container" in panel.attributes["class"]
+      check "filesystem-container" in panel.attributes["class"]
+
+      dispose()
+
+  test "container constants match the legacy class strings":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/components/filesystem.styl.
+    check FilesystemContainerClass == "component-container filesystem-container"
+    check FilesystemTreeContainerClass == "filesystem-tree"
+
+  test "empty VM renders filesystem-tree + visible empty-overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+
+      let tree = findByClass(panel, "filesystem-tree")
+      check tree != nil
+      check tree.children.len == 0
+
+      let overlay = findByClass(panel, "filesystem-empty-overlay")
+      check overlay != nil
+      check overlay.textContent == FilesystemEmptyStateText
+      check "hidden" notin overlay.attributes["class"]
+
+      dispose()
+
+  test "diff + deep-review containers are present but hidden when empty":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+
+      let diff = findByClass(panel, "diff-files-list")
+      check diff != nil
+      check "hidden" in diff.attributes["class"]
+
+      let deepReview = findByClass(panel, "deepreview-file-list")
+      check deepReview != nil
+      check "hidden" in deepReview.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Tree rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Filesystem Panel — tree rendering":
+
+  test "setRoot populates the tree reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      let tree = findByClass(panel, "filesystem-tree")
+      check tree.children.len == 0
+
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("a.nim"),
+        makeFsEntry("b.nim"),
+      ]))
+      check tree.children.len == 2
+
+      dispose()
+
+  test "file rows carry filesystem-entry + file class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[makeFsEntry("foo.nim")]))
+
+      let row = findByClass(panel, "filesystem-entry")
+      check row != nil
+      check "file" in row.attributes["class"]
+      check "folder" notin row.attributes["class"]
+
+      let label = findByClass(row, "filesystem-entry-label")
+      check label != nil
+      check label.textContent == "foo.nim"
+
+      dispose()
+
+  test "folder rows carry folder class + a twisty glyph":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("src", path = "src", isFolder = true,
+                    children = @[makeFsEntry("inner.nim",
+                                             path = "src/inner.nim")]),
+      ]))
+
+      let row = findByClass(panel, "filesystem-entry")
+      check "folder" in row.attributes["class"]
+      # Collapsed by default — twisty is the closed glyph.
+      let twisty = findByClass(row, "filesystem-entry-twisty")
+      check twisty.textContent == ">"
+
+      dispose()
+
+  test "expandPath shows children + toggles the twisty":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("src", path = "src", isFolder = true,
+                    children = @[makeFsEntry("inner.nim",
+                                             path = "src/inner.nim")]),
+      ]))
+
+      # Folder collapsed: children container is empty.
+      var children = findByClass(panel, "filesystem-entry-children")
+      check children.children.len == 0
+
+      vm.expandPath("src")
+
+      # After expansion the inner row materialises.
+      let labels = findAllByClass(panel, "filesystem-entry-label")
+      check labels.len == 2
+      check labels[1].textContent == "inner.nim"
+
+      # The twisty flips to open.
+      let folderRow = findByClass(panel, "filesystem-entry")
+      let twisty = findByClass(folderRow, "filesystem-entry-twisty")
+      check twisty.textContent == "v"
+
+      dispose()
+
+  test "clicking a folder row toggles expansion":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("src", path = "src", isFolder = true,
+                    children = @[makeFsEntry("inner.nim",
+                                             path = "src/inner.nim")]),
+      ]))
+
+      let row = findByClass(panel, "filesystem-entry")
+      check not vm.isExpanded("src")
+
+      row.fireEvent("click")
+      check vm.isExpanded("src")
+
+      row.fireEvent("click")
+      check not vm.isExpanded("src")
+
+      dispose()
+
+  test "diff-class modifiers thread through to the row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("added.nim", diffClass = fdcAdded),
+        makeFsEntry("changed.nim", diffClass = fdcChanged),
+        makeFsEntry("deleted.nim", diffClass = fdcDeleted),
+      ]))
+
+      let rows = findAllByClass(panel, "filesystem-entry")
+      check rows.len == 3
+      check "diff-file-added" in rows[0].attributes["class"]
+      check "diff-file-changed" in rows[1].attributes["class"]
+      check "diff-file-deleted" in rows[2].attributes["class"]
+
+      dispose()
+
+  test "empty-overlay hides once a tree is loaded":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      let overlay = findByClass(panel, "filesystem-empty-overlay")
+      check "hidden" notin overlay.attributes["class"]
+
+      vm.setRoot(makeFsRoot(@[makeFsEntry("a.nim")]))
+      check "hidden" in overlay.attributes["class"]
+
+      vm.clearRoot()
+      check "hidden" notin overlay.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Diff + deep-review surfaces
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Filesystem Panel — diff + deep-review":
+
+  test "setDiffEntries renders one row per entry with the basename":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setDiffEntries([
+        FilesystemDiffEntry(path: "src/a.nim", zebra: false),
+        FilesystemDiffEntry(path: "src/b.nim", zebra: true),
+      ])
+
+      let diff = findByClass(panel, "diff-files-list")
+      check "hidden" notin diff.attributes["class"]
+      check diff.children.len == 2
+      check diff.children[0].textContent == "a.nim"
+      check diff.children[1].textContent == "b.nim"
+      check "path-even" in diff.children[0].attributes["class"]
+      check "path-odd" in diff.children[1].attributes["class"]
+
+      dispose()
+
+  test "setDeepReview renders one compact row per file when active":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setDeepReview(true, [
+        FilesystemDeepReviewFile(
+          path: "src/a.nim", baseName: "a.nim", status: "A",
+          linesAdded: 10, linesRemoved: 0,
+          coverageExecuted: 5, coverageTotal: 10),
+        FilesystemDeepReviewFile(
+          path: "src/b.nim", baseName: "b.nim", status: "M",
+          linesAdded: 3, linesRemoved: 7,
+          coverageExecuted: 8, coverageTotal: 8),
+      ])
+
+      let dr = findByClass(panel, "deepreview-file-list")
+      check "hidden" notin dr.attributes["class"]
+      check dr.children.len == 2
+
+      let firstName = findByClass(dr.children[0], "deepreview-file-name-compact")
+      check firstName.textContent == "a.nim"
+
+      let firstStatus = findByClass(dr.children[0],
+                                    "deepreview-diff-status-compact")
+      check "deepreview-diff-added" in firstStatus.attributes["class"]
+
+      let secondStatus = findByClass(dr.children[1],
+                                     "deepreview-diff-status-compact")
+      check "deepreview-diff-modified" in secondStatus.attributes["class"]
+
+      let firstLines = findByClass(dr.children[0],
+                                   "deepreview-diff-lines-compact")
+      check firstLines.textContent == "+10/-0"
+
+      let firstCoverage = findByClass(dr.children[0],
+                                      "deepreview-coverage-compact")
+      check firstCoverage.textContent == "5/10"
+
+      dispose()
+
+  test "setDeepReview(false, ...) wipes any pending file list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setDeepReview(true, [
+        FilesystemDeepReviewFile(path: "x", baseName: "x", status: "A",
+                                 linesAdded: 1, linesRemoved: 0,
+                                 coverageExecuted: 0, coverageTotal: 0),
+      ])
+      let dr = findByClass(panel, "deepreview-file-list")
+      check dr.children.len == 1
+
+      # Pass a non-empty seq with active=false; the VM must drop it.
+      vm.setDeepReview(false, [
+        FilesystemDeepReviewFile(path: "y", baseName: "y", status: "M",
+                                 linesAdded: 0, linesRemoved: 1,
+                                 coverageExecuted: 0, coverageTotal: 0),
+      ])
+      check vm.deepReviewFiles.val.len == 0
+      check "hidden" in dr.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / formatting helpers
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Filesystem Panel — vm":
+
+  test "createFilesystemVM defaults reflect the empty-state branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      check vm.rootEntry.val.text == ""
+      check vm.rootEntry.val.children.len == 0
+      check vm.expandedPaths.val.len == 0
+      check vm.diffEntries.val.len == 0
+      check not vm.deepReviewActive.val
+      check vm.deepReviewFiles.val.len == 0
+      check vm.isEmpty.val
+      check not vm.hasDiff.val
+      check vm.totalEntryCount.val == 0
+      check not vm.store.isNil
+
+      dispose()
+
+  test "totalEntryCount memos count every descendant":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      check vm.totalEntryCount.val == 0
+
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("src", path = "src", isFolder = true, children = @[
+          makeFsEntry("a.nim", path = "src/a.nim"),
+          makeFsEntry("b.nim", path = "src/b.nim"),
+        ]),
+        makeFsEntry("README.md"),
+      ]))
+      # root + src + a.nim + b.nim + README.md = 5
+      check vm.totalEntryCount.val == 5
+
+      vm.clearRoot()
+      check vm.totalEntryCount.val == 0
+
+      dispose()
+
+  test "toggleExpanded flips the membership in expandedPaths":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+
+      check not vm.isExpanded("src")
+      vm.toggleExpanded("src")
+      check vm.isExpanded("src")
+      vm.toggleExpanded("src")
+      check not vm.isExpanded("src")
+
+      # expandPath / collapsePath are idempotent.
+      vm.expandPath("a")
+      vm.expandPath("a")
+      check vm.expandedPaths.val.len == 1
+      vm.collapsePath("a")
+      vm.collapsePath("a")
+      check vm.expandedPaths.val.len == 0
+
+      dispose()
+
+  test "diffClassToCss maps the enum to the legacy CSS modifier strings":
+    check diffClassToCss(fdcNone) == ""
+    check diffClassToCss(fdcAdded) == "diff-file-added"
+    check diffClassToCss(fdcChanged) == "diff-file-changed"
+    check diffClassToCss(fdcDeleted) == "diff-file-deleted"
+
+  test "twistyText branches on isFolder + expanded":
+    check twistyText(makeFsEntry("a.nim"), false) == ""
+    check twistyText(makeFsEntry("a.nim"), true) == ""
+    let dir = makeFsEntry("src", path = "src", isFolder = true)
+    check twistyText(dir, false) == ">"
+    check twistyText(dir, true) == "v"
+
+  test "diffEntryLabel returns the basename":
+    check diffEntryLabel(FilesystemDiffEntry(path: "src/a.nim",
+                                             zebra: false)) == "a.nim"
+    check diffEntryLabel(FilesystemDiffEntry(path: "main.nim",
+                                             zebra: true)) == "main.nim"
+
+  test "deepReviewStatusClass maps single-letter codes to CSS modifiers":
+    check deepReviewStatusClass("A") == "deepreview-diff-added"
+    check deepReviewStatusClass("M") == "deepreview-diff-modified"
+    check deepReviewStatusClass("D") == "deepreview-diff-deleted"
+    check deepReviewStatusClass("") == ""
+    check deepReviewStatusClass("Z") == ""

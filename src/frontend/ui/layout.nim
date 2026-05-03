@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
-  calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad,
+  calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -552,6 +552,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.RequestPanel,
       Content.TraceLog,
       Content.Scratchpad,
+      Content.Filesystem,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -702,6 +703,22 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           scratchpad.syncLegacyScratchpadIntoVM(
             ScratchpadComponent(component))
           scratchpad.tryMountIsoNimScratchpadPanel()
+
+        # Filesystem is now an IsoNim view -- its DOM is mounted by
+        # ``filesystem.tryMountIsoNimFilesystemPanel`` against the
+        # ``filesystemComponent-{id}`` container, and reactive effects
+        # keep it in sync.  No vnodeToDom bridge or redraw callback is
+        # needed here.  The legacy ``FilesystemComponent`` remains as
+        # the event-bus carrier (its existing event handlers populate
+        # ``data.services.editor.filesystem``) and
+        # ``syncLegacyFilesystemIntoVM`` mirrors any tree already
+        # accumulated when the panel becomes visible.  Mission goal #3
+        # \u00a71.71.  The rich jstree affordances (animated open/close,
+        # contextmenu plugin, search plugin) remain a follow-up.
+        if state.content == Content.Filesystem:
+          filesystem.syncLegacyFilesystemIntoVM(
+            FilesystemComponent(component))
+          filesystem.tryMountIsoNimFilesystemPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

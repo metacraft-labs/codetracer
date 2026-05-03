@@ -662,3 +662,116 @@ type
     configs*: seq[LaunchConfigEntry]
     selectedSlug*: string
     editFolderPath*: string
+
+  # -------------------------------------------------------------------
+  # Filesystem panel — file-tree explorer.
+  #
+  # Mirrors the legacy ``FilesystemComponent`` (``frontend/ui/filesystem.nim``)
+  # which used jstree for the in-Karax tree rendering plus a parallel
+  # diff-files list when ``data.startOptions.diff`` was populated.
+  # ``FilesystemEntryNode`` collapses just the data the IsoNim view
+  # needs into plain ``string`` / ``bool`` / ``seq`` shapes so the same
+  # value type works on both ``test-vm-native`` and ``test-vm-js``
+  # without ``cstring`` / ``langstring`` conversion noise.
+  #
+  # NOTE: rich jstree-style rendering (animated open/close, contextmenu
+  # plugin, search plugin, drag-and-drop) remains a follow-up.  The
+  # value carries enough state for the IsoNim view to render a
+  # collapsible tree with one row per entry, optional devicon class,
+  # and a diff-class modifier so the view can apply the legacy
+  # ``diff-file-added`` / ``diff-file-changed`` / ``diff-file-deleted``
+  # CSS modifiers without re-querying the legacy ``EditorService``.
+  # -------------------------------------------------------------------
+
+  FilesystemDiffClass* = enum
+    ## Per-entry diff modifier the legacy view threaded through jstree
+    ## via ``reapplyDiffClasses`` after every load / refresh / open
+    ## event.  Captured as an enum here so the IsoNim view never has to
+    ## re-derive it from the path comparison the legacy code did.
+    fdcNone     ## No diff modifier (the default).
+    fdcAdded    ## Maps to the legacy ``diff-file-added`` CSS class.
+    fdcChanged  ## Maps to the legacy ``diff-file-changed`` CSS class.
+    fdcDeleted  ## Maps to the legacy ``diff-file-deleted`` CSS class.
+
+  FilesystemEntryNode* = object
+    ## One node in the filesystem tree displayed by the panel.
+    ##
+    ## ``id``           — stable identifier matching the legacy
+    ##                    ``"j{1}_{index}"`` jstree node id.  Empty
+    ##                    string when not yet assigned (e.g. a synthetic
+    ##                    placeholder root).  Carrying it explicitly
+    ##                    keeps the IsoNim row's ``id`` attribute stable
+    ##                    for any external CSS targeting the diff
+    ##                    classes by ``#j…``.
+    ## ``text``         — display label (bare basename).  Rendered
+    ##                    inside the row's ``filesystem-entry-label``
+    ##                    span.
+    ## ``path``         — full path the entry resolves to (the legacy
+    ##                    ``original.path``).  Click handlers use this
+    ##                    to dispatch ``ViewSource`` opens through
+    ##                    ``data.openTab``.
+    ## ``icon``         — devicon CSS class (e.g.
+    ##                    ``"devicon-python-plain"``).  Empty string
+    ##                    falls back to the bundled folder icon in the
+    ##                    view CSS.
+    ## ``isFolder``     — true when the entry has children and should
+    ##                    render the expand/collapse twisty.
+    ## ``isExpanded``   — true when the children are currently visible.
+    ##                    The view toggles a ``.expanded`` modifier on
+    ##                    the row root from this signal so a second
+    ##                    click on the twisty collapses the subtree.
+    ## ``diffClass``    — optional diff modifier (see
+    ##                    ``FilesystemDiffClass``).  The IsoNim view
+    ##                    applies the corresponding ``diff-file-…``
+    ##                    class on the row.
+    ## ``children``     — recursive list of child entries (folders carry
+    ##                    them; files leave the seq empty).
+    id*: string
+    text*: string
+    path*: string
+    icon*: string
+    isFolder*: bool
+    isExpanded*: bool
+    diffClass*: FilesystemDiffClass
+    children*: seq[FilesystemEntryNode]
+
+  FilesystemDiffEntry* = object
+    ## One row in the synthetic ``diff-files-list`` the legacy view
+    ## rendered below the jstree when ``data.startOptions.diff`` was
+    ## populated (e.g. a recorded session opened from a diff fixture).
+    ##
+    ## ``path``    — full source path the diff row links to.  Click
+    ##               opens it via ``data.openTab`` exactly like the
+    ##               legacy ``diffItem`` helper did.
+    ## ``zebra``   — true for the legacy ``path-odd`` row, false for
+    ##               ``path-even``.  Pushed in from the bridge so the
+    ##               view does not need to re-derive the alternation.
+    path*: string
+    zebra*: bool
+
+# Explicit ``==`` overrides for the Filesystem panel value types so the
+# IsoNim signal write path can compile under Nim's side-effect inference.
+# The default structural ``==`` Nim derives for ``FilesystemEntryNode``
+# walks a recursive ``seq[FilesystemEntryNode]``, and that recursion is
+# inferred as side-effecting (the recursive call is treated as
+# potentially side-effecting by ``system.==``).  Marking these
+# operators ``{.noSideEffect.}`` and computing structural equality
+# explicitly keeps the signal write path pure so
+# ``writeSignal`` compiles for ``Signal[FilesystemEntryNode]`` /
+# ``Signal[seq[FilesystemDiffEntry]]`` etc.
+
+proc `==`*(a, b: FilesystemEntryNode): bool {.noSideEffect.} =
+  if a.id != b.id: return false
+  if a.text != b.text: return false
+  if a.path != b.path: return false
+  if a.icon != b.icon: return false
+  if a.isFolder != b.isFolder: return false
+  if a.isExpanded != b.isExpanded: return false
+  if a.diffClass != b.diffClass: return false
+  if a.children.len != b.children.len: return false
+  for i in 0 ..< a.children.len:
+    if a.children[i] != b.children[i]: return false
+  true
+
+proc `==`*(a, b: FilesystemDiffEntry): bool {.noSideEffect.} =
+  a.path == b.path and a.zebra == b.zebra

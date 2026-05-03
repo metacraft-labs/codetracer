@@ -1,8 +1,70 @@
+## Filesystem Panel — file-tree explorer.
+##
+## ---------------------------------------------------------------------------
+## ViewModel layer — IsoNim is the primary renderer.
+##
+## The legacy Karax ``method render`` was dropped in favour of an IsoNim
+## view (``viewmodel/views/isonim_filesystem_view.nim``) that mounts
+## directly into the GoldenLayout container.  The legacy
+## ``FilesystemComponent`` retains its module-level helpers so the
+## frontend's existing wiring (``filesystem-loaded`` /
+## ``filesystem-category-loaded`` IPC handlers, the diff sidecar, the
+## deep-review surface) keeps feeding the panel; every state mutation
+## now mirrors into the parallel ``FilesystemVM`` so the IsoNim view is
+## the single source of truth for the panel's DOM.
+##
+## Lifecycle:
+## 1. ``utils.nim::makeFilesystemComponent`` constructs the legacy
+##    ``FilesystemComponent`` and registers it under
+##    ``Content.Filesystem`` (one instance per panel id).
+## 2. ``layout.nim`` registers the GL container, then detects
+##    ``Content.Filesystem`` is in ``isIsoNimComponent`` and calls
+##    ``tryMountIsoNimFilesystemPanel`` instead of invoking Karax.
+## 3. The mount helper appends the IsoNim panel inside the
+##    ``filesystemComponent-{id}`` container and the reactive effects
+##    keep the DOM in sync with the VM.
+## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
+##    store version of the VM via ``initFilesystemVMWithStore`` so the
+##    panel uses the production ``ReplayDataStore``.
+##
+## NOTE: rich jstree affordances (animated open/close, contextmenu
+## plugin, search plugin, drag-and-drop) remain a follow-up.  The
+## IsoNim view renders a dependency-free collapsible tree; the legacy
+## ``changeIcons`` helper is kept exported because ui_js.nim's
+## ``filesystem-category-loaded`` handler uses it to populate the
+## devicon class on freshly-loaded subtrees.
+## ---------------------------------------------------------------------------
+
 import
   ui_imports,
+  ../[ types, communication ],
   tables
 
-# var testData: js
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import
+  FilesystemEntryNode, FilesystemDiffEntry, FilesystemDiffClass,
+  fdcNone, fdcAdded, fdcChanged, fdcDeleted
+from ../viewmodel/viewmodels/filesystem_vm import
+  FilesystemVM, createFilesystemVM, FilesystemDeepReviewFile,
+  setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
+  isExpanded, setDiffEntries, setDeepReview, emptyEntry
+when defined(js):
+  from isonim/web/dom_api import nil
+  from ../viewmodel/views/isonim_filesystem_view import
+    mountIsoNimFilesystemPanel
+
+# ---------------------------------------------------------------------------
+# Devicon mapping (preserved from the legacy module).
+#
+# Used by the ``filesystem-category-loaded`` IPC handler in ui_js.nim
+# (``response.content.changeIcons()``) so the VM bridge below can query
+# the devicon when translating a CodetracerFile into a
+# FilesystemEntryNode.  Kept verbatim from the legacy implementation so
+# any historical caller keeps the same icon mapping.
+# ---------------------------------------------------------------------------
+
 const ICON_MAP = {
   "py".cstring: "devicon-python-plain".cstring,
   "js": "devicon-javascript-plain",
@@ -106,7 +168,26 @@ const ICON_MAP = {
 proc toDevicon(str: cstring): cstring =
   ICON_MAP[str]
 
+proc deviconForName*(name: string): string =
+  ## Resolve the devicon CSS class for a file basename.  Mirrors the
+  ## per-extension lookup the legacy ``changeIcons`` proc did but
+  ## returns a plain string so the VM bridge can call it without
+  ## ``cstring`` round-tripping.  Returns "" when no mapping exists.
+  if name.len == 0:
+    return ""
+  let dotIdx = name.rfind('.')
+  let ext = if dotIdx >= 0: name[dotIdx + 1 .. ^1].toLowerAscii() else: name
+  let key = cstring(ext)
+  if ICON_MAP.hasKey(key):
+    $ICON_MAP[key]
+  else:
+    ""
+
 proc changeIcons*(file: CodetracerFile) =
+  ## Walk the legacy ``CodetracerFile`` tree and populate each node's
+  ## ``icon`` cstring with the matching devicon class.  Preserved as
+  ## an exported proc because ui_js.nim's ``filesystem-category-loaded``
+  ## handler invokes it after loading a freshly-streamed subtree.
   for child in file.children:
     let str = child.text.split(".")[^1].toLowerCase()
 
@@ -118,190 +199,260 @@ proc changeIcons*(file: CodetracerFile) =
     child.changeIcons()
 
 
-proc reapplyDiffClasses(self: FilesystemComponent) =
-  proc applyClass(diffIdList: seq[cstring], class: cstring) =
-    for id in diffIdList:
-      let sel = "#j" & id
-      let el  = jqFind(sel)
-      if not el.isNil: el.addClass(class)
-
-  self.service.addedDiffId.applyClass("diff-file-added")
-  self.service.changedDiffId.applyClass("diff-file-changed")
-  self.service.deletedDiffId.applyClass("diff-file-deleted")
-
-proc mapDiff(service: EditorService, node: CodetracerFile) =
-  for child in node.children:
-    service.index += 1
-    for fileDiff in data.startOptions.diff.files:
-      if child.original.path == fileDiff.currentPath:
-        case fileDiff.change:
-        of FileAdded:
-          service.addedDiffId.add(&"1_{service.index}_anchor")
-        of FileDeleted:
-          service.deletedDiffId.add(&"1_{service.index}_anchor")
-        of FileRenamed:
-          discard
-        of FileChanged:
-          service.changedDiffId.add(&"1_{service.index}_anchor")
-    mapDiff(service, child)
-
-proc openTab(currentPath: cstring) =
+proc openTab*(currentPath: cstring) =
+  ## Dispatch a ``ViewSource`` open on ``currentPath`` through the
+  ## legacy ``data.openTab`` plumbing.  Exported because the IsoNim
+  ## view's bridge invokes it from row-click handlers.
   data.openTab(data.trace.outputFolder & "files".cstring & currentPath, ViewSource)
 
-proc makeDeepReviewFileClickHandler(filePath: cstring): proc(ev: Event, tg: VNode) =
-  ## Create a click handler for a DeepReview file list item.
-  ## Using a separate proc avoids the Nim JS backend closure-in-loop
-  ## bug where all closures capture the same loop variable by reference.
-  result = proc(ev: Event, tg: VNode) =
-    data.openTab(filePath, ViewSource)
+# ---------------------------------------------------------------------------
+# Module-level VM/store/component slots so the IsoNim mount and any
+# legacy bridge handlers can find each other across calls.  Mirrors
+# the pattern used by trace_log / scratchpad / request_panel / step_list.
+# ---------------------------------------------------------------------------
 
-proc diffItem(path: string, klass: string): VNode =
-  buildHtml(tdiv(
-    class = fmt"diff-file-path {klass}",
-    onclick = proc(ev: Event, tg: VNode) {.closure.} =
-      data.openTab(path, ViewSource)
-  )):
-    text path.split("/")[^1]
+var filesystemVMInstance*: FilesystemVM
+var filesystemVMStore: ReplayDataStore
+var filesystemComponentRef: FilesystemComponent
+# Track which FilesystemComponent ids have already mounted their IsoNim
+# view.  The GL container is keyed by ``filesystemComponent-{id}`` so
+# each panel instance gets its own mount.
+var isoNimFilesystemMountedIds {.used.}: JsAssoc[int, bool] =
+  JsAssoc[int, bool]{}
 
-method render*(self: FilesystemComponent): VNode =
-  if not self.initFilesystem and not self.data.deepReviewActive:
-    # Skip jstree initialization in DeepReview mode -- the filesystem
-    # panel renders a Karax-based changed-files list instead.
-    kxiMap["filesystemComponent"].afterRedraws.add(proc =
-      if not self.initFilesystem:
-        if not jqFind(".filesystem").isNil and
-          not self.service.filesystem.isNil:
-            try:
-              self.service.filesystem.changeIcons()
-              if not self.data.startOptions.diff.isNil:
-                self.service.mapDiff(self.service.filesystem)
-              jqFind(".filesystem").jstree(js{
-                  core: js{
-                    check_callback: true,
-                    data: self.service.filesystem.toJs,
-                    animation: false,
-                  },
-                  plugins: @[cstring"contextmenu", cstring"search", cstring"wholerow"]
-              })
+proc tryMountIsoNimFilesystemPanel*()
 
-              jqFind(".filesystem").toJs.on(
-                "ready.jstree",
-                proc(e: js, node: jsobject(node=CodetracerFile)) =
-                  self.reapplyDiffClasses()
-              )
+# ---------------------------------------------------------------------------
+# Component extension (ctInExtension boiler-plate).
+#
+# Preserved from the legacy module so the extension entry-point still
+# resolves to a valid ``FilesystemComponent``; the in-extension render
+# path falls back to the base ``Component.render()`` (empty VNode) since
+# the IsoNim view is the production renderer.  Same pattern as
+# request_panel §1.51 / scratchpad §1.70.
+# ---------------------------------------------------------------------------
 
-              jqFind(".filesystem").toJs.on(cstring"refresh.jstree",
-                proc(e: js, node: jsobject(node=CodetracerFile)) =
-                  self.reapplyDiffClasses()
-              )
+when defined(ctInExtension):
+  var filesystemComponentForExtension* {.exportc.}: FilesystemComponent =
+    makeFilesystemComponent(data, 0)
 
-              jqFind(".filesystem").toJs.on(cstring"load_node.jstree",
-                proc(e: js, node: jsobject(node=CodetracerFile)) =
-                  self.reapplyDiffClasses()
-              )
+# ---------------------------------------------------------------------------
+# Legacy → VM translation helpers
+# ---------------------------------------------------------------------------
 
-              jqFind(".filesystem").toJs.on(cstring"open_node.jstree",
-                proc(e: js, node: jsobject(node=CodetracerFile)) =
-                  self.reapplyDiffClasses()
-              )
+proc safeStr(s: cstring): string =
+  ## Convert a possibly-null cstring to an empty string.  The legacy
+  ## record carries cstring everywhere; an unconditional ``$`` would
+  ## throw inside ``cstrToNimstr`` for null cstrings.
+  if s.isNil:
+    ""
+  else:
+    $s
 
-              jqFind(".filesystem").toJs.on(cstring"changed.jstree",
-                proc(e: js, nodeData: jsobject(node=CodetracerFile)) =
-                  let ext = ($nodeData.node.original.path).rsplit(".", 1)[1]
-                  let lang = toLang(ext)
-                  data.openTab(nodeData.node.original.path, ViewSource)) #, lang))
+proc resolveDiffClass(path: string): FilesystemDiffClass =
+  ## Compare ``path`` against the diff fixture in
+  ## ``data.startOptions.diff`` (when populated) and return the matching
+  ## diff class.  Mirrors the legacy ``mapDiff`` logic at the data-only
+  ## level so the IsoNim bridge does not need to walk jstree's DOM.
+  if data.isNil or data.startOptions.diff.isNil:
+    return fdcNone
+  for fileDiff in data.startOptions.diff.files:
+    if safeStr(fileDiff.currentPath) == path:
+      case fileDiff.change
+      of FileAdded: return fdcAdded
+      of FileDeleted: return fdcDeleted
+      of FileChanged: return fdcChanged
+      of FileRenamed: return fdcNone
+  fdcNone
 
-              jqFind(".filesystem").toJs.on(cstring"before_open.jstree",
-                proc(e: js, node: jsobject(node=CodetracerFile)) =
-                  let nodeId = node.toJs.node.id
-                  let nodeChildren = node.toJs.node.children.to(seq[cstring])
-                  if nodeChildren.len > 0:
-                    let nodeOriginalPath = node.toJs.node.original.original.path
-                    let childNodeId = nodeChildren[0]
-                    let domAnchorId = childNodeId & "_anchor"
-                    let childDom = byId(domAnchorId)
-                    if not childDom.isNil and childDom.textContent == "Loading...":
-                      let nodeIndex = node.toJs.node.original.index.to(int)
-                      var nodeParentIndices = node.toJs.node.original.parentIndices.to(seq[int])
-                      self.data.ipc.send "CODETRACER::load-path-content", js{
-                        path: nodeOriginalPath,
-                        nodeId: nodeId,
-                        nodeIndex: nodeIndex,
-                        nodeParentIndices: nodeParentIndices})
-            except:
-              cerror "filesystem: " & getCurrentExceptionMsg()
+proc legacyFileToVm*(file: CodetracerFile): FilesystemEntryNode =
+  ## Translate a legacy ``CodetracerFile`` (the jstree input) to a
+  ## platform-neutral ``FilesystemEntryNode`` value.  Recurses on
+  ## children so the same call mirrors the entire subtree in one shot.
+  ## ``isFolder`` is derived from "has at least one child" — the
+  ## legacy record does not carry an explicit "is folder" bit but
+  ## jstree treated any node with children as a folder.
+  if file.isNil:
+    return emptyEntry()
+  let displayText = safeStr(file.text)
+  let path = safeStr(file.original.path)
+  let icon = safeStr(file.icon)
+  result = FilesystemEntryNode(
+    id: $file.index,
+    text: displayText,
+    path: path,
+    icon: icon,
+    isFolder: file.children.len > 0,
+    isExpanded: false,
+    diffClass: resolveDiffClass(path),
+    children: @[],
+  )
+  for child in file.children:
+    result.children.add(legacyFileToVm(child))
 
-            self.initFilesystem = true
-      )
+proc legacyDiffEntries*(): seq[FilesystemDiffEntry] =
+  ## Build the synthetic diff-files-list rows from
+  ## ``data.startOptions.diff.files``.  Returns an empty seq when no
+  ## diff is loaded, hiding the section.
+  result = @[]
+  if data.isNil or data.startOptions.diff.isNil:
+    return
+  for i, fd in data.startOptions.diff.files:
+    let path = safeStr(fd.currentPath)
+    if path.len == 0:
+      continue
+    # The legacy ``diffItem`` proc used ``i mod 2 == 0`` for
+    # ``path-even``; flip the sense so the VM stores "true == odd
+    # row" which matches the helper name.
+    result.add(FilesystemDiffEntry(
+      path: path,
+      zebra: (i mod 2 != 0),
+    ))
 
-  # In DeepReview mode, mark filesystem as initialized immediately since
-  # we don't need jstree.
-  if self.data.deepReviewActive and not self.initFilesystem:
-    self.initFilesystem = true
+# ---------------------------------------------------------------------------
+# IsoNim VM bridge
+# ---------------------------------------------------------------------------
 
-  if self.forceRedraw:
-    data.redraw()
-    self.forceRedraw = false
+proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
+  ## Bulk-replay the legacy filesystem into the VM.  Used by the
+  ## layout when the panel container becomes visible (or is rebuilt)
+  ## so the panel reflects whatever ``EditorService.filesystem`` /
+  ## ``data.startOptions.diff`` already accumulated.
+  if filesystemVMInstance.isNil or self.isNil:
+    return
+  if not self.service.isNil and not self.service.filesystem.isNil:
+    filesystemVMInstance.setRoot(legacyFileToVm(self.service.filesystem))
+  else:
+    filesystemVMInstance.clearRoot()
+  filesystemVMInstance.setDiffEntries(legacyDiffEntries())
 
-  buildHtml(
-    tdiv(
-      class = componentContainerClass("filesystem-container")
-    )
-  ):
-    if self.data.deepReviewActive and not self.data.deepReviewData.isNil:
-      # DeepReview mode: compact one-line-per-file list.
-      # Format: [status] filename  +added/-removed  covered/total
-      tdiv(class = "deepreview-file-list"):
-        for i, file in self.data.deepReviewData.files:
-          let isSelected = false  # TODO: track selected file index
-          let selectedClass = if isSelected: " selected" else: ""
-          tdiv(
-            class = cstring(fmt"deepreview-file-item-compact{selectedClass}"),
-            onclick = makeDeepReviewFileClickHandler(file.path),
-            title = file.path
-          ):
-            # Diff status badge (A/M/D).
-            if not file.diff.isNil and ($file.diff.status).len > 0:
-              let statusStr = $file.diff.status
-              let statusClass = case statusStr
-                of "A": " deepreview-diff-added"
-                of "M": " deepreview-diff-modified"
-                of "D": " deepreview-diff-deleted"
-                else: ""
-              span(class = cstring("deepreview-diff-status-compact" & statusClass)):
-                text cstring(statusStr)
-            # File basename.
-            span(class = "deepreview-file-name-compact"):
-              let pathStr = $file.path
-              let slashIdx = pathStr.rfind('/')
-              let baseName = if slashIdx >= 0: pathStr[slashIdx + 1 .. ^1] else: pathStr
-              text cstring(baseName)
-            # Diff line counts (+added/-removed).
-            if not file.diff.isNil and (file.diff.linesAdded > 0 or file.diff.linesRemoved > 0):
-              let statusStr = $file.diff.status
-              let badgeClass = case statusStr
-                of "A": " deepreview-diff-added"
-                of "M": " deepreview-diff-modified"
-                of "D": " deepreview-diff-deleted"
-                else: ""
-              span(class = cstring("deepreview-diff-lines-compact" & badgeClass)):
-                text cstring(fmt"+{file.diff.linesAdded}/-{file.diff.linesRemoved}")
-            # Coverage summary (executed/total lines).
-            if file.coverage.len > 0:
-              var executed = 0
-              var total = file.coverage.len
-              for lc in file.coverage:
-                if lc.executed: executed += 1
-              span(class = "deepreview-coverage-compact"):
-                text cstring(fmt"{executed}/{total}")
+# ---------------------------------------------------------------------------
+# VM bootstrap
+# ---------------------------------------------------------------------------
+
+proc initFilesystemVMWithStore*(store: ReplayDataStore) =
+  ## Initialise (or replace) the parallel ``FilesystemVM`` using an
+  ## externally-provided ``ReplayDataStore`` (typically the shared
+  ## store from ``SessionViewModel``).  Called from
+  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
+  ## exists (created by ``initFilesystemVM`` before the real backend
+  ## was available) it is replaced so the panel uses the real backend.
+  if filesystemVMInstance != nil:
+    clog "FilesystemVM: replacing existing instance with shared-store version"
+    isoNimFilesystemMountedIds = JsAssoc[int, bool]{}
+  filesystemVMStore = store
+  filesystemVMInstance = createFilesystemVM(store)
+  clog "FilesystemVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimFilesystemPanel()
+
+proc initFilesystemVM*() =
+  ## Lazy fallback used when no shared store has been provided yet.
+  ## Same shape as ``initScratchpadVM`` / ``initTraceLogVM`` — a stub
+  ## backend so the panel can still render before
+  ## ``configureMiddleware`` runs.
+  if filesystemVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
     else:
-      # Normal mode: standard jstree filesystem.
-      tdiv(class = "filesystem",
-        onclick = proc(ev: Event, tg: VNode) =
-          ev.currentTarget.focus()
-      )
-      if not self.data.startOptions.diff.isNil:
-        tdiv(class = "diff-files-list"):
-          for i, fd in self.data.startOptions.diff.files:
-            let klass = if i mod 2 == 0: "path-even" else: "path-odd"
-            diffItem($fd.currentPath, klass)
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  filesystemVMStore = createReplayDataStore(stubBackend)
+  filesystemVMInstance = createFilesystemVM(filesystemVMStore)
+  clog "FilesystemVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimFilesystemPanel()
+
+# ---------------------------------------------------------------------------
+# Mount helper — Web only
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc tryMountIsoNimFilesystemPanel*() =
+    ## Mount the IsoNim Filesystem panel view into the GoldenLayout-
+    ## managed container.  The container's id is
+    ## ``filesystemComponent-{id}`` — each open Filesystem panel
+    ## instance has its own mount.
+    ##
+    ## Safe to call multiple times — mounts only once per component
+    ## id.  Retries via ``setTimeout`` until the DOM container appears
+    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
+    ## host slightly after the layout state changes (mirrors
+    ## ``tryMountIsoNimScratchpadPanel`` / ``tryMountIsoNimTraceLogPanel``).
+    if filesystemVMInstance.isNil:
+      return
+    if filesystemComponentRef.isNil:
+      return
+    let componentId = filesystemComponentRef.id
+    if isoNimFilesystemMountedIds.hasKey(componentId):
+      return
+
+    let key = cstring("filesystemComponent-" & $componentId)
+    var retryCount = 0
+    proc doMount() =
+      if isoNimFilesystemMountedIds.hasKey(componentId):
+        return
+      retryCount += 1
+      let container = dom_api.getElementById(dom_api.document, key)
+      if dom_api.isNodeNil(dom_api.Node(container)):
+        if retryCount > 200:
+          cerror "tryMountIsoNimFilesystemPanel: not ready after 200 retries, giving up"
+          return
+        discard setTimeout(proc() = doMount(), 10)
+        return
+
+      # Replace any prior content (Karax may have planted a stub
+      # element before the IsoNim mount fires).
+      let containerNode = dom_api.Node(container)
+      while not dom_api.isNodeNil(containerNode.firstChild):
+        discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+      isoNimFilesystemMountedIds[componentId] = true
+      try:
+        mountIsoNimFilesystemPanel(container, filesystemVMInstance)
+      except:
+        cerror "tryMountIsoNimFilesystemPanel: mount EXCEPTION: " &
+          getCurrentExceptionMsg()
+
+      # Re-sync any state the legacy component already carries so the
+      # freshly-mounted view reflects the latest tree.
+      if not filesystemComponentRef.isNil:
+        syncLegacyFilesystemIntoVM(filesystemComponentRef)
+
+    doMount()
+else:
+  proc tryMountIsoNimFilesystemPanel*() =
+    ## Native compilation has no DOM — keep the proc available so
+    ## callers (``initFilesystemVM*``) compile on every backend.
+    discard
+
+# ---------------------------------------------------------------------------
+# Component registration — IsoNim primary renderer; no Karax method
+# render.  The base ``Component.render()`` returns a valid empty VNode
+# for any generic callers.
+# ---------------------------------------------------------------------------
+
+method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =
+  ## Register the FilesystemComponent with the mediator.  Bring up the
+  ## IsoNim FilesystemVM lazily so the mount procedure can find it; the
+  ## shared-store version is installed by ``configureMiddleware`` if
+  ## the ViewModel layer is enabled.
+  self.api = api
+  initFilesystemVM()
+  if filesystemComponentRef.isNil:
+    filesystemComponentRef = self
+    tryMountIsoNimFilesystemPanel()
+
+proc registerFilesystemComponent*(component: FilesystemComponent,
+                                   api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
