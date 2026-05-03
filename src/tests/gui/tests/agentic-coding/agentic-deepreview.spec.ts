@@ -462,7 +462,7 @@ test.describe("test_workspace_view_switching", () => {
   });
 
   test("fixture: toggle logic alternates between two views", () => {
-    // Simulate the toggle logic from CaptionBarProgressComponent.render.
+    // Simulate the toggle logic from the caption bar IsoNim click handler.
     // This mirrors the Nim test in agentic_coding_test_plan.nim.
     type ViewKind = "UserWorkspace" | "AgentWorkspace";
 

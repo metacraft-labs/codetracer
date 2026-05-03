@@ -16,7 +16,7 @@
 
 import
   ui_imports, ../utils, ../communication,
-  std/[strformat, jsconsole, math]
+  std/[strformat, math]
 
 when defined(js):
   import isonim/web/web_renderer
@@ -98,77 +98,6 @@ proc updateProgress*(self: CaptionBarProgressComponent, progress: AgentProgress)
   # In a browser environment we would use performance.now(); here we use
   # a simple counter that the caller increments.
   self.lastUpdateMs += 1
-
-# ---------------------------------------------------------------------------
-# Render helpers
-# ---------------------------------------------------------------------------
-
-proc renderProgressBar(self: CaptionBarProgressComponent): VNode =
-  ## Render the animated progress bar fill.
-  let pct = progressPercent(self.progress)
-  let widthStr = cstring(fmt"{pct:.1f}%")
-
-  buildHtml(tdiv(class = "caption-progress-bar")):
-    tdiv(
-      class = "caption-progress-bar-fill",
-      style = style(StyleAttr.width, widthStr)
-    )
-
-proc renderMilestoneList(self: CaptionBarProgressComponent): VNode =
-  ## Render the expanded milestone checklist (visible on hover/click).
-  buildHtml(tdiv(class = "caption-progress-milestones")):
-    if self.progress.milestones.len == 0:
-      tdiv(class = "caption-progress-milestone-empty"):
-        text "No milestones defined"
-    else:
-      for milestone in self.progress.milestones:
-        let statusClass = milestoneStatusClass(milestone.status)
-        tdiv(class = cstring(fmt"caption-progress-milestone-item {statusClass}")):
-          span(class = "caption-progress-milestone-icon"):
-            text milestoneStatusIcon(milestone.status)
-          span(class = "caption-progress-milestone-content"):
-            text $milestone.content
-          if milestone.priority == cstring"high":
-            span(class = "caption-progress-milestone-priority"):
-              text "HIGH"
-
-proc renderCompactView(self: CaptionBarProgressComponent): VNode =
-  ## Render the compact (non-expanded) progress indicator.
-  let stateClass = stateCssClass(self.progress.state)
-  let pct = progressPercent(self.progress)
-  let progressText =
-    if self.progress.milestonesTotal > 0:
-      fmt"{self.progress.milestonesCompleted}/{self.progress.milestonesTotal}"
-    else:
-      "0/0"
-
-  buildHtml(tdiv(class = cstring(fmt"caption-progress-compact {stateClass}"))):
-    span(class = "caption-progress-state"):
-      text stateLabel(self.progress.state)
-
-    if self.progress.taskName.len > 0:
-      span(class = "caption-progress-task"):
-        text $self.progress.taskName
-
-    renderProgressBar(self)
-
-    span(class = "caption-progress-count"):
-      text progressText
-
-    if self.progress.currentMilestone.len > 0:
-      span(class = "caption-progress-current"):
-        text $self.progress.currentMilestone
-
-# ---------------------------------------------------------------------------
-# Main render
-# ---------------------------------------------------------------------------
-
-method render*(self: CaptionBarProgressComponent): VNode =
-  ## Legacy Karax render stub. The IsoNim renderer
-  ## (renderIsoNimCaptionBarProgress) is the primary rendering path.
-  ## This returns an empty container that GoldenLayout or vnodeToDom
-  ## can work with.
-  buildHtml(tdiv(class = "caption-progress-container"))
 
 # ---------------------------------------------------------------------------
 # IsoNim WebRenderer rendering

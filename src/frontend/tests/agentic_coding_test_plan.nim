@@ -202,7 +202,7 @@ suite "test_workspace_view_switching":
 
   test "Toggle from User to Agent workspace":
     var view = UserWorkspace
-    # Simulate the toggle logic from CaptionBarProgressComponent.render
+    # Simulate the toggle logic from the caption bar IsoNim click handler.
     view =
       if view == UserWorkspace: AgentWorkspace
       else: UserWorkspace
