@@ -44,6 +44,7 @@ import viewmodels/filesystem_vm
 import viewmodels/command_palette_vm
 import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_deepreview_vm
+import viewmodels/agent_workspace_vm
 import viewmodels/welcome_screen_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
@@ -70,6 +71,7 @@ import views/isonim_filesystem_view
 import views/isonim_command_palette_view
 import views/isonim_agent_activity_view
 import views/isonim_agent_activity_deepreview_view
+import views/isonim_agent_workspace_view
 import views/isonim_welcome_screen_view
 
 # ---------------------------------------------------------------------------
@@ -9245,3 +9247,171 @@ suite "IsoNim Agent Activity Panel — helpers":
     check inputId(12, "-command") == "agent-query-text-12-command"
     check diffEditorId(2, 7) == "diff-editor-2-7"
     check shellContainerId(4) == "shellComponent-4"
+
+# ===========================================================================
+# Agent Workspace panel tests (§1.76 — agent_workspace Karax -> IsoNim
+# migration, mission goal #3).
+# ===========================================================================
+
+proc makeAgentWorkspaceFile(path: string; covered = 0; total = 0;
+                            hasFlow = false): AgentWorkspaceFileEntry =
+  AgentWorkspaceFileEntry(
+    path: path,
+    coveredLines: covered,
+    totalLines: total,
+    hasFlow: hasFlow,
+  )
+
+suite "IsoNim Agent Workspace Panel — structure":
+
+  test "empty VM renders the legacy empty-state shell":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentWorkspaceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentWorkspacePanel(r, vm, componentId = 8)
+
+      check panel.kind == mnkElement
+      check panel.attributes["class"] == AgentWorkspaceContainerClass
+      let empty = findByClass(panel, AgentWorkspaceEmptyClass)
+      check empty != nil
+      check empty.textContent == AgentWorkspaceEmptyText
+      check findByClass(panel, AgentWorkspaceHeaderClass) == nil
+
+      dispose()
+
+  test "workspace metadata renders header summary body and editor id":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentWorkspaceVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentWorkspacePanel(r, vm, componentId = 9)
+
+      vm.setWorkspaceMetadata("/tmp/agent", "session-1")
+      vm.setSummary(AgentWorkspaceSummary(
+        coveragePercent: 62.5,
+        testsRun: 4,
+        testsPassed: 3,
+        testsFailed: 1,
+        functionsTraced: 2,
+      ))
+
+      let header = findByClass(panel, AgentWorkspaceHeaderClass)
+      check header != nil
+      check findByClass(header, "agent-workspace-header-label").textContent ==
+        "Agent Workspace"
+      check findByClass(header, "agent-workspace-header-path").textContent ==
+        "/tmp/agent"
+
+      let summary = findByClass(panel, AgentWorkspaceSummaryClass)
+      check summary != nil
+      check "Coverage: 62.5%" in summary.textContent
+      check "Tests: 3/4 passed" in summary.textContent
+      check "Functions traced: 2" in summary.textContent
+
+      let editor = findByClass(panel, AgentWorkspaceEditorClass)
+      check editor != nil
+      check editor.attributes["id"] == editorId(9)
+
+      dispose()
+
+  test "file list renders selected state coverage badges and flow marker":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentWorkspaceVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentWorkspacePanel(r, vm, componentId = 10)
+
+      vm.setWorkspaceMetadata("/tmp/agent", "session-1")
+      vm.setFiles(@[
+        makeAgentWorkspaceFile("/repo/src/a.nim", covered = 1, total = 2),
+        makeAgentWorkspaceFile("/repo/src/b.nim", covered = 4, total = 4,
+                               hasFlow = true),
+      ])
+      vm.setSelectedFileIndex(1)
+
+      let rows = findAllByClass(panel, "agent-workspace-file-item")
+      check rows.len == 2
+      check "selected" notin rows[0].attributes["class"]
+      check "selected" in rows[1].attributes["class"]
+      check findByClass(rows[0], "agent-workspace-file-name").textContent ==
+        "a.nim"
+      check findByClass(rows[0], "agent-workspace-coverage-badge").textContent ==
+        "1/2"
+      check findByClass(rows[1], "agent-workspace-flow-badge").textContent ==
+        "flow"
+
+      dispose()
+
+suite "IsoNim Agent Workspace Panel — interactions":
+
+  test "file click updates selection and invokes callback":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentWorkspaceVM(store)
+      let r = MockRenderer()
+      var selected = -1
+      let callbacks = AgentWorkspaceCallbacks(
+        onSelectFile: proc(index: int) = (selected = index),
+      )
+      let panel = renderAgentWorkspacePanel(r, vm, componentId = 11,
+                                            callbacks = callbacks)
+      vm.setWorkspaceMetadata("/tmp/agent", "session-1")
+      vm.setFiles(@[
+        makeAgentWorkspaceFile("/repo/a.nim", 1, 2),
+        makeAgentWorkspaceFile("/repo/b.nim", 2, 2),
+      ])
+
+      let rows = findAllByClass(panel, "agent-workspace-file-item")
+      rows[1].fireEvent("click")
+
+      check selected == 1
+      check vm.selectedFileIndex.val == 1
+
+      dispose()
+
+  test "overlay and view toggles update VM and callbacks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentWorkspaceVM(store)
+      let r = MockRenderer()
+      var overlayToggles = 0
+      var viewToggles = 0
+      let callbacks = AgentWorkspaceCallbacks(
+        onToggleOverlay: proc() = (inc overlayToggles),
+        onToggleView: proc() = (inc viewToggles),
+      )
+      let panel = renderAgentWorkspacePanel(r, vm, componentId = 12,
+                                            callbacks = callbacks)
+      vm.setWorkspaceMetadata("/tmp/agent", "session-1")
+
+      findByClass(panel, "agent-workspace-overlay-toggle").fireEvent("click")
+      check overlayToggles == 1
+      check not vm.coverageOverlayEnabled.val
+      check findByClass(panel, "agent-workspace-overlay-toggle").textContent ==
+        "Show Coverage"
+
+      findByClass(panel, "agent-workspace-view-toggle").fireEvent("click")
+      check viewToggles == 1
+      check vm.viewKind.val == awvkUserWorkspace
+      check findByClass(panel, "agent-workspace-header-label").textContent ==
+        "User Workspace"
+
+      dispose()
+
+suite "IsoNim Agent Workspace Panel — helpers":
+
+  test "helper text matches the legacy selector and label surface":
+    check editorId(7) == "agent-workspace-editor-7"
+    check isonim_agent_workspace_view.fileBasename("/repo/src/main.nim") ==
+      "main.nim"
+    check isonim_agent_workspace_view.fileBasename("main.nim") == "main.nim"
+    check viewLabel(awvkAgentWorkspace) == "Agent Workspace"
+    check viewLabel(awvkUserWorkspace) == "User Workspace"
+    check toggleViewText(awvkAgentWorkspace) == "Switch to User"
+    check toggleViewText(awvkUserWorkspace) == "Switch to Agent"
+    check fileItemClass(false) == "agent-workspace-file-item"
+    check fileItemClass(true) == "agent-workspace-file-item selected"
+    check overlayToggleText(true) == "Hide Coverage"
+    check overlayToggleText(false) == "Show Coverage"

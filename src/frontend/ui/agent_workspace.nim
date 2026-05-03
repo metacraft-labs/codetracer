@@ -24,6 +24,20 @@ import
   ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole]
 
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import
+  AgentWorkspaceFileEntry, AgentWorkspaceSummary, AgentWorkspaceViewKind,
+  awvkAgentWorkspace, awvkUserWorkspace
+from ../viewmodel/viewmodels/agent_workspace_vm import
+  AgentWorkspaceVM, createAgentWorkspaceVM, setViewKind,
+  setWorkspaceMetadata, setSummary, setFiles, setSelectedFileIndex,
+  setCoverageOverlayEnabled, setNotificationCount
+when defined(js):
+  from isonim/web/dom_api as isonim_dom_api import nil
+  from ../viewmodel/views/isonim_agent_workspace_view import
+    mountIsoNimAgentWorkspacePanel, AgentWorkspaceCallbacks
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers (similar to deepreview.nim but prefixed to avoid
@@ -44,6 +58,17 @@ proc awGetMonacoModel(editor: MonacoEditor): js
 
 proc awSetModelLanguage(model: js, language: cstring)
   {.importjs: "monaco.editor.setModelLanguage(#, #)".}
+
+var agentWorkspaceVMStore: ReplayDataStore
+var agentWorkspaceVMInstances*: JsAssoc[int, AgentWorkspaceVM] =
+  JsAssoc[int, AgentWorkspaceVM]{}
+var agentWorkspaceComponentRefs: JsAssoc[int, AgentWorkspaceComponent] =
+  JsAssoc[int, AgentWorkspaceComponent]{}
+var isoNimAgentWorkspaceMountedIds {.used.}: JsAssoc[int, bool] =
+  JsAssoc[int, bool]{}
+
+proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent)
+proc tryMountIsoNimAgentWorkspacePanel*(componentId: int)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,6 +122,97 @@ proc fileBasename(path: cstring): cstring =
     return cstring(s[idx + 1 .. ^1])
   return path
 
+proc safeStr(s: cstring): string =
+  if s.isNil:
+    ""
+  else:
+    $s
+
+proc legacyViewKindToVm(kind: WorkspaceViewKind): AgentWorkspaceViewKind =
+  case kind
+  of UserWorkspace: awvkUserWorkspace
+  of AgentWorkspace: awvkAgentWorkspace
+
+proc legacySummaryToVm(summary: ActivityDeepReviewSummary):
+    AgentWorkspaceSummary =
+  AgentWorkspaceSummary(
+    totalLinesCovered: summary.totalLinesCovered,
+    totalLinesUncovered: summary.totalLinesUncovered,
+    coveragePercent: summary.coveragePercent,
+    testsRun: summary.testsRun,
+    testsPassed: summary.testsPassed,
+    testsFailed: summary.testsFailed,
+    functionsTraced: summary.functionsTraced,
+  )
+
+proc legacyFileEntryToVm(entry: ActivityFileEntry): AgentWorkspaceFileEntry =
+  AgentWorkspaceFileEntry(
+    path: safeStr(entry.path),
+    coveredLines: entry.coveredLines,
+    totalLines: entry.totalLines,
+    hasFlow: entry.hasFlow,
+  )
+
+proc legacyFileEntriesToVm(entries: seq[ActivityFileEntry]):
+    seq[AgentWorkspaceFileEntry] =
+  result = @[]
+  for entry in entries:
+    result.add(legacyFileEntryToVm(entry))
+
+proc ensureAgentWorkspaceVM(self: AgentWorkspaceComponent): AgentWorkspaceVM =
+  if self.isNil:
+    return nil
+  if agentWorkspaceVMInstances.hasKey(self.id):
+    return agentWorkspaceVMInstances[self.id]
+
+  if agentWorkspaceVMStore.isNil:
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+      when defined(js):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
+      else:
+        var fut = newFuture[JsonNode]("stub-backend")
+        fut.complete(%*{})
+        result = fut
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
+    agentWorkspaceVMStore = createReplayDataStore(stubBackend)
+
+  result = createAgentWorkspaceVM(agentWorkspaceVMStore)
+  agentWorkspaceVMInstances[self.id] = result
+
+proc initAgentWorkspaceVMWithStore*(store: ReplayDataStore) =
+  agentWorkspaceVMStore = store
+  agentWorkspaceVMInstances = JsAssoc[int, AgentWorkspaceVM]{}
+  isoNimAgentWorkspaceMountedIds = JsAssoc[int, bool]{}
+  for _, component in agentWorkspaceComponentRefs:
+    discard ensureAgentWorkspaceVM(component)
+    component.syncLegacyAgentWorkspaceIntoVM()
+    tryMountIsoNimAgentWorkspacePanel(component.id)
+
+proc initAgentWorkspaceVM*(self: AgentWorkspaceComponent) =
+  discard ensureAgentWorkspaceVM(self)
+
+proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent) =
+  if self.isNil:
+    return
+  agentWorkspaceComponentRefs[self.id] = self
+  let vm = ensureAgentWorkspaceVM(self)
+  if vm.isNil:
+    return
+  vm.setViewKind(legacyViewKindToVm(self.viewState.activeView))
+  vm.setWorkspaceMetadata(
+    safeStr(self.viewState.agentWorkspacePath),
+    safeStr(self.viewState.agentSessionId))
+  vm.setSummary(legacySummaryToVm(self.drSummary))
+  vm.setFiles(legacyFileEntriesToVm(self.fileEntries))
+  vm.setSelectedFileIndex(self.selectedFileIndex)
+  vm.setCoverageOverlayEnabled(self.coverageOverlayEnabled)
+  vm.setNotificationCount(self.notifications.len)
+
 # ---------------------------------------------------------------------------
 # Notification handling
 # ---------------------------------------------------------------------------
@@ -146,6 +262,8 @@ proc handleDeepReviewNotification*(self: AgentWorkspaceComponent, notification: 
   of CollectionComplete:
     # Final summary; could trigger a full refresh.
     discard
+
+  self.syncLegacyAgentWorkspaceIntoVM()
 
 # ---------------------------------------------------------------------------
 # Decoration builders (coverage overlay)
@@ -223,6 +341,8 @@ proc updateDecorations(self: AgentWorkspaceComponent) =
 method register*(self: AgentWorkspaceComponent, api: MediatorWithSubscribers) =
   ## Register the component with the mediator event system.
   self.api = api
+  self.initAgentWorkspaceVM()
+  self.syncLegacyAgentWorkspaceIntoVM()
 
 proc initEditor(self: AgentWorkspaceComponent) =
   ## Lazily initialise the Monaco editor after the DOM container is rendered.
@@ -286,120 +406,57 @@ proc switchToFile(self: AgentWorkspaceComponent, fileIndex: int) =
       if not model.isNil:
         awSetModelLanguage(model, lang)
     self.updateDecorations()
+  self.syncLegacyAgentWorkspaceIntoVM()
 
 # ---------------------------------------------------------------------------
-# Render helpers
+# IsoNim mount
 # ---------------------------------------------------------------------------
 
-proc renderSummaryBar(self: AgentWorkspaceComponent): VNode =
-  ## Render the top summary bar with coverage and test statistics.
-  let summary = self.drSummary
-  let coverageText = fmt"{summary.coveragePercent:.1f}%"
-  let testsText = fmt"{summary.testsPassed}/{summary.testsRun} passed"
+proc toggleWorkspaceView(self: AgentWorkspaceComponent) =
+  self.viewState.activeView =
+    if self.viewState.activeView == UserWorkspace: AgentWorkspace
+    else: UserWorkspace
+  self.data.ipc.send(cstring(IPC_WORKSPACE_VIEW_SWITCH), js{
+    "view": cstring($self.viewState.activeView),
+    "sessionId": self.viewState.agentSessionId
+  })
+  self.syncLegacyAgentWorkspaceIntoVM()
 
-  buildHtml(tdiv(class = "agent-workspace-summary")):
-    span(class = "agent-workspace-summary-item"):
-      text fmt"Coverage: {coverageText}"
-    span(class = "agent-workspace-summary-item"):
-      text fmt"Tests: {testsText}"
-    span(class = "agent-workspace-summary-item"):
-      text fmt"Functions traced: {summary.functionsTraced}"
-    # Coverage overlay toggle.
-    tdiv(
-      class = "agent-workspace-overlay-toggle",
-      onclick = proc(ev: Event, n: VNode) =
-        self.coverageOverlayEnabled = not self.coverageOverlayEnabled
-        self.updateDecorations()
-        redrawAll()
-    ):
-      let toggleLabel =
-        if self.coverageOverlayEnabled: "Hide Coverage"
-        else: "Show Coverage"
-      text toggleLabel
+proc toggleCoverageOverlay(self: AgentWorkspaceComponent) =
+  self.coverageOverlayEnabled = not self.coverageOverlayEnabled
+  self.updateDecorations()
+  self.syncLegacyAgentWorkspaceIntoVM()
 
-proc renderFileList(self: AgentWorkspaceComponent): VNode =
-  ## Render the file list sidebar with coverage badges.
-  buildHtml(tdiv(class = "agent-workspace-file-list")):
-    for i, entry in self.fileEntries:
-      let isSelected = (i == self.selectedFileIndex)
-      let selectedClass = if isSelected: " selected" else: ""
-      let fileIdx = i
-      tdiv(
-        class = cstring(fmt"agent-workspace-file-item{selectedClass}"),
-        onclick = proc(ev: Event, n: VNode) =
-          self.switchToFile(fileIdx)
-          redrawAll()
-      ):
-        tdiv(class = "agent-workspace-file-name"):
-          text fileBasename(entry.path)
-        tdiv(class = "agent-workspace-file-path"):
-          text $entry.path
-        span(class = "agent-workspace-coverage-badge"):
-          text coverageBadgeText(entry)
-        if entry.hasFlow:
-          span(class = "agent-workspace-flow-badge"):
-            text "flow"
-
-proc renderWorkspaceHeader(self: AgentWorkspaceComponent): VNode =
-  ## Render the header bar with workspace path and view toggle.
-  let viewLabel = case self.viewState.activeView
-    of UserWorkspace: "User Workspace"
-    of AgentWorkspace: "Agent Workspace"
-
-  buildHtml(tdiv(class = "agent-workspace-header")):
-    span(class = "agent-workspace-header-label"):
-      text viewLabel
-    if self.viewState.agentWorkspacePath.len > 0:
-      span(class = "agent-workspace-header-path"):
-        text $self.viewState.agentWorkspacePath
-    tdiv(
-      class = "agent-workspace-view-toggle",
-      onclick = proc(ev: Event, n: VNode) =
-        # Toggle between user and agent workspace views.
-        self.viewState.activeView =
-          if self.viewState.activeView == UserWorkspace: AgentWorkspace
-          else: UserWorkspace
-        # Notify main process of the view switch via IPC.
-        self.data.ipc.send(cstring(IPC_WORKSPACE_VIEW_SWITCH), js{
-          "view": cstring($self.viewState.activeView),
-          "sessionId": self.viewState.agentSessionId
-        })
-        redrawAll()
-    ):
-      let toggleText =
-        if self.viewState.activeView == UserWorkspace: "Switch to Agent"
-        else: "Switch to User"
-      text toggleText
-
-# ---------------------------------------------------------------------------
-# Main render
-# ---------------------------------------------------------------------------
-
-method render*(self: AgentWorkspaceComponent): VNode =
-  ## Render the full agent workspace view with header, summary, file list,
-  ## and Monaco editor with coverage overlay.
-
-  # Schedule editor initialisation after the DOM has been rendered.
-  if not self.kxi.isNil:
-    self.kxi.afterRedraws.add(proc() =
-      self.initEditor()
+proc tryMountIsoNimAgentWorkspacePanel*(componentId: int) =
+  when defined(js):
+    if isoNimAgentWorkspaceMountedIds.hasKey(componentId) and
+       isoNimAgentWorkspaceMountedIds[componentId]:
+      return
+    if not agentWorkspaceComponentRefs.hasKey(componentId):
+      return
+    let component = agentWorkspaceComponentRefs[componentId]
+    let vm = ensureAgentWorkspaceVM(component)
+    if vm.isNil:
+      return
+    let container = document.getElementById(
+      cstring(fmt"agentWorkspaceComponent-{componentId}"))
+    if container.isNil:
+      return
+    let callbacks = AgentWorkspaceCallbacks(
+      onToggleView: proc() =
+        component.toggleWorkspaceView(),
+      onToggleOverlay: proc() =
+        component.toggleCoverageOverlay(),
+      onSelectFile: proc(index: int) =
+        component.switchToFile(index),
+      afterDynamicRender: proc() =
+        component.initEditor(),
     )
-
-  if self.fileEntries.len == 0 and self.viewState.agentSessionId.len == 0:
-    return buildHtml(tdiv(class = "agent-workspace-container")):
-      tdiv(class = "agent-workspace-empty"):
-        text "No agent workspace available. Start an agent session to see workspace files."
-
-  result = buildHtml(tdiv(class = "agent-workspace-container")):
-    renderWorkspaceHeader(self)
-    renderSummaryBar(self)
-    tdiv(class = "agent-workspace-body"):
-      renderFileList(self)
-      tdiv(class = "agent-workspace-editor-area"):
-        tdiv(
-          class = "agent-workspace-editor",
-          id = cstring(fmt"agent-workspace-editor-{self.id}")
-        )
+    mountIsoNimAgentWorkspacePanel(
+      cast[isonim_dom_api.Element](container), vm, componentId, callbacks)
+    isoNimAgentWorkspaceMountedIds[componentId] = true
+  else:
+    discard
 
 # ---------------------------------------------------------------------------
 # IPC handlers

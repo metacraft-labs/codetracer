@@ -4,7 +4,7 @@ import
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
-  agent_activity, agent_activity_deepreview,
+  agent_activity, agent_activity_deepreview, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -547,6 +547,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.CommandPalette,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
+      Content.AgentWorkspace,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -755,6 +756,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           agent_activity_deepreview.syncLegacyAgentActivityDeepReviewIntoVM(
             AgentActivityDeepReviewComponent(component))
           agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel()
+
+        if state.content == Content.AgentWorkspace:
+          agent_workspace.syncLegacyAgentWorkspaceIntoVM(
+            AgentWorkspaceComponent(component))
+          agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   karax, karaxdsl, kdom, vstyles,
-  ui/[agent_activity, agent_activity_deepreview, layout, editor, trace, events, event_log,
+  ui/[agent_activity, agent_activity_deepreview, agent_workspace, layout, editor, trace, events, event_log,
       state, calltrace, loading, start, menu,
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, point_list, scratchpad,
@@ -1041,6 +1041,8 @@ when not defined(ctInExtension):
       agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentActivityDeepReviewVMWithStore');".}
       agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentWorkspaceVMWithStore');".}
+      agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

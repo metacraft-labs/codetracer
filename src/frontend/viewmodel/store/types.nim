@@ -931,6 +931,29 @@ type
     id*: string
     shellId*: int
 
+  AgentWorkspaceViewKind* = enum
+    ## Mirrors the legacy ``WorkspaceViewKind`` without importing the
+    ## common/frontend agentic-coding types into the ViewModel store.
+    awvkUserWorkspace
+    awvkAgentWorkspace
+
+  AgentWorkspaceFileEntry* = object
+    ## One file row in the Agent Workspace sidebar.
+    path*: string
+    coveredLines*: int
+    totalLines*: int
+    hasFlow*: bool
+
+  AgentWorkspaceSummary* = object
+    ## Aggregate counters shown in the Agent Workspace summary bar.
+    totalLinesCovered*: int
+    totalLinesUncovered*: int
+    coveragePercent*: float
+    testsRun*: int
+    testsPassed*: int
+    testsFailed*: int
+    functionsTraced*: int
+
 proc `==`*(a, b: AgentActivityDiffEntry): bool {.noSideEffect.} =
   a.id == b.id and
     a.path == b.path and
@@ -947,6 +970,21 @@ proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
 
 proc `==`*(a, b: AgentActivityTerminalEntry): bool {.noSideEffect.} =
   a.id == b.id and a.shellId == b.shellId
+
+proc `==`*(a, b: AgentWorkspaceFileEntry): bool {.noSideEffect.} =
+  a.path == b.path and
+    a.coveredLines == b.coveredLines and
+    a.totalLines == b.totalLines and
+    a.hasFlow == b.hasFlow
+
+proc `==`*(a, b: AgentWorkspaceSummary): bool {.noSideEffect.} =
+  a.totalLinesCovered == b.totalLinesCovered and
+    a.totalLinesUncovered == b.totalLinesUncovered and
+    a.coveragePercent == b.coveragePercent and
+    a.testsRun == b.testsRun and
+    a.testsPassed == b.testsPassed and
+    a.testsFailed == b.testsFailed and
+    a.functionsTraced == b.functionsTraced
 
 # -------------------------------------------------------------------
 # Agent Activity DeepReview panel — collapsible per-session pane that
