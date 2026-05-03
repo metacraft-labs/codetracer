@@ -227,8 +227,8 @@ proc tryMountIsoNimFilesystemPanel*()
 #
 # Preserved from the legacy module so the extension entry-point still
 # resolves to a valid ``FilesystemComponent``; the in-extension render
-# path falls back to the base ``Component.render()`` (empty VNode) since
-# the IsoNim view is the production renderer.  Same pattern as
+# path installs an empty shell since the IsoNim view is the production
+# renderer.  Same pattern as
 # request_panel §1.51 / scratchpad §1.70.
 # ---------------------------------------------------------------------------
 
@@ -438,8 +438,7 @@ else:
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
-# render.  The base ``Component.render()`` returns a valid empty VNode
-# for any generic callers.
+# render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
 
 method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =

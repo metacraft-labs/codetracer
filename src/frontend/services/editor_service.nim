@@ -97,7 +97,6 @@ proc openExpanded*(self: EditorService, location: types.Location) {.async.} =
   self.active = name
   self.data.redraw()
 
-  #kxiMap[state.fullPath] = setRenderer(proc: VNode = editor.render(), editorLabel, proc = discard)
 # TODO init
 
 data.services.editor.onExpansionResponse = proc(self: EditorService, location: types.Location) {.async.} =

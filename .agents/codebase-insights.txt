@@ -12,7 +12,7 @@
   Sui 1.70.2 and metacraft-labs/nixos-modules b4c1815 built successfully when
   using a large Nix build dir such as `/var/tmp`.
 - ViewModel headless tests are organized under `src/frontend/viewmodel/tests/` in three subdirectories: `unit/` (pure VM tests with MockBackendService), `scenarios/` (headless mirrors of GUI tests in `tsc-ui-tests/tests/`), and `integration/` (tests using real replay-server). Every GUI test category has a corresponding scenario file. See `tests/README.md` for the naming convention and mapping table.
-- When adding new UI component modules under `src/frontend/ui/`, they must be imported from `src/frontend/ui_js.nim` (the main entry point) so their `render` methods are compiled into the JS output. Without this import, the component's render falls back to the base `Component.render()` which returns an empty VNode.
+- When adding new UI component modules under `src/frontend/ui/`, import them from `src/frontend/ui_js.nim` (the main entry point) so their registration, direct render entrypoints, and IsoNim mount helpers are compiled into the JS output. The old base `Component.render()` fallback was removed during the IsoNim migration; generic render dispatch should not be reintroduced.
 - Ruby loops were originally detected only for 'while' and 'until'.
 - 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.
 - Added a regression test ensuring `ExprLoader` detects Ruby `each` loops correctly.

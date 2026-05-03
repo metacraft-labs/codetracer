@@ -69,8 +69,8 @@ proc tryMountIsoNimRequestPanel*()
 #
 # Preserved from the legacy module so the extension entry-point still
 # resolves to a valid ``RequestPanelComponent``; the in-extension
-# render path falls back to the base ``Component.render()`` (empty
-# VNode) since the IsoNim view is the production renderer.
+# render path installs an empty Karax shell since the IsoNim view is
+# the production renderer.
 # ---------------------------------------------------------------------------
 
 when defined(ctInExtension):
@@ -80,7 +80,7 @@ when defined(ctInExtension):
   proc makeRequestPanelComponentForExtension*(id: cstring): RequestPanelComponent {.exportc.} =
     if requestPanelComponentForExtension.kxi.isNil:
       requestPanelComponentForExtension.kxi = setRenderer(
-        proc: VNode = requestPanelComponentForExtension.render(), id, proc = discard)
+        proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = requestPanelComponentForExtension
 
 # ---------------------------------------------------------------------------
@@ -300,8 +300,7 @@ else:
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
-# render.  The base ``Component.render()`` returns a valid empty VNode
-# for any generic callers.
+# render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
 
 method register*(self: RequestPanelComponent, api: MediatorWithSubscribers) =

@@ -73,8 +73,8 @@ proc tryMountIsoNimScratchpadPanel*()
 #
 # Preserved from the legacy module so the extension entry-point still
 # resolves to a valid ``ScratchpadComponent``; the in-extension
-# render path falls back to the base ``Component.render()`` (empty
-# VNode) since the IsoNim view is the production renderer.  Same
+# render path installs an empty Karax shell since the IsoNim view is
+# the production renderer.  Same
 # pattern as request_panel §1.51 — the extension build is a
 # separate code path that is not exercised by the GL panel mount,
 # so leaving it on the Karax-ish ``setRenderer`` shim is the lowest
@@ -88,7 +88,7 @@ when defined(ctInExtension):
   proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
     if scratchpadComponentForExtension.kxi.isNil:
       scratchpadComponentForExtension.kxi = setRenderer(
-        proc: VNode = scratchpadComponentForExtension.render(), id, proc = discard)
+        proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = scratchpadComponentForExtension
 
 # ---------------------------------------------------------------------------
@@ -345,8 +345,7 @@ else:
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
-# render.  The base ``Component.render()`` returns a valid empty VNode
-# for any generic callers.
+# render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
 
 method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =

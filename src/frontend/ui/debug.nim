@@ -481,4 +481,7 @@ proc renderDebugShell*(self: DebugComponent): VNode =
       id="debug",
       class="ct-header"
     )):
-      render(data.ui.commandPalette)
+      if not data.ui.commandPalette.isNil:
+        tdiv(
+          id = cstring("commandPaletteComponent-" & $data.ui.commandPalette.id),
+          class = "component-container")

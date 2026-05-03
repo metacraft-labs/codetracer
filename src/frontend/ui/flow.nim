@@ -201,7 +201,7 @@ when defined(ctInExtension):
 
   proc makeFlowComponentForExtension*(id: cstring): FlowComponent {.exportc.} =
     if flowComponentForExtension.kxi.isNil:
-      flowComponentForExtension.kxi = setRenderer(proc: VNode = flowComponentForExtension.render(), id, proc = discard)
+      flowComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = flowComponentForExtension
 
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
@@ -229,9 +229,8 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   )
 
 # FlowComponent.render() removed: IsoNim is the primary renderer.
-# The base Component.render() returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge). All real rendering
-# is handled by tryMountIsoNimFlowPanel().
+# Generic callers are expected to use direct IsoNim mount paths. All
+# real rendering is handled by tryMountIsoNimFlowPanel().
 
 
 proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =

@@ -55,7 +55,7 @@ when defined(ctInExtension):
 
   proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
     if calltraceComponentForExtension.kxi.isNil:
-      calltraceComponentForExtension.kxi = setRenderer(proc: VNode = calltraceComponentForExtension.render(), id, proc = discard)
+      calltraceComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = calltraceComponentForExtension
 
 proc calltraceJump(self: CalltraceComponent, location: types.Location) =
@@ -1676,9 +1676,8 @@ proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
   self.asyncThreads = threads
 
 # CalltraceComponent.render() removed: IsoNim is the primary renderer.
-# The base Component.render() returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge). All real rendering
-# is handled by tryMountIsoNimCalltrace().
+# Generic callers are expected to use direct IsoNim mount paths. All
+# real rendering is handled by tryMountIsoNimCalltrace().
 
 proc renderRemoveButtonView(self: CallExpandedValuesComponent, key: cstring): VNode =
   buildHtml(

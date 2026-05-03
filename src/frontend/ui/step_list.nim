@@ -272,8 +272,7 @@ else:
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
-# render.  The base ``Component.render()`` returns a valid empty VNode
-# for any generic callers.
+# render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
 
 method register*(self: StepListComponent, api: MediatorWithSubscribers) =

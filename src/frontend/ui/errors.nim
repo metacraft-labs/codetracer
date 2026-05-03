@@ -209,9 +209,8 @@ proc syncErrorsClear*() =
   errorsVMInstance.clearProblems()
 
 # ErrorsComponent.render() removed: IsoNim is the primary renderer.
-# The base ``Component.render()`` returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge); all real DOM
-# construction happens in ``viewmodel/views/isonim_errors_view.nim``.
+# Generic callers are expected to use direct IsoNim mount paths; all real
+# DOM construction happens in ``viewmodel/views/isonim_errors_view.nim``.
 
 method register*(self: ErrorsComponent, api: MediatorWithSubscribers) =
   ## Register the ErrorsComponent with the mediator.  Bring up the

@@ -500,9 +500,8 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
 
 
 # BuildComponent.render() removed: IsoNim is the primary renderer.
-# The base ``Component.render()`` returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge); all real DOM
-# construction happens in ``viewmodel/views/isonim_build_view.nim``.
+# Generic callers are expected to use direct IsoNim mount paths; all real
+# DOM construction happens in ``viewmodel/views/isonim_build_view.nim``.
 
 method register*(self: BuildComponent, api: MediatorWithSubscribers) =
   ## Register the BuildComponent with the mediator.  Bring up the

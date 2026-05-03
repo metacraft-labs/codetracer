@@ -76,7 +76,7 @@ when defined(ctInExtension):
 
   proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
     if stateComponentForExtension.kxi.isNil:
-      stateComponentForExtension.kxi = setRenderer(proc: VNode = stateComponentForExtension.render(), id, proc = discard)
+      stateComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = stateComponentForExtension
 
 # ---------------------------------------------------------------------------
@@ -385,9 +385,8 @@ proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscri
   component.register(api)
 
 # StateComponent.render() removed: IsoNim is the primary renderer.
-# The base Component.render() returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge). All real rendering
-# is handled by tryMountIsoNimStatePanel().
+# Generic callers are expected to use direct IsoNim mount paths. All
+# real rendering is handled by tryMountIsoNimStatePanel().
 
 # proc headerView(self: StateComponent): VNode =
 #   result = buildHtml(

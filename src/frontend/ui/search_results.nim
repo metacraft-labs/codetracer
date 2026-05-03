@@ -291,9 +291,9 @@ proc autoRevealSearchResultsPanel*() =
     showOverlay(panel)
 
 # SearchResultsComponent.render() removed: IsoNim is the primary renderer.
-# The base ``Component.render()`` returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge); all real DOM
-# construction happens in ``viewmodel/views/isonim_search_results_view.nim``.
+# Generic callers are expected to use direct IsoNim mount paths; all real
+# DOM construction happens in
+# ``viewmodel/views/isonim_search_results_view.nim``.
 
 method register*(self: SearchResultsComponent, api: MediatorWithSubscribers) =
   ## Register the SearchResultsComponent with the mediator.  Bring up the

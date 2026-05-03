@@ -228,7 +228,7 @@ when defined(ctInExtension):
 
   proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
     if eventLogComponentForExtension.kxi.isNil:
-      eventLogComponentForExtension.kxi = setRenderer(proc: VNode = eventLogComponentForExtension.render(), id, proc = discard)
+      eventLogComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = eventLogComponentForExtension
 
 proc events(self: EventLogComponent)
@@ -1414,9 +1414,8 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
   resizeEventLogHandler(self)
 
 # EventLogComponent.render() removed: IsoNim is the primary renderer.
-# The base Component.render() returns a valid empty VNode for any
-# generic callers (auto-hide, vnodeToDom bridge). All real rendering
-# is handled by tryMountIsoNimEventLogPanel().
+# Generic callers are expected to use direct IsoNim mount paths. All
+# real rendering is handled by tryMountIsoNimEventLogPanel().
 
 proc scrollOnMove*(self: EventLogComponent, rowSelected: int) =
   if rowSelected > self.denseTable.endRow - 1 or rowSelected < self.denseTable.startRow:

@@ -245,14 +245,15 @@ var sharedRenderersInitialised = false
 var sessionTabBarCallbackRegistered = false
 
 proc renderLayoutComponent(component: Component, content: Content): VNode =
-  ## Render live Karax-backed GoldenLayout components that no longer expose a
-  ## generic Karax render-method override.
+  ## Render the remaining live Karax-backed GoldenLayout components.
+  ## IsoNim-owned panels must be handled by their direct mount path instead of
+  ## falling back to generic Component.render dispatch.
   if content == Content.EditorView:
     EditorViewComponent(component).renderEditor()
   elif content == Content.VCS:
     VCSComponent(component).renderVCS()
   else:
-    component.render()
+    buildHtml(tdiv())
 
 proc ensureSharedRenderers() =
   ## Set up the Karax renderers for global chrome elements that live outside
@@ -275,8 +276,7 @@ proc ensureSharedRenderers() =
   kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
   kxiMap["search-results"] = setRenderer(
     proc: VNode =
-      if not data.ui.searchResults.isNil: data.ui.searchResults.render()
-      else: buildHtml(tdiv()),
+      buildHtml(tdiv()),
     "search-results", proc = discard)
   # Session tab bar: render via IsoNim WebRenderer. The Karax
   # renderSessionTabs returns an empty stub; the real DOM is built

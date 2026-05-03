@@ -166,7 +166,7 @@ when defined(ctInExtension):
 
   proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
     if terminalOutputComponentForExtension.kxi.isNil:
-      terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = terminalOutputComponentForExtension.render(), id, proc = discard)
+      terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
     result = terminalOutputComponentForExtension
 
 proc getLines(self: TerminalOutputComponent) =
@@ -339,9 +339,8 @@ method restart*(self: TerminalOutputComponent) =
     terminalOutputVMInstance.clearLines()
 
 # TerminalOutputComponent.render() removed: IsoNim is the primary
-# renderer.  The base ``Component.render()`` returns a valid empty
-# VNode for any generic callers (auto-hide, vnodeToDom bridge); all
-# real DOM construction happens in
+# renderer.  Generic callers are expected to use direct IsoNim mount
+# paths; all real DOM construction happens in
 # ``viewmodel/views/isonim_terminal_output_view.nim``.
 
 method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
