@@ -201,7 +201,7 @@ proc renderNoSourceShell*(self: NoSourceComponent): VNode =
   ## row is fed into the VM via ``syncNoSourceVM``.
   ##
   ## This is intentionally a regular proc rather than a
-  ## ``method render*: VNode`` override.  The parent editor still needs
+  ## Component.render override.  The parent editor still needs
   ## a Karax VNode container while it owns the no-source branch, but the
   ## no-source component itself no longer participates in the generic
   ## Karax render-dispatch audit.

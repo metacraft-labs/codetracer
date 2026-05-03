@@ -475,7 +475,7 @@ proc renderMenu*(self: MenuComponent): VNode =
   ##
   ## This remains a Karax VNode tree because the shared ``#menu`` renderer
   ## outside GoldenLayout still expects one, but it is intentionally a regular
-  ## proc rather than a ``method render*: VNode`` override.  The menu no longer
+  ## proc rather than a generic Component.render override.  The menu no longer
   ## participates in the generic Karax component render-dispatch audit.
   if not self.data.ui.menuNode.isNil and
     not self.data.isNil:

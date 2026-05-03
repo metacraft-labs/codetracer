@@ -582,7 +582,7 @@ proc renderStatus*(self: StatusComponent): VNode =
   ##
   ## The status bar still returns a Karax VNode tree for the shared ``#status``
   ## renderer, but this is intentionally a regular proc rather than a generic
-  ## ``method render*: VNode`` override.
+  ## Component.render override.
   result = buildHtml(tdiv):
     activeNotificationsView(self)
     if self.notifications != @[] and self.notifications[^1].isOperationStatus:
