@@ -1,7 +1,6 @@
 import
   kdom,
-  ui_imports,
-  ../renderer
+  ui_imports
 
 var
   xtermLib {.importc.}: XtermJsLib
@@ -282,9 +281,9 @@ proc renderEventStatusView(self: ShellComponent, event: SessionEvent): Node =
   of OkStatus:
     class = &"{class} done"
 
-  let vNode = buildHtml(tdiv(class = class))
-
-  vnodeToDom(vNode, KaraxInstance())
+  let statusDom = document.createElement("div")
+  statusDom.setAttribute(cstring"class", cstring class)
+  statusDom
 
 proc renderEventView(self: ShellComponent, event: SessionEvent, eventContainer: kdom.Node) =
   # add event dom
