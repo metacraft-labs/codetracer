@@ -965,7 +965,13 @@ proc renderGitUnifiedDiff(self: VCSComponent): VNode =
                 span(class = "deepreview-unified-line-content"):
                   text lineItem.content
 
-method render*(self: VCSComponent): VNode =
+proc renderVCS*(self: VCSComponent): VNode =
+  ## Render the VCS / DeepReview changed-files chrome.
+  ##
+  ## This panel still returns a Karax VNode tree for its GoldenLayout surface,
+  ## but it is intentionally a regular proc rather than a render-method
+  ## override so it no longer participates in the generic Karax component
+  ## render-dispatch audit.
   # In DeepReview mode, show the review's changed files instead of git data.
   if self.isDeepReviewMode():
     return buildHtml(tdiv(class = componentContainerClass("vcs-container"))):

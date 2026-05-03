@@ -4,6 +4,7 @@ import
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
+  vcs,
   agent_activity, agent_activity_deepreview, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
@@ -242,6 +243,14 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
 # live outside the per-session GL container and only need to be set up once.
 var sharedRenderersInitialised = false
 var sessionTabBarCallbackRegistered = false
+
+proc renderLayoutComponent(component: Component, content: Content): VNode =
+  ## Render live Karax-backed GoldenLayout components that no longer expose a
+  ## generic Karax render-method override.
+  if content == Content.VCS:
+    VCSComponent(component).renderVCS()
+  else:
+    component.render()
 
 proc ensureSharedRenderers() =
   ## Set up the Karax renderers for global chrome elements that live outside
@@ -569,7 +578,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
         if not isIsoNimComponent:
           kxiMap[state.label] = setRenderer(
-            (proc: VNode = component.render()),
+            (proc: VNode = renderLayoutComponent(component, state.content)),
             containerId,
             proc = discard
           )
@@ -838,7 +847,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       let target = kdom.document.getElementById(label)
       if not target.isNil:
         target.innerHTML = cstring""
-        let vnode = component.render()
+        let vnode = renderLayoutComponent(component, panel.content)
         let dom = vnodeToDom(vnode, KaraxInstance())
         target.appendChild(dom)
     elif kxiMap.hasKey(label):
@@ -988,17 +997,18 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       else:
         let component = data.ui.componentMapping[panelDef.content][0]
         if not component.isNil:
-          let vnode = component.render()
+          let vnode = renderLayoutComponent(component, panelDef.content)
           let dom = vnodeToDom(vnode, KaraxInstance())
           innerDiv.appendChild(dom)
 
           let capturedComponent = component
+          let capturedContent = panelDef.content
           let capturedLabel = panelDef.label
           vnodeToDomRedrawCallbacks.add(proc() =
             let el = kdom.document.getElementById(capturedLabel)
             if not el.isNil:
               el.innerHTML = cstring""
-              let v = capturedComponent.render()
+              let v = renderLayoutComponent(capturedComponent, capturedContent)
               let d = vnodeToDom(v, KaraxInstance())
               el.appendChild(d)
           )
