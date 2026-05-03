@@ -174,7 +174,7 @@ This is the largest GAP cluster by spec count.
 
 | Spec | Candidate VM test | Status | Notes |
 |---|---|---|---|
-| `noir-space-ship.spec.ts` | `noir-space-ship/noir_space_ship_test.nim` (9 suites) | PARTIAL | VM test exists co-located, but covers ~9 of the 18 spec scenarios.  Sub-flows covered: editor-loads, calltrace-nav, loop-iteration, event-log, step-fwd-back, locals, calltrace-depth, calltrace-search, full-workflow.  Spec adds: trace-log records, scratchpad compare, step-controls reverse recovery, exhaustive scratchpad, FS context menu, calltrace context menu, flow context menu, trace-log context menu, value-history context menu, jump-to-all-events, simple-tracepoint creation. |
+| `noir-space-ship.spec.ts` | `noir-space-ship/noir_space_ship_test.nim` (12 suites, 1.112) | PARTIAL | VM test exists co-located and now covers editor-loads, calltrace-nav, loop-iteration data, event-log, representative event jumps, trace-log row records, scratchpad compare/exhaustive additions, step-fwd-back, locals, calltrace-depth, calltrace-search, and full-workflow.  Remaining GUI-only / unpaired scenarios: loop-variable flow rendering from §5.8, FS/jstree context menu, calltrace context menu, flow/value-history context menus, trace-log context menu/disable interactions, and simple tracepoint creation through Monaco view-zones. |
 
 #### `welcome-screen/` — 3 specs, 21 tests
 
@@ -533,12 +533,13 @@ Highest-leverage clusters first, scoped to single sub-agent iterations:
      `browser_replay_vm_test.nim` (4 tests) and
      `streaming/streaming_recording_vm_test.nim` (5 tests), all green
      on both VM harnesses.
-  4. **Noir-Space-Ship spec coverage gap** (PARTIAL → PAIRED) — add
-     ~9 missing scenarios (trace-log, scratchpad compare, step-controls
-     reverse, context-menu actions, jump-to-all-events, tracepoint
-     creation) to `noir-space-ship/noir_space_ship_test.nim`.  Single
-     panel, ~9 new tests, very high leverage on the most-cited
-     full-debugging flow.
+  4. **Noir-Space-Ship spec coverage gap** (PARTIAL → PAIRED) — 1.112
+     added bounded VM coverage for trace-log rows, scratchpad
+     compare/exhaustive additions, and representative event jumps.
+     Remaining work is mostly browser/legacy-menu/Monaco view-zone
+     behavior: loop-variable flow rendering, FS/calltrace/flow/value
+     context menus, trace-log menu/disable interactions, and simple
+     tracepoint creation.
   5. **Welcome screen view migration** (follow-up to 1.67) — port the
      ~920 LOC Karax `WelcomeScreenComponent` to an IsoNim view bound
      to the existing `WelcomeScreenVM`.  Closes mission goal #3 for
@@ -614,10 +615,11 @@ For the next sub-agent picking this up, **start with Noir-Space-Ship
 spec coverage**:
 Clusters A and B are now both closed at the smoke level (1.63 and
 1.67 — see §3.1 / §3.2), and Cluster E is closed at smoke level in
-1.91.  The next high-leverage item is the Noir-Space-Ship PARTIAL →
-PAIRED follow-up: add the remaining trace-log, scratchpad, reverse
-step/recovery, context-menu, jump-to-all-events and tracepoint
-scenarios to `noir-space-ship/noir_space_ship_test.nim`.
+1.91.  The next high-leverage item remains the Noir-Space-Ship
+PARTIAL → PAIRED follow-up, but 1.112 moved trace-log row records,
+scratchpad compare/exhaustive additions, and representative event
+jumps into headless coverage.  The remaining scenarios are the
+browser/legacy-menu/Monaco seams listed in §4.
 
 Historical guidance, retained for reference:
 

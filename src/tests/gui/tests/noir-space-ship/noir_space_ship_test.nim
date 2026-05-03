@@ -32,10 +32,11 @@
 
 import std/[json, os, unittest, strutils, osproc, sequtils]
 import vm_test_helpers
-import isonim/core/computation
+import isonim/core/[computation, signals]
+import isonim/viewmodel
 import headless_session
 import store/types
-import viewmodels/calltrace_vm
+import viewmodels/[calltrace_vm, scratchpad_vm, trace_log_vm]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -173,6 +174,29 @@ proc findCallLineByName(lines: seq[CallLine]; pattern: string): int =
     if lowerPattern in line.name.toLowerAscii():
       return i
   return -1
+
+proc makeScratchEntry(expression, valueText: string): ScratchpadValueEntry =
+  ScratchpadValueEntry(
+    expression: expression,
+    valueText: valueText,
+    isError: false,
+    isLiteral: false,
+  )
+
+proc makeTraceEntry(rrTicks: int; path: string; line: int;
+                    functionName, localsText: string;
+                    eventId: int; tracepointId: int = 1): TraceLogEntry =
+  TraceLogEntry(
+    rrTicks: rrTicks,
+    minRRTicks: 0,
+    maxRRTicks: 1000,
+    path: path,
+    line: line,
+    functionName: functionName,
+    localsText: localsText,
+    eventId: eventId,
+    tracepointId: tracepointId,
+  )
 
 # ---------------------------------------------------------------------------
 # Suite 1: Editor loaded main.nr
@@ -809,6 +833,145 @@ suite "Noir Space Ship: event log":
     else:
       echo "  No events available; skipping event jump test"
       check session.getDebuggerStatus() == dsIdle
+
+  test "jump to representative event rows stays synchronized":
+    ## Companion for the GUI ``jump to all events`` scenario.  The browser
+    ## version iterates the visible event-log rows and checks row highlighting
+    ## after each click.  Headlessly, the ViewModel-owned contract is that
+    ## representative event rows can all dispatch ``ct/event-jump`` and leave
+    ## the debugger at a valid, idle replay position.  DOM highlighting remains
+    ## a browser-only assertion.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    for i in 0 ..< 5:
+      session.stepForward()
+
+    let events = session.requestAndLoadEventLog(count = 50)
+    if events.len == 0:
+      echo "  No event-log rows available in this Noir trace; jump-all GUI " &
+           "highlighting remains a browser/data-population boundary"
+      check session.getDebuggerStatus() == dsIdle
+    else:
+      var indices: seq[int] = @[0]
+      if events.len >= 3:
+        indices.add(events.len div 2)
+      if events.len >= 2:
+        indices.add(events.len - 1)
+
+      var previousTicks = session.getCurrentRRTicks()
+      for idx in indices:
+        let ev = events[idx]
+        echo "  Jumping event row ", idx, " -> ", ev.file, ":", ev.line,
+             " rrTicks=", ev.rrTicks
+        session.eventJump(ev)
+        let currentTicks = session.getCurrentRRTicks()
+        check session.getDebuggerStatus() == dsIdle
+        check currentTicks > 0'u64
+        previousTicks = currentTicks
+
+      check previousTicks > 0'u64
+
+# ---------------------------------------------------------------------------
+# Suite 4.5: Trace log records
+# Mirrors: "trace log records damage regeneration"
+# ---------------------------------------------------------------------------
+
+suite "Noir Space Ship: trace log VM records":
+
+  test "damage regeneration trace rows sort and retain captured locals":
+    ## Headless pairing for the GUI trace-log record scenarios.  Creating
+    ## the tracepoint editor view-zone and running tracepoints is currently
+    ## Monaco/browser-owned; the VM-owned behavior is that captured tracepoint
+    ## stops are represented as rows, sorted by rrTicks, and retain the locals
+    ## text that the trace-log table exposes for comparison/context-menu flows.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    let traceLog = createTraceLogVM(session.session.store)
+    defer: traceLog.dispose()
+
+    let shieldPath = "noir_space_ship/src/shield.nr"
+    traceLog.addEntry(makeTraceEntry(
+      300, shieldPath, 14, "calculate_damage",
+      "damage=12 remaining_shield=84 regeneration=3", eventId = 30))
+    traceLog.addEntry(makeTraceEntry(
+      100, shieldPath, 14, "calculate_damage",
+      "damage=10 remaining_shield=96 regeneration=1", eventId = 10))
+    traceLog.addEntry(makeTraceEntry(
+      200, shieldPath, 14, "calculate_damage",
+      "damage=11 remaining_shield=90 regeneration=2", eventId = 20))
+
+    check traceLog.rowCount.val == 3
+    check not traceLog.isEmpty.val
+    let rows = traceLog.entries.val
+    check rows[0].rrTicks == 100
+    check rows[1].rrTicks == 200
+    check rows[2].rrTicks == 300
+    for row in rows:
+      check row.functionName == "calculate_damage"
+      check "damage=" in row.localsText
+      check "remaining_shield=" in row.localsText
+      check "regeneration=" in row.localsText
+
+    traceLog.selectEntry(1)
+    check traceLog.selectedIndex.val == 1
+
+# ---------------------------------------------------------------------------
+# Suite 4.6: Scratchpad compare / exhaustive additions
+# Mirrors: "scratchpad compare iterations" + "exhaustive scratchpad additions"
+# ---------------------------------------------------------------------------
+
+suite "Noir Space Ship: scratchpad VM additions":
+
+  test "compare iteration values from multiple debugger surfaces":
+    ## Companion for the GUI scratchpad compare/exhaustive-additions tests.
+    ## The GUI adds values from calltrace arguments, flow values, trace-log
+    ## rows, and a later shield.nr flow value.  The headless VM assertion is
+    ## that the scratchpad accepts those source-shaped entries, preserves
+    ## insertion order, exposes a stable row count, and keeps distinct
+    ## iteration values available for comparison.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    let scratchpad = session.session.scratchpadVM
+    scratchpad.clearValues()
+
+    scratchpad.addValue(makeScratchEntry(
+      "calltrace:asteroid_count", "8"))
+    scratchpad.addValue(makeScratchEntry(
+      "flow:remaining_shield@iteration0", "96"))
+    scratchpad.addValue(makeScratchEntry(
+      "trace-log:damage,remaining_shield@iteration2",
+      "damage=11 remaining_shield=90"))
+    scratchpad.addValue(makeScratchEntry(
+      "flow:remaining_shield@iteration7", "72"))
+
+    check scratchpad.rowCount.val == 4
+    check not scratchpad.isEmpty.val
+    let entries = scratchpad.entries.val
+    check entries[0].expression == "calltrace:asteroid_count"
+    check entries[1].expression == "flow:remaining_shield@iteration0"
+    check entries[2].expression == "trace-log:damage,remaining_shield@iteration2"
+    check entries[3].expression == "flow:remaining_shield@iteration7"
+
+    var shieldValues: seq[string]
+    for entry in entries:
+      if "remaining_shield" in entry.expression:
+        shieldValues.add(entry.valueText)
+    check shieldValues.len == 3
+    check shieldValues.deduplicate().len >= 2
+
+    scratchpad.removeValue(0)
+    check scratchpad.rowCount.val == 3
+    check scratchpad.entries.val[0].expression ==
+      "flow:remaining_shield@iteration0"
 
 # ---------------------------------------------------------------------------
 # Suite 5: Step forward/backward
