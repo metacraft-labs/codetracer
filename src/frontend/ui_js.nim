@@ -1037,6 +1037,8 @@ when not defined(ctInExtension):
       filesystem.initFilesystemVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCommandPaletteVMWithStore');".}
       command.initCommandPaletteVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentActivityVMWithStore');".}
+      agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentActivityDeepReviewVMWithStore');".}
       agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
 

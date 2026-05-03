@@ -4,7 +4,7 @@ import
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
-  agent_activity_deepreview,
+  agent_activity, agent_activity_deepreview,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -545,6 +545,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
+      Content.AgentActivity,
       Content.AgentActivityDeepReview,
     }
 
@@ -729,6 +730,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           command.syncLegacyCommandPaletteIntoVM(
             CommandPaletteComponent(component))
           command.tryMountIsoNimCommandPalettePanel()
+
+        if state.content == Content.AgentActivity:
+          agent_activity.syncLegacyAgentActivityIntoVM(
+            AgentActivityComponent(component))
+          agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
 
         # AgentActivityDeepReview is now an IsoNim view -- its DOM
         # is mounted by

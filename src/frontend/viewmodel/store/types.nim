@@ -897,6 +897,58 @@ proc `==`*(a, b: CommandPaletteResultEntry): bool {.noSideEffect.} =
     a.snippetSource == b.snippetSource
 
 # -------------------------------------------------------------------
+# Agent Activity panel — ACP conversation stream.
+#
+# Mirrors the legacy ``AgentActivityComponent`` (see
+# ``frontend/ui/agent_activity.nim``) which used a Karax
+# ``method render`` to draw the agent conversation, terminal shells,
+# permission/password prompts, and prompt input controls.  The VM
+# stores the renderable, platform-neutral snapshot; the legacy
+# component remains the ACP/IPC state carrier and mirrors into these
+# values after each state mutation.
+# -------------------------------------------------------------------
+
+type
+  AgentActivityMessageRole* = enum
+    aamrAgent
+    aamrUser
+
+  AgentActivityDiffEntry* = object
+    id*: int
+    path*: string
+    original*: string
+    modified*: string
+
+  AgentActivityMessageEntry* = object
+    id*: string
+    content*: string
+    role*: AgentActivityMessageRole
+    canceled*: bool
+    isLoading*: bool
+    diffs*: seq[AgentActivityDiffEntry]
+
+  AgentActivityTerminalEntry* = object
+    id*: string
+    shellId*: int
+
+proc `==`*(a, b: AgentActivityDiffEntry): bool {.noSideEffect.} =
+  a.id == b.id and
+    a.path == b.path and
+    a.original == b.original and
+    a.modified == b.modified
+
+proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
+  a.id == b.id and
+    a.content == b.content and
+    a.role == b.role and
+    a.canceled == b.canceled and
+    a.isLoading == b.isLoading and
+    a.diffs == b.diffs
+
+proc `==`*(a, b: AgentActivityTerminalEntry): bool {.noSideEffect.} =
+  a.id == b.id and a.shellId == b.shellId
+
+# -------------------------------------------------------------------
 # Agent Activity DeepReview panel — collapsible per-session pane that
 # overlays DeepReview metrics (coverage, test results, recent
 # notifications) onto the agent activity stream.

@@ -1,4 +1,20 @@
-import ../utils, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
+import ../utils, ../communication, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
+
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import
+  AgentActivityMessageEntry, AgentActivityMessageRole,
+  AgentActivityDiffEntry, AgentActivityTerminalEntry,
+  aamrAgent, aamrUser
+from ../viewmodel/viewmodels/agent_activity_vm import
+  AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
+  setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
+  setSessionKey
+when defined(js):
+  from isonim/web/dom_api as isonim_dom_api import nil
+  from ../viewmodel/views/isonim_agent_activity_view import
+    mountIsoNimAgentActivityPanel, AgentActivityCallbacks
 
 const HEIGHT_OFFSET = 2
 const AGENT_MSG_DIV = "msg-content"
@@ -22,6 +38,17 @@ proc computedFontSizePx(el: js): float
 
 var originalModel = createModel("".cstring, "plaintext".cstring)
 var modifiedModel = createModel("".cstring, "plaintext".cstring)
+
+var agentActivityVMStore: ReplayDataStore
+var agentActivityVMInstances*: JsAssoc[int, AgentActivityVM] =
+  JsAssoc[int, AgentActivityVM]{}
+var agentActivityComponentRefs: JsAssoc[int, AgentActivityComponent] =
+  JsAssoc[int, AgentActivityComponent]{}
+var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
+  JsAssoc[int, bool]{}
+
+proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
+proc tryMountIsoNimAgentActivityPanel*(componentId: int)
 
 proc scrollAgentCom() =
   let el = document.getElementsByClassName("agent-com")
@@ -143,6 +170,7 @@ proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring,
     message.canceled = true
 
   console.log cstring(fmt"[agent-activity] storing message sessionKey={self.currentSessionKey()} messageId={messageId} role={role} canceled={canceled} content={message.content} append={append}")
+  self.syncLegacyAgentActivityIntoVM()
   redrawAll()
 
 proc bufferMessageChunk(self: AgentActivityComponent, messageId: cstring, content: cstring) =
@@ -173,6 +201,7 @@ proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTermin
     except:
       discard
   result = self.terminals[terminalId]
+  self.syncLegacyAgentActivityIntoVM()
 
 const INPUT_ID = cstring"agent-query-text"
 
@@ -186,6 +215,123 @@ proc currentSessionKey(self: AgentActivityComponent): cstring =
     self.sessionId
   else:
     self.pendingSessionId
+
+proc safeStr(s: cstring): string =
+  if s.isNil:
+    ""
+  else:
+    $s
+
+proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
+  if self.isNil:
+    return nil
+  if agentActivityVMInstances.hasKey(self.id):
+    return agentActivityVMInstances[self.id]
+
+  if agentActivityVMStore.isNil:
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+      when defined(js):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
+      else:
+        var fut = newFuture[JsonNode]("stub-backend")
+        fut.complete(%*{})
+        result = fut
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
+    agentActivityVMStore = createReplayDataStore(stubBackend)
+
+  result = createAgentActivityVM(agentActivityVMStore)
+  agentActivityVMInstances[self.id] = result
+
+proc initAgentActivityVMWithStore*(store: ReplayDataStore) =
+  ## Install the shared ViewModel store used by production panels.
+  ## Existing per-component VM instances are recreated so they stop
+  ## using the early stub backend.
+  agentActivityVMStore = store
+  agentActivityVMInstances = JsAssoc[int, AgentActivityVM]{}
+  isoNimAgentActivityMountedIds = JsAssoc[int, bool]{}
+  for _, component in agentActivityComponentRefs:
+    discard ensureAgentActivityVM(component)
+    component.syncLegacyAgentActivityIntoVM()
+    tryMountIsoNimAgentActivityPanel(component.id)
+
+proc initAgentActivityVM*(self: AgentActivityComponent) =
+  discard ensureAgentActivityVM(self)
+
+proc legacyRoleToVm(role: AgentMessageRole): AgentActivityMessageRole =
+  case role
+  of AgentMessageAgent: aamrAgent
+  of AgentMessageUser: aamrUser
+
+proc legacyDiffToVm(diff: DiffPreview): AgentActivityDiffEntry =
+  AgentActivityDiffEntry(
+    id: diff.id,
+    path: safeStr(diff.path),
+    original: safeStr(diff.original),
+    modified: safeStr(diff.modified),
+  )
+
+proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
+  var diffs: seq[AgentActivityDiffEntry] = @[]
+  for diff in message.sessionDiffs:
+    diffs.add(legacyDiffToVm(diff))
+  AgentActivityMessageEntry(
+    id: safeStr(message.id),
+    content: safeStr(message.content),
+    role: legacyRoleToVm(message.role),
+    canceled: message.canceled,
+    isLoading: message.isLoading,
+    diffs: diffs,
+  )
+
+proc currentMessagesToVm(self: AgentActivityComponent):
+    seq[AgentActivityMessageEntry] =
+  let sessionKey = self.currentSessionKey()
+  if self.sessionMessageIds.hasKey(sessionKey):
+    for message in self.sessionMessageIds[sessionKey]:
+      if not message.isNil:
+        result.add(legacyMessageToVm(message))
+
+proc currentTerminalsToVm(self: AgentActivityComponent):
+    seq[AgentActivityTerminalEntry] =
+  for terminalId in self.terminalOrder:
+    let terminal = self.terminals[terminalId]
+    result.add(AgentActivityTerminalEntry(
+      id: safeStr(terminal.id),
+      shellId: terminal.shell.id,
+    ))
+
+proc ensureAgentActivityRuntime(self: AgentActivityComponent) =
+  if self.isNil:
+    return
+  self.commandInputId = if self.inCommandPalette: "-command" else: ""
+  if not data.ui.commandPalette.isNil:
+    data.ui.commandPalette.agent = self
+  if not self.acpInitSent:
+    data.ipc.send("CODETRACER::acp-session-init", js{
+      "clientSessionId": self.pendingSessionId
+    })
+    self.acpInitSent = true
+
+proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
+  if self.isNil:
+    return
+  agentActivityComponentRefs[self.id] = self
+  self.ensureAgentActivityRuntime()
+  let vm = ensureAgentActivityVM(self)
+  if vm.isNil:
+    return
+  vm.setSessionKey(safeStr(self.currentSessionKey()))
+  vm.setMessages(self.currentMessagesToVm())
+  vm.setTerminals(self.currentTerminalsToVm())
+  vm.setInputValue(safeStr(self.inputValue))
+  vm.setLoading(self.isLoading)
+  vm.setReRecordInProgress(self.reRecordInProgress)
+  vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
 
 proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring) =
   if not self.sessionMessageIds.hasKey(sessionKey):
@@ -276,6 +422,7 @@ proc clear(self: AgentActivityComponent) =
   if not inputEl.isNil:
     inputEl.toJs.value = cstring""
     autoResizeTextarea(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
+  self.syncLegacyAgentActivityIntoVM()
 
 proc passwordPromp(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="prompt-wrapper")):
@@ -345,230 +492,188 @@ proc createUserPrompt(self: AgentActivityComponent, prompt: cstring, options: se
 proc loadingState(self: AgentActivityComponent): VNode =
   result = buildHtml(tdiv(class="loading-animation"))
 
-method render*(self: AgentActivityComponent): VNode =
-  self.commandInputId = if self.inCommandPalette: "-command" else: ""
-  var inputId = INPUT_ID & fmt"-{self.id}{self.commandInputId}"
-  data.ui.commandPalette.agent = self
-  if not self.acpInitSent:
-    data.ipc.send("CODETRACER::acp-session-init", js{
-      "clientSessionId": self.pendingSessionId
-    })
-    self.acpInitSent = true
-  # let source =
-  self.kxi.afterRedraws.add(proc() =
-    if not self.kxi.isNil:
-      self.inputField = cast[typeof(self.inputField)](jq(fmt"#{inputId}"))
-      # self.shell.createShell() #TODO: Maybe pass in the lines and column sizes
+proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
+  if self.isNil:
+    return
+  let inputId = INPUT_ID & fmt"-{self.id}{self.commandInputId}"
+  self.inputField = cast[typeof(self.inputField)](jq(fmt"#{inputId}"))
+  let sessionKey = self.currentSessionKey()
+  if self.sessionMessageIds.hasKey(sessionKey):
+    for agentMsg in self.sessionMessageIds[sessionKey]:
+      for diffPreview in agentMsg.sessionDiffs:
+        let diffEditorId = fmt"{DIFF_EDITOR_DIV}-{self.id}-{diffPreview.id}"
+        if self.diffEditors.hasKey(diffEditorId):
+          continue
 
-      # Use "rust" for syntax highlighting on both side
-      for agentMsg in self.sessionMessageIds[self.sessionId]:
-        for diffPreview in agentMsg.sessionDiffs:
+        var lang = fromPath(diffPreview.path)
+        let theme =
+          if self.data.config.theme == cstring"default_white":
+            cstring"codetracerWhite"
+          else:
+            cstring"codetracerDark"
 
-          let diffEditorId = fmt"{DIFF_EDITOR_DIV}-{self.id}-{diffPreview.id}"
-
-          if self.diffEditors.hasKey(diffEditorId):
-            return
-
-          var lang = fromPath(diffPreview.path)
-          let theme = if self.data.config.theme == cstring"default_white": cstring"codetracerWhite" else: cstring"codetracerDark"
-
-          self.diffEditors[diffEditorId] = monaco.editor.createDiffEditor(
-            jq(fmt"#{diffEditorId}"),
-            MonacoEditorOptions(
-              language: lang.toCLang(),
-              readOnly: true,
-              theme: theme,
-              automaticLayout: true,
-              folding: true,
-              fontSize: self.data.ui.fontSize,
-              minimap: js{ enabled: false },
-              renderIndentGuides: true,
-              find: js{ addExtraSpaceOnTop: false },
-              renderLineHighlight: "".cstring,
-              lineNumbers: proc(line: int): cstring = self.editorLineNumber(line),
-              lineNumbersMinChars: monacoLineNumbersMinChars(lineCountForGutter(diffPreview.modified)),
-              lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
-              showFoldingControls: cstring"always",
-              mouseWheelScrollSensitivity: 0,
-              fastScrollSensitivity: 0,
-              scrollBeyondLastLine: false,
-              smoothScrolling: false,
-              contextmenu: false,
-              renderOverviewRuler: false,
-              renderSideBySide: false,
-              scrollbar: js{
-                horizontalScrollbarSize: 14,
-                horizontalSliderSize: 8,
-                verticalScrollbarSize: 14,
-                verticalSliderSize: 8
-              },
-            )
+        self.diffEditors[diffEditorId] = monaco.editor.createDiffEditor(
+          jq(fmt"#{diffEditorId}"),
+          MonacoEditorOptions(
+            language: lang.toCLang(),
+            readOnly: true,
+            theme: theme,
+            automaticLayout: true,
+            folding: true,
+            fontSize: self.data.ui.fontSize,
+            minimap: js{ enabled: false },
+            renderIndentGuides: true,
+            find: js{ addExtraSpaceOnTop: false },
+            renderLineHighlight: "".cstring,
+            lineNumbers: proc(line: int): cstring = self.editorLineNumber(line),
+            lineNumbersMinChars: monacoLineNumbersMinChars(
+              lineCountForGutter(diffPreview.modified)),
+            lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
+            showFoldingControls: cstring"always",
+            mouseWheelScrollSensitivity: 0,
+            fastScrollSensitivity: 0,
+            scrollBeyondLastLine: false,
+            smoothScrolling: false,
+            contextmenu: false,
+            renderOverviewRuler: false,
+            renderSideBySide: false,
+            scrollbar: js{
+              horizontalScrollbarSize: 14,
+              horizontalSliderSize: 8,
+              verticalScrollbarSize: 14,
+              verticalSliderSize: 8
+            },
           )
+        )
 
-          let original = diffPreview.original
-          let modified = diffPreview.modified
+        let original = createModel(diffPreview.original, "rust".cstring)
+        let modified = createModel(diffPreview.modified, "rust".cstring)
+        setDiffModel(self.diffEditors[diffEditorId], original, modified)
 
-          let originalModel = createModel(original, "rust".cstring)
-          let modifiedModel = createModel(modified, "rust".cstring)
+  for termId in self.terminalOrder:
+    let terminal = self.terminals[termId]
+    if not terminal.shell.initialized:
+      discard terminal.shell.createShell()
+      terminal.shell.initialized = true
 
-          setDiffModel(self.diffEditors[diffEditorId], originalModel, modifiedModel)
-      # # self.shell.shell.write("Hello there, the terminal will wrap after 60 columns.\r\n")
-      # # self.shell.shell.write("Another line here.\r\n")
-    if data.lastAgentPrompt != "" and not data.lastAgentPrompt.isNil:
-      let agent = cast[AgentActivityComponent](data.ui.componentMapping[Content.AgentActivity][data.ui.componentMapping[Content.AgentActivity].len() - 1])
-      agent.updateAgentUi(data.lastAgentPrompt)
-      data.lastAgentPrompt = ""
-      redrawAll()
-  )
+  if data.lastAgentPrompt != "" and not data.lastAgentPrompt.isNil:
+    self.updateAgentUi(data.lastAgentPrompt)
+    data.lastAgentPrompt = ""
 
-  result = buildHtml(
-    tdiv(class="agent-ha-container")
-  ):
-    tdiv(class="agent-com"):
-      let sessionKey = self.currentSessionKey()
-      let orderedMessages =
-        if self.sessionMessageIds.hasKey(sessionKey):
-          self.sessionMessageIds[sessionKey]
-        else:
-          @[]
-      for msg in orderedMessages:
-        let message = msg
-        if not message.toJs.isNil and message.role == AgentMessageUser:
-          createUserMessageContent(message)
-        else:
-          createAgentMessageContent(self, message)
+when defined(js):
+  proc buildAgentActivityCallbacks(self: AgentActivityComponent):
+      AgentActivityCallbacks =
+    result.onFocusInput = proc() =
+      self.setActiveAgent()
+    result.onInputChange = proc(value: string) =
+      self.inputValue = cstring(value)
+      autoResizeTextarea(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
+      self.syncLegacyAgentActivityIntoVM()
+    result.onSubmitPrompt = proc() =
+      self.setActiveAgent()
+      self.submitPrompt()
+      let inputEl = document.getElementById(
+        INPUT_ID & fmt"-{self.id}{self.commandInputId}")
+      if not inputEl.isNil:
+        inputEl.toJs.value = "".cstring
+      self.isLoading = true
+      let key = self.currentSessionKey()
+      if self.sessionMessageIds.hasKey(key) and
+         self.sessionMessageIds[key].len > 0:
+        self.sessionMessageIds[key][^1].isLoading = true
+      self.syncLegacyAgentActivityIntoVM()
+    result.onStopPrompt = proc() =
+      var cancelId = cstring""
+      if self.activeAgentMessageId.len > 0:
+        cancelId = self.activeAgentMessageId
+      elif self.messageOrder.len > 0:
+        cancelId = self.messageOrder[^1]
 
-      for termId in self.terminalOrder:
-        let terminal = self.terminals[termId]
-        createTerminalContent(self, terminal)
-          # TODO: For now hardcoded id - should be shellComponent-{custom-id}
-          # tdiv(class="terminal-wrapper"):
-          #   tdiv(class="header-wrapper"):
-          #     tdiv(class="task-name"):
-          #       text "Running task..."
-          #     tdiv(class="msg-controls"):
-          #       tdiv(class="command-palette-copy-button", style=style(StyleAttr.marginRight, "0.375em".cstring))
-          #       tdiv(
-          #         class="agent-model-img"
-          #       )
-          #   # if self.expandControl[self.shell.id]:
-          #   tdiv(id=fmt"shellComponent-{self.shell.id}", class="shell-container")
-          # tdiv(class="editor-wrapper"):
-          #   tdiv(id="agentEditor-0", class="agent-editor")
-        # TODO: Integrate it
-      if self.wantsPassword:
-        createPasswordPrompt(self)
-      if self.wantsPermission:
-        createUserPrompt(self, cstring"How are you", @[cstring"well", cstring"bad"])
+      if cancelId.len > 0:
+        self.addAgentMessage(cancelId, cstring"", AgentMessageAgent, true)
 
-    tdiv(class="agent-interaction"):
-      textarea(
-        `type` = "text",
-        id = inputId,
-        name = "agent-query",
-        placeholder = "Ask anything",
-        class = "mousetrap agent-command-input",
-        autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
-        autocorrect="off",
-        autocapitalize="off",
-        rows="1",
-        spellcheck="false",
-        onfocus = proc (e: Event; n: VNode) =
-          self.setActiveAgent(),
-        onkeydown = proc (e: Event; n: VNode) =
-          let ke = cast[KeyboardEvent](e)
-          if ke.key == "Enter":
-            if ke.shiftKey:
-              return
-            else:
-              if not self.isLoading:
-                e.preventDefault()
-                self.submitPrompt()
-                self.inputField.toJs.value = "".cstring
-                self.isLoading = true
-                self.sessionMessageIds[self.sessionId][^1].isLoading = true,
-        oninput = proc (e: Event; n: VNode) =
-          self.inputValue = self.inputField.toJs.value.to(cstring)
-          autoResizeTextarea(inputId)
-      )
-      tdiv(class="agent-buttons-container"):
-        if not self.reRecordInProgress:
-          button(
-            class="ct-button-image-md-secondary agent-button agent-icon-button new-agent-instance",
-            `type`="button",
-            onclick = proc =
-              let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
-              self.reRecordInProgress = true
-              data.runTests(options)
-              redrawAll()
-              # TODO: For now only for the demo hardcode before
-              #       we figure out how to check when the other process has started
-              discard kdom.setTimeout(proc() =
-                self.reRecordInProgress = false
-                redrawAll(),
-                10000
-              )
-          )
-        else:
-          button(
-            class="ct-button-image-md-secondary agent-button agent-icon-button agent-progress-loading",
-            `type`="button",
-            disabled = toDisabled(true)
-          )
-        button(
-          class="ct-button-md-secondary agent-button agent-add-context-button",
-          `type`="button",
-          onclick = proc =
-            echo "#TODO: add a file"
-        ):
-          span(class="add-file-img")
-          text "Add files and more"
-        button(
-          class="ct-button-md-secondary agent-button agent-model-select",
-          `type`="button",
-          onclick = proc =
-            echo "#TODO: Open the model table"
-        ):
-          tdiv(): text "GPT 5"
-          tdiv(class="agent-model-img")
-        if not self.isLoading:
-          button(
-            class="ct-button-image-md-primary agent-submit-button agent-start-button",
-            `type`="button",
-            onclick = proc =
-              self.setActiveAgent()
-              self.submitPrompt()
-              self.inputField.toJs.value = "".cstring
-              self.isLoading = true
-              self.sessionMessageIds[self.sessionId][^1].isLoading = true
-          )
-        else:
-          button(
-            class="ct-button-image-md-secondary agent-submit-button agent-stop-button",
-            `type`="button",
-            onclick = proc =
-              var cancelId = cstring""
-              if self.activeAgentMessageId.len > 0:
-                cancelId = self.activeAgentMessageId
-              elif self.messageOrder.len > 0:
-                cancelId = self.messageOrder[^1]
+      if self.activeAgentMessageId.len > 0:
+        data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+          "sessionId": self.sessionId,
+          "messageId": self.activeAgentMessageId
+        })
+      else:
+        data.ipc.send("CODETRACER::acp-cancel-prompt", js{
+          "sessionId": self.sessionId
+        })
+      self.isLoading = false
+      self.promptInFlight = false
+      self.syncLegacyAgentActivityIntoVM()
+    result.onNewAgentInstance = proc() =
+      let options = RunTestOptions(
+        newWindow: true,
+        path: data.services.debugger.location.path,
+        testName: "")
+      self.reRecordInProgress = true
+      self.syncLegacyAgentActivityIntoVM()
+      data.runTests(options)
+      discard kdom.setTimeout(proc() =
+        self.reRecordInProgress = false
+        self.syncLegacyAgentActivityIntoVM(),
+        10000)
+    result.onAddFiles = proc() =
+      echo "#TODO: add a file"
+    result.onModelSelect = proc() =
+      echo "#TODO: Open the model table"
+    result.afterDynamicRender = proc() =
+      self.afterAgentActivityDynamicRender()
 
-              if cancelId.len > 0:
-                self.addAgentMessage(cancelId, cstring"", AgentMessageAgent, true)
+  proc tryMountIsoNimAgentActivityPanel*(componentId: int) =
+    if not agentActivityVMInstances.hasKey(componentId):
+      return
+    if not agentActivityComponentRefs.hasKey(componentId):
+      return
+    if isoNimAgentActivityMountedIds.hasKey(componentId):
+      return
 
-              if self.activeAgentMessageId.len > 0:
-                data.ipc.send("CODETRACER::acp-cancel-prompt", js{
-                  "sessionId": self.sessionId,
-                  "messageId": self.activeAgentMessageId
-                })
-              else:
-                data.ipc.send("CODETRACER::acp-cancel-prompt", js{
-                  "sessionId": self.sessionId
-                })
-              self.isLoading = false
-              self.promptInFlight = false
-              self.redraw()
-          )
+    let component = agentActivityComponentRefs[componentId]
+    let key = cstring("agentActivityComponent-" & $componentId)
+    var retryCount = 0
+    proc doMount() =
+      if isoNimAgentActivityMountedIds.hasKey(componentId):
+        return
+      retryCount += 1
+      let container = isonim_dom_api.getElementById(
+        isonim_dom_api.document, key)
+      if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
+        if retryCount > 200:
+          cerror "tryMountIsoNimAgentActivityPanel: not ready after 200 retries, giving up"
+          return
+        discard setTimeout(proc() = doMount(), 10)
+        return
+
+      let containerNode = isonim_dom_api.Node(container)
+      while not isonim_dom_api.isNodeNil(containerNode.firstChild):
+        discard isonim_dom_api.removeChild(containerNode, containerNode.firstChild)
+
+      isoNimAgentActivityMountedIds[componentId] = true
+      try:
+        component.syncLegacyAgentActivityIntoVM()
+        mountIsoNimAgentActivityPanel(
+          container,
+          agentActivityVMInstances[componentId],
+          componentId,
+          safeStr(component.commandInputId),
+          component.buildAgentActivityCallbacks())
+      except:
+        cerror "tryMountIsoNimAgentActivityPanel: mount EXCEPTION: " &
+          getCurrentExceptionMsg()
+
+    doMount()
+else:
+  proc tryMountIsoNimAgentActivityPanel*(componentId: int) = discard
+
+method register*(self: AgentActivityComponent, api: MediatorWithSubscribers) =
+  self.api = api
+  agentActivityComponentRefs[self.id] = self
+  self.initAgentActivityVM()
+  self.syncLegacyAgentActivityIntoVM()
+  tryMountIsoNimAgentActivityPanel(self.id)
 
 proc asyncSleep(ms: int): Future[void] =
   newPromise(proc(resolve: proc(): void) =
@@ -685,6 +790,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   else:
     # No final stopReason yet: keep placeholder and collected diffs in place.
     discard
+  self.syncLegacyAgentActivityIntoVM()
   redrawAll()
 
 proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
@@ -755,6 +861,7 @@ proc onAcpRenderDiff*(sender: js, response: JsObject) {.async.} =
   self.ensureSessionMessageList(sessionId)
   self.sessionMessageIds[sessionId][^1].addDiffPreview(path, original, modified)
   echo "NEW: ", self.sessionMessageIds[sessionId][^1].sessionDiffs.len()
+  self.syncLegacyAgentActivityIntoVM()
   redrawAll()
 
 proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
@@ -789,6 +896,7 @@ proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
   # reset active message when binding a new session to avoid mixing prompts
   comp.activeAgentMessageId = cstring""
   comp.flushPendingPrompts()
+  comp.syncLegacyAgentActivityIntoVM()
 
 proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
   let clientSessionId =
@@ -802,6 +910,7 @@ proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
   if not comp.isNil:
     comp.acpInitSent = false
     comp.promptInFlight = false
+    comp.syncLegacyAgentActivityIntoVM()
   # session load failed; keep component idle
   discard
 

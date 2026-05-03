@@ -42,6 +42,7 @@ import viewmodels/request_panel_vm
 import viewmodels/trace_log_vm except NO_SELECTED_INDEX
 import viewmodels/filesystem_vm
 import viewmodels/command_palette_vm
+import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_deepreview_vm
 import viewmodels/welcome_screen_vm
 import views/isonim_state_view
@@ -67,6 +68,7 @@ import views/isonim_request_panel_view
 import views/isonim_trace_log_view
 import views/isonim_filesystem_view
 import views/isonim_command_palette_view
+import views/isonim_agent_activity_view
 import views/isonim_agent_activity_deepreview_view
 import views/isonim_welcome_screen_view
 
@@ -9093,3 +9095,153 @@ suite "IsoNim Welcome Screen — helpers":
   test "formatWelcomeTimeAgo returns a non-empty human string":
     let s = formatWelcomeTimeAgo("2026/05/02 12:00:00")
     check s.len > 0
+
+# ===========================================================================
+# Agent Activity panel tests (§1.75 — agent_activity Karax -> IsoNim
+# migration, mission goal #3).
+# ===========================================================================
+
+proc makeAgentActivityMessage(id, content: string;
+                              role: AgentActivityMessageRole = aamrAgent;
+                              canceled: bool = false;
+                              isLoading: bool = false;
+                              diffs: seq[AgentActivityDiffEntry] = @[]):
+    AgentActivityMessageEntry =
+  AgentActivityMessageEntry(
+    id: id,
+    content: content,
+    role: role,
+    canceled: canceled,
+    isLoading: isLoading,
+    diffs: diffs,
+  )
+
+suite "IsoNim Agent Activity Panel — structure":
+
+  test "root renders conversation and prompt controls":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityPanel(r, vm, componentId = 7)
+
+      check panel.kind == mnkElement
+      check panel.attributes["class"] == AgentActivityContainerClass
+      check findByClass(panel, AgentActivityConversationClass) != nil
+      check findByClass(panel, AgentActivityInteractionClass) != nil
+      let input = findByTag(panel, "textarea")
+      check input != nil
+      check input.attributes["id"] == inputId(7)
+      check input.attributes["placeholder"] == AgentActivityPlaceholderText
+
+      dispose()
+
+  test "messages render user and agent wrappers with status modifiers":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel(r, vm, componentId = 4)
+
+      vm.setMessages(@[
+        makeAgentActivityMessage("u1", "hello", role = aamrUser),
+        makeAgentActivityMessage("a1", "working", isLoading = true),
+        makeAgentActivityMessage("a2", "stopped", canceled = true),
+      ])
+
+      let wrappers = findAllByClass(panel, "agent-msg-wrapper")
+      check wrappers.len == 3
+      check "user-wrapper" in wrappers[0].attributes["class"]
+      check findByClass(wrappers[1], "ai-status") != nil
+      check "(canceled)" in wrappers[2].textContent
+      check findByClass(wrappers[0], AgentActivityMessageContentClass).textContent ==
+        "hello"
+
+      dispose()
+
+  test "diff previews and terminals preserve legacy ids":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel(r, vm, componentId = 3)
+
+      vm.setMessages(@[
+        makeAgentActivityMessage("a1", "patch", diffs = @[
+          AgentActivityDiffEntry(
+            id: 9,
+            path: "/repo/a.nim",
+            original: "old",
+            modified: "new",
+          )
+        ])
+      ])
+      vm.setTerminals(@[
+        AgentActivityTerminalEntry(id: "term-a", shellId: 42)
+      ])
+
+      let editor = findByClass(panel, "agent-editor")
+      check editor != nil
+      check editor.attributes["id"] == diffEditorId(3, 9)
+      let shell = findByClass(panel, "shell-container")
+      check shell != nil
+      check shell.attributes["id"] == shellContainerId(42)
+
+      dispose()
+
+  test "submit/stop buttons react to loading state and invoke callbacks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      var submitted = 0
+      var stopped = 0
+      let callbacks = AgentActivityCallbacks(
+        onSubmitPrompt: proc() = (inc submitted),
+        onStopPrompt: proc() = (inc stopped),
+      )
+      let panel = renderAgentActivityPanel(r, vm, componentId = 5,
+                                           callbacks = callbacks)
+
+      findByClass(panel, "agent-start-button").fireEvent("click")
+      check submitted == 1
+      vm.setLoading(true)
+      check findByClass(panel, "agent-start-button") == nil
+      findByClass(panel, "agent-stop-button").fireEvent("click")
+      check stopped == 1
+
+      dispose()
+
+  test "input event updates VM and surfaces callback value":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      var changed = ""
+      let callbacks = AgentActivityCallbacks(
+        onInputChange: proc(value: string) = (changed = value),
+      )
+      let panel = renderAgentActivityPanel(r, vm, componentId = 6,
+                                           callbacks = callbacks)
+      let input = findByTag(panel, "textarea")
+
+      r.setAttribute(input, "value", "run tests")
+      input.fireEvent("input")
+
+      check vm.inputValue.val == "run tests"
+      check changed == "run tests"
+
+      dispose()
+
+suite "IsoNim Agent Activity Panel — helpers":
+
+  test "helper ids and classes match the legacy selector surface":
+    check messageWrapperClass(aamrUser) == "agent-msg-wrapper user-wrapper"
+    check messageWrapperClass(aamrAgent) == "agent-msg-wrapper"
+    check messageName(aamrUser) == "author"
+    check messageName(aamrAgent) == "agent"
+    check inputId(12) == "agent-query-text-12"
+    check inputId(12, "-command") == "agent-query-text-12-command"
+    check diffEditorId(2, 7) == "diff-editor-2-7"
+    check shellContainerId(4) == "shellComponent-4"
