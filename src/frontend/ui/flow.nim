@@ -727,26 +727,16 @@ proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
     cerror "flow: displayTooltip: tippy import not implemented for browser"
 
 proc tooltipValueView(expression: cstring, value: cstring): Node =
-  let vNode = buildHtml(
-    tdiv(
-      id = &"flow-tooltip-value-{expression}",
-      class = "flow-tooltip-value"
-    )
-  ):
-    text(&"{expression}: {value}")
-
-  vnodeToDom(vNode, KaraxInstance())
+  result = document.createElement("div")
+  result.setAttribute(cstring"id", cstring(&"flow-tooltip-value-{expression}"))
+  result.setAttribute(cstring"class", cstring"flow-tooltip-value")
+  result.appendChild(document.createTextNode(cstring(&"{expression}: {value}")))
 
 proc tooltipStepInfo(step: FlowStep): Node =
-  let vNode = buildHtml(
-    tdiv(
-      id = &"flow-tooltip-step-info-{step.stepCount}",
-      class = &"flow-tooltip-step-info"
-    )
-  ):
-    text(&"Iteration: {step.iteration}")
-
-  vnodeToDom(vNode, KaraxInstance())
+  result = document.createElement("div")
+  result.setAttribute(cstring"id", cstring(&"flow-tooltip-step-info-{step.stepCount}"))
+  result.setAttribute(cstring"class", cstring"flow-tooltip-step-info")
+  result.appendChild(document.createTextNode(cstring(&"Iteration: {step.iteration}")))
 
 proc customRedraw(self: ValueComponent) =
   discard
