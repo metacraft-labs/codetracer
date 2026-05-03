@@ -735,9 +735,9 @@ proc showEmptyResults(self: TraceComponent) =
 
 proc showErrorMessage(self: TraceComponent, tracepointError: cstring) =
   self.resultsOverlayDom.children[0].innerHTML = cstring""
-  let traceErrorVdom = buildHtml(span(class="trace-error")):
-      text tracepointError
-  let traceErrorDom = vnodeToDom(traceErrorVdom, KaraxInstance())
+  let traceErrorDom = document.createElement("span")
+  traceErrorDom.setAttribute(cstring"class", cstring"trace-error")
+  traceErrorDom.appendChild(document.createTextNode(tracepointError))
   self.resultsOverlayDom.children[0].appendChild(traceErrorDom)
   hideDomElement(self.searchInput)
   hideDomElement(self.traceViewDom)
