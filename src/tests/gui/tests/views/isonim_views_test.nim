@@ -79,6 +79,7 @@ import views/isonim_welcome_screen_view
 import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
 import views/isonim_auto_hide_overlay_tabs_view
+import views/isonim_auto_hide_collapsed_icons_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -195,6 +196,47 @@ suite "IsoNim Auto-hide Overlay Tabs — structure":
     check panel.attributes["class"] == AutoHideOverlayTabsRightClass
     panel.children[0].fireEvent("click")
     check selected == 0
+
+suite "IsoNim Auto-hide Collapsed Icons — structure":
+
+  test "empty state renders only the base icon-zone container":
+    let r = MockRenderer()
+    let panel = renderAutoHideCollapsedIconsPanel(r, icons = @[])
+
+    check panel.attributes["class"] == AutoHideCollapsedIconZoneClass
+    check panel.children.len == 0
+
+  test "icons render titles and has-icons modifier":
+    let r = MockRenderer()
+    let panel = renderAutoHideCollapsedIconsPanel(
+      r,
+      icons = @[
+        AutoHideCollapsedIconRecord(icon: "F", title: "FILES"),
+        AutoHideCollapsedIconRecord(icon: "S", title: "STATE")
+      ])
+
+    check panel.attributes["class"] == AutoHideCollapsedIconZoneWithIconsClass
+    check panel.children.len == 2
+    check panel.children[0].attributes["class"] == AutoHideCollapsedIconClass
+    check panel.children[0].attributes["title"] == "FILES"
+    check panel.children[0].textContent == "F"
+    check panel.children[1].attributes["title"] == "STATE"
+    check panel.children[1].textContent == "S"
+
+  test "select callback receives icon index":
+    let r = MockRenderer()
+    var selected = -1
+    let panel = renderAutoHideCollapsedIconsPanel(
+      r,
+      icons = @[
+        AutoHideCollapsedIconRecord(icon: "C", title: "CALLTRACE"),
+        AutoHideCollapsedIconRecord(icon: "E", title: "EVENT LOG")
+      ],
+      callbacks = AutoHideCollapsedIconCallbacks(
+        onSelect: proc(index: int) = selected = index))
+
+    panel.children[1].fireEvent("click")
+    check selected == 1
 
 suite "IsoNim Session Tabs — structure":
 

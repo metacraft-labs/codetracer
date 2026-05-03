@@ -583,6 +583,10 @@ proc renderStatus*(self: StatusComponent): VNode =
   ## The status bar still returns a Karax VNode tree for the shared ``#status``
   ## renderer, but this is intentionally a regular proc rather than a generic
   ## Component.render override.
+  discard windowSetTimeout(proc() =
+    requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+  , 0)
+
   result = buildHtml(tdiv):
     activeNotificationsView(self)
     if self.notifications != @[] and self.notifications[^1].isOperationStatus:
@@ -592,7 +596,7 @@ proc renderStatus*(self: StatusComponent): VNode =
     tdiv(id = "status-base"):
       # Icon zone FIRST so it sits at the leftmost position, physically
       # connecting with the collapsed side strip line above it.
-      renderCollapsedIconZone()
+      renderCollapsedIconZoneHost()
       fileInfoView(self)
       renderBottomAutoHideTabs()
       # TODO: Find another place for these

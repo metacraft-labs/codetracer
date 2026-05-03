@@ -45,6 +45,9 @@ import vdom except Event
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
+  from ../viewmodel/views/isonim_auto_hide_collapsed_icons_view import
+    AutoHideCollapsedIconRecord, AutoHideCollapsedIconCallbacks,
+    renderAutoHideCollapsedIconsInto
   from ../viewmodel/views/isonim_auto_hide_overlay_tabs_view import
     AutoHideOverlayTabRecord, AutoHideOverlayTabsCallbacks,
     renderAutoHideOverlayTabsInto
@@ -670,41 +673,46 @@ proc renderBottomAutoHideTabs*(): VNode =
     for tab in tabs:
       tab
 
-proc makeIconClickHandler(panel: AutoHidePanel): proc(e: Event, tg: VNode) =
-  ## Create a click handler for a status bar icon that opens the overlay
-  ## focused on the specific panel (not the last-active one).
-  result = proc(e: Event, tg: VNode) =
-    showOverlay(panel)
-
-proc renderCollapsedIconZone*(): VNode =
-  ## Render the status bar icon zone for collapsed-mode side panels.
-  ## Shows one icon per panel pinned to collapsed edges.  The zone uses
-  ## the same accent color as the collapsed strip line.
-  ## Returns an empty div when collapsed mode is inactive.
+proc collapsedIconZoneModel*(): seq[AutoHidePanel] =
+  ## Derive side-pinned panels that should appear in the collapsed status-bar
+  ## icon zone. Bottom panels keep their separate text tabs.
   if autoHideState.isNil or not autoHideState.collapsedMode:
-    return buildHtml(tdiv(class = "collapsed-icon-zone"))
+    return @[]
 
-  var icons: seq[VNode] = @[]
   for panel in autoHideState.panels:
     if panel.edge == Bottom:
-      continue  # Bottom panels have their own text-label tabs
+      continue
     if not isEdgeCollapsed(panel.edge):
-      continue  # Only show icons for collapsed edges
-    let handler = makeIconClickHandler(panel)
-    let icon = contentIcon(panel.content)
-    let node = buildHtml(
-      tdiv(
-        class = "collapsed-icon",
-        onclick = handler,
-        title = panel.title
-      )
-    ):
-      text icon
-    icons.add(node)
+      continue
+    result.add(panel)
 
-  buildHtml(tdiv(class = "collapsed-icon-zone" & (if icons.len > 0: " has-icons" else: ""))):
-    for ic in icons:
-      ic
+proc renderCollapsedIconZoneHost*(): VNode =
+  ## Karax placeholder host for the direct IsoNim collapsed icon renderer.
+  buildHtml(tdiv(id = "auto-hide-collapsed-icon-zone", class = "collapsed-icon-zone"))
+
+when defined(js):
+  proc requestCollapsedIconZoneRender*(containerId: cstring) =
+    ## Refresh the collapsed status-bar icon zone through IsoNim direct DOM.
+    let container = dom_api.getElementById(dom_api.document, containerId)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      return
+
+    let panels = collapsedIconZoneModel()
+    var records: seq[AutoHideCollapsedIconRecord] = @[]
+    for panel in panels:
+      records.add(AutoHideCollapsedIconRecord(
+        icon: $contentIcon(panel.content),
+        title: $panel.title))
+
+    let callbacks = AutoHideCollapsedIconCallbacks(
+      onSelect: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          showOverlay(panels[index]))
+    let r = WebRenderer()
+    renderAutoHideCollapsedIconsInto(r, container, records, callbacks)
+else:
+  proc requestCollapsedIconZoneRender*(containerId: cstring) =
+    discard
 
 proc overlaySideTabsModel*(): tuple[
     visible: bool;
