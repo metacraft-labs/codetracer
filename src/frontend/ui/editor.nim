@@ -109,7 +109,7 @@ const MONACO_SHORTCUTS_WHITELIST: seq[cstring] =
   ]
 const EDITOR_GUTTER_PADDING = 2 #px
 
-method render*(self: EditorViewComponent): VNode
+proc renderEditor*(self: EditorViewComponent): VNode
 proc getLineFunctionName(self: EditorViewComponent, line: int): cstring
 proc removeClasses(index: int, class: cstring, name: string)
 proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
@@ -1981,7 +1981,7 @@ proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
   ## What this does:
   ## - Removes the kxiMap entry so `redrawAll()` no longer triggers
   ##   Karax VDOM diffing for this component (protecting Monaco's DOM).
-  ## - Marks the editor as IsoNim-mounted so `render()` returns a stub.
+  ## - Marks the editor as IsoNim-mounted so `renderEditor()` returns a stub.
   ##
   ## Safe to call multiple times per editor — mounts only once per id.
   let editorId = self.id
@@ -2027,7 +2027,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   # -----------------------------------------------------------------------
   # IsoNim primary rendering path — when mounted, the kxiMap entry has
   # been removed so redrawAll() no longer calls this. This guard is a
-  # safety net in case render()/editorView() is called from another path.
+  # safety net in case renderEditor()/editorView() is called from another path.
   # -----------------------------------------------------------------------
   if isoNimEditorMountedIds.hasKey(index):
     return buildHtml(tdiv())
@@ -2100,7 +2100,7 @@ proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, l
     self.monacoEditor.changeViewZones do (view: js):
       expanded.zoneId = cast[int](view.addZone(expanded.viewZone))
 
-    expanded.renderer = setRenderer(proc: VNode = expanded.render(), id, proc = discard)
+    expanded.renderer = setRenderer(proc: VNode = expanded.renderEditor(), id, proc = discard)
     domwindow.toJs.parent = expanded.viewZone.domNode.parentNode
     expanded.isExpanded = true
 
@@ -2314,14 +2314,16 @@ proc onSelectFlow*(data: Data) {.async.} =
 proc onSelectState*(data: Data) {.async.} =
   await data.ui.componentMapping[Content.State][0].select()
 
-method render*(self: EditorViewComponent): VNode =
+proc renderEditor*(self: EditorViewComponent): VNode =
+  ## Render the legacy Karax editor shell used before the IsoNim editor panel
+  ## takes ownership of the mounted Monaco container.
   if not self.data.lspStarted:
     self.data.ipc.send("CODETRACER::start-lsp", js{})
     self.data.lspStarted = true
 
   # When the IsoNim editor view is mounted, return a stable empty stub.
   # The Karax kxiMap entry is removed on mount so redrawAll() no longer
-  # calls this. This guard is a safety net in case render() is called
+  # calls this. This guard is a safety net in case renderEditor() is called
   # from another path.
   if isoNimEditorMountedIds.hasKey(self.id):
     return buildHtml(tdiv())

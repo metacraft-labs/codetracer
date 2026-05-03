@@ -247,7 +247,9 @@ var sessionTabBarCallbackRegistered = false
 proc renderLayoutComponent(component: Component, content: Content): VNode =
   ## Render live Karax-backed GoldenLayout components that no longer expose a
   ## generic Karax render-method override.
-  if content == Content.VCS:
+  if content == Content.EditorView:
+    EditorViewComponent(component).renderEditor()
+  elif content == Content.VCS:
     VCSComponent(component).renderVCS()
   else:
     component.render()
@@ -484,7 +486,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         let component = data.ui.componentMapping[state.content][state.id]
 
         kxiMap[state.label] = setRenderer(
-          (proc: VNode = component.render()),
+          (proc: VNode = EditorViewComponent(component).renderEditor()),
           containerId,
           proc = discard)
         component.kxi = kxiMap[state.label]
