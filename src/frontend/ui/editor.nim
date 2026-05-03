@@ -1542,22 +1542,15 @@ proc makeTestContainer(self: EditorViewComponent, line: int): Node =
   let editorConfiguration = self.monacoEditor.config
   let lineHeight = editorConfiguration.lineHeight
 
-  var style = style(
-    (StyleAttr.left, cstring(fmt"calc({lineContent.len()}ch + 2ch)")),
-    (StyleAttr.fontSize, cstring($(data.ui.fontSize - 2) & "px")),
-    (StyleAttr.lineHeight, cstring($(lineHeight - 2) & "px")),
-    (StyleAttr.height, cstring($(lineHeight - 2) & "px")),
-    (StyleAttr.backgroundSize, cstring($(data.ui.fontSize) & "px"))
-  )
-  let vNode = buildHtml(
-    tdiv(
-      id = &"editor-test-container-{self.id}-{line}",
-      class = "flow-loop-step-container",
-      style = style
-    )
-  )
-
-  return vnodeToDom(vNode, KaraxInstance())
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(&"editor-test-container-{self.id}-{line}"))
+  result.setAttribute(cstring"class", cstring"flow-loop-step-container")
+  result.setAttribute(cstring"style", cstring(
+    fmt"left: calc({lineContent.len()}ch + 2ch); " &
+      fmt"font-size: {data.ui.fontSize - 2}px; " &
+      fmt"line-height: {lineHeight - 2}px; " &
+      fmt"height: {lineHeight - 2}px; " &
+      fmt"background-size: {data.ui.fontSize}px;"))
 
 proc makeTestLineContainer(self: EditorViewComponent, line: int) =
   var dom = cast[Node](document.createElement(cstring"div"))
@@ -1622,7 +1615,7 @@ proc redrawActiveTestButton(self: EditorViewComponent) =
 
   discard setTimeout(proc() = loadAnimation(self, el, 0), 0)
 
-proc testVNode(self: EditorViewComponent, line: int, isPythonTest: bool = false): VNode =
+proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = false): Node =
   # For Python tests, the function name is on the same line (line)
   # For Rust tests, the function is on the next line (line + 1, after #[test])
   let testName = if isPythonTest:
@@ -1633,22 +1626,19 @@ proc testVNode(self: EditorViewComponent, line: int, isPythonTest: bool = false)
   if self.activeTestId == testId:
     discard setTimeout(proc() = redrawActiveTestButton(self), 0)
 
-  buildHtml(
-    tdiv(
-      id = testId,
-      class = "flow-parallel flow-parallel-value-single editor-test-action",
-      onclick = proc() =
-        if testName.len() > 0:
-          capture testId:
-            self.activeTestId = testId
-            self.redrawActiveTestButton()
-          self.runTest(testName, self.name, line, 1)
-          self.api.infoMessage(&"\"{testName}\" started")
-        else:
-          self.api.errorMessage("Coudln't extract test name.")
-    )
-  ):
-    text "Run test"
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(testId))
+  result.setAttribute(cstring"class", cstring"flow-parallel flow-parallel-value-single editor-test-action")
+  result.appendChild(document.createTextNode(cstring"Run test"))
+  result.addEventListener(cstring"click", proc(ev: Event) =
+    if testName.len() > 0:
+      capture testId:
+        self.activeTestId = testId
+        self.redrawActiveTestButton()
+      self.runTest(testName, self.name, line, 1)
+      self.api.infoMessage(&"\"{testName}\" started")
+    else:
+      self.api.errorMessage("Coudln't extract test name."))
 
 proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
   cdebug fmt"makeFlowLine position {position}"
@@ -1694,8 +1684,7 @@ proc addTestActions(self: EditorViewComponent) =
       let widget = self.testDom[rLine]
       let testContainer = self.makeTestContainer(rLine)
       let parentContainer = self.testDom[rLine]
-      let testVNode = testVNode(self, rLine, isPythonTest)
-      let testNode = vnodeToDom(testVNode, KaraxInstance())
+      let testNode = self.makeTestAction(rLine, isPythonTest)
 
       testContainer.appendChild(testNode)
       parentContainer.appendChild(testContainer)
