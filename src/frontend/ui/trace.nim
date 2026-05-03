@@ -146,6 +146,7 @@ proc closeTrace*(self: TraceComponent)
 proc resizeTraceHandler*(self: TraceComponent)
 proc refreshTraceTableLayout*(self: TraceComponent)
 proc refreshTraceComponentLayout*(self: TraceComponent)
+proc renderTrace*(self: TraceComponent): VNode
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig
 proc traceBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
 
@@ -159,12 +160,12 @@ when defined(ctInExtension):
     if not tracepointComponentMapping[name].hasKey(line):
       tracepointComponentMapping[name][line] = makeTraceComponent(data, inExtension = true, traceId = traceId)
     if tracepointComponentMapping[name][line].kxi.isNil:
-      tracepointComponentMapping[name][line].kxi = setRenderer(proc: VNode = tracepointComponentMapping[name][line].render(), id, proc = discard)
+      tracepointComponentMapping[name][line].kxi = setRenderer(proc: VNode = tracepointComponentMapping[name][line].renderTrace(), id, proc = discard)
       tracepointComponentMapping[name][line].line = line
       tracepointComponentMapping[name][line].name = name
     return tracepointComponentMapping[name][line]
     # if tracepointComponentForExtension.kxi.isNil:
-    #   tracepointComponentForExtension.kxi = setRenderer(proc: VNode = tracepointComponentForExtension.render(), id, proc = discard)
+    #   tracepointComponentForExtension.kxi = setRenderer(proc: VNode = tracepointComponentForExtension.renderTrace(), id, proc = discard)
 
 proc calcTraceWidth(self: TraceComponent) =
   let editor = self.editorUI.monacoEditor
@@ -1165,7 +1166,13 @@ proc traceBase(self: TraceComponent): VNode =
   buildHtml(tdiv(id = cstring(fmt"trace-{self.id}"), class="trace")):
     tdiv(id = cstring(fmt"trace-editor-{self.id}"))
 
-method render*(self: TraceComponent): VNode =
+proc renderTrace*(self: TraceComponent): VNode =
+  ## Render the inline tracepoint editor/results Karax sub-tree.
+  ##
+  ## Tracepoints still embed a Karax VNode tree inside Monaco view zones and
+  ## extension surfaces, but they use this regular proc rather than a generic
+  ## ``Component.render`` override while the surrounding editor migration
+  ## continues.
   self.ensureEdit()
   self.ensureChart()
 
@@ -1309,7 +1316,7 @@ proc togglePoint*(trace: TraceComponent) =
     # data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
 
     # render current trace component
-    # trace.viewZone.domNode.appendChild(vnodeToDom(trace.render(), KaraxInstance()))
+    # trace.viewZone.domNode.appendChild(vnodeToDom(trace.renderTrace(), KaraxInstance()))
 
     # sаve references to component dom elements
 
@@ -1451,7 +1458,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
     data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
 
     # render current trace component
-    trace.viewZone.domNode.appendChild(vnodeToDom(trace.render(), KaraxInstance()))
+    trace.viewZone.domNode.appendChild(vnodeToDom(trace.renderTrace(), KaraxInstance()))
 
     # sаve references to component dom elements
 
