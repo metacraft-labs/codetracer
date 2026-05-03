@@ -488,7 +488,7 @@ proc renderMenu*(self: MenuComponent): VNode =
     if not self.data.startOptions.shellUi:
       self.debug.kxi = self.kxi
       data.ui.commandPalette.kxi = self.kxi
-      let debug = self.debug.render()
+      let debug = self.debug.renderDebugShell()
       debug
 
     windowMenu(self.data)

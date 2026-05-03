@@ -465,7 +465,13 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
       self.action(id)
 
 
-method render*(self: DebugComponent): VNode =
+proc renderDebugShell*(self: DebugComponent): VNode =
+  ## Render the shared debug chrome shell.
+  ##
+  ## IsoNim owns the actual debug controls in ``#isonim-debug-controls``.
+  ## This Karax VNode tree is still needed so the command palette remains
+  ## attached to the global menu renderer, but it intentionally does not
+  ## override the generic component ``render`` method.
   # IsoNim is the primary renderer for debug controls (mounted in
   # `#isonim-debug-controls`). Karax only renders the `#debug` div
   # as a minimal shell so the command palette (which lives inside it)
