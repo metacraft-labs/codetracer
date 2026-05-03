@@ -396,40 +396,74 @@ impl CTFSTraceReader {
         //
         // Populate db.steps, db.step_map, and per-step scaffolding
         // (variables, instructions, compound, cells, variable_cells).
-        for i in 0..step_count {
-            let (path_id_raw, line_raw) = reader.step_location(i).map_err(|e| format!("step {i}: {e}"))?;
+        //
+        // The (path_id, line) pair for every step is drained via the
+        // bulk `ct_reader_step_locations` FFI in chunked batches.  The
+        // per-step accessor would issue one Rust→Nim FFI hop per step
+        // AND re-scan from the exec-stream chunk boundary on every
+        // call, giving O(steps × chunk_size) decode cost end-to-end.
+        // The bulk accessor streams each chunk exactly once and pays
+        // a single FFI hop per BULK_STEP_LOCATIONS_CHUNK steps.  See
+        // codetracer §5.2(o) / §1.97 for the motivation and the
+        // before / after benchmark numbers.
+        const BULK_STEP_LOCATIONS_CHUNK: u64 = 1024;
 
-            let path_id = PathId(path_id_raw as usize);
-            let line = Line(line_raw as i64);
-            let step_id = StepId(i as i64);
-            let call_key = step_to_call_key[i as usize];
-            let global_call_key = step_to_global_call_key[i as usize];
-
-            let db_step = DbStep {
-                step_id,
-                path_id,
-                line,
-                call_key,
-                global_call_key,
-            };
-
-            db.steps.push(db_step);
-
-            // Per-step parallel vectors that postprocess() also creates.
-            db.instructions.push(vec![]);
-            db.compound.push(HashMap::new());
-            db.cells.push(HashMap::new());
-            db.variable_cells.push(HashMap::new());
-
-            // step_map: (path_id) → { line → [DbStep, ...] }
-            // Ensure enough entries in step_map for this path_id.
-            while db.step_map.len() <= path_id.0 {
-                db.step_map.push(HashMap::new());
+        let mut path_id_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
+        let mut line_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
+        let mut step_idx: u64 = 0;
+        while step_idx < step_count {
+            let want = std::cmp::min(BULK_STEP_LOCATIONS_CHUNK, step_count - step_idx);
+            let written = reader
+                .step_locations(
+                    step_idx,
+                    want,
+                    &mut path_id_buf[..want as usize],
+                    &mut line_buf[..want as usize],
+                )
+                .map_err(|e| format!("step_locations(start={step_idx}, count={want}): {e}"))?;
+            if written == 0 {
+                // Defensive: should never happen since `want > 0` and
+                // the bulk FFI guarantees min(count, remaining) on
+                // success.  Falling back here would just spin.
+                return Err(format!("step_locations returned 0 entries at step {step_idx}; trace truncated?").into());
             }
-            if line.0 >= 0 {
-                let line_usize = line.0 as usize;
-                db.step_map[path_id].entry(line_usize).or_default().push(db_step);
+
+            for offset in 0..written {
+                let i = step_idx + offset;
+                let path_id = PathId(path_id_buf[offset as usize] as usize);
+                let line = Line(line_buf[offset as usize] as i64);
+                let step_id = StepId(i as i64);
+                let call_key = step_to_call_key[i as usize];
+                let global_call_key = step_to_global_call_key[i as usize];
+
+                let db_step = DbStep {
+                    step_id,
+                    path_id,
+                    line,
+                    call_key,
+                    global_call_key,
+                };
+
+                db.steps.push(db_step);
+
+                // Per-step parallel vectors that postprocess() also creates.
+                db.instructions.push(vec![]);
+                db.compound.push(HashMap::new());
+                db.cells.push(HashMap::new());
+                db.variable_cells.push(HashMap::new());
+
+                // step_map: (path_id) → { line → [DbStep, ...] }
+                // Ensure enough entries in step_map for this path_id.
+                while db.step_map.len() <= path_id.0 {
+                    db.step_map.push(HashMap::new());
+                }
+                if line.0 >= 0 {
+                    let line_usize = line.0 as usize;
+                    db.step_map[path_id].entry(line_usize).or_default().push(db_step);
+                }
             }
+
+            step_idx += written;
         }
 
         info!("Nim reader: {} steps loaded", db.steps.len());
