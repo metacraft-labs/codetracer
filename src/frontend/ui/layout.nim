@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
-  calltrace_editor, repl, low_level_code, request_panel,
+  calltrace_editor, repl, low_level_code, request_panel, trace_log,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -550,6 +550,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Repl,
       Content.LowLevelCode,
       Content.RequestPanel,
+      Content.TraceLog,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -671,6 +672,19 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           request_panel.syncLegacyRequestPanelIntoVM(
             RequestPanelComponent(component))
           request_panel.tryMountIsoNimRequestPanel()
+
+        # TraceLog is now an IsoNim view -- its DOM is mounted by
+        # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
+        # ``traceLogComponent-{id}`` container, and reactive effects
+        # keep it in sync.  No vnodeToDom bridge or redraw callback
+        # is needed here.  The legacy ``TraceLogComponent`` remains
+        # as the event-bus carrier (its ``register`` method still
+        # subscribes to tracepoint-result events) and
+        # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
+        # accumulated when the panel becomes visible.
+        if state.content == Content.TraceLog:
+          trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
+          trace_log.tryMountIsoNimTraceLogPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

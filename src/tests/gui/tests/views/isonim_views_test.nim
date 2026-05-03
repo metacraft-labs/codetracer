@@ -39,6 +39,7 @@ import viewmodels/calltrace_editor_vm
 import viewmodels/repl_vm
 import viewmodels/low_level_code_vm
 import viewmodels/request_panel_vm
+import viewmodels/trace_log_vm except NO_SELECTED_INDEX
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -59,6 +60,7 @@ import views/isonim_calltrace_editor_view
 import views/isonim_repl_view
 import views/isonim_low_level_code_view
 import views/isonim_request_panel_view
+import views/isonim_trace_log_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -6561,3 +6563,438 @@ suite "IsoNim Request Panel — vm":
   test "countText renders the legacy '<filtered> / <total> requests' shape":
     check countText(0, 0) == "0 / 0 requests"
     check countText(2, 5) == "2 / 5 requests"
+
+# ---------------------------------------------------------------------------
+# IsoNim Trace Log Panel — closes section 5.4 entry "trace_log"
+#
+# Mirrors the legacy ``TraceLogComponent`` (``frontend/ui/trace_log.nim``)
+# which rendered a DataTables grid of tracepoint stops.  The IsoNim
+# view replaces the Karax render; these tests cover the structural
+# shell, row rendering / sorting, selection, click → ``ct/event-jump``
+# dispatch, the empty-state placeholder, and the helper procs.
+# ---------------------------------------------------------------------------
+
+proc makeTraceEntry(rrTicks: int; path: string = "src/main.nim";
+                    line: int = 10;
+                    functionName: string = "main";
+                    locals: string = "x=1";
+                    eventId: int = 0;
+                    minRRTicks: int = 0;
+                    maxRRTicks: int = 1000): TraceLogEntry =
+  ## Test fixture builder for ``TraceLogEntry`` rows.
+  TraceLogEntry(
+    rrTicks: rrTicks,
+    minRRTicks: minRRTicks,
+    maxRRTicks: maxRRTicks,
+    path: path,
+    line: line,
+    functionName: functionName,
+    localsText: locals,
+    eventId: eventId,
+    tracepointId: 1,
+  )
+
+suite "IsoNim Trace Log Panel — structure":
+
+  test "root carries component-container + traceLog classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+
+      check "component-container" in panel.attributes["class"]
+      check "traceLog" in panel.attributes["class"]
+
+      dispose()
+
+  test "container constant matches the legacy componentContainerClass output":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/components/tracepoint.styl
+    # (and any test/page-object selectors keyed on the exact class
+    # string).
+    check TraceLogContainerClass == "component-container traceLog"
+
+  test "empty VM renders header + empty body":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+
+      check findByClass(panel, "trace-log-table-header") != nil
+      let body = findByClass(panel, "trace-log-table-body")
+      check body != nil
+      check body.children.len == 0
+
+      dispose()
+
+  test "header columns label rr-ticks / Location / Function / Locals":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      let header = findByClass(panel, "trace-log-table-header")
+      let cols = findAllByClass(header, "trace-col-rr-ticks")
+      let locCols = findAllByClass(header, "trace-col-location")
+      let fnCols = findAllByClass(header, "trace-col-function")
+      let localsCols = findAllByClass(header, "trace-col-locals")
+      check cols.len >= 1
+      check locCols.len == 1
+      check fnCols.len == 1
+      check localsCols.len == 1
+      check cols[0].textContent == "rr-ticks"
+      check locCols[0].textContent == "Location"
+      check fnCols[0].textContent == "Function"
+      check localsCols[0].textContent == "Locals"
+
+      dispose()
+
+  test "empty-state placeholder is visible when no entries":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      let placeholder = findByClass(panel, "trace-log-empty")
+      check placeholder != nil
+      check placeholder.textContent == EmptyStateText
+      check "hidden" notin placeholder.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering / sorting
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Trace Log Panel — row rendering":
+
+  test "addEntry populates the table body reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      let body = findByClass(panel, "trace-log-table-body")
+      check body.children.len == 0
+
+      vm.addEntry(makeTraceEntry(100, eventId = 11))
+      vm.addEntry(makeTraceEntry(200, eventId = 22))
+
+      check body.children.len == 2
+
+      dispose()
+
+  test "row columns render rr-ticks / file:line / function / locals":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(150, path = "src/sub/foo.nim",
+                                 line = 42, functionName = "myFn",
+                                 locals = "a=1 b=hello"))
+
+      let body = findByClass(panel, "trace-log-table-body")
+      let row = body.children[0]
+      check findByClass(row, "trace-col-location").textContent == "foo.nim:42"
+      check findByClass(row, "trace-col-function").textContent == "myFn"
+      check findByClass(row, "trace-col-locals").textContent == "a=1 b=hello"
+      # The rr-ticks column also contains the indicator span; the
+      # number itself shows up in the column's text content.
+      check "150" in findByClass(row, "trace-col-rr-ticks").textContent
+
+      dispose()
+
+  test "addEntry keeps rows sorted ascending by rrTicks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+
+      vm.addEntry(makeTraceEntry(300, functionName = "c"))
+      vm.addEntry(makeTraceEntry(100, functionName = "a"))
+      vm.addEntry(makeTraceEntry(200, functionName = "b"))
+
+      let entries = vm.entries.val
+      check entries.len == 3
+      check entries[0].rrTicks == 100
+      check entries[1].rrTicks == 200
+      check entries[2].rrTicks == 300
+
+      dispose()
+
+  test "rr-ticks indicator span carries the event-rr-ticks-line class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(500, minRRTicks = 0, maxRRTicks = 1000))
+
+      let body = findByClass(panel, "trace-log-table-body")
+      let row = body.children[0]
+      let indicator = findByClass(row, "event-rr-ticks-line")
+      check indicator != nil
+      # 500 in [0, 1000] -> 50%
+      check "50%" in indicator.attributes["style"]
+
+      dispose()
+
+  test "empty-state placeholder hides once entries exist":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      let placeholder = findByClass(panel, "trace-log-empty")
+      check "hidden" notin placeholder.attributes["class"]
+
+      vm.addEntry(makeTraceEntry(1))
+      check "hidden" in placeholder.attributes["class"]
+
+      vm.clearEntries()
+      check "hidden" notin placeholder.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Selection
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Trace Log Panel — selection":
+
+  test "selectEntry flips the selected class on exactly the matching row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(100))
+      vm.addEntry(makeTraceEntry(200))
+      vm.addEntry(makeTraceEntry(300))
+
+      let body = findByClass(panel, "trace-log-table-body")
+      for row in body.children:
+        check "selected" notin row.attributes["class"]
+
+      vm.selectEntry(1)
+      check "selected" notin body.children[0].attributes["class"]
+      check "selected" in body.children[1].attributes["class"]
+      check "selected" notin body.children[2].attributes["class"]
+
+      vm.selectEntry(2)
+      check "selected" notin body.children[1].attributes["class"]
+      check "selected" in body.children[2].attributes["class"]
+
+      dispose()
+
+  test "NO_SELECTED_INDEX clears every row's selected class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(100))
+
+      vm.selectEntry(0)
+      let body = findByClass(panel, "trace-log-table-body")
+      check "selected" in body.children[0].attributes["class"]
+
+      vm.selectEntry(NO_SELECTED_INDEX)
+      check "selected" notin body.children[0].attributes["class"]
+
+      dispose()
+
+  test "selectEntry with out-of-range index clamps to NO_SELECTED_INDEX":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+
+      vm.addEntry(makeTraceEntry(100))
+      vm.selectEntry(5)
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      vm.selectEntry(-2)
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Clear / replace semantics
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Trace Log Panel — clearEntries":
+
+  test "clearEntries wipes the body and resets selection":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(100))
+      vm.addEntry(makeTraceEntry(200))
+      vm.selectEntry(1)
+
+      let body = findByClass(panel, "trace-log-table-body")
+      check body.children.len == 2
+
+      vm.clearEntries()
+      check body.children.len == 0
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      dispose()
+
+  test "setEntries replaces the row list and sorts by rrTicks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+
+      vm.setEntries(@[
+        makeTraceEntry(300, functionName = "c"),
+        makeTraceEntry(100, functionName = "a"),
+        makeTraceEntry(200, functionName = "b"),
+      ])
+
+      let entries = vm.entries.val
+      check entries.len == 3
+      check entries[0].rrTicks == 100
+      check entries[1].rrTicks == 200
+      check entries[2].rrTicks == 300
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Click → ct/event-jump dispatch
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Trace Log Panel — interactions":
+
+  test "clicking a row dispatches ct/event-jump with the row's eventId":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(100, eventId = 11))
+      vm.addEntry(makeTraceEntry(200, eventId = 22, line = 99,
+                                 path = "src/main.nim"))
+
+      mock.clearReceivedCommands()
+      let body = findByClass(panel, "trace-log-table-body")
+      body.children[1].fireEvent("click")
+
+      let req = mock.findCommand("ct/event-jump")
+      check req.isSome
+      check req.get.args["eventId"].getInt == 22
+      check req.get.args["rrTicks"].getInt == 200
+      check req.get.args["path"].getStr == "src/main.nim"
+      check req.get.args["line"].getInt == 99
+
+      dispose()
+
+  test "clicking a row also flips the selection signal":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+      let r = MockRenderer()
+
+      let panel = renderTraceLogPanel(r, vm)
+      vm.addEntry(makeTraceEntry(100))
+      vm.addEntry(makeTraceEntry(200))
+
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+      let body = findByClass(panel, "trace-log-table-body")
+      body.children[1].fireEvent("click")
+
+      check vm.selectedIndex.val == 1
+      check "selected" in body.children[1].attributes["class"]
+
+      dispose()
+
+  test "jumpToEntry with an out-of-range index is a no-op":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+
+      mock.clearReceivedCommands()
+      vm.jumpToEntry(0)
+      vm.jumpToEntry(-1)
+      check mock.findCommand("ct/event-jump").isNone
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / formatting helpers
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Trace Log Panel — vm":
+
+  test "createTraceLogVM defaults reflect the empty-state branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+
+      check vm.entries.val.len == 0
+      check vm.selectedIndex.val == NO_SELECTED_INDEX
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
+      check not vm.store.isNil
+
+      dispose()
+
+  test "isEmpty / rowCount memos track the entry list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createTraceLogVM(store)
+
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
+
+      vm.addEntry(makeTraceEntry(100))
+      check not vm.isEmpty.val
+      check vm.rowCount.val == 1
+
+      vm.addEntry(makeTraceEntry(200))
+      check vm.rowCount.val == 2
+
+      vm.clearEntries()
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
+
+      dispose()
+
+  test "fileLineText splits the path and joins with the line number":
+    let entry = makeTraceEntry(0, path = "src/sub/dir/foo.nim", line = 7)
+    check fileLineText(entry) == "foo.nim:7"
+
+    let entryNoSlash = makeTraceEntry(0, path = "main.nim", line = 3)
+    check fileLineText(entryNoSlash) == "main.nim:3"
+
+  test "rrTicksScale clamps to [0, 100]":
+    check rrTicksScale(0, 0, 100) == 0
+    check rrTicksScale(50, 0, 100) == 50
+    check rrTicksScale(100, 0, 100) == 100
+    # below-min and above-max clamp to the boundaries
+    check rrTicksScale(-10, 0, 100) == 0
+    check rrTicksScale(200, 0, 100) == 100
+    # degenerate range (max <= min) returns 0 to avoid div-by-zero
+    check rrTicksScale(50, 100, 100) == 0
+    check rrTicksScale(50, 100, 50) == 0
+
+  test "rowClass adds the selected modifier when selected":
+    check isonim_trace_log_view.rowClass(false) == "trace-log-row"
+    check isonim_trace_log_view.rowClass(true) == "trace-log-row selected"

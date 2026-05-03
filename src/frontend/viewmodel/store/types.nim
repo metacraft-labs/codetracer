@@ -541,6 +541,62 @@ type
     program*: string
     enabled*: bool
 
+  # -------------------------------------------------------------------
+  # Trace Log panel — tabular tracepoint-result inspector.
+  #
+  # Mirrors the legacy ``Stop`` records from
+  # ``common_types/debugger_features/tracepoints`` that the Karax
+  # ``TraceLogComponent`` rendered in a DataTables grid (one row per
+  # tracepoint hit).  Columns in the legacy view: rr-ticks, file:line,
+  # function name, formatted locals.  ``TraceLogEntry`` collapses
+  # those into plain ``string`` fields so the same value works on
+  # both native (``test-vm-native``) and JS (``test-vm-js``) backends
+  # without ``cstring`` / ``langstring`` conversion noise.
+  # -------------------------------------------------------------------
+
+  TraceLogEntry* = object
+    ## One captured tracepoint stop displayed as a row in the trace
+    ## log panel.
+    ##
+    ## ``rrTicks``       — replay timeline tick at the stop.  Used as
+    ##                     the sort key (legacy view sorted ascending
+    ##                     by this column) and to render the
+    ##                     ``event-rr-ticks-line`` indicator.
+    ## ``minRRTicks`` /
+    ## ``maxRRTicks``    — recording timeline extent at capture time.
+    ##                     The legacy renderer scaled the rr-ticks
+    ##                     line position from this range; carrying
+    ##                     them per-row keeps the value type stable
+    ##                     even if the live timeline shifts later.
+    ## ``path``          — full source path the tracepoint fired in.
+    ## ``line``          — 1-based source line number.
+    ## ``functionName``  — enclosing function.  Rendered verbatim in
+    ##                     the function-name column.
+    ## ``localsText``    — pre-formatted "name=repr name=repr ..."
+    ##                     string mirroring the legacy column 4
+    ##                     renderer (literal strings emit as bare
+    ##                     text; error variables emit as
+    ##                     ``name=<span class=error-trace>...</span>``
+    ##                     in the legacy view; the IsoNim view emits
+    ##                     a flat string and lets CSS style the row).
+    ## ``eventId``       — rr event id used by the row click handler
+    ##                     to dispatch ``ct/event-jump`` (matches the
+    ##                     legacy ``CtEventJump`` event payload — the
+    ##                     ``Stop`` cast to ``ProgramEvent`` carries
+    ##                     the ``event`` field).
+    ## ``tracepointId``  — owning tracepoint identifier; reserved for
+    ##                     future per-tracepoint deletion / toggle
+    ##                     wiring in the IsoNim view.
+    rrTicks*: int
+    minRRTicks*: int
+    maxRRTicks*: int
+    path*: string
+    line*: int
+    functionName*: string
+    localsText*: string
+    eventId*: int
+    tracepointId*: int
+
   LaunchConfigState* = object
     ## Reactive launch-config state.
     ##

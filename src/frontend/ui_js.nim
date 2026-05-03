@@ -1029,6 +1029,8 @@ when not defined(ctInExtension):
       low_level_code.initLowLevelCodeVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initRequestPanelVMWithStore');".}
       request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initTraceLogVMWithStore');".}
+      trace_log.initTraceLogVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator
