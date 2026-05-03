@@ -714,103 +714,111 @@ suite "PointList: breakpoint and tracepoint management":
 # ===========================================================================
 # 4. Scratchpad Value Tracking
 # ===========================================================================
+#
+# As of §1.70 the legacy Karax `selectedItem` / `comparisonMode`
+# placeholders were dropped — the IsoNim ScratchpadVM tracks the
+# pinned-value list (entries) and the locals lookup table that
+# `addFromExpression` resolves against (mirrors the legacy
+# `InternalAddToScratchpadFromExpression` flow).  These scenarios
+# exercise the developer-facing flows on the new API surface.
 
 suite "Scratchpad: value tracking and comparison":
 
-  test "selected item tracking":
-    ## Developer selects different items in the scratchpad to inspect
-    ## their values at the current execution point.
+  test "pinning values from other panels":
+    ## Developer right-clicks values in state / calltrace / hover
+    ## popups; each click ends in `vm.addValue(...)`.  The panel
+    ## should reflect the values in arrival order.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
 
-      check vm.selectedItem.val.isNone
+      check vm.entries.val.len == 0
 
-      # Select item 0.
-      vm.selectItem(some(0))
-      check vm.selectedItem.val == some(0)
+      vm.addValue(ScratchpadValueEntry(expression: "i", valueText: "0"))
+      vm.addValue(ScratchpadValueEntry(expression: "n", valueText: "10"))
+      vm.addValue(ScratchpadValueEntry(expression: "result",
+                                       valueText: "55"))
 
-      # Select item 2.
-      vm.selectItem(some(2))
-      check vm.selectedItem.val == some(2)
-
-      # Clear selection.
-      vm.selectItem(none(int))
-      check vm.selectedItem.val.isNone
+      check vm.entries.val.len == 3
+      check vm.entries.val[0].expression == "i"
+      check vm.entries.val[2].expression == "result"
 
       dispose()
 
-  test "comparison mode toggle":
-    ## Developer enables comparison mode to see two values side by side
-    ## at different execution points (e.g. before and after a mutation).
+  test "removing a pinned value":
+    ## The per-row close button drops the matching entry.  Indices
+    ## shift as expected.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
 
-      check vm.comparisonMode.val == false
+      vm.addValue(ScratchpadValueEntry(expression: "a", valueText: "1"))
+      vm.addValue(ScratchpadValueEntry(expression: "b", valueText: "2"))
+      vm.addValue(ScratchpadValueEntry(expression: "c", valueText: "3"))
 
-      vm.toggleComparisonMode()
-      check vm.comparisonMode.val == true
-
-      vm.toggleComparisonMode()
-      check vm.comparisonMode.val == false
+      vm.removeValue(0)
+      check vm.entries.val.len == 2
+      check vm.entries.val[0].expression == "b"
+      check vm.entries.val[1].expression == "c"
 
       dispose()
 
-  test "selection persists across comparison mode toggles":
-    ## Toggling comparison mode should not affect which item is selected.
+  test "session restart wipes the scratchpad":
+    ## Starting a fresh debugging session should clear every pinned
+    ## entry so the panel does not accumulate stale rows.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
 
-      vm.selectItem(some(1))
-      check vm.selectedItem.val == some(1)
+      for i in 0 ..< 5:
+        vm.addValue(ScratchpadValueEntry(
+          expression: "v" & $i, valueText: $i))
+      check vm.rowCount.val == 5
 
-      vm.toggleComparisonMode()
-      check vm.comparisonMode.val == true
-      check vm.selectedItem.val == some(1)  # Still selected.
-
-      vm.toggleComparisonMode()
-      check vm.comparisonMode.val == false
-      check vm.selectedItem.val == some(1)  # Still selected.
+      vm.clearValues()
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
 
       dispose()
 
-  test "selection works independently in comparison mode":
-    ## Developer can change selection while comparison mode is on.
+  test "addFromExpression resolves through the locals lookup":
+    ## Developer types an expression into the scratchpad add prompt;
+    ## the panel resolves it through the cached `CtLoadLocalsResponse`
+    ## payload and pins the matching value.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
 
-      vm.toggleComparisonMode()
-      check vm.comparisonMode.val == true
+      vm.setLocals(@[
+        ScratchpadValueEntry(expression: "i", valueText: "3"),
+        ScratchpadValueEntry(expression: "buf", valueText: "[1, 2]"),
+      ])
 
-      vm.selectItem(some(0))
-      check vm.selectedItem.val == some(0)
+      vm.addFromExpression("buf")
+      check vm.entries.val.len == 1
+      check vm.entries.val[0].expression == "buf"
+      check vm.entries.val[0].valueText == "[1, 2]"
 
-      vm.selectItem(some(3))
-      check vm.selectedItem.val == some(3)
-
-      vm.selectItem(none(int))
-      check vm.selectedItem.val.isNone
+      # Unknown expression — silent no-op (no console noise either).
+      vm.addFromExpression("nope")
+      check vm.entries.val.len == 1
 
       dispose()
 
-  test "rapid selection changes in comparison mode":
-    ## Stress test: rapidly changing selection should not corrupt state.
+  test "rapid pinning preserves arrival order":
+    ## Stress test: many sequential pins should not corrupt the
+    ## entry list.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
-
-      vm.toggleComparisonMode()
 
       for i in 0 ..< 20:
-        vm.selectItem(some(i))
-        check vm.selectedItem.val == some(i)
+        vm.addValue(ScratchpadValueEntry(
+          expression: "v" & $i, valueText: $i))
 
-      vm.selectItem(none(int))
-      check vm.selectedItem.val.isNone
-      check vm.comparisonMode.val == true
+      check vm.entries.val.len == 20
+      for i in 0 ..< 20:
+        check vm.entries.val[i].expression == "v" & $i
 
       dispose()
 

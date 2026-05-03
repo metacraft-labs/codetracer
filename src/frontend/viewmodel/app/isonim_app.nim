@@ -156,7 +156,7 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
 
   # --- Scratchpad ---
   let scratchpadSection = addPanelSection(r, root, "scratchpad", "Scratchpad")
-  mountIsoNimScratchpad(scratchpadSection, session.scratchpadVM)
+  mountIsoNimScratchpadPanel(scratchpadSection, session.scratchpadVM)
 
   # --- Shell ---
   let shellSection = addPanelSection(r, root, "shell", "Shell")

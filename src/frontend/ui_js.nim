@@ -1031,6 +1031,8 @@ when not defined(ctInExtension):
       request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initTraceLogVMWithStore');".}
       trace_log.initTraceLogVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initScratchpadVMWithStore');".}
+      scratchpad.initScratchpadVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator

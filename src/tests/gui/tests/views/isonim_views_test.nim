@@ -2372,16 +2372,37 @@ suite "IsoNim Point List Panel — interactions":
       dispose()
 
 # ===========================================================================
-# Scratchpad panel tests
-# ===========================================================================
+# Scratchpad panel tests — closes section 5.4 entry "scratchpad" (§1.70)
+#
+# Mirrors the legacy ``ScratchpadComponent`` (``frontend/ui/scratchpad.nim``)
+# which rendered a vertical stack of pinned values via the rich Karax
+# ``ValueComponent`` sub-tree.  The IsoNim view replaces the Karax
+# ``method render``; these tests cover the structural shell, value-row
+# rendering, the empty-state placeholder, the per-row close button
+# (``removeValue``), and the ``addFromExpression`` lookup flow.  The
+# rich ``ValueComponent`` rendering follow-up is deliberately not
+# exercised here — the placeholder ``cellText`` semantics are.
+# ---------------------------------------------------------------------------
+
+proc makeScratchpadEntry(expression: string = "i";
+                         valueText: string = "42";
+                         isError: bool = false;
+                         isLiteral: bool = false): ScratchpadValueEntry =
+  ## Test fixture builder for ``ScratchpadValueEntry`` rows.
+  ScratchpadValueEntry(
+    expression: expression,
+    valueText: valueText,
+    isError: isError,
+    isLiteral: isLiteral,
+  )
 
 # ---------------------------------------------------------------------------
-# Scratchpad structure tests
+# Structure
 # ---------------------------------------------------------------------------
 
 suite "IsoNim Scratchpad Panel — structure":
 
-  test "renders root with scratchpad-component class":
+  test "root carries component-container + active-state classes":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
@@ -2391,11 +2412,19 @@ suite "IsoNim Scratchpad Panel — structure":
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "scratchpad-component"
+      check "component-container" in panel.attributes["class"]
+      check "active-state" in panel.attributes["class"]
+      check panel.attributes["id"] == "values"
 
       dispose()
 
-  test "renders header with title":
+  test "container constant matches the legacy componentContainerClass output":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/components/scratchpad.styl
+    # (the rule is keyed on `[id^="scratchpadComponent-"]`).
+    check ScratchpadContainerClass == "component-container active-state"
+
+  test "empty VM renders value-components-container + empty-overlay":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
@@ -2403,81 +2432,332 @@ suite "IsoNim Scratchpad Panel — structure":
 
       let panel = renderScratchpadPanel(r, vm)
 
-      let title = findByClass(panel, "scratchpad-title")
-      check title != nil
-      check title.textContent == "Scratchpad"
+      let list = findByClass(panel, "value-components-container")
+      check list != nil
+      check list.children.len == 0
+
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay != nil
+      check overlay.textContent == ScratchpadEmptyStateText
+      check "hidden" notin overlay.attributes["class"]
 
       dispose()
 
-  test "renders items container":
+  test "empty-overlay carries the legacy invitation copy verbatim":
+    # The exact wording is part of the user-facing contract — the
+    # tooltip / docs describe the same flow.  A regression here would
+    # be a UX change masquerading as a refactor.
+    check ScratchpadEmptyStateText.startsWith(
+      "You can add values from other components by right clicking")
+    check "Add value to scratchpad" in ScratchpadEmptyStateText
+
+# ---------------------------------------------------------------------------
+# Row rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Scratchpad Panel — row rendering":
+
+  test "addValue populates the value list reactively":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
       let panel = renderScratchpadPanel(r, vm)
+      let list = findByClass(panel, "value-components-container")
+      check list.children.len == 0
 
-      let container = findByClass(panel, "scratchpad-items")
-      check container != nil
+      vm.addValue(makeScratchpadEntry("a", "1"))
+      vm.addValue(makeScratchpadEntry("b", "2"))
+
+      check list.children.len == 2
 
       dispose()
 
-  test "renders comparison toggle button":
+  test "row carries scratchpad-value-view class + close button":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
       let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("x", "99"))
 
-      let toggleBtn = findByClass(panel, "comparison-toggle")
-      check toggleBtn != nil
-      check toggleBtn.textContent == "Compare"
+      let list = findByClass(panel, "value-components-container")
+      let row = list.children[0]
+      check "scratchpad-value-view" in row.attributes["class"]
+
+      let btn = findByClass(row, "ct-button-image-sm-secondary")
+      check btn != nil
+      check btn.tag == "button"
+      check btn.attributes["id"] == "close-element"
+
+      dispose()
+
+  test "row cell renders expression: valueText placeholder text":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("board[1][2]", "X"))
+
+      let cell = findByClass(panel, "scratchpad-value-cell")
+      check cell != nil
+      check cell.textContent == "board[1][2]: X"
+
+      dispose()
+
+  test "empty-overlay hides once a value is pinned":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+      let overlay = findByClass(panel, "empty-overlay")
+      check "hidden" notin overlay.attributes["class"]
+
+      vm.addValue(makeScratchpadEntry("a"))
+      check "hidden" in overlay.attributes["class"]
+
+      vm.clearValues()
+      check "hidden" notin overlay.attributes["class"]
+
+      dispose()
+
+  test "literal entries render bare (no expression: prefix)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("$msg", "hello world",
+                                      isLiteral = true))
+
+      let cell = findByClass(panel, "scratchpad-value-cell")
+      check cell.textContent == "hello world"
+
+      dispose()
+
+  test "error entries render with <error> marker + error class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("crash", "boom", isError = true))
+
+      let list = findByClass(panel, "value-components-container")
+      let row = list.children[0]
+      check "scratchpad-value-error" in row.attributes["class"]
+
+      let cell = findByClass(panel, "scratchpad-value-cell")
+      check cell.textContent == "crash: <error: boom>"
+
+      dispose()
+
+  test "rows preserve insertion order":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+      let r = MockRenderer()
+
+      let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("z", "26"))
+      vm.addValue(makeScratchpadEntry("a", "1"))
+      vm.addValue(makeScratchpadEntry("m", "13"))
+
+      let list = findByClass(panel, "value-components-container")
+      check list.children.len == 3
+      check findByClass(list.children[0],
+                        "scratchpad-value-cell").textContent == "z: 26"
+      check findByClass(list.children[1],
+                        "scratchpad-value-cell").textContent == "a: 1"
+      check findByClass(list.children[2],
+                        "scratchpad-value-cell").textContent == "m: 13"
 
       dispose()
 
 # ---------------------------------------------------------------------------
-# Scratchpad interaction tests
+# Interactions
 # ---------------------------------------------------------------------------
 
 suite "IsoNim Scratchpad Panel — interactions":
 
-  test "comparison toggle changes text":
+  test "clicking close removes that row from the VM":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
       let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("a", "1"))
+      vm.addValue(makeScratchpadEntry("b", "2"))
+      vm.addValue(makeScratchpadEntry("c", "3"))
 
-      let toggleBtn = findByClass(panel, "comparison-toggle")
-      check toggleBtn.textContent == "Compare"
+      let list = findByClass(panel, "value-components-container")
+      check list.children.len == 3
 
-      toggleBtn.fireEvent("click")
+      # Click the middle row's close button.
+      let row1 = list.children[1]
+      let btn = findByClass(row1, "ct-button-image-sm-secondary")
+      btn.fireEvent("click")
 
-      check vm.comparisonMode.val == true
-      check toggleBtn.textContent == "Exit Compare"
-      check "active" in toggleBtn.attributes["class"]
+      check vm.entries.val.len == 2
+      check vm.entries.val[0].expression == "a"
+      check vm.entries.val[1].expression == "c"
+      check list.children.len == 2
 
       dispose()
 
-  test "selected item indicator updates":
+  test "removeValue with out-of-range index is a silent no-op":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      vm.addValue(makeScratchpadEntry("a", "1"))
+      vm.removeValue(5)
+      vm.removeValue(-1)
+
+      check vm.entries.val.len == 1
+      check vm.entries.val[0].expression == "a"
+
+      dispose()
+
+  test "clearValues drops every row":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
       let panel = renderScratchpadPanel(r, vm)
+      vm.addValue(makeScratchpadEntry("a", "1"))
+      vm.addValue(makeScratchpadEntry("b", "2"))
 
-      let indicator = findByClass(panel, "scratchpad-selected-indicator")
-      check indicator.textContent == ""
+      let list = findByClass(panel, "value-components-container")
+      check list.children.len == 2
 
-      vm.selectItem(some(2))
-
-      check "2" in indicator.textContent
-      check "active" in indicator.attributes["class"]
+      vm.clearValues()
+      check list.children.len == 0
+      check vm.entries.val.len == 0
 
       dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / addFromExpression
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Scratchpad Panel — vm":
+
+  test "createScratchpadVM defaults reflect the empty-state branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      check vm.entries.val.len == 0
+      check vm.localsByExpression.val.len == 0
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
+      check not vm.store.isNil
+
+      dispose()
+
+  test "isEmpty / rowCount memos track the entry list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
+
+      vm.addValue(makeScratchpadEntry("a"))
+      check not vm.isEmpty.val
+      check vm.rowCount.val == 1
+
+      vm.addValue(makeScratchpadEntry("b"))
+      check vm.rowCount.val == 2
+
+      vm.removeValue(0)
+      check vm.rowCount.val == 1
+
+      vm.clearValues()
+      check vm.isEmpty.val
+      check vm.rowCount.val == 0
+
+      dispose()
+
+  test "setLocals replaces the lookup table by expression key":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      vm.setLocals(@[
+        makeScratchpadEntry("x", "1"),
+        makeScratchpadEntry("y", "2"),
+      ])
+      check vm.localsByExpression.val.len == 2
+      check vm.localsByExpression.val["x"].valueText == "1"
+
+      # Replace — earlier entries are gone.
+      vm.setLocals(@[
+        makeScratchpadEntry("z", "9"),
+      ])
+      check vm.localsByExpression.val.len == 1
+      check "x" notin vm.localsByExpression.val
+      check vm.localsByExpression.val["z"].valueText == "9"
+
+      dispose()
+
+  test "addFromExpression appends a known local":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      vm.setLocals(@[
+        makeScratchpadEntry("x", "1"),
+        makeScratchpadEntry("y", "hello", isLiteral = true),
+      ])
+
+      vm.addFromExpression("y")
+      check vm.entries.val.len == 1
+      check vm.entries.val[0].expression == "y"
+      check vm.entries.val[0].valueText == "hello"
+      check vm.entries.val[0].isLiteral
+
+      vm.addFromExpression("x")
+      check vm.entries.val.len == 2
+      check vm.entries.val[1].expression == "x"
+
+      dispose()
+
+  test "addFromExpression with unknown name is a silent no-op":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createScratchpadVM(store)
+
+      vm.setLocals(@[makeScratchpadEntry("x", "1")])
+      vm.addFromExpression("not-here")
+
+      check vm.entries.val.len == 0
+
+      dispose()
+
+  test "rowClass adds the error modifier for error entries":
+    check isonim_scratchpad_view.rowClass(false) == "scratchpad-value-view"
+    check isonim_scratchpad_view.rowClass(true) ==
+      "scratchpad-value-view scratchpad-value-error"
+
+  test "cellText branches on isLiteral / isError flags":
+    check cellText(makeScratchpadEntry("a", "1")) == "a: 1"
+    check cellText(makeScratchpadEntry("$msg", "hi",
+                                       isLiteral = true)) == "hi"
+    check cellText(makeScratchpadEntry("crash", "boom",
+                                       isError = true)) ==
+      "crash: <error: boom>"
 
 # ===========================================================================
 # Shell panel tests

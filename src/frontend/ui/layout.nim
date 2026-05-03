@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
-  calltrace_editor, repl, low_level_code, request_panel, trace_log,
+  calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -551,6 +551,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.LowLevelCode,
       Content.RequestPanel,
       Content.TraceLog,
+      Content.Scratchpad,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -685,6 +686,22 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if state.content == Content.TraceLog:
           trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
           trace_log.tryMountIsoNimTraceLogPanel()
+
+        # Scratchpad is now an IsoNim view -- its DOM is mounted by
+        # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
+        # ``scratchpadComponent-{id}`` container, and reactive effects
+        # keep it in sync.  No vnodeToDom bridge or redraw callback
+        # is needed here.  The legacy ``ScratchpadComponent`` remains
+        # as the event-bus carrier (its ``register`` method still
+        # subscribes to ``InternalAddToScratchpad`` /
+        # ``InternalAddToScratchpadFromExpression`` /
+        # ``CtLoadLocalsResponse``) and ``syncLegacyScratchpadIntoVM``
+        # mirrors any rows already accumulated when the panel becomes
+        # visible.  Mission goal #3 §1.70.
+        if state.content == Content.Scratchpad:
+          scratchpad.syncLegacyScratchpadIntoVM(
+            ScratchpadComponent(component))
+          scratchpad.tryMountIsoNimScratchpadPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

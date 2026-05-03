@@ -597,6 +597,55 @@ type
     eventId*: int
     tracepointId*: int
 
+  # -------------------------------------------------------------------
+  # Scratchpad panel — list of values pinned by the user.
+  #
+  # Mirrors the legacy ``ScratchpadComponent`` (``frontend/ui/scratchpad.nim``)
+  # which kept a parallel ``programValues: seq[(cstring, Value)]`` and
+  # ``values: seq[ValueComponent]``.  The Karax view rendered each
+  # entry by delegating to the rich ``ValueComponent`` sub-tree.
+  # ``ScratchpadValueEntry`` collapses just the data the IsoNim view
+  # needs into plain ``string`` fields so the same value type works on
+  # both ``test-vm-native`` and ``test-vm-js`` without ``cstring`` /
+  # ``langstring`` conversion noise.
+  #
+  # NOTE: rich ``ValueComponent`` rendering (expandable trees, charts,
+  # inline / verbose toggles) remains a follow-up.  The value is
+  # carried as a pre-rendered ``valueText`` string so the IsoNim
+  # renderer can paint it verbatim, mirroring what trace_log §1.69 did
+  # with ``localsToText``.  The ``isError`` and ``isLiteral`` flags
+  # are surfaced so future work can apply the legacy ``error-trace``
+  # CSS rule and the literal-string display branch without re-fetching
+  # the original ``Value`` tree.
+  # -------------------------------------------------------------------
+
+  ScratchpadValueEntry* = object
+    ## One pinned value displayed in the Scratchpad panel.
+    ##
+    ## ``expression`` — the source-level expression / variable name the
+    ##                  user sent to the scratchpad (e.g. ``"i"`` or
+    ##                  ``"board[2][3]"``).  Rendered verbatim in the
+    ##                  ``scratchpad-value-cell`` row.
+    ## ``valueText``  — pre-rendered text representation of the value
+    ##                  at capture time, mirroring the legacy
+    ##                  ``ValueComponent`` collapsed view.  The
+    ##                  ``valueTextRepr`` helper (in ``ui/scratchpad.nim``)
+    ##                  produces this string from a ``Value`` ref-object
+    ##                  before it is mirrored into the VM.
+    ## ``isError``    — true when the captured value was a
+    ##                  ``types.Error``.  The IsoNim view colours these
+    ##                  rows with the ``scratchpad-value-error`` CSS
+    ##                  modifier (mirrors the ``error-trace`` rule on
+    ##                  the legacy DOM).
+    ## ``isLiteral``  — true when the captured value was a literal
+    ##                  string (the legacy view rendered such values as
+    ##                  bare text without the ``name=`` prefix); reserved
+    ##                  for the rich-rendering follow-up.
+    expression*: string
+    valueText*: string
+    isError*: bool
+    isLiteral*: bool
+
   LaunchConfigState* = object
     ## Reactive launch-config state.
     ##
