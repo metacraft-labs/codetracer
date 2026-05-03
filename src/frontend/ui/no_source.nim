@@ -12,8 +12,8 @@
 ##    ``NoSourceComponent`` and stashes it on its parent
 ##    ``EditorViewComponent.noInfo`` field.
 ## 2. The editor's ``method render`` notices ``editorView ==
-##    ViewNoSource`` and returns ``self.noInfo.render()``.  The
-##    Karax render returned here is a stable
+##    ViewNoSource`` and returns ``self.noInfo.renderNoSourceShell()``.
+##    The VNode returned here is a stable
 ##    ``<div id="no-source-{id}" class="unknown-location">`` shell —
 ##    Karax diff-ing leaves the IsoNim-managed children alone on
 ##    subsequent redraws because the VDOM has no children declared
@@ -182,11 +182,11 @@ when defined(js):
     doMount()
 
 # ---------------------------------------------------------------------------
-# Karax render (shell only)
+# Karax shell proc (shell only)
 # ---------------------------------------------------------------------------
 
-method render*(self: NoSourceComponent): VNode =
-  ## Karax shell render.  Returns the ``<div id="no-source-{id}">``
+proc renderNoSourceShell*(self: NoSourceComponent): VNode =
+  ## Return the ``<div id="no-source-{id}">``
   ## that the IsoNim view mounts inside.  The shell carries the same
   ## ``unknown-location`` class the legacy view emitted on its root
   ## so any CSS rules keyed on that class still apply.
@@ -199,6 +199,12 @@ method render*(self: NoSourceComponent): VNode =
   ## (rendered in the legacy fallback) loads its instructions in the
   ## background.  When the asm response lands the originating-address
   ## row is fed into the VM via ``syncNoSourceVM``.
+  ##
+  ## This is intentionally a regular proc rather than a
+  ## ``method render*: VNode`` override.  The parent editor still needs
+  ## a Karax VNode container while it owns the no-source branch, but the
+  ## no-source component itself no longer participates in the generic
+  ## Karax render-dispatch audit.
   let history = self.data.services.debugger.jumpHistory
   if history.len >= 1 and self.instructions == Instructions():
     discard self.getAsmCode(history[^1].location)

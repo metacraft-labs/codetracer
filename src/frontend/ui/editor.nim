@@ -2327,7 +2327,7 @@ method render*(self: EditorViewComponent): VNode =
     return buildHtml(tdiv())
 
   if self.editorView == ViewNoSource:
-    result = self.noInfo.render()
+    result = self.noInfo.renderNoSourceShell()
   elif not self.isExpansion and (not self.service.open.hasKey(self.name) or not self.service.open[self.name].received):
     result = loadingEditorView(self.id, self.name)
   else:
