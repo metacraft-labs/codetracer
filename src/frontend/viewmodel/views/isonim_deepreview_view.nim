@@ -383,12 +383,12 @@ when defined(js):
       var maxIterations = vm.maxIterations.val
       var iterIndex = vm.selectedIteration.val
       {.emit: """
-        rootBody.innerHTML = '';
+        `rootBody`.innerHTML = '';
         if (!`hasData`) {
           const err = document.createElement('div');
           err.className = 'deepreview-error';
           err.textContent = 'No DeepReview data loaded. Use --deepreview <path> to load a file.';
-          rootBody.appendChild(err);
+          `rootBody`.appendChild(err);
           return;
         }
         const header = document.createElement('div');
@@ -426,7 +426,7 @@ when defined(js):
         stats.className = 'deepreview-stats';
         stats.textContent = `statsText`;
         header.appendChild(stats);
-        rootBody.appendChild(header);
+        `rootBody`.appendChild(header);
 
         const renderUnified = (parent) => {
           const unified = document.createElement('div');
@@ -439,7 +439,7 @@ when defined(js):
           const area = document.createElement('div');
           area.className = 'deepreview-editor-area';
           renderUnified(area);
-          rootBody.appendChild(area);
+          `rootBody`.appendChild(area);
         } else {
           const body = document.createElement('div');
           body.className = 'deepreview-body';
@@ -515,7 +515,7 @@ when defined(js):
           ct.className = 'deepreview-calltrace';
           ct.innerHTML = '<div class="deepreview-calltrace-header">Call Trace</div>';
           body.appendChild(ct);
-          rootBody.appendChild(body);
+          `rootBody`.appendChild(body);
         }
       """.}
 
@@ -528,7 +528,7 @@ when defined(js):
         var coverage = cstring(file.coverageText)
         var hasCoverage = file.hasCoverage
         {.emit: """
-          const list = rootBody.querySelector('.deepreview-file-list');
+          const list = `rootBody`.querySelector('.deepreview-file-list');
           if (list) {
             const row = document.createElement('div');
             row.className = `rowClass`;
@@ -565,10 +565,10 @@ when defined(js):
         var ctxLabel = cstring(ctx.label)
         var selected = ctx.id == vm.selectedTraceContextId.val
         {.emit: """
-          let select = rootBody.querySelector('.deepreview-trace-select');
+          let select = `rootBody`.querySelector('.deepreview-trace-select');
           if (!select) {
-            const header = rootBody.querySelector('.deepreview-header');
-            const stats = rootBody.querySelector('.deepreview-stats');
+            const header = `rootBody`.querySelector('.deepreview-header');
+            const stats = `rootBody`.querySelector('.deepreview-stats');
             select = document.createElement('select');
             select.className = 'deepreview-trace-select';
             select.addEventListener('change', () => {
@@ -590,7 +590,7 @@ when defined(js):
         var added = file.linesAdded
         var removed = file.linesRemoved
         {.emit: """
-          const unified = rootBody.querySelector('.deepreview-unified-diff');
+          const unified = `rootBody`.querySelector('.deepreview-unified-diff');
           if (unified) {
             const fileEl = document.createElement('div');
             fileEl.className = 'deepreview-unified-file';
@@ -623,7 +623,7 @@ when defined(js):
           var hunkCls = cstring(hunkClass(selected))
           var hidx = hunkIdx
           {.emit: """
-            const fileEl = rootBody.querySelector('.deepreview-unified-file[data-file-index="' + `fileIndex` + '"]');
+            const fileEl = `rootBody`.querySelector('.deepreview-unified-file[data-file-index="' + `fileIndex` + '"]');
             if (fileEl) {
               const hunk = document.createElement('div');
               hunk.className = `hunkCls`;
@@ -643,7 +643,7 @@ when defined(js):
             var oldLine = if line.lineType != "added" and line.oldLine > 0: cstring($line.oldLine) else: cstring""
             var newLine = if line.lineType != "removed" and line.newLine > 0: cstring($line.newLine) else: cstring""
             {.emit: """
-              const hunks = rootBody.querySelectorAll('.deepreview-unified-file[data-file-index="' + `fileIndex` + '"] .deepreview-unified-hunk');
+              const hunks = `rootBody`.querySelectorAll('.deepreview-unified-file[data-file-index="' + `fileIndex` + '"] .deepreview-unified-hunk');
               const hunk = hunks[hunks.length - 1];
               if (hunk) {
                 const row = document.createElement('div');
@@ -663,7 +663,7 @@ when defined(js):
         var count = node.executionCount
         var padding = cstring(fmt"padding-left: {node.depth * 16}px")
         {.emit: """
-          const ct = rootBody.querySelector('.deepreview-calltrace');
+          const ct = `rootBody`.querySelector('.deepreview-calltrace');
           if (ct) {
             let body = ct.querySelector('.deepreview-calltrace-body');
             if (!body) {
@@ -691,7 +691,7 @@ when defined(js):
 
       if vm.callNodes.val.len == 0:
         {.emit: """
-          const ct = rootBody.querySelector('.deepreview-calltrace');
+          const ct = `rootBody`.querySelector('.deepreview-calltrace');
           if (ct && !ct.querySelector('.deepreview-calltrace-empty')) {
             const empty = document.createElement('div');
             empty.className = 'deepreview-calltrace-empty';
