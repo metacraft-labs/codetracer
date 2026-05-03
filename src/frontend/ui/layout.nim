@@ -801,13 +801,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       else:
         # For panels pinned from GL, try the standard label format.
         convertComponentLabel(panel.content, panel.componentId)
-    # For standalone auto-hide panels, Karax's setRenderer doesn't work
-    # reliably because the element starts in a hidden/offscreen host.
-    # Instead, render the component's VNode directly into the container
-    # using vnodeToDom, which bypasses Karax's diffing and produces fresh
-    # DOM nodes.  The Build panel is now an IsoNim view: re-mount it
-    # against the visible label so the reactive root attaches inside
-    # the container that the auto-hide overlay just made visible.
+    # Standalone auto-hide panels are direct IsoNim mounts.  Opening the
+    # overlay reparents their existing wrapper, so refresh the specific
+    # ViewModel-backed mount instead of materialising a fresh Karax VNode.
     if panel.content == Content.Build:
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
@@ -829,15 +825,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       search_results.isoNimSearchResultsMounted = false
       search_results.tryMountIsoNimSearchResultsPanel()
       return
-    let component = data.ui.componentMapping[panel.content][0]
-    if not component.isNil:
-      let target = kdom.document.getElementById(label)
-      if not target.isNil:
-        target.innerHTML = cstring""
-        let vnode = renderLayoutComponent(component, panel.content)
-        let dom = vnodeToDom(vnode, KaraxInstance())
-        target.appendChild(dom)
-    elif kxiMap.hasKey(label):
+    # Pinned GoldenLayout panels already carry a liveElement that showOverlay()
+    # reparents into the overlay.  For the remaining Karax-backed GL panels
+    # (currently Editor/VCS), only ask Karax to redraw its existing instance.
+    # IsoNim-owned panels have no kxiMap entry and need no work here.
+    if kxiMap.hasKey(label):
       redrawSync(kxiMap[label])
 
   autoHideState.onChanged = proc() =
