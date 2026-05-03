@@ -1724,7 +1724,10 @@ proc renderExpandedValueView(
       renderExpandedValue(value)
       renderRemoveButtonView(self, key)
 
-method render*(self: CallExpandedValuesComponent) : VNode =
+proc renderCallExpandedValues*(self: CallExpandedValuesComponent): VNode =
+  ## Render the legacy expanded call value Karax sub-tree without relying on
+  ## generic Component.render dispatch while the calltrace panel itself is
+  ## owned by IsoNim.
   let hasReturnValue = self.values.hasKey(returnValueName)
   var lastKey = cstring""
 
