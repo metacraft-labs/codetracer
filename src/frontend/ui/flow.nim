@@ -921,10 +921,10 @@ proc makeFlowLoopContainer(
   loopIndex: int,
   nested: bool = false
 ): Node =
-  let loop = self.flow.loops[loopIndex]
-  var style: VStyle
   var containerId = &"flow-loop-container-{position}"
   var containerClass: cstring
+
+  result = document.createElement(cstring"div")
 
   if nested:
     containerId = containerId & &"-{loopIndex}-{self.flow.loops[loopIndex].baseIteration}"
@@ -938,31 +938,20 @@ proc makeFlowLoopContainer(
     let leftValue =
       self.loopStates[loopIndex].containerOffset - (flowLine.baseOffsetLeft.float - flowLine.offsetleft.float)
 
-    style = style(
-      (StyleAttr.width, cstring($containerWidth & "px")),
-      (StyleAttr.left, cstring($leftValue & "px"))
-    )
+    result.style.width = cstring($containerWidth & "px")
+    result.style.left = cstring($leftValue & "px")
   else:
     let containerProps = self.prepareFlowLineContainerProps(position)
 
-    style = style(
-      (StyleAttr.left, cstring($(containerProps.left) & "px")),
-      (StyleAttr.height, cstring($(containerProps.height) & "px")),
-      (StyleAttr.width, cstring($(containerProps.width) & "px"))
-    )
+    result.style.left = cstring($(containerProps.left) & "px")
+    result.style.height = cstring($(containerProps.height) & "px")
+    result.style.width = cstring($(containerProps.width) & "px")
 
     containerClass = "flow-loop-container"
 
-  let vNode = buildHtml(
-    tdiv(
-      id = containerId,
-      class = containerClass,
-      style = style
-    )
-  ):
-    text ""
-
-  return vnodeToDom(vNode, KaraxInstance())
+  result.setAttribute(cstring"id", cstring(containerId))
+  result.setAttribute(cstring"class", containerClass)
+  result.appendChild(document.createTextNode(cstring""))
 
 proc ensureLoopContainer(self: FlowComponent, step: FlowStep, flowDom: Node): Node =
   var positionContainer = cast[Node](findNodeInElement(
