@@ -585,6 +585,7 @@ proc renderStatus*(self: StatusComponent): VNode =
   ## Component.render override.
   discard windowSetTimeout(proc() =
     requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+    requestBottomAutoHideTabsRender(cstring"auto-hide-bottom-tabs")
   , 0)
 
   result = buildHtml(tdiv):
@@ -598,7 +599,7 @@ proc renderStatus*(self: StatusComponent): VNode =
       # connecting with the collapsed side strip line above it.
       renderCollapsedIconZoneHost()
       fileInfoView(self)
-      renderBottomAutoHideTabs()
+      renderBottomAutoHideTabsHost()
       # TODO: Find another place for these
       # toggleInlineValues(self)
       # toggleFlow(self)

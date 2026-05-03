@@ -45,6 +45,9 @@ import vdom except Event
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
+  from ../viewmodel/views/isonim_auto_hide_bottom_tabs_view import
+    AutoHideBottomTabRecord, AutoHideBottomTabsCallbacks,
+    renderAutoHideBottomTabsInto
   from ../viewmodel/views/isonim_auto_hide_collapsed_icons_view import
     AutoHideCollapsedIconRecord, AutoHideCollapsedIconCallbacks,
     renderAutoHideCollapsedIconsInto
@@ -665,13 +668,37 @@ proc renderAutoHideRightStrip*(): VNode =
   ## Karax renderer for the right side strip.
   renderAutoHideSideStrip(AutoHideEdge.Right)
 
-proc renderBottomAutoHideTabs*(): VNode =
-  ## Render bottom auto-hide tabs as a container to be placed inside
-  ## the status bar. Returns an empty div when there are no bottom tabs.
-  let tabs = renderStripTabsInto(AutoHideEdge.Bottom)
-  buildHtml(tdiv(class = "auto-hide-bottom-tabs")):
-    for tab in tabs:
-      tab
+proc bottomAutoHideTabsModel*(): seq[AutoHidePanel] =
+  ## Derive bottom-pinned panels for the status-bar bottom tab host.
+  if autoHideState.isNil:
+    return @[]
+  autoHideState.panelsForEdge(AutoHideEdge.Bottom)
+
+proc renderBottomAutoHideTabsHost*(): VNode =
+  ## Karax placeholder host for the direct IsoNim bottom-tab renderer.
+  buildHtml(tdiv(id = "auto-hide-bottom-tabs", class = "auto-hide-bottom-tabs"))
+
+when defined(js):
+  proc requestBottomAutoHideTabsRender*(containerId: cstring) =
+    ## Refresh bottom auto-hide tabs through IsoNim direct DOM.
+    let container = dom_api.getElementById(dom_api.document, containerId)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      return
+
+    let panels = bottomAutoHideTabsModel()
+    var records: seq[AutoHideBottomTabRecord] = @[]
+    for panel in panels:
+      records.add(AutoHideBottomTabRecord(title: $panel.title))
+
+    let callbacks = AutoHideBottomTabsCallbacks(
+      onSelect: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          showOverlay(panels[index]))
+    let r = WebRenderer()
+    renderAutoHideBottomTabsInto(r, container, records, callbacks)
+else:
+  proc requestBottomAutoHideTabsRender*(containerId: cstring) =
+    discard
 
 proc collapsedIconZoneModel*(): seq[AutoHidePanel] =
   ## Derive side-pinned panels that should appear in the collapsed status-bar

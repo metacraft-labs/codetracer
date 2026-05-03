@@ -80,6 +80,7 @@ import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
 import views/isonim_auto_hide_overlay_tabs_view
 import views/isonim_auto_hide_collapsed_icons_view
+import views/isonim_auto_hide_bottom_tabs_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -233,6 +234,47 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
         AutoHideCollapsedIconRecord(icon: "E", title: "EVENT LOG")
       ],
       callbacks = AutoHideCollapsedIconCallbacks(
+        onSelect: proc(index: int) = selected = index))
+
+    panel.children[1].fireEvent("click")
+    check selected == 1
+
+suite "IsoNim Auto-hide Bottom Tabs — structure":
+
+  test "empty state renders the bottom-tabs host without tab children":
+    let r = MockRenderer()
+    let panel = renderAutoHideBottomTabsPanel(r, tabs = @[])
+
+    check panel.attributes["class"] == AutoHideBottomTabsClass
+    check panel.children.len == 0
+
+  test "bottom tabs render strip-tab selector contract and titles":
+    let r = MockRenderer()
+    let panel = renderAutoHideBottomTabsPanel(
+      r,
+      tabs = @[
+        AutoHideBottomTabRecord(title: "BUILD"),
+        AutoHideBottomTabRecord(title: "PROBLEMS"),
+        AutoHideBottomTabRecord(title: "SEARCH RESULTS")
+      ])
+
+    check panel.attributes["class"] == AutoHideBottomTabsClass
+    check panel.children.len == 3
+    check panel.children[0].attributes["class"] == AutoHideBottomTabClass
+    check panel.children[0].textContent == "BUILD"
+    check panel.children[1].textContent == "PROBLEMS"
+    check panel.children[2].textContent == "SEARCH RESULTS"
+
+  test "select callback receives bottom tab index":
+    let r = MockRenderer()
+    var selected = -1
+    let panel = renderAutoHideBottomTabsPanel(
+      r,
+      tabs = @[
+        AutoHideBottomTabRecord(title: "BUILD"),
+        AutoHideBottomTabRecord(title: "SEARCH RESULTS")
+      ],
+      callbacks = AutoHideBottomTabsCallbacks(
         onSelect: proc(index: int) = selected = index))
 
     panel.children[1].fireEvent("click")
