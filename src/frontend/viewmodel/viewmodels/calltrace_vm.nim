@@ -181,6 +181,7 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
       "highLevelPath": line.location.file,
       "highLevelLine": line.location.line,
       "rrTicks": line.rrTicks,
+      "callstackDepth": line.location.callstackDepth,
     }
     discard vm.store.backend.send("ct/calltrace-jump", args)
 

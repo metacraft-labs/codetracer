@@ -43,6 +43,10 @@ type
     file*: string
     line*: int
     column*: int
+    callstackDepth*: int
+      ## Live RR traces use this frame depth when jumping from a calltrace row.
+      ## Materialized traces can leave it at the default 0 because they jump by
+      ## step/tick instead.
 
   # -------------------------------------------------------------------
   # Aggregate state objects — one per logical domain

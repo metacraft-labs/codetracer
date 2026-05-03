@@ -1058,6 +1058,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       rrTicks = cast[uint64](loc.rrTicks),
       file = $loc.highLevelPath,
       line = loc.highLevelLine,
+      callstackDepth = loc.callstackDepth,
       hasChildren = lineHasChildren,
       isExpanded = lineIsExpanded,
       callKey = $call.key,

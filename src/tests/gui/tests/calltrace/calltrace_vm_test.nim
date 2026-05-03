@@ -41,14 +41,19 @@ proc makeStoreWithMock(autoRespond: bool = true):
 
 proc makeCallLine(index: int64; name: string; depth: int = 0;
                   rrTicks: uint64 = 0; file: string = "";
-                  line: int = 0): CallLine =
+                  line: int = 0; callstackDepth: int = 0): CallLine =
   ## Convenience constructor for CallLine test data.
   CallLine(
     index: index,
     name: name,
     depth: depth,
     rrTicks: rrTicks,
-    location: Location(file: file, line: line, column: 0),
+    location: Location(
+      file: file,
+      line: line,
+      column: 0,
+      callstackDepth: callstackDepth,
+    ),
   )
 
 # ---------------------------------------------------------------------------
@@ -291,7 +296,8 @@ suite "CalltraceVM doubleClickEntry":
       # Populate calltrace data in the store.
       let testLines = @[
         makeCallLine(0, "main", file = "main.nim", line = 10, rrTicks = 50),
-        makeCallLine(1, "foo", depth = 1, file = "foo.nim", line = 20, rrTicks = 100),
+        makeCallLine(1, "foo", depth = 1, file = "foo.nim", line = 20,
+                     rrTicks = 100, callstackDepth = 3),
         makeCallLine(2, "bar", depth = 2, file = "bar.nim", line = 30, rrTicks = 150),
       ]
       store.calltrace.lines.val = testLines
@@ -313,6 +319,7 @@ suite "CalltraceVM doubleClickEntry":
           check cmd.args["path"].getStr == "foo.nim"
           check cmd.args["line"].getInt == 20
           check cmd.args["rrTicks"].getBiggestInt == 100
+          check cmd.args["callstackDepth"].getInt == 3
           found = true
           break
       check found

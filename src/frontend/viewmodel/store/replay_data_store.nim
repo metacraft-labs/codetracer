@@ -384,6 +384,7 @@ proc makeCallArg*(name, text: string): CallArg =
 
 proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
                    file: string = ""; line: int = 0;
+                   callstackDepth: int = 0;
                    hasChildren: bool = false; isExpanded: bool = false;
                    callKey: string = ""): CallLine =
   ## Convenience constructor for CallLine — avoids the need for callers
@@ -393,7 +394,7 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
     name: name,
     depth: depth,
     rrTicks: rrTicks,
-    location: Location(file: file, line: line),
+    location: Location(file: file, line: line, callstackDepth: callstackDepth),
     hasChildren: hasChildren,
     isExpanded: isExpanded,
     callKey: callKey,
