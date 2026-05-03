@@ -846,24 +846,24 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   autoHideState.onChanged = proc() =
     # Re-render the side strip tabs whenever the auto-hide state changes.
-    # Left and right strips are separate Karax renderers in the layout row.
-    if kxiMap.hasKey(cstring"auto-hide-strip-left"):
-      redraw(kxiMap[cstring"auto-hide-strip-left"])
-    if kxiMap.hasKey(cstring"auto-hide-strip-right"):
-      redraw(kxiMap[cstring"auto-hide-strip-right"])
+    # Left and right strip hosts are static DOM nodes in the layout row; their
+    # contents and sizing classes are now refreshed through IsoNim directly.
+    requestAutoHideSideStripRender(
+      cstring"auto-hide-strip-left",
+      AutoHideEdge.Left)
+    requestAutoHideSideStripRender(
+      cstring"auto-hide-strip-right",
+      AutoHideEdge.Right)
     # Bottom tabs are rendered inside the status bar; trigger a status redraw.
     if kxiMap.hasKey(cstring"status"):
       redraw(kxiMap[cstring"status"])
 
-  kxiMap["auto-hide-strip-left"] = setRenderer(
-    proc: VNode = renderAutoHideLeftStrip(),
-    "auto-hide-strip-left",
-    proc = discard)
-
-  kxiMap["auto-hide-strip-right"] = setRenderer(
-    proc: VNode = renderAutoHideRightStrip(),
-    "auto-hide-strip-right",
-    proc = discard)
+  requestAutoHideSideStripRender(
+    cstring"auto-hide-strip-left",
+    AutoHideEdge.Left)
+  requestAutoHideSideStripRender(
+    cstring"auto-hide-strip-right",
+    AutoHideEdge.Right)
 
   # Wire overlay header buttons and dismissal handlers.
   setupAutoHideOverlay(layout)

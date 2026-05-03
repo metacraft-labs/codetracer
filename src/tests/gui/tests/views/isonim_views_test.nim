@@ -81,6 +81,7 @@ import views/isonim_debug_shell_view
 import views/isonim_auto_hide_overlay_tabs_view
 import views/isonim_auto_hide_collapsed_icons_view
 import views/isonim_auto_hide_bottom_tabs_view
+import views/isonim_auto_hide_side_strip_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -279,6 +280,58 @@ suite "IsoNim Auto-hide Bottom Tabs — structure":
 
     panel.children[1].fireEvent("click")
     check selected == 1
+
+suite "IsoNim Auto-hide Side Strips — structure":
+
+  test "empty expanded strip has no sizing class and no tab children":
+    let r = MockRenderer()
+    let panel = renderAutoHideSideStripPanel(
+      r,
+      tabs = @[],
+      collapsed = false)
+
+    check panel.attributes["class"] == ""
+    check panel.children.len == 0
+
+  test "expanded strip renders strip tabs and select callback":
+    let r = MockRenderer()
+    var selected = -1
+    let panel = renderAutoHideSideStripPanel(
+      r,
+      tabs = @[
+        AutoHideSideStripRecord(title: "FILES"),
+        AutoHideSideStripRecord(title: "CALLTRACE")
+      ],
+      collapsed = false,
+      callbacks = AutoHideSideStripCallbacks(
+        onSelect: proc(index: int) = selected = index))
+
+    check panel.attributes["class"] == AutoHideSideStripHasTabsClass
+    check panel.children.len == 2
+    check panel.children[0].attributes["class"] == AutoHideSideStripTabClass
+    check panel.children[0].textContent == "FILES"
+    check panel.children[1].textContent == "CALLTRACE"
+
+    panel.children[1].fireEvent("click")
+    check selected == 1
+
+  test "collapsed strip renders only the collapsed click line":
+    let r = MockRenderer()
+    var clicked = false
+    let panel = renderAutoHideSideStripPanel(
+      r,
+      tabs = @[AutoHideSideStripRecord(title: "FILES")],
+      collapsed = true,
+      callbacks = AutoHideSideStripCallbacks(
+        onCollapsedSelect: proc() = clicked = true))
+
+    check panel.attributes["class"] == AutoHideSideStripCollapsedClass
+    check panel.children.len == 1
+    check panel.children[0].attributes["class"] == AutoHideCollapsedStripLineClass
+    check panel.children[0].textContent == ""
+
+    panel.children[0].fireEvent("click")
+    check clicked
 
 suite "IsoNim Session Tabs — structure":
 

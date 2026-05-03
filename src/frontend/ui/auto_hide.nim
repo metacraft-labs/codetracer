@@ -48,6 +48,9 @@ when defined(js):
   from ../viewmodel/views/isonim_auto_hide_bottom_tabs_view import
     AutoHideBottomTabRecord, AutoHideBottomTabsCallbacks,
     renderAutoHideBottomTabsInto
+  from ../viewmodel/views/isonim_auto_hide_side_strip_view import
+    AutoHideSideStripRecord, AutoHideSideStripCallbacks,
+    renderAutoHideSideStripInto
   from ../viewmodel/views/isonim_auto_hide_collapsed_icons_view import
     AutoHideCollapsedIconRecord, AutoHideCollapsedIconCallbacks,
     renderAutoHideCollapsedIconsInto
@@ -577,96 +580,49 @@ proc contentIcon*(content: Content): cstring =
   contentIconJs(content)
 
 
-proc makeStripTabClickHandler(panel: AutoHidePanel): proc(e: Event, tg: VNode) =
-  ## Create a click handler for a strip tab that captures the panel by value.
-  ## This is a separate proc to avoid the classic JS closure-in-a-loop bug:
-  ## Nim's `let` inside a for-loop body may compile to a hoisted `var` in JS,
-  ## causing all closures to reference the last iteration's value. Wrapping
-  ## the capture in a function call creates a proper scope boundary.
-  result = proc(e: Event, tg: VNode) =
-    showOverlay(panel)
-
-proc renderStripTabsInto*(edge: AutoHideEdge): seq[VNode] =
-  ## Render the tab elements for a single edge strip as a sequence of VNodes.
-  ## Used for side strips (rendered into their own DOM containers) and
-  ## bottom tabs (rendered into the status bar).
+proc sideAutoHideTabsModel*(edge: AutoHideEdge): tuple[
+    panels: seq[AutoHidePanel];
+    collapsed: bool] =
+  ## Derive left/right side-strip state while preserving the 1.28
+  ## Xvfb-sensitive collapsed-mode heuristic in ``isEdgeCollapsed``.
   let panels = if not autoHideState.isNil:
       autoHideState.panelsForEdge(edge)
     else:
       @[]
+  (panels: panels, collapsed: isEdgeCollapsed(edge))
 
-  result = @[]
-  for panel in panels:
-    let handler = makeStripTabClickHandler(panel)
-    let node = buildHtml(
-      tdiv(
-        class = "auto-hide-strip-tab",
-        onclick = handler
-      )
-    ):
-      text panel.title
-    result.add(node)
+when defined(js):
+  proc requestAutoHideSideStripRender*(containerId: cstring, edge: AutoHideEdge) =
+    ## Refresh one left/right auto-hide strip through IsoNim direct DOM.
+    let container = dom_api.getElementById(dom_api.document, containerId)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      return
 
-proc renderAutoHideSideStrip(edge: AutoHideEdge): VNode =
-  ## Render a side strip's content. The parent element's "has-tabs" class
-  ## is toggled by updating the DOM directly after Karax renders, so the
-  ## CSS width transitions between 0 (empty) and 28px (has tabs).
-  ##
-  ## In collapsed mode (maximized window, bounded edge), the strip renders
-  ## as a 1px accent-colored line instead of the 28px text-label strip.
-  ## The "collapsed-mode" class is toggled alongside "has-tabs".
-  let tabs = renderStripTabsInto(edge)
-  let collapsed = isEdgeCollapsed(edge)
-  let stripId = case edge
-    of Left:   cstring"auto-hide-strip-left"
-    of Right:  cstring"auto-hide-strip-right"
-    of Bottom: cstring""
+    let model = sideAutoHideTabsModel(edge)
+    var records: seq[AutoHideSideStripRecord] = @[]
+    for panel in model.panels:
+      records.add(AutoHideSideStripRecord(title: $panel.title))
 
-  # After rendering, toggle CSS classes on the parent strip element.
-  discard windowSetTimeout(proc() =
-    let el = document.getElementById(stripId)
-    if not el.isNil:
-      if tabs.len > 0:
-        el.classList.add(cstring"has-tabs")
-      else:
-        el.classList.remove(cstring"has-tabs")
-      # Toggle collapsed-mode class for 1px rendering.
-      if collapsed and tabs.len > 0:
-        el.classList.add(cstring"collapsed-mode")
-      else:
-        el.classList.remove(cstring"collapsed-mode")
-  , 0)
-
-  if collapsed:
-    # In collapsed mode, the strip is a 1px accent line — no text tabs.
-    # Clicking the line opens the overlay with the last-focused panel.
-    let panels = if not autoHideState.isNil:
-        autoHideState.panelsForEdge(edge)
-      else:
-        @[]
-    let handler = proc(e: Event, tg: VNode) =
-      if panels.len > 0:
-        # Show the last active panel for this edge, or the first panel.
-        let target = if not autoHideState.isNil and
-                        not autoHideState.lastActivePanel.isNil and
-                        autoHideState.lastActivePanel.edge == edge:
-            autoHideState.lastActivePanel
-          else:
-            panels[0]
-        showOverlay(target)
-    buildHtml(tdiv(class = "collapsed-strip-line", onclick = handler))
-  else:
-    buildHtml(tdiv):
-      for tab in tabs:
-        tab
-
-proc renderAutoHideLeftStrip*(): VNode =
-  ## Karax renderer for the left side strip.
-  renderAutoHideSideStrip(AutoHideEdge.Left)
-
-proc renderAutoHideRightStrip*(): VNode =
-  ## Karax renderer for the right side strip.
-  renderAutoHideSideStrip(AutoHideEdge.Right)
+    let panels = model.panels
+    let callbacks = AutoHideSideStripCallbacks(
+      onSelect: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          showOverlay(panels[index]),
+      onCollapsedSelect: proc() =
+        if panels.len > 0:
+          let target = if not autoHideState.isNil and
+                          not autoHideState.lastActivePanel.isNil and
+                          autoHideState.lastActivePanel.edge == edge:
+              autoHideState.lastActivePanel
+            else:
+              panels[0]
+          showOverlay(target))
+    let r = WebRenderer()
+    renderAutoHideSideStripInto(
+      r, container, records, model.collapsed, callbacks)
+else:
+  proc requestAutoHideSideStripRender*(containerId: cstring, edge: AutoHideEdge) =
+    discard
 
 proc bottomAutoHideTabsModel*(): seq[AutoHidePanel] =
   ## Derive bottom-pinned panels for the status-bar bottom tab host.
