@@ -470,7 +470,13 @@ proc generateNameMap*(node: MenuNode, res: JsAssoc[cstring, ClientAction] = nil)
       res[node.name] = node.action
 
 
-method render*(self: MenuComponent): VNode =
+proc renderMenu*(self: MenuComponent): VNode =
+  ## Render the global menu chrome.
+  ##
+  ## This remains a Karax VNode tree because the shared ``#menu`` renderer
+  ## outside GoldenLayout still expects one, but it is intentionally a regular
+  ## proc rather than a ``method render*: VNode`` override.  The menu no longer
+  ## participates in the generic Karax component render-dispatch audit.
   if not self.data.ui.menuNode.isNil and
     not self.data.isNil:
       self.prepared = prepareSearch(self.data.ui.menuNode)

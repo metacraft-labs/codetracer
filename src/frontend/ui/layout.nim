@@ -253,7 +253,7 @@ proc ensureSharedRenderers() =
 
   kxiMap["menu"] = setRenderer(
     proc: VNode =
-      if not data.ui.menu.isNil: data.ui.menu.render()
+      if not data.ui.menu.isNil: data.ui.menu.renderMenu()
       else: buildHtml(tdiv()),
     "menu", proc = discard)
   kxiMap["status"] = setRenderer(
@@ -300,7 +300,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   echo data.ui.layout.isNil
 
   if data.startOptions.shellUi:
-    kxiMap["menu"] = setRenderer(proc: VNode = data.ui.menu.render(), "menu", proc = discard)
+    kxiMap["menu"] = setRenderer(proc: VNode = data.ui.menu.renderMenu(), "menu", proc = discard)
     data.ui.menu.kxi = kxiMap["menu"]
     return
 
