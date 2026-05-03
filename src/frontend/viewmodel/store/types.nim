@@ -52,6 +52,35 @@ type
     ## Top-level session information.
     connectionStatus*: ConnectionStatus
 
+  ReplayDeploymentMode* = enum
+    ## Where a replay session is hosted.
+    ##
+    ## The Playwright browser replay specs set ``deploymentMode: "web"``
+    ## while the regular Electron trace specs use the native desktop path.
+    ## Keeping this as ViewModel state lets headless tests exercise the
+    ## same mode distinction without a browser or Electron process.
+    rdmDesktop
+    rdmWeb
+
+  ReplayTraceKind* = enum
+    ## Storage/execution family for the active replay.
+    ##
+    ## ``rtkMaterialized`` covers DB-backed traces such as Python
+    ## materialized replay. ``rtkMcr`` covers rr/MCR-style traces such
+    ## as the C browser replay path.
+    rtkUnknown
+    rtkMaterialized
+    rtkMcr
+
+  ReplayLifecycleStage* = enum
+    ## Coarse lifecycle of a replay or streaming recording session.
+    rlsIdle
+    rlsLoadingTrace
+    rlsBackendReady
+    rlsStreaming
+    rlsComplete
+    rlsError
+
   DebuggerState* = object
     ## Snapshot of the debugger's position in the recording.
     location*: Location
