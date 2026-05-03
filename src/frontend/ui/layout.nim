@@ -1059,13 +1059,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Render side-edge tabs into the overlay's side-tab container.
   # Called from onPanelShown and whenever the overlay edge changes.
   proc renderOverlaySideTabs() =
-    let container = kdom.document.getElementById(cstring"auto-hide-overlay-side-tabs")
-    if container.isNil:
-      return
-    container.innerHTML = cstring""
-    let vnode = renderOverlaySideEdgeTabs()
-    let dom = vnodeToDom(vnode, KaraxInstance())
-    container.appendChild(dom)
+    requestOverlaySideEdgeTabsRender(cstring"auto-hide-overlay-side-tabs")
 
   # Wire onPanelShown to also render side-edge tabs.
   let originalOnPanelShown = autoHideState.onPanelShown

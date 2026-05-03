@@ -42,6 +42,13 @@ import
 import vdom except Event
 # Node type comes from kdom (karax); do not import dom.Node which conflicts.
 
+when defined(js):
+  import isonim/web/web_renderer
+  from isonim/web/dom_api import nil
+  from ../viewmodel/views/isonim_auto_hide_overlay_tabs_view import
+    AutoHideOverlayTabRecord, AutoHideOverlayTabsCallbacks,
+    renderAutoHideOverlayTabsInto
+
 # JS array helpers (not exported from any shared module).
 proc newJsArray(): JsObject {.importjs: "(new Array())".}
 proc push(arr: JsObject, item: JsObject) {.importjs: "#.push(#)".}
@@ -699,41 +706,57 @@ proc renderCollapsedIconZone*(): VNode =
     for ic in icons:
       ic
 
-proc makeSideEdgeTabClickHandler(panel: AutoHidePanel): proc(e: Event, tg: VNode) =
-  ## Click handler for a side-edge tab inside the overlay.
-  result = proc(e: Event, tg: VNode) =
-    showOverlay(panel)
-
-proc renderOverlaySideEdgeTabs*(): VNode =
-  ## Render VS Studio-style side-edge tabs inside the overlay.
-  ## These are vertical tabs drawn on the edge of the overlay, showing
-  ## all panels pinned to the same edge as the currently active overlay.
-  ## Only rendered when collapsed mode is active.
+proc overlaySideTabsModel*(): tuple[
+    visible: bool;
+    edgeClass: string;
+    panels: seq[AutoHidePanel]] =
+  ## Derive the render model for collapsed overlay side tabs from the live
+  ## auto-hide state. Kept separate so the direct IsoNim renderer and tests can
+  ## exercise the same visibility / edge-class rules.
   if autoHideState.isNil or
      not autoHideState.collapsedMode or
      autoHideState.activeOverlay.isNil:
-    return buildHtml(tdiv(class = "overlay-side-tabs hidden"))
+    return (visible: false, edgeClass: "", panels: @[])
 
   let activeEdge = autoHideState.activeOverlay.edge
   if not isEdgeCollapsed(activeEdge):
-    return buildHtml(tdiv(class = "overlay-side-tabs hidden"))
+    return (visible: false, edgeClass: "", panels: @[])
 
-  let siblings = autoHideState.panelsForEdge(activeEdge)
   let edgeClass = case activeEdge
     of Left:  " side-tabs-left"
     of Right: " side-tabs-right"
     of Bottom: ""
 
-  buildHtml(tdiv(class = cstring("overlay-side-tabs" & edgeClass))):
-    for panel in siblings:
-      let isActive = panel == autoHideState.activeOverlay
-      let activeClass = if isActive: " active" else: ""
-      let handler = makeSideEdgeTabClickHandler(panel)
-      tdiv(
-        class = cstring("overlay-side-tab" & activeClass),
-        onclick = handler
-      ):
-        text panel.title
+  (visible: true,
+   edgeClass: edgeClass,
+   panels: autoHideState.panelsForEdge(activeEdge))
+
+when defined(js):
+  proc requestOverlaySideEdgeTabsRender*(containerId: cstring) =
+    ## Refresh the collapsed overlay side tabs through IsoNim direct DOM.
+    ## This replaces the old Karax VNode materialisation in layout.nim.
+    let container = dom_api.getElementById(dom_api.document, containerId)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      return
+
+    let model = overlaySideTabsModel()
+    var records: seq[AutoHideOverlayTabRecord] = @[]
+    for panel in model.panels:
+      records.add(AutoHideOverlayTabRecord(
+        title: $panel.title,
+        active: panel == autoHideState.activeOverlay))
+
+    let panels = model.panels
+    let callbacks = AutoHideOverlayTabsCallbacks(
+      onSelect: proc(index: int) =
+        if index >= 0 and index < panels.len:
+          showOverlay(panels[index]))
+    let r = WebRenderer()
+    renderAutoHideOverlayTabsInto(
+      r, container, records, model.visible, model.edgeClass, callbacks)
+else:
+  proc requestOverlaySideEdgeTabsRender*(containerId: cstring) =
+    discard
 
 # ---------------------------------------------------------------------------
 # Serialisation for layout save/load

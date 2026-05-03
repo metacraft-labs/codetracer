@@ -78,6 +78,7 @@ import views/isonim_deepreview_view
 import views/isonim_welcome_screen_view
 import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
+import views/isonim_auto_hide_overlay_tabs_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -145,6 +146,55 @@ suite "IsoNim Debug Shell — structure":
 
     check panel.attributes["id"] == DebugShellId
     check findByClass(panel, DebugCommandPaletteHostClass).isNil
+
+suite "IsoNim Auto-hide Overlay Tabs — structure":
+
+  test "hidden state renders only the hidden container":
+    let r = MockRenderer()
+    let panel = renderAutoHideOverlayTabsPanel(
+      r,
+      tabs = @[],
+      visible = false,
+      edgeClass = "")
+
+    check panel.attributes["class"] == AutoHideOverlayTabsHiddenClass
+    check panel.children.len == 0
+
+  test "left edge renders sibling tabs with active modifier":
+    let r = MockRenderer()
+    let panel = renderAutoHideOverlayTabsPanel(
+      r,
+      tabs = @[
+        AutoHideOverlayTabRecord(title: "FILES", active: true),
+        AutoHideOverlayTabRecord(title: "CALLTRACE", active: false)
+      ],
+      visible = true,
+      edgeClass = " side-tabs-left")
+
+    check panel.attributes["class"] == AutoHideOverlayTabsLeftClass
+    check panel.children.len == 2
+    check panel.children[0].attributes["class"] == AutoHideOverlayTabActiveClass
+    check panel.children[0].textContent == "FILES"
+    check panel.children[1].attributes["class"] == AutoHideOverlayTabClass
+    check panel.children[1].textContent == "CALLTRACE"
+
+  test "select callback receives tab index":
+    let r = MockRenderer()
+    var selected = -1
+    let panel = renderAutoHideOverlayTabsPanel(
+      r,
+      tabs = @[
+        AutoHideOverlayTabRecord(title: "STATE", active: false),
+        AutoHideOverlayTabRecord(title: "EVENT LOG", active: true)
+      ],
+      visible = true,
+      edgeClass = " side-tabs-right",
+      callbacks = AutoHideOverlayTabsCallbacks(
+        onSelect: proc(index: int) = selected = index))
+
+    check panel.attributes["class"] == AutoHideOverlayTabsRightClass
+    panel.children[0].fireEvent("click")
+    check selected == 0
 
 suite "IsoNim Session Tabs — structure":
 
