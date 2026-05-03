@@ -498,7 +498,12 @@ proc renderPie*(self: ChartComponent): VNode =
   ):
     canvas(id = cstring(fmt"chart-pie-canvas-{self.getId}"))
 
-method render*(self: ChartComponent): VNode =
+proc renderChart*(self: ChartComponent): VNode =
+  ## Render the rich Karax chart sub-tree used by legacy value views.
+  ##
+  ## This remains a Karax VNode renderer for inline history charts, but it is a
+  ## regular proc so ChartComponent no longer participates in generic
+  ## Component.render dispatch while the surrounding surfaces are migrated.
   var table = self.tableView()
 
   result = buildHtml(
@@ -512,7 +517,7 @@ method render*(self: ChartComponent): VNode =
 
 proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
   let chart = self.charts[expression]
-  var chartElement = chart.render()
+  var chartElement = chart.renderChart()
 
   chart.ensure()
 
@@ -1118,7 +1123,7 @@ proc view(
   #     if self.charts.hasKey(expression):
   #       let chart = self.charts[expression]
 
-  #       result = chart.render()
+  #       result = chart.renderChart()
   #       chart.ensure()
   #     else:
   #       result = nil
@@ -1286,7 +1291,12 @@ proc view(
         inlineHistoryView(self, expression)
   result.alwaysChange = true
 
-method render*(self: ValueComponent): VNode =
+proc renderValue*(self: ValueComponent): VNode =
+  ## Render the rich Karax value sub-tree used by legacy/IsoNim-adjacent views.
+  ##
+  ## The expandable value tree still feeds editor, flow, trace and calltrace
+  ## embeddings, but this regular proc avoids a residual generic render-method
+  ## override while preserving the exact VNode tree.
   var path: seq[SubPath] = @[]
 
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})

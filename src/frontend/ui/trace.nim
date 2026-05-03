@@ -318,7 +318,7 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
 
   kxiMap[id] = setRenderer(
     (proc: VNode =
-      self.modalValueComponent.render()),
+      self.modalValueComponent.renderValue()),
     id,
     proc = echo "error when setting up renderer for modal"
   )
@@ -1193,7 +1193,7 @@ method render*(self: TraceComponent): VNode =
 
   #     initialPosition = currentPosition
 
-  var mainView = self.chart.render()
+  var mainView = self.chart.renderChart()
 
   result = buildHtml(tdiv):
     tdiv(

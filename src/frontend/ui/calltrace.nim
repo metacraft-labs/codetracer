@@ -459,7 +459,7 @@ proc callArgListView(
     span(class = "call-arg-tooltip-value"): text $(arg.value.textRepr)
 
 proc renderExpandedValue(value: ValueComponent): VNode =
-  value.render()
+  value.renderValue()
 
 proc callArgsView(
   self: CalltraceComponent,

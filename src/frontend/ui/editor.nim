@@ -1,6 +1,6 @@
 import
   std/[ cstrutils, jsre ],
-  ui_imports, trace, debug, menu, flow, no_source, shortcuts, kdom,
+  ui_imports, trace, debug, menu, flow, value, no_source, shortcuts, kdom,
   trace_macro,
   ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/ct_event
@@ -1236,13 +1236,13 @@ proc addViewZone(self: EditorViewComponent, vNode: VNode, line: int) =
     self.viewZones[line] = zoneId
 
 proc renderValueView(self: EditorViewComponent, value: ValueComponent, line: int) =
-  var vNode = value.render()
+  var vNode = value.renderValue()
   self.addViewZone(vNode, line)
 
 proc customRedraw(self: ValueComponent) =
   let editor = data.ui.editors[data.services.debugger.location.path]
   var line = editor.lastMouseClickLine
-  var vNode = self.render()
+  var vNode = self.renderValue()
 
   editor.clearViewZones()
   editor.addViewZone(vNode, line)

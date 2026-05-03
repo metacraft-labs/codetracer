@@ -753,7 +753,7 @@ proc customRedraw(self: ValueComponent) =
   discard
 
 proc openTooltip*(self: FlowComponent, containerId: cstring, value: Value) =
-  let valueDom = vnodeToDom(self.modalValueComponent[containerId].render(), KaraxInstance())
+  let valueDom = vnodeToDom(self.modalValueComponent[containerId].renderValue(), KaraxInstance())
 
   self.tooltipId = containerId
   self.displayTooltip(containerId, valueDom)
@@ -1500,7 +1500,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       #     self.ensureValueComponent(id, name, beforeValue)
       #     self.openTooltip(id, beforeValue)
       #   else:
-      #     let valueDom = vnodeToDom(self.modalValueComponent[id].render(), KaraxInstance())
+      #     let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
       #     self.displayTooltip(id, valueDom)
     ):
       text event.text
@@ -1620,7 +1620,7 @@ proc flowSimpleValue*(
             self.ensureValueComponent(id, name, beforeValue)
             self.openTooltip(id, beforeValue)
           else:
-            let valueDom = vnodeToDom(self.modalValueComponent[id].render(), KaraxInstance())
+            let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
             self.displayTooltip(id, valueDom)
       ):
         text beforeValue.textRepr(compact=true)
@@ -1643,7 +1643,7 @@ proc flowSimpleValue*(
             self.ensureValueComponent(id, name, afterValue)
             self.openTooltip(id, afterValue)
           else:
-            let valueDom = vnodeToDom(self.modalValueComponent[id].render(), KaraxInstance())
+            let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
             self.displayTooltip(id, valueDom)
       ):
         text afterValue.textRepr(compact=true)
@@ -1667,7 +1667,7 @@ proc flowSimpleValue*(
             self.ensureValueComponent(idBefore, name, beforeValue)
             self.openTooltip(idBefore, beforeValue)
           else:
-            let valueDom = vnodeToDom(self.modalValueComponent[idBefore].render(), KaraxInstance())
+            let valueDom = vnodeToDom(self.modalValueComponent[idBefore].renderValue(), KaraxInstance())
             self.displayTooltip(idBefore, valueDom)
       ):
         text beforeValue.textRepr(compact=true)
@@ -1691,7 +1691,7 @@ proc flowSimpleValue*(
             self.ensureValueComponent(idAfter, name, afterValue)
             self.openTooltip(idAfter, afterValue)
           else:
-            let valueDom = vnodeToDom(self.modalValueComponent[idAfter].render(), KaraxInstance())
+            let valueDom = vnodeToDom(self.modalValueComponent[idAfter].renderValue(), KaraxInstance())
             self.displayTooltip(idAfter, valueDom)
       ):
         text afterValue.textRepr(compact=true)
