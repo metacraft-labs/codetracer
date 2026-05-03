@@ -41,6 +41,7 @@ import viewmodels/low_level_code_vm
 import viewmodels/request_panel_vm
 import viewmodels/trace_log_vm except NO_SELECTED_INDEX
 import viewmodels/filesystem_vm
+import viewmodels/command_palette_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -63,6 +64,7 @@ import views/isonim_low_level_code_view
 import views/isonim_request_panel_view
 import views/isonim_trace_log_view
 import views/isonim_filesystem_view
+import views/isonim_command_palette_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -7745,3 +7747,479 @@ suite "IsoNim Filesystem Panel — vm":
     check deepReviewStatusClass("D") == "deepreview-diff-deleted"
     check deepReviewStatusClass("") == ""
     check deepReviewStatusClass("Z") == ""
+
+# ===========================================================================
+# Command Palette panel tests (§1.72 — IsoNim Migration Campaign,
+# mission goal #3).  Mirrors the Filesystem suite layout: structure,
+# row rendering, interactions, vm/helpers.
+# ===========================================================================
+
+proc makeCpEntry(value: string;
+                 kind: CommandPaletteResultKind = cprkCommand;
+                 level: CommandPaletteNotificationLevel = cpnlInfo;
+                 file: string = "";
+                 line: int = 0;
+                 symbolKind: string = "";
+                 valueHighlighted: string = ""): CommandPaletteResultEntry =
+  ## Build a synthetic ``CommandPaletteResultEntry`` for the view +
+  ## VM tests.  Mirrors ``makeFsEntry`` / ``makeScratchpadEntry`` —
+  ## defaults to a plain command-kind row so the ``value`` flows
+  ## through to the rendered label without per-kind decoration.
+  CommandPaletteResultEntry(
+    value: value,
+    valueHighlighted:
+      if valueHighlighted.len > 0: valueHighlighted else: value,
+    kind: kind,
+    level: level,
+    file: file,
+    line: line,
+    symbolKind: symbolKind,
+    snippetSource: "",
+  )
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Command Palette Panel — structure":
+
+  test "root carries component-container + command-container classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "component-container" in panel.attributes["class"]
+      check "command-container" in panel.attributes["class"]
+      # Closed by default — outer wrapper carries the hidden modifier.
+      check "hidden" in panel.attributes["class"]
+
+      dispose()
+
+  test "container constants match the legacy class strings":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/components/command.styl.
+    check CommandPaletteContainerClass == "component-container command-container"
+    check CommandPaletteSurfaceClass == "command-view"
+    check CommandPaletteResultsClass == "command-results"
+    check CommandPaletteResultRowClass == "command-result"
+    check CommandPaletteHiddenModifier == "hidden"
+    check CommandPaletteInputFieldClass == "command-input-field"
+    check CommandPalettePlaceholderClass == "command-input-placeholder"
+
+  test "empty VM renders surface + input row + results + empty overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+
+      let surface = findByClass(panel, "command-view")
+      check surface != nil
+
+      let inputRow = findByClass(panel, "command-input-row")
+      check inputRow != nil
+
+      let input = findByClass(panel, "command-input-field")
+      check input != nil
+      check input.tag == "input"
+
+      let placeholder = findByClass(panel, "command-input-placeholder")
+      check placeholder != nil
+      # No hint set yet — the placeholder is empty.
+      check placeholder.textContent == ""
+
+      let results = findByClass(panel, "command-results")
+      check results != nil
+      # Empty result list — container starts hidden.
+      check "hidden" in results.attributes["class"]
+
+      let empty = findByClass(panel, "command-empty-overlay")
+      check empty != nil
+      check empty.textContent == CommandPaletteEmptyStateText
+      # Inactive + no input -> overlay is hidden.
+      check "hidden" in empty.attributes["class"]
+
+      dispose()
+
+  test "open() flips the outer hidden modifier":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      check "hidden" in panel.attributes["class"]
+
+      vm.open()
+      check "hidden" notin panel.attributes["class"]
+
+      vm.close()
+      check "hidden" in panel.attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Command Palette Panel — row rendering":
+
+  test "setResults populates the dropdown reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      let results = findByClass(panel, "command-results")
+      check results.children.len == 0
+
+      vm.setResults([
+        makeCpEntry("open-file"),
+        makeCpEntry("close-tab"),
+      ])
+      check results.children.len == 2
+      check "hidden" notin results.attributes["class"]
+
+      dispose()
+
+  test "row labels carry entry.value verbatim":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("alpha"),
+        makeCpEntry("beta"),
+      ])
+
+      let labels = findAllByClass(panel, "command-result-value")
+      check labels.len == 2
+      check labels[0].textContent == "alpha"
+      check labels[1].textContent == "beta"
+
+      dispose()
+
+  test "kind modifier flows through to the row class string":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("cmd", kind = cprkCommand),
+        makeCpEntry("file.nim", kind = cprkFile),
+        makeCpEntry("hello", kind = cprkProgram),
+        makeCpEntry("text", kind = cprkTextSearch),
+        makeCpEntry("Foo", kind = cprkSymbol, symbolKind = "function"),
+        makeCpEntry("/ai prompt", kind = cprkAgent),
+      ])
+
+      let rows = findAllByClass(panel, "command-result")
+      check rows.len == 6
+      check "command-command" in rows[0].attributes["class"]
+      check "command-file" in rows[1].attributes["class"]
+      check "command-program" in rows[2].attributes["class"]
+      check "command-text-search" in rows[3].attributes["class"]
+      check "command-symbol" in rows[4].attributes["class"]
+      check "command-agent" in rows[5].attributes["class"]
+
+      dispose()
+
+  test "selected modifier flips when selectedIndex changes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("a"),
+        makeCpEntry("b"),
+        makeCpEntry("c"),
+      ])
+
+      var rows = findAllByClass(panel, "command-result")
+      check rows.len == 3
+      # Default selection is row 0.
+      check "command-selected" in rows[0].attributes["class"]
+      check "command-selected" notin rows[1].attributes["class"]
+      check "command-selected" notin rows[2].attributes["class"]
+
+      vm.setSelected(2)
+      rows = findAllByClass(panel, "command-result")
+      check "command-selected" notin rows[0].attributes["class"]
+      check "command-selected" notin rows[1].attributes["class"]
+      check "command-selected" in rows[2].attributes["class"]
+
+      dispose()
+
+  test "zebra modifiers alternate between rows":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("a"),
+        makeCpEntry("b"),
+        makeCpEntry("c"),
+        makeCpEntry("d"),
+      ])
+
+      let rows = findAllByClass(panel, "command-result")
+      check rows.len == 4
+      check "command-even" in rows[0].attributes["class"]
+      check "command-odd" in rows[1].attributes["class"]
+      check "command-even" in rows[2].attributes["class"]
+      check "command-odd" in rows[3].attributes["class"]
+
+      dispose()
+
+  test "symbol rows append the ': <symbolKind>' suffix":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("Foo", kind = cprkSymbol, symbolKind = "function"),
+        makeCpEntry("plain"),
+      ])
+
+      let suffixes = findAllByClass(panel, "command-result-suffix")
+      check suffixes.len == 2
+      check suffixes[0].textContent == ": function"
+      # Non-symbol rows render an empty suffix slot.
+      check suffixes[1].textContent == ""
+
+      dispose()
+
+  test "warn / error level adds the level modifier":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("ok"),
+        makeCpEntry("warn", level = cpnlWarning),
+        makeCpEntry("err", level = cpnlError),
+        makeCpEntry("good", level = cpnlSuccess),
+      ])
+
+      let rows = findAllByClass(panel, "command-result")
+      check rows.len == 4
+      # Info row carries no level modifier.
+      check "command-warn" notin rows[0].attributes["class"]
+      check "command-error" notin rows[0].attributes["class"]
+      check "command-success" notin rows[0].attributes["class"]
+      check "command-warn" in rows[1].attributes["class"]
+      check "command-error" in rows[2].attributes["class"]
+      check "command-success" in rows[3].attributes["class"]
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Interactions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Command Palette Panel — interactions":
+
+  test "clicking a row updates selectedIndex":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("alpha"),
+        makeCpEntry("beta"),
+        makeCpEntry("gamma"),
+      ])
+
+      let rows = findAllByClass(panel, "command-result")
+      check vm.selectedIndex.val == 0
+
+      rows[2].fireEvent("click")
+      check vm.selectedIndex.val == 2
+
+      rows[1].fireEvent("click")
+      check vm.selectedIndex.val == 1
+
+      dispose()
+
+  test "empty-overlay shows when active + input present + no results":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      let empty = findByClass(panel, "command-empty-overlay")
+      check "hidden" in empty.attributes["class"]
+
+      vm.open()
+      vm.setQuery("xyz")
+      check "hidden" notin empty.attributes["class"]
+
+      # Once results arrive the overlay hides again.
+      vm.setResults([makeCpEntry("xyz-match")])
+      check "hidden" in empty.attributes["class"]
+
+      dispose()
+
+  test "placeholder hint flows into the placeholder span":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCommandPalettePanel(r, vm)
+      let placeholder = findByClass(panel, "command-input-placeholder")
+      check placeholder.textContent == ""
+
+      vm.setInputPlaceholder(":open file.nim")
+      check placeholder.textContent == ":open file.nim"
+
+      vm.setInputPlaceholder("")
+      check placeholder.textContent == ""
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / formatting helpers
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Command Palette Panel — vm":
+
+  test "createCommandPaletteVM defaults reflect the closed-state branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+
+      check not vm.isActive.val
+      check vm.inputValue.val == ""
+      check vm.inputPlaceholder.val == ""
+      check vm.query.val == ""
+      check vm.results.val.len == 0
+      check vm.selectedIndex.val == 0
+      check vm.activeCommandName.val == ""
+      check vm.mode.val == cpmNormal
+      check not vm.hasResults.val
+      check vm.resultCount.val == 0
+      check not vm.store.isNil
+
+      dispose()
+
+  test "setSelected clamps into [0, results.len)":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+
+      vm.setResults([
+        makeCpEntry("a"),
+        makeCpEntry("b"),
+        makeCpEntry("c"),
+      ])
+
+      vm.setSelected(-5)
+      check vm.selectedIndex.val == 0
+
+      vm.setSelected(99)
+      check vm.selectedIndex.val == 2
+
+      vm.setSelected(1)
+      check vm.selectedIndex.val == 1
+
+      dispose()
+
+  test "close() resets every transient piece of state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+
+      vm.open()
+      vm.setQuery("hello")
+      vm.setInputPlaceholder("hint")
+      vm.setMode(cpmAgent)
+      vm.setActiveCommandName("open")
+      vm.setResults([makeCpEntry("a")])
+
+      vm.close()
+
+      check not vm.isActive.val
+      check vm.inputValue.val == ""
+      check vm.inputPlaceholder.val == ""
+      check vm.query.val == ""
+      check vm.results.val.len == 0
+      check vm.selectedIndex.val == 0
+      check vm.mode.val == cpmNormal
+      check vm.activeCommandName.val == ""
+
+      dispose()
+
+  test "clear() drops input/query/results but keeps isActive":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+
+      vm.open()
+      vm.setQuery("hello")
+      vm.setResults([makeCpEntry("a")])
+
+      vm.clear()
+
+      check vm.isActive.val
+      check vm.inputValue.val == ""
+      check vm.query.val == ""
+      check vm.results.val.len == 0
+      check vm.selectedIndex.val == 0
+
+      dispose()
+
+  test "resultKindClass maps the enum to per-kind CSS modifiers":
+    check resultKindClass(cprkCommand) == "command-command"
+    check resultKindClass(cprkFile) == "command-file"
+    check resultKindClass(cprkProgram) == "command-program"
+    check resultKindClass(cprkTextSearch) == "command-text-search"
+    check resultKindClass(cprkSymbol) == "command-symbol"
+    check resultKindClass(cprkAgent) == "command-agent"
+
+  test "resultLevelClass maps notification levels to CSS modifiers":
+    check resultLevelClass(cpnlInfo) == ""
+    check resultLevelClass(cpnlWarning) == "command-warn"
+    check resultLevelClass(cpnlError) == "command-error"
+    check resultLevelClass(cpnlSuccess) == "command-success"
+
+  test "rowZebraClass alternates between command-even and command-odd":
+    check rowZebraClass(0) == "command-even"
+    check rowZebraClass(1) == "command-odd"
+    check rowZebraClass(2) == "command-even"
+    check rowZebraClass(99) == "command-odd"
+
+  test "rowSuffixText emits ': <symbolKind>' only for symbol rows":
+    check rowSuffixText(makeCpEntry("Foo", kind = cprkSymbol,
+                                    symbolKind = "function")) ==
+      ": function"
+    # Symbol row without a populated symbolKind renders an empty suffix.
+    check rowSuffixText(makeCpEntry("Foo", kind = cprkSymbol)) == ""
+    check rowSuffixText(makeCpEntry("plain")) == ""
+
+  test "containerClass appends 'hidden' only when isActive is false":
+    check containerClass(true) == CommandPaletteContainerClass
+    check containerClass(false) ==
+      CommandPaletteContainerClass & " " & CommandPaletteHiddenModifier

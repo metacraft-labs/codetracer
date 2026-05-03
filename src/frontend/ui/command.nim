@@ -1,4 +1,62 @@
+## Command Palette Panel — Ctrl+P-style file/command/symbol search overlay.
+##
+## ---------------------------------------------------------------------------
+## ViewModel layer — IsoNim is the primary renderer.
+##
+## The legacy Karax ``method render`` was dropped in favour of an IsoNim
+## view (``viewmodel/views/isonim_command_palette_view.nim``) that
+## mounts directly into the GoldenLayout container.  The legacy
+## ``CommandPaletteComponent`` retains its module-level helpers
+## (``clear``/``close``/``resetCommandPalette``/``commandIsParent``/
+## ``changePlaceholder``/``eventuallyClearPlaceholder``/``showResults``/
+## ``onInput``/``runQuery``/``onTab``/``onProgramSearchResults``) so the
+## existing wiring (keyboard shortcuts, ``CommandInterpreter``, agent
+## passthrough) keeps feeding the panel; every state mutation now
+## mirrors into the parallel ``CommandPaletteVM`` via
+## ``syncLegacyCommandPaletteIntoVM`` so the IsoNim view is the single
+## source of truth for the panel's DOM.
+##
+## Lifecycle:
+## 1. ``utils.nim::makeCommandPaletteComponent`` constructs the legacy
+##    ``CommandPaletteComponent`` and registers it under
+##    ``Content.CommandPalette`` (one instance per panel id).
+## 2. ``layout.nim`` registers the GL container, then detects
+##    ``Content.CommandPalette`` is in ``isIsoNimComponent`` and calls
+##    ``tryMountIsoNimCommandPalettePanel`` instead of invoking Karax.
+## 3. The mount helper appends the IsoNim panel inside the
+##    ``commandPaletteComponent-{id}`` container and the reactive
+##    effects keep the DOM in sync with the VM.
+## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
+##    store version of the VM via ``initCommandPaletteVMWithStore`` so
+##    the panel uses the production ``ReplayDataStore``.
+##
+## NOTE: rich per-kind row rendering (program-search HTML fragment,
+## symbol-kind suffix, file-path tail truncation, agent-mode
+## passthrough) remains a follow-up.  The IsoNim view renders one row
+## per result with the entry's display ``value`` verbatim plus stable
+## per-kind / per-level / selected / zebra modifiers.
+## ---------------------------------------------------------------------------
+
 import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activity
+
+import ../communication
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import
+  CommandPaletteResultEntry, CommandPaletteResultKind,
+  CommandPaletteNotificationLevel, CommandPaletteMode,
+  cprkCommand, cprkFile, cprkProgram, cprkTextSearch, cprkSymbol, cprkAgent,
+  cpnlInfo, cpnlWarning, cpnlError, cpnlSuccess,
+  cpmNormal, cpmAgent
+from ../viewmodel/viewmodels/command_palette_vm import
+  CommandPaletteVM, createCommandPaletteVM,
+  open, close, clear, setQuery, setResults, setSelected, setMode,
+  setInputPlaceholder, setActiveCommandName
+when defined(js):
+  from isonim/web/dom_api as isonim_dom_api import nil
+  from ../viewmodel/views/isonim_command_palette_view import
+    mountIsoNimCommandPalettePanel
 
 proc clear(self: CommandPaletteComponent) =
   self.selected = 0
@@ -23,93 +81,6 @@ proc commandIsParent(self: CommandPaletteComponent, commandName: cstring): bool 
     self.interpreter.commands[commandName].kind == ParentCommand
   else:
     return false
-
-proc commandResultView(self: CommandPaletteComponent, queryResult: CommandPanelResult, selected: bool, isEven: bool, i: int, activeCommandName: cstring): VNode =
-  let selectedClass = if selected: "command-selected" else: ""
-  let evenClass = if isEven: "command-even" else: "command-odd"
-
-  let displayResult = if queryResult.level == NotificationInfo:
-      case queryResult.kind:
-      of ProgramQuery:
-        buildHtml(
-          tdiv(class = "command-program-search-result")
-        ):
-          span(class = "command-program-search-result-line"):
-            text $queryResult.codeSnippet.line
-          span(class = "command-program-search-result-source"):
-            text queryResult.codeSnippet.source
-          span(class = "command-program-search-result-value"):
-            text queryResult.value
-
-      of TextSearchQuery, SymbolQuery:
-        let nameLimit = 40
-
-        var txt =
-          if queryResult.value.trim.len <= nameLimit:
-            queryResult.valueHighlighted.trim
-          else:
-            let trimmed = queryResult.valueHighlighted.trim
-            var res = ""
-            var curr = 0
-            var cnt = 0
-            var open = false
-            while cnt < nameLimit - 3:
-              let currStr = ($trimmed)[curr .. ^1]
-              if currStr.startsWith("<b>"):
-                open = true
-                res &= "<b>"
-                curr += 3
-              elif currStr.startsWith("</b>"):
-                open = false
-                res &= "</b>"
-                curr += 4
-              else:
-                res &= trimmed[curr]
-                cnt += 1
-                curr += 1
-
-            if open:
-              res &= "</b>"
-
-            res & "..."
-
-        if queryResult.kind == SymbolQuery:
-          txt &= ": " & queryResult.symbolKind
-
-        let file =
-          if queryResult.file.len <= nameLimit:
-            queryResult.file
-          else:
-            "..." & ($queryResult.file)[^(nameLimit - 3) .. ^1]
-
-        buildHtml(
-          tdiv(class = "command-program-search-result")
-        ):
-          span(class = "command-program-search-result-value"):
-            verbatim(txt)
-          span(class = "command-program-search-result-location"):
-            text file & ":"
-            span(class = "command-program-search-result-line"):
-              text $queryResult.line
-
-      else:
-        buildHtml(verbatim(queryResult.valueHighlighted))
-
-    else:
-      let level = toLowerAscii(($queryResult.level)["Notification".len .. ^1])
-      buildHtml(tdiv(class = "command-program-{level}")):
-        text queryResult.value
-
-  buildHtml(
-    tdiv(
-      class = "command-result " & selectedClass & " " & evenClass & $(self.inputValue.len),
-      onclick = proc =
-        self.close()
-        self.interpreter.runCommandPanelResult(queryResult)
-        self.resetCommandPalette()
-    )
-  ):
-    displayResult
 
 proc changePlaceholder*(self: CommandPaletteComponent) =
   if self.results.len == 0:
@@ -242,21 +213,6 @@ proc runQuery(self: CommandPaletteComponent) =
     data.openLayoutTab(content)
     self.resetCommandPalette()
     redrawAll()
-    # discard setTimeout(proc() =
-    #   self.agent = cast[AgentActivityComponent](data.ui.componentMapping[content][data.ui.componentMapping[content].len() - 1])
-    #   self.agent.updateAgentUi(data.lastAgentPrompt),
-    #   100
-    # )
-    # discard setTimeout(proc() =
-    #   data.openLayoutTab(content)
-    #   discard setTimeout(proc() =
-    #     self.agent = cast[AgentActivityComponent](data.ui.componentMapping[content][data.ui.componentMapping[content].len() - 1])
-    #     self.agent.updateAgentUi(data.lastAgentPrompt)
-    #     redrawAll(),
-    #     500
-    #   ),
-    #   0
-    # )
 
   self.prevCommandValue = self.inputValue
 
@@ -270,68 +226,260 @@ method onProgramSearchResults*(self: CommandPaletteComponent, results: seq[Comma
   self.results = results
   self.data.redraw()
 
-var initStart = true
+# ---------------------------------------------------------------------------
+# Module-level VM/store/component slots so the IsoNim mount and any
+# legacy bridge handlers can find each other across calls.  Mirrors
+# the pattern used by trace_log / scratchpad / filesystem.
+# ---------------------------------------------------------------------------
 
-method render*(self: CommandPaletteComponent): VNode =
-  let (padClass, activeClass) = if self.active: ("", "ct-active") else: ("", "")
-  let hasDropdown = self.active and not self.inAgentMode
-  let viewClass = if hasDropdown: "command-open" else: ""
-  let surfaceClass = if hasDropdown: "command-surface command-surface-open" else: "command-surface"
-  let inputClass = "mousetrap ct-input-com-pal ct-input-search-image"
-  let resultsClass = if self.results.len > 0:
-      "command-results-open"
+var commandPaletteVMInstance*: CommandPaletteVM
+var commandPaletteVMStore: ReplayDataStore
+var commandPaletteComponentRef: CommandPaletteComponent
+# Track which CommandPaletteComponent ids have already mounted their
+# IsoNim view.  The GL container is keyed by
+# ``commandPaletteComponent-{id}`` so each open palette panel
+# instance gets its own mount.
+var isoNimCommandPaletteMountedIds {.used.}: JsAssoc[int, bool] =
+  JsAssoc[int, bool]{}
+
+proc tryMountIsoNimCommandPalettePanel*()
+
+# ---------------------------------------------------------------------------
+# Legacy → VM translation helpers
+# ---------------------------------------------------------------------------
+
+proc safeStr(s: cstring): string =
+  ## Convert a possibly-null cstring to an empty string.  The legacy
+  ## record carries cstring everywhere; an unconditional ``$`` would
+  ## throw inside ``cstrToNimstr`` for null cstrings.
+  if s.isNil:
+    ""
+  else:
+    $s
+
+proc legacyKindToVm(kind: QueryKind): CommandPaletteResultKind =
+  ## Map the legacy ``QueryKind`` enum to its VM-side counterpart.
+  ## The mapping is one-to-one — both enums carry the same six
+  ## variants in the same order.
+  case kind
+  of CommandQuery: cprkCommand
+  of FileQuery: cprkFile
+  of ProgramQuery: cprkProgram
+  of TextSearchQuery: cprkTextSearch
+  of SymbolQuery: cprkSymbol
+  of AgentQuery: cprkAgent
+
+proc legacyLevelToVm(level: NotificationKind): CommandPaletteNotificationLevel =
+  ## Map the legacy ``NotificationKind`` enum to the VM-side
+  ## ``CommandPaletteNotificationLevel``.  Only the four values
+  ## the legacy ``commandResultView`` branched on are mapped; any
+  ## others fall through to ``cpnlInfo`` so the row renders the
+  ## standard branch.
+  case level
+  of NotificationInfo: cpnlInfo
+  of NotificationWarning: cpnlWarning
+  of NotificationError: cpnlError
+  of NotificationSuccess: cpnlSuccess
+
+proc legacyResultToVm(qr: CommandPanelResult): CommandPaletteResultEntry =
+  ## Translate one legacy ``CommandPanelResult`` ref into a flat
+  ## ``CommandPaletteResultEntry`` value.  Per-kind context fields
+  ## (file/line/symbolKind/snippetSource) are populated from the
+  ## ref's case-branch fields; non-applicable fields stay empty / 0.
+  if qr.isNil:
+    return CommandPaletteResultEntry()
+  result = CommandPaletteResultEntry(
+    value: safeStr(qr.value),
+    valueHighlighted: safeStr(qr.valueHighlighted),
+    kind: legacyKindToVm(qr.kind),
+    level: legacyLevelToVm(qr.level),
+    file: "",
+    line: 0,
+    symbolKind: "",
+    snippetSource: "",
+  )
+  case qr.kind
+  of ProgramQuery:
+    result.line = qr.codeSnippet.line
+    result.snippetSource = safeStr(qr.codeSnippet.source)
+  of TextSearchQuery, SymbolQuery:
+    result.file = safeStr(qr.file)
+    result.line = qr.line
+    result.symbolKind = safeStr(qr.symbolKind)
+  else:
+    discard
+
+proc legacyResultsToVm(results: seq[CommandPanelResult]):
+    seq[CommandPaletteResultEntry] =
+  ## Bulk translation helper — invoked from
+  ## ``syncLegacyCommandPaletteIntoVM`` so the VM signal is updated
+  ## in one go.
+  result = @[]
+  for qr in results:
+    result.add(legacyResultToVm(qr))
+
+proc legacyModeToVm(self: CommandPaletteComponent): vmtypes.CommandPaletteMode =
+  ## Pick the VM-side mode based on the legacy ``inAgentMode`` flag.
+  ## The legacy ``CommandPaletteMode`` enum carried only
+  ## ``CommandPaletteNormal`` because the agent path was tracked via
+  ## ``inAgentMode``; the IsoNim VM keeps both branches as a single
+  ## source of truth.
+  if self.inAgentMode:
+    cpmAgent
+  else:
+    cpmNormal
+
+# ---------------------------------------------------------------------------
+# IsoNim VM bridge
+# ---------------------------------------------------------------------------
+
+proc syncLegacyCommandPaletteIntoVM*(self: CommandPaletteComponent) =
+  ## Bulk-replay the legacy command-palette state into the VM.
+  ## Called from layout / event-bus boilerplate so the panel reflects
+  ## whatever the legacy ``CommandInterpreter`` already accumulated.
+  ## Defensive nil-checks so a partially-initialised palette can call
+  ## through this without exploding.
+  if commandPaletteVMInstance.isNil or self.isNil:
+    return
+  commandPaletteVMInstance.setResults(legacyResultsToVm(self.results))
+  commandPaletteVMInstance.setSelected(self.selected)
+  commandPaletteVMInstance.setQuery(safeStr(self.inputValue))
+  commandPaletteVMInstance.setInputPlaceholder(safeStr(self.inputPlaceholder))
+  commandPaletteVMInstance.setActiveCommandName(safeStr(self.activeCommandName))
+  commandPaletteVMInstance.setMode(legacyModeToVm(self))
+  if self.active:
+    commandPaletteVMInstance.open()
+  else:
+    commandPaletteVMInstance.close()
+
+# ---------------------------------------------------------------------------
+# VM bootstrap
+# ---------------------------------------------------------------------------
+
+proc initCommandPaletteVMWithStore*(store: ReplayDataStore) =
+  ## Initialise (or replace) the parallel ``CommandPaletteVM`` using
+  ## an externally-provided ``ReplayDataStore`` (typically the shared
+  ## store from ``SessionViewModel``).  Called from
+  ## ``ui_js.configureMiddleware``.  If a stub-backed instance
+  ## already exists (created by ``initCommandPaletteVM`` before the
+  ## real backend was available) it is replaced so the panel uses
+  ## the real backend.
+  if commandPaletteVMInstance != nil:
+    clog "CommandPaletteVM: replacing existing instance with shared-store version"
+    isoNimCommandPaletteMountedIds = JsAssoc[int, bool]{}
+  commandPaletteVMStore = store
+  commandPaletteVMInstance = createCommandPaletteVM(store)
+  clog "CommandPaletteVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimCommandPalettePanel()
+
+proc initCommandPaletteVM*() =
+  ## Lazy fallback used when no shared store has been provided yet.
+  ## Same shape as ``initFilesystemVM`` / ``initScratchpadVM`` — a
+  ## stub backend so the panel can still render before
+  ## ``configureMiddleware`` runs.
+  if commandPaletteVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
     else:
-      "command-results-open command-results-empty"
-  result = buildHtml(
-    tdiv(class = fmt"command-view {padClass} {activeClass} {viewClass}", id = "command-view")):
-      if not self.inAgentMode:
-        tdiv(class = surfaceClass):
-          input(
-            `type` = "text",
-            id = "command-query-text",
-            name = "command-query",
-            placeholder = "Navigate to file or run a :command",
-            class = inputClass,
-            autocomplete="off", # https://stackoverflow.com/questions/254712/disable-spell-checking-on-html-textfields
-            autocorrect="off",
-            autocapitalize="off",
-            spellcheck="false",
-            onmousedown = proc =
-              data.search(SearchFileRealTime, "".cstring),
-            oninput = proc(ev: Event, tg: VNode) =
-              let value = self.inputField.toJs.value.to(cstring)
-              self.onInput(value),
-            onkeydown = proc(e: KeyboardEvent, v: VNode) =
-              echo "command ", e.keyCode
-              if e.keyCode == DOWN_KEY_CODE: # down
-                commandSelectNext()
-              elif e.keyCode == UP_KEY_CODE: # up
-                commandSelectPrevious()
-              elif e.keyCode == ENTER_KEY_CODE: # enter
-                self.runQuery()
-              elif e.keyCode == ESC_KEY_CODE: # escape
-                self.resetCommandPalette()
-              elif e.keyCode == TAB_KEY_CODE: # tab
-                e.preventDefault()
-                self.onTab()
-          )
-          # tdiv(class = "custom-tooltip"):
-          #   text "Navigate to file (ctrl+p) / Run command (alt+p)"
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
 
-          if self.active:
-            tdiv(
-              id = "command-results",
-              class = resultsClass,
-              onmousedown = proc(e: Event, et: VNode) = e.preventDefault()
-            ):
-              if self.results.len > 0:
-                for i, result in self.results:
-                  commandResultView(self, result, i == self.selected, i mod 2 == 0, i, data.services.search.activeCommandName)
-              else:
-                tdiv(class = "command-result empty"):
-                  text "No matching result found."
-      else:
-        let agent = cast[AgentActivityComponent](data.ui.componentMapping[Content.AgentActivity][data.ui.componentMapping[Content.AgentActivity].len() - 1])
-        agent.inCommandPalette = true
-        render(agent)
-        agent.inCommandPalette = false
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  commandPaletteVMStore = createReplayDataStore(stubBackend)
+  commandPaletteVMInstance = createCommandPaletteVM(commandPaletteVMStore)
+  clog "CommandPaletteVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimCommandPalettePanel()
+
+# ---------------------------------------------------------------------------
+# Mount helper — Web only
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  proc tryMountIsoNimCommandPalettePanel*() =
+    ## Mount the IsoNim Command Palette panel view into the
+    ## GoldenLayout-managed container.  The container's id is
+    ## ``commandPaletteComponent-{id}`` — each open palette panel
+    ## instance has its own mount.
+    ##
+    ## Safe to call multiple times — mounts only once per component
+    ## id.  Retries via ``setTimeout`` until the DOM container
+    ## appears (capped at 200 attempts, ~2 s) since GoldenLayout
+    ## creates the host slightly after the layout state changes
+    ## (mirrors ``tryMountIsoNimFilesystemPanel`` /
+    ## ``tryMountIsoNimScratchpadPanel`` /
+    ## ``tryMountIsoNimTraceLogPanel``).
+    if commandPaletteVMInstance.isNil:
+      return
+    if commandPaletteComponentRef.isNil:
+      return
+    let componentId = commandPaletteComponentRef.id
+    if isoNimCommandPaletteMountedIds.hasKey(componentId):
+      return
+
+    let key = cstring("commandPaletteComponent-" & $componentId)
+    var retryCount = 0
+    proc doMount() =
+      if isoNimCommandPaletteMountedIds.hasKey(componentId):
+        return
+      retryCount += 1
+      let container = isonim_dom_api.getElementById(
+        isonim_dom_api.document, key)
+      if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
+        if retryCount > 200:
+          cerror "tryMountIsoNimCommandPalettePanel: not ready after 200 retries, giving up"
+          return
+        discard setTimeout(proc() = doMount(), 10)
+        return
+
+      # Replace any prior content (Karax may have planted a stub
+      # element before the IsoNim mount fires).
+      let containerNode = isonim_dom_api.Node(container)
+      while not isonim_dom_api.isNodeNil(containerNode.firstChild):
+        discard isonim_dom_api.removeChild(
+          containerNode, containerNode.firstChild)
+
+      isoNimCommandPaletteMountedIds[componentId] = true
+      try:
+        mountIsoNimCommandPalettePanel(container, commandPaletteVMInstance)
+      except:
+        cerror "tryMountIsoNimCommandPalettePanel: mount EXCEPTION: " &
+          getCurrentExceptionMsg()
+
+      # Re-sync any state the legacy component already carries so
+      # the freshly-mounted view reflects the latest state.
+      if not commandPaletteComponentRef.isNil:
+        syncLegacyCommandPaletteIntoVM(commandPaletteComponentRef)
+
+    doMount()
+else:
+  proc tryMountIsoNimCommandPalettePanel*() =
+    ## Native compilation has no DOM — keep the proc available so
+    ## callers (``initCommandPaletteVM*``) compile on every backend.
+    discard
+
+# ---------------------------------------------------------------------------
+# Component registration — IsoNim primary renderer; no Karax method
+# render.  The base ``Component.render()`` returns a valid empty
+# VNode for any generic callers.
+# ---------------------------------------------------------------------------
+
+method register*(self: CommandPaletteComponent, api: MediatorWithSubscribers) =
+  ## Register the CommandPaletteComponent with the mediator.  Bring
+  ## up the IsoNim CommandPaletteVM lazily so the mount procedure
+  ## can find it; the shared-store version is installed by
+  ## ``configureMiddleware`` if the ViewModel layer is enabled.
+  self.api = api
+  initCommandPaletteVM()
+  if commandPaletteComponentRef.isNil:
+    commandPaletteComponentRef = self
+    tryMountIsoNimCommandPalettePanel()

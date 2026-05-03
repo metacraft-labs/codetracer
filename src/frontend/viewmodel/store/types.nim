@@ -775,3 +775,123 @@ proc `==`*(a, b: FilesystemEntryNode): bool {.noSideEffect.} =
 
 proc `==`*(a, b: FilesystemDiffEntry): bool {.noSideEffect.} =
   a.path == b.path and a.zebra == b.zebra
+
+# -------------------------------------------------------------------
+# Command Palette panel — Ctrl-P-style command + file + symbol search
+# overlay.
+#
+# Mirrors the legacy ``CommandPaletteComponent`` (see
+# ``frontend/ui/command.nim``) which used a Karax ``method render``
+# to draw a fixed input field plus a dropdown of
+# ``CommandPanelResult`` rows.  Section §1.72 (mission goal #3)
+# replaces the Karax render with an IsoNim view; the rich
+# ``commandResultView`` shapes (per-kind program-search HTML
+# fragments, symbol-kind suffix, file-path tail truncation, agent-
+# mode passthrough) remain a follow-up — the IsoNim view renders the
+# common path (one row per result, with the result's display value
+# verbatim) and lets the legacy interpreter handle the runQuery
+# action when the user picks a row.
+#
+# ``CommandPaletteResultEntry`` carries just the data the IsoNim view
+# needs as plain ``string`` / ``int`` / ``bool`` fields so the same
+# value type works on both ``test-vm-native`` and ``test-vm-js``
+# backends without ``cstring`` / ``langstring`` conversion noise.
+# -------------------------------------------------------------------
+
+type
+  CommandPaletteResultKind* = enum
+    ## Maps to the legacy ``QueryKind`` enum (``frontend/types.nim``)
+    ## minus the JS-only Karax ref-object plumbing.  Carries enough
+    ## per-kind context for the IsoNim view to apply the right CSS
+    ## modifier and so future iterations can wire the rich render
+    ## paths back in without re-fetching the original
+    ## ``CommandPanelResult`` ref.
+    cprkCommand
+    cprkFile
+    cprkProgram
+    cprkTextSearch
+    cprkSymbol
+    cprkAgent
+
+  CommandPaletteNotificationLevel* = enum
+    ## Mirrors ``NotificationKind`` (``frontend/types.nim``) but only
+    ## the subset the legacy ``commandResultView`` branched on.
+    ## ``cpnlInfo`` is the standard "render the per-kind row"
+    ## branch; the warn/error tags downgrade the row to the
+    ## ``command-program-{warn,error}`` plain text branch the legacy
+    ## view used for diagnostics.
+    cpnlInfo
+    cpnlWarning
+    cpnlError
+    cpnlSuccess
+
+  CommandPaletteResultEntry* = object
+    ## One row in the command-palette dropdown.
+    ##
+    ## ``value``           — display string the legacy
+    ##                       ``commandResultView`` rendered as
+    ##                       ``queryResult.value``.  For commands
+    ##                       this is the command name (``open-file``);
+    ##                       for files it is the file path; for
+    ##                       text/symbol searches it is the matched
+    ##                       text.  Rendered verbatim as the row's
+    ##                       primary label.
+    ## ``valueHighlighted`` — pre-rendered HTML/highlighted variant of
+    ##                       ``value`` that the legacy view fed into
+    ##                       ``verbatim()``.  The IsoNim view exposes
+    ##                       this as a plain string so the rich
+    ##                       highlighting follow-up can reuse it
+    ##                       without re-fetching the original
+    ##                       ``CommandPanelResult`` ref.
+    ## ``kind``            — query kind (see ``CommandPaletteResultKind``).
+    ## ``level``           — notification severity (see
+    ##                       ``CommandPaletteNotificationLevel``).
+    ## ``file``            — file path the row resolves to (file /
+    ##                       text-search / symbol queries; empty
+    ##                       otherwise).
+    ## ``line``            — 1-based source line for program / text
+    ##                       / symbol queries; 0 when not applicable.
+    ## ``symbolKind``      — short label (``"function"``, ``"class"``)
+    ##                       the symbol-search rows append after the
+    ##                       value (``": function"``).  Empty for
+    ##                       non-symbol rows.
+    ## ``snippetSource``   — captured source-line text for program
+    ##                       queries (the ``codeSnippet.source``
+    ##                       field on the legacy ref).
+    value*: string
+    valueHighlighted*: string
+    kind*: CommandPaletteResultKind
+    level*: CommandPaletteNotificationLevel
+    file*: string
+    line*: int
+    symbolKind*: string
+    snippetSource*: string
+
+  CommandPaletteMode* = enum
+    ## Top-level mode the palette is operating in.  Mirrors the
+    ## legacy ``CommandPaletteMode`` enum + the ``inAgentMode`` bool
+    ## (``frontend/types.nim``) collapsed into a single typed enum.
+    ## ``cpmNormal`` is the standard command/file/program/symbol
+    ## search overlay; ``cpmAgent`` is the ``/ai`` passthrough that
+    ## the legacy view delegated to ``AgentActivityComponent``.
+    ##
+    ## The legacy enum carried only ``CommandPaletteNormal`` because
+    ## the agent path was tracked via ``inAgentMode``; the IsoNim
+    ## migration keeps both branches as a single source of truth.
+    cpmNormal
+    cpmAgent
+
+proc `==`*(a, b: CommandPaletteResultEntry): bool {.noSideEffect.} =
+  ## Explicit equality so ``Signal[seq[CommandPaletteResultEntry]]``
+  ## compiles under Nim's side-effect inference.  Mirrors the
+  ## ``FilesystemDiffEntry`` / ``ScratchpadValueEntry`` overrides
+  ## above (same root cause: the structural ``==`` for objects
+  ## carrying ``string`` fields is inferred as side-effecting).
+  a.value == b.value and
+    a.valueHighlighted == b.valueHighlighted and
+    a.kind == b.kind and
+    a.level == b.level and
+    a.file == b.file and
+    a.line == b.line and
+    a.symbolKind == b.symbolKind and
+    a.snippetSource == b.snippetSource

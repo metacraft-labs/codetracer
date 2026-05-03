@@ -553,6 +553,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.TraceLog,
       Content.Scratchpad,
       Content.Filesystem,
+      Content.CommandPalette,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -719,6 +720,23 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           filesystem.syncLegacyFilesystemIntoVM(
             FilesystemComponent(component))
           filesystem.tryMountIsoNimFilesystemPanel()
+
+        # CommandPalette is now an IsoNim view -- its DOM is mounted by
+        # ``command.tryMountIsoNimCommandPalettePanel`` against the
+        # ``commandPaletteComponent-{id}`` container, and reactive
+        # effects keep it in sync.  No vnodeToDom bridge or redraw
+        # callback is needed here.  The legacy
+        # ``CommandPaletteComponent`` remains as the event-bus carrier
+        # (the keyboard / interpreter / agent passthrough) and
+        # ``syncLegacyCommandPaletteIntoVM`` mirrors any state already
+        # accumulated when the panel becomes visible.  Mission goal #3
+        # \u00a71.72.  The rich per-kind row rendering paths
+        # (program-search HTML fragment, symbol-kind suffix, file-path
+        # tail truncation, agent-mode passthrough) remain a follow-up.
+        if state.content == Content.CommandPalette:
+          command.syncLegacyCommandPaletteIntoVM(
+            CommandPaletteComponent(component))
+          command.tryMountIsoNimCommandPalettePanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

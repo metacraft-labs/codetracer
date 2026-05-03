@@ -7,7 +7,7 @@ import
       build, errors, search_results, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
-      request_panel, session_switch],
+      request_panel, session_switch, command],
   lib/[ jslib ],
   types, lang, utils, renderer, config, dap,
   ../common/ct_logging,
@@ -1035,6 +1035,8 @@ when not defined(ctInExtension):
       scratchpad.initScratchpadVMWithStore(activeSessionVM.store)
       {.emit: "console.error('[PIPELINE] configureMiddleware: calling initFilesystemVMWithStore');".}
       filesystem.initFilesystemVMWithStore(activeSessionVM.store)
+      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCommandPaletteVMWithStore');".}
+      command.initCommandPaletteVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator
