@@ -5,7 +5,8 @@ import
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
-# The TimelineVM receives the same data but does not affect rendering yet.
+# The TimelineVM owns the IsoNim timeline DOM while legacy handlers keep
+# feeding it replay-position updates.
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -17,8 +18,7 @@ from ../viewmodel/views/isonim_timeline_view import
   mountIsoNimTimeline
 
 # Module-level TimelineVM instance. Created once and fed data whenever
-# the legacy event-bus handlers fire. Rendering still reads from legacy
-# data so behaviour is unchanged.
+# the legacy event-bus handlers fire.
 var timelineVMInstance: TimelineVM
 var timelineVMStore: ReplayDataStore
 var isoNimTimelineMounted*: bool = false

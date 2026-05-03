@@ -1912,26 +1912,6 @@ proc onWelcomeScreen(
 proc onNewNotification(sender: js, notification: Notification) =
   data.viewsApi.showNotification(notification)
 
-# func renderVariables(self: TimelineComponent): VNode =
-  # buildHtml(tdi)
-method render(self: TimelineComponent): VNode =
-  # When the IsoNim timeline view is mounted, return a stable empty stub.
-  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
-  # calls this. This guard is a safety net in case render() is called
-  # from another path (e.g. redrawDynamically before the guard there).
-  if trace.isoNimTimelineMounted:
-    return buildHtml(tdiv())
-
-  # Legacy Karax rendering path — active only before IsoNim mounts.
-  # var view = case self.active:
-  # of TimelineVariables:
-  #   self.renderVariables()
-  # of TimelineRegisters:
-  #   self.renderRegisters()
-  buildHtml(tdiv()):
-    tdiv(id="timeline") #:
-      # for
-
 proc onCtInstallStatus(sender: js, status: (cstring, cstring)) =
   if status[0] == cstring"ok":
     data.viewsApi.successMessage($(status[1]))
