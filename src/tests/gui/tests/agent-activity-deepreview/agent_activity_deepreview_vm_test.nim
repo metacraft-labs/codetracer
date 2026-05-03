@@ -25,15 +25,15 @@
 ## Compile and run:
 ##   nim c -r src/tests/gui/tests/agent-activity-deepreview/agent_activity_deepreview_vm_test.nim
 
-import std/unittest
-import vm_test_helpers
+import std/[json, unittest]
 import isonim/core/[signals, computation, owner]
-import isonim/viewmodel
-import backend/backend_service
 import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/agent_activity_deepreview_vm
+
+const AgenticSessionFixtureJson =
+  staticRead("../agentic-coding/fixtures/agent-session.json")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,6 +67,34 @@ proc makeNotif(label: string;
   ## ``isonim_views_test.nim::makeAdrNotif`` so the same shape works
   ## for both the headless view tests and the VM-only tests here.
   AgentDeepReviewNotification(label: label, kind: kind, passed: passed)
+
+proc agenticSessionFixture(): JsonNode =
+  ## Shared GUI fixture used by ``agentic-deepreview.spec.ts``.  Keeping
+  ## this smoke pinned to the same JSON catches fixture/schema drift at
+  ## the VM layer before the live ACP/Electron tests run.
+  parseJson(AgenticSessionFixtureJson)
+
+proc notificationKind(kind: string): AgentDeepReviewNotificationKind =
+  case kind
+  of "CoverageUpdate": adrnkCoverageUpdate
+  of "FlowUpdate", "FlowTraceUpdate": adrnkFlowTraceUpdate
+  of "TestComplete": adrnkTestComplete
+  of "CollectionComplete": adrnkCollectionComplete
+  else: adrnkCollectionComplete
+
+proc notificationLabel(notif: JsonNode): string =
+  case notif["kind"].getStr()
+  of "CoverageUpdate":
+    "Coverage updated: " & notif["filePath"].getStr()
+  of "FlowUpdate", "FlowTraceUpdate":
+    "Flow traced: " & notif["functionKey"].getStr()
+  of "TestComplete":
+    let status = if notif["passed"].getBool(): "passed" else: "failed"
+    "Test " & status & ": " & notif["testName"].getStr()
+  of "CollectionComplete":
+    "DeepReview collection complete"
+  else:
+    "Unknown notification"
 
 # ---------------------------------------------------------------------------
 # Initial state
@@ -263,6 +291,99 @@ suite "AgentActivityDeepReviewVM notifications feed":
       check vm.coverageSummary.val.coveragePercent == 90.0
       check vm.testResults.val.testsRun == 3
       check vm.fileCoverage.val.len == 1
+
+      dispose()
+
+suite "AgentActivityDeepReviewVM agentic-coding smoke pairing":
+
+  test "agentic fixture notifications populate summary files tests and feed":
+    ## Smoke-level companion for agentic-deepreview.spec.ts:
+    ## fixture notifications are reduced into the user-visible Activity
+    ## DeepReview VM state.  Live ACP IPC dispatch, caption-bar progress,
+    ## and Electron layout remain the next-layer integration boundary.
+    createRoot proc(dispose: proc()) =
+      let fixture = agenticSessionFixture()
+      let expected = fixture["expectedSummary"]
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+
+      var totalCovered = 0
+      var totalUncovered = 0
+      var testsRun = 0
+      var testsPassed = 0
+      var testsFailed = 0
+      var functionsTraced = 0
+      var totalDurationMs = 0
+      var files: seq[AgentDeepReviewFileCoverage] = @[]
+
+      for notif in fixture["notifications"]:
+        case notif["kind"].getStr()
+        of "CoverageUpdate":
+          let covered = notif["linesCovered"].len
+          let uncovered = notif["linesUncovered"].len
+          totalCovered += covered
+          totalUncovered += uncovered
+          files.add(makeFile(
+            notif["filePath"].getStr(),
+            covered = covered,
+            total = covered + uncovered))
+        of "FlowUpdate", "FlowTraceUpdate":
+          inc functionsTraced
+          let flowPath = notif["flowFilePath"].getStr()
+          for i in 0 ..< files.len:
+            if files[i].path == flowPath:
+              files[i].hasFlow = true
+        of "TestComplete":
+          inc testsRun
+          totalDurationMs += notif["durationMs"].getInt()
+          if notif["passed"].getBool():
+            inc testsPassed
+          else:
+            inc testsFailed
+        else:
+          discard
+
+        vm.appendNotification(AgentDeepReviewNotification(
+          label: notificationLabel(notif),
+          kind: notificationKind(notif["kind"].getStr()),
+          passed: notif.hasKey("passed") and notif["passed"].getBool(),
+        ))
+
+      vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: totalCovered,
+        totalLinesUncovered: totalUncovered,
+        coveragePercent: expected["coveragePercent"].getFloat(),
+        functionsTraced: functionsTraced,
+      ))
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: testsRun,
+        testsPassed: testsPassed,
+        testsFailed: testsFailed,
+        totalDurationMs: totalDurationMs,
+      ))
+      vm.setFileCoverage(files)
+      vm.setExpanded(true)
+
+      check vm.coverageSummary.val.totalLinesCovered ==
+        expected["totalLinesCovered"].getInt()
+      check vm.coverageSummary.val.totalLinesUncovered ==
+        expected["totalLinesUncovered"].getInt()
+      check vm.coveragePercent.val == expected["coveragePercent"].getFloat()
+      check vm.coverageSummary.val.functionsTraced ==
+        expected["functionsTraced"].getInt()
+      check vm.testResults.val.testsRun == expected["testsRun"].getInt()
+      check vm.testResults.val.testsPassed == expected["testsPassed"].getInt()
+      check vm.testResults.val.testsFailed == expected["testsFailed"].getInt()
+      check vm.hasFailures.val
+      check vm.fileCoverage.val.len == expected["fileCount"].getInt()
+      check vm.fileCoverage.val[0].path == "src/feature.rs"
+      check vm.fileCoverage.val[0].coveredLines == 15
+      check vm.fileCoverage.val[0].totalLines == 20
+      check vm.fileCoverage.val[0].hasFlow
+      check vm.notificationCount.val == fixture["notifications"].len
+      check vm.notifications.val[^1].label ==
+        "Test failed: test_validate_input_empty"
+      check vm.isExpanded.val
 
       dispose()
 

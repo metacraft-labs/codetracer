@@ -272,11 +272,12 @@ state cleanly.  Headless-first applicability is limited for these.
 
 | Spec | Candidate VM test | Status | Notes |
 |---|---|---|---|
-| `agentic-deepreview.spec.ts` | (none) | GAP | ACP/agentic orchestration still has no direct VM-pairing smoke for the 40-test GUI spec; migrated AgentActivity/AgentWorkspace/AgentActivityDeepReview VMs cover their panel state but not the combined agentic-deepreview scenario |
+| `agentic-deepreview.spec.ts` | `agent-activity-deepreview/agent_activity_deepreview_vm_test.nim` + `agent-workspace/agent_workspace_vm_test.nim` | PARTIAL (smoke, 1.116) | fixture-backed notification summary/feed and workspace metadata/file-selection state now covered through migrated VMs; ACP IPC dispatch, caption-bar progress, live workspace-view switching, and Electron layout remain integration-only |
 
-This single spec carries 40 tests; closing the gap requires a bounded
-VM-level companion around agent session/workspace/DeepReview notification
-flows, or several smaller PARTIAL pairings against the migrated agent VMs.
+This single spec carries 40 tests.  The 1.116 smoke closes the pure GAP
+at the VM-visible state layer, but full pairing still needs lower-layer
+or integration coverage for ACP IPC/session orchestration, caption-bar
+progress, live workspace-view switching, and Electron layout rendering.
 
 #### `deepreview/` — 1 spec, 21 tests
 
@@ -334,9 +335,9 @@ flows, or several smaller PARTIAL pairings against the migrated agent VMs.
 | Status | Specs | % of 67 |
 |---|---:|---:|
 | PAIRED | 25 | 37% |
-| PARTIAL | 18 | 27% |
+| PARTIAL | 19 | 28% |
 | SHARED | 13 | 19% |
-| GAP | 11 | 16% |
+| GAP | 10 | 15% |
 | **Total** | **67** | **100%** |
 
 After Cluster A closure in 1.63 (12 program_specific_tests
@@ -344,16 +345,19 @@ After Cluster A closure in 1.63 (12 program_specific_tests
 `integration/language_smoke_mock_test.nim`) and Cluster B closure in
 1.67 (3 welcome-screen specs moved GAP → PAIRED at smoke level via
 `welcome-screen/welcome_screen_vm_test.nim`), reasonable headless
-coverage now exists for ~82% of specs.  Cluster E closure in 1.91
+coverage now exists for ~85% of specs.  Cluster E closure in 1.91
 adds browser materialized/MCR and streaming lifecycle coverage via
 `ReplayLifecycleVM`, `browser_replay_vm_test.nim` and
 `streaming/streaming_recording_vm_test.nim`.  The 1.93 reload reconnect
 contract test moves `reload_reconnect.spec.ts` GAP → PARTIAL by covering
 the pure host bootstrap cache behavior.  The 1.108 DeepReview smoke test
 moves `deepreview-gui.spec.ts` GAP → PARTIAL by covering the offline
-review file/hunk-selection state at the `DeepReviewVM` layer.  Remaining
-GAPs are agentic-coding / multi-window / auto-hide / layout plus a small
-misc tail (macro-expansion, page-object infra, benchmarks).
+review file/hunk-selection state at the `DeepReviewVM` layer.  The 1.116
+agentic-coding smoke moves `agentic-deepreview.spec.ts` GAP → PARTIAL by
+covering fixture-backed Activity DeepReview notification state and Agent
+Workspace file-selection state.  Remaining GAPs are multi-window /
+auto-hide / layout plus a small misc tail (macro-expansion, page-object
+infra, benchmarks).
 
 ---
 
@@ -436,7 +440,7 @@ new-record / online-trace / stylus-explorer surfaces) is structurally
 complex enough to warrant a dedicated iteration; the Karax bridge can
 mirror its own state into the VM in a follow-up.
 
-### 3.3 Cluster C — DeepReview / agentic (1 GAP, 1 PARTIAL, 61 tests)
+### 3.3 Cluster C — DeepReview / agentic (2 PARTIAL, 61 tests)
 
 **Specs:** `deepreview-gui` (21 tests), `agentic-deepreview` (40 tests).
 
@@ -444,19 +448,21 @@ mirror its own state into the VM in a follow-up.
 `deepreview/deepreview_vm_test.nim`, which covers the offline review
 header/context metadata, file rows, selected file, unified diff sections,
 mode switch, and hunk-selection toolbar state through `DeepReviewVM`.
-`agentic-deepreview` remains GAP because the combined ACP session,
-workspace switching, progress, and notification flow is not yet paired
-headlessly.
+`agentic-deepreview` is PARTIAL as of 1.116 via fixture-backed
+`AgentActivityDeepReviewVM` and `AgentWorkspaceVM` smokes covering
+notification summary/feed, file coverage rows, workspace metadata,
+selected file, overlay state, and notification count.  The combined ACP
+session, IPC dispatch, caption-bar progress, live workspace switching,
+and Electron layout flow is not paired headlessly.
 
 **Effort:** **medium-large remaining**.  The panel migration blocker is
-closed by 1.77; further progress should be sliced across concrete
-migrated VM seams (`AgentActivityVM`, `AgentWorkspaceVM`,
-`AgentActivityDeepReviewVM`, `DeepReviewVM`) rather than attempting all
-61 GUI scenarios at once.
+closed by 1.77; the remaining work should stay sliced across concrete
+migrated VM seams or explicit integration boundaries rather than
+attempting all 61 GUI scenarios at once.
 
 **Leverage:** ★★★★★ in absolute test count (61 tests), with the
-standalone DeepReview smoke now represented and the agentic-coding
-combined flow still open.
+standalone DeepReview and agentic-coding smokes now represented, with
+the live ACP/Electron combined flow still open.
 
 ### 3.4 Cluster D — Layout / strips / auto-hide / multi-window (8 GAPs, 35 tests)
 
@@ -546,10 +552,10 @@ Highest-leverage clusters first, scoped to single sub-agent iterations:
      this panel.  Likely 1–2 dedicated iterations given the four
      surfaces (welcome / new-record / online-trace / stylus-explorer).
   6. **Cluster C (DeepReview / agentic)** — standalone DeepReview is
-     PARTIAL at smoke level in 1.108.  Continue with bounded agentic
-     slices against the migrated Agent Activity / Workspace /
-     DeepReview VMs rather than trying to cover all 61 scenarios in one
-     pass.
+     PARTIAL at smoke level in 1.108 and agentic-coding is PARTIAL at
+     smoke level in 1.116.  Remaining work is ACP IPC/session
+     orchestration, caption-bar progress, live workspace switching, and
+     Electron layout rendering.
 
 Cluster D (layout/multi-window) and Cluster F (misc) are intentionally
 deferred — they need new architectural pieces (a `LayoutVM`) before
