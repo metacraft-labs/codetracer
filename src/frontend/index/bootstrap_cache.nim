@@ -47,6 +47,15 @@ const
     cstring"ct/complete-move"
   ]
 
+proc bootstrapDapEventKey*(eventName: cstring): cstring =
+  ## Return the cache key for a DAP event that should be replayed during
+  ## browser reconnect bootstrap, or an empty key for events that are
+  ## rebuilt by renderer-side reload effects.
+  for candidate in bootstrapDapEvents:
+    if candidate == eventName:
+      return eventName
+  return cstring""
+
 proc upsertBootstrap*(cache: var seq[BootstrapPayload], payload: BootstrapPayload) =
   ## Replace an existing payload for the same (id, key) tuple or append
   ## if unseen.  ``key`` is empty for legacy single-payload-per-id

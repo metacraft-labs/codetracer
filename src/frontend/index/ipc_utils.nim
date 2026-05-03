@@ -254,10 +254,7 @@ proc ready*(): Future[void] {.async.} =
       if raw.isUndefined or raw.isNull:
         return cstring""
       let eventName = cast[cstring](raw)
-      for candidate in bootstrapDapEvents:
-        if candidate == eventName:
-          return eventName
-      return cstring""
+      bootstrapDapEventKey(eventName)
 
     mainWindow.webContents.send = proc(id: cstring, response: js) =
       debugPrint cstring"frontend ... <=== index: ", id, response

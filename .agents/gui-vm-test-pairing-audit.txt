@@ -117,7 +117,8 @@ exists a Nim test that:
 | `welcome-screen/` | 1 | `welcome_screen_vm_test.nim` (5 suites / 35 tests — added 1.67 for cluster B closure) |
 | `streaming/` | 1 | `streaming_recording_vm_test.nim` (5 tests — added 1.91 for Cluster E streaming lifecycle coverage) |
 | `(top-level)` | 1 | `browser_replay_vm_test.nim` (4 tests — added 1.91 for Cluster E browser materialized/MCR coverage) |
-| **Total** | **27 VM test files** | claim of 568+ tests is suite-counted, not file-counted; +1 file / +12 tests in 1.63; +1 file / +35 tests in 1.67; +2 files / +9 tests in 1.91 |
+| `page-objects-tests/` | 1 | `reload_reconnect_vm_test.nim` (3 tests — added 1.93 host bootstrap cache contract coverage) |
+| **Total** | **28 VM test files** | claim of 568+ tests is suite-counted, not file-counted; +1 file / +12 tests in 1.63; +1 file / +35 tests in 1.67; +2 files / +9 tests in 1.91; +1 file / +3 tests in 1.93 |
 
 ### 2.3 Per-directory pairing (spec → matching VM test)
 
@@ -305,7 +306,7 @@ DeepReview panel itself (multi-day project per section 5.4).
 | Spec | Candidate VM test | Status | Notes |
 |---|---|---|---|
 | `page_object.spec.ts` | (none) | GAP | tests the page-object infra itself; not a VM concern |
-| `reload_reconnect.spec.ts` | (none) | GAP | reconnect flow closed in 1.37 but no VM-layer test |
+| `reload_reconnect.spec.ts` | `page-objects-tests/reload_reconnect_vm_test.nim` | PARTIAL (host contract, 1.93) | covers the host bootstrap cache/replay contract for `ct/complete-move` after browser reload; Electron `webContents.send` interception and live socket reconnect remain GUI/integration-only |
 
 #### `program-agnostic/` — 1 spec, 1 test
 
@@ -332,9 +333,9 @@ DeepReview panel itself (multi-day project per section 5.4).
 | Status | Specs | % of 67 |
 |---|---:|---:|
 | PAIRED | 25 | 37% |
-| PARTIAL | 16 | 24% |
+| PARTIAL | 17 | 25% |
 | SHARED | 13 | 19% |
-| GAP | 13 | 19% |
+| GAP | 12 | 18% |
 | **Total** | **67** | **100%** |
 
 After Cluster A closure in 1.63 (12 program_specific_tests
@@ -342,10 +343,12 @@ After Cluster A closure in 1.63 (12 program_specific_tests
 `integration/language_smoke_mock_test.nim`) and Cluster B closure in
 1.67 (3 welcome-screen specs moved GAP → PAIRED at smoke level via
 `welcome-screen/welcome_screen_vm_test.nim`), reasonable headless
-coverage now exists for ~81% of specs.  Cluster E closure in 1.91
+coverage now exists for ~82% of specs.  Cluster E closure in 1.91
 adds browser materialized/MCR and streaming lifecycle coverage via
 `ReplayLifecycleVM`, `browser_replay_vm_test.nim` and
-`streaming/streaming_recording_vm_test.nim`.  Remaining GAPs are the
+`streaming/streaming_recording_vm_test.nim`.  The 1.93 reload reconnect
+contract test moves `reload_reconnect.spec.ts` GAP → PARTIAL by covering
+the pure host bootstrap cache behavior.  Remaining GAPs are the
 panel-not-yet-migrated areas (deepreview / multi-window / auto-hide /
 layout) plus a small misc tail (macro-expansion, page-object infra,
 benchmarks).
@@ -487,10 +490,13 @@ shape, calltrace navigation and n/a/b locals.  Transport-level VFS /
 WebSocket / recorder process failures remain lower-layer integration
 coverage, not VM concerns.
 
-### 3.6 Cluster F — Misc small GAPs (3 GAPs, 6 tests)
+### 3.6 Cluster F — Misc small GAPs (2 GAPs, 5 tests; 1 PARTIAL)
 
 `macro-expansion-stepping` (2), `panel-loading-times` (1) (benchmark),
-`page_object` (2), `reload_reconnect` (1) PARTIAL.
+`page_object` (2).  `reload_reconnect` (1) is PARTIAL as of 1.93 via a
+host bootstrap cache contract test; next-layer closure would require a
+host/server integration test that exercises `webContents.send` interception
+and socket reconnect without relying on page-object infrastructure.
 
 **Effort:** mixed.  Macro-expansion needs a VM extension; benchmark and
 page-object infra tests are arguably out-of-scope for the headless-
