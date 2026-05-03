@@ -139,6 +139,7 @@ type
     mode*: Signal[WelcomeScreenMode]
     loading*: Signal[bool]
     loadingTraceId*: Signal[int]
+    onlineTraceInput*: Signal[string]
     launchConfig*: Signal[LaunchConfigState]
     newRecord*: Signal[NewRecordFormState]
 
@@ -273,6 +274,7 @@ proc showWelcome*(vm: WelcomeScreenVM) =
   ## Swap to the welcome surface (used by the new-record / online-
   ## trace surfaces' "Back" buttons).
   vm.setMode(wsmWelcome)
+  vm.onlineTraceInput.val = ""
 
 proc showNewRecord*(vm: WelcomeScreenVM) =
   ## Swap to the new-record-form surface and reset the form to its
@@ -284,6 +286,14 @@ proc showOnlineTrace*(vm: WelcomeScreenVM) =
   ## Swap to the online-trace download surface — mirrors the legacy
   ## ``Open online trace`` button.
   vm.setMode(wsmOnlineTrace)
+  vm.onlineTraceInput.val = ""
+
+proc setOnlineTraceInput*(vm: WelcomeScreenVM; value: string) =
+  ## Update the current online-trace download input value.  The
+  ## legacy Karax view stored this on ``newDownload.args``; the VM
+  ## keeps the typed text as one plain string so the IsoNim view can
+  ## bind the input field directly without depending on the legacy ref.
+  vm.onlineTraceInput.val = value
 
 # ---------------------------------------------------------------------------
 # Actions — loading overlay
@@ -303,6 +313,15 @@ proc endLoading*(vm: WelcomeScreenVM) =
   ## interactive again.
   vm.loading.val = false
   vm.loadingTraceId.val = NO_LOADING_TRACE
+
+proc syncLoadingState*(vm: WelcomeScreenVM; loading: bool; traceId: int) =
+  ## Bridge helper for the legacy renderer path: mirror the current
+  ## loading overlay state without implying a new user action.  This
+  ## lets the startup wiring replay ``self.loading`` /
+  ## ``self.loadingTrace`` into the VM after IPC handlers mutate the
+  ## legacy component directly.
+  vm.loading.val = loading
+  vm.loadingTraceId.val = if loading: traceId else: NO_LOADING_TRACE
 
 # ---------------------------------------------------------------------------
 # Actions — launch config
@@ -474,6 +493,7 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
     let mode = createSignal(wsmWelcome)
     let loading = createSignal(false)
     let loadingTraceId = createSignal(NO_LOADING_TRACE)
+    let onlineTraceInput = createSignal("")
     let launchConfig = createSignal(emptyLaunchConfig())
     let newRecord = createSignal(emptyNewRecord())
 
@@ -510,6 +530,7 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
       mode: mode,
       loading: loading,
       loadingTraceId: loadingTraceId,
+      onlineTraceInput: onlineTraceInput,
       launchConfig: launchConfig,
       newRecord: newRecord,
       hasRecentTraces: hasRecentTraces,

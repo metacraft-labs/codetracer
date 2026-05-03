@@ -1377,8 +1377,7 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   discard shellComponent.createShell()
 
   if not data.ui.welcomeScreen.isNil:
-    data.ui.welcomeScreen.welcomeScreen = false
-    data.ui.welcomeScreen.newRecordScreen = false
+    data.ui.welcomeScreen.resetView()
 
   if data.ui.menu.isNil:
     discard data.makeMenuComponent()
@@ -1410,8 +1409,7 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   loadTheme(data.config.theme)
 
   if not data.ui.welcomeScreen.isNil:
-    data.ui.welcomeScreen.welcomeScreen = false
-    data.ui.welcomeScreen.newRecordScreen = false
+    data.ui.welcomeScreen.resetView()
 
   # DeepReview GL layout: VCS panel (left) showing changed files from the
   # review data, DeepReview component (center) rendering the unified diff
@@ -1796,6 +1794,7 @@ proc recordPath(data: Data, path: cstring, fieldName: cstring) =
     let capitalizedField = capitalize(fieldName)
     formValidator.toJs[&"valid{capitalizedField}"]= true
     formValidator.toJs[&"invalid{capitalizedField}Message"] = cstring""
+    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
     redrawAll()
 
 proc onRecordPath(
@@ -1825,6 +1824,7 @@ proc onSuccessfulRecord(
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordSuccess
+    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
     redrawAll()
   else:
     data.viewsApi.successMessage(cstring"Recording finished. Reloading trace...")
@@ -1836,6 +1836,7 @@ proc onFailedRecord(
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordError
     data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
+    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
     redrawAll()
   else:
     data.viewsApi.errorMessage(response.errorMessage)
@@ -1845,6 +1846,7 @@ proc onLoadingTrace(
   response: jsobject(trace=Trace)) =
   data.ui.welcomeScreen.loading = true
   data.ui.welcomeScreen.loadingTrace = response.trace
+  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
   redrawAll()
 
 proc onFailedDownload(
@@ -1853,6 +1855,7 @@ proc onFailedDownload(
 ) =
   data.ui.welcomeScreen.newDownload.status.kind = RecordError
   data.ui.welcomeScreen.newDownload.status.errorMessage = response.errorMessage
+  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
   redrawAll()
 
 proc onSuccessfulDownload(
@@ -1860,6 +1863,7 @@ proc onSuccessfulDownload(
   response: jsobject()
 ) =
   data.ui.welcomeScreen.newDownload.status.kind = RecordSuccess
+  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
   redrawAll()
 
 proc onWelcomeScreen(
@@ -1892,6 +1896,7 @@ proc onWelcomeScreen(
 
   if data.ui.welcomeScreen.isNil:
     discard data.makeWelcomeScreenComponent()
+  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
 
   data.ui.initEventReceived = true
   data.tryInitLayout()

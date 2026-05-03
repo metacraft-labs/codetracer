@@ -42,6 +42,7 @@ import viewmodels/request_panel_vm
 import viewmodels/trace_log_vm except NO_SELECTED_INDEX
 import viewmodels/filesystem_vm
 import viewmodels/command_palette_vm
+import viewmodels/welcome_screen_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -65,6 +66,7 @@ import views/isonim_request_panel_view
 import views/isonim_trace_log_view
 import views/isonim_filesystem_view
 import views/isonim_command_palette_view
+import views/isonim_welcome_screen_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -91,6 +93,13 @@ proc findByClass*(node: MockNode; cls: string): MockNode =
     if found != nil:
       return found
   return nil
+
+proc findAllByTag*(node: MockNode; tag: string): seq[MockNode] =
+  ## Find all descendants (including self) with the given tag name.
+  if node.kind == mnkElement and node.tag == tag:
+    result.add(node)
+  for child in node.children:
+    result.add(findAllByTag(child, tag))
 
 proc findAllByClass*(node: MockNode; cls: string): seq[MockNode] =
   ## Find all descendants (including self) whose "class" attribute
@@ -8223,3 +8232,353 @@ suite "IsoNim Command Palette Panel — vm":
     check containerClass(true) == CommandPaletteContainerClass
     check containerClass(false) ==
       CommandPaletteContainerClass & " " & CommandPaletteHiddenModifier
+# Welcome screen tests (§1.73 — welcome-screen Karax -> IsoNim migration,
+# mission goal #3).  Covers the rendering cases already exercised by
+# welcome_screen.spec.ts and the WelcomeScreenVM headless suite.
+# ===========================================================================
+
+proc makeWelcomeTrace(id: int; program: string;
+                      args: seq[string] = @[];
+                      date: string = "2026/05/02 12:00:00";
+                      duration: string = "0.5s";
+                      workdir: string = "/tmp"): RecentTraceRecord =
+  RecentTraceRecord(
+    id: id,
+    program: program,
+    args: args,
+    workdir: workdir,
+    date: date,
+    duration: duration,
+  )
+
+proc makeWelcomeFolder(id: int; name: string; path: string): RecentFolderRecord =
+  RecentFolderRecord(id: id, name: name, path: path)
+
+proc makeWelcomeOption(name: string; inactive: bool = false):
+    WelcomeStartOptionRecord =
+  WelcomeStartOptionRecord(
+    key: optionKey(name),
+    name: name,
+    inactive: inactive,
+  )
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Welcome Screen — structure":
+
+  test "welcome mode renders the wrapper, panels, and start options":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.setStartOptions(@[
+        makeWelcomeOption("Open folder"),
+        makeWelcomeOption("Record new trace"),
+      ])
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check panel.attributes["class"] == WelcomeScreenRootClass
+
+      let wrapper = findByClass(panel, "welcome-screen-wrapper")
+      check wrapper != nil
+
+      let welcome = findByClass(panel, "welcome-screen")
+      check welcome != nil
+      check "welcome-screen-loading" notin welcome.attributes["class"]
+
+      let leftPanel = findByClass(panel, "welcome-left-panel")
+      let rightPanel = findByClass(panel, "welcome-right-panel")
+      check leftPanel != nil
+      check rightPanel != nil
+
+      let options = findAllByClass(panel, "start-option")
+      check options.len == 2
+
+      dispose()
+
+  test "loading flag appends the loading modifier and overlay":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      check findByClass(panel, "welcome-screen-loading-overlay") == nil
+
+      vm.beginLoadingTrace(7)
+      let welcome = findByClass(panel, "welcome-screen")
+      check "welcome-screen-loading" in welcome.attributes["class"]
+      let overlay = findByClass(panel, "welcome-screen-loading-overlay")
+      check overlay != nil
+
+      vm.endLoading()
+      check findByClass(panel, "welcome-screen-loading-overlay") == nil
+
+      dispose()
+
+  test "new-record and online-trace modes swap the top-level surface":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      check findByClass(panel, "welcome-screen") != nil
+
+      vm.showNewRecord()
+      check findByClass(panel, "new-record-screen") != nil
+      check findByClass(panel, "new-online-trace-form") == nil
+
+      vm.showOnlineTrace()
+      check findByClass(panel, "new-online-trace-form") != nil
+
+      vm.enterEditMode()
+      check findByClass(panel, "welcome-screen") == nil
+      check findByClass(panel, "new-record-screen") == nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Welcome-mode content
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Welcome Screen — welcome mode":
+
+  test "recent traces render time-ago text and tooltip content":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      vm.setRecentTraces(@[
+        makeWelcomeTrace(1, "/usr/bin/python3", @["fib.py"],
+                         date = "2026/05/02 12:00:00"),
+      ])
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      let trace = findByClass(panel, "recent-trace")
+      check trace != nil
+
+      let timeAgo = findByClass(trace, "recent-trace-title-time")
+      check timeAgo != nil
+      check timeAgo.textContent.len > 0
+
+      let tooltip = findByClass(trace, "recent-trace-tooltip")
+      check tooltip != nil
+      check "Program: /usr/bin/python3" in tooltip.textContent
+      check "Args: fib.py" in tooltip.textContent
+
+      dispose()
+
+  test "hovering a trace toggles the tooltip visibility class":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      vm.setRecentTraces(@[makeWelcomeTrace(7, "/bin/ruby", @["app.rb"])])
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      let trace = findByClass(panel, "recent-trace")
+      var tooltip = findByClass(panel, "recent-trace-tooltip")
+      check "visible" notin tooltip.attributes["class"]
+
+      trace.fireEvent("mouseover")
+      check vm.hoveredTrace.val == 7
+      tooltip = findByClass(panel, "recent-trace-tooltip")
+      check "visible" in tooltip.attributes["class"]
+
+      trace.fireEvent("mouseleave")
+      check vm.hoveredTrace.val == NO_HOVERED_TRACE
+      tooltip = findByClass(panel, "recent-trace-tooltip")
+      check "visible" notin tooltip.attributes["class"]
+
+      dispose()
+
+  test "recent folders and start-option buttons render their labels":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      vm.setRecentFolders(@[
+        makeWelcomeFolder(1, "examples", "/repo/examples"),
+      ])
+      vm.setStartOptions(@[
+        makeWelcomeOption("Open folder"),
+        makeWelcomeOption("Record new trace"),
+        makeWelcomeOption("Open online trace", inactive = true),
+      ])
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+
+      let folderName = findByClass(panel, "recent-folder-name")
+      check folderName != nil
+      check folderName.textContent == "examples"
+
+      let options = findAllByClass(panel, "start-option")
+      check options.len == 3
+      check "inactive-start-option" in options[2].attributes["class"]
+
+      dispose()
+
+  test "empty-state copy matches the first-time and traces-empty branches":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      let panel = renderWelcomeScreenPanel(r, vm)
+      check "Welcome to CodeTracer!" in panel.textContent
+      check RecentTracesEmptyText in panel.textContent
+
+      vm.setRecentTraces(@[makeWelcomeTrace(1, "/bin/ct")])
+      vm.setRecentFolders(@[])
+      check "Welcome to CodeTracer!" notin panel.textContent
+      check RecentFoldersEmptyText in panel.textContent
+
+      dispose()
+
+  test "click callbacks surface recent-trace, folder, and option actions":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+
+      vm.setRecentTraces(@[makeWelcomeTrace(11, "/bin/python")])
+      vm.setRecentFolders(@[makeWelcomeFolder(3, "demo", "/tmp/demo")])
+      vm.setStartOptions(@[makeWelcomeOption("Record new trace")])
+
+      var clickedTrace = -1
+      var clickedFolder = ""
+      var clickedOption = ""
+      let callbacks = WelcomeScreenCallbacks(
+        onRecentTraceClick: proc(traceId: int) = clickedTrace = traceId,
+        onRecentFolderClick: proc(folderPath: string) = clickedFolder = folderPath,
+        onStartOptionClick: proc(key: string) = clickedOption = key
+      )
+
+      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      findByClass(panel, "recent-trace").fireEvent("click")
+      findByClass(panel, "recent-folder").fireEvent("click")
+      findAllByClass(panel, "start-option")[0].fireEvent("click")
+
+      check clickedTrace == 11
+      check clickedFolder == "/tmp/demo"
+      check clickedOption == "record-new-trace"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Form interactions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Welcome Screen — forms":
+
+  test "new-record form input events update the VM and emit callbacks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.showNewRecord()
+
+      var gotExec = ""
+      var gotArgs: seq[string] = @[]
+      var gotWorkDir = ""
+      var gotOutput = ""
+      var toggled = 0
+      let callbacks = WelcomeScreenCallbacks(
+        onRecordExecutableChange: proc(path: string) = gotExec = path,
+        onRecordArgsChange: proc(args: seq[string]) = gotArgs = args,
+        onRecordWorkDirChange: proc(path: string) = gotWorkDir = path,
+        onRecordOutputFolderChange: proc(path: string) = gotOutput = path,
+        onToggleDefaultOutputFolder: proc() = inc toggled
+      )
+
+      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      let inputs = findAllByTag(panel, "input")
+      check inputs.len >= 5
+
+      r.setAttribute(inputs[0], "value", "/usr/bin/python3")
+      inputs[0].fireEvent("input")
+      r.setAttribute(inputs[1], "value", "fib.py --n 10")
+      inputs[1].fireEvent("input")
+      r.setAttribute(inputs[2], "value", "/tmp/work")
+      inputs[2].fireEvent("input")
+      inputs[3].fireEvent("change")
+      r.setAttribute(inputs[4], "value", "/tmp/out")
+      inputs[4].fireEvent("input")
+
+      check vm.newRecord.val.executable == "/usr/bin/python3"
+      check vm.newRecord.val.args == @["fib.py", "--n", "10"]
+      check vm.newRecord.val.workDir == "/tmp/work"
+      check vm.newRecord.val.outputFolder == "/tmp/out"
+      check gotExec == "/usr/bin/python3"
+      check gotArgs == @["fib.py", "--n", "10"]
+      check gotWorkDir == "/tmp/work"
+      check gotOutput == "/tmp/out"
+      check toggled == 1
+
+      dispose()
+
+  test "online-trace form input updates VM and submit/back callbacks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let r = MockRenderer()
+      vm.showOnlineTrace()
+
+      var submitted = ""
+      var backCount = 0
+      let callbacks = WelcomeScreenCallbacks(
+        onOnlineTraceInputChange: proc(value: string) = discard,
+        onSubmitOnlineTrace: proc(value: string) = submitted = value,
+        onShowWelcome: proc() =
+          inc backCount
+          vm.showWelcome()
+      )
+
+      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      let input = findByTag(panel, "input")
+      r.setAttribute(input, "value", "abc123")
+      input.fireEvent("input")
+      check vm.onlineTraceInput.val == "abc123"
+
+      let buttons = findAllByTag(panel, "button")
+      buttons[1].fireEvent("click")
+      check submitted == "abc123"
+
+      buttons[0].fireEvent("click")
+      check backCount == 1
+      check vm.mode.val == wsmWelcome
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Helper coverage
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Welcome Screen — helpers":
+
+  test "helper procs map classes and strings consistently":
+    check welcomeScreenClass(false) == "welcome-screen"
+    check welcomeScreenClass(true) == "welcome-screen welcome-screen-loading"
+    check traceTooltipClass(false) == "recent-trace-tooltip"
+    check traceTooltipClass(true) == "recent-trace-tooltip visible"
+    check startOptionClass(makeWelcomeOption("Open folder"), false) ==
+      "start-option open-folder"
+    check startOptionClass(makeWelcomeOption("Open online trace",
+      inactive = true), true) ==
+        "start-option open-online-trace inactive-start-option hovered"
+    check traceCommandText(makeWelcomeTrace(1, "/usr/bin/python3",
+      @["fib.py"])) == "python3 fib.py"
+    check parseArgsInput("a  b   c") == @["a", "b", "c"]
+
+  test "formatWelcomeTimeAgo returns a non-empty human string":
+    let s = formatWelcomeTimeAgo("2026/05/02 12:00:00")
+    check s.len > 0

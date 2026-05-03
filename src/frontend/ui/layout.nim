@@ -2,6 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   karax, karaxdsl, vstyles,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
+  welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
@@ -310,21 +311,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # data.openTab with diff decorations applied by the component.
 
   if data.startOptions.welcomeScreen and data.trace.isNil:
-    clog "initLayout: setting up welcome screen renderer"
-    kxiMap["welcome-screen"] =
-      setRenderer(
-        proc: VNode =
-          clog "welcome screen render proc called"
-          if not data.ui.welcomeScreen.isNil:
-            data.ui.welcomeScreen.render()
-          else:
-            buildHtml(tdiv()),
-        "welcomeScreen",
-        proc = discard)
-    data.ui.welcomeScreen.kxi = kxiMap["welcome-screen"]
-    clog "initLayout: welcome screen kxi set, calling redrawSync"
-    # Force immediate redraw since window.onload may have already fired
-    redrawSync(kxiMap["welcome-screen"])
+    clog "initLayout: mounting IsoNim welcome screen"
+    if not data.ui.welcomeScreen.isNil:
+      data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
+    welcome_screen.tryMountIsoNimWelcomeScreen()
     return
 
   # Determine the GL container element.
