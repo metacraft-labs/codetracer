@@ -4,6 +4,7 @@ import
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
+  agent_activity_deepreview,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
   caption_bar_progress,
   ../[ types, renderer, config ],
@@ -544,6 +545,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
+      Content.AgentActivityDeepReview,
     }
 
     # When a background tab becomes visible, force Karax to redraw into the
@@ -727,6 +729,26 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           command.syncLegacyCommandPaletteIntoVM(
             CommandPaletteComponent(component))
           command.tryMountIsoNimCommandPalettePanel()
+
+        # AgentActivityDeepReview is now an IsoNim view -- its DOM
+        # is mounted by
+        # ``agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel``
+        # against the ``agentActivityDeepReviewComponent-{id}``
+        # container, and reactive effects keep it in sync.  No
+        # vnodeToDom bridge or redraw callback is needed here.  The
+        # legacy ``AgentActivityDeepReviewComponent`` remains as the
+        # event-bus carrier (the ``IPC_DEEPREVIEW_NOTIFICATION``
+        # handler keeps populating ``self.fileEntries`` /
+        # ``self.recentNotifications``) and
+        # ``syncLegacyAgentActivityDeepReviewIntoVM`` mirrors any
+        # rows already accumulated when the panel becomes visible.
+        # Mission goal #3 \u00a71.73.  The rich per-row affordances
+        # (per-file coverage bar, per-notification colour pills,
+        # the "Functions" summary card) remain a follow-up.
+        if state.content == Content.AgentActivityDeepReview:
+          agent_activity_deepreview.syncLegacyAgentActivityDeepReviewIntoVM(
+            AgentActivityDeepReviewComponent(component))
+          agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel()
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Register a redraw callback for updates.

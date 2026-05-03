@@ -895,3 +895,132 @@ proc `==`*(a, b: CommandPaletteResultEntry): bool {.noSideEffect.} =
     a.line == b.line and
     a.symbolKind == b.symbolKind and
     a.snippetSource == b.snippetSource
+
+# -------------------------------------------------------------------
+# Agent Activity DeepReview panel — collapsible per-session pane that
+# overlays DeepReview metrics (coverage, test results, recent
+# notifications) onto the agent activity stream.
+#
+# Mirrors the legacy ``AgentActivityDeepReviewComponent`` (see
+# ``frontend/ui/agent_activity_deepreview.nim``) which used a Karax
+# ``method render`` to draw a header + per-section panel.  Section
+# §1.74 (mission goal #3) replaces the Karax render with an IsoNim
+# view; the rich per-notification badges and per-file coverage bars
+# remain a follow-up — the IsoNim view renders the per-file table,
+# test-result list, and recent-notification feed as flat reactive
+# rows that the headless tests can assert against without depending
+# on the legacy Karax DOM.
+#
+# All fields are plain ``string`` / ``int`` / ``float`` / ``bool`` /
+# ``seq`` so the same value type works on both ``test-vm-native``
+# and ``test-vm-js`` backends without ``cstring`` / ``langstring``
+# conversion noise.  The companion enums mirror the legacy
+# ``DeepReviewNotificationKind`` (defined in
+# ``common/common_types/codetracer_features/agentic_coding.nim``)
+# so the bridge in ``ui/agent_activity_deepreview.nim`` can map a
+# legacy ``DeepReviewNotification`` ref into a flat
+# ``AgentDeepReviewNotification`` value in one shot.
+# -------------------------------------------------------------------
+
+type
+  AgentDeepReviewNotificationKind* = enum
+    ## Maps to the legacy ``DeepReviewNotificationKind`` enum.  The
+    ## variant tag drives both the per-notification CSS modifier in
+    ## the IsoNim view and the per-kind summary mutation logic in
+    ## ``ui/agent_activity_deepreview.nim``.
+    adrnkCoverageUpdate    ## Per-file line coverage refresh.
+    adrnkFlowTraceUpdate   ## Function execution flow trace ready.
+    adrnkTestComplete      ## A single test run finished.
+    adrnkCollectionComplete ## All DeepReview collection done.
+
+  AgentDeepReviewCoverageSummary* = object
+    ## Aggregated coverage / test counts shown in the panel header
+    ## badge and the summary cards row.  Mirrors
+    ## ``ActivityDeepReviewSummary`` minus the ``lastUpdatedMs``
+    ## timestamp (the IsoNim view does not paint a relative-time
+    ## label — it can be added in a follow-up if needed).
+    ##
+    ## ``totalLinesCovered`` / ``totalLinesUncovered`` accumulate
+    ## across every file in ``fileCoverage``; ``coveragePercent`` is
+    ## kept as a stored value so the legacy bridge can publish
+    ## either an explicit percentage or recompute it from the
+    ## covered/uncovered counts.  ``functionsTraced`` mirrors the
+    ## legacy field but is currently advisory (the IsoNim view does
+    ## not paint a separate functions card; it can be added in a
+    ## follow-up).
+    totalLinesCovered*: int
+    totalLinesUncovered*: int
+    coveragePercent*: float
+    functionsTraced*: int
+
+  AgentDeepReviewTestResults* = object
+    ## Roll-up of per-test counts displayed alongside the coverage
+    ## summary.  Matches the legacy ``testsRun`` / ``testsPassed`` /
+    ## ``testsFailed`` triplet in ``ActivityDeepReviewSummary``.
+    ## ``totalDurationMs`` is exposed for a future aggregate timing
+    ## badge; the current IsoNim view keeps parity with the legacy
+    ## summary card's pass/run and failure-count text.
+    testsRun*: int
+    testsPassed*: int
+    testsFailed*: int
+    totalDurationMs*: int
+
+  AgentDeepReviewFileCoverage* = object
+    ## One row in the per-file coverage table.  Mirrors the
+    ## legacy ``ActivityFileEntry`` ref-object minus the cstring
+    ## fields — the bridge in ``ui/agent_activity_deepreview.nim``
+    ## materialises the cstring path through ``$`` before it lands
+    ## in the VM.  ``hasFlow`` flips on when a ``FlowTraceUpdate``
+    ## notification arrives for the same path so the file row's
+    ## "Flow" column shows ``yes``.
+    path*: string
+    coveredLines*: int
+    totalLines*: int
+    hasFlow*: bool
+
+  AgentDeepReviewNotification* = object
+    ## One row in the recent-activity feed.  ``label`` carries the
+    ## already-formatted human-readable summary so the IsoNim view
+    ## can render it verbatim without re-importing the legacy
+    ## ``notificationLabel`` proc.  ``kind`` is preserved so the
+    ## row can apply the matching CSS modifier (``activity-dr-
+    ## notif-{kind}``).  ``passed`` is set only for
+    ## ``adrnkTestComplete`` rows so the view can paint a
+    ## red/green tint without inspecting the label string.
+    label*: string
+    kind*: AgentDeepReviewNotificationKind
+    passed*: bool
+
+proc `==`*(a, b: AgentDeepReviewCoverageSummary): bool {.noSideEffect.} =
+  ## Explicit equality so ``Signal[AgentDeepReviewCoverageSummary]``
+  ## compiles under Nim's side-effect inference.  Mirrors the
+  ## ``FilesystemDiffEntry`` / ``CommandPaletteResultEntry`` overrides
+  ## above (same root cause: the structural ``==`` for objects
+  ## carrying ``float`` fields is inferred as side-effecting in some
+  ## Nim versions).
+  a.totalLinesCovered == b.totalLinesCovered and
+    a.totalLinesUncovered == b.totalLinesUncovered and
+    a.coveragePercent == b.coveragePercent and
+    a.functionsTraced == b.functionsTraced
+
+proc `==`*(a, b: AgentDeepReviewTestResults): bool {.noSideEffect.} =
+  ## Explicit equality (see ``AgentDeepReviewCoverageSummary`` above).
+  a.testsRun == b.testsRun and
+    a.testsPassed == b.testsPassed and
+    a.testsFailed == b.testsFailed and
+    a.totalDurationMs == b.totalDurationMs
+
+proc `==`*(a, b: AgentDeepReviewFileCoverage): bool {.noSideEffect.} =
+  ## Explicit equality so ``Signal[seq[AgentDeepReviewFileCoverage]]``
+  ## compiles under Nim's side-effect inference.
+  a.path == b.path and
+    a.coveredLines == b.coveredLines and
+    a.totalLines == b.totalLines and
+    a.hasFlow == b.hasFlow
+
+proc `==`*(a, b: AgentDeepReviewNotification): bool {.noSideEffect.} =
+  ## Explicit equality so ``Signal[seq[AgentDeepReviewNotification]]``
+  ## compiles under Nim's side-effect inference.
+  a.label == b.label and
+    a.kind == b.kind and
+    a.passed == b.passed

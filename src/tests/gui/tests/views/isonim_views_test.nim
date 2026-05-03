@@ -42,6 +42,7 @@ import viewmodels/request_panel_vm
 import viewmodels/trace_log_vm except NO_SELECTED_INDEX
 import viewmodels/filesystem_vm
 import viewmodels/command_palette_vm
+import viewmodels/agent_activity_deepreview_vm
 import viewmodels/welcome_screen_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
@@ -66,6 +67,7 @@ import views/isonim_request_panel_view
 import views/isonim_trace_log_view
 import views/isonim_filesystem_view
 import views/isonim_command_palette_view
+import views/isonim_agent_activity_deepreview_view
 import views/isonim_welcome_screen_view
 
 # ---------------------------------------------------------------------------
@@ -94,13 +96,6 @@ proc findByClass*(node: MockNode; cls: string): MockNode =
       return found
   return nil
 
-proc findAllByTag*(node: MockNode; tag: string): seq[MockNode] =
-  ## Find all descendants (including self) with the given tag name.
-  if node.kind == mnkElement and node.tag == tag:
-    result.add(node)
-  for child in node.children:
-    result.add(findAllByTag(child, tag))
-
 proc findAllByClass*(node: MockNode; cls: string): seq[MockNode] =
   ## Find all descendants (including self) whose "class" attribute
   ## contains `cls` as a whole word.
@@ -122,6 +117,13 @@ proc findByTag*(node: MockNode; tag: string): MockNode =
     if found != nil:
       return found
   return nil
+
+proc findAllByTag*(node: MockNode; tag: string): seq[MockNode] =
+  ## Find all descendants (including self) with the given tag name.
+  if node.kind == mnkElement and node.tag == tag:
+    result.add(node)
+  for child in node.children:
+    result.add(findAllByTag(child, tag))
 
 # ---------------------------------------------------------------------------
 # Structure tests
@@ -8229,9 +8231,518 @@ suite "IsoNim Command Palette Panel — vm":
     check rowSuffixText(makeCpEntry("plain")) == ""
 
   test "containerClass appends 'hidden' only when isActive is false":
-    check containerClass(true) == CommandPaletteContainerClass
-    check containerClass(false) ==
+    check isonim_command_palette_view.containerClass(true) ==
+      CommandPaletteContainerClass
+    check isonim_command_palette_view.containerClass(false) ==
       CommandPaletteContainerClass & " " & CommandPaletteHiddenModifier
+
+# ===========================================================================
+# Agent Activity DeepReview panel tests (§1.74 — IsoNim Migration
+# Campaign, mission goal #3).  Mirrors the Filesystem / CommandPalette
+# suite layout: structure, row rendering, interactions, vm/helpers.
+# ===========================================================================
+
+proc makeAdrFile(path: string;
+                 covered: int = 0;
+                 total: int = 0;
+                 hasFlow: bool = false): AgentDeepReviewFileCoverage =
+  ## Build a synthetic ``AgentDeepReviewFileCoverage`` row for the
+  ## view + VM tests.  Defaults to a zero-coverage entry so each
+  ## test can override only the fields it cares about.
+  AgentDeepReviewFileCoverage(
+    path: path,
+    coveredLines: covered,
+    totalLines: total,
+    hasFlow: hasFlow,
+  )
+
+proc makeAdrNotif(label: string;
+                  kind: AgentDeepReviewNotificationKind =
+                    adrnkCoverageUpdate;
+                  passed: bool = false): AgentDeepReviewNotification =
+  ## Build a synthetic ``AgentDeepReviewNotification`` row.  Mirrors
+  ## ``makeCpEntry``: defaults to a coverage-update kind so the
+  ## label flows through to the rendered row body without per-kind
+  ## decoration.
+  AgentDeepReviewNotification(label: label, kind: kind, passed: passed)
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Agent Activity DeepReview Panel — structure":
+
+  test "root carries component-container + activity-dr-container classes":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      check panel.kind == mnkElement
+      check panel.tag == "div"
+      check "component-container" in panel.attributes["class"]
+      check "activity-dr-container" in panel.attributes["class"]
+      # Closed by default — outer wrapper carries the collapsed
+      # modifier and the body carries the hidden modifier.
+      check "activity-dr-collapsed" in panel.attributes["class"]
+
+      dispose()
+
+  test "container constants match the legacy class strings":
+    # Documents the wire shape — a regression here would break the
+    # existing scss rules under static/styles/components/activity-dr.styl.
+    check AgentActivityDeepReviewContainerClass ==
+      "component-container activity-dr-container"
+    check AgentActivityDeepReviewBodyClass == "activity-dr-body"
+    check AgentActivityDeepReviewCollapsedModifier == "activity-dr-collapsed"
+    check AgentActivityDeepReviewHiddenModifier == "hidden"
+    check AgentActivityDeepReviewLabelText == "DeepReview"
+    check AgentActivityDeepReviewFilesEmptyText ==
+      "No files with coverage data yet."
+    check AgentActivityDeepReviewTestsEmptyText == "No test results yet."
+    check AgentActivityDeepReviewNotifsEmptyText ==
+      "No recent notifications."
+
+  test "empty VM renders header + collapsed body shell":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      let header = findByClass(panel, "activity-dr-header")
+      check header != nil
+
+      let label = findByClass(panel, "activity-dr-header-label")
+      check label != nil
+      check label.textContent == AgentActivityDeepReviewLabelText
+
+      let chevron = findByClass(panel, "activity-dr-chevron")
+      check chevron != nil
+      # Closed by default -> chevron renders the '>' glyph.
+      check chevron.textContent == ">"
+
+      let body = findByClass(panel, "activity-dr-body")
+      check body != nil
+      check "hidden" in body.attributes["class"]
+
+      dispose()
+
+  test "toggleExpanded flips the collapsed + hidden modifiers":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      check "activity-dr-collapsed" in panel.attributes["class"]
+      let body = findByClass(panel, "activity-dr-body")
+      check "hidden" in body.attributes["class"]
+
+      vm.toggleExpanded()
+      check "activity-dr-collapsed" notin panel.attributes["class"]
+      check "hidden" notin body.attributes["class"]
+
+      vm.toggleExpanded()
+      check "activity-dr-collapsed" in panel.attributes["class"]
+      check "hidden" in body.attributes["class"]
+
+      dispose()
+
+  test "header chevron flips between '>' and 'v' on toggle":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      let chevron = findByClass(panel, "activity-dr-chevron")
+      check chevron.textContent == ">"
+
+      vm.setExpanded(true)
+      check chevron.textContent == "v"
+
+      vm.setExpanded(false)
+      check chevron.textContent == ">"
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Row rendering — coverage cards / file table / test results / notifs
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Agent Activity DeepReview Panel — row rendering":
+
+  test "coverage card paints the formatted percent + counts":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: 75,
+        totalLinesUncovered: 25,
+        coveragePercent: 75.0,
+        functionsTraced: 0,
+      ))
+
+      let coverageCard = findByClass(panel, "activity-dr-card-coverage")
+      check coverageCard != nil
+      let valueNode = findByClass(coverageCard, "activity-dr-card-value")
+      check valueNode != nil
+      check valueNode.textContent == "75.0%"
+      let detailNode = findByClass(coverageCard, "activity-dr-card-detail")
+      check detailNode != nil
+      check detailNode.textContent == "75 covered / 25 uncovered"
+
+      dispose()
+
+  test "tests card paints '<passed>/<run>' + warn modifier on failures":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 10, testsPassed: 7, testsFailed: 3,
+        totalDurationMs: 0,
+      ))
+
+      let testsCard = findByClass(panel, "activity-dr-card-tests")
+      check testsCard != nil
+      let valueNode = findByClass(testsCard, "activity-dr-card-value")
+      check valueNode.textContent == "7/10"
+      let detailNode = findByClass(testsCard, "activity-dr-card-detail")
+      check detailNode.textContent == "3 failed"
+      check "activity-dr-card-warn" in detailNode.attributes["class"]
+
+      # All-passing flips the warn modifier off + relabels.
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 4, testsPassed: 4, testsFailed: 0,
+        totalDurationMs: 0,
+      ))
+      let detailNode2 = findByClass(testsCard, "activity-dr-card-detail")
+      check detailNode2.textContent == "all passing"
+      check "activity-dr-card-warn" notin detailNode2.attributes["class"]
+
+      dispose()
+
+  test "setFileCoverage populates the per-file rows reactively":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      let filesContainer = findByClass(panel, "activity-dr-files")
+      # Initial empty state — placeholder row visible.
+      let emptyInitial = findByClass(panel, "activity-dr-files-empty")
+      check emptyInitial != nil
+      check emptyInitial.textContent == AgentActivityDeepReviewFilesEmptyText
+
+      vm.setFileCoverage([
+        makeAdrFile("/repo/src/a.nim", covered = 8, total = 10),
+        makeAdrFile("/repo/src/b.nim", covered = 4, total = 4,
+                    hasFlow = true),
+      ])
+
+      let rows = findAllByClass(panel, "activity-dr-files-row")
+      check rows.len == 2
+
+      # Row 0 — basename + coverage ratio + "--" flow indicator.
+      let row0Name = findByClass(rows[0], "activity-dr-files-col-name")
+      check row0Name.textContent == "a.nim"
+      let row0Cov = findByClass(rows[0], "activity-dr-files-col-coverage")
+      check row0Cov.textContent == "8/10"
+      let row0Flow = findByClass(rows[0], "activity-dr-files-col-flow")
+      check row0Flow.textContent == "--"
+
+      # Row 1 — hasFlow = true so the flow column reads "yes".
+      let row1Flow = findByClass(rows[1], "activity-dr-files-col-flow")
+      check row1Flow.textContent == "yes"
+
+      # Empty placeholder no longer rendered (rows replace it).
+      let emptyAfter = findByClass(filesContainer, "activity-dr-files-empty")
+      check emptyAfter == nil
+
+      dispose()
+
+  test "TestComplete notifications populate the test-results list":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      # Default empty branch.
+      let emptyInitial = findByClass(panel, "activity-dr-tests-empty")
+      check emptyInitial != nil
+      check emptyInitial.textContent == AgentActivityDeepReviewTestsEmptyText
+
+      vm.appendNotification(makeAdrNotif("Test PASS: alpha (12ms)",
+                                         kind = adrnkTestComplete,
+                                         passed = true))
+      vm.appendNotification(makeAdrNotif("Test FAIL: beta (5ms)",
+                                         kind = adrnkTestComplete,
+                                         passed = false))
+      # A non-test notification must NOT show up in the test list.
+      vm.appendNotification(makeAdrNotif("Coverage: foo.nim",
+                                         kind = adrnkCoverageUpdate))
+
+      let rows = findAllByClass(panel, "activity-dr-test-item")
+      check rows.len == 2
+      check "activity-dr-test-pass" in rows[0].attributes["class"]
+      check "activity-dr-test-fail" in rows[1].attributes["class"]
+      check rows[0].textContent == "Test PASS: alpha (12ms)"
+      check rows[1].textContent == "Test FAIL: beta (5ms)"
+
+      dispose()
+
+  test "appendNotification renders most-recent first in the feed":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      vm.appendNotification(makeAdrNotif("first"))
+      vm.appendNotification(makeAdrNotif("second",
+                                         kind = adrnkFlowTraceUpdate))
+      vm.appendNotification(makeAdrNotif("third",
+                                         kind = adrnkCollectionComplete))
+
+      let rows = findAllByClass(panel, "activity-dr-notif-item")
+      check rows.len == 3
+      # Newest first — order reversed vs. append order.
+      check rows[0].textContent == "third"
+      check rows[1].textContent == "second"
+      check rows[2].textContent == "first"
+
+      # Per-kind modifiers carry the matching CSS class.
+      check "activity-dr-notif-complete" in rows[0].attributes["class"]
+      check "activity-dr-notif-flow" in rows[1].attributes["class"]
+      check "activity-dr-notif-coverage" in rows[2].attributes["class"]
+
+      dispose()
+
+  test "clearNotifications restores the empty placeholder branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      vm.appendNotification(makeAdrNotif("alpha"))
+      check findAllByClass(panel, "activity-dr-notif-item").len == 1
+
+      vm.clearNotifications()
+      let rowsAfter = findAllByClass(panel, "activity-dr-notif-item")
+      check rowsAfter.len == 0
+      let emptyAfter = findByClass(panel, "activity-dr-notifs-empty")
+      check emptyAfter != nil
+      check emptyAfter.textContent == AgentActivityDeepReviewNotifsEmptyText
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Interactions
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Agent Activity DeepReview Panel — interactions":
+
+  test "header badge is visible only when collapsed AND data is present":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+      let badge = findByClass(panel, "activity-dr-header-badge")
+      check badge != nil
+      # Empty summary -> badge has no text.
+      check badge.textContent == ""
+
+      vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: 8, totalLinesUncovered: 2,
+        coveragePercent: 80.0, functionsTraced: 0,
+      ))
+      check badge.textContent == "80.0%"
+
+      # Expanded -> badge text is suppressed (legacy "show only when
+      # collapsed" behaviour).
+      vm.setExpanded(true)
+      check badge.textContent == ""
+
+      vm.setExpanded(false)
+      check badge.textContent == "80.0%"
+
+      dispose()
+
+  test "setCoverageSummary repaints both the badge and the card":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: 1, totalLinesUncovered: 9,
+        coveragePercent: 10.0, functionsTraced: 0,
+      ))
+      let cardValue = findByClass(panel, "activity-dr-card-coverage")
+      check findByClass(cardValue, "activity-dr-card-value").textContent ==
+        "10.0%"
+      check findByClass(panel, "activity-dr-header-badge").textContent ==
+        "10.0%"
+
+      vm.setCoverageSummary(AgentDeepReviewCoverageSummary(
+        totalLinesCovered: 9, totalLinesUncovered: 1,
+        coveragePercent: 90.0, functionsTraced: 0,
+      ))
+      check findByClass(panel, "activity-dr-card-value").textContent ==
+        "90.0%"
+      check findByClass(panel, "activity-dr-header-badge").textContent ==
+        "90.0%"
+
+      dispose()
+
+  test "setFileCoverage with empty seq restores the placeholder row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderAgentActivityDeepReviewPanel(r, vm)
+
+      vm.setFileCoverage([makeAdrFile("/x.nim", 1, 1)])
+      check findAllByClass(panel, "activity-dr-files-row").len == 1
+
+      vm.setFileCoverage([])
+      check findAllByClass(panel, "activity-dr-files-row").len == 0
+      let empty = findByClass(panel, "activity-dr-files-empty")
+      check empty != nil
+      check empty.textContent == AgentActivityDeepReviewFilesEmptyText
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# VM defaults / formatting helpers
+# ---------------------------------------------------------------------------
+
+suite "IsoNim Agent Activity DeepReview Panel — vm":
+
+  test "createAgentActivityDeepReviewVM defaults reflect the closed branch":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+
+      check not vm.isExpanded.val
+      check vm.fileCoverage.val.len == 0
+      check vm.notifications.val.len == 0
+      check vm.coverageSummary.val.totalLinesCovered == 0
+      check vm.coverageSummary.val.coveragePercent == 0.0
+      check vm.testResults.val.testsRun == 0
+      check not vm.hasFailures.val
+      check vm.notificationCount.val == 0
+      check vm.coveragePercent.val == 0.0
+      check not vm.store.isNil
+
+      dispose()
+
+  test "appendNotification trims to the MAX_NOTIFICATIONS cap":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+
+      # Push 60 notifications — only the most recent 50 must remain.
+      for i in 0 ..< 60:
+        vm.appendNotification(makeAdrNotif("n" & $i))
+
+      check vm.notifications.val.len == MAX_NOTIFICATIONS
+      check vm.notificationCount.val == MAX_NOTIFICATIONS
+      # First entry is now n10 (60-50), last is n59.
+      check vm.notifications.val[0].label == "n10"
+      check vm.notifications.val[^1].label == "n59"
+
+      dispose()
+
+  test "hasFailures memo flips when testsFailed > 0":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityDeepReviewVM(store)
+
+      check not vm.hasFailures.val
+
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 1, testsPassed: 1, testsFailed: 0))
+      check not vm.hasFailures.val
+
+      vm.setTestResults(AgentDeepReviewTestResults(
+        testsRun: 2, testsPassed: 1, testsFailed: 1))
+      check vm.hasFailures.val
+
+      dispose()
+
+  test "containerClass / bodyClass append the collapsed/hidden modifiers":
+    # Pure-helper checks — no reactive root needed.  Use the
+    # qualified module name because the same proc names exist for
+    # the CommandPalette view.
+    check isonim_agent_activity_deepreview_view.containerClass(true) ==
+      AgentActivityDeepReviewContainerClass
+    check isonim_agent_activity_deepreview_view.containerClass(false) ==
+      AgentActivityDeepReviewContainerClass & " " &
+        AgentActivityDeepReviewCollapsedModifier
+    check isonim_agent_activity_deepreview_view.bodyClass(true) ==
+      AgentActivityDeepReviewBodyClass
+    check isonim_agent_activity_deepreview_view.bodyClass(false) ==
+      AgentActivityDeepReviewBodyClass & " " &
+        AgentActivityDeepReviewHiddenModifier
+
+  test "formatPercent emits one-decimal-place + trailing %":
+    check isonim_agent_activity_deepreview_view.formatPercent(0.0) == "0.0%"
+    check isonim_agent_activity_deepreview_view.formatPercent(100.0) ==
+      "100.0%"
+    check isonim_agent_activity_deepreview_view.formatPercent(42.5) ==
+      "42.5%"
+
+  test "fileBasename returns the path tail":
+    check isonim_agent_activity_deepreview_view.fileBasename(
+      "/repo/a/b/c.nim") == "c.nim"
+    check isonim_agent_activity_deepreview_view.fileBasename("a.nim") ==
+      "a.nim"
+    check isonim_agent_activity_deepreview_view.fileBasename("") == ""
+
+  test "notificationKindClass maps each variant to its CSS modifier":
+    check notificationKindClass(adrnkCoverageUpdate) ==
+      "activity-dr-notif-coverage"
+    check notificationKindClass(adrnkFlowTraceUpdate) ==
+      "activity-dr-notif-flow"
+    check notificationKindClass(adrnkTestComplete) ==
+      "activity-dr-notif-test"
+    check notificationKindClass(adrnkCollectionComplete) ==
+      "activity-dr-notif-complete"
+
+  test "testRowClass appends pass / fail modifier":
+    check testRowClass(true) ==
+      AgentActivityDeepReviewTestRowClass & " " &
+        AgentActivityDeepReviewTestPassClass
+    check testRowClass(false) ==
+      AgentActivityDeepReviewTestRowClass & " " &
+        AgentActivityDeepReviewTestFailClass
+
+# ===========================================================================
 # Welcome screen tests (§1.73 — welcome-screen Karax -> IsoNim migration,
 # mission goal #3).  Covers the rendering cases already exercised by
 # welcome_screen.spec.ts and the WelcomeScreenVM headless suite.
