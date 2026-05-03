@@ -47,6 +47,7 @@ import viewmodels/agent_activity_deepreview_vm
 import viewmodels/agent_workspace_vm
 import viewmodels/deepreview_vm
 import viewmodels/welcome_screen_vm
+import app/isonim_app_shell
 import views/isonim_state_view
 import views/isonim_calltrace_view
 import views/isonim_debug_controls_view
@@ -9611,3 +9612,46 @@ suite "IsoNim DeepReview Panel — helpers":
       "deepreview-mode-btn deepreview-mode-btn-active"
     check isonim_deepreview_view.lineClass("added") ==
       "deepreview-unified-line deepreview-unified-line-added"
+
+# ===========================================================================
+# Standalone IsoNim app shell tests (§5.3 — app-level structure).
+# ===========================================================================
+
+suite "IsoNim App Shell — structure":
+
+  test "renders one header and the expected section host list":
+    let r = MockRenderer()
+    let shell = renderIsoNimAppShell(r)
+
+    check shell.root.kind == mnkElement
+    check shell.root.attributes["class"] == "isonim-app-shell"
+
+    let header = findByClass(shell.root, IsoNimAppHeaderClass)
+    check header != nil
+    check header.textContent == IsoNimAppHeaderText
+
+    let sections = findAllByClass(shell.root, IsoNimPanelSectionClass)
+    let contents = findAllByClass(shell.root, IsoNimSectionContentClass)
+    check sections.len == IsoNimAppSectionSpecs.len
+    check contents.len == IsoNimAppSectionSpecs.len
+    check shell.sections.len == IsoNimAppSectionSpecs.len
+
+    for i, spec in IsoNimAppSectionSpecs:
+      check sections[i].attributes["id"] == sectionId(spec.panelId)
+      check findByClass(sections[i], IsoNimSectionHeaderClass).textContent ==
+        spec.title
+      check shell.sections[i].panelId == spec.panelId
+      check shell.sections[i].title == spec.title
+      check shell.sections[i].content.attributes["class"] ==
+        IsoNimSectionContentClass
+
+  test "does not allocate an Editor host outside GoldenLayout context":
+    let r = MockRenderer()
+    let shell = renderIsoNimAppShell(r)
+
+    for spec in IsoNimAppSectionSpecs:
+      check spec.panelId != "editor"
+      check spec.title != "Editor"
+
+    check findByClass(shell.root, "editor-component") == nil
+    check findByClass(shell.root, "monaco-editor") == nil

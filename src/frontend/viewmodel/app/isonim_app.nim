@@ -32,10 +32,9 @@ when not defined(js):
 
 import isonim/web/dom_api as isonim_dom
 import isonim/web/web_renderer
-import isonim/dsl/ui
-import isonim/core/computation  # createRenderEffect — emitted by the DSL
 
 import ../session_vm
+import ./isonim_app_shell
 
 # Import all IsoNim view mount procs.
 # Each view reads from its corresponding ViewModel's signals and renders
@@ -66,34 +65,6 @@ type
     session*: SessionViewModel
 
 # ---------------------------------------------------------------------------
-# Panel section helper
-# ---------------------------------------------------------------------------
-
-proc addPanelSection(r: WebRenderer; parent: isonim_dom.Element;
-                     panelId: string; title: string): isonim_dom.Element =
-  ## Create a collapsible section wrapper for a panel.
-  ##
-  ## Structure:
-  ##   <div class="isonim-panel-section" id="isonim-section-{panelId}">
-  ##     <h3 class="isonim-section-header">{title}</h3>
-  ##     <div class="isonim-section-content">
-  ##       <!-- panel content mounted here -->
-  ##     </div>
-  ##   </div>
-  ##
-  ## Returns the inner content div so the caller can mount the panel into it.
-  var content: isonim_dom.Element
-  let section = ui(r):
-    tdiv(class = "isonim-panel-section",
-         id = "isonim-section-" & panelId):
-      h3(class = "isonim-section-header"):
-        text title
-      tdiv(ref = content, class = "isonim-section-content"):
-        discard
-  r.appendChild(parent, section)
-  content
-
-# ---------------------------------------------------------------------------
 # App creation
 # ---------------------------------------------------------------------------
 
@@ -105,8 +76,10 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   ## running in a context where IsoNim is not enabled), this proc returns
   ## nil and does nothing.
   ##
-  ## Each panel is mounted into its own section wrapper. The layout is a
-  ## simple vertical stack for now — GoldenLayout integration comes later.
+  ## The app shell is emitted as one IsoNim ``ui()`` tree.  Each mounted
+  ## panel gets a stable ``.isonim-section-content`` host inside that tree.
+  ## The layout is a simple vertical stack for now — GoldenLayout / app
+  ## layout-manager integration remains the next architectural layer.
   ## The panels read directly from the SessionViewModel's signals (the
   ## same-process fast path), so all updates are automatic.
   let root = isonim_dom.document.getElementById(cstring"isonim-app")
@@ -114,53 +87,23 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
     return nil
 
   let r = WebRenderer()
-
-  # App header — identifies this as the IsoNim rendering surface
-  let appHeader = ui(r):
-    tdiv(class = "isonim-app-header"):
-      text "IsoNim Rendering (experimental)"
-  r.appendChild(root, appHeader)
+  let shell = renderIsoNimAppShell(r)
+  isonim_dom.appendChild(isonim_dom.Node(root), isonim_dom.Node(shell.root))
 
   # Debug controls are mounted separately into `#isonim-debug-controls`
   # (defined in index.html) by `tryMountIsoNimDebugControls` in debug.nim.
   # Do NOT mount them here — that would create duplicate elements with the
   # same IDs (e.g. `#next-debug`), breaking Playwright locators.
 
-  # --- State (Locals / Globals / Watches) ---
-  let stateSection = addPanelSection(r, root, "state", "State")
-  mountIsoNimStatePanel(stateSection, session.stateVM)
-
-  # --- Calltrace ---
-  let calltraceSection = addPanelSection(r, root, "calltrace", "Calltrace")
-  mountIsoNimCalltrace(calltraceSection, session.calltraceVM)
-
-  # --- Event Log ---
-  let eventLogSection = addPanelSection(r, root, "event-log", "Event Log")
-  mountIsoNimEventLog(eventLogSection, session.eventLogVM)
-
-  # --- Flow ---
-  let flowSection = addPanelSection(r, root, "flow", "Flow")
-  mountIsoNimFlow(flowSection, session.flowVM)
-
-  # --- Timeline ---
-  let timelineSection = addPanelSection(r, root, "timeline", "Timeline")
-  mountIsoNimTimeline(timelineSection, session.timelineVM)
-
-  # --- Search ---
-  let searchSection = addPanelSection(r, root, "search", "Search")
-  mountIsoNimSearch(searchSection, session.searchVM)
-
-  # --- Point List ---
-  let pointListSection = addPanelSection(r, root, "point-list", "Point List")
-  mountIsoNimPointList(pointListSection, session.pointListVM)
-
-  # --- Scratchpad ---
-  let scratchpadSection = addPanelSection(r, root, "scratchpad", "Scratchpad")
-  mountIsoNimScratchpadPanel(scratchpadSection, session.scratchpadVM)
-
-  # --- Shell ---
-  let shellSection = addPanelSection(r, root, "shell", "Shell")
-  mountIsoNimShell(shellSection, session.shellVM)
+  mountIsoNimStatePanel(shell.sections[0].content, session.stateVM)
+  mountIsoNimCalltrace(shell.sections[1].content, session.calltraceVM)
+  mountIsoNimEventLog(shell.sections[2].content, session.eventLogVM)
+  mountIsoNimFlow(shell.sections[3].content, session.flowVM)
+  mountIsoNimTimeline(shell.sections[4].content, session.timelineVM)
+  mountIsoNimSearch(shell.sections[5].content, session.searchVM)
+  mountIsoNimPointList(shell.sections[6].content, session.pointListVM)
+  mountIsoNimScratchpadPanel(shell.sections[7].content, session.scratchpadVM)
+  mountIsoNimShell(shell.sections[8].content, session.shellVM)
 
   # Note: Editor is not mounted here because it requires additional
   # parameters (index, path, isExpansion, expansionDepth) that depend
