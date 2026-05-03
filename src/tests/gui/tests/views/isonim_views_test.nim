@@ -45,6 +45,7 @@ import viewmodels/command_palette_vm
 import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_deepreview_vm
 import viewmodels/agent_workspace_vm
+import viewmodels/deepreview_vm
 import viewmodels/welcome_screen_vm
 import views/isonim_state_view
 import views/isonim_calltrace_view
@@ -72,6 +73,7 @@ import views/isonim_command_palette_view
 import views/isonim_agent_activity_view
 import views/isonim_agent_activity_deepreview_view
 import views/isonim_agent_workspace_view
+import views/isonim_deepreview_view
 import views/isonim_welcome_screen_view
 
 # ---------------------------------------------------------------------------
@@ -9312,7 +9314,7 @@ suite "IsoNim Agent Workspace Panel — structure":
 
       let editor = findByClass(panel, AgentWorkspaceEditorClass)
       check editor != nil
-      check editor.attributes["id"] == editorId(9)
+      check editor.attributes["id"] == isonim_agent_workspace_view.editorId(9)
 
       dispose()
 
@@ -9403,15 +9405,209 @@ suite "IsoNim Agent Workspace Panel — interactions":
 suite "IsoNim Agent Workspace Panel — helpers":
 
   test "helper text matches the legacy selector and label surface":
-    check editorId(7) == "agent-workspace-editor-7"
+    check isonim_agent_workspace_view.editorId(7) ==
+      "agent-workspace-editor-7"
     check isonim_agent_workspace_view.fileBasename("/repo/src/main.nim") ==
       "main.nim"
     check isonim_agent_workspace_view.fileBasename("main.nim") == "main.nim"
-    check viewLabel(awvkAgentWorkspace) == "Agent Workspace"
-    check viewLabel(awvkUserWorkspace) == "User Workspace"
-    check toggleViewText(awvkAgentWorkspace) == "Switch to User"
-    check toggleViewText(awvkUserWorkspace) == "Switch to Agent"
-    check fileItemClass(false) == "agent-workspace-file-item"
-    check fileItemClass(true) == "agent-workspace-file-item selected"
-    check overlayToggleText(true) == "Hide Coverage"
-    check overlayToggleText(false) == "Show Coverage"
+    check isonim_agent_workspace_view.viewLabel(awvkAgentWorkspace) ==
+      "Agent Workspace"
+    check isonim_agent_workspace_view.viewLabel(awvkUserWorkspace) ==
+      "User Workspace"
+    check isonim_agent_workspace_view.toggleViewText(awvkAgentWorkspace) ==
+      "Switch to User"
+    check isonim_agent_workspace_view.toggleViewText(awvkUserWorkspace) ==
+      "Switch to Agent"
+    check isonim_agent_workspace_view.fileItemClass(false) ==
+      "agent-workspace-file-item"
+    check isonim_agent_workspace_view.fileItemClass(true) ==
+      "agent-workspace-file-item selected"
+    check isonim_agent_workspace_view.overlayToggleText(true) == "Hide Coverage"
+    check isonim_agent_workspace_view.overlayToggleText(false) == "Show Coverage"
+
+# ===========================================================================
+# DeepReview panel tests (§1.77 — deepreview Karax -> IsoNim migration,
+# mission goal #3).
+# ===========================================================================
+
+proc makeDeepReviewFileEntry(path: string; status = "M"; coverage = "2/4"):
+    DeepReviewFileEntry =
+  DeepReviewFileEntry(
+    path: path,
+    diffStatus: status,
+    linesAdded: 2,
+    linesRemoved: 1,
+    coverageText: coverage,
+    hasCoverage: true,
+    hasFlow: true,
+  )
+
+proc makeDeepReviewUnifiedFile(): DeepReviewUnifiedFileEntry =
+  DeepReviewUnifiedFileEntry(
+    fileIndex: 0,
+    path: "/repo/src/main.nim",
+    diffStatus: "M",
+    linesAdded: 1,
+    linesRemoved: 1,
+    hunks: @[
+      DeepReviewHunkEntry(
+        oldStart: 3,
+        oldCount: 2,
+        newStart: 3,
+        newCount: 2,
+        lines: @[
+          DeepReviewDiffLineEntry(
+            lineType: "removed",
+            content: "old",
+            oldLine: 3,
+          ),
+          DeepReviewDiffLineEntry(
+            lineType: "added",
+            content: "new",
+            newLine: 3,
+            values: @[
+              DeepReviewFlowValueEntry(
+                name: "x",
+                value: "42",
+                truncated: false,
+              )
+            ],
+          ),
+        ],
+      )
+    ],
+  )
+
+suite "IsoNim DeepReview Panel — structure":
+
+  test "unloaded VM renders the legacy no-data error":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+
+      let panel = renderDeepReviewPanel(r, vm, componentId = 2)
+
+      check panel.kind == mnkElement
+      check panel.attributes["class"] == DeepReviewContainerClass
+      let err = findByClass(panel, DeepReviewErrorClass)
+      check err != nil
+      check err.textContent == DeepReviewNoDataText
+
+      dispose()
+
+  test "full-files mode renders header file list editor and calltrace":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+      let panel = renderDeepReviewPanel(r, vm, componentId = 3)
+
+      vm.setHasData(true)
+      vm.setHeader("DeepReview: parser", "abcdef123456...", "1 files | 2 recordings | 9ms")
+      vm.setFiles(@[makeDeepReviewFileEntry("/repo/src/main.nim")])
+      vm.setExecutionState(0, 2, "main")
+      vm.setIterationState(0, 3)
+      vm.setCallNodes(@[
+        DeepReviewCallNodeEntry(name: "main", executionCount: 2, depth: 0),
+        DeepReviewCallNodeEntry(name: "helper", executionCount: 1, depth: 1),
+      ])
+
+      check findByClass(panel, DeepReviewHeaderClass) != nil
+      check findByClass(panel, "deepreview-session-title").textContent ==
+        "DeepReview: parser"
+      check findByClass(panel, "deepreview-stats").textContent ==
+        "1 files | 2 recordings | 9ms"
+      check findByClass(panel, DeepReviewFileListClass) != nil
+      check findByClass(panel, "deepreview-file-name").textContent == "main.nim"
+      check findByClass(panel, "deepreview-coverage-badge").textContent == "2/4"
+      check findByClass(panel, DeepReviewEditorClass).attributes["id"] ==
+        isonim_deepreview_view.editorId(3)
+      check findAllByClass(panel, "deepreview-calltrace-node").len == 2
+
+      dispose()
+
+  test "unified mode renders hunks line rows and flow values":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+      let panel = renderDeepReviewPanel(r, vm, componentId = 4)
+
+      vm.setHasData(true)
+      vm.setViewMode(drpvmUnified)
+      vm.setHeader("", "abcdef", "1 files | 1 recordings | 1ms")
+      vm.setUnifiedFiles(@[makeDeepReviewUnifiedFile()])
+
+      check findByClass(panel, DeepReviewUnifiedDiffClass) != nil
+      check findByClass(panel, "deepreview-unified-file-path").textContent ==
+        "/repo/src/main.nim"
+      let rows = findAllByClass(panel, "deepreview-unified-line")
+      check rows.len == 2
+      check "deepreview-unified-line-removed" in rows[0].attributes["class"]
+      check "deepreview-unified-line-added" in rows[1].attributes["class"]
+      check findByClass(rows[1], "flow-parallel-value-name").textContent ==
+        "<x>"
+      check findByClass(rows[1], "flow-parallel-value-box").textContent ==
+        "42"
+
+      dispose()
+
+suite "IsoNim DeepReview Panel — interactions":
+
+  test "file mode and hunk clicks update VM and invoke callbacks":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+      let r = MockRenderer()
+      var selectedFile = -1
+      var selectedMode = drpvmFullFiles
+      var selectedHunk = (-1, -1)
+      let callbacks = DeepReviewCallbacks(
+        onSelectFile: proc(index: int) = (selectedFile = index),
+        onSetViewMode: proc(mode: DeepReviewPanelViewMode) =
+          (selectedMode = mode),
+        onSelectHunk: proc(fileIdx, hunkIdx: int) =
+          (selectedHunk = (fileIdx, hunkIdx)),
+      )
+      let panel = renderDeepReviewPanel(r, vm, componentId = 5,
+                                        callbacks = callbacks)
+
+      vm.setHasData(true)
+      vm.setFiles(@[
+        makeDeepReviewFileEntry("/repo/a.nim"),
+        makeDeepReviewFileEntry("/repo/b.nim"),
+      ])
+      findAllByClass(panel, "deepreview-file-item")[1].fireEvent("click")
+      check selectedFile == 1
+      check vm.selectedFileIndex.val == 1
+
+      findAllByClass(panel, "deepreview-mode-btn")[1].fireEvent("click")
+      check selectedMode == drpvmUnified
+      check vm.viewMode.val == drpvmUnified
+
+      vm.setUnifiedFiles(@[makeDeepReviewUnifiedFile()])
+      findByClass(panel, "deepreview-unified-hunk-header").fireEvent("click")
+      check selectedHunk == (0, 0)
+
+      dispose()
+
+suite "IsoNim DeepReview Panel — helpers":
+
+  test "helper text matches the legacy selector and class surface":
+    check isonim_deepreview_view.editorId(8) == "deepreview-editor-8"
+    check isonim_deepreview_view.fileBasename("/repo/src/main.nim") ==
+      "main.nim"
+    check isonim_deepreview_view.diffStatusCssClass("A") ==
+      " deepreview-diff-added"
+    check isonim_deepreview_view.diffStatusCssClass("M") ==
+      " deepreview-diff-modified"
+    check isonim_deepreview_view.diffStatusCssClass("D") ==
+      " deepreview-diff-deleted"
+    check isonim_deepreview_view.diffLinesSummary(2, 1) == "+2 / -1"
+    check isonim_deepreview_view.fileItemClass(true) ==
+      "deepreview-file-item selected"
+    check isonim_deepreview_view.modeButtonClass(true) ==
+      "deepreview-mode-btn deepreview-mode-btn-active"
+    check isonim_deepreview_view.lineClass("added") ==
+      "deepreview-unified-line deepreview-unified-line-added"

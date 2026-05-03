@@ -19,7 +19,32 @@ import
   ui_imports, ../utils, ../communication,
   std/[strformat, jsconsole]
 
+import std/json
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ../viewmodel/store/replay_data_store
+from ../viewmodel/store/types as vmtypes import
+  DeepReviewPanelViewMode, DeepReviewTraceContextEntry, DeepReviewFileEntry,
+  DeepReviewFlowValueEntry, DeepReviewDiffLineEntry, DeepReviewHunkEntry,
+  DeepReviewUnifiedFileEntry, DeepReviewCallNodeEntry,
+  drpvmFullFiles, drpvmUnified
+import ../viewmodel/viewmodels/deepreview_vm
+when defined(js):
+  from isonim/web/dom_api as isonim_dom_api import nil
+  from ../viewmodel/views/isonim_deepreview_view import
+    mountIsoNimDeepReviewPanel, DeepReviewCallbacks
+
 type langstring = cstring
+
+var deepReviewVMStore: ReplayDataStore
+var deepReviewVMInstances*: JsAssoc[int, DeepReviewVM] =
+  JsAssoc[int, DeepReviewVM]{}
+var deepReviewComponentRefs: JsAssoc[int, DeepReviewComponent] =
+  JsAssoc[int, DeepReviewComponent]{}
+var isoNimDeepReviewMountedIds {.used.}: JsAssoc[int, bool] =
+  JsAssoc[int, bool]{}
+
+proc syncLegacyDeepReviewIntoVM*(self: DeepReviewComponent)
+proc tryMountIsoNimDeepReviewPanel*(componentId: int)
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers
@@ -112,6 +137,22 @@ proc guessLanguageFromPath(path: langstring): cstring =
   of "md": return cstring"markdown"
   of "sh", "bash": return cstring"shell"
   else: return cstring"plaintext"
+
+proc safeStr(s: cstring): string =
+  if s.isNil:
+    ""
+  else:
+    $s
+
+proc legacyViewModeToVm(mode: DeepReviewViewMode): DeepReviewPanelViewMode =
+  case mode
+  of FullFiles: drpvmFullFiles
+  of Unified: drpvmUnified
+
+proc vmViewModeToLegacy(mode: DeepReviewPanelViewMode): DeepReviewViewMode =
+  case mode
+  of drpvmFullFiles: FullFiles
+  of drpvmUnified: Unified
 
 proc buildSourcePlaceholder(file: DeepReviewFileData): cstring =
   ## Build a placeholder source text using line numbers from coverage
@@ -302,11 +343,50 @@ proc buildInlineValueDecorations(file: DeepReviewFileData, executionIndex: int):
 # Forward declarations for mutual references.
 proc updateDecorations(self: DeepReviewComponent)
 
+proc ensureDeepReviewVM(self: DeepReviewComponent): DeepReviewVM =
+  if self.isNil:
+    return nil
+  if deepReviewVMInstances.hasKey(self.id):
+    return deepReviewVMInstances[self.id]
+
+  if deepReviewVMStore.isNil:
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+      when defined(js):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
+      else:
+        var fut = newFuture[JsonNode]("stub-backend")
+        fut.complete(%*{})
+        result = fut
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
+    deepReviewVMStore = createReplayDataStore(stubBackend)
+
+  result = createDeepReviewVM(deepReviewVMStore)
+  deepReviewVMInstances[self.id] = result
+
+proc initDeepReviewVMWithStore*(store: ReplayDataStore) =
+  deepReviewVMStore = store
+  deepReviewVMInstances = JsAssoc[int, DeepReviewVM]{}
+  isoNimDeepReviewMountedIds = JsAssoc[int, bool]{}
+  for _, component in deepReviewComponentRefs:
+    discard ensureDeepReviewVM(component)
+    component.syncLegacyDeepReviewIntoVM()
+    tryMountIsoNimDeepReviewPanel(component.id)
+
+proc initDeepReviewVM*(self: DeepReviewComponent) =
+  discard ensureDeepReviewVM(self)
+
 method register*(self: DeepReviewComponent, api: MediatorWithSubscribers) =
   ## Register the component with the mediator event system.
   ## DeepReview operates in offline mode so it does not subscribe to
   ## any debugger events.
   self.api = api
+  self.initDeepReviewVM()
+  self.syncLegacyDeepReviewIntoVM()
 
 proc initEditor(self: DeepReviewComponent) =
   ## Lazily initialise the Monaco editor after the DOM container is rendered.
@@ -409,6 +489,7 @@ proc switchToFile(self: DeepReviewComponent, fileIndex: int) =
       if not model.isNil:
         drSetModelLanguage(model, lang)
     self.updateDecorations()
+  self.syncLegacyDeepReviewIntoVM()
 
 # ---------------------------------------------------------------------------
 # Render helpers
@@ -695,6 +776,178 @@ proc splitSourceLines(file: DeepReviewFileData): seq[string] =
   if file.isNil or file.sourceContent.isNil or ($file.sourceContent).len == 0:
     return @[]
   result = ($file.sourceContent).split('\n')
+
+proc legacyTraceContextsToVm(drData: DeepReviewData):
+    seq[DeepReviewTraceContextEntry] =
+  result = @[]
+  if drData.isNil:
+    return
+  for ctx in drData.traceContexts:
+    result.add(DeepReviewTraceContextEntry(
+      id: ctx.id,
+      label: safeStr(ctx.label),
+    ))
+
+proc legacyFileToVm(file: DeepReviewFileData): DeepReviewFileEntry =
+  let status = if file.isNil or file.diff.isNil: "" else: safeStr(file.diff.status)
+  let added = if file.isNil or file.diff.isNil: 0 else: file.diff.linesAdded
+  let removed = if file.isNil or file.diff.isNil: 0 else: file.diff.linesRemoved
+  result = DeepReviewFileEntry(
+    path: if file.isNil: "" else: safeStr(file.path),
+    diffStatus: status,
+    linesAdded: added,
+    linesRemoved: removed,
+    coverageText: safeStr(coverageSummary(file)),
+    hasCoverage: not file.isNil and not file.flags.isNil and file.flags.hasCoverage,
+    hasFlow: not file.isNil and not file.flags.isNil and file.flags.hasFlow,
+  )
+
+proc legacyFilesToVm(drData: DeepReviewData): seq[DeepReviewFileEntry] =
+  result = @[]
+  if drData.isNil:
+    return
+  for file in drData.files:
+    result.add(legacyFileToVm(file))
+
+proc legacyLineValuesToVm(file: DeepReviewFileData; lineNum: int):
+    seq[DeepReviewFlowValueEntry] =
+  result = @[]
+  for value in flowValuesForLine(file, lineNum):
+    result.add(DeepReviewFlowValueEntry(
+      name: value.name,
+      value: value.value,
+      truncated: value.truncated,
+    ))
+
+proc legacyHunkToVm(file: DeepReviewFileData; hunk: DeepReviewHunk):
+    DeepReviewHunkEntry =
+  result = DeepReviewHunkEntry(
+    oldStart: hunk.oldStart,
+    oldCount: hunk.oldCount,
+    newStart: hunk.newStart,
+    newCount: hunk.newCount,
+    lines: @[],
+  )
+  for line in hunk.lines:
+    let lineType = safeStr(line.`type`)
+    result.lines.add(DeepReviewDiffLineEntry(
+      lineType: lineType,
+      content: safeStr(line.content),
+      oldLine: line.oldLine,
+      newLine: line.newLine,
+      values:
+        if lineType != "removed" and line.newLine > 0:
+          legacyLineValuesToVm(file, line.newLine)
+        else:
+          @[],
+    ))
+
+proc legacyUnifiedFilesToVm(drData: DeepReviewData):
+    seq[DeepReviewUnifiedFileEntry] =
+  result = @[]
+  if drData.isNil:
+    return
+  for fileIdx, file in drData.files:
+    if file.diff.isNil or file.diff.hunks.len == 0:
+      continue
+    var hunks: seq[DeepReviewHunkEntry] = @[]
+    for hunk in file.diff.hunks:
+      hunks.add(legacyHunkToVm(file, hunk))
+    result.add(DeepReviewUnifiedFileEntry(
+      fileIndex: fileIdx,
+      path: safeStr(file.path),
+      diffStatus: safeStr(file.diff.status),
+      linesAdded: file.diff.linesAdded,
+      linesRemoved: file.diff.linesRemoved,
+      hunks: hunks,
+    ))
+
+proc flattenCallNodes(nodes: seq[DeepReviewCallNode]; depth: int;
+                      outNodes: var seq[DeepReviewCallNodeEntry]) =
+  for node in nodes:
+    if node.isNil:
+      continue
+    outNodes.add(DeepReviewCallNodeEntry(
+      name: safeStr(node.name),
+      executionCount: node.executionCount,
+      depth: depth,
+    ))
+    flattenCallNodes(node.children, depth + 1, outNodes)
+
+proc legacyCallNodesToVm(drData: DeepReviewData): seq[DeepReviewCallNodeEntry] =
+  result = @[]
+  if drData.isNil or drData.callTrace.isNil:
+    return
+  flattenCallNodes(drData.callTrace.nodes, 0, result)
+
+proc selectedFlowCount(self: DeepReviewComponent): int =
+  let file = self.selectedFile()
+  if file.isNil:
+    0
+  else:
+    file.flow.len
+
+proc selectedFunctionKey(self: DeepReviewComponent): string =
+  let file = self.selectedFile()
+  if file.isNil or self.selectedExecutionIndex < 0 or
+     self.selectedExecutionIndex >= file.flow.len:
+    "?"
+  else:
+    safeStr(file.flow[self.selectedExecutionIndex].functionKey)
+
+proc selectedMaxIterations(self: DeepReviewComponent): int =
+  let file = self.selectedFile()
+  if file.isNil:
+    return 0
+  for loop in file.loops:
+    result = max(result, loop.totalIterations)
+
+proc syncLegacyDeepReviewIntoVM*(self: DeepReviewComponent) =
+  if self.isNil:
+    return
+  deepReviewComponentRefs[self.id] = self
+  if self.glEmbedded and not self.drData.isNil:
+    let sharedIdx = self.data.deepReviewSelectedFileIndex
+    if sharedIdx >= 0 and sharedIdx < self.drData.files.len:
+      self.selectedFileIndex = sharedIdx
+  let vm = ensureDeepReviewVM(self)
+  if vm.isNil:
+    return
+  let drData = self.drData
+  vm.setHasData(not drData.isNil)
+  vm.setGlEmbedded(self.glEmbedded)
+  vm.setViewMode(legacyViewModeToVm(self.viewMode))
+  vm.setSelectedFileIndex(self.effectiveFileIndex())
+  vm.setSelectedTraceContextId(self.selectedTraceContextId)
+  vm.setSelectedHunks(self.drSelectedHunks)
+  vm.setHunkToolbarVisible(self.drHunkToolbarVisible)
+  vm.setHunkCopyFeedback(self.drHunkCopyFeedback)
+  if drData.isNil:
+    vm.clearPanel()
+    vm.setGlEmbedded(self.glEmbedded)
+    vm.setViewMode(legacyViewModeToVm(self.viewMode))
+    return
+
+  let commitDisplay =
+    if drData.commitSha.len > 12:
+      ($drData.commitSha)[0 ..< 12] & "..."
+    else:
+      safeStr(drData.commitSha)
+  let sessionTitle =
+    if drData.sessionTitle.isNil: "" else: safeStr(drData.sessionTitle)
+  vm.setHeader(
+    sessionTitle,
+    commitDisplay,
+    fmt"{drData.files.len} files | {drData.recordingCount} recordings | {drData.collectionTimeMs}ms")
+  vm.setTraceContexts(legacyTraceContextsToVm(drData))
+  vm.setFiles(legacyFilesToVm(drData))
+  vm.setSelectedFileIndex(self.effectiveFileIndex())
+  vm.setExecutionState(
+    self.selectedExecutionIndex, self.selectedFlowCount(),
+    self.selectedFunctionKey())
+  vm.setIterationState(self.selectedIteration, self.selectedMaxIterations())
+  vm.setUnifiedFiles(legacyUnifiedFilesToVm(drData))
+  vm.setCallNodes(legacyCallNodesToVm(drData))
 
 proc makeExpandAboveHandler(self: DeepReviewComponent, fileIdx, hunkIdx: int): proc(ev: Event, n: VNode) =
   ## Create a click handler for expanding context above a hunk.
@@ -1148,10 +1401,10 @@ proc exposeTestHelpers(self: DeepReviewComponent) =
   proc setExec(idx: int) =
     selfCapture.selectedExecutionIndex = idx
     selfCapture.updateDecorations()
-    redrawAll()
+    selfCapture.syncLegacyDeepReviewIntoVM()
   proc setIter(idx: int) =
     selfCapture.selectedIteration = idx
-    redrawAll()
+    selfCapture.syncLegacyDeepReviewIntoVM()
   proc setViewMode(mode: cstring) =
     ## Switch the view mode. Accepts "unified" or "fullfiles".
     let modeStr = $mode
@@ -1164,26 +1417,26 @@ proc exposeTestHelpers(self: DeepReviewComponent) =
       selfCapture.viewMode = FullFiles
       selfCapture.editorInitialized = false
       selfCapture.decorationCollection = nil
-    redrawAll()
+    selfCapture.syncLegacyDeepReviewIntoVM()
 
   proc setTraceContext(id: int) =
     ## Set the trace context to the given id.
     selfCapture.selectedTraceContextId = id
     selfCapture.updateDecorations()
-    redrawAll()
+    selfCapture.syncLegacyDeepReviewIntoVM()
 
   proc expandAbove(fileIdx: int, hunkIdx: int) =
     ## Expand context above a hunk by EXPAND_STEP lines.
     selfCapture.ensureExpansionState()
     let current = selfCapture.expandAbove.getExpand(fileIdx, hunkIdx)
     selfCapture.expandAbove.setExpand(fileIdx, hunkIdx, current + EXPAND_STEP)
-    redrawAll()
+    selfCapture.syncLegacyDeepReviewIntoVM()
   proc expandBelow(fileIdx: int, hunkIdx: int) =
     ## Expand context below a hunk by EXPAND_STEP lines.
     selfCapture.ensureExpansionState()
     let current = selfCapture.expandBelow.getExpand(fileIdx, hunkIdx)
     selfCapture.expandBelow.setExpand(fileIdx, hunkIdx, current + EXPAND_STEP)
-    redrawAll()
+    selfCapture.syncLegacyDeepReviewIntoVM()
 
   {.emit: """
   window.__deepreviewSetExecution = `setExec`;
@@ -1194,110 +1447,87 @@ proc exposeTestHelpers(self: DeepReviewComponent) =
   window.__deepreviewExpandBelow = `expandBelow`;
   """.}
 
-method render*(self: DeepReviewComponent): VNode =
-  ## Render the full DeepReview view with sidebar, editor, and call trace.
-  let drData = self.drData
+proc setDeepReviewViewMode(self: DeepReviewComponent;
+                           mode: DeepReviewPanelViewMode) =
+  self.viewMode = vmViewModeToLegacy(mode)
+  if self.viewMode == FullFiles:
+    self.editorInitialized = false
+    self.decorationCollection = nil
+  self.syncLegacyDeepReviewIntoVM()
 
-  # In GL-embedded mode the VCS panel owns file selection.  Sync the
-  # component's local index from the shared data-level index so that
-  # editor content, decorations and unified diff scroll position stay
-  # in sync when the user clicks a different file in the VCS panel.
-  if self.glEmbedded and not drData.isNil:
-    let sharedIdx = self.data.deepReviewSelectedFileIndex
-    if sharedIdx != self.selectedFileIndex and
-       sharedIdx >= 0 and sharedIdx < drData.files.len:
-      self.selectedFileIndex = sharedIdx
-      self.selectedExecutionIndex = 0
-      self.selectedIteration = 0
-      if self.editorInitialized and not self.editor.isNil:
-        let file = self.selectedFile()
-        if not file.isNil:
-          let content = buildSourcePlaceholder(file)
-          self.editor.drSetMonacoValue(content)
-          let lang = guessLanguageFromPath(file.path)
-          let model = self.editor.drGetMonacoModel()
-          if not model.isNil:
-            drSetModelLanguage(model, lang)
-        self.updateDecorations()
+proc setDeepReviewExecution(self: DeepReviewComponent; index: int) =
+  self.selectedExecutionIndex = index
+  self.updateDecorations()
+  self.syncLegacyDeepReviewIntoVM()
 
-  # Expose test helpers on the window object for E2E tests.
-  self.exposeTestHelpers()
+proc setDeepReviewIteration(self: DeepReviewComponent; index: int) =
+  self.selectedIteration = index
+  self.syncLegacyDeepReviewIntoVM()
 
-  # Schedule editor initialisation and unified diff scroll-to-file
-  # after the DOM has been rendered.
-  if not self.kxi.isNil:
-    self.kxi.afterRedraws.add(proc() =
-      self.initEditor()
-      # In unified diff mode, scroll to the selected file's section
-      # so that switching modes preserves the user's context.
-      if self.viewMode == Unified:
-        {.emit: """
-        var fileEl = document.querySelector(
-          '.deepreview-unified-file[data-file-index="' + `self`.selectedFileIndex + '"]');
-        if (fileEl) {
-          fileEl.scrollIntoView({ behavior: 'auto', block: 'start' });
-        }
-        """.}
+proc setDeepReviewTraceContext(self: DeepReviewComponent; id: int) =
+  self.selectedTraceContextId = id
+  self.updateDecorations()
+  self.syncLegacyDeepReviewIntoVM()
+
+proc selectDeepReviewHunk(self: DeepReviewComponent; fileIdx, hunkIdx: int) =
+  self.toggleDrHunkSelection(fileIdx, hunkIdx)
+  self.syncLegacyDeepReviewIntoVM()
+
+proc clearSelectedDeepReviewHunks(self: DeepReviewComponent) =
+  self.clearDrHunkSelection()
+  self.syncLegacyDeepReviewIntoVM()
+
+proc afterDeepReviewDynamicRender(self: DeepReviewComponent) =
+  self.initEditor()
+  if self.viewMode == Unified:
+    {.emit: """
+    var fileEl = document.querySelector(
+      '.deepreview-unified-file[data-file-index="' + `self`.selectedFileIndex + '"]');
+    if (fileEl) {
+      fileEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }
+    """.}
+
+proc tryMountIsoNimDeepReviewPanel*(componentId: int) =
+  when defined(js):
+    if isoNimDeepReviewMountedIds.hasKey(componentId) and
+       isoNimDeepReviewMountedIds[componentId]:
+      return
+    if not deepReviewComponentRefs.hasKey(componentId):
+      return
+    let component = deepReviewComponentRefs[componentId]
+    let vm = ensureDeepReviewVM(component)
+    if vm.isNil:
+      return
+    let container = document.getElementById(
+      cstring(fmt"deepReviewComponent-{componentId}"))
+    if container.isNil:
+      return
+    component.exposeTestHelpers()
+    component.syncLegacyDeepReviewIntoVM()
+    let callbacks = DeepReviewCallbacks(
+      onSelectFile: proc(index: int) =
+        component.switchToFile(index),
+      onSetExecution: proc(index: int) =
+        component.setDeepReviewExecution(index),
+      onSetIteration: proc(index: int) =
+        component.setDeepReviewIteration(index),
+      onSetTraceContext: proc(id: int) =
+        component.setDeepReviewTraceContext(id),
+      onSetViewMode: proc(mode: DeepReviewPanelViewMode) =
+        component.setDeepReviewViewMode(mode),
+      onSelectHunk: proc(fileIdx, hunkIdx: int) =
+        component.selectDeepReviewHunk(fileIdx, hunkIdx),
+      onCopySelectedHunks: proc() =
+        component.copyDrSelectedHunksAsPatch()
+        component.syncLegacyDeepReviewIntoVM(),
+      onClearSelectedHunks: proc() =
+        component.clearSelectedDeepReviewHunks(),
+      afterDynamicRender: proc() =
+        component.afterDeepReviewDynamicRender(),
     )
-
-  if drData.isNil:
-    return buildHtml(tdiv(class = "deepreview-container")):
-      tdiv(class = "deepreview-error"):
-        text "No DeepReview data loaded. Use --deepreview <path> to load a file."
-
-  # Truncate commit SHA for display.
-  let commitDisplay = if drData.commitSha.len > 12:
-    cstring(($drData.commitSha)[0 ..< 12] & "...")
+    mountIsoNimDeepReviewPanel(
+      cast[isonim_dom_api.Element](container), vm, componentId, callbacks)
+    isoNimDeepReviewMountedIds[componentId] = true
   else:
-    drData.commitSha
-
-  # Session title: use the sessionTitle field if present, otherwise
-  # fall back to the commit-based display.
-  let hasSessionTitle = not drData.sessionTitle.isNil and ($drData.sessionTitle).len > 0
-
-  result = buildHtml(tdiv(class = "deepreview-container")):
-    # Header bar with session title, trace context selector, view mode
-    # toggle, and summary statistics. Compact layout (32-36px height)
-    # matching the CodeTracer status bar style.
-    tdiv(class = "deepreview-header"):
-      if hasSessionTitle:
-        span(class = "deepreview-session-title"):
-          text drData.sessionTitle
-      span(class = "deepreview-commit"):
-        text fmt"Commit: {commitDisplay}"
-      renderTraceContextSelector(self)
-      if not self.glEmbedded:
-        # Only show view mode toggle when the component owns both views.
-        # In GL-embedded mode, the unified diff is always shown and file
-        # browsing is handled by the separate filesystem panel.
-        renderViewModeToggle(self)
-      span(class = "deepreview-stats"):
-        text fmt"{drData.files.len} files | {drData.recordingCount} recordings | {drData.collectionTimeMs}ms"
-
-    if self.glEmbedded:
-      # GL-embedded mode: render only the unified diff view. The file
-      # list and calltrace are handled by separate GL panels (filesystem
-      # and calltrace components).
-      tdiv(class = "deepreview-editor-area"):
-        renderUnifiedDiff(self)
-    else:
-      tdiv(class = "deepreview-body"):
-        # Left sidebar: file list.
-        renderFileList(self)
-
-        if self.viewMode == Unified:
-          # Center: unified diff view with all files as scrollable hunks.
-          tdiv(class = "deepreview-editor-area"):
-            renderUnifiedDiff(self)
-        else:
-          # Center: single-file editor area with sliders (original Full Files mode).
-          tdiv(class = "deepreview-editor-area"):
-            renderExecutionSlider(self)
-            renderLoopSlider(self)
-            tdiv(
-              class = "deepreview-editor",
-              id = cstring(fmt"deepreview-editor-{self.id}")
-            )
-
-        # Right sidebar: call trace panel.
-        renderCallTrace(self)
+    discard

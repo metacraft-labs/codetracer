@@ -545,6 +545,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
+      Content.DeepReview,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
       Content.AgentWorkspace,
@@ -731,6 +732,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           command.syncLegacyCommandPaletteIntoVM(
             CommandPaletteComponent(component))
           command.tryMountIsoNimCommandPalettePanel()
+
+        if state.content == Content.DeepReview:
+          deepreview.syncLegacyDeepReviewIntoVM(
+            DeepReviewComponent(component))
+          deepreview.tryMountIsoNimDeepReviewPanel(component.id)
 
         if state.content == Content.AgentActivity:
           agent_activity.syncLegacyAgentActivityIntoVM(

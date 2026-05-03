@@ -954,6 +954,55 @@ type
     testsFailed*: int
     functionsTraced*: int
 
+  DeepReviewPanelViewMode* = enum
+    drpvmFullFiles
+    drpvmUnified
+
+  DeepReviewTraceContextEntry* = object
+    id*: int
+    label*: string
+
+  DeepReviewFileEntry* = object
+    path*: string
+    diffStatus*: string
+    linesAdded*: int
+    linesRemoved*: int
+    coverageText*: string
+    hasCoverage*: bool
+    hasFlow*: bool
+
+  DeepReviewFlowValueEntry* = object
+    name*: string
+    value*: string
+    truncated*: bool
+
+  DeepReviewDiffLineEntry* = object
+    lineType*: string
+    content*: string
+    oldLine*: int
+    newLine*: int
+    values*: seq[DeepReviewFlowValueEntry]
+
+  DeepReviewHunkEntry* = object
+    oldStart*: int
+    oldCount*: int
+    newStart*: int
+    newCount*: int
+    lines*: seq[DeepReviewDiffLineEntry]
+
+  DeepReviewUnifiedFileEntry* = object
+    fileIndex*: int
+    path*: string
+    diffStatus*: string
+    linesAdded*: int
+    linesRemoved*: int
+    hunks*: seq[DeepReviewHunkEntry]
+
+  DeepReviewCallNodeEntry* = object
+    name*: string
+    executionCount*: int
+    depth*: int
+
 proc `==`*(a, b: AgentActivityDiffEntry): bool {.noSideEffect.} =
   a.id == b.id and
     a.path == b.path and
@@ -985,6 +1034,48 @@ proc `==`*(a, b: AgentWorkspaceSummary): bool {.noSideEffect.} =
     a.testsPassed == b.testsPassed and
     a.testsFailed == b.testsFailed and
     a.functionsTraced == b.functionsTraced
+
+proc `==`*(a, b: DeepReviewTraceContextEntry): bool {.noSideEffect.} =
+  a.id == b.id and a.label == b.label
+
+proc `==`*(a, b: DeepReviewFileEntry): bool {.noSideEffect.} =
+  a.path == b.path and
+    a.diffStatus == b.diffStatus and
+    a.linesAdded == b.linesAdded and
+    a.linesRemoved == b.linesRemoved and
+    a.coverageText == b.coverageText and
+    a.hasCoverage == b.hasCoverage and
+    a.hasFlow == b.hasFlow
+
+proc `==`*(a, b: DeepReviewFlowValueEntry): bool {.noSideEffect.} =
+  a.name == b.name and a.value == b.value and a.truncated == b.truncated
+
+proc `==`*(a, b: DeepReviewDiffLineEntry): bool {.noSideEffect.} =
+  a.lineType == b.lineType and
+    a.content == b.content and
+    a.oldLine == b.oldLine and
+    a.newLine == b.newLine and
+    a.values == b.values
+
+proc `==`*(a, b: DeepReviewHunkEntry): bool {.noSideEffect.} =
+  a.oldStart == b.oldStart and
+    a.oldCount == b.oldCount and
+    a.newStart == b.newStart and
+    a.newCount == b.newCount and
+    a.lines == b.lines
+
+proc `==`*(a, b: DeepReviewUnifiedFileEntry): bool {.noSideEffect.} =
+  a.fileIndex == b.fileIndex and
+    a.path == b.path and
+    a.diffStatus == b.diffStatus and
+    a.linesAdded == b.linesAdded and
+    a.linesRemoved == b.linesRemoved and
+    a.hunks == b.hunks
+
+proc `==`*(a, b: DeepReviewCallNodeEntry): bool {.noSideEffect.} =
+  a.name == b.name and
+    a.executionCount == b.executionCount and
+    a.depth == b.depth
 
 # -------------------------------------------------------------------
 # Agent Activity DeepReview panel — collapsible per-session pane that
