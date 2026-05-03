@@ -2318,19 +2318,10 @@ proc renderShrinkedStep(
     text ""
 
 proc makeFlowStepContainer(self: FlowComponent, step: FlowStep): Node =
-  var containerClass = "flow-loop-step-container"
-  var containerStyle = style()
-
-  let vNode = buildHtml(
-    tdiv(
-      id = &"flow-loop-step-container-{step.loop}-{step.iteration}",
-      class = containerClass,
-      style = containerStyle
-    )
-  ):
-    text ""
-
-  return vnodeToDom(vNode, KaraxInstance())
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(&"flow-loop-step-container-{step.loop}-{step.iteration}"))
+  result.setAttribute(cstring"class", cstring"flow-loop-step-container")
+  result.appendChild(document.createTextNode(cstring""))
 
 proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
   # create flow loop step container
