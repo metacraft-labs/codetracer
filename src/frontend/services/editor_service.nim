@@ -37,9 +37,16 @@ data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveSt
   else:
     discard
 
-  # run to entry
-  # jump or move in other ways
-  self.completeMoveResponses[response.location.highLevelPath] = response
+  # Run-to-entry, calltrace jumps, and other moves can arrive before a newly
+  # opened editor component has mounted and subscribed to CtCompleteMove.
+  # `openTab` above uses `location.path`, while some source-mapped traces use
+  # `highLevelPath` as the editor-facing key. Cache under both non-empty keys
+  # so `EditorViewComponent.afterInit` can replay the move regardless of which
+  # path variant named the tab.
+  if response.location.highLevelPath.len > 0:
+    self.completeMoveResponses[response.location.highLevelPath] = response
+  if response.location.path.len > 0 and response.location.path != response.location.highLevelPath:
+    self.completeMoveResponses[response.location.path] = response
 
 data.services.editor.onOpenedTab = proc(self: EditorService, response: OpenedTab) {.async.} =
   # kout2 response

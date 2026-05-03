@@ -198,6 +198,52 @@ proc makeTraceEntry(rrTicks: int; path: string; line: int;
     tracepointId: tracepointId,
   )
 
+proc loadFlowArgs(path: string; line: int; rrTicks: uint64): JsonNode =
+  ## Build the full ``CtLoadFlowArguments`` shape expected by the DAP
+  ## db-backend.  The frontend emits this from ``EditorViewComponent.loadFlow``.
+  %*{
+    "flowMode": 0,
+    "location": {
+      "path": path, "line": line,
+      "highLevelPath": path, "highLevelLine": line,
+      "rrTicks": rrTicks.int64,
+      "functionName": "", "highLevelFunctionName": "",
+      "lowLevelPath": "", "lowLevelLine": 0,
+      "functionFirst": 0, "functionLast": 0,
+      "event": 0, "expression": "", "offset": 0, "error": false,
+      "callstackDepth": 0, "originatingInstructionAddress": 0,
+      "key": "", "globalCallKey": "",
+      "expansionParents": [], "missingPath": false,
+    },
+  }
+
+proc flowLoopCounts(resp: JsonNode): tuple[loops: int, inLoopSteps: int] =
+  ## Count loop metadata and loop-tagged steps in a ``ct/load-flow`` response.
+  let body = resp.getOrDefault("body")
+  if body.isNil:
+    return
+  let viewUpdates = body.getOrDefault("viewUpdates")
+  if viewUpdates.isNil:
+    return
+  var entries: seq[JsonNode] = @[]
+  if viewUpdates.kind == JArray:
+    entries = viewUpdates.elems
+  elif viewUpdates.kind == JObject:
+    for _, value in viewUpdates.pairs:
+      entries.add(value)
+
+  for entry in entries:
+    if entry.isNil or entry.kind != JObject:
+      continue
+    let loopsNode = entry.getOrDefault("loops")
+    if not loopsNode.isNil and loopsNode.kind == JArray:
+      result.loops += loopsNode.len
+    let stepsNode = entry.getOrDefault("steps")
+    if not stepsNode.isNil and stepsNode.kind == JArray:
+      for step in stepsNode.elems:
+        if step.getOrDefault("loop").getInt(-1) >= 0:
+          inc result.inLoopSteps
+
 # ---------------------------------------------------------------------------
 # Suite 1: Editor loaded main.nr
 # Mirrors: "editor loaded main.nr file"
@@ -776,6 +822,79 @@ suite "Noir Space Ship: loop iteration via calltrace":
       # entry point in main.nr, not inside iterate_asteroids.
       check (staleHadError or staleLoopCount < goodLoopCount or
              staleLoopSteps < goodLoopSteps)
+
+  test "calltrace jump to already-open shield editor loads iterate_asteroids flow":
+    ## §5.8 view-layer regression guard.  The GUI failure path first opens
+    ## ``shield.nr`` through one calltrace target, then jumps to
+    ## ``iterate_asteroids`` in that already-open editor.  The editor's
+    ## per-component ``CtCompleteMove`` handler must treat either
+    ## ``location.path`` or ``location.highLevelPath`` as targeting the tab and
+    ## then call ``loadFlow`` with the fresh complete-move location.
+    ##
+    ## Headless DAP cannot observe DOM subscribers directly, so this test pins
+    ## the backend/VM shape the fixed source path consumes: after a same-file
+    ## calltrace jump, the latest complete-move event targets ``shield.nr`` and
+    ## a frontend-equivalent ``ct/load-flow`` at that exact location returns
+    ## the Noir loop data.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    for i in 0 ..< 10:
+      session.stepForward()
+
+    session.requestAndLoadCalltrace(depth = 30)
+    let initialLines = session.getCalltraceLines()
+    let damageIdx = findCallLineByName(initialLines, "calculate_damage")
+    if damageIdx < 0:
+      echo "  calculate_damage not present in calltrace; skipping"
+      check initialLines.len > 0
+    else:
+      session.calltraceJumpByLine(initialLines[damageIdx])
+      check session.getDebuggerStatus() == dsIdle
+      let openedShield = session.getCurrentFile()
+      echo "  opened editor target: ", openedShield
+      check openedShield.endsWith("shield.nr")
+
+      session.requestAndLoadCalltrace(depth = 30)
+      let shieldLines = session.getCalltraceLines()
+      let iterIdx = findCallLineByName(shieldLines, "iterate_asteroids")
+      if iterIdx < 0:
+        echo "  iterate_asteroids not present after shield jump; skipping"
+        check shieldLines.len > 0
+      else:
+        session.calltraceJumpByLine(shieldLines[iterIdx])
+        check session.getDebuggerStatus() == dsIdle
+
+        let completeMove = session.lastCompleteMoveEvent.getOrDefault("body")
+        check not completeMove.isNil
+        let location = completeMove.getOrDefault("location")
+        check not location.isNil
+        let path = location.getOrDefault("path").getStr("")
+        let highLevelPath = location.getOrDefault("highLevelPath").getStr("")
+        let line = location.getOrDefault("line").getInt(0)
+        let rrTicks = location.getOrDefault("rrTicks").getBiggestInt().uint64
+        echo "  iterate complete-move: path=", path,
+             " highLevelPath=", highLevelPath,
+             " line=", line, " rrTicks=", rrTicks
+
+        check path.endsWith("shield.nr") or highLevelPath.endsWith("shield.nr")
+        check rrTicks > 0'u64
+
+        let flowPath =
+          if path.len > 0:
+            path
+          else:
+            highLevelPath
+        let flowResp = session.sendRawDapRequest("ct/load-flow",
+          loadFlowArgs(flowPath, line, rrTicks))
+        check flowResp.getOrDefault("success").getBool(false)
+        let counts = flowLoopCounts(flowResp)
+        echo "  existing-editor load-flow: loops=", counts.loops,
+             " in-loop-steps=", counts.inLoopSteps
+        check counts.loops > 0
+        check counts.inLoopSteps > 0
 
 # ---------------------------------------------------------------------------
 # Suite 4: Event log populated

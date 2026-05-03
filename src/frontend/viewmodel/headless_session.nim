@@ -46,6 +46,8 @@ type
       ## Filesystem path to the trace folder being replayed.
     replayServerBin*: string
       ## Path to the replay-server binary.
+    lastCompleteMoveEvent*: JsonNode
+      ## Latest raw ``ct/complete-move`` event observed by the session.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -70,6 +72,7 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   ## with ``location.path``, ``location.line``, ``location.rrTicks``, etc.
   ## See ``src/db-backend/src/task.rs`` for the Rust definition.
   let body = completeMoveEvent.getOrDefault("body")
+  session.lastCompleteMoveEvent = completeMoveEvent
   if body.isNil:
     return
 

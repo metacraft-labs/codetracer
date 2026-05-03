@@ -2156,8 +2156,13 @@ method afterInit*(self: EditorViewComponent) {.async.} =
                    $cached.location.rrTicks & " line=" & $cached.location.line &
                    " resetFlow=" & $cached.resetFlow &
                    " highLevelPath=" & $cached.location.highLevelPath)
-    await self.onCompleteMove(self.service.completeMoveResponses[self.path])
+    let cached = self.service.completeMoveResponses[self.path]
+    await self.onCompleteMove(cached)
     discard jsDelete(self.service.completeMoveResponses[self.path])
+    if cached.location.path.len > 0:
+      discard jsDelete(self.service.completeMoveResponses[cached.location.path])
+    if cached.location.highLevelPath.len > 0:
+      discard jsDelete(self.service.completeMoveResponses[cached.location.highLevelPath])
   elif isShield:
     # Diagnostic: the cached move may have been stored under
     # ``highLevelPath`` while we look it up by ``self.path``.  Walk the
@@ -2237,7 +2242,12 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     else:
       self.path.split(cstring":")[0]
 
-  if response.location.path == sourceFilePath:
+  let moveTargetsEditor =
+    response.location.path == sourceFilePath or
+    (response.location.highLevelPath.len > 0 and
+     response.location.highLevelPath == sourceFilePath)
+
+  if moveTargetsEditor:
     self.data.services.debugger.stableBusy = false
     if not response.location.isExpanded:
       self.service.active = response.location.path
