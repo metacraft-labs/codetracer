@@ -1,5 +1,5 @@
 import
-  ui_imports, show_code, value, ../utils,
+  ui_imports, value, ../utils,
   ../communication, ../../common/ct_event
 
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
@@ -208,9 +208,6 @@ proc getLastKey(assoc: JsAssoc[cstring, ValueComponent]): cstring =
     keys.add(key)
 
   result = keys[keys.len - 1]
-
-proc codeCallView(id: cstring, path: cstring, line: int): VNode =
-  showCode(id, path, line-3, line+5, line)
 
 proc callOffset(depth: int): VStyle =
   style((StyleAttr.minWidth, cstring(&"{depth * 8}px")))
@@ -686,7 +683,6 @@ proc callView*(
         if contextMenu != @[]:
           showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.inExtension)
     ):
-      codeCallView(&"{key}", call.location.highLevelPath, call.location.highLevelLine)
       let count = if childrenCount > 0:
           childrenCount
         else:

@@ -1,6 +1,5 @@
 import
   ui_imports,
-  show_code,
   value,
   ../communication,
   ../event_helpers,
@@ -35,7 +34,6 @@ proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - se
 proc watchView(self: StateComponent): VNode
 proc loadLocals*(self: StateComponent)
 # proc headerView(self: StateComponent): VNode
-proc excerpt(self: StateComponent): VNode
 
 func watchInputId(self: StateComponent): cstring =
   cstring(fmt"watch-{self.id}")
@@ -390,33 +388,6 @@ proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscri
 # The base Component.render() returns a valid empty VNode for any
 # generic callers (auto-hide, vnodeToDom bridge). All real rendering
 # is handled by tryMountIsoNimStatePanel().
-
-# Show the current active debugger line on top of the search bar in the state component
-proc excerpt(self: StateComponent): VNode =
-  let path = self.location.path
-  let id = cstring(fmt"code-state-line-{self.id}")
-
-  if data.ui.editors.hasKey(path):
-    let editor = data.ui.editors[path]
-    let codeLine = self.location.line
-    let sourceCode = editor.tabInfo.sourceLines[codeLine - 1]
-
-    result = buildHtml(
-      tdiv(
-        id = id,
-        class = "code-state-line"
-      )
-    ):
-      span(): text cstring(fmt"{codeLine} | {sourceCode}")
-      showCode(id, path, codeLine-3, codeLine+5, codeLine)
-  else:
-    result = buildHtml(
-      tdiv(
-        id = id,
-        class = "code-state-line no-code"
-      )
-    ):
-      span(): text ""
 
 # proc headerView(self: StateComponent): VNode =
 #   result = buildHtml(

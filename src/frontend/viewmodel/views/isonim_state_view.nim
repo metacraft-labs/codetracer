@@ -63,7 +63,7 @@ proc displayIf(cond: bool): string =
 # line above the variables list as
 #   <div id="code-state-line-{id}" class="code-state-line">
 #     <span>{line} | {sourceCode}</span>
-#     <show_code .../>
+#     <ul class="code-tooltip">...</ul>
 #   </div>
 # falling back to ``class="code-state-line no-code"`` and a blank span
 # when the source for the current file was not yet loaded.  Keeping the
