@@ -59,24 +59,28 @@ var contextMenuHandlers*: seq[proc(ev: Event)] # app-global
 template componentContainerClass*(class: string = ""): cstring =
   cstring("component-container " & class)
 
-proc contextMenuOption(self: ContextMenu, key: int): VNode =
-  buildHtml(
-    tdiv(class = "context-menu-option",
-         onclick = proc =
-          self.actions[key]()
-          self.dom.toJs.classList.remove("visible"))):
-      tdiv(class = "context-menu-option-text"): text self.options[key]
-
 proc renderContextMenu*(self: ContextMenu): dom.Node =
-  let vNode = buildHtml(
-    tdiv(
-      class = "context-menu",
-      tabindex = "0",
-      onblur = proc =
-        self.dom.toJs.classList.remove("visible"))):
-    for key, option in self.options:
-      contextMenuOption(self, key)
-  return cast[dom.Node](vnodeToDom(vNode, KaraxInstance()))
+  let root = kdom.document.createElement("div")
+  root.class = cstring"context-menu"
+  root.setAttribute(cstring"tabindex", cstring"0")
+  root.addEventListener(cstring"blur", proc(e: Event) =
+    self.dom.toJs.classList.remove("visible"))
+
+  for key, option in self.options:
+    let action = self.actions[key]
+    let optionDom = kdom.document.createElement("div")
+    optionDom.class = cstring"context-menu-option"
+    optionDom.addEventListener(cstring"click", proc(e: Event) =
+      action()
+      self.dom.toJs.classList.remove("visible"))
+
+    let textDom = kdom.document.createElement("div")
+    textDom.class = cstring"context-menu-option-text"
+    textDom.appendChild(kdom.document.createTextNode(option))
+    optionDom.appendChild(textDom)
+    root.appendChild(optionDom)
+
+  return cast[dom.Node](root)
 
 
 proc loadTheme*(name: cstring)
