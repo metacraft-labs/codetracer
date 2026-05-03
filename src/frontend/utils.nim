@@ -9,9 +9,10 @@ proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#
 
 var kxiMap* = JsAssoc[cstring, KaraxInstance]{}
 
-# Callbacks for components that use vnodeToDom instead of Karax.
+# Direct-DOM redraw hooks for surfaces that are not owned by a Karax
+# renderer instance, such as IsoNim chrome mounted into fixed hosts.
 # redrawAll() iterates these after processing kxiMap entries.
-var vnodeToDomRedrawCallbacks*: seq[proc()] = @[]
+var directDomRedrawCallbacks*: seq[proc()] = @[]
 const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0

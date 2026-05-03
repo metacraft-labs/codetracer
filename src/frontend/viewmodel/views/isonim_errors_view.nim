@@ -5,9 +5,7 @@
 ## Renders a live, reactive DOM tree driven by ``ErrorsVM`` signals.
 ## Replaces the legacy Karax ``method render`` in
 ## ``frontend/ui/errors.nim`` (the IsoNim view is the single source of
-## truth for the panel's DOM).  The Karax → DOM bridge that previously
-## rendered this panel via ``vnodeToDom`` (see ``layout.nim`` BuildErrors
-## branches) is removed in the same migration.
+## truth for the panel's DOM).
 ##
 ## Both renderer overloads (Mock and Web) produce the same outer
 ## structure (matching the Playwright contract in

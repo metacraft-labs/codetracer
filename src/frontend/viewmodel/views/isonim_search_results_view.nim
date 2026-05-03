@@ -5,14 +5,9 @@
 ## Renders a live, reactive DOM tree driven by ``SearchResultsVM``
 ## signals.  Replaces the legacy Karax ``method render`` in
 ## ``frontend/ui/search_results.nim`` (the IsoNim view is the single
-## source of truth for the panel's DOM).  The Karax → DOM bridge that
-## previously rendered this panel via ``vnodeToDom`` (see ``layout.nim``
-## SearchResults branches — GL mount, standalone auto-hide,
-## onPanelShown, ``__ctRenderPanel(20)``) is removed in the same
-## migration.  This is the last panel to come off the ``vnodeToDom``
-## bridge: with build (1.33), errors (1.34), and search_results (this
-## migration) all on IsoNim, the entire ``vnodeToDom`` trio of
-## "lowest-friction" panels is now migrated.
+## source of truth for the panel's DOM). The GoldenLayout, auto-hide,
+## onPanelShown, and ``__ctRenderPanel(20)`` paths all sync legacy state
+## into this VM and then mount the IsoNim view directly.
 ##
 ## Both renderer overloads (Mock and Web) produce the same outer
 ## structure (matching the Playwright contract used by

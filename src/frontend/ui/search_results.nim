@@ -11,11 +11,6 @@
 ## panel data is sourced from ``data.services.search.results[SearchFixed]``
 ## and mirrored into a ``SearchResultsVM`` whose signals drive the
 ## IsoNim view.
-##
-## This is the last panel to come off the ``vnodeToDom`` Karax bridge:
-## with build (1.33), errors (1.34), and search_results (this migration)
-## all on IsoNim, the entire ``vnodeToDom`` trio of "lowest-friction"
-## panels is now migrated.
 ## ---------------------------------------------------------------------------
 
 import ui_imports, auto_hide, ../[types, communication]
@@ -47,8 +42,7 @@ proc tryMountIsoNimSearchResultsPanel*()
 # fixedSearchView — kept as the legacy Karax renderer for the floating
 # fixed-search overlay.  This view is mounted at the global
 # ``#fixed-search`` element, NOT inside the search-results panel, so it
-# stays on Karax for now (separate migration; the floating overlay is
-# not in section 5.4's vnodeToDom trio).
+# stays on Karax for now as a separate migration from the panel body.
 # ---------------------------------------------------------------------------
 
 proc fixedSearchView*: VNode =

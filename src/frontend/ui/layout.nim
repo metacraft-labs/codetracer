@@ -280,14 +280,14 @@ proc ensureSharedRenderers() =
     "search-results", proc = discard)
   # Session tab bar: render via IsoNim WebRenderer. The Karax
   # renderSessionTabs returns an empty stub; the real DOM is built
-  # by renderIsoNimSessionTabs. Register a redraw callback so
+  # by renderIsoNimSessionTabs. Register a direct-DOM redraw hook so
   # redrawAll() re-renders the tab bar when sessions change.
   kxiMap["session-tab-bar"] = setRenderer(
     proc: VNode = renderSessionTabs(data),
     "session-tab-bar",
     proc = discard)
   sessionTabBarCallbackRegistered = true
-  vnodeToDomRedrawCallbacks.add(proc() =
+  directDomRedrawCallbacks.add(proc() =
     renderIsoNimSessionTabs(data)
   )
   # Initial render after Karax creates the container element.
@@ -593,8 +593,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
         # Build is now an IsoNim view — its DOM is mounted by
         # `build.tryMountIsoNimBuildPanel` against the `buildComponent-{id}`
-        # container, and reactive effects keep it in sync.  No vnodeToDom
-        # bridge or redraw callback is needed here.
+        # container, and reactive effects keep it in sync. No direct-DOM
+        # redraw hook is needed here.
         if state.content == Content.Build:
           # The IsoNim view mounts itself once `buildComponentRef` and
           # the VM are both available (the registration order between
@@ -610,7 +610,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # BuildErrors is now an IsoNim view -- its DOM is mounted by
         # ``errors.tryMountIsoNimErrorsPanel`` against the
         # ``errorsComponent-{id}`` container, and reactive effects keep
-        # it in sync.  No vnodeToDom bridge or redraw callback is
+        # it in sync. No direct-DOM redraw hook is
         # needed here.
         if state.content == Content.BuildErrors:
           errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
@@ -619,8 +619,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # SearchResults is now an IsoNim view -- its DOM is mounted by
         # ``search_results.tryMountIsoNimSearchResultsPanel`` against
         # the ``searchResultsComponent-{id}`` container, and reactive
-        # effects keep it in sync.  No vnodeToDom bridge or redraw
-        # callback is needed here.
+        # effects keep it in sync. No direct-DOM redraw hook is needed here.
         if state.content == Content.SearchResults:
           search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
           search_results.tryMountIsoNimSearchResultsPanel()
@@ -628,8 +627,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # StepList is now an IsoNim view -- its DOM is mounted by
         # ``step_list.tryMountIsoNimStepListPanel`` against the
         # ``stepListComponent-{id}`` container, and reactive effects
-        # keep it in sync.  No vnodeToDom bridge or redraw callback
-        # is needed here.
+        # keep it in sync. No direct-DOM redraw hook is needed here.
         if state.content == Content.StepList:
           step_list.syncLegacyStepListIntoVM(StepListComponent(component))
           step_list.tryMountIsoNimStepListPanel()
@@ -646,8 +644,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # Repl is now an IsoNim view -- its DOM is mounted by
         # ``repl.tryMountIsoNimReplPanel`` against the
         # ``replComponent-{id}`` container, and reactive effects
-        # keep it in sync.  No vnodeToDom bridge or redraw callback
-        # is needed here.
+        # keep it in sync. No direct-DOM redraw hook is needed here.
         if state.content == Content.Repl:
           repl.syncLegacyReplIntoVM(ReplComponent(component))
           repl.syncReplConfigIntoVM()
@@ -671,8 +668,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # RequestPanel is now an IsoNim view -- its DOM is mounted by
         # ``request_panel.tryMountIsoNimRequestPanel`` against the
         # ``requestPanelComponent-{id}`` container, and reactive
-        # effects keep it in sync.  No vnodeToDom bridge or redraw
-        # callback is needed here.  The legacy ``RequestPanelComponent``
+        # effects keep it in sync. No direct-DOM redraw hook is needed here.
+        # The legacy ``RequestPanelComponent``
         # remains as the event-bus carrier (M6 will subscribe to
         # ``CtUpdatedHttpRequests``) and its mutators feed the VM via
         # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
@@ -685,8 +682,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # TraceLog is now an IsoNim view -- its DOM is mounted by
         # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
         # ``traceLogComponent-{id}`` container, and reactive effects
-        # keep it in sync.  No vnodeToDom bridge or redraw callback
-        # is needed here.  The legacy ``TraceLogComponent`` remains
+        # keep it in sync. No direct-DOM redraw hook is needed here.
+        # The legacy ``TraceLogComponent`` remains
         # as the event-bus carrier (its ``register`` method still
         # subscribes to tracepoint-result events) and
         # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
@@ -698,8 +695,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # Scratchpad is now an IsoNim view -- its DOM is mounted by
         # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
         # ``scratchpadComponent-{id}`` container, and reactive effects
-        # keep it in sync.  No vnodeToDom bridge or redraw callback
-        # is needed here.  The legacy ``ScratchpadComponent`` remains
+        # keep it in sync. No direct-DOM redraw hook is needed here.
+        # The legacy ``ScratchpadComponent`` remains
         # as the event-bus carrier (its ``register`` method still
         # subscribes to ``InternalAddToScratchpad`` /
         # ``InternalAddToScratchpadFromExpression`` /
@@ -714,7 +711,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # Filesystem is now an IsoNim view -- its DOM is mounted by
         # ``filesystem.tryMountIsoNimFilesystemPanel`` against the
         # ``filesystemComponent-{id}`` container, and reactive effects
-        # keep it in sync.  No vnodeToDom bridge or redraw callback is
+        # keep it in sync. No direct-DOM redraw hook is
         # needed here.  The legacy ``FilesystemComponent`` remains as
         # the event-bus carrier (its existing event handlers populate
         # ``data.services.editor.filesystem``) and
@@ -730,8 +727,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # CommandPalette is now an IsoNim view -- its DOM is mounted by
         # ``command.tryMountIsoNimCommandPalettePanel`` against the
         # ``commandPaletteComponent-{id}`` container, and reactive
-        # effects keep it in sync.  No vnodeToDom bridge or redraw
-        # callback is needed here.  The legacy
+        # effects keep it in sync. No direct-DOM redraw hook is needed here.
+        # The legacy
         # ``CommandPaletteComponent`` remains as the event-bus carrier
         # (the keyboard / interpreter / agent passthrough) and
         # ``syncLegacyCommandPaletteIntoVM`` mirrors any state already
@@ -759,7 +756,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # ``agent_activity_deepreview.tryMountIsoNimAgentActivityDeepReviewPanel``
         # against the ``agentActivityDeepReviewComponent-{id}``
         # container, and reactive effects keep it in sync.  No
-        # vnodeToDom bridge or redraw callback is needed here.  The
+        # direct-DOM redraw hook is needed here. The
         # legacy ``AgentActivityDeepReviewComponent`` remains as the
         # event-bus carrier (the ``IPC_DEEPREVIEW_NOTIFICATION``
         # handler keeps populating ``self.fileEntries`` /
@@ -780,12 +777,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
-        # into the GL container. Register a redraw callback for updates.
+        # into the GL container. Register a direct-DOM redraw hook for updates.
         if state.content == Content.CaptionBarProgress:
           let capturedComp = CaptionBarProgressComponent(component)
           let capturedId = containerId
           tryMountCaptionBarProgress(capturedId, capturedComp)
-          vnodeToDomRedrawCallbacks.add(proc() =
+          directDomRedrawCallbacks.add(proc() =
             tryMountCaptionBarProgress(capturedId, capturedComp)
           )
 
@@ -942,9 +939,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # Panel is not in GL — create a standalone auto-hide panel with
       # its own DOM container. Build/BuildErrors/SearchResults are now
-      # IsoNim-migrated and mount via the IsoNim reactive root.  No
-      # vnodeToDom redraw callback is needed because the IsoNim view
-      # keeps the DOM in sync automatically.
+      # IsoNim-migrated and mount via the IsoNim reactive root, so they
+      # need no redraw hook.
 
       # Create a wrapper element that the auto-hide overlay will
       # reparent when the panel is shown.
@@ -967,8 +963,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # All three standalone auto-hide panels (Build, BuildErrors,
       # SearchResults) are now IsoNim views.  Each mounts itself
       # against the inner div the next time its ``tryMountIsoNim*``
-      # runs — no vnodeToDom redraw callback is needed because the
-      # reactive root keeps the DOM in sync automatically.
+      # runs; the reactive root keeps the DOM in sync automatically.
       if panelDef.content == Content.Build:
         try:
           let buildComp = data.ui.componentMapping[Content.Build][0]
@@ -996,25 +991,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           search_results.tryMountIsoNimSearchResultsPanel()
         except:
           cerror "auto_hide: tryMountIsoNimSearchResultsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
-      else:
-        let component = data.ui.componentMapping[panelDef.content][0]
-        if not component.isNil:
-          let vnode = renderLayoutComponent(component, panelDef.content)
-          let dom = vnodeToDom(vnode, KaraxInstance())
-          innerDiv.appendChild(dom)
-
-          let capturedComponent = component
-          let capturedContent = panelDef.content
-          let capturedLabel = panelDef.label
-          vnodeToDomRedrawCallbacks.add(proc() =
-            let el = kdom.document.getElementById(capturedLabel)
-            if not el.isNil:
-              el.innerHTML = cstring""
-              let v = renderLayoutComponent(capturedComponent, capturedContent)
-              let d = vnodeToDom(v, KaraxInstance())
-              el.appendChild(d)
-          )
-
       addStandaloneAutoHidePanel(
         panelDef.title,
         panelDef.content,
@@ -1032,7 +1008,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     ## Build, BuildErrors, and SearchResults are all IsoNim views:
     ## sync any legacy state (E2E tests inject directly into
     ## ``build.output`` / ``build.problems`` / search service results)
-    ## into the VM and then re-mount.  No vnodeToDom panels remain.
+    ## into the VM and then re-mount.
     if contentId == int(Content.Build):
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
@@ -1246,7 +1222,7 @@ proc ensureTabBarRenderer() =
       proc = discard)
   if not sessionTabBarCallbackRegistered:
     sessionTabBarCallbackRegistered = true
-    vnodeToDomRedrawCallbacks.add(proc() =
+    directDomRedrawCallbacks.add(proc() =
       renderIsoNimSessionTabs(data)
     )
   # Render via IsoNim to ensure tabs reflect current state.

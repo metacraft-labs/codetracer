@@ -165,12 +165,12 @@ proc redrawAll* =
   if e != kxiMap.len:
     cerror "redrawAll: not all redrawed, e != kxiMap.len"
 
-  # Re-render IsoNim-migrated components that use vnodeToDom.
-  for cb in vnodeToDomRedrawCallbacks:
+  # Re-render direct-DOM surfaces that sit outside Karax's renderer map.
+  for cb in directDomRedrawCallbacks:
     try:
       cb()
     except:
-      cerror "redrawAll: error in vnodeToDom redraw callback"
+      cerror "redrawAll: error in direct DOM redraw callback"
 
   data.ui.lastRedraw = now()
   # echo "## FINISH REDRAW"
