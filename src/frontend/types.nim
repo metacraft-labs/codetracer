@@ -846,6 +846,7 @@ type
     width*: cstring
     resizeObserver*: ResizeObserver
     isCalltrace*: bool
+    extensionRendererId*: cstring
 
     debugger*:       DebuggerService
     service*:        CalltraceService

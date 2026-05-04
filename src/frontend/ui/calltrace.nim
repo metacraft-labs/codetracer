@@ -56,9 +56,22 @@ proc renderCallExpandedValuesDom*(self: CallExpandedValuesComponent): Node
 when defined(ctInExtension):
   var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
 
+  proc bindCalltraceExtensionHost(component: CalltraceComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension calltrace surface has no panel markup of its own; keep the
+    # exported component usable without retaining an empty Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
-    if calltraceComponentForExtension.kxi.isNil:
-      calltraceComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if calltraceComponentForExtension.extensionRendererId.len == 0:
+      calltraceComponentForExtension.extensionRendererId = id
+      calltraceComponentForExtension.bindCalltraceExtensionHost()
     result = calltraceComponentForExtension
 
 proc calltraceJump(self: CalltraceComponent, location: types.Location) =
@@ -1756,6 +1769,10 @@ proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
 # CalltraceComponent.render() removed: IsoNim is the primary renderer.
 # Generic callers are expected to use direct IsoNim mount paths. All
 # real rendering is handled by tryMountIsoNimCalltrace().
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: CalltraceComponent) =
+    self.bindCalltraceExtensionHost()
 
 proc renderRemoveButtonDom(
   self: CallExpandedValuesComponent,
