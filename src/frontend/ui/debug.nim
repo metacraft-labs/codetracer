@@ -99,7 +99,7 @@ proc tryMountIsoNimDebugControls() =
 proc requestDebugShellRender*(self: DebugComponent) =
   ## Ensure the direct IsoNim debug shell exists.
   ##
-  ## The shell itself lives outside the Karax-owned ``#menu`` renderer. It is
+  ## The shell itself lives outside the direct ``#menu`` renderer. It is
   ## mounted once into the static ``#debug`` host from ``index.html`` so menu
   ## redraws cannot erase the command palette's IsoNim mount point.
   let commandPaletteId =

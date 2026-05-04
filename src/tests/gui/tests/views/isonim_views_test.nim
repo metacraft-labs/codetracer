@@ -83,6 +83,7 @@ import views/isonim_auto_hide_collapsed_icons_view
 import views/isonim_auto_hide_bottom_tabs_view
 import views/isonim_auto_hide_side_strip_view
 import views/isonim_status_view
+import views/isonim_menu_shell_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -432,6 +433,77 @@ suite "IsoNim Status Shell — structure":
     check messages.len == 2
     check messages[0].textContent == "second"
     check messages[1].textContent == "first"
+
+suite "IsoNim Menu Shell — structure":
+
+  proc menuNode(
+      name: string;
+      path: seq[int];
+      kind: MenuNodeRecordKind = MenuRecordElement;
+      enabled: bool = true;
+      shortcut: string = "";
+      nodeClass: string = ""): MenuNodeRecord =
+    MenuNodeRecord(
+      kind: kind,
+      name: name,
+      shortcut: shortcut,
+      enabled: enabled,
+      iconClass: name.toLowerAscii,
+      nameClass: "menu-element-" & name.toLowerAscii,
+      nodeClass: nodeClass,
+      path: path,
+      nameWidth: name.len + 1)
+
+  test "hidden menu renders root trigger and window controls only":
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: false,
+        rootNodes: @[menuNode("File", @[0], kind = MenuRecordFolder)],
+        showWindowMenu: true,
+        maximized: false))
+
+    check panel.attributes["class"] == MenuShellRootClass
+    check findByClass(panel, WindowMenuClass) != nil
+    check findByClass(panel, "maximize") != nil
+    check findByClass(panel, "restore").isNil
+    check findAllByClass(panel, "menu-node").len == 0
+
+  test "visible menu renders search host, root nodes, and window restore":
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: true,
+        rootNodes: @[
+          menuNode("File", @[0], kind = MenuRecordFolder,
+            nodeClass = "menu-active-node"),
+          menuNode("Run", @[1], shortcut = "CTRL+R")
+        ],
+        showWindowMenu: true,
+        maximized: true))
+
+    check findByClass(panel, "menu-active-node") != nil
+    check findAllByClass(panel, "menu-node").len == 2
+    check findByClass(panel, "menu-node-shortcut").textContent == "CTRL+R"
+    check findByClass(panel, "restore") != nil
+    check findByClass(panel, "maximize").isNil
+
+  test "shell UI model can render menu without window controls":
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: true,
+        rootNodes: @[menuNode("Shell", @[0], kind = MenuRecordFolder)],
+        showWindowMenu: false))
+
+    check findByClass(panel, WindowMenuClass).isNil
+    check findByClass(panel, "menu-folder").textContent.contains("Shell")
 
 suite "IsoNim Session Tabs — structure":
 

@@ -38,6 +38,7 @@ var tippy* {.importc.}: JsObject # app-global
 var monaco* {.importc.}: Monaco # app-global
 var fuzzysort* {.importc.}: Fuzzysort # app-global
 var noUiSlider* {.importc.}: js # app-global
+var sharedDirectRedraw*: proc()
 proc wNumb*(options: js): js {.importc.}
 proc readFileUtf8*(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
 
@@ -168,6 +169,11 @@ proc redrawAll* =
     e += 1
   if e != kxiMap.len:
     cerror "redrawAll: not all redrawed, e != kxiMap.len"
+  if not sharedDirectRedraw.isNil:
+    try:
+      sharedDirectRedraw()
+    except:
+      cerror "redrawAll: error when calling shared direct redraw"
 
   data.ui.lastRedraw = now()
   # echo "## FINISH REDRAW"

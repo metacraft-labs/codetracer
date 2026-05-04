@@ -231,8 +231,8 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
     data.ui.openComponentIds[content].delete(id)
 
 # Track whether the shared (non-GL) global renderers have been initialised.
-# Menu/fixed-search/search-results/session-tab-bar still use Karax setRenderer
-# stubs; status is refreshed directly through IsoNim.
+# Fixed-search/search-results/session-tab-bar still use Karax setRenderer
+# stubs; menu/status are refreshed directly through IsoNim.
 var sharedRenderersInitialised = false
 
 proc renderLayoutComponent(component: Component, content: Content): VNode =
@@ -247,18 +247,18 @@ proc renderLayoutComponent(component: Component, content: Content): VNode =
     buildHtml(tdiv())
 
 proc ensureSharedRenderers() =
-  ## Set up the Karax renderers for global chrome elements that live outside
-  ## individual session GL containers.  Safe to call multiple times — it only
-  ## acts on the first invocation.
+  ## Set up the shared global chrome elements that live outside individual
+  ## session GL containers. Safe to call multiple times — it only acts on the
+  ## first invocation.
   if sharedRenderersInitialised:
     return
   sharedRenderersInitialised = true
 
-  kxiMap["menu"] = setRenderer(
-    proc: VNode =
-      if not data.ui.menu.isNil: data.ui.menu.renderMenu()
-      else: buildHtml(tdiv()),
-    "menu", proc = discard)
+  renderer.sharedDirectRedraw = proc() =
+    if not data.ui.menu.isNil:
+      data.ui.menu.requestMenuRender()
+  if not data.ui.menu.isNil:
+    discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
   kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
   kxiMap["search-results"] = setRenderer(
     proc: VNode =
@@ -274,7 +274,6 @@ proc ensureSharedRenderers() =
   # Initial render after Karax creates the container element.
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 
-  data.ui.menu.kxi = kxiMap["menu"]
   data.ui.searchResults.kxi = kxiMap["search-results"]
   if not data.ui.status.isNil:
     discard windowSetTimeout(proc() = data.ui.status.requestStatusRender(), 0)
@@ -293,8 +292,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   echo data.ui.layout.isNil
 
   if data.startOptions.shellUi:
-    kxiMap["menu"] = setRenderer(proc: VNode = data.ui.menu.renderMenu(), "menu", proc = discard)
-    data.ui.menu.kxi = kxiMap["menu"]
+    renderer.sharedDirectRedraw = proc() =
+      if not data.ui.menu.isNil:
+        data.ui.menu.requestMenuRender()
+    if not data.ui.menu.isNil:
+      discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
     return
 
   # DeepReview mode: uses the normal GL layout path.  The DeepReview-specific
