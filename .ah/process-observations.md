@@ -21,3 +21,115 @@ to manually annotate sections; the loop driver only appends.
 - Final status: `completed`
 - Wall-clock: 0 ms
 - Total events: 240
+
+## 1.117
+
+- Session: `direct-codex-1777835724927-418389`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 250
+
+## 1.127
+
+- Session: `direct-codex-1777842220915-238146`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 249
+
+## 1.135
+
+- Session: `direct-codex-1777845442928-469629`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 267
+
+## 1.145
+
+- Session: `direct-codex-1777852155788-191631`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 221
+
+## 1.153
+
+- Session: `direct-codex-1777854930868-875701`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 198
+
+## 1.161
+
+- Session: `direct-codex-1777857839487-579550`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 207
+
+## 1.169
+
+- Session: `direct-codex-1777862001383-162411`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 288
+
+## 1.177
+
+- Session: `direct-codex-1777866844973-593334`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 246
+
+## 1.188
+
+- Session: `direct-codex-1777870848358-315808`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 160
+
+## 1.196
+
+- Session: `direct-codex-1777873694045-75798`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 254
+
+## 1.205
+
+- Session: `direct-codex-1777878767471-544330`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 252
+
+## 1.213
+
+- Session: `direct-codex-1777883015040-181885`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 190
+
+## 1.221
+
+- Session: `direct-codex-1777886148683-53336`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 193
+
+## 1.230
+
+- Session: `direct-codex-1777888446453-757793`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 298
+
+## 1.242
+
+- Session: `direct-codex-1777891564981-809633`
+- Final status: `completed`
+- Wall-clock: 0 ms
+- Total events: 88
+
+## 1.244
+
+- Session: `direct-codex-1777892196849-996615`
+- Final status: `failed (exit 1)`
+- Wall-clock: 0 ms
+- Total events: 4
