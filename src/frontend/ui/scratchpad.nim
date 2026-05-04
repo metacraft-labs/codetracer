@@ -73,22 +73,30 @@ proc tryMountIsoNimScratchpadPanel*()
 #
 # Preserved from the legacy module so the extension entry-point still
 # resolves to a valid ``ScratchpadComponent``; the in-extension
-# render path installs an empty Karax shell since the IsoNim view is
-# the production renderer.  Same
-# pattern as request_panel §1.51 — the extension build is a
-# separate code path that is not exercised by the GL panel mount,
-# so leaving it on the Karax-ish ``setRenderer`` shim is the lowest
-# friction option.
+# surface has no panel markup of its own because the IsoNim view is
+# the production renderer.
 # ---------------------------------------------------------------------------
 
 when defined(ctInExtension):
   var scratchpadComponentForExtension* {.exportc.}: ScratchpadComponent =
     makeScratchpadComponent(data, 0, inExtension = true)
 
+  proc bindScratchpadExtensionHost(component: ScratchpadComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension scratchpad surface is an empty compatibility host; keep the
+    # exported component usable without retaining a Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
-    if scratchpadComponentForExtension.kxi.isNil:
-      scratchpadComponentForExtension.kxi = setRenderer(
-        proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if scratchpadComponentForExtension.extensionRendererId.len == 0:
+      scratchpadComponentForExtension.extensionRendererId = id
+      scratchpadComponentForExtension.bindScratchpadExtensionHost()
     result = scratchpadComponentForExtension
 
 # ---------------------------------------------------------------------------
@@ -347,6 +355,10 @@ else:
 # Component registration — IsoNim primary renderer; no Karax method
 # render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: ScratchpadComponent) =
+    self.bindScratchpadExtensionHost()
 
 method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
   ## Register the ScratchpadComponent with the mediator.  Bring up the

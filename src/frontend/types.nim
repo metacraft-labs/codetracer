@@ -687,6 +687,7 @@ type
     values*:        seq[ValueComponent]
     service*:       DebuggerService
     locals*:        seq[Variable]
+    extensionRendererId*: cstring
 
   TimelineMode* = enum TimelineVariables, TimelineRegisters
 
