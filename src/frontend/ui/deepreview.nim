@@ -492,216 +492,6 @@ proc switchToFile(self: DeepReviewComponent, fileIndex: int) =
   self.syncLegacyDeepReviewIntoVM()
 
 # ---------------------------------------------------------------------------
-# Render helpers
-# ---------------------------------------------------------------------------
-
-proc makeFileClickHandler(self: DeepReviewComponent, idx: int): proc(ev: Event, n: VNode) =
-  ## Create a click handler for a file list item.
-  ## Using a separate proc avoids the Nim 1.6 JS backend closure-in-loop
-  ## bug where all closures capture the same loop variable by reference
-  ## (JS ``var`` is function-scoped, not block-scoped).
-  result = proc(ev: Event, n: VNode) =
-    self.switchToFile(idx)
-    redrawAll()
-
-proc diffStatusLabel(diff: DeepReviewFileDiff): cstring =
-  ## Return a single-letter label for the diff status.
-  if diff.isNil:
-    return cstring""
-  let s = $diff.status
-  case s
-  of "A": return cstring"A"
-  of "M": return cstring"M"
-  of "D": return cstring"D"
-  else: return cstring""
-
-proc diffStatusCssClass(diff: DeepReviewFileDiff): string =
-  ## Return a CSS modifier class for the diff status colour.
-  if diff.isNil:
-    return ""
-  let s = $diff.status
-  case s
-  of "A": return " deepreview-diff-added"
-  of "M": return " deepreview-diff-modified"
-  of "D": return " deepreview-diff-deleted"
-  else: return ""
-
-proc diffLinesSummary(diff: DeepReviewFileDiff): cstring =
-  ## Return a short "+N / -M" summary of changed lines.
-  if diff.isNil:
-    return cstring""
-  result = cstring(fmt"+{diff.linesAdded} / -{diff.linesRemoved}")
-
-proc renderFileList(self: DeepReviewComponent): VNode =
-  ## Render the file list sidebar.
-  ## Each file entry shows a diff status indicator (A/M/D), the file
-  ## basename and path, a modified line count, and a coverage badge.
-  buildHtml(tdiv(class = "deepreview-file-list")):
-    for i, file in self.drData.files:
-      let isSelected = (i == self.selectedFileIndex)
-      let selectedClass = if isSelected: " selected" else: ""
-      tdiv(
-        class = cstring(fmt"deepreview-file-item{selectedClass}"),
-        onclick = self.makeFileClickHandler(i)
-      ):
-        # Top row: diff status indicator + file basename.
-        tdiv(class = "deepreview-file-name-row"):
-          if not file.diff.isNil and ($file.diff.status).len > 0:
-            span(class = cstring("deepreview-diff-status" & diffStatusCssClass(file.diff))):
-              text diffStatusLabel(file.diff)
-          tdiv(class = "deepreview-file-name"):
-            text fileBasename(file.path)
-        tdiv(class = "deepreview-file-path-full"):
-          text $file.path
-        # Badge row: diff line count and coverage.
-        tdiv(class = "deepreview-file-badges"):
-          if not file.diff.isNil and (file.diff.linesAdded > 0 or file.diff.linesRemoved > 0):
-            span(class = cstring("deepreview-diff-lines" & diffStatusCssClass(file.diff))):
-              text diffLinesSummary(file.diff)
-          if file.flags.hasCoverage:
-            span(class = "deepreview-coverage-badge"):
-              text coverageSummary(file)
-
-proc renderExecutionSlider(self: DeepReviewComponent): VNode =
-  ## Render the function execution index slider.
-  let file = self.selectedFile()
-  let flowCount = if file.isNil: 0 else: file.flow.len
-  if flowCount == 0:
-    return buildHtml(tdiv(class = "deepreview-slider deepreview-slider-empty")):
-      span(class = "deepreview-slider-label"): text "No execution data"
-  else:
-    let maxVal = max(0, flowCount - 1)
-    let funcKey = if self.selectedExecutionIndex < flowCount:
-      $file.flow[self.selectedExecutionIndex].functionKey
-    else:
-      "?"
-    buildHtml(tdiv(class = "deepreview-slider")):
-      span(class = "deepreview-slider-label"): text "Execution:"
-      input(
-        class = "deepreview-slider-input",
-        `type` = "range",
-        min = "0",
-        max = cstring($maxVal),
-        value = cstring($self.selectedExecutionIndex),
-        oninput = proc(ev: Event, n: VNode) =
-          let val = cast[cstring](ev.target.toJs.value)
-          self.selectedExecutionIndex = ($val).parseInt
-          self.updateDecorations()
-          redrawAll()
-      )
-      span(class = "deepreview-slider-info"):
-        text fmt"{self.selectedExecutionIndex + 1}/{flowCount} ({funcKey})"
-
-proc renderLoopSlider(self: DeepReviewComponent): VNode =
-  ## Render the loop iteration slider for the current execution.
-  let file = self.selectedFile()
-  if file.isNil or file.loops.len == 0:
-    return buildHtml(tdiv())
-
-  # Find maximum iteration count across all loops in the file.
-  var maxIter = 0
-  for loop in file.loops:
-    if loop.totalIterations > maxIter:
-      maxIter = loop.totalIterations
-
-  if maxIter == 0:
-    return buildHtml(tdiv())
-
-  buildHtml(tdiv(class = "deepreview-slider")):
-    span(class = "deepreview-slider-label"): text "Iteration:"
-    input(
-      class = "deepreview-slider-input",
-      `type` = "range",
-      min = "0",
-      max = cstring($max(0, maxIter - 1)),
-      value = cstring($self.selectedIteration),
-      oninput = proc(ev: Event, n: VNode) =
-        let val = cast[cstring](ev.target.toJs.value)
-        self.selectedIteration = ($val).parseInt
-        redrawAll()
-    )
-    span(class = "deepreview-slider-info"):
-      text fmt"{self.selectedIteration + 1}/{maxIter}"
-
-proc renderViewModeToggle(self: DeepReviewComponent): VNode =
-  ## Render toggle buttons to switch between Unified diff and Full Files modes.
-  ## Mode switching preserves the current ``selectedFileIndex`` so the user
-  ## does not lose their place when toggling views.
-  let isUnified = self.viewMode == Unified
-  let isFullFiles = self.viewMode == FullFiles
-  buildHtml(tdiv(class = "deepreview-mode-toggle")):
-    button(
-      class = cstring(if isFullFiles: "deepreview-mode-btn deepreview-mode-btn-active" else: "deepreview-mode-btn"),
-      onclick = proc(ev: Event, n: VNode) =
-        # Preserve selectedFileIndex across mode switch.
-        # Reset editor state so it re-initialises after the DOM
-        # is re-created by Karax (see setViewMode comment).
-        self.viewMode = FullFiles
-        self.editorInitialized = false
-        self.decorationCollection = nil
-        redrawAll()
-    ):
-      text "Full Files"
-    button(
-      class = cstring(if isUnified: "deepreview-mode-btn deepreview-mode-btn-active" else: "deepreview-mode-btn"),
-      onclick = proc(ev: Event, n: VNode) =
-        # Preserve selectedFileIndex across mode switch.
-        self.viewMode = Unified
-        redrawAll()
-    ):
-      text "Unified Diff"
-
-proc makeTraceContextChangeHandler(self: DeepReviewComponent): proc(ev: Event, n: VNode) =
-  ## Create a change handler for the trace context selector dropdown.
-  result = proc(ev: Event, n: VNode) =
-    let val = cast[cstring](ev.target.toJs.value)
-    self.selectedTraceContextId = ($val).parseInt
-    # TODO(DR-6): When actual per-context data switching is implemented,
-    # reload coverage/flow overlays for the selected trace context here.
-    self.updateDecorations()
-    redrawAll()
-
-proc renderTraceContextSelector(self: DeepReviewComponent): VNode =
-  ## Render a dropdown to select between available trace contexts.
-  ## Each trace context represents a different recording run (e.g.
-  ## "latest passing run", "previous run"). When no contexts are
-  ## available, the selector is hidden.
-  let drData = self.drData
-  if drData.isNil or drData.traceContexts.len == 0:
-    return buildHtml(tdiv())
-
-  buildHtml(tdiv(class = "deepreview-trace-selector")):
-    select(
-      class = "deepreview-trace-select",
-      onchange = self.makeTraceContextChangeHandler()
-    ):
-      for ctx in drData.traceContexts:
-        let isSelected = (ctx.id == self.selectedTraceContextId)
-        if isSelected:
-          option(
-            value = cstring($ctx.id),
-            selected = "selected"
-          ):
-            text $ctx.label
-        else:
-          option(value = cstring($ctx.id)):
-            text $ctx.label
-
-proc renderCallTraceNode(node: DeepReviewCallNode, depth: int): VNode =
-  ## Recursively render a call trace tree node.
-  let indent = depth * 16
-  buildHtml(tdiv(class = "deepreview-calltrace-node")):
-    tdiv(
-      class = "deepreview-calltrace-entry",
-      style = style(StyleAttr.paddingLeft, cstring(fmt"{indent}px"))
-    ):
-      span(class = "deepreview-calltrace-name"): text $node.name
-      span(class = "deepreview-calltrace-count"): text fmt" x{node.executionCount}"
-    if node.children.len > 0:
-      for child in node.children:
-        renderCallTraceNode(child, depth + 1)
-
-# ---------------------------------------------------------------------------
 # Context expansion helpers
 # ---------------------------------------------------------------------------
 
@@ -743,8 +533,9 @@ proc setExpand(table: JsAssoc[cstring, JsAssoc[cstring, int]], fileIdx, hunkIdx,
 
 type
   FlowValuePair = object
-    ## A single variable name/value pair from a flow step, used to render
-    ## Omniscience annotations in the unified diff view.
+    ## A single variable name/value pair from a flow step, mirrored into
+    ## ``DeepReviewVM`` so the IsoNim unified diff can render Omniscience
+    ## annotations.
     name: string
     value: string
     truncated: bool
@@ -769,13 +560,6 @@ proc flowValuesForLine(file: DeepReviewFileData, lineNum: int): seq[FlowValuePai
           ))
         return pairs
   return @[]
-
-proc splitSourceLines(file: DeepReviewFileData): seq[string] =
-  ## Split the file's sourceContent into individual lines.
-  ## Returns an empty seq if sourceContent is nil or empty.
-  if file.isNil or file.sourceContent.isNil or ($file.sourceContent).len == 0:
-    return @[]
-  result = ($file.sourceContent).split('\n')
 
 proc legacyTraceContextsToVm(drData: DeepReviewData):
     seq[DeepReviewTraceContextEntry] =
@@ -949,22 +733,6 @@ proc syncLegacyDeepReviewIntoVM*(self: DeepReviewComponent) =
   vm.setUnifiedFiles(legacyUnifiedFilesToVm(drData))
   vm.setCallNodes(legacyCallNodesToVm(drData))
 
-proc makeExpandAboveHandler(self: DeepReviewComponent, fileIdx, hunkIdx: int): proc(ev: Event, n: VNode) =
-  ## Create a click handler for expanding context above a hunk.
-  result = proc(ev: Event, n: VNode) =
-    self.ensureExpansionState()
-    let current = self.expandAbove.getExpand(fileIdx, hunkIdx)
-    self.expandAbove.setExpand(fileIdx, hunkIdx, current + EXPAND_STEP)
-    redrawAll()
-
-proc makeExpandBelowHandler(self: DeepReviewComponent, fileIdx, hunkIdx: int): proc(ev: Event, n: VNode) =
-  ## Create a click handler for expanding context below a hunk.
-  result = proc(ev: Event, n: VNode) =
-    self.ensureExpansionState()
-    let current = self.expandBelow.getExpand(fileIdx, hunkIdx)
-    self.expandBelow.setExpand(fileIdx, hunkIdx, current + EXPAND_STEP)
-    redrawAll()
-
 # ---------------------------------------------------------------------------
 # Hunk editor helpers (DeepReview)
 # ---------------------------------------------------------------------------
@@ -975,28 +743,6 @@ proc isDrHunkSelected(self: DeepReviewComponent, fileIdx, hunkIdx: int): bool =
     if pair[0] == fileIdx and pair[1] == hunkIdx:
       return true
   return false
-
-proc drFlatHunkOrdinal(drData: DeepReviewData, fileIdx, hunkIdx: int): int =
-  ## Compute a flat ordinal for a (fileIdx, hunkIdx) pair.
-  result = 0
-  for fi in 0 ..< drData.files.len:
-    if fi == fileIdx:
-      result += hunkIdx
-      return
-    let file = drData.files[fi]
-    if not file.diff.isNil:
-      result += file.diff.hunks.len
-
-proc drHunkPairFromOrdinal(drData: DeepReviewData, ordinal: int): (int, int) =
-  ## Reverse of ``drFlatHunkOrdinal``.
-  var remaining = ordinal
-  for fi in 0 ..< drData.files.len:
-    let file = drData.files[fi]
-    let hunkCount = if file.diff.isNil: 0 else: file.diff.hunks.len
-    if remaining < hunkCount:
-      return (fi, remaining)
-    remaining -= hunkCount
-  return (0, 0)
 
 proc toggleDrHunkSelection(self: DeepReviewComponent, fileIdx, hunkIdx: int) =
   ## Toggle a single hunk in/out of the selection.
@@ -1009,19 +755,6 @@ proc toggleDrHunkSelection(self: DeepReviewComponent, fileIdx, hunkIdx: int) =
     self.drSelectedHunks.delete(found)
   else:
     self.drSelectedHunks.add((fileIdx, hunkIdx))
-  self.drHunkToolbarVisible = self.drSelectedHunks.len > 0
-
-proc selectDrHunkRange(self: DeepReviewComponent, fromOrdinal, toOrdinal: int) =
-  ## Select all hunks between two flat ordinals (inclusive).
-  let lo = min(fromOrdinal, toOrdinal)
-  let hi = max(fromOrdinal, toOrdinal)
-  let drData = self.drData
-  if drData.isNil:
-    return
-  for ord in lo .. hi:
-    let pair = drHunkPairFromOrdinal(drData, ord)
-    if not self.isDrHunkSelected(pair[0], pair[1]):
-      self.drSelectedHunks.add(pair)
   self.drHunkToolbarVisible = self.drSelectedHunks.len > 0
 
 proc clearDrHunkSelection(self: DeepReviewComponent) =
@@ -1091,309 +824,13 @@ proc copyDrSelectedHunksAsPatch(self: DeepReviewComponent) =
         redrawAll(),
       2000)
 
-proc makeDrHunkHeaderClickHandler(self: DeepReviewComponent, fileIdx, hunkIdx: int): proc(ev: Event, n: VNode) =
-  ## Create a click handler for a hunk header in the DeepReview diff view.
-  ## Supports plain click, Ctrl/Cmd-click (toggle), and Shift-click (range).
-  let selfCapture = self
-  let drData = self.drData
-  result = proc(ev: Event, n: VNode) =
-    let jsEv = cast[JsObject](ev)
-    let shiftKey = jsEv.shiftKey.to(bool)
-    let ctrlKey = jsEv.ctrlKey.to(bool) or jsEv.metaKey.to(bool)
-
-    if shiftKey and selfCapture.drLastHunkClickIndex >= 0 and not drData.isNil:
-      let currentOrd = drFlatHunkOrdinal(drData, fileIdx, hunkIdx)
-      selfCapture.selectDrHunkRange(selfCapture.drLastHunkClickIndex, currentOrd)
-    elif ctrlKey:
-      selfCapture.toggleDrHunkSelection(fileIdx, hunkIdx)
-    else:
-      if selfCapture.drSelectedHunks.len == 1 and
-         selfCapture.isDrHunkSelected(fileIdx, hunkIdx):
-        selfCapture.clearDrHunkSelection()
-      else:
-        selfCapture.clearDrHunkSelection()
-        selfCapture.drSelectedHunks.add((fileIdx, hunkIdx))
-        selfCapture.drHunkToolbarVisible = true
-
-    if not drData.isNil:
-      selfCapture.drLastHunkClickIndex = drFlatHunkOrdinal(drData, fileIdx, hunkIdx)
-
-    ev.preventDefault()
-    redrawAll()
-
-proc renderDrHunkToolbar(self: DeepReviewComponent): VNode =
-  ## Render the floating action toolbar for selected hunks in DeepReview.
-  if not self.drHunkToolbarVisible or self.drSelectedHunks.len == 0:
-    return buildHtml(tdiv())
-
-  buildHtml(tdiv(class = "hunk-toolbar")):
-    span(class = "hunk-toolbar-count"):
-      text cstring($self.drSelectedHunks.len & " hunk" &
-        (if self.drSelectedHunks.len > 1: "s" else: "") & " selected")
-
-    tdiv(class = "hunk-toolbar-actions"):
-      tdiv(class = "hunk-toolbar-button",
-           onclick = proc(ev: Event, n: VNode) =
-             self.copyDrSelectedHunksAsPatch()
-             redrawAll()):
-        if self.drHunkCopyFeedback:
-          text "Copied!"
-        else:
-          text "Copy as patch"
-
-      tdiv(class = "hunk-toolbar-button hunk-toolbar-button-subtle",
-           onclick = proc(ev: Event, n: VNode) =
-             self.clearDrHunkSelection()
-             redrawAll()):
-        text "Clear"
-
-proc renderUnifiedDiff(self: DeepReviewComponent): VNode =
-  ## Render all modified files as a vertical scrollable list of diff hunks.
-  ## Each file gets a header with path and diff metadata, followed by its
-  ## hunks with added/removed/context line colouring. This is a pure-DOM
-  ## rendering approach (no Monaco editor) to keep things simple and
-  ## performant for the diff overview.
-  ##
-  ## Context expansion: if the file has ``sourceContent``, "Expand above"
-  ## and "Expand below" buttons appear around each hunk. Clicking them
-  ## reveals additional unchanged source lines, rendered as context type.
-  if self.drData.isNil or self.drData.files.len == 0:
-    return buildHtml(tdiv(class = "deepreview-unified-diff")):
-      tdiv(class = "deepreview-unified-empty"):
-        text "No files to display."
-
-  self.ensureExpansionState()
-
-  buildHtml(tdiv(class = "deepreview-unified-diff")):
-    # Floating hunk action toolbar (shown when hunks are selected).
-    renderDrHunkToolbar(self)
-
-    for fileIdx, file in self.drData.files:
-      if file.diff.isNil:
-        continue
-      let hasHunks = file.diff.hunks.len > 0
-      if not hasHunks:
-        continue
-
-      let sourceLines = splitSourceLines(file)
-      let hasSource = sourceLines.len > 0
-
-      # File header with path, status badge and line counts.
-      # Add a data attribute so the unified diff can scroll to the
-      # selected file's section when switching modes.
-      tdiv(class = "deepreview-unified-file", `data-file-index` = cstring($fileIdx)):
-        tdiv(class = "deepreview-unified-file-header"):
-          if ($file.diff.status).len > 0:
-            span(class = cstring("deepreview-diff-status" & diffStatusCssClass(file.diff))):
-              text diffStatusLabel(file.diff)
-          span(class = "deepreview-unified-file-path"):
-            text $file.path
-          if file.diff.linesAdded > 0 or file.diff.linesRemoved > 0:
-            span(class = "deepreview-unified-file-stats"):
-              span(class = "deepreview-unified-additions"):
-                text cstring(fmt"+{file.diff.linesAdded}")
-              span(class = "deepreview-unified-deletions"):
-                text cstring(fmt"-{file.diff.linesRemoved}")
-
-        # Render each hunk with optional expansion buttons.
-        for hunkIdx, hunk in file.diff.hunks:
-          let isSelected = self.isDrHunkSelected(fileIdx, hunkIdx)
-          let hunkClass = if isSelected:
-            "deepreview-unified-hunk hunk-selected"
-          else:
-            "deepreview-unified-hunk"
-
-          tdiv(class = cstring(hunkClass)):
-            # Hunk header (like @@ -40,6 +40,12 @@). Clickable for selection.
-            tdiv(class = "deepreview-unified-hunk-header hunk-header-selectable",
-                 onclick = self.makeDrHunkHeaderClickHandler(fileIdx, hunkIdx)):
-              if isSelected:
-                span(class = "hunk-selection-indicator"):
-                  text "\xE2\x9C\x93" # checkmark
-              text cstring(fmt"@@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@")
-
-            # --- "Expand above" button and expanded lines ---
-            if hasSource:
-              let aboveCount = self.expandAbove.getExpand(fileIdx, hunkIdx)
-
-              # Determine the first line of the hunk (1-based) and the
-              # upper boundary (line after previous hunk, or 1).
-              var hunkFirstLine = 0
-              for lineItem in hunk.lines:
-                let ln = if lineItem.newLine > 0: lineItem.newLine
-                          elif lineItem.oldLine > 0: lineItem.oldLine
-                          else: 0
-                if ln > 0:
-                  hunkFirstLine = ln
-                  break
-
-              # Compute the earliest line we can show above. For the
-              # first hunk this is line 1; for subsequent hunks it is
-              # one line after the previous hunk's last line.
-              var aboveLimit = 1
-              if hunkIdx > 0:
-                let prevHunk = file.diff.hunks[hunkIdx - 1]
-                # The last line of the previous hunk in the new file.
-                var prevLast = 0
-                for pli in countdown(prevHunk.lines.len - 1, 0):
-                  let pln = prevHunk.lines[pli].newLine
-                  if pln > 0:
-                    prevLast = pln
-                    break
-                # Also account for existing "expand below" on the
-                # previous hunk.
-                let prevBelowCount = self.expandBelow.getExpand(fileIdx, hunkIdx - 1)
-                aboveLimit = max(aboveLimit, prevLast + prevBelowCount + 1)
-
-              if hunkFirstLine > aboveLimit:
-                # There are lines available to expand.
-                let startLine = max(aboveLimit, hunkFirstLine - aboveCount)
-
-                # Render the expand-above button.
-                if startLine > aboveLimit or aboveCount == 0:
-                  tdiv(
-                    class = "deepreview-expand-row",
-                    onclick = self.makeExpandAboveHandler(fileIdx, hunkIdx)
-                  ):
-                    span(class = "deepreview-expand-icon"): text "..."
-                    span(class = "deepreview-expand-label"):
-                      text cstring(fmt"Expand 10 lines above")
-
-                # Render expanded lines above as context.
-                if aboveCount > 0 and startLine < hunkFirstLine:
-                  for lineNum in startLine ..< hunkFirstLine:
-                    if lineNum >= 1 and lineNum <= sourceLines.len:
-                      tdiv(class = "deepreview-unified-line deepreview-unified-line-context deepreview-expanded-context"):
-                        span(class = "deepreview-unified-gutter-old"):
-                          text cstring($lineNum)
-                        span(class = "deepreview-unified-gutter-new"):
-                          text cstring($lineNum)
-                        span(class = "deepreview-unified-line-content"):
-                          text cstring(sourceLines[lineNum - 1])
-
-            # Hunk lines.
-            for lineItem in hunk.lines:
-              let lineType = $lineItem.`type`
-              let lineClass = case lineType
-                of "added": "deepreview-unified-line deepreview-unified-line-added"
-                of "removed": "deepreview-unified-line deepreview-unified-line-removed"
-                else: "deepreview-unified-line deepreview-unified-line-context"
-
-              tdiv(class = cstring(lineClass)):
-                # Gutter: old line number.
-                span(class = "deepreview-unified-gutter-old"):
-                  if lineType != "added" and lineItem.oldLine > 0:
-                    text cstring($lineItem.oldLine)
-                # Gutter: new line number.
-                span(class = "deepreview-unified-gutter-new"):
-                  if lineType != "removed" and lineItem.newLine > 0:
-                    text cstring($lineItem.newLine)
-                # Line content.
-                span(class = "deepreview-unified-line-content"):
-                  text $lineItem.content
-                # Omniscience overlay: inline variable values from flow data.
-                # Only shown for lines that exist in the new file version
-                # (added or context lines with a valid newLine number).
-                #
-                # Renders each variable using the same CSS classes as the
-                # standard CodeTracer flow visualization (flow-parallel-value,
-                # flow-parallel-value-name, flow-parallel-value-box) so the
-                # values look identical to flow annotations in the editor.
-                if lineType != "removed" and lineItem.newLine > 0:
-                  let valuePairs = flowValuesForLine(file, lineItem.newLine)
-                  if valuePairs.len > 0:
-                    span(class = "deepreview-flow-values"):
-                      for vp in valuePairs:
-                        span(class = "flow-parallel-value"):
-                          span(class = "flow-parallel-value-name"):
-                            text cstring("<" & vp.name & ">")
-                          let valText = if vp.truncated: vp.value & "..."
-                                        else: vp.value
-                          span(class = "flow-parallel-value-box flow-parallel-value-before-only"):
-                            text cstring(valText)
-
-            # --- "Expand below" button and expanded lines ---
-            if hasSource:
-              let belowCount = self.expandBelow.getExpand(fileIdx, hunkIdx)
-
-              # Determine the last line of the hunk (1-based).
-              var hunkLastLine = 0
-              for lineItem in hunk.lines:
-                let ln = lineItem.newLine
-                if ln > hunkLastLine:
-                  hunkLastLine = ln
-                let oln = lineItem.oldLine
-                if oln > hunkLastLine:
-                  hunkLastLine = oln
-
-              # Compute the furthest line we can show below. For the
-              # last hunk this is the end of the file; for earlier
-              # hunks it is one line before the next hunk's first line.
-              var belowLimit = sourceLines.len
-              if hunkIdx < file.diff.hunks.len - 1:
-                let nextHunk = file.diff.hunks[hunkIdx + 1]
-                var nextFirst = 0
-                for nli in nextHunk.lines:
-                  let nln = if nli.newLine > 0: nli.newLine
-                            elif nli.oldLine > 0: nli.oldLine
-                            else: 0
-                  if nln > 0:
-                    nextFirst = nln
-                    break
-                # Also account for existing "expand above" on the
-                # next hunk.
-                let nextAboveCount = self.expandAbove.getExpand(fileIdx, hunkIdx + 1)
-                if nextFirst > 0:
-                  belowLimit = min(belowLimit, nextFirst - nextAboveCount - 1)
-
-              if hunkLastLine < belowLimit:
-                # There are lines available to expand.
-                let endLine = min(belowLimit, hunkLastLine + belowCount)
-
-                # Render expanded lines below as context.
-                if belowCount > 0 and endLine > hunkLastLine:
-                  for lineNum in (hunkLastLine + 1) .. endLine:
-                    if lineNum >= 1 and lineNum <= sourceLines.len:
-                      tdiv(class = "deepreview-unified-line deepreview-unified-line-context deepreview-expanded-context"):
-                        span(class = "deepreview-unified-gutter-old"):
-                          text cstring($lineNum)
-                        span(class = "deepreview-unified-gutter-new"):
-                          text cstring($lineNum)
-                        span(class = "deepreview-unified-line-content"):
-                          text cstring(sourceLines[lineNum - 1])
-
-                # Render the expand-below button.
-                if endLine < belowLimit or belowCount == 0:
-                  tdiv(
-                    class = "deepreview-expand-row",
-                    onclick = self.makeExpandBelowHandler(fileIdx, hunkIdx)
-                  ):
-                    span(class = "deepreview-expand-icon"): text "..."
-                    span(class = "deepreview-expand-label"):
-                      text cstring(fmt"Expand 10 lines below")
-
-proc renderCallTrace(self: DeepReviewComponent): VNode =
-  ## Render the call trace panel.
-  if self.drData.callTrace.isNil or self.drData.callTrace.nodes.len == 0:
-    return buildHtml(tdiv(class = "deepreview-calltrace")):
-      tdiv(class = "deepreview-calltrace-header"): text "Call Trace"
-      tdiv(class = "deepreview-calltrace-empty"): text "No call trace data"
-  else:
-    buildHtml(tdiv(class = "deepreview-calltrace")):
-      tdiv(class = "deepreview-calltrace-header"): text "Call Trace"
-      tdiv(class = "deepreview-calltrace-body"):
-        for node in self.drData.callTrace.nodes:
-          renderCallTraceNode(node, 0)
-
 # ---------------------------------------------------------------------------
 # Main render
 # ---------------------------------------------------------------------------
 
 proc exposeTestHelpers(self: DeepReviewComponent) =
   ## Expose helper functions on the ``window`` object for E2E test
-  ## interaction. Karax's event delegation can make programmatic
-  ## ``dispatchEvent`` calls unreliable for range inputs, so the
-  ## tests call these helpers directly.
+  ## interaction with the mounted IsoNim view.
   ##
   ## We use closures that capture ``self`` so the JS functions don't
   ## need to reference mangled Nim method names.
@@ -1412,8 +849,8 @@ proc exposeTestHelpers(self: DeepReviewComponent) =
       selfCapture.viewMode = Unified
     else:
       # Switching back to FullFiles requires re-initialising the Monaco
-      # editor because Karax destroys and re-creates the editor div when
-      # toggling between the Unified diff VNode and the editor VNode.
+      # editor because the IsoNim view replaces the editor div when toggling
+      # between Unified Diff and Full Files.
       selfCapture.viewMode = FullFiles
       selfCapture.editorInitialized = false
       selfCapture.decorationCollection = nil
