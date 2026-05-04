@@ -560,6 +560,8 @@ type
     readOnly*: js
     content*: Content
     layoutItem*: GoldenContentItem
+    # Live compatibility boundary: extension/state value refresh paths still
+    # schedule redraws and afterRedraw callbacks through the base renderer.
     kxi*: KaraxInstance
     inExtension*: bool
     api*: MediatorWithSubscribers
@@ -1062,7 +1064,6 @@ type
     isExpanded*:    bool # zone expanded
     isExpansion*:   bool # is an expansion editor
     parentLine*:    int
-    renderer*:      KaraxInstance
     tabInfo*:       TabInfo
     flowUpdate*:    FlowUpdate
     flow*:          FlowComponent
@@ -1124,6 +1125,8 @@ type
     tableCallback*: proc(data: js)
     drawId*:        int
     locals*:        seq[seq[(langstring, Value)]]
+    # Live compatibility boundary: expanded Monaco trace view zones still use
+    # this renderer handle for editor-after-redraw trace refreshes.
     m*:             KaraxInstance
     zoneId*:                int
     newZoneId*:             int
