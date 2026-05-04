@@ -1,6 +1,6 @@
 import
   std / [strformat, strutils, jsffi, math],
-  kdom, vdom, karax, karaxdsl,
+  kdom,
   ../types,
   ../lib/[ logging, jslib ]
 
@@ -195,16 +195,13 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
       self.context.scroller.measure()
 
 proc updateTableFooter*(self: DataTableComponent) =
-  ## Synchronise the footer DOM (rendered statically by the IsoNim
-  ## event-log shell or by the Karax `tableFooter` VNode) with the
-  ## current `startRow`, `endRow`, and `rowsCount` fields.
+  ## Synchronise the footer DOM (rendered statically by an IsoNim shell
+  ## or created directly by `tableFooterDom`) with the current `startRow`,
+  ## `endRow`, and `rowsCount` fields.
   ##
-  ## In the legacy Karax path the footer was a VNode rebuilt on every
-  ## `redraw()`, so its `class` string and inner texts updated
-  ## automatically. The IsoNim shell renders the footer once with a
-  ## static class (`data-tables-footer 0to0`) and a fixed structure;
-  ## this proc is the only mechanism that keeps the visible counters
-  ## in sync as DataTables reports new totals via the ajax callback.
+  ## The footer shell is rendered once with a static structure; this proc
+  ## is the mechanism that keeps the visible counters in sync as DataTables
+  ## reports new totals via the ajax callback.
   ##
   ## Page-object tests (e.g. `EventLogTab.getRows`) parse the parent
   ## `.data-tables-footer` element's class with the regex `(\d*)to`
@@ -214,8 +211,7 @@ proc updateTableFooter*(self: DataTableComponent) =
   if self.footerDom.isNil:
     return
 
-  # Mirror the Karax `tableFooter` VNode class string: the suffix
-  # `<startRow>to<endRow>` is part of the test contract — see
+  # The suffix `<startRow>to<endRow>` is part of the test contract — see
   # `EventLogTab.getRows()` in
   # src/tests/gui/page-objects/layout_page.ts which parses the regex
   # `(\d*)to` out of the class attribute.
@@ -293,31 +289,47 @@ proc scrollTable*(table: DataTableComponent, position: cstring) =
   except:
     cerror getCurrentExceptionMsg()
 
-proc tableFooter*(table: DataTableComponent): VNode =
-  let class = cstring(fmt"data-tables-footer {table.startRow}to{table.endRow}")
+proc appendFooterText(parent: Node, value: cstring) =
+  parent.appendChild(document.createTextNode(value))
 
-  buildHtml(
-    tdiv(class = class)
-  ):
-    tdiv(class = "data-tables-footer-info"):
-      text "Rows"
-      input(
-        class = "ct-input-small mx-2",
-        onkeydown = proc(ev: KeyboardEvent, et: VNode) =
-          if ev.keyCode == ENTER_KEY_CODE:
-            table.inputFieldChange = false
-            scrollTable(table, ev.target.value)
-          else:
-            table.inputFieldChange = true
-            ev.stopPropagation(),
-        value = cstring($(table.startRow))
-      )
-      text "to"
-      tdiv(class="data-tables-footer-end-row"):
-        text($(table.endRow))
-      text "of"
-      tdiv(class="data-tables-footer-rows-count"):
-        text($(table.rowsCount))
+proc footerDiv(className: cstring = cstring""): Node =
+  result = document.createElement(cstring"div")
+  if className != cstring"":
+    result.setAttribute(cstring"class", className)
+
+proc tableFooterDom*(table: DataTableComponent): Node =
+  result = footerDiv(cstring(fmt"data-tables-footer {table.startRow}to{table.endRow}"))
+
+  let info = footerDiv(cstring"data-tables-footer-info")
+  result.appendChild(info)
+
+  info.appendFooterText(cstring"Rows")
+
+  let input = document.createElement(cstring"input")
+  input.setAttribute(cstring"class", cstring"ct-input-small mx-2")
+  input.value = cstring($(table.startRow))
+  input.addEventListener(cstring"keydown", proc(ev: Event) =
+    let keyboardEvent = cast[KeyboardEvent](ev)
+    if keyboardEvent.keyCode == ENTER_KEY_CODE:
+      table.inputFieldChange = false
+      scrollTable(table, ev.target.value)
+    else:
+      table.inputFieldChange = true
+      ev.stopPropagation()
+  )
+  info.appendChild(input)
+
+  info.appendFooterText(cstring"to")
+
+  let endRow = footerDiv(cstring"data-tables-footer-end-row")
+  endRow.appendFooterText(cstring($(table.endRow)))
+  info.appendChild(endRow)
+
+  info.appendFooterText(cstring"of")
+
+  let rowsCount = footerDiv(cstring"data-tables-footer-rows-count")
+  rowsCount.appendFooterText(cstring($(table.rowsCount)))
+  info.appendChild(rowsCount)
 
 proc removeTracepointResults*(table: DataTableComponent, tracepoint: Tracepoint) =
   discard

@@ -847,7 +847,6 @@ proc ensureChart(self: TraceComponent) =
             onmouseleave = proc =
               self.mouseIsOverTable = false
           )
-        tableFooter(self.dataTable)
 
     self.chart.tableView = tableView
     # self.chart.id = self.data.ui.idMap[j"chart"]
@@ -995,42 +994,6 @@ proc traceDiv(className: cstring = cstring""): Node =
 proc appendTraceText(parent: Node, text: cstring) =
   parent.appendChild(traceTextNode(text))
 
-proc traceDataTableFooterDom(self: TraceComponent): Node =
-  let table = self.dataTable
-
-  result = traceDiv(cstring(fmt"data-tables-footer {table.startRow}to{table.endRow}"))
-
-  let info = traceDiv(cstring"data-tables-footer-info")
-  result.appendChild(info)
-
-  info.appendTraceText(cstring"Rows")
-
-  let input = document.createElement(cstring"input")
-  input.setAttribute(cstring"class", cstring"ct-input-small mx-2")
-  input.value = cstring($(table.startRow))
-  input.addEventListener(cstring"keydown", proc(ev: Event) =
-    let keyboardEvent = cast[KeyboardEvent](ev)
-    if keyboardEvent.keyCode == ENTER_KEY_CODE:
-      table.inputFieldChange = false
-      scrollTable(table, ev.target.value)
-    else:
-      table.inputFieldChange = true
-      ev.stopPropagation()
-  )
-  info.appendChild(input)
-
-  info.appendTraceText(cstring"to")
-
-  let endRow = traceDiv(cstring"data-tables-footer-end-row")
-  endRow.appendTraceText(cstring($(table.endRow)))
-  info.appendChild(endRow)
-
-  info.appendTraceText(cstring"of")
-
-  let rowsCount = traceDiv(cstring"data-tables-footer-rows-count")
-  rowsCount.appendTraceText(cstring($(table.rowsCount)))
-  info.appendChild(rowsCount)
-
 proc traceChartTableDom(self: TraceComponent): Node =
   result = traceDiv(cstring"chart-table hidden")
   result.setAttribute(cstring"id", cstring(fmt"chart-table-{self.id}"))
@@ -1049,7 +1012,7 @@ proc traceChartTableDom(self: TraceComponent): Node =
   )
   dataTable.appendChild(table)
 
-  result.appendChild(self.traceDataTableFooterDom())
+  result.appendChild(tableFooterDom(self.dataTable))
 
 proc traceChartCanvasDom(self: TraceComponent, kind: cstring, hidden: bool): Node =
   let hiddenClass = if hidden: cstring" hidden" else: cstring""
