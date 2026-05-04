@@ -112,7 +112,6 @@ when defined(js):
         "sessionId": self.viewState.agentSessionId
       })
       requestCaptionBarProgressRender(self)
-      redrawAll()
 
   proc onContainerMouseEnter(self: CaptionBarProgressComponent): proc() =
     result = proc() =
