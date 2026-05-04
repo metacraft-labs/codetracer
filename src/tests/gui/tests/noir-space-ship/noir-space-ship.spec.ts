@@ -268,13 +268,12 @@ test.describe("NoirSpaceShip", () => {
     await layout.reverseNextButton().dispatchEvent("click");
   });
 
-  // TODO(failing): TimeoutError waiting for `.flow-parallel-value-name` or `.flow-loop-value-name`
-  //   with text 'regeneration' to become visible (5000ms timeout).
-  //   Loop-local variables (regeneration, damage, remaining_shield) are not rendered in the flow
-  //   visualization. The static analysis extracts them but DbReplay cannot evaluate them at the
-  //   breakpoint scope because they are loop-scoped.
-  //   Hypothesis: The noir db-backend's variable lookup needs to handle loop-scoped variables
-  //   differently, perhaps by expanding the scope query to include enclosing loop blocks.
+  // TODO(failing): TimeoutError waiting for flow value 'regeneration' to become visible.
+  //   The headless DAP regression in noir_space_ship_test.nim proves ct/load-flow includes
+  //   regeneration in both exprOrder and resolved before/after value names for
+  //   shield.nr::iterate_asteroids. The remaining boundary is the GUI flow view projection /
+  //   selector path: the loop chrome renders, but the browser-visible value labels are still
+  //   the main/argument values rather than the iterate_asteroids loop-local values.
   test("loop iteration slider tracks remaining shield", async ({ ctPage }) => {
     let traceStep = 0;
     function trace(message: string): void {
@@ -387,9 +386,8 @@ test.describe("NoirSpaceShip", () => {
   });
 
   // TODO(failing): Same root cause as "loop iteration slider tracks remaining shield" --
-  //   TimeoutError waiting for flow value 'regeneration' to become visible.
-  //   Loop-scoped variables are not rendered in the flow visualization.
-  //   Hypothesis: Needs loop-scoped variable support in the noir db-backend.
+  //   ct/load-flow contains the regeneration value at the DAP layer, but the GUI flow view
+  //   does not expose a browser-visible value box for it after the iterate_asteroids jump.
   test("simple loop iteration jump", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();

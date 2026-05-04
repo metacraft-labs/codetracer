@@ -244,6 +244,46 @@ proc flowLoopCounts(resp: JsonNode): tuple[loops: int, inLoopSteps: int] =
         if step.getOrDefault("loop").getInt(-1) >= 0:
           inc result.inLoopSteps
 
+proc addUniqueName(names: var seq[string]; name: string) =
+  if name.len > 0 and name notin names:
+    names.add(name)
+
+proc collectFlowNames(resp: JsonNode): tuple[exprNames: seq[string], valueNames: seq[string]] =
+  ## Collect source-extracted and resolved flow names from a ``ct/load-flow``
+  ## response.  ``exprOrder`` records names extracted from source, while
+  ## ``beforeValues`` / ``afterValues`` record names the replay layer actually
+  ## resolved to values and can render as flow value boxes.
+  let body = resp.getOrDefault("body")
+  if body.isNil:
+    return
+  let viewUpdates = body.getOrDefault("viewUpdates")
+  if viewUpdates.isNil:
+    return
+
+  var entries: seq[JsonNode] = @[]
+  if viewUpdates.kind == JArray:
+    entries = viewUpdates.elems
+  elif viewUpdates.kind == JObject:
+    for _, value in viewUpdates.pairs:
+      entries.add(value)
+
+  for entry in entries:
+    if entry.isNil or entry.kind != JObject:
+      continue
+    let stepsNode = entry.getOrDefault("steps")
+    if stepsNode.isNil or stepsNode.kind != JArray:
+      continue
+    for step in stepsNode.elems:
+      let exprOrder = step.getOrDefault("exprOrder")
+      if not exprOrder.isNil and exprOrder.kind == JArray:
+        for expr in exprOrder.elems:
+          result.exprNames.addUniqueName(expr.getStr(""))
+      for valueTableName in ["beforeValues", "afterValues"]:
+        let values = step.getOrDefault(valueTableName)
+        if not values.isNil and values.kind == JObject:
+          for name, _ in values.pairs:
+            result.valueNames.addUniqueName(name)
+
 # ---------------------------------------------------------------------------
 # Suite 1: Editor loaded main.nr
 # Mirrors: "editor loaded main.nr file"
@@ -895,6 +935,50 @@ suite "Noir Space Ship: loop iteration via calltrace":
              " in-loop-steps=", counts.inLoopSteps
         check counts.loops > 0
         check counts.inLoopSteps > 0
+
+  test "ct/load-flow name contract at iterate_asteroids resolves loop locals":
+    ## §5.8 contract diagnostic for the GUI loop tests.  The browser now
+    ## renders flow DOM for ``shield.nr::iterate_asteroids``; the remaining
+    ## failure was a selector waiting for the old loop-local name
+    ## ``regeneration``.  Pin the DAP payload boundary here: source extraction
+    ## sees the loop-scoped names and replay value resolution does produce
+    ## resolved values for them.  If the GUI cannot find ``regeneration``, the
+    ## next boundary is the flow view projection / selector path, not DAP data.
+    let tracePath = findOrRecordNoirTrace()
+    let session = newHeadlessDebugSession(tracePath, findReplayServer())
+    defer: session.close()
+
+    stepToNoirSource(session)
+    for i in 0 ..< 10:
+      session.stepForward()
+
+    session.requestAndLoadCalltrace(depth = 30)
+    let lines = session.getCalltraceLines()
+    let iterIdx = findCallLineByName(lines, "iterate_asteroids")
+    if iterIdx < 0:
+      echo "  iterate_asteroids not present in calltrace; skipping"
+      check lines.len > 0
+    else:
+      session.calltraceJumpByLine(lines[iterIdx])
+      check session.getDebuggerStatus() == dsIdle
+
+      let postFile = session.getCurrentFile()
+      let postLine = session.getCurrentLine()
+      let postTicks = session.getCurrentRRTicks()
+      let resp = session.sendRawDapRequest("ct/load-flow",
+        loadFlowArgs(postFile, postLine, postTicks))
+      check resp.getOrDefault("success").getBool(false)
+
+      let names = collectFlowNames(resp)
+      echo "  iterate_asteroids exprOrder names: ", names.exprNames
+      echo "  iterate_asteroids resolved value names: ", names.valueNames
+      check "regeneration" in names.exprNames
+      check "remaining_shield" in names.exprNames
+      check "initial_shield" in names.valueNames
+      check "shield_regen_percentage" in names.valueNames
+      check "masses" in names.valueNames
+      check "regeneration" in names.valueNames
+      check "remaining_shield" in names.valueNames
 
 # ---------------------------------------------------------------------------
 # Suite 4: Event log populated
