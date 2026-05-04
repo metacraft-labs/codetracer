@@ -401,7 +401,7 @@ when defined(js):
                  discard vm.store.backend.send(
                    "ct/calltrace-jump",
                    %*{"rrTicks": capturedRrTicks})):
-            text "#" & key & " - rrTicks(" & $capturedRrTicks & "): " & name
+            text "#" & key & " - stepId(" & $capturedRrTicks & "): " & name
         r.appendChild(container, resultEl)
 
   proc wireSearchForm(form, input: isonim_dom.Element; vm: CalltraceVM) =
@@ -496,7 +496,8 @@ when defined(js):
                     id = "calltrace-search-input-0",
                     class = "calltrace-search-input calltrace-search-input-0 " &
                             "ct-input-panel ct-input-search-image",
-                    `type` = "text", placeholder = "Search", tabindex = "0")
+                    `type` = "text", placeholder = "Search", tabindex = "0",
+                    value = vm.searchQuery.val)
             tdiv(ref = resultsContainer, class = "call-search-results hidden"):
               discard
         tdiv(ref = scrollContainer,

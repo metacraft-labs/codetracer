@@ -993,6 +993,14 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createCalltraceVM(store)
     if fixture != "empty": vm.applyCalltrace()
+    if fixture == "search-status-report":
+      vm.setSearchQuery("status_report")
+      vm.setBackendSearchResults(@[
+        (name: "status_report", rrTicks: 43, key: "5"),
+        (name: "status_report", rrTicks: 111, key: "10"),
+        (name: "status_report", rrTicks: 179, key: "15"),
+        (name: "status_report", rrTicks: 247, key: "20"),
+      ])
     mountIsoNimCalltrace(container, vm)
     return proc() = vm.dispose())
 
@@ -1092,6 +1100,7 @@ proc mountAgentActivity(container: isonim_dom.Element; fixture: string): Dispose
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createAgentActivityVM(store)
     if fixture != "empty": vm.applyAgentActivity()
+    if fixture == "reference": vm.setTerminals(@[])
     if fixture == "loading": vm.setLoading(true)
     mountIsoNimAgentActivityPanel(container, vm, 101, "storybook-agent-input")
     return proc() = vm.dispose())
