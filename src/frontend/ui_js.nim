@@ -1803,8 +1803,7 @@ proc recordPath(data: Data, path: cstring, fieldName: cstring) =
     let capitalizedField = capitalize(fieldName)
     formValidator.toJs[&"valid{capitalizedField}"]= true
     formValidator.toJs[&"invalid{capitalizedField}Message"] = cstring""
-    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-    redrawAll()
+    data.ui.welcomeScreen.requestWelcomeScreenRender()
 
 proc onRecordPath(
   sender: js,
@@ -1823,7 +1822,7 @@ proc onPathValidated(
     message=cstring)) =
   if not response.isValid:
     data.invalidPath(response.fieldName, response.message)
-    redrawAll()
+    data.ui.welcomeScreen.requestWelcomeScreenRender()
   else:
     data.recordPath(response.execPath, response.fieldName)
 
@@ -1833,8 +1832,7 @@ proc onSuccessfulRecord(
   if not data.ui.welcomeScreen.isNil and
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordSuccess
-    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-    redrawAll()
+    data.ui.welcomeScreen.requestWelcomeScreenRender()
   else:
     data.viewsApi.successMessage(cstring"Recording finished. Reloading trace...")
 
@@ -1845,8 +1843,7 @@ proc onFailedRecord(
       not data.ui.welcomeScreen.newRecord.isNil:
     data.ui.welcomeScreen.newRecord.status.kind = RecordError
     data.ui.welcomeScreen.newRecord.status.errorMessage = response.errorMessage
-    data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-    redrawAll()
+    data.ui.welcomeScreen.requestWelcomeScreenRender()
   else:
     data.viewsApi.errorMessage(response.errorMessage)
 
@@ -1855,8 +1852,7 @@ proc onLoadingTrace(
   response: jsobject(trace=Trace)) =
   data.ui.welcomeScreen.loading = true
   data.ui.welcomeScreen.loadingTrace = response.trace
-  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-  redrawAll()
+  data.ui.welcomeScreen.requestWelcomeScreenRender()
 
 proc onFailedDownload(
   sender: js,
@@ -1864,16 +1860,14 @@ proc onFailedDownload(
 ) =
   data.ui.welcomeScreen.newDownload.status.kind = RecordError
   data.ui.welcomeScreen.newDownload.status.errorMessage = response.errorMessage
-  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-  redrawAll()
+  data.ui.welcomeScreen.requestWelcomeScreenRender()
 
 proc onSuccessfulDownload(
   sender: js,
   response: jsobject()
 ) =
   data.ui.welcomeScreen.newDownload.status.kind = RecordSuccess
-  data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-  redrawAll()
+  data.ui.welcomeScreen.requestWelcomeScreenRender()
 
 proc onWelcomeScreen(
   sender: js,

@@ -26,6 +26,7 @@ var isoNimWelcomeScreenMounted = false
 
 proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent)
 proc tryMountIsoNimWelcomeScreen*()
+proc requestWelcomeScreenRender*(self: WelcomeScreenComponent)
 
 proc safeStr(s: cstring): string =
   if s.isNil:
@@ -188,6 +189,11 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
     welcomeScreenVMInstance.setOnlineTraceInput("")
   else:
     welcomeScreenVMInstance.setOnlineTraceInput(self.newDownload.args.mapIt($it).join(" "))
+
+proc requestWelcomeScreenRender*(self: WelcomeScreenComponent) =
+  ## Refresh the direct IsoNim welcome screen mount after legacy state changes.
+  self.syncLegacyWelcomeScreenIntoVM()
+  tryMountIsoNimWelcomeScreen()
 
 proc showNewRecordView*(self: WelcomeScreenComponent) =
   self.welcomeScreen = false
