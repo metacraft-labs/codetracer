@@ -117,6 +117,14 @@ proc requestDebugShellRender*(self: DebugComponent) =
   renderDebugChromeInto(r, container, commandPaletteId)
   debugShellMountedCommandPaletteId = commandPaletteId
 
+proc requestDebugActionRefresh(self: DebugComponent) =
+  ## Refresh the Debug-owned direct IsoNim surfaces after local action state
+  ## changes. The run-tests loading flag no longer belongs to a broad app
+  ## redraw path, but keeping this request local preserves the mounted Debug
+  ## shell/control contract if the action fires before either host exists.
+  self.requestDebugShellRender()
+  tryMountIsoNimDebugControls()
+
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel DebugControlsVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel).
@@ -257,7 +265,7 @@ proc action(self: DebugComponent, id: string) =
     # TODO: For now hardcode the animation reset
     discard setTimeout(proc() =
       self.isLoading = false
-      redrawAll(),
+      self.requestDebugActionRefresh(),
       10000
     )
 
