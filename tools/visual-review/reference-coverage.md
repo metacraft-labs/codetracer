@@ -11,6 +11,13 @@ worktree artifacts that agents should compare against.
   `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T155511Z/`
 - Expanded panel baseline:
   `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T220906Z/`
+- Expanded panel baseline with isolated layout config:
+  `/home/zahary/metacraft/codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T222307Z/`
+
+Some old Karax panels were less developed than current IsoNim surfaces. Use
+these references for mature shell, Golden Layout, design-system class, and
+spacing contracts. Do not downgrade richer current IsoNim behavior to match an
+old empty, blocked, or partial Karax state.
 
 ## Coverage Matrix
 
@@ -26,17 +33,26 @@ worktree artifacts that agents should compare against.
 | Agent activity active | captured | `20260504T220923Z_noir-agent-activity-active` |
 | Menu open | captured | `20260504T220925Z_noir-menu-view-open` |
 | Status expanded | captured | `20260504T220927Z_noir-status-expanded` |
-| Search results | captured | `20260504T220948Z_noir-search-results-shield` |
-| Fixed search | blocked | `20260504T220948Z_noir-fixed-search-blocked`; input existed but was hidden |
+| Search results | captured | `20260504T222338Z_noir-search-results-karax-populated`; preserve newer IsoNim functionality if richer |
+| Fixed search | captured | `20260504T222336Z_noir-fixed-search-karax-visible` |
 | Point list | blocked | `20260504T220950Z_noir-point-list-open`; Karax raised unexpected `PointList` content |
 | Step list | captured | `20260504T220952Z_noir-step-list-open` |
-| Timeline | blocked | `20260504T220954Z_noir-timeline-open`; layout tab API unavailable |
-| Trace log | blocked | `20260504T220956Z_noir-trace-log-open`; layout tab API unavailable |
-| Build | blocked | `20260504T220958Z_noir-build-open`; layout tab API unavailable |
-| Build errors | blocked | `20260504T221000Z_noir-build-errors-open`; layout tab API unavailable |
+| Timeline | blocked | `20260504T222349Z_noir-timeline-blocked-no-factory`; Karax lacked a usable component factory |
+| Trace log | captured | `20260504T222329Z_noir-trace-log-karax-open` |
+| Build | captured | `20260504T222317Z_noir-build-karax-open`; preserve newer IsoNim output behavior if richer |
+| Build errors | partial | `20260504T222538Z_noir-build-errors-karax-open-attached` and `20260504T222734Z_noir-build-errors-karax-direct-id0`; Karax content stayed empty |
 | Shell | captured | `20260504T221002Z_noir-shell-open` |
-| Agent workspace | blocked | `20260504T221004Z_noir-agent-workspace-open`; layout tab API unavailable |
-| Agent activity deep review | blocked | `20260504T221006Z_noir-agent-activity-deepreview-open`; layout tab API unavailable |
+| REPL | captured | `20260504T222331Z_noir-repl-karax-open` |
+| Low-level code | captured | `20260504T222333Z_noir-low-level-code-karax-open` |
+| No source | captured | `20260504T222334Z_noir-no-source-karax-open` |
+| Command palette | captured | `20260504T222339Z_noir-command-palette-karax-open` |
+| Debug controls/header | captured | `20260504T222314Z_noir-debug-controls-header` |
+| Agent workspace | captured | `20260504T222341Z_noir-agent-workspace-karax-open`; preserve newer IsoNim behavior if richer |
+| Agent activity deep review | captured | `20260504T222342Z_noir-agent-activity-deepreview-karax-open`; preserve newer IsoNim behavior if richer |
+| Deep review panel | partial | `20260504T222344Z_noir-deepreview-panel-karax-open-empty` and `20260504T222427Z_deepreview-standalone-karax-sample`; old Karax state was underdeveloped |
+| Flow | partial | `20260504T222348Z_noir-flow-select-attempt`; old frontend raised missing `ct/load-flow` response-kind handling |
+| VCS | missing | No old panel implementation found |
+| Request panel | missing | No old panel implementation found |
 | Welcome screen | captured | `20260504T221201Z_welcome-screen` |
 
 ## Current Workflow
