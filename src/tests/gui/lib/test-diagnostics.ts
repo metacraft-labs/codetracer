@@ -94,7 +94,24 @@ async function captureDomSummary(page: Page, baseName: string): Promise<void> {
       const variables = document.querySelectorAll('[class*="variables"], [id*="variables"]');
       const programState = document.querySelectorAll('[class*="program-state"]');
       const goldenLayout = document.querySelectorAll(".lm_goldenlayout");
-      const flowValues = document.querySelectorAll('[class*="flow-value"], [class*="deepreview-flow-values"]');
+      const flowValues = document.querySelectorAll(
+        ".flow-parallel-value-box, .flow-inline-value-box, .flow-multiline-value-box, " +
+          ".flow-multiline-value-container, .flow-loop-textarea, [class*=\"deepreview-flow-values\"]",
+      );
+      const flowValueBoxes = document.querySelectorAll(
+        ".flow-parallel-value-box, .flow-inline-value-box, .flow-multiline-value-box",
+      );
+      const flowLoopControls = document.querySelectorAll(
+        ".flow-multiline-value-container, .flow-loop-textarea",
+      );
+      const flowNames = Array.from(
+        document.querySelectorAll(
+          ".ct-omni-name, .ct-omni-name-std, .flow-parallel-value-name, .flow-loop-value-name",
+        ),
+      )
+        .map((el) => (el.textContent ?? "").trim())
+        .filter((text) => text.length > 0)
+        .slice(0, 30);
 
       // Hidden elements
       const hidden = Array.from(all).filter((el) => {
@@ -123,6 +140,9 @@ async function captureDomSummary(page: Page, baseName: string): Promise<void> {
         `  Program State: ${programState.length}`,
         `  GoldenLayout: ${goldenLayout.length}`,
         `  Flow/Omniscience: ${flowValues.length}`,
+        `  Flow value boxes: ${flowValueBoxes.length}`,
+        `  Flow loop controls: ${flowLoopControls.length}`,
+        `  Flow value names: ${flowNames.join(", ") || "(none)"}`,
       ].join("\n");
     });
 

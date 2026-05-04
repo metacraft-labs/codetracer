@@ -134,7 +134,7 @@ export class EditorPane {
     // Strategy 1: Find a visible name label and pick its sibling value box.
     // Works for normal (non-loop) values where showName=true.
     const nameLocator = this.root
-      .locator(".flow-parallel-value-name, .flow-loop-value-name")
+      .locator(".ct-omni-name, .ct-omni-name-std, .flow-parallel-value-name, .flow-loop-value-name")
       .filter({ hasText: valueName });
 
     const siblingLocator = nameLocator

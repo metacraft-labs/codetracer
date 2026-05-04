@@ -47,7 +47,7 @@ export class FlowValue {
    */
   async name(): Promise<string> {
     const nameLocator = this.root.locator(
-      "xpath=preceding-sibling::span[contains(@class,'value-name')]",
+      "xpath=preceding-sibling::span[contains(@class,'value-name') or contains(@class,'ct-omni-name')]",
     );
     if ((await nameLocator.count()) > 0) {
       const text = await nameLocator.last().innerText();
