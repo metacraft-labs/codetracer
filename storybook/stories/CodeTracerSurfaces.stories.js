@@ -46,23 +46,13 @@ function injectSurfaceStyles(container) {
     .ct-storybook-surface {
       box-sizing: border-box;
       min-height: 100vh;
-      padding: 16px;
-      background: #17191d;
-      color: #e8e8e8;
-      font-family: Inter, system-ui, sans-serif;
+      padding: 0;
     }
 
     .ct-storybook-frame {
       box-sizing: border-box;
-      min-height: calc(100vh - 32px);
-      border: 1px solid #3f4652;
-      background: #101216;
+      min-height: 100vh;
       overflow: auto;
-    }
-
-    .ct-storybook-surface[data-kind="layout"] .ct-storybook-frame {
-      border: 0;
-      background: transparent;
     }
 
     .ct-storybook-frame > .component-container,
@@ -70,19 +60,8 @@ function injectSurfaceStyles(container) {
     .ct-storybook-frame > .terminal,
     .ct-storybook-frame > .panel,
     .ct-storybook-frame > .isonim-app-shell {
-      min-height: calc(100vh - 34px);
+      min-height: 100vh;
     }
-
-    .ct-storybook-surface pre {
-      margin: 0;
-      font: 13px/1.45 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-      white-space: pre-wrap;
-    }
-
-    .ct-storybook-surface .ansi-bright-green-fg { color: #7ee787; }
-    .ct-storybook-surface .ansi-bright-cyan-fg { color: #67e8f9; }
-    .ct-storybook-surface .ansi-bright-yellow-fg { color: #facc15; }
-    .ct-storybook-surface .ansi-bright-red-fg { color: #ff7b72; }
   `;
   container.appendChild(style);
 }

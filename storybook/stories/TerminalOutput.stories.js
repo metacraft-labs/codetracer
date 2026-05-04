@@ -35,57 +35,12 @@ function injectTerminalStyles(container) {
     .ct-storybook-terminal {
       box-sizing: border-box;
       min-height: 100vh;
-      padding: 16px;
-      background: #161616;
-      color: #e8e8e8;
-      font-family: Inter, system-ui, sans-serif;
     }
 
     .ct-storybook-terminal .component-container.terminal {
-      height: calc(100vh - 32px);
+      height: 100vh;
       overflow: auto;
-      border: 1px solid #3f4652;
-      background: #0f1115;
     }
-
-    .ct-storybook-terminal pre {
-      margin: 0;
-      padding: 12px;
-      font: 13px/1.45 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-      white-space: pre-wrap;
-    }
-
-    .ct-storybook-terminal .terminal-line {
-      min-height: 18px;
-    }
-
-    .ct-storybook-terminal .terminal-line > div {
-      display: inline;
-      cursor: pointer;
-    }
-
-    .ct-storybook-terminal .past {
-      color: #8e98a8;
-    }
-
-    .ct-storybook-terminal .active {
-      color: #f3f4f6;
-      background: #334155;
-    }
-
-    .ct-storybook-terminal .future {
-      color: #5eead4;
-    }
-
-    .ct-storybook-terminal .empty-overlay {
-      padding: 12px;
-      color: #a7b0bd;
-      font: 13px/1.45 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    }
-
-    .ct-storybook-terminal .ansi-bright-green-fg { color: #7ee787; }
-    .ct-storybook-terminal .ansi-bright-cyan-fg { color: #67e8f9; }
-    .ct-storybook-terminal .ansi-bright-yellow-fg { color: #facc15; }
   `;
   container.appendChild(style);
 }

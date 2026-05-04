@@ -7,7 +7,11 @@ const config: StorybookConfig = {
     name: "@storybook/html-webpack5",
     options: {},
   },
-  staticDirs: [{ from: "../dist", to: "/dist" }],
+  staticDirs: [
+    { from: "../dist", to: "/dist" },
+    { from: "../../src/build-debug/frontend", to: "/frontend" },
+    { from: "../../src/build-debug/public", to: "/public" },
+  ],
 };
 
 export default config;
