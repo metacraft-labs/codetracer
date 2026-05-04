@@ -3139,7 +3139,7 @@ proc flowLoopValue*(
   step: FlowStep,
   allIterations: int,
   style: VStyle
-): VNode =
+): Node =
   # let flowMode =
   #   ($self.data.config.flow.realFlowUI)
   #     .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
@@ -3152,32 +3152,49 @@ proc flowLoopValue*(
     self.activeStep = newStep
     self.jumpToLocalStep(self.activeStep.stepCount + 1)
 
-  result = buildHtml(
-    span(
-      class = &"flow-loop-value",
-      style=style
-    )
-  ):
-    span(class = &"ct-omniscience-loop", style=style):
-      span(class = &"flow-parallel-loop-iteration-start"): text "iteration "
-      textarea(class = &"flow-loop-textarea",
-        value = $(iteration),
-        maxlength = $width,
-        onblur = proc() = self.onEnter(),
-        oninput = proc(ev: Event, v: VNode) =
-          let value = parseInt($ev.target.value)
-          if value >= 0 and value <= allIterations:
-            iteration = value,
-        onkeydown = proc(ev: KeyboardEvent, v: VNode) =
-          if ev.keyCode == ENTER_KEY_CODE:
-            self.onEnter()
-            self.redrawFlow(),
-        style = style(
-          (StyleAttr.width, cstring($(width+1) & "ch")),
-          (StyleAttr.textAlign, cstring("right"))),
-      )
-      # TODO: FOR NOW HARDCODE THE PARALLEL
-      span(class = &"flow-parallel-loop-iteration-end"): text fmt"from {allIterations}"
+  result = document.createElement(cstring"span")
+  result.setAttribute(cstring"class", cstring"flow-loop-value")
+  result.applyStyle(style)
+
+  let loopSpan = document.createElement(cstring"span")
+  loopSpan.setAttribute(cstring"class", cstring"ct-omniscience-loop")
+  loopSpan.applyStyle(style)
+
+  let iterationStart = document.createElement(cstring"span")
+  iterationStart.setAttribute(cstring"class", cstring"flow-parallel-loop-iteration-start")
+  iterationStart.appendChild(document.createTextNode(cstring"iteration "))
+  loopSpan.appendChild(iterationStart)
+
+  let textarea = document.createElement(cstring"textarea")
+  textarea.setAttribute(cstring"class", cstring"flow-loop-textarea")
+  textarea.setAttribute(cstring"value", cstring($(iteration)))
+  textarea.toJs.value = cstring($(iteration))
+  textarea.setAttribute(cstring"maxlength", cstring($width))
+  textarea.addEventListener(cstring"blur", proc(e: Event) =
+    self.onEnter()
+  )
+  textarea.addEventListener(cstring"input", proc(ev: Event) =
+    let value = parseInt($cast[cstring](ev.target.toJs.value))
+    if value >= 0 and value <= allIterations:
+      iteration = value
+  )
+  textarea.addEventListener(cstring"keydown", proc(ev: Event) =
+    if cast[int](ev.toJs.keyCode) == ENTER_KEY_CODE:
+      self.onEnter()
+      self.redrawFlow()
+  )
+  textarea.applyStyle(style(
+    (StyleAttr.width, cstring($(width+1) & "ch")),
+    (StyleAttr.textAlign, cstring("right"))))
+  loopSpan.appendChild(textarea)
+
+  # TODO: FOR NOW HARDCODE THE PARALLEL
+  let iterationEnd = document.createElement(cstring"span")
+  iterationEnd.setAttribute(cstring"class", cstring"flow-parallel-loop-iteration-end")
+  iterationEnd.appendChild(document.createTextNode(cstring(fmt"from {allIterations}")))
+  loopSpan.appendChild(iterationEnd)
+
+  result.appendChild(loopSpan)
 
 proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
   let iteration = step.iteration
@@ -3250,7 +3267,7 @@ proc makeLoopLine(
 
   if step.rrTicks != -1:
     result.appendChild(backLoopControlButton(self, step, bStyle))
-    result.appendChild(vnodeToDom(flowLoopValue(self, step, allIterations, style), KaraxInstance()))
+    result.appendChild(flowLoopValue(self, step, allIterations, style))
     result.appendChild(nextLoopControlButton(self, step, bStyle))
 
   # self.redraw()
