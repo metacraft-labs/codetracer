@@ -1222,6 +1222,11 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
 proc appendRendered(container: isonim_dom.Element; node: isonim_dom.Element) =
   discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(node))
 
+proc createHost(container: isonim_dom.Element; tag, id: string): isonim_dom.Element =
+  result = isonim_dom.createElement(isonim_dom.document, cstring(tag))
+  isonim_dom.setAttribute(result, cstring"id", cstring(id))
+  discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(result))
+
 proc mountStructure(container: isonim_dom.Element; name, fixture: string): DisposeProc =
   let r = WebRenderer()
   case name
@@ -1241,13 +1246,18 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
                      shortcut: "F5", enabled: true, path: @[1, 0],
                      nameWidth: 18),
     ])
-    appendRendered(container, renderMenuShell(r, MenuShellModel(
+    let menuHost = createHost(container, "div", "menu")
+    renderMenuShellInto(r, menuHost, MenuShellModel(
       showNavigation: true, active: true, searchQuery: "",
       rootNodes: @[fileNode, debugNode],
       showWindowMenu: true,
-    )))
+    ))
   of "status-shell":
-    appendRendered(container, renderStatusShell(r, StatusShellModel(
+    let footerHost = isonim_dom.createElement(isonim_dom.document, cstring"footer")
+    let statusHost = createHost(footerHost, "div", "status")
+    discard isonim_dom.appendChild(isonim_dom.Node(container),
+                                   isonim_dom.Node(footerHost))
+    renderStatusInto(r, statusHost, StatusShellModel(
       activeNotifications: @[
         StatusNotificationRecord(index: 0, kindClass: "info",
                                  variantClass: "default",
@@ -1259,7 +1269,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
                             locationText: "src/combat.nr:42",
                             locationTitle: "src/combat.nr:42"),
       showNotifications: fixture == "history",
-    )))
+    ))
   of "debug-shell":
     appendRendered(container, renderDebugChromePanel(r, 3))
   of "auto-hide-bottom-tabs":
