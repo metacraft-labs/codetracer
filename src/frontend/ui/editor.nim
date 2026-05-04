@@ -121,7 +121,6 @@ proc editorAfterRedraw(self: EditorViewComponent)
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
 proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring)
 proc renderExpandedEditorDirect(self: EditorViewComponent)
-func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
   x >= location.left and x <= location.right and y >= location.top and y <= location.bottom
@@ -1341,7 +1340,6 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     selectedLine: -1,
     selectedLineInGroup: -1,
     selectedStepCount: -1,
-    multilineFlowLines: multilineFlowLines(),
     multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
     loopLineSteps: JsAssoc[int, int]{},
     inlineDecorations: JsAssoc[int, InlineDecorations]{},
@@ -2212,9 +2210,6 @@ method afterInit*(self: EditorViewComponent) {.async.} =
       if ($k).contains("shield.nr"):
         clog cstring("[NSS-1.64] afterInit: cachedMove present under key " & $k &
                      " (self.path=" & $self.path & ") -- KEY MISMATCH")
-
-func multilineFlowLines*: JsAssoc[int, KaraxInstance] =
-  JsAssoc[int, KaraxInstance]{}
 
 func supportsFlow*(self: EditorViewComponent): bool =
   self.data.config.flow.enabled

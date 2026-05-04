@@ -1303,7 +1303,6 @@ type
     flowDom*: JsAssoc[int, kdom.Node]
     activeStep*: FlowStep
     groups*: seq[Group]
-    inlineFlowVariables*: JsAssoc[int, JsAssoc[cstring, KaraxInstance]]
     inlineDecorations*: JsAssoc[int, InlineDecorations]
     inlineValueWidth*: int
     key*: cstring
@@ -1315,7 +1314,6 @@ type
     loopStates*: JsAssoc[int, LoopState]
     maxLoopActiveIterationOffset*: float
     maxFlowLineWidth*: int
-    multilineFlowLines*: JsAssoc[int, KaraxInstance]
     multilineValuesDoms*: JsAssoc[int, JsAssoc[cstring, kdom.Node]]
     multilineWidgets*: JsAssoc[int, JsAssoc[cstring, js]]
     multilineZones*: JsAssoc[int, MultilineZone]

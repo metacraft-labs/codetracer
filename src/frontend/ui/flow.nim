@@ -678,9 +678,6 @@ proc removeExpandedFlow(self: FlowComponent, line: int) =
     self.editorUI.monacoEditor.changeViewZones do (view: js):
       view.removeZone(self.multilineZones[line].zoneID)
 
-  if self.multilineFlowLines.hasKey(line):
-    discard jsDelete(self.multilineFlowLines[line])
-
 proc registerScratchpadValue(self: ScratchpadComponent, expression: cstring, value: Value) =
   self.programValues.add((expression, value))
   self.values.add(ValueComponent(
@@ -1685,7 +1682,6 @@ proc clearMultiline(self: FlowComponent) =
     self.removeExpandedFlow(line)
 
   self.multilineZones = JsAssoc[int, MultilineZone]{}
-  self.multilineFlowLines = JsAssoc[int, KaraxInstance]{}
   self.multilineValuesDoms = JsAssoc[int, JsAssoc[cstring, kdom.Node]]{}
 
 proc clearFlowLines*(self: FlowComponent) =
@@ -4277,7 +4273,6 @@ when defined(ctInExtension):
     #   selectedLine: -1,
     #   selectedLineInGroup: -1,
     #   selectedStepCount: -1,
-    #   # multilineFlowLines: multilineFlowLines(),
     #   multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
     #   loopLineSteps: JsAssoc[int, int]{},
     #   inlineDecorations: JsAssoc[int, InlineDecorations]{},
