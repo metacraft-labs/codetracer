@@ -130,7 +130,7 @@
   position: absolute
   display: flex
   flex-direction: column
-  width: unquote("min(56em, calc(100vw - 2em))")
+  width: unquote("min(40em, calc(100vw - 2em))")
   max-width: unquote("calc(100vw - 2em)")
   border-radius: 1em
   border: 0.0625em solid colors-ui-border-primary
@@ -179,9 +179,9 @@
 
 .dropdown-list-row
   display: grid
-  grid-template-columns: minmax(14em, 1.2fr) minmax(0, 3fr)
+  grid-template-columns: 9em minmax(0, 1fr)
   align-items: stretch
-  min-height: 3.1em
+  min-height: 2em
   border-top: 0.0625em solid colors-ui-border-primary
 
   &:first-child
@@ -194,13 +194,13 @@
   padding: 0 1.25em
   background: colors-ui-surface-canvas
   align-items: center
-  min-height: 3.6em
+  min-height: 2.4em
   border-bottom: 0.0625em solid colors-ui-border-primary
 
   button
     flex: 0 0 auto !important
     height: 100%
-    padding: 0.875em 0.25em 0.8125em
+    padding: 0.4em 0.25em 0.375em
     border-radius: 0 !important
     border: none !important
     background: colors-ui-surface-canvas !important
@@ -467,7 +467,7 @@ label
 .dropdown-list-tag
   display: flex
   align-items: center
-  padding: 0.5em 0 0.5em 1em
+  padding: 0.25em 0 0.25em 1em
 
   .ct-checkmark-field
     font-weight: 500
@@ -475,9 +475,9 @@ label
 .dropdown-list-kind
   display: grid
   grid-template-columns: repeat(3, minmax(0, 1fr))
-  gap: 0.625em 1.25em
+  gap: 0.25em 1em
   align-items: center
-  padding: 0.5em 1em 0.5em 1.25em
+  padding: 0.25em 1em 0.25em 1.25em
 
 .paging-menu
   display: flex
