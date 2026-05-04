@@ -6,7 +6,7 @@ import
     async, jsconsole, os
   ],
   # third party
-  karax, karaxdsl, kdom, vdom, results,
+  karax, kdom, results,
   # internal
   types, utils, lang,
   communication, dap,
@@ -221,14 +221,6 @@ proc maybeRedrawTraces*(length: int) =
 proc asmTabLoad*(path: cstring, name: cstring): Future[void] =
   # TODO data.servics.tabLoad(path, name, data.lang, lowLevel=2)
   discard
-
-proc getLine*(element: kdom.Node): int =
-  let e = cast[dom.Element](element)
-  parseInt($eattr(e, "line")) + 1
-
-proc getColumn*(element: kdom.Node): int =
-  let e = cast[dom.Element](element)
-  parseInt($eattr(e, "line")) + 1
 
 # INIT
 
@@ -1072,11 +1064,6 @@ proc lowAsm*(data: Data): bool =
 
 
 
-proc onShowSubmit*(ev: Event, tg: VNode) =
-  cast[js](ev).preventDefault()
-  # TODO traceShow(byId("trace-query"))
-
-
 proc moveTab*(right: bool = true) =
   discard
   # let panel = data.ui.activeEditorPanel
@@ -1178,16 +1165,6 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
         container.style.display = "none")
   except:
     discard
-
-proc gotoDefinition*(e: Event, v: VNode) =
-  let line = getLine(e.target)
-  let column = getColumn(e.target)
-  let path = eattr(e.target.parentNode.parentNode.parentNode, "label")
-  ipc.send "CODETRACER::goto-definition", js{
-    path: path,
-    line: line,
-    column: column
-  }
 
 # DEBUGGER
 
