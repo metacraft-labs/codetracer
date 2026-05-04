@@ -69,6 +69,7 @@ var isoNimAgentWorkspaceMountedIds {.used.}: JsAssoc[int, bool] =
 
 proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent)
 proc tryMountIsoNimAgentWorkspacePanel*(componentId: int)
+proc requestAgentWorkspacePanelRefresh*(self: AgentWorkspaceComponent)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -213,6 +214,15 @@ proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent) =
   vm.setCoverageOverlayEnabled(self.coverageOverlayEnabled)
   vm.setNotificationCount(self.notifications.len)
 
+proc requestAgentWorkspacePanelRefresh*(self: AgentWorkspaceComponent) =
+  ## Refresh the Agent Workspace IsoNim mount after legacy component state
+  ## changes.  Signal writes update mounted views; the mount attempt covers the
+  ## first refresh after the GoldenLayout host is created.
+  if self.isNil:
+    return
+  self.syncLegacyAgentWorkspaceIntoVM()
+  tryMountIsoNimAgentWorkspacePanel(self.id)
+
 # ---------------------------------------------------------------------------
 # Notification handling
 # ---------------------------------------------------------------------------
@@ -263,7 +273,7 @@ proc handleDeepReviewNotification*(self: AgentWorkspaceComponent, notification: 
     # Final summary; could trigger a full refresh.
     discard
 
-  self.syncLegacyAgentWorkspaceIntoVM()
+  self.requestAgentWorkspacePanelRefresh()
 
 # ---------------------------------------------------------------------------
 # Decoration builders (coverage overlay)
@@ -523,5 +533,4 @@ proc onAcpDeepReviewNotification*(sender: js, response: JsObject) {.async.} =
         workspace.handleDeepReviewNotification(notification)
       else:
         console.log cstring(fmt"[agent-workspace] unknown notification kind: {kindStr}")
-      redrawAll()
       break
