@@ -49,6 +49,8 @@ proc getBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBounding
 proc replaceChildren(node: js) {.importjs:"#.replaceChildren()".}
 proc redrawCallLines(self: CalltraceComponent)
 proc loadLines(self: CalltraceComponent, fromScroll: bool)
+proc calltraceValueDomHostId(prefix: cstring, parts: varargs[cstring]): cstring
+proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent)
 
 when defined(ctInExtension):
   var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
@@ -185,6 +187,7 @@ proc scrollLineIndex*(self: CalltraceComponent): int =
 
 proc showCallValue*(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring) =
   let id = keyOrIndex & "_" & arg.name
+  let valueHostId = calltraceValueDomHostId(cstring"call-tooltip-value", id)
   let value = ValueComponent(
     expanded: JsAssoc[cstring, bool]{arg.name: true},
     charts: JsAssoc[cstring, ChartComponent]{},
@@ -195,11 +198,41 @@ proc showCallValue*(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring)
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
     data: data,
-    location: self.location
+    location: self.location,
+    customRedraw: proc(value: ValueComponent) =
+      mountCalltraceValueDom(valueHostId, value)
   )
 
   self.forceRerender[id] = true
   self.modalValueComponent[id] = value
+
+proc domIdToken(raw: cstring): string =
+  for ch in $raw:
+    if ch in {'a'..'z'} or ch in {'A'..'Z'} or ch in {'0'..'9'} or ch in {'-', '_'}:
+      result.add(ch)
+    else:
+      result.add("_")
+      result.add(toHex(ord(ch), 2))
+
+proc calltraceValueDomHostId(prefix: cstring, parts: varargs[cstring]): cstring =
+  var id = $prefix
+  for part in parts:
+    id.add("-")
+    id.add(domIdToken(part))
+  result = cstring(id)
+
+proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent) =
+  let host = document.getElementById(hostId)
+  if host.isNil:
+    return
+
+  host.innerHTML = cstring""
+  host.appendChild(value.renderValueDom())
+
+proc scheduleCalltraceValueDomMount(hostId: cstring, value: ValueComponent) =
+  discard setTimeout(proc() =
+    mountCalltraceValueDom(hostId, value)
+  , 0)
 
 proc getLastKey(assoc: JsAssoc[cstring, ValueComponent]): cstring =
   var keys: seq[cstring] = @[]
@@ -416,19 +449,26 @@ proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): V
       tdiv(class = "call-arg-text", id = &"call-arg-text-{keyOrIndex}-{arg.name}"):
         text value
 
-proc ensureValueComponent(self: CallExpandedValuesComponent, name: cstring, value: Value) =
+proc ensureValueComponent(
+  self: CallExpandedValuesComponent,
+  name: cstring,
+  value: Value,
+  valueHostId: cstring
+) =
   if not self.values.hasKey(name):
-     self.values[name] = ValueComponent(
-       expanded: JsAssoc[cstring, bool]{},
-       charts: JsAssoc[cstring, ChartComponent]{},
-       showInline: JsAssoc[cstring, bool]{},
-       baseExpression: name,
-       baseValue: value,
-       stateID: -1,
-       data: self.data,
-       nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-       valueWidth: VALUE_COMPONENT_VALUE_WIDTH)
-     self.data.registerComponent(self.values[name], Content.Value)
+    self.values[name] = ValueComponent(
+      expanded: JsAssoc[cstring, bool]{},
+      charts: JsAssoc[cstring, ChartComponent]{},
+      showInline: JsAssoc[cstring, bool]{},
+      baseExpression: name,
+      baseValue: value,
+      stateID: -1,
+      data: self.data,
+      nameWidth: VALUE_COMPONENT_NAME_WIDTH,
+      valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
+      customRedraw: proc(value: ValueComponent) =
+        mountCalltraceValueDom(valueHostId, value))
+    self.data.registerComponent(self.values[name], Content.Value)
 
 proc makeCallExpandedValueComponent(data: Data, callDepth: int): CallExpandedValuesComponent =
   result = CallExpandedValuesComponent(
@@ -448,15 +488,25 @@ proc callArgListView(
       onclick = proc =
         if not self.expandedValues.hasKey(callKey):
           self.expandedValues[callKey] = makeCallExpandedValueComponent(self.data, callDepth)
-        ensureValueComponent(self.expandedValues[callKey], arg.name, arg.value)
+        ensureValueComponent(
+          self.expandedValues[callKey],
+          arg.name,
+          arg.value,
+          calltraceValueDomHostId(cstring"call-expanded-value-dom", callKey, arg.name)
+        )
     )
   ):
     span(class = "call-arg-tooltip-name"): text $(arg.name)
     text " : "
     span(class = "call-arg-tooltip-value"): text $(arg.value.textRepr)
 
-proc renderExpandedValue(value: ValueComponent): VNode =
-  value.renderValue()
+proc renderExpandedValueHost(hostId: cstring, value: ValueComponent): VNode =
+  scheduleCalltraceValueDomMount(hostId, value)
+  buildHtml(tdiv(
+    id = hostId,
+    class = "calltrace-direct-value-host",
+    style = style(StyleAttr.width, cstring"100%")
+  ))
 
 proc callArgsView(
   self: CalltraceComponent,
@@ -483,7 +533,10 @@ proc callArgsView(
         tdiv(class = "call-tooltip",
           style = style(StyleAttr.left, fmt"{self.callValuePosition[id]}px")
         ):
-          renderExpandedValue(self.modalValueComponent[id])
+          renderExpandedValueHost(
+            calltraceValueDomHostId(cstring"call-tooltip-value", cstring(id)),
+            self.modalValueComponent[id]
+          )
       if i < args.len - 1:
         text ", "
     text ")"
@@ -500,7 +553,12 @@ proc returnValueView(
       onclick = proc =
         if not self.expandedValues.hasKey(callKey):
           self.expandedValues[callKey] = makeCallExpandedValueComponent(self.data, callDepth)
-        ensureValueComponent(self.expandedValues[callKey], "<return value>", ret)
+        ensureValueComponent(
+          self.expandedValues[callKey],
+          returnValueName,
+          ret,
+          calltraceValueDomHostId(cstring"call-expanded-value-dom", callKey, returnValueName)
+        )
     )
   ):
     let value = ret.textRepr
@@ -1687,7 +1745,10 @@ proc renderExpandedValueView(
       self.callIsLastElement
     )
     tdiv(class = valueClass):
-      renderExpandedValue(value)
+      renderExpandedValueHost(
+        calltraceValueDomHostId(cstring"call-expanded-value-dom", key, value.baseExpression),
+        value
+      )
       renderRemoveButtonView(self, key)
 
 proc renderCallExpandedValues*(self: CallExpandedValuesComponent): VNode =
