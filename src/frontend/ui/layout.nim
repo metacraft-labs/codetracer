@@ -231,8 +231,8 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
     data.ui.openComponentIds[content].delete(id)
 
 # Track whether the shared (non-GL) global renderers have been initialised.
-# Fixed-search/search-results still use Karax setRenderer stubs; menu/status
-# and session-tab-bar are refreshed directly through IsoNim.
+# Menu/status/session-tab-bar/fixed-search are refreshed directly; the global
+# search-results footer placeholder is static and no longer has a Karax stub.
 var sharedRenderersInitialised = false
 
 proc renderLayoutComponent(component: Component, content: Content): VNode =
@@ -254,19 +254,15 @@ proc ensureSharedRenderers() =
   renderer.sharedDirectRedraw = proc() =
     if not data.ui.menu.isNil:
       data.ui.menu.requestMenuRender()
+    requestFixedSearchRender()
   if not data.ui.menu.isNil:
     discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
-  kxiMap["fixed-search"] = setRenderer(fixedSearchView, "fixed-search", proc = discard)
-  kxiMap["search-results"] = setRenderer(
-    proc: VNode =
-      buildHtml(tdiv()),
-    "search-results", proc = discard)
+  discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)
   # Session tab bar: index.html owns the static host and ui/session_tabs.nim
   # creates it defensively for older shells/tests; explicit session/trace
   # mutation sites refresh the direct IsoNim mount.
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 
-  data.ui.searchResults.kxi = kxiMap["search-results"]
   if not data.ui.status.isNil:
     discard windowSetTimeout(proc() = data.ui.status.requestStatusRender(), 0)
 
@@ -287,8 +283,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     renderer.sharedDirectRedraw = proc() =
       if not data.ui.menu.isNil:
         data.ui.menu.requestMenuRender()
+      requestFixedSearchRender()
     if not data.ui.menu.isNil:
       discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
+    discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)
     return
 
   # DeepReview mode: uses the normal GL layout path.  The DeepReview-specific

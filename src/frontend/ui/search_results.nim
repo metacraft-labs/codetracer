@@ -37,53 +37,121 @@ var searchResultsComponentRef: SearchResultsComponent
 var isoNimSearchResultsMounted*: bool = false
 
 proc tryMountIsoNimSearchResultsPanel*()
+proc requestFixedSearchRender*()
 
 # ---------------------------------------------------------------------------
-# fixedSearchView — kept as the legacy Karax renderer for the floating
-# fixed-search overlay.  This view is mounted at the global
-# ``#fixed-search`` element, NOT inside the search-results panel, so it
-# stays on Karax for now as a separate migration from the panel body.
+# Fixed-search overlay — direct DOM renderer.
+#
+# The global ``#fixed-search`` host is static in ``index.html`` and lives
+# outside the Search Results GoldenLayout panel.  Keep it direct-DOM instead
+# of preserving a Karax ``setRenderer`` island for an input-only overlay.
 # ---------------------------------------------------------------------------
 
-proc fixedSearchView*: VNode =
-  let active = if data.services.search.active[SearchFixed]: cstring"" else: cstring"fixed-search-non-active"
-  # TODO active
-  buildHtml(
-    tdiv(
-      id = "fixed-search",
-      class = active
-    )
-  ):
-    tdiv(class = "fixed-search-query-field"):
-      input(
-        `type` = "text",
-        id = "fixed-search-query",
-        name = "search-query",
-        class = "mousetrap",
-        onkeydown = proc(e: KeyboardEvent, v: VNode) =
-          if e.keyCode == ENTER_KEY_CODE and e.isTrusted:
-            let value = jq("#fixed-search-query").toJs.value.to(cstring)
-            let includeValue = jq("#fixed-search-include").toJs.value.to(cstring)
-            let excludeValue = jq("#fixed-search-exclude").toJs.value.to(cstring)
-            data.services.search.active[SearchFixed] = false
-            discard data.services.search.run(value, includeValue, excludeValue)
-          else:
-            data.services.search.active[SearchFixed] = true
-      )
-    tdiv(class = "fixed-search-include-field " & active):
-      input(
-        `type` = "text",
-        id = "fixed-search-include",
-        placeholder = "include"
-      )
-    tdiv(
-      class = "fixed-search-exclude-field " & active
-    ):
-      input(
-        `type` = "text",
-        id = "fixed-search-exclude",
-        placeholder = "exclude"
-      )
+when defined(js):
+  proc clearChildren(node: kdom.Element) =
+    {.emit: """
+      while (`node`.firstChild) {
+        `node`.removeChild(`node`.firstChild);
+      }
+    """.}
+
+  proc inputValue(id: cstring): cstring =
+    let input = kdom.document.getElementById(id)
+    if input.isNil:
+      return cstring""
+    input.toJs.value.to(cstring)
+
+  proc makeFixedSearchInput(
+      id: cstring;
+      placeholder: cstring = cstring"";
+      className: cstring = cstring""): kdom.Element =
+    result = kdom.document.createElement("input")
+    result.setAttribute(cstring"type", cstring"text")
+    result.setAttribute(cstring"id", id)
+    if placeholder.len > 0:
+      result.setAttribute(cstring"placeholder", placeholder)
+    if className.len > 0:
+      result.setAttribute(cstring"class", className)
+
+  proc updateFixedSearchFieldClasses(inactiveClass: cstring) =
+    {.emit: """
+      const includeField = document.querySelector(
+        '#fixed-search .fixed-search-include-field');
+      const excludeField = document.querySelector(
+        '#fixed-search .fixed-search-exclude-field');
+      if (includeField) {
+        includeField.setAttribute(
+          'class',
+          'fixed-search-include-field ' + `inactiveClass`);
+      }
+      if (excludeField) {
+        excludeField.setAttribute(
+          'class',
+          'fixed-search-exclude-field ' + `inactiveClass`);
+      }
+    """.}
+
+  proc requestFixedSearchRender*() =
+    ## Refresh the global fixed-search overlay without Karax.
+    ##
+    ## Preserves the old ``fixedSearchView`` ids/classes and Enter-to-search
+    ## behavior while allowing ``#fixed-search`` to remain a static DOM host.
+    let container = kdom.document.getElementById(cstring"fixed-search")
+    if container.isNil:
+      return
+
+    let inactiveClass =
+      if data.services.search.active[SearchFixed]:
+        cstring""
+      else:
+        cstring"fixed-search-non-active"
+    container.setAttribute(cstring"class", inactiveClass)
+    updateFixedSearchFieldClasses(inactiveClass)
+    if not kdom.document.getElementById(cstring"fixed-search-query").isNil:
+      return
+
+    container.clearChildren()
+
+    let queryField = kdom.document.createElement("div")
+    queryField.setAttribute(cstring"class", cstring"fixed-search-query-field")
+    let queryInput = makeFixedSearchInput(
+      cstring"fixed-search-query",
+      className = cstring"mousetrap")
+    queryInput.setAttribute(cstring"name", cstring"search-query")
+    queryInput.addEventListener(cstring"keydown", proc(ev: Event) =
+      let event = cast[KeyboardEvent](ev)
+      if event.keyCode == ENTER_KEY_CODE and event.isTrusted:
+        let value = inputValue(cstring"fixed-search-query")
+        let includeValue = inputValue(cstring"fixed-search-include")
+        let excludeValue = inputValue(cstring"fixed-search-exclude")
+        data.services.search.active[SearchFixed] = false
+        discard data.services.search.run(value, includeValue, excludeValue)
+      else:
+        data.services.search.active[SearchFixed] = true)
+    queryField.appendChild(queryInput)
+
+    let includeField = kdom.document.createElement("div")
+    includeField.setAttribute(
+      cstring"class",
+      cstring("fixed-search-include-field " & $inactiveClass))
+    includeField.appendChild(makeFixedSearchInput(
+      cstring"fixed-search-include",
+      placeholder = cstring"include"))
+
+    let excludeField = kdom.document.createElement("div")
+    excludeField.setAttribute(
+      cstring"class",
+      cstring("fixed-search-exclude-field " & $inactiveClass))
+    excludeField.appendChild(makeFixedSearchInput(
+      cstring"fixed-search-exclude",
+      placeholder = cstring"exclude"))
+
+    container.appendChild(queryField)
+    container.appendChild(includeField)
+    container.appendChild(excludeField)
+else:
+  proc requestFixedSearchRender*() =
+    discard
 
 proc parseRawLocation*(location: cstring): (cstring, int) =
   let tokens = location.split(cstring":")
