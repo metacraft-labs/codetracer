@@ -1644,6 +1644,7 @@ type
     renderedEventIndex*: int
     currentLine*:    int
     initialUpdate*:  bool
+    extensionRendererId*: cstring
 
   LayoutSizes* = ref object
     normalSize*: float

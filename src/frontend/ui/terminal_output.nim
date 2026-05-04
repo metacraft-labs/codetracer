@@ -164,9 +164,22 @@ proc addTerminalLine(self: TerminalOutputComponent, text: cstring, eventIndex: i
 when defined(ctInExtension):
   var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent = makeTerminalOutputComponent(data, 0, inExtension = true)
 
+  proc bindTerminalOutputExtensionHost(component: TerminalOutputComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension terminal-output surface has no panel markup of its own; keep
+    # the exported component usable without retaining an empty Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
-    if terminalOutputComponentForExtension.kxi.isNil:
-      terminalOutputComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if terminalOutputComponentForExtension.extensionRendererId.len == 0:
+      terminalOutputComponentForExtension.extensionRendererId = id
+      terminalOutputComponentForExtension.bindTerminalOutputExtensionHost()
     result = terminalOutputComponentForExtension
 
 proc getLines(self: TerminalOutputComponent) =
@@ -342,6 +355,10 @@ method restart*(self: TerminalOutputComponent) =
 # renderer.  Generic callers are expected to use direct IsoNim mount
 # paths; all real DOM construction happens in
 # ``viewmodel/views/isonim_terminal_output_view.nim``.
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: TerminalOutputComponent) =
+    self.bindTerminalOutputExtensionHost()
 
 method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
   self.api = api
