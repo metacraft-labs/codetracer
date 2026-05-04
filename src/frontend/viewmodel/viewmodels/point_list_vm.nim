@@ -21,6 +21,13 @@ import isonim/viewmodel
 import ../store/replay_data_store
 
 type
+  PointListEntry* = object
+    kind*: string
+    label*: string
+    path*: string
+    line*: int
+    enabled*: bool
+
   PointListVM* = ref object of ViewModel
     ## Reactive state for the Point List panel.
     ##
@@ -35,6 +42,7 @@ type
     # -- Mutable state --
     selectedPoint*: Signal[Option[int]]
     editingPoint*: Signal[Option[int]]
+    points*: Signal[seq[PointListEntry]]
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -53,6 +61,9 @@ proc stopEditing*(vm: PointListVM) =
   ## Stop editing any point. Clears the editingPoint signal.
   vm.editingPoint.val = none(int)
 
+proc setPoints*(vm: PointListVM; points: openArray[PointListEntry]) =
+  vm.points.val = @points
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -67,5 +78,6 @@ proc createPointListVM*(store: ReplayDataStore): PointListVM =
       store: store,
       selectedPoint: createSignal(none(int)),
       editingPoint: createSignal(none(int)),
+      points: createSignal(newSeq[PointListEntry]()),
       disposeProc: dispose,
     )

@@ -100,7 +100,7 @@ proc storyCalltraceLines(): seq[CallLine] =
              hasChildren: true, isExpanded: true, callKey: "main:0"),
   ]
   var idx = 1'i64
-  for iteration in 0 .. 7:
+  for iteration in 0 .. 9:
     result.add(CallLine(index: idx, name: "iterate_asteroids",
       depth: 1, rrTicks: uint64(46 + iteration * 68),
       location: Location(file: "src/shield.nr", line: 54, column: 3),
@@ -132,8 +132,15 @@ proc storyCalltraceLines(): seq[CallLine] =
       depth: 1, rrTicks: uint64(114 + iteration * 68),
       location: Location(file: "src/main.nr", line: 17, column: 3,
                          callstackDepth: 1),
-      hasChildren: false, isExpanded: false,
+      hasChildren: true, isExpanded: true,
       callKey: "status:" & $iteration))
+    inc idx
+    result.add(CallLine(index: idx, name: "calculate_remaining_shield_pct",
+      depth: 2, rrTicks: uint64(120 + iteration * 68),
+      location: Location(file: "src/shield.nr", line: 61, column: 3,
+                         callstackDepth: 2),
+      hasChildren: false, isExpanded: false,
+      callKey: "status-remaining:" & $iteration))
     inc idx
 
 proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
@@ -141,15 +148,52 @@ proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
   result["main:0"] = @[
     CallArg(name: "initial_shield", text: "10000"),
     CallArg(name: "shield_regen_percentage", text: "10"),
+    CallArg(name: "asteroid_masses_positive",
+            text: "@[100, 2000, 2000, 50, 50, 2500, 3250, 1232]"),
+    CallArg(name: "asteroid_masses_negative",
+            text: "@[2000, 2000, 50, 3250, 1232]"),
   ]
-  for iteration in 0 .. 7:
+  let masses = [100, 2000, 2000, 50, 50, 2500, 3250, 1232, 800, 450]
+  let remainingBefore = [10000, 10000, 8000, 7000, 5000, 3500, 1250, 18, 10000, 9550]
+  let remainingAfter = [9900, 8000, 6000, 6950, 4950, 1000, 18, 0, 9200, 9100]
+  for iteration in 0 .. 9:
     result["iterate:" & $iteration] = @[
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "iteration", text: $iteration),
+      CallArg(name: "shield_regen_percentage", text: "10"),
+      CallArg(name: "masses",
+              text: "@[100, 2000, 2000, 50, 50, 2500, 3250, 1232]"),
     ]
     result["damage:" & $iteration] = @[
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "asteroid_mass", text: $(100 + iteration * 350)),
+      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
+      CallArg(name: "mass", text: $masses[iteration]),
+      CallArg(name: "__return",
+              text: $(remainingBefore[iteration] - remainingAfter[iteration])),
+    ]
+    result["remaining:" & $iteration] = @[
+      CallArg(name: "initial_shield", text: "10000"),
+      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
+      CallArg(name: "__return", text: $(remainingBefore[iteration] div 100)),
+    ]
+    result["regen:" & $iteration] = @[
+      CallArg(name: "initial_shield", text: "10000"),
+      CallArg(name: "remaining_shield", text: $remainingAfter[iteration]),
+      CallArg(name: "shield_regen_percentage", text: "10"),
+      CallArg(name: "__return", text: "1000"),
+    ]
+    result["status:" & $iteration] = @[
+      CallArg(name: "iteration", text: $iteration),
+      CallArg(name: "initial_shield", text: "10000"),
+      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
+      CallArg(name: "damage",
+              text: $(remainingBefore[iteration] - remainingAfter[iteration])),
+      CallArg(name: "regenerated_shield", text: "1000"),
+      CallArg(name: "__return", text: "nil"),
+    ]
+    result["status-remaining:" & $iteration] = @[
+      CallArg(name: "initial_shield", text: "10000"),
+      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
+      CallArg(name: "__return", text: $(remainingBefore[iteration] div 100)),
     ]
 
 proc makeStore(): ReplayDataStore =
@@ -314,6 +358,28 @@ const noirTerminalTranscript = [
   "shields will not hold as expected",
 ]
 
+const noirEventTicks = [
+  2'u64,
+  46'u64, 52'u64, 58'u64, 72'u64,
+  114'u64, 120'u64, 126'u64, 140'u64,
+  182'u64, 188'u64, 194'u64, 208'u64,
+  250'u64, 256'u64, 262'u64, 276'u64,
+  318'u64, 324'u64, 330'u64, 344'u64,
+  386'u64, 392'u64, 398'u64, 412'u64,
+  454'u64, 460'u64, 466'u64, 480'u64,
+  522'u64, 528'u64, 534'u64, 548'u64,
+  560'u64, 565'u64, 570'u64, 575'u64,
+  618'u64, 624'u64, 630'u64, 644'u64,
+  686'u64, 692'u64, 698'u64, 712'u64,
+  754'u64, 760'u64, 766'u64, 780'u64,
+  822'u64, 828'u64, 834'u64, 848'u64,
+  890'u64, 896'u64, 902'u64, 916'u64,
+  950'u64, 956'u64, 962'u64, 976'u64,
+  1010'u64, 1016'u64, 1022'u64, 1036'u64,
+  1070'u64, 1076'u64, 1082'u64, 1096'u64,
+  1108'u64,
+]
+
 proc storyLines(): seq[TerminalLine] =
   result = @[]
   for lineIndex, text in noirTerminalTranscript:
@@ -329,34 +395,34 @@ proc storyProblems(): seq[BuildProblemLine] =
 
 proc storyFilesystem(): FilesystemEntryNode =
   FilesystemEntryNode(
-    id: "root",
+    id: "1_1",
     text: "source folders",
     path: "/workspace/source folders",
     isFolder: true,
     isExpanded: true,
     children: @[
-      FilesystemEntryNode(id: "codetracer-main", text: "codetracer-main",
+      FilesystemEntryNode(id: "1_2", text: "codetracer-main",
                           path: "/workspace/source folders/codetracer-main",
                           isFolder: true, isExpanded: true, children: @[
-        FilesystemEntryNode(id: "test-programs", text: "test-programs",
+        FilesystemEntryNode(id: "1_3", text: "test-programs",
                             path: "/workspace/source folders/codetracer-main/test-programs",
                             isFolder: true, isExpanded: true, children: @[
-          FilesystemEntryNode(id: "noir-space-ship", text: "noir_space_ship",
+          FilesystemEntryNode(id: "1_4", text: "noir_space_ship",
                               path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship",
                               isFolder: true, isExpanded: true, children: @[
-            FilesystemEntryNode(id: "nargo", text: "Nargo.toml",
+            FilesystemEntryNode(id: "1_5", text: "Nargo.toml",
                                 path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/Nargo.toml",
                                 icon: "devicon-rust-original"),
-            FilesystemEntryNode(id: "prover", text: "Prover.toml",
+            FilesystemEntryNode(id: "1_6", text: "Prover.toml",
                                 path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/Prover.toml",
                                 icon: "devicon-rust-original"),
-            FilesystemEntryNode(id: "src", text: "src",
+            FilesystemEntryNode(id: "1_7", text: "src",
                                 path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src",
                                 isFolder: true, isExpanded: true, children: @[
-              FilesystemEntryNode(id: "main", text: "main.nr",
+              FilesystemEntryNode(id: "1_8", text: "main.nr",
                                   path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src/main.nr",
-                                  icon: "custom-noir-icon", diffClass: fdcChanged),
-              FilesystemEntryNode(id: "shield", text: "shield.nr",
+                                  icon: "custom-noir-icon"),
+              FilesystemEntryNode(id: "1_9", text: "shield.nr",
                                   path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src/shield.nr",
                                   icon: "custom-noir-icon"),
             ]),
@@ -447,7 +513,7 @@ proc storyEventRows(): seq[EventLogRow] =
   result = @[]
   for index, text in noirTerminalTranscript:
     let rrTicks =
-      if index == 0: 2'u64
+      if index < noirEventTicks.len: noirEventTicks[index]
       else: uint64(40 + index * 6)
     result.add EventLogRow(
       eventId: rrTicks,
@@ -462,16 +528,18 @@ proc applyEventLog(vm: EventLogVM) =
 
 proc applyCalltrace(vm: CalltraceVM) =
   vm.setViewportHeight(48)
-  vm.selectEntry(some(2'i64))
-  vm.setSearchQuery("damage")
-  vm.setBackendSearchResults(@[
-    (name: "calculate_damage", rrTicks: 52, key: "damage:0"),
-    (name: "calculate_damage", rrTicks: 120, key: "damage:1"),
-  ])
+  vm.selectEntry(some(0'i64))
+  vm.setSearchQuery("")
+  vm.setBackendSearchResults(@[])
   vm.store.calltrace.loadingState.val = lsIdle
 
 proc applyState(vm: StateVM) =
   vm.selectPath("ship.shield")
+
+proc applyEmptyState(store: ReplayDataStore) =
+  store.locals.codeStateLine.val = ""
+  store.locals.locals.val = @[]
+  store.locals.globals.val = @[]
 
 proc htmlEscape(text: string): string =
   result = text
@@ -489,19 +557,21 @@ proc storyEventDenseHtml(rows: seq[EventLogRow]; selected: Option[int]): string 
   result.add "<div class=\"dt-container dts DTS dt-empty-footer\">"
   result.add "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">"
   result.add "<div class=\"dt-scroll\"><div class=\"dt-scroll-head\"><div class=\"dt-scroll-headInner\">"
-  result.add "<table class=\"dataTable\"><thead><tr><th>direction location rr ticks</th><th>index</th><th>location</th><th>event</th><th>text</th></tr></thead></table>"
+  result.add "<table class=\"dataTable\"><thead><tr><th>direction location rr ticks</th><th>rr event id</th><th>fullpath</th><th>event-image</th><th>text</th></tr></thead></table>"
   result.add "</div></div><div class=\"dt-scroll-body\"><table class=\"dataTable\"><tbody>"
   for i, row in rows:
     let rowState =
-      if selected.isSome and selected.get == i: "past active"
-      elif i > 2: "future"
-      else: "past"
-    let percent = min(100, int(row.eventId))
+      if selected.isSome and selected.get == i: "future event-selected"
+      else: "future"
+    let rrTicksPercent = formatFloat(float(row.eventId) / 1000.0, ffDecimal, 3)
+    let rrTicksRemaining = formatFloat(101.0 - (float(row.eventId) / 1000.0),
+                                       ffDecimal, 3)
     result.add "<tr class=\"" & rowState & "\">"
     result.add "<td class=\"direct-location-rr-ticks eventLog-cell dt-type-numeric sorting_1\">"
     result.add "<div class=\"rr-ticks-time-container\"><span class=\"rr-ticks-time\">" & $row.eventId & "</span></div>"
     result.add "<div class=\"rr-ticks-line-container\"><span class=\"rr-ticks-line event-rr-ticks-line\"></span>"
-    result.add "<span class=\"rr-ticks-empty-remaining\" style=\"width:" & $(100 - percent) & "%; left:" & $percent & "%\"></span></div></td>"
+    result.add "<span class=\"rr-ticks-empty-remaining\" style=\"width:" &
+               rrTicksRemaining & "%; left:" & rrTicksPercent & "%\"></span></div></td>"
     result.add "<td class=\"eventLog-index eventLog-cell dt-type-numeric\">" & $i & "</td>"
     result.add "<td class=\"eventLog-fullpath eventLog-cell\">" & htmlEscape(storyEventPath(row)) & "</td>"
     result.add "<td class=\"eventLog-event eventLog-cell\">" & htmlEscape(row.kind) & "</td>"
@@ -555,10 +625,7 @@ proc applyFilesystem(vm: FilesystemVM) =
   vm.expandPath("/workspace/source folders/codetracer-main/test-programs")
   vm.expandPath("/workspace/source folders/codetracer-main/test-programs/noir_space_ship")
   vm.expandPath("/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src")
-  vm.setDiffEntries(@[
-    FilesystemDiffEntry(path: "src/main.nr", zebra: false),
-    FilesystemDiffEntry(path: "src/shield.nr", zebra: true),
-  ])
+  vm.setDiffEntries(@[])
 
 proc applyTraceLog(vm: TraceLogVM) =
   vm.setEntries(@[
@@ -747,7 +814,9 @@ proc applyWelcome(vm: WelcomeScreenVM) =
   ])
 
 proc applyCommandPalette(vm: CommandPaletteVM) =
+  vm.open()
   vm.setQuery("open")
+  vm.setInputPlaceholder("Open Online Trace")
   vm.setResults([
     CommandPaletteResultEntry(value: "Open File", kind: cprkCommand),
     CommandPaletteResultEntry(value: "src/main.nr", kind: cprkFile,
@@ -862,7 +931,10 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
 proc mountState(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createStateVM(store)
-    if fixture != "empty": vm.applyState()
+    if fixture == "variables":
+      vm.applyState()
+    else:
+      store.applyEmptyState()
     store.locals.loadingState.val = lsIdle
     mountIsoNimStatePanel(container, vm)
     store.locals.loadingState.val = lsIdle
@@ -887,6 +959,21 @@ proc mountFlow(container: isonim_dom.Element; fixture: string): DisposeProc =
     let vm = createFlowVM(store)
     vm.iterationCount.val = 12
     vm.selectIteration(5)
+    vm.hoverStep(some(1))
+    vm.setSteps([
+      FlowStepEntry(step: 0, location: "main.nr:13",
+                    expression: "initial_shield", beforeValue: "10000",
+                    afterValue: "10000"),
+      FlowStepEntry(step: 1, location: "shield.nr:58",
+                    expression: "damage", beforeValue: "100",
+                    afterValue: "2000"),
+      FlowStepEntry(step: 2, location: "shield.nr:61",
+                    expression: "remaining_shield", beforeValue: "10000",
+                    afterValue: "8000"),
+      FlowStepEntry(step: 3, location: "shield.nr:66",
+                    expression: "shield_status", beforeValue: "90%",
+                    afterValue: "80%"),
+    ])
     mountIsoNimFlow(container, vm)
     return proc() = vm.dispose())
 
@@ -1002,6 +1089,14 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
 proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createPointListVM(store)
+    vm.setPoints([
+      PointListEntry(kind: "trace", label: "damage after subtraction",
+                     path: "src/combat.nr", line: 42, enabled: true),
+      PointListEntry(kind: "break", label: "status report branch",
+                     path: "src/main.nr", line: 17, enabled: true),
+      PointListEntry(kind: "trace", label: "regen calculation",
+                     path: "src/shield.nr", line: 61, enabled: false),
+    ])
     vm.selectPoint(some(0))
     mountIsoNimPointList(container, vm)
     return proc() = vm.dispose())
@@ -1017,7 +1112,19 @@ proc mountTimeline(container: isonim_dom.Element; fixture: string): DisposeProc 
 proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createSearchVM(store)
-    if fixture != "empty": vm.applySearch()
+    if fixture != "empty":
+      vm.applySearch()
+      vm.setResults([
+        SearchPanelResultEntry(label: "remaining_shield",
+                               detail: "src/combat.nr:42",
+                               shortcut: "text"),
+        SearchPanelResultEntry(label: "shield_status",
+                               detail: "src/shield.nr:66",
+                               shortcut: "symbol"),
+        SearchPanelResultEntry(label: "src/shield.nr",
+                               detail: "file result",
+                               shortcut: "file"),
+      ])
     mountIsoNimSearch(container, vm)
     return proc() = vm.dispose())
 

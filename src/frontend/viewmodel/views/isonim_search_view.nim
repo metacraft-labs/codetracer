@@ -67,6 +67,16 @@ proc selectedIndicatorText(vm: SearchVM): string =
   let sel = vm.selectedResult.val
   if sel.isSome: "Selected: " & $sel.get else: ""
 
+proc searchResultClass(vm: SearchVM; index: int): string =
+  if vm.selectedResult.val.isSome and vm.selectedResult.val.get == index:
+    "search-result-row selected"
+  else:
+    "search-result-row"
+
+proc onResultClick(vm: SearchVM; index: int): proc() =
+  let captured = index
+  result = proc() = vm.selectResult(some(captured))
+
 proc onSetMode(vm: SearchVM; mode: SearchMode): proc() =
   let m = mode
   result = proc() = vm.setMode(m)
@@ -97,6 +107,15 @@ template renderSearchPanelImpl(r, vm, rootClass: untyped): untyped =
               value = vm.query.val)
       tdiv(class = "search-results",
            display = displayIf(vm.resultsVisible.val)):
+        for i, resultEntry in vm.results.val:
+          tdiv(class = searchResultClass(vm, i),
+               onclick = onResultClick(vm, i)):
+            span(class = "search-result-label"):
+              text resultEntry.label
+            span(class = "search-result-detail"):
+              text resultEntry.detail
+            span(class = "search-result-shortcut"):
+              text resultEntry.shortcut
         span(class = selectedIndicatorClass(vm)):
           text selectedIndicatorText(vm)
 

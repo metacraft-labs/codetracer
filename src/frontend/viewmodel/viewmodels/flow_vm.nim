@@ -35,6 +35,13 @@ type
     fmLine      ## Show flow at the line level
     fmFunction  ## Show flow at the function level
 
+  FlowStepEntry* = object
+    step*: int
+    location*: string
+    expression*: string
+    beforeValue*: string
+    afterValue*: string
+
   FlowVM* = ref object of ViewModel
     ## Reactive state for the Flow panel.
     ##
@@ -63,6 +70,7 @@ type
     # have a dedicated flow sub-store.
     iterationCount*: Signal[int]
     loadingState*: Signal[LoadingState]
+    steps*: Signal[seq[FlowStepEntry]]
 
     # -- Derived state --
     isLoading*: Memo[bool]
@@ -106,6 +114,9 @@ proc toggleRawValues*(vm: FlowVM) =
   ## Toggle whether raw (unformatted) values are shown.
   vm.showRawValues.val = not vm.showRawValues.val
 
+proc setSteps*(vm: FlowVM; steps: openArray[FlowStepEntry]) =
+  vm.steps.val = @steps
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -128,6 +139,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     # Internal flow state (not yet in ReplayDataStore).
     let iterationCount = createSignal(0)
     let loadingState = createSignal(lsIdle)
+    let steps = createSignal(newSeq[FlowStepEntry]())
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -145,6 +157,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       showRawValues: showRawValues,
       iterationCount: iterationCount,
       loadingState: loadingState,
+      steps: steps,
       isLoading: isLoading,
       totalIterations: totalIterations,
       disposeProc: dispose,

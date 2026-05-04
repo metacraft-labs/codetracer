@@ -156,6 +156,8 @@ storybook/storybook-static/
 tools/visual-review/reports/
 tools/visual-review/screenshots/
 tools/visual-review/dumps/
+tools/visual-review/compare/
+tools/visual-review/contact-sheets/
 ctail
 #dispatcher
 gmon.out

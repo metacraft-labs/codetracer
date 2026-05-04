@@ -1,12 +1,82 @@
 #command-data
   height: 28px
 
+.command-container
+  height: 100%
+  width: 100%
+  display: flex
+  align-items: flex-start
+  justify-content: center
+  padding-top: 10vh
+  background: rgba(27, 27, 27, 0.96)
+  box-sizing: border-box
+  font-family: "SpaceGrotesk", sans-serif
+
+  &.hidden
+    display: none
+
 .command-view
-  font-size: inherit
+  font-size: 16px
   z-index: 9999
-  left: 35vw
-  width: 30vw
-  right: 35vw
+  width: calc(100vw - 5em)
+  max-width: 48em
+  color: TEXT_CONTENT_COLOR
+
+  .command-input-row
+    position: relative
+    height: 2.875em
+    display: flex
+    align-items: center
+    background: #151515
+    border: 0.0625em solid #4f4f4f
+    border-radius: 0.75em 0.75em 0 0
+    box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.35)
+
+  .command-input-field
+    width: 100%
+    height: 100%
+    border: 0
+    outline: 0
+    background: transparent
+    color: TEXT_CONTENT_COLOR
+    padding: 0 1em
+    font-size: 1em
+    font-family: "SpaceGrotesk", sans-serif
+
+  .command-input-placeholder
+    position: absolute
+    left: 4.6em
+    right: 1em
+    pointer-events: none
+    color: VALUE_TYPE_COLOR
+    opacity: 0.45
+    white-space: nowrap
+    overflow: hidden
+    text-overflow: ellipsis
+
+  .command-results
+    width: 100%
+    max-height: 24em
+    overflow-y: auto
+    background-color: COMMAND_RESULT_BACKGROUND_COLOR
+    border: 0.0625em solid #4f4f4f
+    border-top: 0
+    box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
+    border-bottom-left-radius: 0.75em
+    border-bottom-right-radius: 0.75em
+
+    &.hidden
+      display: none
+
+  .command-empty-overlay
+    padding: 0.75em 1em
+    color: VALUE_TYPE_COLOR
+    background: COMMAND_RESULT_BACKGROUND_COLOR
+    border: 0.0625em solid #4f4f4f
+    border-top: 0
+
+    &.hidden
+      display: none
 
   .command-surface
     position: relative
@@ -107,7 +177,7 @@
 .fixed-search-non-active
   display: none
 
-.search-results
+#fixed-search .search-results
   font-size: 20px
   background-color: BACKGROUND_COLOR
   color: COLOR
@@ -124,10 +194,10 @@
   .search-results-text
     width: 50vw
 
-.search-results-active
+#fixed-search .search-results-active
   display: block
 
-.search-results-non-active
+#fixed-search .search-results-non-active
   display: none
 
 .command-program-search-result-value > div

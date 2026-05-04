@@ -123,7 +123,25 @@ proc argsForRow(vm: CalltraceVM; item: proc(): CallLine): seq[CallArg] =
     return @[]
   if line.callKey notin argsTable:
     return @[]
-  argsTable[line.callKey]
+  for arg in argsTable[line.callKey]:
+    if arg.name != "__return":
+      result.add arg
+
+proc returnValueForRow(vm: CalltraceVM; item: proc(): CallLine): string =
+  ## Storybook fixtures can carry a synthetic ``__return`` arg so the
+  ## IsoNim visual surface mirrors the Karax calltrace's ``=> value`` spans.
+  ## Real calltrace rows that do not provide this sentinel render unchanged.
+  let line = item()
+  let argsTable = vm.store.calltrace.args.val
+  if line.callKey.len == 0 or line.callKey notin argsTable:
+    return ""
+  for arg in argsTable[line.callKey]:
+    if arg.name == "__return":
+      return arg.text
+  ""
+
+proc returnArrowForRow(vm: CalltraceVM; item: proc(): CallLine): string =
+  if returnValueForRow(vm, item).len > 0: " => " else: ""
 
 proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
                            item: proc(): CallLine): MockNode =
@@ -231,6 +249,18 @@ proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
 
 when defined(js):
 
+  proc createSvgElement(tag: cstring): isonim_dom.Element =
+    {.emit: "`result` = document.createElementNS('http://www.w3.org/2000/svg', `tag`);".}
+
+  proc appendTraceLine(svg: isonim_dom.Element; x1, y1, x2, y2: float) =
+    let line = createSvgElement(cstring"line")
+    isonim_dom.setAttribute(line, cstring"x1", cstring($x1))
+    isonim_dom.setAttribute(line, cstring"y1", cstring($y1))
+    isonim_dom.setAttribute(line, cstring"x2", cstring($x2))
+    isonim_dom.setAttribute(line, cstring"y2", cstring($y2))
+    isonim_dom.setAttribute(line, cstring"stroke-width", cstring"0.5")
+    isonim_dom.appendChild(isonim_dom.Node(svg), isonim_dom.Node(line))
+
   proc rowClassWeb(vm: CalltraceVM; item: proc(): CallLine): string =
     let sel = vm.selectedEntry.val
     let line = item()
@@ -270,8 +300,14 @@ when defined(js):
             tdiv(id = "local-call-text-" & $item().index, class = "call-text",
                  onclick = h.onSelect, ondblclick = h.onDblClick):
               text item().name & " #" & $item().index
-            tdiv(ref = argsContainer, class = "call-args"):
+            tdiv(ref = argsContainer, class = "call-args",
+                 id = "call-args-false-" & $item().index):
               discard
+            span(class = "return"):
+              span(class = "return-arrow"):
+                text returnArrowForRow(vm, item)
+              span(class = "return-text"):
+                text returnValueForRow(vm, item)
 
     # Reactively populate the args container with one ``.call-arg``
     # element per argument. Mirrors the historical Karax call-argument
@@ -303,14 +339,14 @@ when defined(js):
         let argText = callArgs[i].text
         let argEl = ui(r):
           tdiv(class = "call-arg",
-               id = "call-arg-" & line.callKey & "-" & argName):
+               id = "call-arg-" & $line.index & "-" & argName):
             tdiv(class = "call-arg-header",
-                 id = "call-arg-header-" & line.callKey & "-" & argName):
+                 id = "call-arg-header-" & $line.index & "-" & argName):
               tdiv(class = "call-arg-name",
-                   id = "call-arg-name-" & line.callKey & "-" & argName):
+                   id = "call-arg-name-" & $line.index & "-" & argName):
                 text argName & "="
               tdiv(class = "call-arg-text",
-                   id = "call-arg-text-" & line.callKey & "-" & argName):
+                   id = "call-arg-text-" & $line.index & "-" & argName):
                 text argText
         r.appendChild(argsContainer, argEl)
         if i < callArgs.len - 1:
@@ -387,6 +423,37 @@ when defined(js):
         {.emit: "`scrollTop` = `scrollContainer`.scrollTop || 0;".}
         vm.scroll(int64(scrollTop / CALL_HEIGHT_PX)))
 
+  proc renderTraceSvg(r: WebRenderer; svgContainer: isonim_dom.Element;
+                      vm: CalltraceVM) =
+    ## Lightweight version of Karax ``redrawTraceLine`` for Storybook/visual
+    ## parity.  It draws the same absolute SVG layer and approximate 8px-depth
+    ## connector grid used by the legacy materialized calltrace.
+    createRenderEffect proc() =
+      let lines = vm.store.calltrace.lines.val
+      r.clearChildren(svgContainer)
+      let rowHeight = 25.0
+      let width = 1868.0
+      let height = max(float(lines.len) * rowHeight, 1.0)
+      isonim_dom.setAttribute(svgContainer, cstring"width", cstring($width))
+      isonim_dom.setAttribute(svgContainer, cstring"height", cstring($height))
+      isonim_dom.setAttribute(svgContainer, cstring"viewBox",
+                              cstring("0 0 " & $width & " " & $height))
+      if lines.len < 2:
+        return
+      for i in 0 ..< lines.len:
+        let depth = max(lines[i].depth, 0)
+        let x1 = 10.0 + float(depth * 8)
+        let topY = float(i) * rowHeight
+        let centerY = topY + 12.5
+        let bottomY = topY + rowHeight
+        let startY = if i == 0: centerY else: topY
+        let endY = if i == lines.high: centerY else: bottomY
+        if endY > startY:
+          appendTraceLine(svgContainer, x1, startY, x1, endY)
+        if i < lines.high:
+          let nextX = 10.0 + float(max(lines[i + 1].depth, 0) * 8)
+          appendTraceLine(svgContainer, x1, bottomY, nextX, bottomY)
+
   proc renderCalltracePanel*(r: WebRenderer;
                              vm: CalltraceVM): isonim_dom.Element =
     ## Render the complete Calltrace panel using real DOM elements.
@@ -398,9 +465,11 @@ when defined(js):
       formEl, inputEl: isonim_dom.Element
       resultsContainer: isonim_dom.Element
       scrollContainer, innerContainer, linesContainer: isonim_dom.Element
+      svgContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = "component-container calltrace-view isonim-calltrace",
+      tdiv(id = "calltraceComponent-0",
+           class = "component-container calltrace-view isonim-calltrace",
            `data-label` = "calltrace-data-label-0", tabindex = "2"):
         tdiv:
           tdiv(class = "calltrace-search"):
@@ -439,12 +508,23 @@ when defined(js):
     # `vm.visibleLines` (calltrace_vm.nim) — the slicing memo that the
     # Mock renderer still uses for its viewport-aware unit tests, and
     # `syncCalltraceData` (calltrace.nim) — which feeds the store.
+    svgContainer = createSvgElement(cstring"svg")
+    isonim_dom.setAttribute(svgContainer, cstring"id", cstring"svg-content-0")
+    isonim_dom.setAttribute(svgContainer, cstring"class",
+                            cstring"calltrace-svg-line")
+    isonim_dom.setAttribute(svgContainer, cstring"width", cstring"1")
+    isonim_dom.setAttribute(svgContainer, cstring"height", cstring"1")
+    isonim_dom.setAttribute(svgContainer, cstring"viewBox", cstring"0 0 1 1")
+    isonim_dom.appendChild(isonim_dom.Node(linesContainer),
+                           isonim_dom.Node(svgContainer))
+
     indexEach[CallLine, WebRenderer, isonim_dom.Element](r, linesContainer,
       proc(): seq[CallLine] = vm.store.calltrace.lines.val,
       proc(item: proc(): CallLine, index: int): isonim_dom.Element =
         renderCallLineRowWeb(r, vm, item))
 
     renderSearchResultsList(r, resultsContainer, vm)
+    renderTraceSvg(r, svgContainer, vm)
     wireSearchForm(formEl, inputEl, vm)
     wireScrollContainer(scrollContainer, vm)
 

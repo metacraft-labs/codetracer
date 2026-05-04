@@ -22,7 +22,7 @@
 ## structure mirroring the legacy ``componentContainerClass(
 ## "active-state")`` layout::
 ##
-##   div#values.component-container.active-state
+##   div#scratchpadComponent-0.component-container.active-state
 ##     div.value-components-container
 ##       div.scratchpad-value-view (one per entry)
 ##         button#close-element.ct-button-image-sm-secondary.ct-mr-2
@@ -135,7 +135,7 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
   var emptyContainer: MockNode
 
   let panel = ui(r):
-    tdiv(class = ScratchpadContainerClass, id = "values"):
+    tdiv(class = ScratchpadContainerClass, id = "scratchpadComponent-0"):
       tdiv(ref = listContainer, class = "value-components-container"):
         discard
       tdiv(ref = emptyContainer, class = "empty-overlay"):
@@ -218,7 +218,7 @@ when defined(js):
     var emptyContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = ScratchpadContainerClass, id = "values"):
+      tdiv(class = ScratchpadContainerClass, id = "scratchpadComponent-0"):
         tdiv(ref = listContainer, class = "value-components-container"):
           discard
         tdiv(ref = emptyContainer, class = "empty-overlay"):

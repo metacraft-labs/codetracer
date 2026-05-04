@@ -235,7 +235,7 @@ when defined(js):
           if (`callbacks`.onToggleView) `callbacks`.onToggleView();
         });
         headerEl.appendChild(viewToggle);
-        header.appendChild(headerEl);
+        `header`.appendChild(headerEl);
 
         const summaryEl = document.createElement('div');
         summaryEl.className = 'agent-workspace-summary';
@@ -252,7 +252,7 @@ when defined(js):
           if (`callbacks`.onToggleOverlay) `callbacks`.onToggleOverlay();
         });
         summaryEl.appendChild(overlayToggle);
-        summary.appendChild(summaryEl);
+        `summary`.appendChild(summaryEl);
 
         const bodyEl = document.createElement('div');
         bodyEl.className = 'agent-workspace-body';
@@ -266,7 +266,7 @@ when defined(js):
         editor.id = `editorIdValue`;
         editorArea.appendChild(editor);
         bodyEl.appendChild(editorArea);
-        body.appendChild(bodyEl);
+        `body`.appendChild(bodyEl);
       """.}
 
       for i, entry in vm.files.val:
@@ -277,7 +277,7 @@ when defined(js):
         var hasFlow = entry.hasFlow
         var fileIdx = i
         {.emit: """
-          const fileList = body.querySelector('.agent-workspace-file-list');
+          const fileList = `body`.querySelector('.agent-workspace-file-list');
           const row = document.createElement('div');
           row.className = `selectedClass`;
           row.addEventListener('click', () => {

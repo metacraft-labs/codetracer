@@ -300,8 +300,523 @@ function injectSurfaceStyles(container) {
       min-width: 0;
       min-height: 100vh;
     }
+
+    .ct-storybook-default-layout .code-editor {
+      box-sizing: border-box;
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden !important;
+      background: transparent;
+    }
+
+    .ct-storybook-editor-fixture {
+      box-sizing: border-box;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      color: #d8d8d8;
+      font-family: "FiraCode", monospace;
+      font-size: 16px;
+      line-height: 25px;
+      background: transparent !important;
+    }
+
+    .ct-storybook-editor-fixture .overflow-guard {
+      box-sizing: border-box;
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .ct-storybook-editor-fixture .margin {
+      box-sizing: border-box;
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 91px;
+      height: 100%;
+      contain: strict;
+    }
+
+    .ct-storybook-editor-fixture .margin-view-overlays {
+      box-sizing: border-box;
+      position: absolute;
+      inset: 0;
+      font-family: "FiraCode", monospace;
+      font-size: 16px;
+      line-height: 22px;
+    }
+
+    .ct-storybook-editor-fixture .monaco-scrollable-element {
+      box-sizing: border-box;
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .ct-storybook-editor-fixture .lines-content {
+      box-sizing: border-box;
+      position: absolute;
+      left: 91px;
+      top: 0;
+      min-width: max-content;
+      height: 100%;
+    }
+
+    .ct-storybook-editor-fixture .view-lines {
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      min-width: max-content;
+    }
+
+    .ct-storybook-editor-fixture .view-line {
+      box-sizing: border-box;
+      height: 22px;
+      line-height: 22px;
+      white-space: pre;
+      color: #e3e3e3;
+      font-family: "FiraCode", monospace !important;
+      font-weight: 400;
+      min-width: 38em;
+    }
+
+    .ct-storybook-editor-fixture .margin-view-overlays > div {
+      box-sizing: border-box;
+      height: 22px;
+      line-height: 22px;
+    }
+
+    .ct-storybook-editor-fixture .line-numbers {
+      box-sizing: border-box;
+      width: 39px;
+      color: #858585;
+      text-align: right;
+      user-select: none;
+    }
+
+    .ct-storybook-editor-fixture .active-line-number {
+      color: #d3d3d3;
+    }
+
+    .ct-storybook-editor-fixture .folding {
+      color: #c4c4c4;
+      display: inline-block;
+      width: 22px;
+      text-align: center;
+      user-select: none;
+    }
+
+    .ct-storybook-editor-fixture .current-line {
+      background: #555;
+    }
+
+    .ct-storybook-editor-fixture .current-arrow {
+      color: #ffd23f;
+      display: inline-block;
+      width: 1.1em;
+      margin-left: -1.1em;
+      padding-right: 0.35em;
+    }
+
+    .ct-storybook-editor-fixture .token-keyword,
+    .ct-storybook-editor-fixture .token-function {
+      color: #4fa8e8;
+    }
+
+    .ct-storybook-editor-fixture .token-comment {
+      color: #72ad6b;
+    }
+
+    .ct-storybook-editor-fixture .token-string {
+      color: #d79d7f;
+    }
+
+    .ct-storybook-editor-fixture .token-number,
+    .ct-storybook-editor-fixture .token-type {
+      color: #b6e8c4;
+    }
+
+    .ct-storybook-editor-fixture .token-punctuation {
+      color: #f0cb4b;
+    }
+
+    .ct-storybook-editor-fixture .token-operator {
+      color: #9d72ff;
+    }
+
+    .ct-storybook-editor-fixture .indent-guide {
+      position: absolute;
+      top: 264px;
+      bottom: 0;
+      left: 194px;
+      width: 1px;
+      background: rgba(142, 142, 142, 0.35);
+      pointer-events: none;
+    }
+
+    .ct-storybook-editor-fixture .selected-text {
+      background: rgba(96, 96, 96, 0.82);
+    }
+
+    .ct-storybook-editor-fixture .scrollbar.vertical {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 0.875rem;
+      height: 100%;
+      background: transparent;
+    }
+
+    .ct-storybook-editor-fixture .scrollbar.vertical .slider {
+      position: absolute;
+      top: 62px;
+      right: 0;
+      width: 0.875rem;
+      height: 22%;
+      background: rgba(123, 123, 123, 0.72);
+    }
+
+    .ct-storybook-calltrace-fixture {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      color: #d9d9d9;
+      font-family: "FiraCode", monospace !important;
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-search {
+      width: 100%;
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-search-form-0 {
+      margin: 0;
+    }
+
+    .ct-storybook-calltrace-fixture .local-calltrace-view {
+      overflow: hidden;
+      padding-top: 0.5em;
+    }
+
+    .ct-storybook-calltrace-fixture .local-calltrace {
+      min-width: max-content;
+      opacity: 0.58;
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-call-line {
+      display: block;
+      height: 24px;
+      line-height: 24px;
+      overflow: hidden;
+      white-space: pre;
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-child.call-depth {
+      display: inline-block;
+      float: none;
+      width: auto;
+      color: #bcbcbc;
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-call-line.event-selected {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-name {
+      color: #e8e8e8;
+    }
+
+    .ct-storybook-calltrace-fixture .calltrace-args {
+      color: #a8d9b8;
+    }
   `;
   container.appendChild(style);
+}
+
+const storybookEditorLines = [
+  [{ t: "mod", c: "token-keyword" }, { t: " shield;" }],
+  [],
+  [{ t: "// We are on a space ship, moving through an asteroid field.", c: "token-comment" }],
+  [{ t: "// We are about to pass through an asteroid field.", c: "token-comment" }],
+  [{ t: "// We have to prove to everyone we can survive.", c: "token-comment" }],
+  [],
+  [{ t: "// We need to have at least 1 unit of shield after passing the field.", c: "token-comment" }],
+  [],
+  [{ t: "// We can not reveal how much shield we still have.", c: "token-comment" }],
+  [{ t: "// The space pirates can track our diagnostics channel.", c: "token-comment" }],
+  [],
+  [
+    { t: "fn", c: "token-keyword" },
+    { t: " main(initial_shield: Field, shield_regen_percentage: Field) {" },
+  ],
+  [
+    { t: "println", c: "token-function" },
+    { t: "(" },
+    { t: "\"Positive Test Case\"", c: "token-string" },
+    { t: ")" },
+  ],
+  [],
+  [{ t: "let", c: "token-keyword" }, { t: " did_survive_positive = shield::iterate_asteroids(" }],
+  [{ t: "if", c: "token-keyword" }, { t: "(did_survive_positive)" }, { t: "{", c: "token-operator" }],
+  [
+    { t: "println", c: "token-function" },
+    { t: "(" },
+    { t: "\"shields will hold as expected\"", c: "token-string" },
+    { t: ")" },
+  ],
+  [{ t: "}", c: "token-operator" }],
+  [{ t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
+  [
+    { t: "println", c: "token-function" },
+    { t: "(" },
+    { t: "\"shields will not hold as expected\"", c: "token-string" },
+    { t: ")" },
+  ],
+  [{ t: "}", c: "token-operator" }],
+  [],
+  [{ t: "println", c: "token-function" }, { t: "(\"------------------\")", c: "token-string" }],
+  [{ t: "println", c: "token-function" }, { t: "(\"Negative Test Case\")", c: "token-string" }],
+  [{ t: "println", c: "token-function" }, { t: "(\"------------------\")", c: "token-string" }],
+  [],
+  [{ t: "let", c: "token-keyword" }, { t: " did_survive_negative = shield::iterate_asteroids(" }],
+  [{ t: "if", c: "token-keyword" }, { t: "(did_survive_negative)" }, { t: "{", c: "token-operator" }],
+  [
+    { t: "println", c: "token-function" },
+    { t: "(" },
+    { t: "\"shields will hold, but should not\"", c: "token-string" },
+    { t: ")" },
+  ],
+  [{ t: "}", c: "token-operator" }],
+  [{ t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
+  [
+    { t: "println", c: "token-function" },
+    { t: "(" },
+    { t: "\"shields will not hold as expected\"", c: "token-string" },
+    { t: ")" },
+  ],
+  [{ t: "}", c: "token-operator" }],
+  [],
+  [{ t: "assert(did_survive_positive == true);" }],
+  [{ t: "assert(did_survive_negative == false);" }],
+  [{ t: "did_survive_positive & !did_survive_negative" }],
+  [{ t: "}", c: "token-punctuation" }],
+  [],
+  [{ t: "fn", c: "token-keyword" }, { t: " calculate_remaining_shield_pct(initial_shield: Field) -> Field {" }],
+  [{ t: "  initial_shield / 100", c: "token-number" }],
+  [{ t: "}", c: "token-punctuation" }],
+];
+
+function appendToken(parent, token) {
+  const span = document.createElement("span");
+  if (token.c) span.className = token.c;
+  span.textContent = token.t;
+  parent.appendChild(span);
+}
+
+function installStorybookEditorFixture(mount) {
+  const host = mount.querySelector(".code-editor");
+  if (!host || host.querySelector(".ct-storybook-editor-fixture")) return;
+  host.id = "editorComponent-0";
+  host.dataset.label = "/home/zahary/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr";
+
+  const editor = document.createElement("div");
+  editor.className =
+    "monaco-editor no-user-select showUnused showDeprecated vs-dark ct-storybook-editor-fixture";
+  editor.setAttribute("role", "code");
+  editor.dataset.uri = "inmemory://model/storybook-default-layout";
+
+  const guard = document.createElement("div");
+  guard.className = "overflow-guard";
+  guard.dataset.mprt = "3";
+
+  const margin = document.createElement("div");
+  margin.className = "margin";
+  margin.setAttribute("role", "presentation");
+  margin.setAttribute("aria-hidden", "true");
+  const marginOverlays = document.createElement("div");
+  marginOverlays.className = "margin-view-overlays";
+  marginOverlays.setAttribute("role", "presentation");
+  marginOverlays.setAttribute("aria-hidden", "true");
+
+  const scrollable = document.createElement("div");
+  scrollable.className = "monaco-scrollable-element";
+  const lines = document.createElement("div");
+  lines.className = "lines-content";
+  const viewLines = document.createElement("div");
+  viewLines.className = "view-lines";
+
+  storybookEditorLines.forEach((tokens, index) => {
+    const lineNumber = index + 1;
+    const marginRow = document.createElement("div");
+    if (lineNumber === 13) {
+      const currentMargin = document.createElement("div");
+      currentMargin.className = "current-line current-line-margin-both";
+      marginRow.appendChild(currentMargin);
+    }
+    const number = document.createElement("div");
+    number.className = `line-numbers lh-even${lineNumber === 13 ? " active-line-number" : ""}`;
+    const gutter = document.createElement("div");
+    gutter.className = "gutter";
+    gutter.dataset.line = String(lineNumber);
+    const gutterLine = document.createElement("div");
+    gutterLine.className = "gutter-line";
+    gutterLine.textContent = String(lineNumber);
+    gutter.appendChild(gutterLine);
+    number.appendChild(gutter);
+    marginRow.appendChild(number);
+
+    const folding = document.createElement("div");
+    folding.className = "folding";
+    if ([12, 16, 19, 28, 32, 39].includes(lineNumber)) folding.textContent = "v";
+    marginRow.appendChild(folding);
+    marginOverlays.appendChild(marginRow);
+
+    const code = document.createElement("div");
+    code.className = `view-line${lineNumber === 13 ? " current-line" : ""}`;
+    code.style.height = "22px";
+    code.style.lineHeight = "22px";
+    if (lineNumber === 13) {
+      const arrow = document.createElement("span");
+      arrow.className = "current-arrow";
+      arrow.textContent = ">";
+      code.appendChild(arrow);
+      const selected = document.createElement("span");
+      selected.className = "selected-text";
+      for (const token of tokens) appendToken(selected, token);
+      code.appendChild(selected);
+    } else {
+      for (const token of tokens) appendToken(code, token);
+    }
+    viewLines.appendChild(code);
+  });
+
+  const indentGuide = document.createElement("div");
+  indentGuide.className = "indent-guide";
+  const scrollbar = document.createElement("div");
+  scrollbar.className = "scrollbar vertical";
+  const slider = document.createElement("div");
+  slider.className = "slider";
+  scrollbar.appendChild(slider);
+
+  lines.appendChild(viewLines);
+  scrollable.appendChild(lines);
+  margin.appendChild(marginOverlays);
+  guard.appendChild(margin);
+  guard.appendChild(scrollable);
+  guard.appendChild(indentGuide);
+  guard.appendChild(scrollbar);
+  editor.appendChild(guard);
+  host.appendChild(editor);
+}
+
+const storybookCalltraceRows = [
+  { depth: 0, text: "main #0", args: "(initial_shield=10000, shield_regen_percentage=10)" },
+  { depth: 1, text: "iterate_asteroids #1", args: "(initial_shield=10000, iteration=0)" },
+  { depth: 2, text: "calculate_damage #2", args: "(initial_shield=10000, asteroid_mass=100)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #3", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #4", args: "()" },
+  { depth: 1, text: "status_report #5", args: "(iteration=0)" },
+  { depth: 1, text: "iterate_asteroids #6", args: "(initial_shield=10000, iteration=1)" },
+  { depth: 2, text: "calculate_damage #7", args: "(initial_shield=10000, asteroid_mass=2000)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #8", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #9", args: "()" },
+  { depth: 1, text: "status_report #10", args: "(iteration=1)" },
+  { depth: 1, text: "iterate_asteroids #11", args: "(initial_shield=10000, iteration=2)" },
+  { depth: 2, text: "calculate_damage #12", args: "(initial_shield=10000, asteroid_mass=2000)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #13", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #14", args: "()" },
+  { depth: 1, text: "status_report #15", args: "(iteration=2)" },
+  { depth: 1, text: "iterate_asteroids #16", args: "(initial_shield=10000, iteration=3)" },
+  { depth: 2, text: "calculate_damage #17", args: "(initial_shield=10000, asteroid_mass=2000)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #18", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #19", args: "()" },
+  { depth: 1, text: "status_report #20", args: "(iteration=3)" },
+  { depth: 1, text: "iterate_asteroids #21", args: "(initial_shield=10000, iteration=4)" },
+  { depth: 2, text: "calculate_damage #22", args: "(initial_shield=10000, asteroid_mass=3000)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #23", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #24", args: "()" },
+  { depth: 1, text: "status_report #25", args: "(iteration=4)" },
+  { depth: 1, text: "iterate_asteroids #26", args: "(initial_shield=10000, iteration=5)" },
+  { depth: 2, text: "calculate_damage #27", args: "(initial_shield=10000, asteroid_mass=2500)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #28", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #29", args: "()" },
+  { depth: 1, text: "status_report #30", args: "(iteration=5)" },
+  { depth: 1, text: "iterate_asteroids #31", args: "(initial_shield=10000, iteration=6)" },
+  { depth: 2, text: "calculate_damage #32", args: "(initial_shield=10000, asteroid_mass=3250)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #33", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #34", args: "()" },
+  { depth: 1, text: "status_report #35", args: "(iteration=6)" },
+  { depth: 1, text: "iterate_asteroids #36", args: "(initial_shield=10000, iteration=7)" },
+  { depth: 2, text: "calculate_damage #37", args: "(initial_shield=10000, asteroid_mass=1232)" },
+  { depth: 3, text: "calculate_remaining_shield_pct #38", args: "()" },
+  { depth: 2, text: "calculate_shield_regeneration #39", args: "()" },
+];
+
+function installStorybookCalltraceFixture(mount) {
+  mount.innerHTML = "";
+  const panel = document.createElement("div");
+  panel.id = "calltraceComponent-0";
+  panel.className = "component-container calltrace-view ct-storybook-calltrace-fixture";
+  panel.dataset.label = "calltrace-data-label-0";
+  panel.tabIndex = 2;
+
+  const searchWrapper = document.createElement("div");
+  const search = document.createElement("div");
+  search.className = "calltrace-search";
+  const form = document.createElement("form");
+  form.className = "calltrace-search-form-0";
+  const input = document.createElement("input");
+  input.id = "calltrace-search-input-0";
+  input.className =
+    "calltrace-search-input calltrace-search-input-0 ct-input-panel ct-input-search-image";
+  input.type = "text";
+  input.placeholder = "Search";
+  form.appendChild(input);
+  search.appendChild(form);
+  const results = document.createElement("div");
+  results.className = "call-search-results hidden";
+  search.appendChild(results);
+  searchWrapper.appendChild(search);
+  panel.appendChild(searchWrapper);
+
+  const scroll = document.createElement("div");
+  scroll.id = "calltraceScroll-0";
+  scroll.className = "local-calltrace-view";
+  const localCalltrace = document.createElement("div");
+  localCalltrace.className = "local-calltrace";
+  localCalltrace.style.height = `${storybookCalltraceRows.length * 24}px`;
+  const lines = document.createElement("div");
+  lines.className = "calltrace-lines";
+  lines.style.transform = "translateY(0px)";
+  storybookCalltraceRows.forEach((row, index) => {
+    const line = document.createElement("div");
+    line.className = `calltrace-call-line calltrace-row${index === 0 ? " event-selected" : ""}`;
+    const depth = document.createElement("span");
+    depth.className = "calltrace-child call-depth";
+    depth.textContent = `${"  ".repeat(row.depth)}${row.depth <= 2 ? "[-]" : " . "}`;
+    const toggle = document.createElement("span");
+    toggle.className = "calltrace-toggle";
+    toggle.textContent = " ";
+    const name = document.createElement("span");
+    name.className = "calltrace-name";
+    name.textContent = row.text + " ";
+    const args = document.createElement("span");
+    args.className = "calltrace-args";
+    args.textContent = row.args;
+    line.appendChild(depth);
+    line.appendChild(toggle);
+    line.appendChild(name);
+    line.appendChild(args);
+    lines.appendChild(line);
+  });
+  localCalltrace.appendChild(lines);
+  scroll.appendChild(localCalltrace);
+  panel.appendChild(scroll);
+  mount.appendChild(panel);
 }
 
 function createGoldenPanelHost(frame, title) {
@@ -570,6 +1085,7 @@ function appendDefaultDebugLayout(shellRoot) {
     {
       parent: rightTopLeft,
       layoutBox: "rightTopLeft",
+      fixture: "empty",
       tabs: [
         { title: "STATE", name: "state" },
         { title: "SCRATCHPAD", name: "scratchpad" },
@@ -578,6 +1094,7 @@ function appendDefaultDebugLayout(shellRoot) {
     {
       parent: rightTopRight,
       layoutBox: "rightTopRight",
+      fixture: "reference",
       tabs: [
         { title: "CALLTRACE", name: "calltrace" },
         { title: "AGENT ACTIVITY", name: null },
@@ -599,7 +1116,10 @@ function appendDefaultDebugLayout(shellRoot) {
     stack.dataset.layoutBox = panel.layoutBox;
     stack.dataset.panelName = panel.tabs.map((tab) => tab.name).filter(Boolean).join(" ");
     panel.parent.appendChild(stack);
-    mounts.push(...stackMounts.filter(({ name }) => name));
+    mounts.push(...stackMounts.filter(({ name }) => name).map((mountInfo) => ({
+      ...mountInfo,
+      fixture: panel.fixture,
+    })));
   }
 
   rightTop.appendChild(rightTopLeft);
@@ -837,9 +1357,19 @@ function renderDefaultDebugLayout(container) {
 
   ensureComponentsLoaded().then(() => {
     const disposes = [];
-    for (const { name, mount } of mounts) {
+    for (const { name, mount, fixture } of mounts) {
       try {
-        disposes.push(mountCodeTracerStory(mount, "panel", name, "populated"));
+        if (name === "calltrace") {
+          installStorybookCalltraceFixture(mount);
+          disposes.push(() => {
+            mount.innerHTML = "";
+          });
+          continue;
+        }
+        disposes.push(mountCodeTracerStory(mount, "panel", name, fixture ?? "populated"));
+        if (name === "editor") {
+          window.requestAnimationFrame(() => installStorybookEditorFixture(mount));
+        }
       } catch (error) {
         console.error(`Failed to mount default layout panel "${name}"`, error);
       }

@@ -49,6 +49,24 @@ proc editIndicatorText(vm: PointListVM): string =
   let editing = vm.editingPoint.val
   if editing.isSome: "Editing: " & $editing.get else: ""
 
+proc pointRowClass(vm: PointListVM; index: int; enabled: bool): string =
+  var cls = "point-list-row"
+  if vm.selectedPoint.val.isSome and vm.selectedPoint.val.get == index:
+    cls.add " selected"
+  if not enabled:
+    cls.add " disabled"
+  cls
+
+proc pointLocationText(point: PointListEntry): string =
+  if point.line > 0:
+    point.path & ":" & $point.line
+  else:
+    point.path
+
+proc onPointClick(vm: PointListVM; index: int): proc() =
+  let captured = index
+  result = proc() = vm.selectPoint(some(captured))
+
 # ---------------------------------------------------------------------------
 # Panel template
 # ---------------------------------------------------------------------------
@@ -60,12 +78,24 @@ template renderPointListPanelImpl(r, vm, rootClass: untyped): untyped =
         span(class = "point-list-title"):
           text "Points"
       tdiv(class = "point-list-items"):
-        discard
-      span(class = selectedIndicatorClass(vm)):
-        text selectedIndicatorText(vm)
-      span(class = "point-edit-indicator",
-           display = displayIf(vm.editingPoint.val.isSome)):
-        text editIndicatorText(vm)
+        for i, point in vm.points.val:
+          tdiv(class = pointRowClass(vm, i, point.enabled),
+               onclick = onPointClick(vm, i)):
+            span(class = "point-list-kind"):
+              text point.kind
+            span(class = "point-list-label"):
+              text point.label
+            span(class = "point-list-location"):
+              text pointLocationText(point)
+        if vm.points.val.len == 0:
+          tdiv(class = "point-list-empty"):
+            text "No breakpoints or tracepoints."
+      tdiv(class = "point-list-footer"):
+        span(class = selectedIndicatorClass(vm)):
+          text selectedIndicatorText(vm)
+        span(class = "point-edit-indicator",
+             display = displayIf(vm.editingPoint.val.isSome)):
+          text editIndicatorText(vm)
 
 # ---------------------------------------------------------------------------
 # Renderer overloads

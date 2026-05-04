@@ -230,7 +230,8 @@ when defined(js):
     ## the public API so callers do not have to thread it themselves.
     discard componentId
     ui(r):
-      tdiv(class = "component-container eventLog isonim-event-log",
+      tdiv(id = "eventLogComponent-" & $componentId,
+           class = "component-container eventLog isonim-event-log",
            tabindex = "2"):
         tdiv(class = "ct-flex"):
           button(id = "category-image",

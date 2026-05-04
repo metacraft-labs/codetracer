@@ -343,7 +343,7 @@ when defined(js):
           body.textContent = `content`;
           wrap.appendChild(header);
           wrap.appendChild(body);
-          conversation.appendChild(wrap);
+          `conversation`.appendChild(wrap);
         """.}
         for diff in message.diffs:
           var path = cstring(diff.path)
@@ -365,7 +365,7 @@ when defined(js):
             editorWrapper.appendChild(editor);
             componentWrapper.appendChild(diffHeader);
             componentWrapper.appendChild(editorWrapper);
-            conversation.appendChild(componentWrapper);
+            `conversation`.appendChild(componentWrapper);
           """.}
       for terminal in vm.terminals.val:
         var terminalId = cstring(terminal.id)
@@ -394,21 +394,21 @@ when defined(js):
           shell.className = 'shell-container';
           term.appendChild(header);
           term.appendChild(shell);
-          conversation.appendChild(term);
+          `conversation`.appendChild(term);
         """.}
       if vm.wantsPassword.val:
         {.emit: """
           const prompt = document.createElement('div');
           prompt.className = 'prompt-wrapper';
           prompt.innerHTML = '<div class="password-wrapper"><input class="password-prompt-input" type="password" placeholder="Password to continue"><button class="ct-button-sm-primary password-continue-button" type="button">Continue</button></div>';
-          conversation.appendChild(prompt);
+          `conversation`.appendChild(prompt);
         """.}
       if vm.wantsPermission.val:
         {.emit: """
           const prompt = document.createElement('div');
           prompt.className = 'prompt-wrapper';
           prompt.innerHTML = '<div class="header-wrapper">How are you</div><div class="user-options-wrapper"><button class="ct-button-sm-secondary user-option" type="button">well</button><button class="ct-button-sm-secondary user-option" type="button">bad</button></div>';
-          conversation.appendChild(prompt);
+          `conversation`.appendChild(prompt);
         """.}
       if callbacks.afterDynamicRender != nil:
         callbacks.afterDynamicRender()
@@ -428,13 +428,13 @@ when defined(js):
           return b;
         };
         if (!`rerecord`) {
-          buttons.appendChild(makeButton('ct-button-image-md-secondary agent-button agent-icon-button new-agent-instance', () => {
+          `buttons`.appendChild(makeButton('ct-button-image-md-secondary agent-button agent-icon-button new-agent-instance', () => {
             if (`callbacks`.onNewAgentInstance) `callbacks`.onNewAgentInstance();
           }));
         } else {
           const b = makeButton('ct-button-image-md-secondary agent-button agent-icon-button agent-progress-loading', () => {});
           b.disabled = true;
-          buttons.appendChild(b);
+          `buttons`.appendChild(b);
         }
         const add = makeButton('ct-button-md-secondary agent-button agent-add-context-button', () => {
           if (`callbacks`.onAddFiles) `callbacks`.onAddFiles();
@@ -443,7 +443,7 @@ when defined(js):
         icon.className = 'add-file-img';
         add.appendChild(icon);
         add.appendChild(document.createTextNode('Add files and more'));
-        buttons.appendChild(add);
+        `buttons`.appendChild(add);
         const model = makeButton('ct-button-md-secondary agent-button agent-model-select', () => {
           if (`callbacks`.onModelSelect) `callbacks`.onModelSelect();
         });
@@ -453,8 +453,8 @@ when defined(js):
         img.className = 'agent-model-img';
         model.appendChild(text);
         model.appendChild(img);
-        buttons.appendChild(model);
-        buttons.appendChild(makeButton(
+        `buttons`.appendChild(model);
+        `buttons`.appendChild(makeButton(
           `loading`
             ? 'ct-button-image-md-secondary agent-submit-button agent-stop-button'
             : 'ct-button-image-md-primary agent-submit-button agent-start-button',

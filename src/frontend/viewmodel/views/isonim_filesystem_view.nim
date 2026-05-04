@@ -168,6 +168,35 @@ proc iconClass*(entry: FilesystemEntryNode): string =
   else:
     "filesystem-entry-icon filesystem-entry-file-icon"
 
+proc jstreeNodeId*(entry: FilesystemEntryNode): string =
+  ## Legacy jstree ids use the ``j1_1`` shape.  Older IsoNim fixtures stored
+  ## ids without the leading ``j``; tolerate both so bridge data stays stable.
+  if entry.id.len == 0:
+    ""
+  elif entry.id[0] == 'j':
+    entry.id
+  else:
+    "j" & entry.id
+
+proc jstreeNodeClass*(entry: FilesystemEntryNode; expanded, isLast: bool): string =
+  let stateClass =
+    if entry.isFolder:
+      if expanded: "jstree-open" else: "jstree-closed"
+    else:
+      "jstree-leaf"
+  let lastClass = if isLast: " jstree-last" else: ""
+  let diffClass = diffClassToCss(entry.diffClass)
+  let diffSuffix = if diffClass.len > 0: " " & diffClass else: ""
+  "jstree-node  " & stateClass & lastClass & diffSuffix
+
+proc jstreeIconClass*(entry: FilesystemEntryNode): string =
+  if entry.icon.len > 0:
+    "jstree-icon jstree-themeicon " & entry.icon & " jstree-themeicon-custom"
+  elif entry.isFolder:
+    "jstree-icon jstree-themeicon"
+  else:
+    "jstree-icon jstree-themeicon jstree-file"
+
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
@@ -355,40 +384,61 @@ when defined(js):
     while not isonim_dom.isNodeNil(asNode.firstChild):
       discard isonim_dom.removeChild(asNode, asNode.firstChild)
 
-  proc renderWebEntry(vm: FilesystemVM;
-                      entry: FilesystemEntryNode): isonim_dom.Element =
-    ## Build a tree node in the real DOM.  Same shape as the Mock
-    ## variant; click handler is wired imperatively via
-    ## ``addEventListener``.
+  proc renderWebEntry(vm: FilesystemVM; entry: FilesystemEntryNode;
+                      level: int; isLast: bool): isonim_dom.Element =
+    ## Build one legacy jstree node in the real DOM.  The WebRenderer mirrors
+    ## the Karax/jstree output because the visual reference is the browser's
+    ## final plugin DOM, including wholerow, ocl, anchor and themeicon nodes.
     let expandedFlag = vm.isExpanded(entry.path)
-    let row = createWebElement("div", rowClass(entry, expandedFlag),
-                               (if entry.id.len > 0: "j" & entry.id else: ""))
+    let nodeId = jstreeNodeId(entry)
+    let row = createWebElement("li", jstreeNodeClass(entry, expandedFlag, isLast),
+                               nodeId)
     let entryPath = entry.path
     let isFolder = entry.isFolder
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
+    isonim_dom.setAttribute(row, cstring"role", cstring"treeitem")
+    isonim_dom.setAttribute(row, cstring"aria-selected", cstring"false")
+    isonim_dom.setAttribute(row, cstring"aria-level", cstring($level))
+    if nodeId.len > 0:
+      isonim_dom.setAttribute(row, cstring"aria-labelledby",
+                              cstring(nodeId & "_anchor"))
+    if isFolder:
+      isonim_dom.setAttribute(row, cstring"aria-expanded",
+                              cstring(if expandedFlag: "true" else: "false"))
+
+    let wholerow = createWebTextElement("div", "\xC2\xA0", "jstree-wholerow")
+    isonim_dom.setAttribute(wholerow, cstring"unselectable", cstring"on")
+    isonim_dom.setAttribute(wholerow, cstring"role", cstring"presentation")
+    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(wholerow))
+
+    let twisty = createWebElement("i", "jstree-icon jstree-ocl")
+    isonim_dom.setAttribute(twisty, cstring"role", cstring"presentation")
+    isonim_dom.addEventListener(isonim_dom.Node(twisty), cstring"click",
                                 proc(ev: isonim_dom.Event) =
       if isFolder:
         vm.toggleExpanded(entryPath))
-
-    let twisty = createWebTextElement("span", twistyText(entry, expandedFlag),
-                                      "filesystem-entry-twisty")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(twisty))
 
-    let icon = createWebElement("div", iconClass(entry))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(icon))
-
-    let label = createWebTextElement("span", entry.text,
-                                     "filesystem-entry-label")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(label))
-
-    let children = createWebElement("div", "filesystem-entry-children")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(children))
+    let anchor = createWebElement("a", "jstree-anchor",
+                                  (if nodeId.len > 0: nodeId & "_anchor" else: ""))
+    isonim_dom.setAttribute(anchor, cstring"href", cstring"#")
+    isonim_dom.setAttribute(anchor, cstring"tabindex", cstring"-1")
+    let icon = createWebElement("i", jstreeIconClass(entry))
+    isonim_dom.setAttribute(icon, cstring"role", cstring"presentation")
+    isonim_dom.appendChild(isonim_dom.Node(anchor), isonim_dom.Node(icon))
+    let labelText = isonim_dom.createTextNode(isonim_dom.document,
+                                              cstring(entry.text))
+    isonim_dom.appendChild(isonim_dom.Node(anchor), labelText)
+    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(anchor))
 
     if isFolder and expandedFlag:
-      for child in entry.children:
-        let childNode = renderWebEntry(vm, child)
+      let children = createWebElement("ul", "jstree-children")
+      isonim_dom.setAttribute(children, cstring"role", cstring"group")
+      for i in 0 ..< entry.children.len:
+        let childNode = renderWebEntry(vm, entry.children[i], level + 1,
+                                       i == entry.children.high)
         isonim_dom.appendChild(isonim_dom.Node(children),
                                isonim_dom.Node(childNode))
+      isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(children))
     row
 
   proc renderFilesystemPanel*(r: WebRenderer;
@@ -403,9 +453,16 @@ when defined(js):
     var deepReviewContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = FilesystemContainerClass):
-        tdiv(class = "filesystem"):
-          tdiv(ref = treeContainer, class = FilesystemTreeContainerClass):
+      tdiv(id = "filesystemComponent", class = FilesystemContainerClass):
+        tdiv(class = "filesystem jstree jstree-1 jstree-default",
+             role = "tree", `aria-multiselectable` = "true",
+             tabindex = "0", `aria-activedescendant` = "j1_1",
+             `aria-busy` = "false"):
+          ul(ref = treeContainer,
+             class = "jstree-container-ul jstree-children jstree-contextmenu " &
+                     "jstree-wholerow-ul jstree-no-dots " &
+                     FilesystemTreeContainerClass,
+             role = "group"):
             discard
           tdiv(ref = emptyContainer, class = "filesystem-empty-overlay"):
             text FilesystemEmptyStateText
@@ -419,16 +476,17 @@ when defined(js):
       let root = vm.rootEntry.val
       clearWebChildren(treeContainer)
       if root.text.len > 0 and root.text != "/":
-        let node = renderWebEntry(vm, root)
+        let node = renderWebEntry(vm, root, 1, true)
         isonim_dom.appendChild(isonim_dom.Node(treeContainer),
                                isonim_dom.Node(node))
       elif root.children.len > 0:
-        for child in root.children:
-          let childNode = renderWebEntry(vm, child)
+        for i in 0 ..< root.children.len:
+          let childNode = renderWebEntry(vm, root.children[i], 1,
+                                         i == root.children.high)
           isonim_dom.appendChild(isonim_dom.Node(treeContainer),
                                  isonim_dom.Node(childNode))
       elif root.text.len > 0:
-        let node = renderWebEntry(vm, root)
+        let node = renderWebEntry(vm, root, 1, true)
         isonim_dom.appendChild(isonim_dom.Node(treeContainer),
                                isonim_dom.Node(node))
 

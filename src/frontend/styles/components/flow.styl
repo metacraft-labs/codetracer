@@ -48,6 +48,9 @@
     padding: 0 8px 6px
     color: VALUE_TYPE_COLOR
 
+    &[display="none"]
+      display: none
+
   .flow-iteration-slider
     display: grid
     grid-template-columns: max-content minmax(140px, 360px)
@@ -63,9 +66,56 @@
     flex: 1 1 auto
     min-height: 0
     border-top: 1px solid ACTIVE_MENU_BACKGROUND
-    background:
-      linear-gradient(EVENT_LOG_ROWS_BORDERS_COLOR 1px, transparent 1px)
-    background-size: 100% 24px
+    overflow: auto
+    background: BACKGROUND_COLOR
+
+  .flow-steps-header,
+  .flow-step-row
+    display: grid
+    grid-template-columns: 4.5em 14em minmax(16em, 1fr) minmax(12em, 20em)
+    align-items: center
+    column-gap: 1em
+    padding: 0 0.75em
+    min-height: 24px
+    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+
+  .flow-steps-header
+    position: sticky
+    top: 0
+    z-index: 1
+    color: VALUE_TYPE_COLOR
+    background: HEADER_PANEL_BACKGROUND_COLOR
+    font-size: 12px
+
+  .flow-step-row
+    cursor: pointer
+    color: TEXT_CONTENT_COLOR
+
+    &:hover,
+    &.hovered
+      background: ACTIVE_ROW
+
+  .flow-step-index
+    color: VALUE_TYPE_COLOR
+
+  .flow-step-location
+    color: #9cdcfe
+
+  .flow-step-expression
+    color: TEXT_CONTENT_COLOR
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .flow-step-value
+    color: #b5cea8
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .flow-steps-empty
+    padding: 0.75em
+    color: VALUE_TYPE_COLOR
 
   .flow-value-display
     display: flex

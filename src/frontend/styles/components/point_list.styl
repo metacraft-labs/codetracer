@@ -1,0 +1,79 @@
+.point-list-component
+  height: 100%
+  display: flex
+  flex-direction: column
+  overflow: hidden
+  background: BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  font-family: "FiraCode", monospace
+  font-size: 13px
+  line-height: 20px
+
+.point-list-header
+  flex: 0 0 28px
+  display: flex
+  align-items: center
+  padding: 0 0.75em
+  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+  background: HEADER_PANEL_BACKGROUND_COLOR
+  color: VALUE_TYPE_COLOR
+
+.point-list-title
+  text-transform: uppercase
+  font-family: "SpaceGrotesk", sans-serif
+  font-size: 12px
+  font-weight: 600
+
+.point-list-items
+  flex: 1 1 auto
+  min-height: 0
+  overflow: auto
+
+.point-list-row
+  display: grid
+  grid-template-columns: 5em minmax(12em, 1fr) minmax(14em, 32em)
+  align-items: center
+  column-gap: 1em
+  min-height: 26px
+  padding: 0 0.75em
+  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+  cursor: pointer
+
+  &:hover,
+  &.selected
+    background: ACTIVE_ROW
+
+  &.disabled
+    opacity: 0.48
+
+.point-list-kind
+  color: #d7ba7d
+  text-transform: uppercase
+  font-size: 11px
+
+.point-list-label,
+.point-list-location
+  min-width: 0
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.point-list-location
+  color: VALUE_TYPE_COLOR
+
+.point-list-empty
+  padding: 0.75em
+  color: VALUE_TYPE_COLOR
+
+.point-list-footer
+  flex: 0 0 24px
+  display: flex
+  align-items: center
+  gap: 1em
+  padding: 0 0.75em
+  border-top: 1px solid ACTIVE_MENU_BACKGROUND
+  color: VALUE_TYPE_COLOR
+  font-size: 12px
+
+.point-selected-indicator.active
+  color: TEXT_CONTENT_COLOR

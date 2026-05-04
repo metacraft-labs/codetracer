@@ -19,7 +19,7 @@
 ## Structure (per the Playwright contract in
 ## ``src/tests/gui/page-objects/panes/terminal/terminal-output-pane.ts``)::
 ##
-##   div.component-container.terminal[.isonim-terminal-output]
+##   div#terminalComponent-0.component-container.terminal[.isonim-terminal-output]
 ##     pre
 ##       div.terminal-line#terminal-line-{lineIndex}
 ##         div.{past|active|future}                ← fragment, click → jumpToEvent
@@ -103,7 +103,7 @@ proc renderTerminalOutputPanel*(r: MockRenderer;
   var preNode: MockNode
 
   let panel = ui(r):
-    tdiv(class = "component-container terminal"):
+    tdiv(id = "terminalComponent-0", class = "component-container terminal"):
       pre(ref = preNode):
         discard
       tdiv(class = "empty-overlay",
@@ -151,7 +151,8 @@ when defined(js):
     var preNode: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = "component-container terminal isonim-terminal-output"):
+      tdiv(id = "terminalComponent-0",
+           class = "component-container terminal isonim-terminal-output"):
         pre(ref = preNode):
           discard
         tdiv(class = "empty-overlay",

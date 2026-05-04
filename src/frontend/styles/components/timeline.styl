@@ -15,9 +15,11 @@
     display: flex
     align-items: center
     gap: 12px
-    padding: 6px 8px
+    padding: 6px 10px
     flex: 0 0 auto
     color: VALUE_TYPE_COLOR
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    background: HEADER_PANEL_BACKGROUND_COLOR
 
   .position-ticks
     color: TEXT_CONTENT_COLOR
@@ -26,7 +28,7 @@
     display: flex
     align-items: center
     gap: 4px
-    padding: 0 8px 8px
+    padding: 8px 10px
     flex: 0 0 auto
 
     button
@@ -46,13 +48,14 @@
 
   .timeline-track
     position: relative
-    height: 28px
-    margin: 0 8px
+    height: 42px
+    margin: 0 10px
     border-top: 1px solid ACTIVE_MENU_BACKGROUND
     border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
     background:
-      linear-gradient(90deg, EVENT_LOG_ROWS_BORDERS_COLOR 1px, transparent 1px)
-    background-size: 40px 100%
+      linear-gradient(90deg, EVENT_LOG_ROWS_BORDERS_COLOR 1px, transparent 1px),
+      linear-gradient(to bottom, transparent 19px, ACTIVE_ROW 20px, transparent 21px)
+    background-size: 40px 100%, 100% 100%
     flex: 0 0 auto
 
   .timeline-playhead
@@ -60,7 +63,8 @@
     top: 0
     bottom: 0
     width: 2px
-    background: CT_SECONDARY_BLUE
+    background: #d7ba7d
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35)
 
   .timeline-hover-tooltip
     width: fit-content

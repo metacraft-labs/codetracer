@@ -30,6 +30,11 @@ type
     smFindInFiles ## Full-text search across all files
     smFindSymbol  ## Symbol search
 
+  SearchPanelResultEntry* = object
+    label*: string
+    detail*: string
+    shortcut*: string
+
   SearchVM* = ref object of ViewModel
     ## Reactive state for the Search / Command palette panel.
     ##
@@ -47,6 +52,7 @@ type
     query*: Signal[string]
     selectedResult*: Signal[Option[int]]
     resultsVisible*: Signal[bool]
+    results*: Signal[seq[SearchPanelResultEntry]]
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -74,6 +80,10 @@ proc selectResult*(vm: SearchVM; index: Option[int]) =
   ## Set the selected result index. Pass `none(int)` to clear.
   vm.selectedResult.val = index
 
+proc setResults*(vm: SearchVM; results: openArray[SearchPanelResultEntry]) =
+  vm.results.val = @results
+  vm.resultsVisible.val = results.len > 0
+
 proc toggleResults*(vm: SearchVM) =
   ## Toggle visibility of the results list.
   vm.resultsVisible.val = not vm.resultsVisible.val
@@ -94,5 +104,6 @@ proc createSearchVM*(store: ReplayDataStore): SearchVM =
       query: createSignal(""),
       selectedResult: createSignal(none(int)),
       resultsVisible: createSignal(false),
+      results: createSignal(newSeq[SearchPanelResultEntry]()),
       disposeProc: dispose,
     )

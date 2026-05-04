@@ -55,6 +55,9 @@ proc tabLabel(tab: StateTab): string =
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
+proc displayFlexIf(cond: bool): string =
+  if cond: "flex" else: "none"
+
 # ---------------------------------------------------------------------------
 # Code-state-line helpers
 # ---------------------------------------------------------------------------
@@ -236,7 +239,8 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
   var rowContainer: MockNode
 
   let panel = ui(r):
-    tdiv(class = "state-component"):
+    tdiv(id = "stateComponent-0",
+         class = "component-container active-state state-component"):
       tdiv(class = "state-tabs"):
         button(class = tabClass(vm, stLocals),
                onclick = onSelectTab(vm, stLocals)):
@@ -264,7 +268,7 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
         text "Loading..."
       tdiv(class = "value-components-container"):
         tdiv(class = "empty-overlay",
-             display = displayIf(getStateViewState(vm).variables.len == 0)):
+             display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
           text "No local variables are present in the current point of execution."
         tdiv(ref = rowContainer):
           discard
@@ -314,7 +318,8 @@ when defined(js):
       rowContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = "state-component isonim-state"):
+      tdiv(id = "stateComponent-0",
+           class = "component-container active-state state-component isonim-state"):
         # Code-state-line: rendered before the watch input so that the
         # Playwright `#code-state-line-0` lookup finds the populated
         # element (with text "<line> | <source>") matching the legacy
@@ -338,7 +343,7 @@ when defined(js):
           text "Loading..."
         tdiv(class = "value-components-container"):
           tdiv(class = "empty-overlay",
-               display = displayIf(getStateViewState(vm).variables.len == 0)):
+               display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
             text "No local variables are present in the current point of execution."
           tdiv(ref = rowContainer):
             discard

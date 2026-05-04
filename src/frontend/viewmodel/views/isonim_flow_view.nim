@@ -12,6 +12,8 @@
 ## materialised into one concrete proc per renderer so the `ui()`
 ## macro can resolve element types at compile time.
 
+import std/options
+
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
 import isonim/testing/mock_dom
@@ -62,6 +64,24 @@ proc iterationLabelText(vm: FlowVM): string =
 proc sliderMaxAttr(vm: FlowVM): string =
   let maxVal = vm.totalIterations.val - 1
   $(if maxVal >= 0: maxVal else: 0)
+
+proc flowStepRowClass(vm: FlowVM; index: int): string =
+  if vm.hoveredStep.val.isSome() and vm.hoveredStep.val.get() == index:
+    "flow-step-row hovered"
+  else:
+    "flow-step-row"
+
+proc flowStepTransition(step: FlowStepEntry): string =
+  if step.beforeValue.len > 0 and step.afterValue.len > 0:
+    step.beforeValue & " -> " & step.afterValue
+  elif step.afterValue.len > 0:
+    step.afterValue
+  else:
+    step.beforeValue
+
+proc onStepClick(vm: FlowVM; index: int): proc() =
+  let captured = index
+  result = proc() = vm.clickStep(captured)
 
 # ---------------------------------------------------------------------------
 # Click handlers
@@ -121,7 +141,29 @@ template renderFlowPanelImpl(r, vm, rootClass: untyped): untyped =
               max = sliderMaxAttr(vm),
               value = $vm.selectedIteration.val)
       tdiv(class = "flow-steps"):
-        discard
+        tdiv(class = "flow-steps-header"):
+          span:
+            text "Step"
+          span:
+            text "Location"
+          span:
+            text "Expression"
+          span:
+            text "Value"
+        for i, step in vm.steps.val:
+          tdiv(class = flowStepRowClass(vm, i),
+               onclick = onStepClick(vm, step.step)):
+            span(class = "flow-step-index"):
+              text $step.step
+            span(class = "flow-step-location"):
+              text step.location
+            span(class = "flow-step-expression"):
+              text step.expression
+            span(class = "flow-step-value"):
+              text flowStepTransition(step)
+        if vm.steps.val.len == 0:
+          tdiv(class = "flow-steps-empty"):
+            text "No flow values loaded."
       tdiv(class = "flow-value-display"):
         span(class = "flow-value-text"):
           discard
