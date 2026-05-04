@@ -1496,36 +1496,34 @@ proc flowSimpleValue*(
   showName: bool,
   style: VStyle,
   i: int = 0,
-): VNode =
+): Node =
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
 
-  proc renderViewOption(): VNode =
-    buildHtml(
-      span(
-        class = &"flow-{flowMode}-value-name flow-view-more-button flow-hide-content",
-        style = style,
-        onmousedown = proc(e: Event, v: VNode) =
-          let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-          let target = document.getElementById(targetId)
-          if not target.isNil:
-            if target.style.maxWidth != "none":
-              target.style.maxWidth = "none"
-              e.target.toJs.classList.remove("flow-hide-content")
-              e.target.toJs.classList.add("flow-show-content")
-            else:
-              e.target.toJs.classList.remove("flow-show-content")
-              e.target.toJs.classList.add("flow-hide-content")
-              target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-          self.maxWidth = 0
-          self.editorUI.adjustEditorWidth()
-      )
+  proc renderViewOption(): Node =
+    result = document.createElement(cstring"span")
+    result.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-view-more-button flow-hide-content"))
+    result.applyStyle(style)
+    result.addEventListener(cstring"mousedown", proc(e: Event) =
+      let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+      let target = document.getElementById(targetId)
+      if not target.isNil:
+        if target.style.maxWidth != "none":
+          target.style.maxWidth = "none"
+          e.target.toJs.classList.remove("flow-hide-content")
+          e.target.toJs.classList.add("flow-show-content")
+        else:
+          e.target.toJs.classList.remove("flow-show-content")
+          e.target.toJs.classList.add("flow-hide-content")
+          target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
+      self.maxWidth = 0
+      self.editorUI.adjustEditorWidth()
     )
 
-  proc onMouseDown(e: Event, v: VNode, value: Value) =
+  proc onMouseDown(e: Event, value: Value) =
     e.stopPropagation()
 
     if cast[MouseEvent](e).button == 0:
@@ -1535,7 +1533,7 @@ proc flowSimpleValue*(
       else:
         self.jumpToLocalStep(stepCount)
 
-  proc onContextMenu(e: Event, v: VNode, value: Value) =
+  proc onContextMenu(e: Event, value: Value) =
     e.stopPropagation()
 
     let step = self.flow.steps[stepCount]
@@ -1544,138 +1542,92 @@ proc flowSimpleValue*(
     if contextMenu != @[]:
       showContextMenu(contextMenu, cast[int](e.toJs.clientX), cast[int](e.toJs.clientY))
 
-  result = buildHtml(
-    span(
-      class = &"ct-omni-value",
-      style=style
+  proc appendValueSpan(parent: Node, id: cstring, className: string, value: Value) =
+    let valueSpan = document.createElement(cstring"span")
+    valueSpan.setAttribute(cstring"id", id)
+    valueSpan.applyStyle(style)
+    valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
+    valueSpan.setAttribute(cstring"class", cstring(className))
+    valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
+      onMouseDown(e, value)
     )
-  ):
-    case flowValueMode:
+    valueSpan.addEventListener(cstring"contextmenu", proc(e: Event) =
+      onContextMenu(e, value)
+    )
+    # ValueComponent.renderValue() is still Karax-owned; only this nested
+    # modal/tooltip value rendering stays materialized in this narrow cleanup.
+    valueSpan.addEventListener(cstring"mouseover", proc(e: Event) =
+      if not self.modalValueComponent.hasKey(id):
+        self.ensureValueComponent(id, name, value)
+        self.openTooltip(id, value)
+      else:
+        let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
+        self.displayTooltip(id, valueDom)
+    )
+    valueSpan.appendChild(document.createTextNode(value.textRepr(compact=true)))
+    parent.appendChild(valueSpan)
+
+  result = document.createElement(cstring"span")
+  result.setAttribute(cstring"class", cstring"ct-omni-value")
+  result.applyStyle(style)
+
+  case flowValueMode:
+  of BeforeValueMode:
+    if beforeValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+      result.appendChild(renderViewOption())
+  of AfterValueMode:
+    if afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+      result.appendChild(renderViewOption())
+  of BeforeAndAfterValueMode:
+    if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+      result.appendChild(renderViewOption())
+
+  if showName:
+    let nameSpan = document.createElement(cstring"span")
+    nameSpan.setAttribute(cstring"class", cstring"ct-omni-name")
+    nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
+      self.jumpToLocalStep(stepCount)
+    )
+    nameSpan.addEventListener(cstring"contextmenu", proc(e: Event) =
+      case flowValueMode:
       of BeforeValueMode:
-        if beforeValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-          renderViewOption()
+        onContextMenu(e, beforeValue)
       of AfterValueMode:
-        if afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-          renderViewOption()
+        onContextMenu(e, afterValue)
       of BeforeAndAfterValueMode:
-        if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-          renderViewOption()
-    if showName:
-      span(
-        class = &"ct-omni-name",
-        onmousedown = proc(e: Event, v: VNode) =
-          self.jumpToLocalStep(stepCount),
-        oncontextmenu = proc(e: Event, v: VNode) =
-          case flowValueMode:
-          of BeforeValueMode:
-            onContextMenu(e, v, beforeValue)
-          of AfterValueMode:
-            onContextMenu(e, v, afterValue)
-          of BeforeAndAfterValueMode:
-            discard
-      ):
-        text $name
+        discard
+    )
+    nameSpan.appendChild(document.createTextNode(name))
+    result.appendChild(nameSpan)
 
-    if flowValueMode == BeforeValueMode:
-      var before = &"flow-{flowMode}-value-before-only"
-      let id = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+  if flowValueMode == BeforeValueMode:
+    let before = &"flow-{flowMode}-value-before-only"
+    let id = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+    # The `flow-parallel-value-box` token is part of the DOM contract:
+    # the GUI smoke-test helper `assertFlowValueVisible` (and any
+    # consumer checking [class*="flow-parallel-value-box"]) needs it
+    # present even on single-assignment / before-only spans. The
+    # AfterValueMode and dual cases below already include it; emit it
+    # here too so the contract is uniform across all flow value
+    # branches.
+    appendValueSpan(result, cstring(id), &"flow-{flowMode}-value-box " & before, beforeValue)
+  elif flowValueMode == AfterValueMode:
+    let after = &"flow-{flowMode}-value-after-only"
+    let id = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+    appendValueSpan(result, cstring(id), &"flow-{flowMode}-value-box " & after, afterValue)
+  else:
+    let before = &"flow-{flowMode}-value-dual"
+    let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+    let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
 
-      span(
-        id = id,
-        style = style,
-        iteration = $(self.flow.steps[stepCount].iteration),
-        # The `flow-parallel-value-box` token is part of the DOM contract:
-        # the GUI smoke-test helper `assertFlowValueVisible` (and any
-        # consumer checking [class*="flow-parallel-value-box"]) needs it
-        # present even on single-assignment / before-only spans. The
-        # AfterValueMode and dual cases below already include it; emit it
-        # here too so the contract is uniform across all flow value
-        # branches.
-        class = &"flow-{flowMode}-value-box " & before,
-        onmousedown = proc(e: Event, v: VNode) =
-          onMouseDown(e, v, beforeValue),
-        oncontextmenu = proc(e: Event, v: VNode) =
-          onContextMenu(e, v, beforeValue),
-        onmouseover = proc =
-          if not self.modalValueComponent.hasKey(id):
-            self.ensureValueComponent(id, name, beforeValue)
-            self.openTooltip(id, beforeValue)
-          else:
-            let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
-            self.displayTooltip(id, valueDom)
-      ):
-        text beforeValue.textRepr(compact=true)
+    appendValueSpan(result, cstring(idBefore), &"flow-{flowMode}-value-box flow-dual-value-before " & before, beforeValue)
 
-    elif flowValueMode == AfterValueMode:
-      var after = &"flow-{flowMode}-value-after-only"
-      let id = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
+    let arrowSpan = document.createElement(cstring"span")
+    arrowSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-dual-arrow"))
+    arrowSpan.appendChild(document.createTextNode(cstring"=>"))
+    result.appendChild(arrowSpan)
 
-      span(
-        id = id,
-        style = style,
-        iteration = $(self.flow.steps[stepCount].iteration),
-        class = &"flow-{flowMode}-value-box " & after,
-        onmousedown = proc(e: Event, v: VNode) =
-          onMouseDown(e, v, afterValue),
-        oncontextmenu = proc(e: Event, v: VNode) =
-          onContextMenu(e, v, afterValue),
-        onmouseover = proc =
-          if not self.modalValueComponent.hasKey(id):
-            self.ensureValueComponent(id, name, afterValue)
-            self.openTooltip(id, afterValue)
-          else:
-            let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
-            self.displayTooltip(id, valueDom)
-      ):
-        text afterValue.textRepr(compact=true)
-
-    else:
-      var before = &"flow-{flowMode}-value-dual"
-      let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-      let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-
-      span(
-        id = idBefore,
-        style = style,
-        iteration = $(self.flow.steps[stepCount].iteration),
-        class = &"flow-{flowMode}-value-box flow-dual-value-before " & before,
-        onmousedown = proc(e: Event, v: VNode) =
-          onMouseDown(e, v, beforeValue),
-        oncontextmenu = proc(e: Event, v: VNode) =
-          onContextMenu(e, v, beforeValue),
-        onmouseover = proc =
-          if not self.modalValueComponent.hasKey(idBefore):
-            self.ensureValueComponent(idBefore, name, beforeValue)
-            self.openTooltip(idBefore, beforeValue)
-          else:
-            let valueDom = vnodeToDom(self.modalValueComponent[idBefore].renderValue(), KaraxInstance())
-            self.displayTooltip(idBefore, valueDom)
-      ):
-        text beforeValue.textRepr(compact=true)
-
-      span(
-        class = &"flow-{flowMode}-value-name flow-dual-arrow",
-      ):
-        text "=>"
-
-      span(
-        id = idAfter,
-        style = style,
-        iteration = $(self.flow.steps[stepCount].iteration),
-        class = &"flow-{flowMode}-value-box " & before,
-        onmousedown = proc(e: Event, v: VNode) =
-          onMouseDown(e, v, afterValue),
-        oncontextmenu = proc(e: Event, v: VNode) =
-          onContextMenu(e, v, afterValue),
-        onmouseover = proc =
-          if not self.modalValueComponent.hasKey(idAfter):
-            self.ensureValueComponent(idAfter, name, afterValue)
-            self.openTooltip(idAfter, afterValue)
-          else:
-            let valueDom = vnodeToDom(self.modalValueComponent[idAfter].renderValue(), KaraxInstance())
-            self.displayTooltip(idAfter, valueDom)
-      ):
-        text afterValue.textRepr(compact=true)
+    appendValueSpan(result, cstring(idAfter), &"flow-{flowMode}-value-box " & before, afterValue)
 
 proc clearSliders(self: FlowComponent) =
   if not self.inExtension:
@@ -2063,7 +2015,7 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
     counter += 1
     var showName = true
 
-    let valueVNode = flowSimpleValue(
+    let valueNode = flowSimpleValue(
       self,
       expression,
       beforeValue,
@@ -2073,7 +2025,7 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
       style,
       i
     )
-    result.appendChild(vnodeToDom(valueVNode, KaraxInstance()))
+    result.appendChild(valueNode)
 
     if counter < valuesCount:
       let emptySpace = document.createElement(cstring"div")
@@ -2146,7 +2098,7 @@ proc makeflowValue(
     false,
     style
   )
-  result.appendChild(vnodeToDom(valueNode, KaraxInstance()))
+  result.appendChild(valueNode)
 
 proc sortVariablesPositions(self: FlowComponent, step: FlowStep, ascending: bool = true) =
   var direction: int  = 1;
@@ -2231,7 +2183,7 @@ proc insertFlowInlineValues(self: FlowComponent, step: FlowStep) =
     for expression, variable in self.flowLines[step.position].sortedVariables:
       if not self.flowLines[step.position].decorationsDoms.hasKey(expression):
         let widget = self.flowDom[step.position]
-        let valueVNode = flowSimpleValue(
+        let valueNode = flowSimpleValue(
           self,
           expression,
           step.beforeValues[expression],
@@ -2241,7 +2193,7 @@ proc insertFlowInlineValues(self: FlowComponent, step: FlowStep) =
           style
         )
 
-        lineDecorationsDoms[index].appendChild(vnodeToDom(valueVNode, KaraxInstance()))
+        lineDecorationsDoms[index].appendChild(valueNode)
         self.flowLines[step.position].decorationsDoms[expression] = lineDecorationsDoms[index]
         index += 1
 
@@ -2335,7 +2287,7 @@ proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
       stepContainer.appendChild(stepNode)
 
     else:
-      let stepVNode = flowSimpleValue(
+      let stepNode = flowSimpleValue(
         self,
         expression,
         step.beforeValues[expression],
@@ -2344,7 +2296,7 @@ proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
         false,
         style
       )
-      stepContainer.appendChild(vnodeToDom(stepVNode, KaraxInstance()))
+      stepContainer.appendChild(stepNode)
     topOffset += 1
 
   return stepContainer
@@ -3980,24 +3932,21 @@ func startWidth*(self: FlowComponent, loopID: int): float =
   var group = self.lineGroups[self.flow.loops[loopID].first]
   return self.startWidth(group, loopID, 0)
 
-proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
+proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
   if stepCount notin self.flow.steps.low .. self.flow.steps.high:
     return
   var step = self.flow.steps[stepCount]
 
   if step.loop == -1:
-    result = buildHtml(
-      tdiv(
-        class = fmt"flow-parallel flow-parallel-value-single",
-        style=self.flowLeftStyle()
-      )
-    ):
-      var style = style()
-      var i = 0
+    result = document.createElement(cstring"div")
+    result.setAttribute(cstring"class", cstring"flow-parallel flow-parallel-value-single")
+    result.applyStyle(self.flowLeftStyle())
 
-      for name in step.exprOrder:
-        flowSimpleValue(self, name, step.beforeValues[name], step.afterValues[name], stepCount, true, style, i)
-        i += 1
+    var style = style()
+    var i = 0
+    for name in step.exprOrder:
+      result.appendChild(flowSimpleValue(self, name, step.beforeValues[name], step.afterValues[name], stepCount, true, style, i))
+      i += 1
 
     return
 
@@ -4041,7 +3990,8 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
   let monacoEditorWidth = cast[kdom.Element](domElement).clientWidth
   let visibleWidth = monacoEditorWidth.float - (self.maxFlowLineWidth + 11).float * 13.0 - 70 # iteration info is 70
 
-  result = buildHtml(tdiv(class=loopClass))
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring(loopClass))
 
   for values in valueLines:
     if self.data.config.flow.realFlowUI == FlowMultiline and not self.multilineZones[position].variables[values[0]]:
@@ -4052,17 +4002,15 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
     if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
       lineClass = "flow-loop-first-line"
 
-    var res = buildHtml(
-      tdiv(
-        class = &"flow-parallel flow-parallel-loop {lineClass}",
-        style=flowLeftStyle(self)
-      )
-    ):
-      if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
-        moveButtonsView(self, visibleWidth)
+    var res = document.createElement(cstring"div")
+    res.setAttribute(cstring"class", cstring(&"flow-parallel flow-parallel-loop {lineClass}"))
+    res.applyStyle(flowLeftStyle(self))
 
-      if self.data.config.flow.realFlowUI != FlowMultiline:
-        iterationInfoView(self, position, values)
+    if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
+      res.appendChild(vnodeToDom(moveButtonsView(self, visibleWidth), KaraxInstance()))
+
+    if self.data.config.flow.realFlowUI != FlowMultiline:
+      res.appendChild(vnodeToDom(iterationInfoView(self, position, values), KaraxInstance()))
 
     for (loopID, loop) in loops:
       var index = 0
@@ -4079,73 +4027,79 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): VNode =
         index += 1
 
       var hasLoop = false
-      var html = buildHtml(
-        tdiv(
-          class = &"flow-parallel-loop-values loop-{loopID.int}",
-          onscroll = proc(ev: Event, node: VNode) =
-            discard
-        )
-      ):
-        tdiv(class="flow-parallel-group"):
-          for i in 0 ..< loop.iteration:
-            if group.isNil:
-              break
-            if index < self.selectedIndex:
-              index += 1
-              continue
+      var html = document.createElement(cstring"div")
+      html.setAttribute(cstring"class", cstring(&"flow-parallel-loop-values loop-{loopID.int}"))
+      html.addEventListener(cstring"scroll", proc(ev: Event) =
+        discard
+      )
 
-            hasLoop = true
-            let width =
-              if self.valueMode == BeforeAndAfterValueMode:
-                group.loopWidths[loopID][i] * group.baseWidth * 2 + 21
-              else:
-                (group.loopWidths[loopID][i] * group.baseWidth)
-            let columnStyle = style(
-              (StyleAttr.width, cstring($width & "px")))
+      let parallelGroup = document.createElement(cstring"div")
+      parallelGroup.setAttribute(cstring"class", cstring"flow-parallel-group")
+      html.appendChild(parallelGroup)
 
-            # change class on width change to make sure it's re-rendered
-            let flowWidthClass = fmt"flow-parallel-values-width-{width}"
+      for i in 0 ..< loop.iteration:
+        if group.isNil:
+          break
+        if index < self.selectedIndex:
+          index += 1
+          continue
 
-            tdiv(
-              id = &"flow-values-{position}-{loopID.int}-{index}",
-              class = &"flow-parallel-values {flowWidthClass}",
-              style=columnStyle
-            ):
-              if not self.flow.positionStepCounts.hasKey(position):
-                continue
+        hasLoop = true
+        let width =
+          if self.valueMode == BeforeAndAfterValueMode:
+            group.loopWidths[loopID][i] * group.baseWidth * 2 + 21
+          else:
+            group.loopWidths[loopID][i] * group.baseWidth
+        let columnStyle = style(
+          (StyleAttr.width, cstring($width & "px")))
 
-              if index >= self.flow.positionStepCounts[position].len:
-                break
+        # change class on width change to make sure it's re-rendered
+        let flowWidthClass = fmt"flow-parallel-values-width-{width}"
 
-              let currentStepCount = self.flow.positionStepCounts[position][index]
+        let valuesColumn = document.createElement(cstring"div")
+        valuesColumn.setAttribute(cstring"id", cstring(&"flow-values-{position}-{loopID.int}-{index}"))
+        valuesColumn.setAttribute(cstring"class", cstring(&"flow-parallel-values {flowWidthClass}"))
+        valuesColumn.applyStyle(columnStyle)
+        parallelGroup.appendChild(valuesColumn)
 
-              if currentStepCount notin self.flow.steps.low .. self.flow.steps.high:
-                break
+        if not self.flow.positionStepCounts.hasKey(position):
+          continue
 
-              let currentStep = self.flow.steps[currentStepCount]
+        if index >= self.flow.positionStepCounts[position].len:
+          break
 
-              index += 1
+        let currentStepCount = self.flow.positionStepCounts[position][index]
 
-              var style = style()
+        if currentStepCount notin self.flow.steps.low .. self.flow.steps.high:
+          break
 
-              for name in values:
-                if not currentStep.beforeValues.hasKey(name) or not currentStep.afterValues.hasKey(name):
-                  span(class = &"flow-parallel-value", style=style):
-                    text "no value"
-                else:
-                  flowSimpleValue(
-                    self,
-                    name,
-                    currentStep.beforeValues[name],
-                    currentStep.afterValues[name],
-                    currentStepCount,
-                    false,
-                    style
-                  )
+        let currentStep = self.flow.steps[currentStepCount]
+
+        index += 1
+
+        var style = style()
+
+        for name in values:
+          if not currentStep.beforeValues.hasKey(name) or not currentStep.afterValues.hasKey(name):
+            let noValue = document.createElement(cstring"span")
+            noValue.setAttribute(cstring"class", cstring"flow-parallel-value")
+            noValue.applyStyle(style)
+            noValue.appendChild(document.createTextNode(cstring"no value"))
+            valuesColumn.appendChild(noValue)
+          else:
+            valuesColumn.appendChild(flowSimpleValue(
+              self,
+              name,
+              currentStep.beforeValues[name],
+              currentStep.afterValues[name],
+              currentStepCount,
+              false,
+              style
+            ))
       if hasLoop:
-        res.add(html)
+        res.appendChild(html)
 
-    result.add(res)
+    result.appendChild(res)
 
 proc resizeFlowSlider*(self: FlowComponent) =
   self.shouldRecalcFlow = false
@@ -4204,7 +4158,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
           if steps.len > 0:
             let step = steps[0]
             discard jsDelete(node.findNodeInElement(".flow-multiline-value"))
-            let valueVNode = flowSimpleValue(
+            let valueNode = flowSimpleValue(
               self,
               expression,
               step.beforeValues[expression],
@@ -4212,7 +4166,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
               step.stepCount,
               false,
               style())
-            node.appendChild(vnodeToDom(valueVNode, KaraxInstance()))
+            node.appendChild(valueNode)
 
     of FlowInline:
       # change inline flow values
@@ -4225,7 +4179,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
           if steps.len > 0:
             let step = steps[0]
             node.innerHTML = ""
-            let valueVNode = flowSimpleValue(
+            let valueNode = flowSimpleValue(
               self,
               expression,
               step.beforeValues[expression],
@@ -4233,7 +4187,7 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
               step.stepCount,
               false,
               style())
-            node.appendChild(vnodeToDom(valueVNode, KaraxInstance()))
+            node.appendChild(valueNode)
 
     else:
       discard
