@@ -301,6 +301,14 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
   if traceMain.isNil or expandedWindow.isNil:
     return
 
+  proc redrawModalValue(value: ValueComponent) =
+    let modalContent = document.getElementById(id)
+    if modalContent.isNil:
+      return
+
+    modalContent.innerHTML = cstring""
+    modalContent.appendChild(value.renderValueDom())
+
   traceMain.innerHTML = ""
   traceMain.style.display = "block"
   expandedWindow.style.display = "block"
@@ -314,19 +322,12 @@ proc showExpandValue*(self: TraceComponent, traceValue: (cstring, Value), line: 
     stateID: -1,
     nameWidth: VALUE_COMPONENT_NAME_WIDTH,
     valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    data: data
+    data: data,
+    customRedraw: redrawModalValue
   )
 
   self.modalValueComponent = value
-
-  kxiMap[id] = setRenderer(
-    (proc: VNode =
-      self.modalValueComponent.renderValue()),
-    id,
-    proc = echo "error when setting up renderer for modal"
-  )
-
-  self.data.redraw()
+  redrawModalValue(value)
 
 method onUpdatedTable*(self: TraceComponent, response: CtUpdatedTableResponseBody) {.async.} =
   if response.tableUpdate.isTrace and response.tableUpdate.data.draw == self.drawId and response.tableUpdate.traceId == self.id:
