@@ -2,7 +2,7 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   karax, karaxdsl, kdom, vstyles,
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, events, event_log,
-      state, calltrace, loading, start, menu,
+      state, calltrace, start, menu,
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, point_list, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
