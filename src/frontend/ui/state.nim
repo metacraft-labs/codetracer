@@ -31,9 +31,7 @@ var isoNimStateMounted: bool = false
 # let TOTAL_VALUE_COMPONENT_WIDTH: float = 95 #%
 
 proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - self.nameWidth
-proc watchView(self: StateComponent): VNode
 proc loadLocals*(self: StateComponent)
-# proc headerView(self: StateComponent): VNode
 
 func watchInputId(self: StateComponent): cstring =
   cstring(fmt"watch-{self.id}")
@@ -404,46 +402,6 @@ proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscri
 when defined(ctInExtension):
   method redrawForExtension*(self: StateComponent) =
     self.bindStateExtensionHost()
-
-# proc headerView(self: StateComponent): VNode =
-#   result = buildHtml(
-#     tdiv(
-#       id = "chevron-container"
-#     )
-#   ):
-#     span(
-#       class = cstring(fmt"chevron chevron-width-{(self.nameWidth * 100).floor.int}"),
-#       style = style(StyleAttr.left, cstring(fmt"{self.nameWidth}%")),
-#       onmousedown = proc(ev:Event, tg:VNode) =
-#       self.chevronClicked = true,
-#       onmouseup = proc =
-#       self.chevronClicked = false
-#     )
-
-proc watchView(self: StateComponent): VNode =
-  result = buildHtml(
-    tdiv(id = "gdb-evaluate")
-  ):
-    form(
-      onsubmit = proc(ev: Event, v: VNode) =
-        ev.stopPropagation()
-        ev.preventDefault()
-        self.submitWatchExpression(),
-      onmousemove = proc(ev: Event, tg:VNode) = ev.stopPropagation(),
-      onclick = proc(ev: Event, tg:VNode) = ev.stopPropagation()
-    ):
-      input(
-        `type`="text",
-        placeholder="Enter a watch expression",
-        id = self.watchInputId(),
-        class="ct-input-panel ct-fill-available",
-        onkeydown = proc(ev: KeyboardEvent, v: VNode) =
-          if ev.keyCode == ENTER_KEY_CODE:
-            ev.stopPropagation()
-            ev.preventDefault()
-            self.submitWatchExpression()
-      )
-
 
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.location = response.location
