@@ -182,6 +182,13 @@ data.redraw = redrawAll
 proc redrawRoot* =
   kxi.redraw()
 
+proc redrawAfterSessionSwitch* =
+  ## Session switching changes Data's active session forwarding while keeping
+  ## each GoldenLayout container alive. Refresh the mounted UI surfaces through
+  ## the renderer owner so session_switch does not call the broad redraw entry
+  ## point directly.
+  redrawAll()
+
 
 # proc getSelectionText: cstring =
 #   var text = cstring""
