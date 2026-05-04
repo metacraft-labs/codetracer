@@ -1,22 +1,14 @@
-import type { Meta, StoryObj } from "@storybook/html";
 import { expect } from "@storybook/test";
 
-declare global {
-  function mountTerminalOutputPanel(
-    container: Element,
-    fixture: string,
-  ): () => void;
-}
+let loadPromise = null;
 
-let loadPromise: Promise<void> | null = null;
-
-function ensureComponentsLoaded(): Promise<void> {
+function ensureComponentsLoaded() {
   if (typeof mountTerminalOutputPanel !== "undefined") {
     return Promise.resolve();
   }
 
   if (!loadPromise) {
-    loadPromise = new Promise<void>((resolve, reject) => {
+    loadPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = "./dist/components.js";
       script.onload = () => resolve();
@@ -33,11 +25,11 @@ function ensureComponentsLoaded(): Promise<void> {
   return loadPromise;
 }
 
-function tick(): Promise<void> {
+function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function injectTerminalStyles(container: HTMLElement): void {
+function injectTerminalStyles(container) {
   const style = document.createElement("style");
   style.textContent = `
     .ct-storybook-terminal {
@@ -98,7 +90,7 @@ function injectTerminalStyles(container: HTMLElement): void {
   container.appendChild(style);
 }
 
-function renderTerminalOutput(fixture: string): HTMLElement {
+function renderTerminalOutput(fixture) {
   const container = document.createElement("div");
   container.className = "ct-storybook-terminal";
   injectTerminalStyles(container);
@@ -108,16 +100,16 @@ function renderTerminalOutput(fixture: string): HTMLElement {
 
   ensureComponentsLoaded().then(() => {
     const dispose = mountTerminalOutputPanel(
-      mountPoint as unknown as Element,
+      mountPoint,
       fixture,
     );
-    (container as any).__dispose = dispose;
+    container.__dispose = dispose;
   });
 
   return container;
 }
 
-const meta: Meta = {
+const meta = {
   title: "CodeTracer/Panels/Terminal Output",
   parameters: {
     layout: "fullscreen",
@@ -126,7 +118,7 @@ const meta: Meta = {
 
 export default meta;
 
-export const Populated: StoryObj = {
+export const Populated = {
   render: () => renderTerminalOutput("populated"),
   play: async ({ canvasElement }) => {
     await ensureComponentsLoaded();
@@ -140,7 +132,7 @@ export const Populated: StoryObj = {
   },
 };
 
-export const Empty: StoryObj = {
+export const Empty = {
   render: () => renderTerminalOutput("empty"),
   play: async ({ canvasElement }) => {
     await ensureComponentsLoaded();
@@ -153,7 +145,7 @@ export const Empty: StoryObj = {
   },
 };
 
-export const Loading: StoryObj = {
+export const Loading = {
   render: () => renderTerminalOutput("loading"),
   play: async ({ canvasElement }) => {
     await ensureComponentsLoaded();
