@@ -74,9 +74,22 @@ method restart*(self: StateComponent) =
 when defined(ctInExtension):
   var stateComponentForExtension* {.exportc.}: StateComponent = makeStateComponent(data, 0, inExtension = true)
 
+  proc bindStateExtensionHost(component: StateComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension state surface has no panel markup of its own; keep the
+    # exported component usable without retaining an empty Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
-    if stateComponentForExtension.kxi.isNil:
-      stateComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if stateComponentForExtension.extensionRendererId.len == 0:
+      stateComponentForExtension.extensionRendererId = id
+      stateComponentForExtension.bindStateExtensionHost()
     result = stateComponentForExtension
 
 # ---------------------------------------------------------------------------
@@ -387,6 +400,10 @@ proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscri
 # StateComponent.render() removed: IsoNim is the primary renderer.
 # Generic callers are expected to use direct IsoNim mount paths. All
 # real rendering is handled by tryMountIsoNimStatePanel().
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: StateComponent) =
+    self.bindStateExtensionHost()
 
 # proc headerView(self: StateComponent): VNode =
 #   result = buildHtml(

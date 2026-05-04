@@ -779,6 +779,7 @@ type
     minNameWidth*: float # %
     maxNameWidth*: float # %
     totalValueWidth*: float # %
+    extensionRendererId*: cstring
 
   CallExpandedValuesComponent* = ref object of Component
     values*:        JsAssoc[cstring, ValueComponent]
