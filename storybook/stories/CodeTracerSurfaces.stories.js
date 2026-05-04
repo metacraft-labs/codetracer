@@ -305,6 +305,17 @@ function injectSurfaceStyles(container) {
       min-height: 100vh;
     }
 
+    .ct-storybook-command-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      pointer-events: auto;
+    }
+
+    .ct-storybook-command-overlay .command-container {
+      min-height: 100vh;
+    }
+
     .ct-storybook-default-layout .code-editor {
       box-sizing: border-box;
       width: 100% !important;
@@ -930,6 +941,7 @@ function syncDefaultLayoutGeometry(root) {
 
 const defaultDebugVariants = {
   populated: { focusedPanel: "rightTopRight" },
+  "debug-controls-header": { focusedPanel: "rightTopRight" },
   "filesystem-active": { focusedPanel: "sidebar" },
   "state-active": { focusedPanel: "rightTopLeft" },
   "calltrace-active": { focusedPanel: "rightTopRight" },
@@ -945,6 +957,55 @@ const defaultDebugVariants = {
   "status-expanded": {
     focusedPanel: "rightTopRight",
     rightTopRightActive: "agent-activity",
+  },
+  "build-open": {
+    focusedPanel: "rightTopRight",
+    rightTopRightActive: "build",
+    rightTopRightExtraTabs: [{ title: "BUILD", name: "build" }],
+  },
+  "trace-log-open": {
+    focusedPanel: "rightTopRight",
+    rightTopRightActive: "trace-log",
+    rightTopRightExtraTabs: [
+      { title: "BUILD", name: "build" },
+      { title: "BUILD ERRORS", name: "errors" },
+      { title: "TRACE LOG", name: "trace-log" },
+    ],
+  },
+  "search-results-populated": {
+    focusedPanel: "rightTopRight",
+    fixedSearchActive: true,
+    rightTopRightActive: "search-results",
+    rightTopRightExtraTabs: [
+      { title: "BUILD", name: "build" },
+      { title: "BUILD ERRORS", name: "errors" },
+      { title: "TRACE LOG", name: "trace-log" },
+      { title: "SEARCH RESULTS", name: "search-results" },
+    ],
+  },
+  "fixed-search-visible": {
+    focusedPanel: "rightTopRight",
+    fixedSearchActive: true,
+    rightTopRightActive: "build",
+    rightTopRightExtraTabs: [
+      { title: "BUILD", name: "build" },
+      { title: "BUILD ERRORS", name: "errors" },
+      { title: "TRACE LOG", name: "trace-log" },
+      { title: "REPL", name: "repl" },
+      { title: "LOW LEVEL CODE", name: "low-level-code" },
+    ],
+  },
+  "command-palette-open": {
+    focusedPanel: "rightTopRight",
+    commandPaletteOpen: true,
+    rightTopRightActive: "build",
+    rightTopRightExtraTabs: [
+      { title: "BUILD", name: "build" },
+      { title: "BUILD ERRORS", name: "errors" },
+      { title: "TRACE LOG", name: "trace-log" },
+      { title: "REPL", name: "repl" },
+      { title: "LOW LEVEL CODE", name: "low-level-code" },
+    ],
   },
 };
 
@@ -987,6 +1048,12 @@ function appendDefaultDebugLayout(shellRoot, variant) {
   rightBottom.className = "lm_item lm_column ct-storybook-layout-right-bottom";
   rightBottom.dataset.layoutBox = "rightBottom";
 
+  const rightTopRightTabs = [
+    { title: "CALLTRACE", name: "calltrace" },
+    { title: "AGENT ACTIVITY", name: "agent-activity" },
+    ...(variant.rightTopRightExtraTabs ?? []),
+  ];
+
   const panels = [
     {
       parent: leftColumn,
@@ -1012,10 +1079,7 @@ function appendDefaultDebugLayout(shellRoot, variant) {
       layoutBox: "rightTopRight",
       fixture: variant.calltraceFixture ?? "reference",
       activeName: variant.rightTopRightActive ?? "calltrace",
-      tabs: [
-        { title: "CALLTRACE", name: "calltrace" },
-        { title: "AGENT ACTIVITY", name: "agent-activity" },
-      ],
+      tabs: rightTopRightTabs,
     },
     {
       parent: rightBottom,
@@ -1215,21 +1279,34 @@ function createKaraxReferenceShell(container, variant) {
 
   const fixedSearch = document.createElement("div");
   fixedSearch.id = "fixed-search";
-  fixedSearch.className = "fixed-search-non-active";
+  fixedSearch.className = variant.fixedSearchActive ? "" : "fixed-search-non-active";
+  const fixedSearchQueryField = document.createElement("div");
+  fixedSearchQueryField.className = "fixed-search-query-field";
   const fixedSearchInput = document.createElement("input");
   fixedSearchInput.id = "fixed-search-query";
   fixedSearchInput.className = "mousetrap";
   fixedSearchInput.type = "text";
   fixedSearchInput.name = "search-query";
-  fixedSearch.appendChild(fixedSearchInput);
-  const fixedSearchInclude = document.createElement("button");
+  fixedSearchQueryField.appendChild(fixedSearchInput);
+  fixedSearch.appendChild(fixedSearchQueryField);
+  const fixedSearchIncludeField = document.createElement("div");
+  fixedSearchIncludeField.className =
+    `fixed-search-include-field ${variant.fixedSearchActive ? "" : "fixed-search-non-active"}`;
+  const fixedSearchInclude = document.createElement("input");
   fixedSearchInclude.id = "fixed-search-include";
-  fixedSearchInclude.type = "button";
-  fixedSearch.appendChild(fixedSearchInclude);
-  const fixedSearchExclude = document.createElement("button");
+  fixedSearchInclude.type = "text";
+  fixedSearchInclude.placeholder = "include";
+  fixedSearchIncludeField.appendChild(fixedSearchInclude);
+  fixedSearch.appendChild(fixedSearchIncludeField);
+  const fixedSearchExcludeField = document.createElement("div");
+  fixedSearchExcludeField.className =
+    `fixed-search-exclude-field ${variant.fixedSearchActive ? "" : "fixed-search-non-active"}`;
+  const fixedSearchExclude = document.createElement("input");
   fixedSearchExclude.id = "fixed-search-exclude";
-  fixedSearchExclude.type = "button";
-  fixedSearch.appendChild(fixedSearchExclude);
+  fixedSearchExclude.type = "text";
+  fixedSearchExclude.placeholder = "exclude";
+  fixedSearchExcludeField.appendChild(fixedSearchExclude);
+  fixedSearch.appendChild(fixedSearchExcludeField);
   root.appendChild(fixedSearch);
 
   const frame = document.createElement("section");
@@ -1369,6 +1446,16 @@ function renderDefaultDebugLayout(container, fixture) {
         }
       } catch (error) {
         console.error(`Failed to mount default layout panel "${name}"`, error);
+      }
+    }
+    if (variant.commandPaletteOpen) {
+      const overlay = document.createElement("div");
+      overlay.className = "ct-storybook-command-overlay";
+      root.appendChild(overlay);
+      try {
+        disposes.push(mountCodeTracerStory(overlay, "panel", "command-palette", "populated"));
+      } catch (error) {
+        console.error("Failed to mount default layout command palette", error);
       }
     }
     container.__dispose = () => {

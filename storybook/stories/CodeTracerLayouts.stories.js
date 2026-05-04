@@ -46,6 +46,42 @@ export const NoirStatusExpanded = story(
   "status-expanded",
   "Noir Status Expanded",
 );
+export const NoirFixedSearchVisible = story(
+  "layout",
+  "default-debug",
+  "fixed-search-visible",
+  "Noir Fixed Search Visible",
+);
+export const NoirSearchResultsPopulated = story(
+  "layout",
+  "default-debug",
+  "search-results-populated",
+  "Noir Search Results Populated",
+);
+export const NoirCommandPaletteOpen = story(
+  "layout",
+  "default-debug",
+  "command-palette-open",
+  "Noir Command Palette Open",
+);
+export const NoirBuildOpen = story(
+  "layout",
+  "default-debug",
+  "build-open",
+  "Noir Build Open",
+);
+export const NoirTraceLogOpen = story(
+  "layout",
+  "default-debug",
+  "trace-log-open",
+  "Noir Trace Log Open",
+);
+export const NoirDebugControlsHeader = story(
+  "layout",
+  "default-debug",
+  "debug-controls-header",
+  "Noir Debug Controls Header",
+);
 export const StandaloneAppShell = story(
   "layout",
   "standalone-app-shell",
