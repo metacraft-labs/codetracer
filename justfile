@@ -20,6 +20,20 @@ build-ui-js output:
     --out:{{output}} \
     js src/frontend/ui_js.nim
 
+build-storybook-components:
+  mkdir -p storybook/dist
+  nim \
+    -d:chronicles_enabled=off \
+    --hints:off \
+    --out:storybook/dist/components.js \
+    js src/frontend/storybook_components.nim
+
+storybook: build-storybook-components
+  cd storybook && npm run storybook
+
+storybook-build: build-storybook-components
+  cd storybook && npm run build-storybook
+
 serve-docs hostname="localhost" port="3000":
   #!/usr/bin/env bash
   cd docs/book/
