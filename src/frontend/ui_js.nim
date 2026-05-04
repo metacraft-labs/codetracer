@@ -4,7 +4,7 @@ import
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
       state, calltrace, start, menu,
       debug, flow, filesystem, vcs, value, repl,
-      build, errors, search_results, welcome_screen, point_list, scratchpad,
+      build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command],
