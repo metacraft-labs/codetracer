@@ -8,6 +8,11 @@
  * since each is a separate native window. These tests verify the data model
  * and IPC infrastructure via `page.evaluate()` on `window.data` and the
  * Electron `ipcRenderer`.
+ *
+ * Migration-status note: the old section 2.3 "template-vs-JS visibility"
+ * residual was reclassified as stale after the targeted spec stayed green at
+ * 4/4. Keep the assertion boundary below on active-session fields, not on Nim
+ * forwarding templates that do not exist as JavaScript object properties.
  */
 
 import { test, expect } from "../../lib/fixtures";
