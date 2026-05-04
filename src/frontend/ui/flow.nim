@@ -2131,24 +2131,29 @@ proc makeflowValue(
     (StyleAttr.height, cstring($(self.lineHeight - 2) & "px"))
   )
 
-  let vNode = buildHtml(
-    tdiv(
-      id = &"flow-multiline-value-{position}-{expression}",
-      class = "flow-multiline-value-container",
-      style = style(
-        (StyleAttr.top, cstring($(topOffset*editorLineHeight) & "px")),
-        (StyleAttr.left, cstring($(nodeLeft) & "px")))
-    )
-  ):
-    if topOffset > 0:
-      tdiv(
-        class = "flow-multiline-value-pointer",
-        style = style(
-          (StyleAttr.top, cstring($((-1)*topOffset*editorLineHeight) & "px")),
-          (StyleAttr.height, cstring($(topOffset*editorLineHeight) & "px"))))
-    flowSimpleValue(self, expression, beforeValue, afterValue, stepCount, false, style)
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(&"flow-multiline-value-{position}-{expression}"))
+  result.setAttribute(cstring"class", cstring"flow-multiline-value-container")
+  result.style.top = cstring($(topOffset*editorLineHeight) & "px")
+  result.style.left = cstring($(nodeLeft) & "px")
 
-  return vnodeToDom(vNode, KaraxInstance())
+  if topOffset > 0:
+    let pointer = document.createElement(cstring"div")
+    pointer.setAttribute(cstring"class", cstring"flow-multiline-value-pointer")
+    pointer.style.top = cstring($((-1)*topOffset*editorLineHeight) & "px")
+    pointer.style.height = cstring($(topOffset*editorLineHeight) & "px")
+    result.appendChild(pointer)
+
+  let valueNode = flowSimpleValue(
+    self,
+    expression,
+    beforeValue,
+    afterValue,
+    stepCount,
+    false,
+    style
+  )
+  result.appendChild(vnodeToDom(valueNode, KaraxInstance()))
 
 proc sortVariablesPositions(self: FlowComponent, step: FlowStep, ascending: bool = true) =
   var direction: int  = 1;
