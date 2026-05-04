@@ -1,7 +1,7 @@
 import
   ../[ types, communication ],
   ../../common/ct_event,
-  ui_imports, colors, events, trace, typetraits, strutils, jsconsole,
+  ui_imports, colors, trace, typetraits, strutils, jsconsole,
   datatable, strutils, base64
 
 # ---------------------------------------------------------------------------
