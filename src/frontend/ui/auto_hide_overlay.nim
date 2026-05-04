@@ -24,7 +24,7 @@ import
   ../lib/[ jslib, logging ],
   auto_hide
 
-# Node type comes from kdom (karax); do not import dom.Node which conflicts.
+# Node type comes from kdom; do not import dom.Node which conflicts.
 
 # ---------------------------------------------------------------------------
 # Overlay header button wiring

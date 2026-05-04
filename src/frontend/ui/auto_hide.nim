@@ -7,7 +7,7 @@
 ##
 ## Key design principle: LIVE DOM ELEMENT PRESERVATION.
 ## When a panel is pinned, its DOM element (containing the Monaco editor,
-## Karax-rendered tree, scroll state, etc.) is captured and kept alive.
+## rendered panel tree, scroll state, etc.) is captured and kept alive.
 ## The overlay shows this same element by reparenting it into the overlay
 ## container — no component recreation, no state loss. On unpin, the live
 ## element is reparented back into the GL layout.
@@ -38,7 +38,7 @@ import
   vstyles, kdom,
   ../types,
   ../lib/[ jslib, logging ]
-# Node type comes from kdom (karax); do not import dom.Node which conflicts.
+# Node type comes from kdom; do not import dom.Node which conflicts.
 
 when defined(js):
   import isonim/web/web_renderer

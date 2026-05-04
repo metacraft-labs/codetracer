@@ -90,12 +90,12 @@ proc tryMountIsoNimEventLogPanel() =
   ## Mount the IsoNim event log view into the GoldenLayout-managed
   ## event log component container. The container is created by
   ## GoldenLayout with the id `eventLogComponent-0`. The IsoNim view
-  ## replaces all Karax content and becomes the primary renderer,
+  ## replaces the previous component content and becomes the primary renderer,
   ## creating the DOM structure that DataTables attaches to.
   ##
   ## After mounting:
   ## - `isoNimEventLogMounted` is set to true
-  ## - The Karax render() returns a minimal stub
+  ## - Generic component rendering stays on the direct mount path
   ## - The kxiMap entry is removed so redrawAll() skips this component
   ## - The EventLogComponent's events() runs to init DataTables on the
   ##   IsoNim-created `<table>` elements

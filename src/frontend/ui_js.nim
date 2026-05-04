@@ -1370,7 +1370,6 @@ proc onTraceLoaded(
     data.viewsApi.installMessage()
 
 proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
-  # domwindow.kxi = JsAssoc[cstring, KaraxInstance]{}
   data.startOptions.loading = false
   data.startOptions.shellUi = true
   data.config = response.config
