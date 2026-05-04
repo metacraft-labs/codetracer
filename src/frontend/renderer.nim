@@ -189,11 +189,15 @@ proc redrawAfterSessionSwitch* =
   ## point directly.
   redrawAll()
 
+proc removeLegacyRendererInstanceByKey*(key: cstring) =
+  ## Drop a remaining Karax-backed renderer instance by its renderer key.
+  ## Callers own component lifetime; renderer/utils still own kxiMap.
+  if kxiMap.hasKey(key):
+    discard jsDelete(kxiMap[key])
+
 proc removeLegacyRendererInstance*(label: cstring) =
   ## Drop a remaining Karax-backed renderer instance by its GoldenLayout label.
-  ## Layout owns component lifetime, but renderer/utils still own kxiMap.
-  if kxiMap.hasKey(label):
-    discard jsDelete(kxiMap[label])
+  removeLegacyRendererInstanceByKey(label)
 
 proc redrawLegacyRendererInstance*(label: cstring): bool =
   ## Redraw a remaining Karax-backed renderer instance by label when present.

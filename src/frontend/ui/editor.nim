@@ -32,7 +32,7 @@ var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
 
 # Track which editor instances have been IsoNim-mounted by their id.
-# Once an editor's container is created by IsoNim, the kxiMap entry is removed.
+# Once an editor's container is created by IsoNim, its legacy renderer entry is removed.
 var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 
 # ---------------------------------------------------------------------------
@@ -296,8 +296,8 @@ proc closeEditorTab*(data: Data, id: cstring) =
   let editorId = editor.id
   discard jsDelete(data.ui.editors[id])
 
-  # remove editor karax instance (may already be absent if IsoNim-mounted)
-  discard jsDelete(kxiMap[id])
+  # remove editor renderer instance (may already be absent if IsoNim-mounted)
+  renderer.removeLegacyRendererInstanceByKey(id)
 
   # Clean up the IsoNim mount tracking for this editor.
   if isoNimEditorMountedIds.hasKey(editorId):
@@ -1979,12 +1979,12 @@ proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
   if tabInfo.monacoEditor.isNil:
     return
 
-  # Remove the Karax instance so redrawAll() skips this component.
-  # Editor tabs use the file path (self.name) as the kxiMap key.
-  # This prevents Karax VDOM diffing from corrupting the IsoNim/Monaco
+  # Remove the legacy renderer instance so redrawAll() skips this component.
+  # Editor tabs use the file path (self.name) as the renderer key.
+  # This prevents legacy VDOM diffing from corrupting the IsoNim/Monaco
   # managed DOM on subsequent redraw cycles.
   if not self.name.isNil:
-    kxiMap.del(self.name)
+    renderer.removeLegacyRendererInstanceByKey(self.name)
 
   isoNimEditorMountedIds[editorId] = true
 
@@ -2351,7 +2351,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     discard self.flow.onCompleteMove(response)
 
   # For IsoNim-mounted editors, run the after-redraw work directly
-  # since the kxiMap entry has been removed and redrawAll() will not
+  # since the legacy renderer entry has been removed and redrawAll() will not
   # reach this component's afterRedraws callbacks.
   if isoNimEditorMountedIds.hasKey(self.id):
     self.editorAfterRedraw()
