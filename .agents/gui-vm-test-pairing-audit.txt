@@ -283,7 +283,7 @@ progress, live workspace-view switching, and Electron layout rendering.
 
 | Spec | Candidate VM test | Status | Notes |
 |---|---|---|---|
-| `deepreview-gui.spec.ts` | `deepreview/deepreview_vm_test.nim` | PARTIAL (smoke, 1.108) | offline review header/context metadata, file rows, selected file, unified file sections and hunk-selection toolbar state covered via `DeepReviewVM`; Monaco decorations, expand-context buttons and full GUI fixture loading remain GUI/integration-only |
+| `deepreview-gui.spec.ts` | `deepreview/deepreview_vm_test.nim` | PARTIAL (smoke, 1.108; narrowed, 1.209) | offline review header/context metadata, file rows, selected file, unified file sections, hunk-selection toolbar state, flattened calltrace rows, and execution/iteration state covered via `DeepReviewVM`; Monaco decorations, expand-context buttons and full GUI fixture loading remain GUI/integration-only |
 
 #### `streaming/` — 1 spec, 5 tests
 
@@ -445,9 +445,11 @@ mirror its own state into the VM in a follow-up.
 **Specs:** `deepreview-gui` (21 tests), `agentic-deepreview` (40 tests).
 
 **Status:** standalone `deepreview-gui` is PARTIAL as of 1.108 via
-`deepreview/deepreview_vm_test.nim`, which covers the offline review
-header/context metadata, file rows, selected file, unified diff sections,
-mode switch, and hunk-selection toolbar state through `DeepReviewVM`.
+`deepreview/deepreview_vm_test.nim`, narrowed in 1.209 to also cover
+flattened calltrace rows plus execution/iteration state.  It now covers
+the offline review header/context metadata, file rows, selected file,
+unified diff sections, mode switch, hunk-selection toolbar state,
+calltrace rows, and slider state through `DeepReviewVM`.
 `agentic-deepreview` is PARTIAL as of 1.116 via fixture-backed
 `AgentActivityDeepReviewVM` and `AgentWorkspaceVM` smokes covering
 notification summary/feed, file coverage rows, workspace metadata,

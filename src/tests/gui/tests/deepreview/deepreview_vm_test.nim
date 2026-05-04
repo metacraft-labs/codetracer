@@ -65,6 +65,14 @@ proc makeUnifiedFile(fileIndex: int; path, status: string;
     ],
   )
 
+proc makeCallNode(name: string; executionCount, depth: int):
+    DeepReviewCallNodeEntry =
+  DeepReviewCallNodeEntry(
+    name: name,
+    executionCount: executionCount,
+    depth: depth,
+  )
+
 suite "DeepReviewVM initial state":
 
   test "defaults reflect an unloaded panel":
@@ -222,6 +230,52 @@ suite "DeepReviewVM smoke pairing":
       check vm.unifiedFiles.val[2].diffStatus == "D"
       check vm.selectedHunks.val == @[(1, 0)]
       check vm.hunkToolbarVisible.val
+
+      dispose()
+
+  test "calltrace execution and iteration state stay in VM state":
+    ## Bounded companion for the DeepReview calltrace scenarios:
+    ## flattened call nodes, execution slider state, selected function, and
+    ## loop-iteration state are owned by DeepReviewVM. Monaco decorations and
+    ## expand-context controls remain outside this VM-level slice.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDeepReviewVM(store)
+
+      vm.setHasData(true)
+      vm.setFiles(@[
+        makeFile("src/review_target.rs", status = "M", coverage = "12/18",
+                 added = 5, removed = 2),
+      ])
+      vm.setSelectedFileIndex(0)
+      vm.setExecutionState(2, 4, "parse_input")
+      vm.setIterationState(3, 6)
+      vm.setCallNodes(@[
+        makeCallNode("main", executionCount = 1, depth = 0),
+        makeCallNode("parse_input", executionCount = 4, depth = 1),
+        makeCallNode("validate_token", executionCount = 2, depth = 2),
+      ])
+
+      check vm.hasData.val
+      check vm.selectedFile.val.path == "src/review_target.rs"
+      check vm.flowCount.val == 4
+      check vm.selectedExecutionIndex.val == 2
+      check vm.currentFunctionKey.val == "parse_input"
+      check vm.maxIterations.val == 6
+      check vm.selectedIteration.val == 3
+      check vm.callNodes.val.len == 3
+      check vm.callNodes.val[0].name == "main"
+      check vm.callNodes.val[0].depth == 0
+      check vm.callNodes.val[1].name == "parse_input"
+      check vm.callNodes.val[1].executionCount == 4
+      check vm.callNodes.val[2].depth == 2
+
+      vm.setExecutionState(9, 4, "validate_token")
+      vm.setIterationState(99, 6)
+
+      check vm.selectedExecutionIndex.val == 3
+      check vm.currentFunctionKey.val == "validate_token"
+      check vm.selectedIteration.val == 5
 
       dispose()
 
