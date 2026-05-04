@@ -35,11 +35,9 @@
 
 import
   std / [ jsffi, jsconsole, strformat, sequtils ],
-  karax, karaxdsl, vstyles, kdom,
+  vstyles, kdom,
   ../types,
   ../lib/[ jslib, logging ]
-
-import vdom except Event
 # Node type comes from kdom (karax); do not import dom.Node which conflicts.
 
 when defined(js):
@@ -630,10 +628,6 @@ proc bottomAutoHideTabsModel*(): seq[AutoHidePanel] =
     return @[]
   autoHideState.panelsForEdge(AutoHideEdge.Bottom)
 
-proc renderBottomAutoHideTabsHost*(): VNode =
-  ## Karax placeholder host for the direct IsoNim bottom-tab renderer.
-  buildHtml(tdiv(id = "auto-hide-bottom-tabs", class = "auto-hide-bottom-tabs"))
-
 when defined(js):
   proc requestBottomAutoHideTabsRender*(containerId: cstring) =
     ## Refresh bottom auto-hide tabs through IsoNim direct DOM.
@@ -668,10 +662,6 @@ proc collapsedIconZoneModel*(): seq[AutoHidePanel] =
     if not isEdgeCollapsed(panel.edge):
       continue
     result.add(panel)
-
-proc renderCollapsedIconZoneHost*(): VNode =
-  ## Karax placeholder host for the direct IsoNim collapsed icon renderer.
-  buildHtml(tdiv(id = "auto-hide-collapsed-icon-zone", class = "collapsed-icon-zone"))
 
 when defined(js):
   proc requestCollapsedIconZoneRender*(containerId: cstring) =
