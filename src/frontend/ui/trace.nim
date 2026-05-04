@@ -1162,9 +1162,27 @@ proc setEditorResizeObserver(self: TraceComponent) =
 
   self.resizeObserver = resizeObserver
 
-proc traceBase(self: TraceComponent): VNode =
-  buildHtml(tdiv(id = cstring(fmt"trace-{self.id}"), class="trace")):
-    tdiv(id = cstring(fmt"trace-editor-{self.id}"))
+proc legacyTraceViewZoneBaseDom(self: TraceComponent): Node =
+  ## Direct DOM shell for the Monaco trace view zone.
+  ##
+  ## The full tracepoint editor/results subtree below this shell is still
+  ## Karax-owned; keep that materialization isolated in
+  ## `appendLegacyTraceViewZoneKaraxContent` until tracepoints get a direct
+  ## DOM/IsoNim renderer.
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(fmt"trace-{self.id}"))
+  result.setAttribute(cstring"class", cstring"trace")
+
+  let editorHost = document.createElement(cstring"div")
+  editorHost.setAttribute(cstring"id", cstring(fmt"trace-editor-{self.id}"))
+  result.appendChild(editorHost)
+
+proc appendLegacyTraceViewZoneKaraxContent(self: TraceComponent) =
+  ## Legacy boundary: `renderTrace()` still returns the Karax tracepoint
+  ## VNode tree.  Monaco view zones need a concrete DOM node, so this proc is
+  ## the only live trace view-zone materialization bridge until the tracepoint
+  ## subtree itself is migrated.
+  self.viewZone.domNode.appendChild(vnodeToDom(self.renderTrace(), KaraxInstance()))
 
 proc renderTrace*(self: TraceComponent): VNode =
   ## Render the inline tracepoint editor/results Karax sub-tree.
@@ -1299,7 +1317,7 @@ proc togglePoint*(trace: TraceComponent) =
   if trace.viewZone.isNil:
     trace.syncTraceResultsHeight()
     # create trace base dom Node
-    let traceNode = vnodeToDom(traceBase(trace), kxi)
+    let traceNode = trace.legacyTraceViewZoneBaseDom()
 
     # config new view zone in monaco editor
     trace.viewZone = js{
@@ -1314,9 +1332,6 @@ proc togglePoint*(trace: TraceComponent) =
 
     # # add tracepoint to points register
     # data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
-
-    # render current trace component
-    # trace.viewZone.domNode.appendChild(vnodeToDom(trace.renderTrace(), KaraxInstance()))
 
     # sаve references to component dom elements
 
@@ -1441,7 +1456,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   if trace.viewZone.isNil:
     trace.syncTraceResultsHeight()
     # create trace base dom Node
-    let traceNode = vnodeToDom(traceBase(trace), kxi)
+    let traceNode = trace.legacyTraceViewZoneBaseDom()
 
     # config new view zone in monaco editor
     trace.viewZone = js{
@@ -1458,7 +1473,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
     data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
 
     # render current trace component
-    trace.viewZone.domNode.appendChild(vnodeToDom(trace.renderTrace(), KaraxInstance()))
+    trace.appendLegacyTraceViewZoneKaraxContent()
 
     # sаve references to component dom elements
 
