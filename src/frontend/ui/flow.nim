@@ -3179,43 +3179,41 @@ proc flowLoopValue*(
       # TODO: FOR NOW HARDCODE THE PARALLEL
       span(class = &"flow-parallel-loop-iteration-end"): text fmt"from {allIterations}"
 
-proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): VNode =
+proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
   let iteration = step.iteration
   let currentStep = self.flow.steps[step.stepCount]
   let previousIterationStepCount = self.flow.steps[self.flow.loopIterationSteps[currentStep.loop][max(iteration-1, 0)].table[step.position]]
 
-  result = buildHtml(
-    button(
-      class = "ct-button-image-sm-secondary ct-button-no-border",
-      id = "backward-loop",
-      style = style,
-      disabled = toDisabled(iteration-1 < 0),
-      onclick = proc =
-        self.activeStep = previousIterationStepCount
-        self.jumpToLocalStep(self.activeStep.stepCount + 1)
-        self.redrawFlow()
-        self.redraw()
-    )
+  result = document.createElement(cstring"button")
+  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border")
+  result.setAttribute(cstring"id", cstring"backward-loop")
+  result.applyStyle(style)
+  if iteration - 1 < 0:
+    result.setAttribute(cstring"disabled", cstring"disabled")
+  result.addEventListener(cstring"click", proc(e: Event) =
+    self.activeStep = previousIterationStepCount
+    self.jumpToLocalStep(self.activeStep.stepCount + 1)
+    self.redrawFlow()
+    self.redraw()
   )
 
-proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): VNode =
+proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
   let iteration = step.iteration
   let currentStep = self.flow.steps[step.stepCount]
   let maxIterations = self.flow.loopIterationSteps[currentStep.loop].len - 1
   let nextIterationStepCount = self.flow.steps[self.flow.loopIterationSteps[currentStep.loop][min(iteration+1, maxIterations)].table[step.position]]
 
-  result = buildHtml(
-    button(
-      class = "ct-button-image-sm-secondary ct-button-no-border",
-      id = "forward-loop",
-      style = style,
-      disabled = toDisabled(maxIterations == iteration),
-      onclick = proc =
-        self.activeStep = nextIterationStepCount
-        self.jumpToLocalStep(self.activeStep.stepCount + 1)
-        self.redrawFlow()
-        self.redraw()
-    )
+  result = document.createElement(cstring"button")
+  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border")
+  result.setAttribute(cstring"id", cstring"forward-loop")
+  result.applyStyle(style)
+  if maxIterations == iteration:
+    result.setAttribute(cstring"disabled", cstring"disabled")
+  result.addEventListener(cstring"click", proc(e: Event) =
+    self.activeStep = nextIterationStepCount
+    self.jumpToLocalStep(self.activeStep.stepCount + 1)
+    self.redrawFlow()
+    self.redraw()
   )
 
 proc makeLoopLine(
@@ -3251,9 +3249,9 @@ proc makeLoopLine(
   result.setAttribute(cstring"class", cstring"flow-multiline-value-container ct-flex ct-p-0")
 
   if step.rrTicks != -1:
-    result.appendChild(vnodeToDom(backLoopControlButton(self, step, bStyle), KaraxInstance()))
+    result.appendChild(backLoopControlButton(self, step, bStyle))
     result.appendChild(vnodeToDom(flowLoopValue(self, step, allIterations, style), KaraxInstance()))
-    result.appendChild(vnodeToDom(nextLoopControlButton(self, step, bStyle), KaraxInstance()))
+    result.appendChild(nextLoopControlButton(self, step, bStyle))
 
   # self.redraw()
 
