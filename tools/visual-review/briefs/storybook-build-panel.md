@@ -9,7 +9,7 @@ Shared project brief: `../project-visual-brief.md`
 
 ## Screen
 
-- Route: Storybook iframe story `codetracer-surfaces--panel-build`
+- Route: Storybook iframe story `codetracer-panels--build`
 - Capture id: `storybook-build-panel`
 - Viewport: laptop, 1440x900
 

@@ -19,15 +19,15 @@ const { chromium } = requireFromStorybook("playwright");
 
 const views = {
   "terminal-output": {
-    storyId: "codetracer-surfaces--panel-terminal-output",
+    storyId: "codetracer-panels--terminal-output",
     brief: "tools/visual-review/briefs/storybook-terminal-output.md",
   },
   build: {
-    storyId: "codetracer-surfaces--panel-build",
+    storyId: "codetracer-panels--build",
     brief: "tools/visual-review/briefs/storybook-build-panel.md",
   },
   "default-layout": {
-    storyId: "codetracer-surfaces--layout-default-debug",
+    storyId: "codetracer-layouts--default-debug",
     brief: "tools/visual-review/briefs/storybook-default-layout.md",
   },
 };

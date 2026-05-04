@@ -537,8 +537,9 @@ function renderSurface(kind, name, fixture = "populated") {
   return container;
 }
 
-function story(kind, name, fixture = "populated") {
+export function story(kind, name, fixture = "populated", storyName = null) {
   return {
+    name: storyName ?? titleize(name),
     render: () => renderSurface(kind, name, fixture),
     play: async ({ canvasElement }) => {
       await ensureComponentsLoaded();
@@ -551,7 +552,8 @@ function story(kind, name, fixture = "populated") {
 }
 
 const meta = {
-  title: "CodeTracer/Surfaces",
+  title: "CodeTracer/Panels",
+  includeStories: /^[A-Z]/,
   parameters: {
     layout: "fullscreen",
   },
@@ -559,69 +561,38 @@ const meta = {
 
 export default meta;
 
-export const LayoutStandaloneAppShell = story("layout", "standalone-app-shell");
-export const LayoutDefaultDebug = story("layout", "default-debug");
-export const LayoutWelcome = story("panel", "welcome-screen");
-
-export const PanelAgentActivity = story("panel", "agent-activity");
-export const PanelAgentActivityDeepReview = story("panel", "agent-activity-deepreview");
-export const PanelAgentWorkspace = story("panel", "agent-workspace");
-export const PanelBuild = story("panel", "build");
-export const PanelCalltrace = story("panel", "calltrace");
-export const PanelCalltraceEditor = story("panel", "calltrace-editor");
-export const PanelCommandPalette = story("panel", "command-palette");
-export const PanelDebugControls = story("panel", "debug-controls");
-export const PanelDeepReview = story("panel", "deepreview");
-export const PanelEditor = story("panel", "editor");
-export const PanelErrors = story("panel", "errors");
-export const PanelEventLog = story("panel", "event-log");
-export const PanelFilesystem = story("panel", "filesystem");
-export const PanelFlow = story("panel", "flow");
-export const PanelLowLevelCode = story("panel", "low-level-code");
-export const PanelNoSource = story("panel", "no-source");
-export const PanelPointList = story("panel", "point-list");
-export const PanelRepl = story("panel", "repl");
-export const PanelRequestPanel = story("panel", "request-panel");
-export const PanelScratchpad = story("panel", "scratchpad");
-export const PanelSearch = story("panel", "search");
-export const PanelSearchResults = story("panel", "search-results");
-export const PanelShell = story("panel", "shell");
-export const PanelState = story("panel", "state");
-export const PanelStepList = story("panel", "step-list");
-export const PanelTerminalOutput = story("panel", "terminal-output");
-export const PanelTimeline = story("panel", "timeline");
-export const PanelTraceLog = story("panel", "trace-log");
-export const PanelVcs = story("panel", "vcs");
-export const PanelWelcomeScreen = story("panel", "welcome-screen");
-
-export const FixtureBuildRunning = story("panel", "build", "loading");
-export const FixtureErrorsEmpty = story("panel", "errors", "empty");
-export const FixtureTerminalEmpty = story("panel", "terminal-output", "empty");
-export const FixtureTerminalLoading = story("panel", "terminal-output", "loading");
-export const FixtureWelcomeRecord = story("panel", "welcome-screen", "record");
-export const FixtureWelcomeOnlineTrace = story("panel", "welcome-screen", "online");
-
-export const ViewMenuShell = story("view", "menu-shell");
-export const ViewStatusShell = story("view", "status-shell");
-export const ViewSessionTabs = story("view", "session-tabs");
-export const ViewDebugShell = story("view", "debug-shell");
-export const ViewAutoHideBottomTabs = story("view", "auto-hide-bottom-tabs");
-export const ViewAutoHideCollapsedIcons = story("view", "auto-hide-collapsed-icons");
-export const ViewAutoHideOverlayTabs = story("view", "auto-hide-overlay-tabs");
-export const ViewAutoHideSideStrip = story("view", "auto-hide-side-strip");
-export const ViewAutoHideSideStripCollapsed = story(
-  "view",
-  "auto-hide-side-strip",
-  "collapsed",
+export const AgentActivity = story("panel", "agent-activity", "populated", "Agent Activity");
+export const AgentActivityDeepReview = story(
+  "panel",
+  "agent-activity-deepreview",
+  "populated",
+  "Agent Activity Deep Review",
 );
-
-export const ComponentMenuShell = story("component", "menu-shell");
-export const ComponentStatusShell = story("component", "status-shell");
-export const ComponentSessionTabs = story("component", "session-tabs");
-export const ComponentAutoHideBottomTabs = story("component", "auto-hide-bottom-tabs");
-export const ComponentAutoHideCollapsedIcons = story(
-  "component",
-  "auto-hide-collapsed-icons",
-);
-export const ComponentAutoHideOverlayTabs = story("component", "auto-hide-overlay-tabs");
-export const ComponentAutoHideSideStrip = story("component", "auto-hide-side-strip");
+export const AgentWorkspace = story("panel", "agent-workspace", "populated", "Agent Workspace");
+export const Build = story("panel", "build", "populated", "Build");
+export const Calltrace = story("panel", "calltrace", "populated", "Calltrace");
+export const CalltraceEditor = story("panel", "calltrace-editor", "populated", "Calltrace Editor");
+export const CommandPalette = story("panel", "command-palette", "populated", "Command Palette");
+export const DebugControls = story("panel", "debug-controls", "populated", "Debug Controls");
+export const DeepReview = story("panel", "deepreview", "populated", "Deep Review");
+export const Editor = story("panel", "editor", "populated", "Editor");
+export const Errors = story("panel", "errors", "populated", "Errors");
+export const EventLog = story("panel", "event-log", "populated", "Event Log");
+export const Filesystem = story("panel", "filesystem", "populated", "Filesystem");
+export const Flow = story("panel", "flow", "populated", "Flow");
+export const LowLevelCode = story("panel", "low-level-code", "populated", "Low Level Code");
+export const NoSource = story("panel", "no-source", "populated", "No Source");
+export const PointList = story("panel", "point-list", "populated", "Point List");
+export const Repl = story("panel", "repl", "populated", "Repl");
+export const RequestPanel = story("panel", "request-panel", "populated", "Request Panel");
+export const Scratchpad = story("panel", "scratchpad", "populated", "Scratchpad");
+export const Search = story("panel", "search", "populated", "Search");
+export const SearchResults = story("panel", "search-results", "populated", "Search Results");
+export const Shell = story("panel", "shell", "populated", "Shell");
+export const State = story("panel", "state", "populated", "State");
+export const StepList = story("panel", "step-list", "populated", "Step List");
+export const TerminalOutput = story("panel", "terminal-output", "populated", "Terminal Output");
+export const Timeline = story("panel", "timeline", "populated", "Timeline");
+export const TraceLog = story("panel", "trace-log", "populated", "Trace Log");
+export const Vcs = story("panel", "vcs", "populated", "VCS");
+export const WelcomeScreen = story("panel", "welcome-screen", "populated", "Welcome Screen");

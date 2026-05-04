@@ -224,7 +224,7 @@ function renderTerminalOutput(fixture) {
 }
 
 const meta = {
-  title: "CodeTracer/Panels/Terminal Output",
+  title: "CodeTracer/Compatibility/Terminal Output",
   parameters: {
     layout: "fullscreen",
   },

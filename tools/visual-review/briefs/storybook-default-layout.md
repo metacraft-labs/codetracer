@@ -9,7 +9,7 @@ Shared project brief: `../project-visual-brief.md`
 
 ## Screen
 
-- Route: Storybook iframe story `codetracer-surfaces--layout-default-debug`
+- Route: Storybook iframe story `codetracer-layouts--default-debug`
 - Capture id: `storybook-default-layout`
 - Viewport: laptop, 1440x900
 
