@@ -9,11 +9,11 @@
 ##
 ## Structure:
 ##   div.shell-component
+##     div.shell-input-row
+##       span.shell-prompt               "$ "
+##       input.shell-input               value reactive
 ##     div.shell-output
 ##       span.shell-scroll-indicator     text + display reactive
-##     div.shell-input-row
-##       span.shell-prompt               "> "
-##       input.shell-input               value reactive
 ##     span.shell-history-indicator      text + display reactive
 
 import isonim/core/[signals, computation]
@@ -58,16 +58,16 @@ proc historyIndicatorVisible(vm: ShellVM): bool =
 template renderShellPanelImpl(r, vm, rootClass: untyped): untyped =
   ui(r):
     tdiv(class = rootClass):
+      tdiv(class = "shell-input-row"):
+        span(class = "shell-prompt"):
+          text "$ "
+        input(class = "shell-input",
+              placeholder = "Enter command...",
+              value = vm.inputBuffer.val)
       tdiv(class = "shell-output"):
         span(class = "shell-scroll-indicator",
              display = displayIf(scrollIndicatorVisible(vm))):
           text scrollIndicatorText(vm)
-      tdiv(class = "shell-input-row"):
-        span(class = "shell-prompt"):
-          text "> "
-        input(class = "shell-input",
-              placeholder = "Enter command...",
-              value = vm.inputBuffer.val)
       span(class = "shell-history-indicator",
            display = displayIf(historyIndicatorVisible(vm))):
         text historyIndicatorText(vm)

@@ -431,9 +431,9 @@ proc storyLines(): seq[TerminalLine] =
 
 proc storyProblems(): seq[BuildProblemLine] =
   @[
-    BuildProblemLine(severity: blsError, path: "src/combat.nr", line: 42,
-                     col: 7, message: "expected field `shield` to be u32"),
-    BuildProblemLine(severity: blsWarning, path: "src/main.nr", line: 18,
+    BuildProblemLine(severity: blsError, path: "src/main.nr", line: 13,
+                     col: 10, message: "expected field `shield` to be u32"),
+    BuildProblemLine(severity: blsWarning, path: "src/shield.nr", line: 61,
                      col: 3, message: "unused variable `debug_mode`"),
   ]
 
@@ -479,35 +479,35 @@ proc storyFilesystem(): FilesystemEntryNode =
 proc applyBuild(vm: BuildVM; fixture: string) =
   vm.setCommand("nargo test")
   vm.setRunning(fixture == "loading")
-  vm.appendLine(BuildOutputLine(htmlText: "$ nargo test --workspace noir-space-ship",
+  vm.appendLine(BuildOutputLine(htmlText: "$ nargo test --workspace noir_space_ship",
                                 isStdout: true, severity: blsInfo))
-  vm.appendLine(BuildOutputLine(htmlText: "Compiling noir-space-ship v0.2.0",
+  vm.appendLine(BuildOutputLine(htmlText: "Compiling noir_space_ship v0.2.0",
                                 isStdout: true, severity: blsInfo))
   vm.appendLine(BuildOutputLine(htmlText: "Checking src/main.nr",
                                 isStdout: true, severity: blsInfo))
   vm.appendLine(BuildOutputLine(
-    htmlText: "<span class=\"ansi-bright-red-fg\">src/combat.nr:42:7 error:</span> expected u32",
+    htmlText: "<span class=\"ansi-bright-red-fg\">src/main.nr:13:10 error:</span> expected u32",
     isStdout: false,
     severity: blsError,
-    locationPath: "src/combat.nr",
-    locationLine: 42,
+    locationPath: "src/main.nr",
+    locationLine: 13,
   ))
   vm.appendLine(BuildOutputLine(
-    htmlText: "  let remaining_shield = shield - damage",
-    isStdout: false,
-    severity: blsError,
-  ))
-  vm.appendLine(BuildOutputLine(
-    htmlText: "      ^^^^^^^^^^^^^^^ expected field `shield` to be u32",
+    htmlText: "  let did_survive_positive = shield.iterate_asteroids(...)",
     isStdout: false,
     severity: blsError,
   ))
   vm.appendLine(BuildOutputLine(
-    htmlText: "<span class=\"ansi-bright-yellow-fg\">src/main.nr:18:3 warning:</span> unused variable `debug_mode`",
+    htmlText: "         ^^^^^^^^^^^^^ expected field `shield` to be u32",
+    isStdout: false,
+    severity: blsError,
+  ))
+  vm.appendLine(BuildOutputLine(
+    htmlText: "<span class=\"ansi-bright-yellow-fg\">src/shield.nr:61:3 warning:</span> unused variable `debug_mode`",
     isStdout: false,
     severity: blsWarning,
-    locationPath: "src/main.nr",
-    locationLine: 18,
+    locationPath: "src/shield.nr",
+    locationLine: 61,
   ))
   for problem in storyProblems():
     vm.appendProblem(problem)
@@ -537,10 +537,10 @@ proc applyScratchpad(vm: ScratchpadVM) =
 proc applySearchResults(vm: SearchResultsVM) =
   vm.setQuery("shield")
   vm.setResults(@[
-    SearchResultLine(path: "src/combat.nr", line: 42,
-                     text: "let remaining_shield = shield - damage"),
-    SearchResultLine(path: "src/main.nr", line: 18,
-                     text: "assert(final_state.shield > 0)"),
+    SearchResultLine(path: "src/main.nr", line: 13,
+                     text: "let did_survive_positive = shield.iterate_asteroids(...)"),
+    SearchResultLine(path: "src/shield.nr", line: 61,
+                     text: "fn calculate_remaining_shield_pct(initial_shield, remaining_shield)"),
   ])
   vm.setActive(true)
 
@@ -689,13 +689,13 @@ proc applyFilesystem(vm: FilesystemVM) =
 proc applyTraceLog(vm: TraceLogVM) =
   vm.setEntries(@[
     TraceLogEntry(rrTicks: 120, minRRTicks: 0, maxRRTicks: 400,
-                  path: "src/main.nr", line: 18, functionName: "main",
-                  localsText: "shield=100 damage=29", eventId: 10,
+                  path: "src/main.nr", line: 13, functionName: "main",
+                  localsText: "shield=10000 damage=100", eventId: 10,
                   tracepointId: 1),
     TraceLogEntry(rrTicks: 180, minRRTicks: 0, maxRRTicks: 400,
-                  path: "src/combat.nr", line: 42,
+                  path: "src/shield.nr", line: 58,
                   functionName: "calculate_damage",
-                  localsText: "remaining_shield=71", eventId: 12,
+                  localsText: "remaining_shield=9900", eventId: 12,
                   tracepointId: 1),
   ])
   vm.selectEntry(1)
@@ -703,27 +703,36 @@ proc applyTraceLog(vm: TraceLogVM) =
 proc applyStepList(vm: StepListVM) =
   vm.setLineSteps(@[
     StepLine(kind: slkLine, delta: -1,
-             location: StepLineLocation(path: "src/combat.nr", line: 41,
-                                        functionName: "calculate_damage",
-                                        rrTicks: 140),
-             sourceLine: "let damage = incoming_damage / armor",
-             values: @[StepLineFlowValue(expression: "damage", value: "29")]),
+             location: StepLineLocation(path: "src/main.nr", line: 12,
+                                        functionName: "main",
+                                        rrTicks: 120),
+             sourceLine: "fn main(initial_shield: Field, shield_regen_percentage: Field) {",
+             values: @[StepLineFlowValue(expression: "initial_shield",
+                                         value: "10000")]),
     StepLine(kind: slkLine, delta: 0,
-             location: StepLineLocation(path: "src/combat.nr", line: 42,
-                                        functionName: "calculate_damage",
+             location: StepLineLocation(path: "src/main.nr", line: 13,
+                                        functionName: "main",
                                         rrTicks: 180),
-             sourceLine: "let remaining_shield = shield - damage",
-             values: @[StepLineFlowValue(expression: "remaining_shield",
-                                         value: "71")]),
-    StepLine(kind: slkReturn, delta: 1,
-             location: StepLineLocation(path: "src/combat.nr", line: 43,
+             sourceLine: "let did_survive_positive = shield.iterate_asteroids(...)",
+             values: @[StepLineFlowValue(expression: "did_survive_positive",
+                                         value: "true")]),
+    StepLine(kind: slkCall, delta: 1,
+             location: StepLineLocation(path: "src/shield.nr", line: 58,
                                         functionName: "calculate_damage",
                                         rrTicks: 220),
-             sourceLine: "return remaining_shield",
-             values: @[StepLineFlowValue(expression: "result", value: "71")]),
+             sourceLine: "calculate_damage",
+             values: @[StepLineFlowValue(expression: "mass", value: "100"),
+                       StepLineFlowValue(expression: "damage", value: "100")]),
+    StepLine(kind: slkReturn, delta: 2,
+             location: StepLineLocation(path: "src/shield.nr", line: 61,
+                                        functionName: "calculate_remaining_shield_pct",
+                                        rrTicks: 240),
+             sourceLine: "calculate_remaining_shield_pct",
+             values: @[StepLineFlowValue(expression: "remaining_shield",
+                                         value: "99")]),
   ])
-  vm.setCurrentLocation(StepLineLocation(path: "src/combat.nr", line: 42,
-                                        functionName: "calculate_damage",
+  vm.setCurrentLocation(StepLineLocation(path: "src/main.nr", line: 13,
+                                        functionName: "main",
                                         rrTicks: 180))
 
 proc applyNoSource(vm: NoSourceVM) =
@@ -768,18 +777,18 @@ proc applyAgentActivity(vm: AgentActivityVM) =
   vm.setSessionKey("story-session")
   vm.setMessages(@[
     AgentActivityMessageEntry(id: "m1", role: aamrUser,
-                              content: "Find why the shield drops below zero."),
+                              content: "Find why the shield status drops below zero."),
     AgentActivityMessageEntry(id: "m2", role: aamrAgent,
-                              content: "I found a suspicious subtraction in combat.nr.",
+                              content: "I found a suspicious damage path in shield.nr.",
                               diffs: @[AgentActivityDiffEntry(
-                                id: 1, path: "src/combat.nr",
-                                original: "shield - damage",
-                                modified: "max(0, shield - damage)")]),
+                                id: 1, path: "src/shield.nr",
+                                original: "remaining_shield - damage",
+                                modified: "max(0, remaining_shield - damage)")]),
   ])
   vm.setTerminals(@[AgentActivityTerminalEntry(id: "terminal-1", shellId: 1)])
 
 proc applyAgentWorkspace(vm: AgentWorkspaceVM) =
-  vm.setWorkspaceMetadata("/workspace/noir-space-ship", "story-session")
+  vm.setWorkspaceMetadata("/workspace/noir_space_ship", "story-session")
   vm.setSummary(AgentWorkspaceSummary(totalLinesCovered: 140,
                                       totalLinesUncovered: 24,
                                       coveragePercent: 85.4,
@@ -790,7 +799,7 @@ proc applyAgentWorkspace(vm: AgentWorkspaceVM) =
   vm.setFiles([
     AgentWorkspaceFileEntry(path: "src/main.nr", coveredLines: 72,
                             totalLines: 80, hasFlow: true),
-    AgentWorkspaceFileEntry(path: "src/combat.nr", coveredLines: 68,
+    AgentWorkspaceFileEntry(path: "src/shield.nr", coveredLines: 68,
                             totalLines: 84, hasFlow: true),
   ])
   vm.setNotificationCount(3)
@@ -807,25 +816,25 @@ proc applyDeepReview(vm: DeepReviewVM) =
                         linesAdded: 8, linesRemoved: 2,
                         coverageText: "90%", hasCoverage: true,
                         hasFlow: true),
-    DeepReviewFileEntry(path: "src/combat.nr", diffStatus: "modified",
+    DeepReviewFileEntry(path: "src/shield.nr", diffStatus: "modified",
                         linesAdded: 11, linesRemoved: 4,
                         coverageText: "81%", hasCoverage: true,
                         hasFlow: true),
   ])
   vm.setUnifiedFiles([
-    DeepReviewUnifiedFileEntry(fileIndex: 0, path: "src/combat.nr",
+    DeepReviewUnifiedFileEntry(fileIndex: 0, path: "src/shield.nr",
                                diffStatus: "modified", linesAdded: 11,
                                linesRemoved: 4, hunks: @[
-      DeepReviewHunkEntry(oldStart: 38, oldCount: 6, newStart: 38, newCount: 7,
+      DeepReviewHunkEntry(oldStart: 54, oldCount: 6, newStart: 54, newCount: 7,
                           lines: @[
         DeepReviewDiffLineEntry(lineType: "context",
-                                content: "fn calculate_damage(ship, weapon) {",
-                                oldLine: 38, newLine: 38),
+                                content: "fn iterate_asteroids(masses) {",
+                                oldLine: 54, newLine: 54),
         DeepReviewDiffLineEntry(lineType: "added",
-                                content: "  let remaining_shield = max(0, shield - damage);",
-                                oldLine: 0, newLine: 42,
+                                content: "  let remaining_shield = calculate_damage(...);",
+                                oldLine: 0, newLine: 58,
                                 values: @[DeepReviewFlowValueEntry(
-                                  name: "remaining_shield", value: "71")]),
+                                  name: "remaining_shield", value: "9900")]),
       ]),
     ]),
   ])
@@ -844,32 +853,32 @@ proc applyAgentActivityDeepReview(vm: AgentActivityDeepReviewVM) =
   vm.setFileCoverage([
     AgentDeepReviewFileCoverage(path: "src/main.nr", coveredLines: 72,
                                 totalLines: 80, hasFlow: true),
-    AgentDeepReviewFileCoverage(path: "src/combat.nr", coveredLines: 68,
+    AgentDeepReviewFileCoverage(path: "src/shield.nr", coveredLines: 68,
                                 totalLines: 84, hasFlow: true),
   ])
   vm.appendNotification(AgentDeepReviewNotification(
-    kind: adrnkCoverageUpdate, label: "Coverage updated for src/combat.nr"))
+    kind: adrnkCoverageUpdate, label: "Coverage updated for src/shield.nr"))
   vm.appendNotification(AgentDeepReviewNotification(
     kind: adrnkTestComplete, label: "shield regression test failed",
     passed: false))
 
 proc applyWelcome(vm: WelcomeScreenVM) =
   vm.setRecentTraces(@[
-    RecentTraceRecord(id: 1, program: "noir-space-ship",
-                      args: @["test"], workdir: "/workspace/noir-space-ship",
+    RecentTraceRecord(id: 1, program: "zir_shields",
+                      args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/04 16:03:00", duration: "4.2s"),
-    RecentTraceRecord(id: 2, program: "sudoku",
-                      args: @[], workdir: "/workspace/sudoku",
+    RecentTraceRecord(id: 2, program: "zir_shields",
+                      args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/03 12:44:00", duration: "1.1s"),
   ])
-  vm.setRecentFolders(@[
-    RecentFolderRecord(id: 1, name: "CodeTracer", path: "/home/zahary/metacraft/codetracer"),
-    RecentFolderRecord(id: 2, name: "Noir", path: "/home/zahary/metacraft/noir"),
-  ])
+  vm.setRecentFolders(@[])
   vm.setStartOptions(@[
     WelcomeStartOptionRecord(key: "open-folder", name: "Open folder"),
     WelcomeStartOptionRecord(key: "record-new-trace", name: "Record new trace"),
+    WelcomeStartOptionRecord(key: "open-local-trace", name: "Open local trace"),
     WelcomeStartOptionRecord(key: "open-online-trace", name: "Open online trace"),
+    WelcomeStartOptionRecord(key: "codetracer-shell", name: "CodeTracer shell",
+                             inactive: true),
   ])
 
 proc applyCommandPalette(vm: CommandPaletteVM) =
@@ -925,7 +934,7 @@ proc applySearch(vm: SearchVM) =
 
 proc applyShell(vm: ShellVM) =
   vm.inputHistory.val = @["print(remaining_shield)", "continue"]
-  vm.setInput("print(ship)")
+  vm.setInput("")
 
 proc mountBuild(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =

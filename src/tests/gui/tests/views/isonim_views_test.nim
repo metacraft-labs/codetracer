@@ -3346,7 +3346,7 @@ suite "IsoNim Shell Panel — structure":
 
       let prompt = findByClass(panel, "shell-prompt")
       check prompt != nil
-      check prompt.textContent == "> "
+      check prompt.textContent == "$ "
 
       let input = findByClass(panel, "shell-input")
       check input != nil
