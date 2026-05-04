@@ -3742,35 +3742,53 @@ proc resizeLineSlider(self: FlowComponent, position: int) =
 
 const MAX_CELL_WIDTH = 100
 
-proc moveButtonsView(self: FlowComponent, visibleWidth: float): VNode =
-  result = buildHtml(
-    tdiv(class="move-buttons")
-  ):
-    let leftStyle = style((StyleAttr.left, cstring($(self.maxFlowLineWidth - 4) & cstring"ex")))
-    let rightStyle = style((StyleAttr.marginLeft, cstring($(visibleWidth + MAX_CELL_WIDTH.float)) & cstring"px"))
+proc flowFontAwesomeIcon(typ: string, kl: string = ""): Node =
+  result = document.createElement(cstring"i")
+  result.setAttribute(cstring"class", cstring(fmt"fa fa-{typ} {kl}"))
 
-    tdiv(class="flow-left-button", style=leftStyle, onclick = proc =
-      if not self.selected:
-        discard self.select()
-      discard self.onLeft()):
-      fa "caret-left"
-    tdiv(class="flow-right-button", style=rightStyle, onclick = proc =
-      if not self.selected:
-        discard self.select()
-      discard self.onRight()):
-      fa "caret-right"
+proc moveButtonsView(self: FlowComponent, visibleWidth: float): Node =
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring"move-buttons")
 
-proc iterationVarView(self: FlowComponent, line: int, field: cstring, style: VStyle): VNode =
+  let leftStyle = style((StyleAttr.left, cstring($(self.maxFlowLineWidth - 4) & cstring"ex")))
+  let rightStyle = style((StyleAttr.marginLeft, cstring($(visibleWidth + MAX_CELL_WIDTH.float)) & cstring"px"))
+
+  let leftButton = document.createElement(cstring"div")
+  leftButton.setAttribute(cstring"class", cstring"flow-left-button")
+  leftButton.applyStyle(leftStyle)
+  leftButton.addEventListener(cstring"click", proc(e: Event) =
+    if not self.selected:
+      discard self.select()
+    discard self.onLeft()
+  )
+  leftButton.appendChild(flowFontAwesomeIcon("caret-left"))
+  result.appendChild(leftButton)
+
+  let rightButton = document.createElement(cstring"div")
+  rightButton.setAttribute(cstring"class", cstring"flow-right-button")
+  rightButton.applyStyle(rightStyle)
+  rightButton.addEventListener(cstring"click", proc(e: Event) =
+    if not self.selected:
+      discard self.select()
+    discard self.onRight()
+  )
+  rightButton.appendChild(flowFontAwesomeIcon("caret-right"))
+  result.appendChild(rightButton)
+
+proc iterationVarView(self: FlowComponent, line: int, field: cstring, style: VStyle): Node =
   var limitedLabel = if ($field).len > 5: ($field)[0 .. ^4] & ".." else: $field
 
-  buildHtml(tdiv(style=style)):
-    text limitedLabel
+  result = document.createElement(cstring"div")
+  result.applyStyle(style)
+  result.appendChild(document.createTextNode(cstring(limitedLabel)))
 
-proc iterationInfoView(self: FlowComponent, line: int, fields: seq[cstring]): VNode =
-  buildHtml(tdiv(class="flow-iteration-info")):
-    let style = self.varStyle(fields)
-    for variable in fields:
-      iterationVarView(self, line, variable, style)
+proc iterationInfoView(self: FlowComponent, line: int, fields: seq[cstring]): Node =
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"class", cstring"flow-iteration-info")
+
+  let style = self.varStyle(fields)
+  for variable in fields:
+    result.appendChild(iterationVarView(self, line, variable, style))
 
 func calculateInternal(self: FlowComponent, group: Group, loop: Loop, width: float)
 
@@ -4007,10 +4025,10 @@ proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
     res.applyStyle(flowLeftStyle(self))
 
     if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
-      res.appendChild(vnodeToDom(moveButtonsView(self, visibleWidth), KaraxInstance()))
+      res.appendChild(moveButtonsView(self, visibleWidth))
 
     if self.data.config.flow.realFlowUI != FlowMultiline:
-      res.appendChild(vnodeToDom(iterationInfoView(self, position, values), KaraxInstance()))
+      res.appendChild(iterationInfoView(self, position, values))
 
     for (loopID, loop) in loops:
       var index = 0
