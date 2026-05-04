@@ -499,13 +499,15 @@ function Ensure-NodeTooling {
 }
 
 function Prepend-PathEntries {
-  param([Parameter(Mandatory = $true)][string[]]$Entries)
+  param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][AllowEmptyCollection()][string[]]$Entries)
   $existing = [Environment]::GetEnvironmentVariable("PATH")
   $prefix = @()
   foreach ($entry in $Entries) {
-    if ([string]::IsNullOrWhiteSpace($entry)) { continue }
-    if (-not (Test-Path -LiteralPath $entry)) { continue }
-    $prefix += $entry
+    if ($null -eq $entry) { continue }
+    $entryPath = [string]$entry
+    if ([string]::IsNullOrWhiteSpace($entryPath)) { continue }
+    if (-not (Test-Path -LiteralPath $entryPath)) { continue }
+    $prefix += $entryPath
   }
   if ($prefix.Count -eq 0) { return }
   [Environment]::SetEnvironmentVariable("PATH", (($prefix -join ";") + ";" + $existing), "Process")

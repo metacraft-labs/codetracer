@@ -40,7 +40,8 @@ jobs:
             "non-nix-build/windows/ensure-ct-remote.ps1",
             "non-nix-build/windows/ensure-nargo.ps1",
             "non-nix-build/windows/ensure-ttd.ps1",
-            "non-nix-build/windows/validate-toolchain-versions.ps1"
+            "non-nix-build/windows/validate-toolchain-versions.ps1",
+            "non-nix-build/windows/validate-env-path-entries.ps1"
           )
 
           foreach ($scriptPath in $scriptPaths) {
@@ -65,6 +66,11 @@ jobs:
         shell: pwsh
         run: |
           pwsh -File non-nix-build/windows/validate-toolchain-versions.ps1
+
+      - name: Validate env.ps1 PATH helper
+        shell: pwsh
+        run: |
+          pwsh -File non-nix-build/windows/validate-env-path-entries.ps1
 
       - name: Validate arm64 mode routing smoke checks
         shell: pwsh
