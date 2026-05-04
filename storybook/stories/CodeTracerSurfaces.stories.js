@@ -1298,7 +1298,7 @@ function createKaraxReferenceShell(container, variant) {
   return root;
 }
 
-function createAppShell(container, kind, name) {
+function createAppShell(container, kind, name, displayTitle = null) {
   if (kind === "view" || kind === "component") {
     const frame = document.createElement("div");
     frame.className = "ct-storybook-frame";
@@ -1348,7 +1348,7 @@ function createAppShell(container, kind, name) {
   container.appendChild(rootContainer);
 
   if (kind === "panel") {
-    return createGoldenPanelHost(frame, titleize(name));
+    return createGoldenPanelHost(frame, displayTitle ?? titleize(name));
   }
 
   return frame;
@@ -1379,7 +1379,7 @@ function renderDefaultDebugLayout(container, fixture) {
   });
 }
 
-function renderSurface(kind, name, fixture = "populated") {
+function renderSurface(kind, name, fixture = "populated", displayTitle = null) {
   const container = document.createElement("div");
   container.className = "ct-storybook-surface";
   container.dataset.kind = kind;
@@ -1391,7 +1391,7 @@ function renderSurface(kind, name, fixture = "populated") {
     return container;
   }
 
-  const frame = createAppShell(container, kind, name);
+  const frame = createAppShell(container, kind, name, displayTitle);
 
   ensureComponentsLoaded().then(() => {
     const dispose = mountCodeTracerStory(frame, kind, name, fixture);
@@ -1404,7 +1404,7 @@ function renderSurface(kind, name, fixture = "populated") {
 export function story(kind, name, fixture = "populated", storyName = null) {
   return {
     name: storyName ?? titleize(name),
-    render: () => renderSurface(kind, name, fixture),
+    render: () => renderSurface(kind, name, fixture, storyName),
     play: async ({ canvasElement }) => {
       await ensureComponentsLoaded();
       await tick();

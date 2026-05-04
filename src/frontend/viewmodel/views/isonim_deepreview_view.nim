@@ -53,9 +53,9 @@ proc fileBasename*(path: string): string =
 
 proc diffStatusCssClass*(status: string): string =
   case status
-  of "A": " deepreview-diff-added"
-  of "M": " deepreview-diff-modified"
-  of "D": " deepreview-diff-deleted"
+  of "A", "added": " deepreview-diff-added"
+  of "M", "modified": " deepreview-diff-modified"
+  of "D", "deleted": " deepreview-diff-deleted"
   else: ""
 
 proc diffLinesSummary*(added, removed: int): string =
@@ -527,6 +527,10 @@ when defined(js):
         var path = cstring(file.path)
         var coverage = cstring(file.coverageText)
         var hasCoverage = file.hasCoverage
+        var diffLines = cstring(diffLinesSummary(file.linesAdded, file.linesRemoved))
+        var hasDiffLines = file.linesAdded > 0 or file.linesRemoved > 0
+        var diffLinesClass = cstring("deepreview-diff-lines" &
+          diffStatusCssClass(file.diffStatus))
         {.emit: """
           const list = `rootBody`.querySelector('.deepreview-file-list');
           if (list) {
@@ -550,6 +554,12 @@ when defined(js):
             nm.textContent = `name`;
             nameRow.appendChild(nm);
             row.querySelector('.deepreview-file-path-full').textContent = `path`;
+            if (`hasDiffLines`) {
+              const diff = document.createElement('span');
+              diff.className = `diffLinesClass`;
+              diff.textContent = `diffLines`;
+              row.querySelector('.deepreview-file-badges').appendChild(diff);
+            }
             if (`hasCoverage`) {
               const badge = document.createElement('span');
               badge.className = 'deepreview-coverage-badge';

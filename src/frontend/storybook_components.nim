@@ -812,18 +812,21 @@ proc applyDeepReview(vm: DeepReviewVM) =
     DeepReviewTraceContextEntry(id: 2, label: "Unit tests"),
   ])
   vm.setFiles([
-    DeepReviewFileEntry(path: "src/main.nr", diffStatus: "modified",
+    DeepReviewFileEntry(path: "src/main.nr", diffStatus: "M",
                         linesAdded: 8, linesRemoved: 2,
                         coverageText: "90%", hasCoverage: true,
                         hasFlow: true),
-    DeepReviewFileEntry(path: "src/shield.nr", diffStatus: "modified",
+    DeepReviewFileEntry(path: "src/shield.nr", diffStatus: "M",
                         linesAdded: 11, linesRemoved: 4,
                         coverageText: "81%", hasCoverage: true,
                         hasFlow: true),
   ])
+  vm.setExecutionState(0, 1, "main")
+  vm.setIterationState(0, 3)
+  vm.setViewMode(drpvmUnified)
   vm.setUnifiedFiles([
     DeepReviewUnifiedFileEntry(fileIndex: 0, path: "src/shield.nr",
-                               diffStatus: "modified", linesAdded: 11,
+                               diffStatus: "M", linesAdded: 11,
                                linesRemoved: 4, hunks: @[
       DeepReviewHunkEntry(oldStart: 54, oldCount: 6, newStart: 54, newCount: 7,
                           lines: @[
@@ -835,6 +838,14 @@ proc applyDeepReview(vm: DeepReviewVM) =
                                 oldLine: 0, newLine: 58,
                                 values: @[DeepReviewFlowValueEntry(
                                   name: "remaining_shield", value: "9900")]),
+        DeepReviewDiffLineEntry(lineType: "removed",
+                                content: "  return remaining_shield - damage;",
+                                oldLine: 59, newLine: 0),
+        DeepReviewDiffLineEntry(lineType: "added",
+                                content: "  return max(0, remaining_shield - damage);",
+                                oldLine: 0, newLine: 59,
+                                values: @[DeepReviewFlowValueEntry(
+                                  name: "damage", value: "2000")]),
       ]),
     ]),
   ])

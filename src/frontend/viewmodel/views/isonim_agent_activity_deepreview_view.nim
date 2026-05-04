@@ -291,8 +291,10 @@ proc notificationRowClass*(notif: AgentDeepReviewNotification): string =
   if notif.kind == adrnkTestComplete:
     if notif.passed:
       parts.add AgentActivityDeepReviewTestPassClass
+      parts.add "activity-dr-notif-test-pass"
     else:
       parts.add AgentActivityDeepReviewTestFailClass
+      parts.add "activity-dr-notif-test-fail"
   parts.join(" ")
 
 # ---------------------------------------------------------------------------

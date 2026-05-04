@@ -15,7 +15,7 @@ when defined(js):
 import ../store/types
 import ../viewmodels/agent_activity_vm
 
-const AgentActivityContainerClass* = "agent-ha-container"
+const AgentActivityContainerClass* = "component-container agent-ha-container"
 const AgentActivityConversationClass* = "agent-com"
 const AgentActivityInteractionClass* = "agent-interaction"
 const AgentActivityInputClass* = "mousetrap agent-command-input"
