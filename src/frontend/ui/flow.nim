@@ -741,8 +741,13 @@ proc tooltipStepInfo(step: FlowStep): Node =
 proc customRedraw(self: ValueComponent) =
   discard
 
+proc renderModalValueDom(self: FlowComponent, containerId: cstring): Node =
+  # ValueComponent.renderValue() remains Karax-owned. Keep this bridge narrow
+  # until the value renderer itself has a direct DOM/IsoNim entrypoint.
+  vnodeToDom(self.modalValueComponent[containerId].renderValue(), KaraxInstance())
+
 proc openTooltip*(self: FlowComponent, containerId: cstring, value: Value) =
-  let valueDom = vnodeToDom(self.modalValueComponent[containerId].renderValue(), KaraxInstance())
+  let valueDom = self.renderModalValueDom(containerId)
 
   self.tooltipId = containerId
   self.displayTooltip(containerId, valueDom)
@@ -1476,13 +1481,8 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
   )
   # oncontextmenu = proc(e: Event, v: VNode) =
   #   onContextMenu(e, v, beforeValue),
-  # onmouseover = proc =
-  #   if not self.modalValueComponent.hasKey(id):
-  #     self.ensureValueComponent(id, name, beforeValue)
-  #     self.openTooltip(id, beforeValue)
-  #   else:
-  #     let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
-  #     self.displayTooltip(id, valueDom)
+  # flowEventValue intentionally has no tooltip/modal behavior. Normal
+  # flow values centralize modal materialization in renderModalValueDom.
   valueSpan.appendChild(document.createTextNode(event.text))
   result.appendChild(valueSpan)
 
@@ -1561,7 +1561,7 @@ proc flowSimpleValue*(
         self.ensureValueComponent(id, name, value)
         self.openTooltip(id, value)
       else:
-        let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
+        let valueDom = self.renderModalValueDom(id)
         self.displayTooltip(id, valueDom)
     )
     valueSpan.appendChild(document.createTextNode(value.textRepr(compact=true)))
