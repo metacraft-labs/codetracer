@@ -58,6 +58,8 @@ when defined(js):
   from ../viewmodel/views/isonim_command_palette_view import
     mountIsoNimCommandPalettePanel
 
+proc requestCommandPalettePanelRefresh(self: CommandPaletteComponent)
+
 proc clear(self: CommandPaletteComponent) =
   self.selected = 0
   self.inputValue = ""
@@ -68,7 +70,7 @@ proc clear(self: CommandPaletteComponent) =
 
 proc close(self: CommandPaletteComponent) =
   self.active = false
-  redrawAll()
+  self.requestCommandPalettePanelRefresh()
   self.clear()
 
 proc resetCommandPalette*(self: CommandPaletteComponent) =
@@ -131,7 +133,7 @@ proc changePlaceholder*(self: CommandPaletteComponent) =
 proc eventuallyClearPlaceholder(self: CommandPaletteComponent, value: cstring) =
   if self.inputPlaceholder != cstring("") and not ($(self.inputPlaceholder)).startsWith($value):
     self.inputPlaceholder = cstring("")
-    redrawAll()
+    self.requestCommandPalettePanelRefresh()
 
 proc showResults(self: CommandPaletteComponent) =
   let value = self.inputField.toJs.value.to(cstring)
@@ -141,7 +143,7 @@ proc showResults(self: CommandPaletteComponent) =
     self.results = self.interpreter.autocompleteQuery(self.query)
     self.changePlaceholder()
     self.active = true
-    redrawAll()
+    self.requestCommandPalettePanelRefresh()
   else:
     discard
 
@@ -151,7 +153,7 @@ proc onInput(self: CommandPaletteComponent, value: cstring) =
   if self.inputValue == cstring"/ai ":
     self.inAgentMode = true
     self.inputValue = ""
-    redrawAll()
+    self.requestCommandPalettePanelRefresh()
 
 proc runQuery(self: CommandPaletteComponent) =
   clog "runQuery "
@@ -212,7 +214,7 @@ proc runQuery(self: CommandPaletteComponent) =
     let content = Content.AgentActivity
     data.openLayoutTab(content)
     self.resetCommandPalette()
-    redrawAll()
+    self.requestCommandPalettePanelRefresh()
 
   self.prevCommandValue = self.inputValue
 
@@ -351,6 +353,13 @@ proc syncLegacyCommandPaletteIntoVM*(self: CommandPaletteComponent) =
     commandPaletteVMInstance.open()
   else:
     commandPaletteVMInstance.close()
+
+proc requestCommandPalettePanelRefresh(self: CommandPaletteComponent) =
+  ## Refresh the Command Palette's IsoNim surface after local legacy-state
+  ## mutations. The legacy component remains the command interpreter/event-bus
+  ## carrier, while the VM and direct mount own the visible DOM.
+  self.syncLegacyCommandPaletteIntoVM()
+  tryMountIsoNimCommandPalettePanel()
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
