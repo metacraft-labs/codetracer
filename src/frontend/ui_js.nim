@@ -1,6 +1,5 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
-  karax,
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
       state, calltrace, start, menu,
       debug, flow, filesystem, vcs, value, repl,
@@ -1931,8 +1930,7 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     data.services.editor.open[newPath].name = newPath
     # data.services.editor.open[newPath].fileInfo.path = newPath
     discard jsDelete(data.services.editor.open[untitledName])
-    kxiMap[newPath] = kxiMap[untitledName]
-    discard jsDelete(kxiMap[untitledName])
+    moveKaraxInstanceKey(untitledName, newPath)
     data.ui.editors[newPath] = data.ui.editors[untitledName]
     discard jsDelete(data.ui.editors[untitledName])
     data.ui.editors[newPath].path = newPath
