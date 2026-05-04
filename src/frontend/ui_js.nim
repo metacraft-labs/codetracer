@@ -1,6 +1,6 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
-  karax, karaxdsl, kdom, vstyles,
+  karax,
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
       state, calltrace, start, menu,
       debug, flow, filesystem, vcs, value, repl,
