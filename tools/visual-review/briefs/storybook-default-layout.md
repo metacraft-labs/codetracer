@@ -9,20 +9,21 @@ Shared project brief: `../project-visual-brief.md`
 
 ## Screen
 
-- Route: Storybook iframe story `codetracer-surfaces--layout-standalone-app-shell`
+- Route: Storybook iframe story `codetracer-surfaces--layout-default-debug`
 - Capture id: `storybook-default-layout`
 - Viewport: laptop, 1440x900
 
 ## Seeded State
 
-The fixture includes State, Calltrace, Event Log, Flow, Timeline, Search,
-Point List, Scratchpad, and Shell sections with representative replay data.
+The fixture includes a Golden Layout-style debugging workspace with Filesystem,
+Editor, Scratchpad, Calltrace, Event Log, and Terminal Output panels populated
+from real IsoNim panel views.
 
 ## Expected Visible Content
 
 - Dark CodeTracer app styling loaded in the iframe.
-- App-shell sections should be readable and consistently spaced.
-- Multiple panels should look like CodeTracer surfaces, not browser defaults.
+- Golden Layout panel headers, tabs, and content cells should be visible.
+- Multiple real IsoNim panels should look like CodeTracer surfaces, not browser defaults.
 - The layout should show a coherent full-screen debugging workspace.
 
 ## Must Not Show

@@ -83,6 +83,8 @@ function injectSurfaceStyles(container) {
       min-width: 0;
       min-height: 0;
       height: 100%;
+      font-size: 16px;
+      line-height: 24px;
     }
 
     .ct-storybook-golden-panel .lm_stack {
@@ -128,6 +130,107 @@ function injectSurfaceStyles(container) {
       width: 16px !important;
       height: 16px !important;
       margin-top: 0 !important;
+    }
+
+    .ct-storybook-default-layout {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      font-size: 16px;
+      line-height: 24px;
+    }
+
+    .ct-storybook-default-layout .lm_row,
+    .ct-storybook-default-layout .lm_column {
+      box-sizing: border-box;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .ct-storybook-default-layout > .lm_row {
+      width: 100%;
+      height: 100%;
+      flex-direction: row;
+      gap: 4px;
+    }
+
+    .ct-storybook-default-layout .lm_column {
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .ct-storybook-layout-sidebar {
+      flex: 0 0 14%;
+    }
+
+    .ct-storybook-layout-editor {
+      flex: 0 0 33%;
+    }
+
+    .ct-storybook-layout-right {
+      flex: 1 1 53%;
+    }
+
+    .ct-storybook-layout-right-top {
+      flex: 1 1 50%;
+      flex-direction: row;
+      gap: 4px;
+    }
+
+    .ct-storybook-layout-right-top > .lm_column {
+      flex: 1 1 50%;
+    }
+
+    .ct-storybook-layout-right-bottom {
+      flex: 1 1 50%;
+    }
+
+    .ct-storybook-default-layout .lm_stack {
+      box-sizing: border-box;
+      display: flex;
+      flex: 1 1 100%;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .ct-storybook-default-layout .lm_header {
+      box-sizing: border-box;
+      flex: 0 0 32px;
+      height: 32px !important;
+      min-height: 32px;
+      overflow: visible;
+    }
+
+    .ct-storybook-default-layout .lm_items {
+      box-sizing: border-box;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .ct-storybook-default-layout .lm_items > div,
+    .ct-storybook-default-layout .lm_content,
+    .ct-storybook-default-layout .ct-storybook-panel-content {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .ct-storybook-default-layout .ct-storybook-panel-content > .component-container,
+    .ct-storybook-default-layout .ct-storybook-panel-content > .build-panel,
+    .ct-storybook-default-layout .ct-storybook-panel-content > .panel {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
     }
 
     .ct-storybook-golden-panel .lm_items {
@@ -241,6 +344,105 @@ function createGoldenPanelHost(frame, title) {
   return mount;
 }
 
+function createGoldenStack(title) {
+  const stack = document.createElement("div");
+  stack.className = "lm_item lm_stack";
+
+  const header = document.createElement("section");
+  header.className = "lm_header";
+
+  const tabs = document.createElement("section");
+  tabs.className = "lm_tabs";
+
+  const tab = document.createElement("div");
+  tab.className = "lm_tab lm_active";
+
+  const tabTitle = document.createElement("span");
+  tabTitle.className = "lm_title";
+  tabTitle.textContent = title;
+  tab.appendChild(tabTitle);
+
+  const closeTab = document.createElement("div");
+  closeTab.className = "lm_close_tab";
+  tab.appendChild(closeTab);
+  tabs.appendChild(tab);
+  header.appendChild(tabs);
+
+  const items = document.createElement("section");
+  items.className = "lm_items";
+
+  const item = document.createElement("div");
+  const content = document.createElement("div");
+  content.className = "lm_content";
+  const mount = document.createElement("div");
+  mount.className = "ct-storybook-panel-content";
+  content.appendChild(mount);
+  item.appendChild(content);
+  items.appendChild(item);
+  stack.appendChild(header);
+  stack.appendChild(items);
+
+  return { stack, mount };
+}
+
+function appendDefaultDebugLayout(frame) {
+  const root = document.createElement("div");
+  root.className = "lm_goldenlayout lm_item lm_root ct-storybook-default-layout";
+
+  const row = document.createElement("div");
+  row.className = "lm_item lm_row";
+
+  const leftColumn = document.createElement("div");
+  leftColumn.className = "lm_item lm_column ct-storybook-layout-sidebar";
+
+  const editorColumn = document.createElement("div");
+  editorColumn.className = "lm_item lm_column ct-storybook-layout-editor";
+
+  const rightColumn = document.createElement("div");
+  rightColumn.className = "lm_item lm_column ct-storybook-layout-right";
+
+  const rightTop = document.createElement("div");
+  rightTop.className = "lm_item lm_row ct-storybook-layout-right-top";
+
+  const rightTopLeft = document.createElement("div");
+  rightTopLeft.className = "lm_item lm_column";
+
+  const rightTopRight = document.createElement("div");
+  rightTopRight.className = "lm_item lm_column";
+
+  const rightBottom = document.createElement("div");
+  rightBottom.className = "lm_item lm_column ct-storybook-layout-right-bottom";
+
+  const panels = [
+    { parent: leftColumn, title: "FILESYSTEM", name: "filesystem" },
+    { parent: editorColumn, title: "src/main.nr", name: "editor" },
+    { parent: rightTopLeft, title: "SCRATCHPAD", name: "scratchpad" },
+    { parent: rightTopRight, title: "CALLTRACE", name: "calltrace" },
+    { parent: rightBottom, title: "EVENT LOG", name: "event-log" },
+    { parent: rightBottom, title: "TERMINAL OUTPUT", name: "terminal-output" },
+  ];
+
+  const mounts = [];
+  for (const panel of panels) {
+    const { stack, mount } = createGoldenStack(panel.title);
+    stack.dataset.panelName = panel.name;
+    panel.parent.appendChild(stack);
+    mounts.push({ name: panel.name, mount });
+  }
+
+  rightTop.appendChild(rightTopLeft);
+  rightTop.appendChild(rightTopRight);
+  rightColumn.appendChild(rightTop);
+  rightColumn.appendChild(rightBottom);
+  row.appendChild(leftColumn);
+  row.appendChild(editorColumn);
+  row.appendChild(rightColumn);
+  root.appendChild(row);
+  frame.appendChild(root);
+
+  return mounts;
+}
+
 function createAppShell(container, kind, name) {
   if (kind === "view" || kind === "component") {
     const frame = document.createElement("div");
@@ -297,12 +499,33 @@ function createAppShell(container, kind, name) {
   return frame;
 }
 
+function renderDefaultDebugLayout(container) {
+  const frame = createAppShell(container, "layout", "default-debug");
+  const mounts = appendDefaultDebugLayout(frame);
+
+  ensureComponentsLoaded().then(() => {
+    const disposes = mounts.map(({ name, mount }) =>
+      mountCodeTracerStory(mount, "panel", name, "populated"),
+    );
+    container.__dispose = () => {
+      for (const dispose of disposes) {
+        if (typeof dispose === "function") dispose();
+      }
+    };
+  });
+}
+
 function renderSurface(kind, name, fixture = "populated") {
   const container = document.createElement("div");
   container.className = "ct-storybook-surface";
   container.dataset.kind = kind;
   container.dataset.surface = name;
   injectSurfaceStyles(container);
+
+  if (kind === "layout" && name === "default-debug") {
+    renderDefaultDebugLayout(container);
+    return container;
+  }
 
   const frame = createAppShell(container, kind, name);
 

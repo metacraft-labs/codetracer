@@ -31,5 +31,15 @@ nix shell nixpkgs#nodejs --command node tools/visual-review/capture-storybook.mj
 
 The capture tool builds Storybook, serves `storybook/storybook-static`, captures
 named stories at the configured viewport sizes, and writes diagnostics beside
-the screenshots. The generated `reports/` and `screenshots/` directories are
-ignored; keep the project brief, screen briefs, and capture script in git.
+the screenshots. It also writes HTML and computed-style dumps that can be
+compared against reference dumps from older known-good builds:
+
+```bash
+nix shell nixpkgs#nodejs --command node tools/visual-review/compare-style-dumps.mjs \
+  --reference ../codetracer-main/ui-tests/reference-dumps/isonim-karax-reference-20260504T155511Z/20260504T160434Z_noir-terminal-visible.computed-styles.json \
+  --current tools/visual-review/dumps/terminal-output-laptop.computed-styles.json \
+  --out tools/visual-review/reports/terminal-vs-karax-reference.md
+```
+
+The generated `reports/`, `screenshots/`, and `dumps/` directories are ignored;
+keep the project brief, screen briefs, and capture/comparison scripts in git.

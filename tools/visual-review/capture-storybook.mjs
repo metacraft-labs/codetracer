@@ -12,6 +12,7 @@ const storybookDir = join(repoRoot, "storybook");
 const staticDir = join(storybookDir, "storybook-static");
 const outDir = join(repoRoot, "tools/visual-review/screenshots");
 const reportDir = join(repoRoot, "tools/visual-review/reports");
+const dumpDir = join(repoRoot, "tools/visual-review/dumps");
 
 const requireFromStorybook = createRequire(join(storybookDir, "package.json"));
 const { chromium } = requireFromStorybook("playwright");
@@ -26,7 +27,7 @@ const views = {
     brief: "tools/visual-review/briefs/storybook-build-panel.md",
   },
   "default-layout": {
-    storyId: "codetracer-surfaces--layout-standalone-app-shell",
+    storyId: "codetracer-surfaces--layout-default-debug",
     brief: "tools/visual-review/briefs/storybook-default-layout.md",
   },
 };
@@ -122,12 +123,15 @@ async function main() {
 
   mkdirSync(outDir, { recursive: true });
   mkdirSync(reportDir, { recursive: true });
+  mkdirSync(dumpDir, { recursive: true });
 
   if (!selectedView && !selectedSize) {
     rmSync(outDir, { recursive: true, force: true });
     rmSync(reportDir, { recursive: true, force: true });
+    rmSync(dumpDir, { recursive: true, force: true });
     mkdirSync(outDir, { recursive: true });
     mkdirSync(reportDir, { recursive: true });
+    mkdirSync(dumpDir, { recursive: true });
   }
 
   if (!existsSync(staticDir)) {
@@ -166,6 +170,8 @@ async function main() {
         const captureId = `${viewName}-${sizeName}`;
         const screenshotPath = join(outDir, `${captureId}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
+        const htmlPath = join(dumpDir, `${captureId}.html`);
+        writeFileSync(htmlPath, await page.content());
 
         const diagnostics = await page.evaluate(() => {
           const stylesheets = [...document.querySelectorAll("link[rel=stylesheet]")].map((link) => {
@@ -214,6 +220,154 @@ async function main() {
           };
         });
 
+        const computedStylePath = join(dumpDir, `${captureId}.computed-styles.json`);
+        const computedStyles = await page.evaluate(() => {
+          const styleProps = [
+            "display",
+            "visibility",
+            "position",
+            "box-sizing",
+            "left",
+            "top",
+            "right",
+            "bottom",
+            "width",
+            "height",
+            "min-width",
+            "min-height",
+            "max-width",
+            "max-height",
+            "margin",
+            "padding",
+            "border",
+            "border-radius",
+            "background-color",
+            "background-image",
+            "color",
+            "font-family",
+            "font-size",
+            "font-weight",
+            "line-height",
+            "overflow",
+            "overflow-x",
+            "overflow-y",
+            "flex",
+            "flex-direction",
+            "align-items",
+            "justify-content",
+            "grid-template-columns",
+            "grid-template-rows",
+            "gap",
+            "z-index",
+            "opacity",
+            "transform",
+          ];
+
+          function cssPath(element) {
+            const parts = [];
+            let current = element;
+            while (current && current.nodeType === Node.ELEMENT_NODE) {
+              let part = current.tagName.toLowerCase();
+              if (current.id) part += `#${current.id}`;
+              if (current.className && typeof current.className === "string") {
+                const classes = current.className
+                  .trim()
+                  .split(/\s+/)
+                  .filter(Boolean)
+                  .slice(0, 4)
+                  .join(".");
+                if (classes) part += `.${classes}`;
+              }
+              parts.unshift(part);
+              current = current.parentElement;
+            }
+            return parts.join(" > ");
+          }
+
+          const interestingSelectors = [
+            "body",
+            "#root-container",
+            "#auto-hide-layout-row",
+            "#ROOT",
+            "#main",
+            ".lm_goldenlayout",
+            ".lm_row",
+            ".lm_column",
+            ".lm_stack",
+            ".lm_header",
+            ".lm_tabs",
+            ".lm_tab",
+            ".lm_active",
+            ".lm_controls",
+            ".lm_content",
+            ".ct-storybook-panel-content",
+            ".component-container",
+            ".terminal",
+            ".isonim-terminal-output",
+            ".terminal-line",
+            ".active",
+            ".past",
+            ".future",
+            ".build-panel",
+            ".build-header",
+            ".build-command-label",
+            ".build-header-controls",
+            ".build-output-container",
+            ".build-stdout",
+            ".build-stderr",
+            ".build-clickable",
+            ".build-line-error",
+            ".build-line-warning",
+            ".isonim-app-shell",
+            ".isonim-panel-section",
+            ".isonim-section-content",
+          ];
+
+          const seen = new Set();
+          const elements = [];
+          for (const selector of interestingSelectors) {
+            for (const element of document.querySelectorAll(selector)) {
+              if (seen.has(element)) continue;
+              seen.add(element);
+              const rect = element.getBoundingClientRect();
+              const computed = window.getComputedStyle(element);
+              const styles = {};
+              for (const prop of styleProps) styles[prop] = computed.getPropertyValue(prop);
+              elements.push({
+                index: elements.length,
+                selector,
+                path: cssPath(element),
+                tag: element.tagName.toLowerCase(),
+                id: element.id || null,
+                className: typeof element.className === "string" ? element.className : "",
+                text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 250),
+                rect: {
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                },
+                styles,
+              });
+            }
+          }
+
+          return {
+            url: location.href,
+            title: document.title,
+            viewport: {
+              width: window.innerWidth,
+              height: window.innerHeight,
+              devicePixelRatio: window.devicePixelRatio,
+            },
+            capturedAt: new Date().toISOString(),
+            elementCount: document.querySelectorAll("*").length,
+            capturedElementCount: elements.length,
+            elements,
+          };
+        });
+        writeFileSync(computedStylePath, JSON.stringify(computedStyles, null, 2));
+
         const report = {
           captureId,
           view: viewName,
@@ -221,6 +375,8 @@ async function main() {
           storyId: view.storyId,
           brief: view.brief,
           screenshotPath,
+          htmlPath,
+          computedStylePath,
           url,
           viewport,
           resourceErrors,

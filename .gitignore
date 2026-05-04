@@ -155,6 +155,7 @@ dist/
 storybook/storybook-static/
 tools/visual-review/reports/
 tools/visual-review/screenshots/
+tools/visual-review/dumps/
 ctail
 #dispatcher
 gmon.out

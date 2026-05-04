@@ -58,6 +58,8 @@ function injectTerminalStyles(container) {
       min-width: 0;
       min-height: 0;
       height: 100%;
+      font-size: 16px;
+      line-height: 24px;
     }
 
     .ct-storybook-terminal .lm_stack {
