@@ -1401,12 +1401,12 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
       isTooltipValue: true,
     )
 
-proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle, i: int): VNode =
+proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle, i: int): Node =
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
-  var before = &"flow-{flowMode}-value-before-only"
+  let before = &"flow-{flowMode}-value-before-only"
 
   let (klass, name) =
     case event.kind:
@@ -1425,63 +1425,66 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     else:
       ("", "")
 
-  result = buildHtml(
-    span(
-      class = &"ct-omni-value",
-      style=style
+  result = document.createElement(cstring"span")
+  result.setAttribute(cstring"class", cstring"ct-omni-value")
+  result.applyStyle(style)
+
+  if event.text.len() > FLOW_VALUE_LIMIT:
+    let viewMore = document.createElement(cstring"span")
+    viewMore.setAttribute(cstring"class", cstring(&"ct-omni-name{klass} flow-view-more-button flow-hide-content"))
+    viewMore.applyStyle(style)
+    viewMore.addEventListener(cstring"mousedown", proc(e: Event) =
+      let targetId = &"flow-{flowMode}-value-box-{stepCount}-{i}"
+      let target = document.getElementById(targetId)
+      if not target.isNil:
+        if target.style.maxWidth != "none":
+          target.style.maxWidth = "none"
+          e.target.toJs.classList.remove("flow-hide-content")
+          e.target.toJs.classList.add("flow-show-content")
+        else:
+          e.target.toJs.classList.remove("flow-show-content")
+          e.target.toJs.classList.add("flow-hide-content")
+          target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
+        self.maxWidth = 0
+        self.editorUI.adjustEditorWidth()
     )
-  ):
-    if event.text.len() > FLOW_VALUE_LIMIT:
-      span(
-        class = &"ct-omni-name{klass} flow-view-more-button flow-hide-content",
-        style = style,
-        onmousedown = proc(e: Event, v: VNode) =
-          let targetId = &"flow-{flowMode}-value-box-{stepCount}-{i}"
-          let target = document.getElementById(targetId)
-          if not target.isNil:
-            if target.style.maxWidth != "none":
-              target.style.maxWidth = "none"
-              e.target.toJs.classList.remove("flow-hide-content")
-              e.target.toJs.classList.add("flow-show-content")
-            else:
-              e.target.toJs.classList.remove("flow-show-content")
-              e.target.toJs.classList.add("flow-hide-content")
-              target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-            self.maxWidth = 0
-            self.editorUI.adjustEditorWidth()
-      )
-    span(
-      class = &"ct-omni-name{klass}",
-      onmousedown = proc(e: Event, v: VNode) =
-        self.jumpToLocalStep(stepCount),
-      # oncontextmenu = proc(e: Event, v: VNode) =
-      #   case flowValueMode:
-      #   of BeforeValueMode:
-      #     onContextMenu(e, v, beforeValue)
-      #   of AfterValueMode:
-      #     onContextMenu(e, v, afterValue)
-      #   of BeforeAndAfterValueMode:
-      #     discard
-    ):
-      text &"<{name}>"
-    span(
-      id = &"flow-{flowMode}-value-box-{stepCount}-{i}",
-      style = style,
-      iteration = $(self.flow.steps[stepCount].iteration),
-      class = &"flow-{flowMode}-value-box {klass}-box " & before,
-      onmousedown = proc(e: Event, v: VNode) =
-        self.jumpToLocalStep(stepCount),
-      # oncontextmenu = proc(e: Event, v: VNode) =
-      #   onContextMenu(e, v, beforeValue),
-      # onmouseover = proc =
-      #   if not self.modalValueComponent.hasKey(id):
-      #     self.ensureValueComponent(id, name, beforeValue)
-      #     self.openTooltip(id, beforeValue)
-      #   else:
-      #     let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
-      #     self.displayTooltip(id, valueDom)
-    ):
-      text event.text
+    result.appendChild(viewMore)
+
+  let nameSpan = document.createElement(cstring"span")
+  nameSpan.setAttribute(cstring"class", cstring(&"ct-omni-name{klass}"))
+  nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
+    self.jumpToLocalStep(stepCount)
+  )
+  # oncontextmenu = proc(e: Event, v: VNode) =
+  #   case flowValueMode:
+  #   of BeforeValueMode:
+  #     onContextMenu(e, v, beforeValue)
+  #   of AfterValueMode:
+  #     onContextMenu(e, v, afterValue)
+  #   of BeforeAndAfterValueMode:
+  #     discard
+  nameSpan.appendChild(document.createTextNode(cstring(&"<{name}>")))
+  result.appendChild(nameSpan)
+
+  let valueSpan = document.createElement(cstring"span")
+  valueSpan.setAttribute(cstring"id", cstring(&"flow-{flowMode}-value-box-{stepCount}-{i}"))
+  valueSpan.applyStyle(style)
+  valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
+  valueSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-box {klass}-box " & before))
+  valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
+    self.jumpToLocalStep(stepCount)
+  )
+  # oncontextmenu = proc(e: Event, v: VNode) =
+  #   onContextMenu(e, v, beforeValue),
+  # onmouseover = proc =
+  #   if not self.modalValueComponent.hasKey(id):
+  #     self.ensureValueComponent(id, name, beforeValue)
+  #     self.openTooltip(id, beforeValue)
+  #   else:
+  #     let valueDom = vnodeToDom(self.modalValueComponent[id].renderValue(), KaraxInstance())
+  #     self.displayTooltip(id, valueDom)
+  valueSpan.appendChild(document.createTextNode(event.text))
+  result.appendChild(valueSpan)
 
 
 proc flowSimpleValue*(
@@ -2050,8 +2053,7 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
     (StyleAttr.backgroundSize, cstring($(self.fontSize + 2) & "px"))
   )
   for i, event in step.events:
-    let eventVNode = flowEventValue(self, event, step.stepCount, style, i)
-    result.appendChild(vnodeToDom(eventVNode, KaraxInstance()))
+    result.appendChild(flowEventValue(self, event, step.stepCount, style, i))
 
   for i, expression in step.exprOrder:
     let beforeValue = step.beforeValues[expression]
