@@ -16,7 +16,6 @@
 
 import
   std/strformat,
-  karax, karaxdsl, vdom,
   session_switch,
   ../types,
   ../viewmodel/views/isonim_session_tabs_view
@@ -26,7 +25,7 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 # ---------------------------------------------------------------------------
-# Rendering
+# Model derivation and direct rendering
 # ---------------------------------------------------------------------------
 
 proc sessionLabel(session: ReplaySession, index: int): cstring =
@@ -36,12 +35,6 @@ proc sessionLabel(session: ReplaySession, index: int): cstring =
     session.trace.program
   else:
     cstring(fmt"Trace {index + 1}")
-
-proc renderSessionTabs*(data: Data): VNode =
-  ## Legacy Karax render stub. Returns an empty container.
-  ## The IsoNim renderer (renderIsoNimSessionTabs) is the primary
-  ## rendering path, mounted via layout.nim.
-  buildHtml(tdiv(id = "session-tab-bar", class = "session-tab-bar"))
 
 proc sessionTabRecords(data: Data): seq[SessionTabRecord] =
   for i in 0 ..< data.sessions.len:
@@ -58,9 +51,30 @@ proc sessionTabCallbacks(data: Data): SessionTabsCallbacks =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc ensureSessionTabBarHost(): isonim_dom.Element =
+    ## Return the static tab-bar host, creating it if an older shell or test
+    ## harness did not include the index.html node.
+    result = isonim_dom.getElementById(
+      isonim_dom.document,
+      cstring SessionTabBarId)
+    if not isonim_dom.isNodeNil(isonim_dom.Node(result)):
+      return
+
+    result = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(result, cstring"id", cstring SessionTabBarId)
+    isonim_dom.setAttribute(result, cstring"class", cstring SessionTabBarClass)
+
+    let rootContainer = isonim_dom.getElementById(
+      isonim_dom.document,
+      cstring"root-container")
+    if isonim_dom.isNodeNil(isonim_dom.Node(rootContainer)):
+      {.emit: "document.body.appendChild(`result`);".}
+    else:
+      {.emit: "`rootContainer`.parentNode.insertBefore(`result`, `rootContainer`);".}
+
   proc renderIsoNimSessionTabs*(data: Data) =
     ## Build the session tab bar DOM using IsoNim WebRenderer and
-    ## render directly into the existing `#session-tab-bar` element.
+    ## render directly into `#session-tab-bar`.
     ##
     ## Structure:
     ##   div#session-tab-bar.session-tab-bar[.single-session]
@@ -68,8 +82,7 @@ when defined(js):
     ##       span.session-tab-label
     ##       span.session-tab-close            (only when multiple)
     ##     div.session-tab-add                 (the "+" button)
-    let container = isonim_dom.getElementById(isonim_dom.document,
-                                               cstring"session-tab-bar")
+    let container = ensureSessionTabBarHost()
     if isonim_dom.isNodeNil(isonim_dom.Node(container)):
       return
 
@@ -83,7 +96,8 @@ when defined(js):
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state
-    ## changes.  This replaces the previous global redrawAll callback.
+    ## changes. This replaces the previous Karax host stub and global redraw
+    ## callback path.
     renderIsoNimSessionTabs(data)
 else:
   proc requestSessionTabsRender*(data: Data) =

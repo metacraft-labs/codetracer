@@ -231,8 +231,8 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
     data.ui.openComponentIds[content].delete(id)
 
 # Track whether the shared (non-GL) global renderers have been initialised.
-# Fixed-search/search-results/session-tab-bar still use Karax setRenderer
-# stubs; menu/status are refreshed directly through IsoNim.
+# Fixed-search/search-results still use Karax setRenderer stubs; menu/status
+# and session-tab-bar are refreshed directly through IsoNim.
 var sharedRenderersInitialised = false
 
 proc renderLayoutComponent(component: Component, content: Content): VNode =
@@ -261,14 +261,9 @@ proc ensureSharedRenderers() =
     proc: VNode =
       buildHtml(tdiv()),
     "search-results", proc = discard)
-  # Session tab bar: render via IsoNim WebRenderer. The Karax
-  # renderSessionTabs returns an empty stub; explicit session/trace
+  # Session tab bar: index.html owns the static host and ui/session_tabs.nim
+  # creates it defensively for older shells/tests; explicit session/trace
   # mutation sites refresh the direct IsoNim mount.
-  kxiMap["session-tab-bar"] = setRenderer(
-    proc: VNode = renderSessionTabs(data),
-    "session-tab-bar",
-    proc = discard)
-  # Initial render after Karax creates the container element.
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 
   data.ui.searchResults.kxi = kxiMap["search-results"]
@@ -1171,21 +1166,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 # import dependency (layout -> session_tabs -> session_switch -> layout).
 setInitLayoutProc(initLayout)
 
-# Wire the tab-bar renderer setup so that switchSession can ensure and refresh
-# the direct IsoNim mount for ``#session-tab-bar`` even when initLayout is not
+# Wire the tab-bar setup so that switchSession can ensure and refresh the
+# direct IsoNim mount for ``#session-tab-bar`` even when initLayout is not
 # called (e.g. for empty sessions).
-#
-# IMPORTANT: if the renderer already exists (set up by ensureSharedRenderers
-# during initLayout), do NOT overwrite it — that would replace the Karax
-# instance while the surrounding chrome is alive.
 proc ensureTabBarRenderer() =
-  if not kxiMap.hasKey(cstring"session-tab-bar"):
-    kxiMap["session-tab-bar"] = setRenderer(
-      proc: VNode = renderSessionTabs(data),
-      "session-tab-bar",
-      proc = discard)
   requestSessionTabsRender(data)
-  # Use a short delay as a fallback for paths where the Karax shell has just
-  # been registered and the DOM element may not be ready until the next tick.
+  # Use a short delay as a fallback for paths where the surrounding shell has
+  # just been mounted and the static host may not be available until the next
+  # tick.
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 setEnsureTabBarRendererProc(ensureTabBarRenderer)
