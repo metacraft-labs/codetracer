@@ -283,6 +283,7 @@ proc buildDiffDecorations(file: DeepReviewFileData): seq[JsObject] =
         continue
       if line.newLine < 1:
         continue
+      let newLine = line.newLine
 
       let className = if isModification:
         cstring"deepreview-diff-line-modified"
@@ -291,9 +292,9 @@ proc buildDiffDecorations(file: DeepReviewFileData): seq[JsObject] =
 
       result.add(js{
         range: js{
-          startLineNumber: line.newLine,
+          startLineNumber: newLine,
           startColumn: 1,
-          endLineNumber: line.newLine,
+          endLineNumber: newLine,
           endColumn: 1
         },
         options: js{

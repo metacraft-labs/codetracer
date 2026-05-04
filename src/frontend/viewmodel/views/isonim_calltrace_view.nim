@@ -339,13 +339,15 @@ when defined(js):
       r.setAttribute(container, "class", "call-search-results")
       for res in results:
         let capturedRrTicks = res.rrTicks
+        let key = res.key
+        let name = res.name
         let resultEl = ui(r):
           tdiv(class = "search-result",
                onmousedown = proc() =
                  discard vm.store.backend.send(
                    "ct/calltrace-jump",
                    %*{"rrTicks": capturedRrTicks})):
-            text "#" & res.key & " - rrTicks(" & $res.rrTicks & "): " & res.name
+            text "#" & key & " - rrTicks(" & $capturedRrTicks & "): " & name
         r.appendChild(container, resultEl)
 
   proc wireSearchForm(form, input: isonim_dom.Element; vm: CalltraceVM) =

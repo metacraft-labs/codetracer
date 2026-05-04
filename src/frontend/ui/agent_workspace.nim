@@ -303,11 +303,12 @@ proc buildCoverageOverlay(self: AgentWorkspaceComponent): seq[JsObject] =
     for line in notif.linesCovered:
       if line < 1:
         continue
+      let lineNumber = line
       result.add(js{
         range: js{
-          startLineNumber: line,
+          startLineNumber: lineNumber,
           startColumn: 1,
-          endLineNumber: line,
+          endLineNumber: lineNumber,
           endColumn: 1
         },
         options: js{
@@ -321,11 +322,12 @@ proc buildCoverageOverlay(self: AgentWorkspaceComponent): seq[JsObject] =
     for line in notif.linesUncovered:
       if line < 1:
         continue
+      let lineNumber = line
       result.add(js{
         range: js{
-          startLineNumber: line,
+          startLineNumber: lineNumber,
           startColumn: 1,
-          endLineNumber: line,
+          endLineNumber: lineNumber,
           endColumn: 1
         },
         options: js{

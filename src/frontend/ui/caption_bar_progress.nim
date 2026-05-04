@@ -197,13 +197,16 @@ when defined(js):
         if self.expanded and self.progress.milestones.len > 0:
           tdiv(class = "caption-progress-milestones"):
             for milestone in self.progress.milestones:
+              let status = milestone.status
+              let content = milestone.content
+              let priority = milestone.priority
               tdiv(class = "caption-progress-milestone-item " &
-                            $milestoneStatusClass(milestone.status)):
+                            $milestoneStatusClass(status)):
                 span(class = "caption-progress-milestone-icon"):
-                  text $milestoneStatusIcon(milestone.status)
+                  text $milestoneStatusIcon(status)
                 span(class = "caption-progress-milestone-content"):
-                  text $milestone.content
-                if milestone.priority == cstring"high":
+                  text $content
+                if priority == cstring"high":
                   span(class = "caption-progress-milestone-priority"):
                     text "HIGH"
 

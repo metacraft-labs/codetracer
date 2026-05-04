@@ -518,24 +518,25 @@ proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: Cha
 
   if self.state.valueHistory.hasKey(key):
     for event in self.state.valueHistory[key].results:
+      let historyEvent = event
       let locationNode = newElement(cstring"div", cstring"history-location")
       locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
         ev.preventDefault()
-        self.historyContextAction(event, ev)
+        self.historyContextAction(historyEvent, ev)
       )
-      locationNode.appendText(cstring($event.location.rrTicks))
+      locationNode.appendText(cstring($historyEvent.location.rrTicks))
       locationElement.appendChild(locationNode)
 
       let valueNode = newElement(cstring"div", cstring"history-value")
       valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
         if cast[MouseEvent](ev).button == 0:
-          self.historyClick(event.location)
+          self.historyClick(historyEvent.location)
       )
       valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
         ev.preventDefault()
-        self.historyContextAction(event, ev)
+        self.historyContextAction(historyEvent, ev)
       )
-      valueNode.appendText(event.value.textRepr)
+      valueNode.appendText(historyEvent.value.textRepr)
       valueElement.appendChild(valueNode)
 
   textElement.appendChild(locationElement)

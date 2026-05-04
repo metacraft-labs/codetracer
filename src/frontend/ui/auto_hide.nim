@@ -752,12 +752,17 @@ proc serializeAutoHideState*(): JsObject =
 
   var panelArray = newJsArray()
   for panel in autoHideState.panels:
+    let edge = panel.edge
+    let title = panel.title
+    let content = panel.content
+    let componentId = panel.componentId
+    let config = panel.config
     let obj = js{
-      "edge": cint(ord(panel.edge)),
-      "title": panel.title,
-      "content": cint(ord(panel.content)),
-      "componentId": panel.componentId,
-      "config": panel.config
+      "edge": cint(ord(edge)),
+      "title": title,
+      "content": cint(ord(content)),
+      "componentId": componentId,
+      "config": config
     }
     panelArray.push(obj)
 
