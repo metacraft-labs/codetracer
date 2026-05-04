@@ -11,7 +11,7 @@
 	branch = devel
 [submodule "libs/nim-chronicles"]
 	path = libs/nim-chronicles
-	url = https://github.com/alehander92/nim-chronicles.git
+	url = https://github.com/metacraft-labs/nim-chronicles.git
 	branch = codetracer-unified-log-format
 [submodule "libs/nim-prompt"]
 	path = libs/nim-prompt
