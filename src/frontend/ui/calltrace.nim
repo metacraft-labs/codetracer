@@ -51,6 +51,7 @@ proc redrawCallLines(self: CalltraceComponent)
 proc loadLines(self: CalltraceComponent, fromScroll: bool)
 proc calltraceValueDomHostId(prefix: cstring, parts: varargs[cstring]): cstring
 proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent)
+proc renderCallExpandedValuesDom*(self: CallExpandedValuesComponent): Node
 
 when defined(ctInExtension):
   var calltraceComponentForExtension* {.exportc.}: CalltraceComponent = makeCalltraceComponent(data, 0, inExtension = true)
@@ -346,6 +347,55 @@ proc setExpandedValueOffset(
           tdiv(class = "empty-offset empty-offset-right-border")
       else:
         tdiv(class = "empty-offset empty-offset-right-border")
+
+proc calltraceText(value: cstring): Node =
+  document.createTextNode(value)
+
+proc calltraceNewElement(tag: cstring, className: cstring = cstring""): Node =
+  result = document.createElement(tag)
+  if className.len > 0:
+    result.setAttribute(cstring"class", className)
+
+proc setExpandedValueOffsetDom(
+  depth: int,
+  isLastValue: bool = false,
+  backIndentCount: int = 0,
+  callHasChildren: bool = false,
+  callIsLastChild: bool = false,
+  callIsCollapsed: bool = false,
+  callIsLastElement: bool = false
+): Node =
+  var emptyOffsetCount = depth - 1
+
+  if isLastValue and backIndentCount > 0:
+    emptyOffsetCount -= (backIndentCount - 1)
+
+  result = calltraceNewElement(cstring"div", cstring"call-offsets")
+
+  if callIsLastElement:
+    for i in 0..<depth:
+      result.appendChild(calltraceNewElement(cstring"div", cstring"empty-offset"))
+  else:
+    for i in 0..<emptyOffsetCount:
+      result.appendChild(calltraceNewElement(cstring"div", cstring"empty-offset"))
+    if isLastValue:
+      for i in 0..<backIndentCount - 1:
+        result.appendChild(calltraceNewElement(
+          cstring"div",
+          cstring"empty-offset empty-offset-bottom-border"))
+    if isLastValue and (not callHasChildren or callIsCollapsed):
+      if callIsLastChild:
+        result.appendChild(calltraceNewElement(
+          cstring"div",
+          cstring"empty-offset empty-offset-right-border empty-offset-bottom-border"))
+      else:
+        result.appendChild(calltraceNewElement(
+          cstring"div",
+          cstring"empty-offset empty-offset-right-border"))
+    else:
+      result.appendChild(calltraceNewElement(
+        cstring"div",
+        cstring"empty-offset empty-offset-right-border"))
 
 proc childlessCallView(self: CalltraceComponent, call: Call, active: cstring): VNode =
   let internalActive =
@@ -1707,66 +1757,75 @@ proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
 # Generic callers are expected to use direct IsoNim mount paths. All
 # real rendering is handled by tryMountIsoNimCalltrace().
 
-proc renderRemoveButtonView(self: CallExpandedValuesComponent, key: cstring): VNode =
-  buildHtml(
-    tdiv(
-      id = fmt"expanded-value-remove-button-{key}",
-      class = "remove-expanded-value",
-      onclick = proc =
-        discard jsDelete(self.values[key])
-    )
-  ):
-    text "x"
+proc renderRemoveButtonDom(
+  self: CallExpandedValuesComponent,
+  key: cstring,
+  row: Node
+): Node =
+  result = calltraceNewElement(cstring"div", cstring"remove-expanded-value")
+  result.setAttribute(cstring"id", cstring(fmt"expanded-value-remove-button-{key}"))
+  result.addEventListener(cstring"click", proc(ev: Event) =
+    discard jsDelete(self.values[key])
+    {.emit: "if (`row`.parentNode) `row`.parentNode.removeChild(`row`);".})
+  result.appendChild(calltraceText(cstring"x"))
 
-proc renderExpandedValueView(
-  self:CallExpandedValuesComponent,
+proc renderExpandedValueDom(
+  self: CallExpandedValuesComponent,
   key: cstring,
   value: ValueComponent,
   isLastValue: bool = false,
   isReturnValue: bool
-): VNode =
-  var valueClass: string
+): Node =
+  result = calltraceNewElement(cstring"div", cstring"value-expanded")
+  result.appendChild(setExpandedValueOffsetDom(
+    self.depth,
+    isLastValue,
+    self.backIndentCount,
+    self.callHasChildren,
+    self.callIsLastChild,
+    self.callIsCollapsed,
+    self.callIsLastElement))
 
-  if isReturnValue:
-    valueClass = "call-expanded-value return-value"
-  else:
-    valueClass = "call-expanded-value"
+  let valueClass =
+    if isReturnValue:
+      cstring"call-expanded-value return-value"
+    else:
+      cstring"call-expanded-value"
+  let valueContainer = calltraceNewElement(cstring"div", valueClass)
+  let hostId = calltraceValueDomHostId(
+    cstring"call-expanded-value-dom",
+    key,
+    value.baseExpression)
+  let host = calltraceNewElement(cstring"div", cstring"calltrace-direct-value-host")
+  host.setAttribute(cstring"id", hostId)
+  host.setAttribute(cstring"style", cstring"width: 100%;")
+  host.appendChild(value.renderValueDom())
+  valueContainer.appendChild(host)
+  valueContainer.appendChild(renderRemoveButtonDom(self, key, result))
+  result.appendChild(valueContainer)
 
-  buildHtml(
-    tdiv(class = "value-expanded")
-  ):
-    setExpandedValueOffset(
-      self.depth,
-      isLastValue,
-      self.backIndentCount,
-      self.callHasChildren,
-      self.callIsLastChild,
-      self.callIsCollapsed,
-      self.callIsLastElement
-    )
-    tdiv(class = valueClass):
-      renderExpandedValueHost(
-        calltraceValueDomHostId(cstring"call-expanded-value-dom", key, value.baseExpression),
-        value
-      )
-      renderRemoveButtonView(self, key)
-
-proc renderCallExpandedValues*(self: CallExpandedValuesComponent): VNode =
-  ## Render the legacy expanded call value Karax sub-tree without relying on
-  ## generic Component.render dispatch while the calltrace panel itself is
-  ## owned by IsoNim.
+proc renderCallExpandedValuesDom*(self: CallExpandedValuesComponent): Node =
+  ## Build the legacy expanded call-value container directly. The rich value
+  ## rows are owned by ValueComponent.renderValueDom(); this helper preserves
+  ## only the calltrace-specific container, offset, and remove-button shell.
   let hasReturnValue = self.values.hasKey(returnValueName)
   var lastKey = cstring""
 
-  buildHtml(tdiv(class = "call-expanded-values-container")):
-    if not hasReturnValue:
-     lastKey = getLastKey(self.values)
+  result = calltraceNewElement(cstring"div", cstring"call-expanded-values-container")
 
-    for key,value in self.values:
-      if key == returnValueName:
-        continue
-      let isLastValue = key == lastKey
-      renderExpandedValueView(self, key, value, isLastValue, false)
+  if not hasReturnValue and self.values.len > 0:
+    lastKey = getLastKey(self.values)
 
-    if hasReturnValue:
-      renderExpandedValueView(self, returnValueName, self.values[returnValueName], true, true)
+  for key, value in self.values:
+    if key == returnValueName:
+      continue
+    let isLastValue = key == lastKey
+    result.appendChild(renderExpandedValueDom(self, key, value, isLastValue, false))
+
+  if hasReturnValue:
+    result.appendChild(renderExpandedValueDom(
+      self,
+      returnValueName,
+      self.values[returnValueName],
+      true,
+      true))
