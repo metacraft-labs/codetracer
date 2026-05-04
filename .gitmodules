@@ -5,10 +5,6 @@
 [submodule "libs/poly"]
 	path = libs/poly
 	url = https://github.com/alehander92/poly.git
-[submodule "libs/karax"]
-	path = libs/karax
-	url = ../karax.git
-	branch = new-karax
 [submodule "libs/NimYAML"]
 	path = libs/NimYAML
 	url = https://github.com/status-im/NimYAML.git

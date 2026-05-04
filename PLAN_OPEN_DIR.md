@@ -177,28 +177,16 @@ This plan outlines the work needed to enable CodeTracer to open in "edit mode" o
 - **File**: `src/frontend/ui/welcome_screen.nim`
 - Modify `welcomeScreenView()` (line 703-723) to have two-column layout:
 
-  ```nim
-  proc welcomeScreenView(self: WelcomeScreenComponent): VNode =
-    buildHtml(tdiv(id = "welcome-screen", class = class)):
-      tdiv(class = "welcome-title"):
-        # ... existing title code
-      tdiv(class = "welcome-content"):
-        tdiv(class = "welcome-left-panel"):
-          recentFoldersView(self)      # NEW: folders list
-        tdiv(class = "welcome-right-panel"):
-          recentProjectsView(self)     # existing traces list
-      renderStartOptions(self)
-  ```
+  Update the direct IsoNim welcome view so the root `welcome-screen` element
+  contains a title, a two-column `welcome-content` area, and the existing start
+  options.
 
 #### 3.2 Add Recent Folders View
 
 - **File**: `src/frontend/ui/welcome_screen.nim`
 - Add new proc:
 
-  ```nim
-  proc recentFolderView(self: WelcomeScreenComponent, folder: RecentFolder, position: int): VNode
-  proc recentFoldersView(self: WelcomeScreenComponent): VNode
-  ```
+  Add direct IsoNim render helpers for a recent folder row and the folders list.
 
 - Style similar to `recentProjectsView()` but for folders
 - On click: load folder in edit mode via IPC
@@ -799,25 +787,8 @@ proc onRecordFromLaunch*(sender: js, response: jsobject(config=LaunchConfig)) {.
 
 **File**: `src/frontend/ui/launch_config_selector.nim` (NEW) or integrate into welcome_screen.nim
 
-```nim
-proc launchConfigSelectorView*(data: Data, configs: seq[LaunchConfig]): VNode =
-  buildHtml(tdiv(class = "launch-config-selector")):
-    tdiv(class = "launch-config-title"):
-      text "Select Launch Configuration"
-    tdiv(class = "launch-config-list"):
-      for i, config in configs:
-        tdiv(
-          class = "launch-config-item",
-          onclick = proc =
-            data.recordWithLaunchConfig(config)
-        ):
-          span(class = "launch-config-name"):
-            text config.name
-          span(class = "launch-config-type"):
-            text config.`type`
-          span(class = "launch-config-program"):
-            text config.program
-```
+Add a direct IsoNim selector view with a `launch-config-selector` root,
+`launch-config-title`, and one clickable `launch-config-item` per config.
 
 ### 8.6 Recording with Launch Config
 
@@ -915,30 +886,9 @@ folder "Debug":
 
 Add a dropdown/popup button to the debug toolbar for quick access:
 
-```nim
-proc launchConfigDropdown*(data: Data): VNode =
-  buildHtml(tdiv(class = "launch-config-dropdown")):
-    button(
-      class = "launch-config-trigger",
-      onclick = proc = data.ui.showLaunchConfigPopup = not data.ui.showLaunchConfigPopup
-    ):
-      span(class = "icon-record")
-      span(class = "dropdown-arrow")
-
-    if data.ui.showLaunchConfigPopup:
-      tdiv(class = "launch-config-popup"):
-        if data.launchConfigs.len == 0:
-          tdiv(class = "launch-config-empty"):
-            text "No configurations in .vscode/launch.json"
-        else:
-          for config in data.launchConfigs:
-            tdiv(
-              class = "launch-config-popup-item",
-              onclick = proc = data.recordWithLaunchConfig(config)
-            ):
-              span(class = "config-name"): text config.name
-              span(class = "config-type"): text config.`type`
-```
+Add a direct IsoNim dropdown with a `launch-config-dropdown` root,
+`launch-config-trigger`, and an optional `launch-config-popup` containing
+either an empty state or one clickable `launch-config-popup-item` per config.
 
 ### 8.12 Command Palette Integration
 

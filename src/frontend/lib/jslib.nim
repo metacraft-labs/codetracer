@@ -246,7 +246,6 @@ proc show*(e: dom.Element) =
   e.style.display = cstring"block"
 
 proc eattr*(e: dom.Node, s: string): cstring {.importcpp: "#.getAttribute('data-' + toJSStr(#))" .}
-proc eattr*(e: kdom.Node, s: string): cstring {.importcpp: "#.getAttribute('data-' + toJSStr(#))" .}
 proc createElementNS*(document: dom.Document, a: cstring, b: cstring): dom.Element {.importcpp: "(#.createElementNS(#, #))".}
 proc append*(element: dom.Element, other: dom.Element) {.importcpp: "(#.append(#))".}
 
