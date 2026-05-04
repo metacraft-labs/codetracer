@@ -64,6 +64,9 @@ Current confirmation does not change the old reference status below. Rows marked
 blocked, partial, or absent; the current IsoNim story can still be valid and
 capturable.
 
+Latest mature-state screenshot delta report:
+`tools/visual-review/mature-karax-visual-delta-20260505.md`.
+
 ## Coverage Matrix
 
 | Surface | Reference status | Reference capture |
