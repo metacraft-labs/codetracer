@@ -1475,14 +1475,6 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
   nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
     self.jumpToLocalStep(stepCount)
   )
-  # oncontextmenu = proc(e: Event, v: VNode) =
-  #   case flowValueMode:
-  #   of BeforeValueMode:
-  #     onContextMenu(e, v, beforeValue)
-  #   of AfterValueMode:
-  #     onContextMenu(e, v, afterValue)
-  #   of BeforeAndAfterValueMode:
-  #     discard
   nameSpan.appendChild(document.createTextNode(cstring(&"<{name}>")))
   result.appendChild(nameSpan)
 
@@ -1494,8 +1486,6 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
   valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
     self.jumpToLocalStep(stepCount)
   )
-  # oncontextmenu = proc(e: Event, v: VNode) =
-  #   onContextMenu(e, v, beforeValue),
   # flowEventValue intentionally has no tooltip/modal behavior. Normal
   # flow values centralize modal materialization in renderModalValueDom.
   valueSpan.appendChild(document.createTextNode(event.text))
