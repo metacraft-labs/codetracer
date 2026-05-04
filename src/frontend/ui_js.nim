@@ -1079,43 +1079,10 @@ when not defined(ctInExtension):
             calltrace.syncCalltraceDebuggerPosition(rrTicks, path, line)
             state.syncStoreDebuggerPosition(rrTicks, path, line))
 
-      # -----------------------------------------------------------------
-      # IsoNim app shell: mount the parallel IsoNim renderer.
-      #
-      # The IsoNim app renders all panels from SessionViewModel signals
-      # into a separate `#isonim-app` container. It coexists with the
-      # Karax app — both read from the same SessionViewModel instance
-      # (same-process fast path).
-      #
-      # IsoNim is enabled by default. Disable via:
-      #   - Runtime: `?karax=1` URL parameter (opt-out)
-      # -----------------------------------------------------------------
-      block:
-        var enableIsoNim = true
-        # Runtime URL parameter check: ?karax=1 disables IsoNim
-        {.emit: """
-          try {
-            var params = new URLSearchParams(window.location.search);
-            if (params.get('karax') === '1') {
-              `enableIsoNim` = false;
-            }
-          } catch(e) {}
-        """.}
-        if enableIsoNim:
-          # The isonim_app shell mount is disabled — it creates a duplicate
-          # DOM tree in #isonim-app that conflicts with the per-panel
-          # tryMount procs which mount into GoldenLayout containers (where
-          # tests and actual UI look for content). The per-panel mounts in
-          # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
-          # rendering path.
-          discard
-          # {.emit: """
-          #   var isoEl = document.getElementById('isonim-app');
-          #   if (isoEl) isoEl.style.display = 'block';
-          # """.}
-          # activeIsoNimApp = mountIsoNimApp(activeSessionVM)
-          # if not activeIsoNimApp.isNil:
-          #   clog "IsoNimApp: mounted successfully (same-process fast path)"
+      # The standalone isonim_app shell remains disabled here because it would
+      # create a duplicate DOM tree in #isonim-app. The per-panel mounts in
+      # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
+      # rendering path and mount directly into GoldenLayout containers.
 
     for content, components in data.ui.componentMapping:
       for i, component in components:

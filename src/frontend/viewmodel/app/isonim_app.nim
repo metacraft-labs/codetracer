@@ -2,12 +2,11 @@
 ##
 ## IsoNim application shell for CodeTracer.
 ##
-## This module provides the primary IsoNim rendering entry point that
-## coexists with the Karax layout manager. It renders all panels from
-## SessionViewModel signals into a dedicated `#isonim-app` container div,
-## which is visible by default. Disable via:
-##
-##   - URL parameter: `?karax=1` (opt-out, falls back to legacy Karax rendering)
+## This module provides the standalone IsoNim rendering entry point. It renders
+## all panels from SessionViewModel signals into a dedicated `#isonim-app`
+## container div. The GoldenLayout-mounted per-panel IsoNim views are the
+## canonical application path while the standalone shell remains available for
+## future layout-manager work.
 ##
 ## Architecture:
 ##
@@ -126,9 +125,9 @@ proc mountIsoNimApp*(session: SessionViewModel): IsoNimApp =
   ## full IsoNim app with all panels, or returns nil if the container div
   ## is not present in the HTML.
   ##
-  ## The app is enabled by default. The `#isonim-app` div is visible and
-  ## IsoNim mounts into it automatically. Disable with `?karax=1` URL
-  ## parameter to fall back to legacy Karax rendering.
+  ## The standalone shell is mounted only by callers that opt into this entry
+  ## point. The regular application mounts IsoNim views directly into
+  ## GoldenLayout containers.
   result = createIsoNimApp(session)
   if result.isNil:
     return
