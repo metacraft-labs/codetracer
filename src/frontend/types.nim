@@ -1158,6 +1158,7 @@ type
     runTraceButtonDom*:     kdom.Element
     searchInput*:           kdom.Element
     traceViewDom*:          kdom.Element
+    extensionRendererId*:   cstring
     lineCount*:             int
     resultsHeight*:         int
     toggleState*:           bool

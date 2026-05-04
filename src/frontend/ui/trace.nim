@@ -146,6 +146,7 @@ proc closeTrace*(self: TraceComponent)
 proc resizeTraceHandler*(self: TraceComponent)
 proc refreshTraceTableLayout*(self: TraceComponent)
 proc refreshTraceComponentLayout*(self: TraceComponent)
+proc renderTraceForExtension(self: TraceComponent)
 proc renderTrace*(self: TraceComponent): VNode
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig
 proc traceBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
@@ -159,13 +160,13 @@ when defined(ctInExtension):
       tracepointComponentMapping[name] = JsAssoc[int, TraceComponent]{}
     if not tracepointComponentMapping[name].hasKey(line):
       tracepointComponentMapping[name][line] = makeTraceComponent(data, inExtension = true, traceId = traceId)
-    if tracepointComponentMapping[name][line].kxi.isNil:
-      tracepointComponentMapping[name][line].kxi = setRenderer(proc: VNode = tracepointComponentMapping[name][line].renderTrace(), id, proc = discard)
-      tracepointComponentMapping[name][line].line = line
-      tracepointComponentMapping[name][line].name = name
-    return tracepointComponentMapping[name][line]
-    # if tracepointComponentForExtension.kxi.isNil:
-    #   tracepointComponentForExtension.kxi = setRenderer(proc: VNode = tracepointComponentForExtension.renderTrace(), id, proc = discard)
+    let trace = tracepointComponentMapping[name][line]
+    if trace.extensionRendererId.len == 0:
+      trace.extensionRendererId = id
+      trace.line = line
+      trace.name = name
+      trace.renderTraceForExtension()
+    return trace
 
 proc calcTraceWidth(self: TraceComponent) =
   let editor = self.editorUI.monacoEditor
@@ -270,9 +271,10 @@ proc applyTraceDomLayout(self: TraceComponent) =
   if traceMain.isNil:
     return
 
-  self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
-  self.calcTraceWidth()
-  traceMain.style.width = cstring(fmt"{self.traceWidth}px")
+  if not self.editorUI.isNil and not self.editorUI.monacoEditor.isNil:
+    self.editorUI.monacoEditor.config = getConfiguration(self.editorUI.monacoEditor)
+    self.calcTraceWidth()
+    traceMain.style.width = cstring(fmt"{self.traceWidth}px")
 
   let editorTextarea = jq(cstring(fmt"#trace-{self.id} .editor-textarea"))
   if not editorTextarea.isNil:
@@ -817,7 +819,12 @@ proc saveSource*(self: TraceComponent) =
 
 proc ensureEdit*(self: TraceComponent) =
   if self.selectorId.len == 0:
-    self.selectorId = cstring(&"edit-trace-{self.editorUI.id}-{self.line}")
+    let ownerId =
+      if self.editorUI.isNil:
+        self.id
+      else:
+        self.editorUI.id
+    self.selectorId = cstring(&"edit-trace-{ownerId}-{self.line}")
     self.isChanged = true
 
 proc ensureChart(self: TraceComponent) =
@@ -1399,11 +1406,10 @@ proc setEditorResizeObserver(self: TraceComponent) =
   self.resizeObserver = resizeObserver
 
 proc legacyTraceViewZoneBaseDom(self: TraceComponent): Node =
-  ## Direct DOM shell for the Monaco trace view zone.
+  ## Direct DOM shell shared by Monaco trace view zones and extension hosts.
   ##
   ## `renderTraceDom` appends the direct tracepoint editor/results subtree
-  ## below this shell; the legacy `renderTrace()` VNode path remains only for
-  ## extension surfaces.
+  ## below this shell.
   result = document.createElement(cstring"div")
   result.setAttribute(cstring"id", cstring(fmt"trace-{self.id}"))
   result.setAttribute(cstring"class", cstring"trace")
@@ -1414,8 +1420,7 @@ proc legacyTraceViewZoneBaseDom(self: TraceComponent): Node =
 
 proc renderTraceDom*(self: TraceComponent): Node =
   ## Render the inline tracepoint editor/results subtree directly for Monaco
-  ## view zones.  The legacy `renderTrace()` VNode path remains for extension
-  ## surfaces while the shared value renderer is migrated separately.
+  ## view zones and extension tracepoint hosts.
   self.ensureEdit()
   self.ensureChart()
 
@@ -1482,13 +1487,96 @@ proc renderTraceDom*(self: TraceComponent): Node =
 proc appendTraceViewZoneDomContent(self: TraceComponent) =
   self.viewZone.domNode.appendChild(self.renderTraceDom())
 
+proc bindTraceDomRefs(self: TraceComponent) =
+  self.searchInput =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .trace-search")
+    ))
+  self.traceViewDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .trace-view")
+    ))
+  self.hamburgerButton =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} #hamburger-dropdown")
+    ))
+  self.hamburgerDropdownList =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .hamburger-dropdown-container .dropdown-list")
+    ))
+  self.overlayDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .trace-disabled-overlay")
+    ))
+  self.resultsOverlayDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .trace-results-overlay")
+    ))
+  self.kindSwitchButton =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .select-view-kind-button")
+    ))
+  self.kindSwitchDropDownList =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .kind-dropdown-menu")
+    ))
+  self.chartTableDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .chart-table")
+    ))
+
+  if not self.chartTableDom.isNil:
+    self.dataTable.footerDom =
+      cast[Element](self.chartTableDom.findNodeInElement(".data-tables-footer"))
+
+  self.chartLineDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .chart-line")
+    ))
+
+  self.chartPieDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} .chart-pie")
+    ))
+
+  self.runTraceButtonDom =
+    cast[Element](jq(
+      cstring(&"#trace-{self.id} #trace-run-button")
+    ))
+
+proc renderTraceForExtension(self: TraceComponent) =
+  if self.extensionRendererId.len == 0:
+    return
+
+  let host = document.getElementById(self.extensionRendererId)
+  if host.isNil:
+    return
+
+  if not host.findNodeInElement(cstring(fmt"#trace-{self.id}")).isNil:
+    self.bindTraceDomRefs()
+    self.refreshTraceComponentLayout()
+    return
+
+  host.innerHTML = cstring""
+  let traceNode = self.legacyTraceViewZoneBaseDom()
+  traceNode.appendChild(self.renderTraceDom())
+  host.appendChild(traceNode)
+  self.bindTraceDomRefs()
+
+  discard setTimeout(proc =
+    self.ensureMonacoEditor()
+    self.refreshTraceComponentLayout()
+    self.focusTraceEditorAfterLayout()
+  , 0)
+
+method redrawForExtension*(self: TraceComponent) =
+  self.renderTraceForExtension()
+
 proc renderTrace*(self: TraceComponent): VNode =
-  ## Render the inline tracepoint editor/results Karax sub-tree.
+  ## Legacy Karax tracepoint renderer retained for non-migrated callers.
   ##
-  ## Tracepoints still embed a Karax VNode tree inside Monaco view zones and
-  ## extension surfaces, but they use this regular proc rather than a generic
-  ## ``Component.render`` override while the surrounding editor migration
-  ## continues.
+  ## The main Monaco view-zone path and the extension tracepoint host path use
+  ## `renderTraceDom` directly.
   self.ensureEdit()
   self.ensureChart()
 
@@ -1785,7 +1873,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
       ))
     trace.hamburgerButton =
       cast[Element](jq(
-        cstring(&"#trace-{trace.id} .hamburger-dropdown")
+        cstring(&"#trace-{trace.id} #hamburger-dropdown")
       ))
     trace.hamburgerDropdownList =
       cast[Element](jq(
@@ -1832,7 +1920,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
 
     trace.runTraceButtonDom =
       cast[Element](jq(
-        cstring(&"#trace-{trace.id} .run-trace-button")
+        cstring(&"#trace-{trace.id} #trace-run-button")
       ))
 
     trace.kindSwitchButton.toJs.parentNode.addEventListener(cstring("click"), proc =
