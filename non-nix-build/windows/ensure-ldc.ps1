@@ -19,7 +19,11 @@ function Ensure-Ldc {
   $version = $Toolchain["LDC_VERSION"]
   $ldcArch = ConvertTo-LdcFileArch -Arch $Arch
   $assetBase = "ldc2-$version-windows-$ldcArch"
-  $asset = "$assetBase.zip"
+  $asset = "$assetBase.7z"
+  $expectedSha = $Toolchain["LDC_WIN_X64_SHA256"]
+  if ([string]::IsNullOrWhiteSpace($expectedSha) -or $expectedSha -notmatch '^[A-Fa-f0-9]{64}$') {
+    throw "Missing or invalid LDC_WIN_X64_SHA256 in toolchain-versions.env."
+  }
   $ldcVersionRoot = Join-Path $Root "ldc/$version"
   $extractDir = Join-Path $ldcVersionRoot $assetBase
   $ldcExe = Join-Path $extractDir "bin/ldc2.exe"
@@ -44,14 +48,19 @@ function Ensure-Ldc {
   New-Item -ItemType Directory -Force -Path $ldcVersionRoot | Out-Null
   $downloadUrl = "https://github.com/ldc-developers/ldc/releases/download/v$version/$asset"
 
-  $tempZip = Join-Path $env:TEMP $asset
-  Download-File -Url $downloadUrl -OutFile $tempZip
+  $tempArchive = Join-Path $env:TEMP $asset
+  Download-File -Url $downloadUrl -OutFile $tempArchive
 
   try {
+    Assert-FileSha256 -Path $tempArchive -Expected $expectedSha
     Ensure-CleanDirectory -Path $ldcVersionRoot
-    Expand-Archive -Path $tempZip -DestinationPath $ldcVersionRoot -Force
+    $sevenZipExe = Get-SevenZipExe
+    & $sevenZipExe x $tempArchive "-o$ldcVersionRoot" -y | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to extract LDC archive '$tempArchive'."
+    }
   } finally {
-    Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempArchive -Force -ErrorAction SilentlyContinue
   }
 
   if (-not (Test-Path -LiteralPath $ldcExe -PathType Leaf)) {

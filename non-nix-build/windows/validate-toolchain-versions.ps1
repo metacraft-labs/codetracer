@@ -35,7 +35,8 @@ $requiredKeys = @(
   "TUP_PREBUILT_SHA256",
   "TUP_MSYS2_BASE_VERSION",
   "TUP_MSYS2_BASE_X64_SHA256",
-  "TUP_MSYS2_PACKAGES"
+  "TUP_MSYS2_PACKAGES",
+  "LDC_WIN_X64_SHA256"
 )
 
 $valuePatterns = @{
@@ -67,6 +68,7 @@ $valuePatterns = @{
   "TUP_MSYS2_BASE_VERSION" = '^[0-9]{8}$'
   "TUP_MSYS2_BASE_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "TUP_MSYS2_PACKAGES" = '^[A-Za-z0-9+_.-]+(?: [A-Za-z0-9+_.-]+)*$'
+  "LDC_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
 }
 
 if (-not (Test-Path -LiteralPath $FilePath)) {

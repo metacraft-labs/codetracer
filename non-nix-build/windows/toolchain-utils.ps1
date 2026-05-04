@@ -246,6 +246,30 @@ function Get-WindowsTarExe {
   throw "Unable to find tar.exe. Required to extract ct-remote archives."
 }
 
+function Get-SevenZipExe {
+  $commands = @("7z", "7za", "7zr")
+  foreach ($commandName in $commands) {
+    $command = Get-Command $commandName -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+      return $command.Source
+    }
+  }
+
+  $candidateRoots = @(
+    ${env:ProgramFiles},
+    ${env:ProgramFiles(x86)}
+  ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+  foreach ($root in $candidateRoots) {
+    $candidate = Join-Path $root "7-Zip/7z.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+
+  throw "Unable to find 7-Zip (7z.exe/7za/7zr). Required to extract .7z toolchain archives."
+}
+
 function Get-BashExe {
   $bashCommand = Get-Command bash -ErrorAction SilentlyContinue
   if ($null -eq $bashCommand -or [string]::IsNullOrWhiteSpace($bashCommand.Source)) {
