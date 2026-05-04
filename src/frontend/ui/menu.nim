@@ -40,18 +40,6 @@ proc openMainMenu(self: MenuComponent) =
   self.activePathWidths = JsAssoc[int, int]{}
   self.activePathOffsets = JsAssoc[int, int]{}
 
-proc menuNestedStyle*(self: MenuComponent, value: int, depth: int, separators: int, width: int): VStyle =
-  var left = cast[int](jq("#menu-main").toJs.clientWidth)
-
-  if depth != 1:
-    for i in 1..<depth:
-      left += cast[int](jq(cstring(fmt"#menu-nested-elements-{i}")).toJs.clientWidth)
-
-  result = style(
-    (StyleAttr.top, cstring(fmt"{value * 28 + separators * 28 - 56}px")),
-    (StyleAttr.left, cstring(fmt"calc({left}px + {2 * depth}px)"))
-  )
-
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
   # load a shortcut for this node from config
   # if we update config it should effect it
@@ -88,133 +76,6 @@ proc parentNodeAtPath(self: MenuComponent; path: seq[int]): MenuNode =
     if result.isNil or index < 0 or index >= result.elements.len:
       return nil
     result = result.elements[index]
-
-proc menuElementView*(
-  self: MenuComponent,
-  node: MenuNode,
-  i: int,
-  depth: int,
-  nameWidth: int,
-  shortcutWidth: int): VNode =
-
-  let enabledClass = if node.enabled: "menu-enabled" else: "menu-disabled"
-  let shortcut = loadShortcut(node.action, self.data.config)
-
-  buildHtml(
-    tdiv(
-      id = cstring(fmt"menu-element-{depth} {i}"),
-      class = cstring(fmt"menu-element menu-node {enabledClass}"),
-      onmouseover = proc =
-        if not self.keyNavigation:
-          self.activeIndex = i
-          self.activePath.setLen(depth + 1)
-
-          if self.activePath[depth] != i:
-              self.activePath[depth] = i
-
-        if self.keyNavigation and (self.activeIndex != i or (self.activePath.len() > 1 and self.activePath[^1] != i)):
-          self.keyNavigation = false
-
-        self.data.redraw(),
-      onclick = proc =
-        self.enterElement(node)
-    )
-  ):
-    span(class = "menu-node-icon"):
-      text ""
-    span(class = cstring(fmt"menu-node-name menu-element-{convertStringToHtmlClass(node.name)}"),
-         style = style(StyleAttr.width, cstring(fmt"{nameWidth}ch"))):
-      text node.name
-    if shortcut != "":
-      span(class = "menu-node-shortcut"):
-        text shortcut
-
-proc menuFolderView*(
-  self: MenuComponent,
-  node: MenuNode,
-  i: int,
-  depth: int,
-  parentLength: int,
-  nameWidth: int
-): VNode =
-  let enabledClass = if node.enabled: "menu-enabled" else: "menu-disabled"
-
-  buildHtml(
-    tdiv(
-      class = cstring(fmt"menu-folder menu-node {enabledClass}"),
-      onmouseover = proc =
-        if node.enabled and not self.keyNavigation:
-          if node.elements.len > 0:
-            self.activePath.setLen(depth + 1)
-            self.activeIndex = 0
-            self.activeLength = node.elements.len
-
-            if self.activePath[depth] != i:
-              self.activePath[depth] = i
-
-        if self.keyNavigation and (self.activeIndex != i or (self.activePath.len() > 1 and self.activePath[^1] != i)):
-          self.keyNavigation = false
-
-        self.data.redraw()
-    )
-  ):
-    span(class = "menu-node-icon"):
-      tdiv(class = "icon " & iconClass(node.name))
-    span(class = cstring(fmt"menu-node-name menu-folder-{convertStringToHtmlClass(node.name)}"),
-         style = style(StyleAttr.width, cstring(fmt"{nameWidth}ch"))):
-      text node.name
-      if node.elements.len > 0:
-        span(class = "menu-expand")
-
-proc menuSubGroupSeparatorView*(self: MenuComponent): VNode =
-  buildHtml(hr(class = "menu-sub-group-separator"))
-
-proc menuNodeView*(
-  self: MenuComponent,
-  node: MenuNode,
-  i: int,
-  depth: int,
-  parentLength: int,
-  nameWidth: int,
-  shortcutWidth: int
-): VNode =
-  let activeNode =
-    if (self.activePath.len == depth and self.activeIndex == i) or
-        (self.activePath.len() > 0 and self.activePath.len() != depth and self.activePath[depth] == i):
-      cstring"menu-active-node"
-    else:
-      cstring""
-
-  buildHtml(tdiv(class = "menu-node-container " & activeNode)):
-    if node.kind == MenuElement:
-      menuElementView(self, node, i, depth, nameWidth, shortcutWidth)
-    else:
-      let folderItemWidth = nameWidth + shortcutWidth - self.folderArrowCharWidth
-      menuFolderView(self, node, i, depth, parentLength, folderItemWidth)
-    if node.isBeforeNextSubGroup:
-      menuSubGroupSeparatorView(self)
-
-proc menuSearchResultView*(self: MenuComponent, res: cstring, i: int): VNode =
-  result = buildHtml(
-    tdiv(
-      class = "menu-search-result",
-      onclick = proc =
-        var action = self.data.actions[self.nameMap[res]]
-        self.runAction(action)
-    )
-  ):
-    let shortcut = loadShortcut(self.nameMap[res], self.data.config)
-    let activeSearchResult =
-      if self.activeSearchIndex == i:
-        cstring"menu-active-search-result"
-      else:
-        cstring""
-    tdiv(class = "menu-node-icon"):
-      tdiv(class = "icon " & iconClass(res))
-    span(class = "menu-node-name " & activeSearchResult):
-      text res
-    span(class = "menu-node-shortcut"):
-      text shortcut
 
 proc enterFolder*(self: MenuComponent) =
   var node = self.data.ui.menuNode
@@ -360,120 +221,6 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
 
   return (name: maxNameWidth, shortcut: maxShortcutWidth)
 
-proc navigationMenuView*(self: MenuComponent): VNode =
-  let menu = self.data.ui.menuNode
-
-  result = buildHtml(
-    tdiv(
-      id = "navigation-menu",
-      tabindex = "0",
-      onblur = proc =
-        if not self.search:
-          self.active = false
-          self.closeMenu()
-          redrawAll(),
-      onkeydown = proc(e: KeyboardEvent, tg: VNode) =
-        if e.keyCode == ESC_KEY_CODE:
-          self.active = false
-          self.closeMenu()
-          redrawAll(),
-      onmousedown = proc =
-        self.activeDomElement = cast[dom.Node](dom.window.document.activeElement)
-    )
-  ):
-    tdiv(
-      id = "menu-root",
-      onclick = proc =
-        toggle(self)
-        discard setTimeout(proc() = jq("#navigation-menu").focus(), 10)):
-      tdiv(id="menu-logo-img")
-
-    if self.active:
-      tdiv(
-        id="menu-main",
-        onmousedown = proc(ev: Event, tg: VNode) =
-          ev.stopPropagation(),
-        onmouseover = proc(ev: Event, tg: VNode) =
-          ev.stopPropagation()
-          self.search = false
-          ev.currentTarget.parentNode.focus()):
-        tdiv(id="menu-search-results"):
-          if self.searchQuery.len > 0:
-            if self.searchResults.len == 0:
-              tdiv(class="menu-no-search-results"):
-                text "No results found"
-            else:
-              for i, res in self.searchResults:
-                menuSearchResultView(self, res, i)
-        tdiv(id="menu-elements"):
-          if self.searchQuery.len == 0:
-            let nameAndShortcutWidths =
-                self.calculateMaxMenuElementWidth(menu)
-            var mainMenuWidth =
-              nameAndShortcutWidths.name + nameAndShortcutWidths.shortcut
-
-            self.activePathWidths[0] = mainMenuWidth
-            self.activePathOffsets[0] = 0
-
-            for i, element in menu.elements:
-              var shouldRender = false
-              if ui_imports.electron_lib.inElectron:
-                if not cast[bool]((element.menuOs and ord(MenuNodeOSHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
-                  shouldRender = true
-              else:
-                if not cast[bool]((element.menuOs and ord(MenuNodeOSNonHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
-                  shouldRender = true
-
-              if shouldRender:
-                menuNodeView(
-                  self,
-                  element,
-                  i,
-                  0,
-                  menu.elements.len,
-                  nameAndShortcutWidths.name,
-                  nameAndShortcutWidths.shortcut)
-
-        var current = menu
-        var sum = 0
-        for depth, i in self.activePath:
-          var separators = countSeparators(current, i)
-          current = current.elements[i]
-          sum += i
-          separators += 1
-
-          let nameAndShortcutWidths =
-            self.calculateMaxMenuElementWidth(current)
-          let submenuWidth =
-            nameAndShortcutWidths.name + nameAndShortcutWidths.shortcut
-          self.activePathWidths[depth + 1] = submenuWidth
-          self.activePathOffsets[depth + 1] =
-            self.activePathOffsets[depth] + self.activePathWidths[depth]
-
-          tdiv(
-            class = cstring(fmt"menu-nested-elements menu-top-{sum} {separators}"),
-            id = cstring(fmt"menu-nested-elements-{depth + 1}"),
-            style = menuNestedStyle(self, sum, depth + 1, separators, submenuWidth)
-          ):
-            for i2, element in current.elements:
-              var shouldRender = false
-              if ui_imports.electron_lib.inElectron:
-                if not cast[bool]((element.menuOs and ord(MenuNodeOSHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
-                  shouldRender = true
-              else:
-                if not cast[bool]((element.menuOs and ord(MenuNodeOSNonHost)) or (element.menuOs and ord(MenuNodeOSMacOS))):
-                  shouldRender = true
-
-              if shouldRender:
-                menuNodeView(
-                  self,
-                  element,
-                  i2,
-                  depth + 1,
-                  current.elements.len,
-                  nameAndShortcutWidths.name,
-                  nameAndShortcutWidths.shortcut)
-
 proc prepareSearch*(node: MenuNode): seq[js] =
   result = @[]
   if not node.enabled:
@@ -498,25 +245,6 @@ proc generateNameMap*(node: MenuNode, res: JsAssoc[cstring, ClientAction] = nil)
     result[node.name] = node.action
     if not res.isNil:
       res[node.name] = node.action
-
-
-proc renderMenu*(self: MenuComponent): VNode =
-  ## Legacy Karax menu chrome renderer.
-  ##
-  ## The live shared ``#menu`` host is refreshed by ``requestMenuRender``.
-  ## This compatibility proc is retained only for older call sites while the
-  ## deeper menu-node helper procs above are retired in later slices.
-  if not self.data.ui.menuNode.isNil and
-    not self.data.isNil:
-      self.prepared = prepareSearch(self.data.ui.menuNode)
-      self.nameMap = generateNameMap(self.data.ui.menuNode)
-  if not self.data.startOptions.shellUi:
-    self.debug.kxi = self.kxi
-    data.ui.commandPalette.kxi = self.kxi
-    self.debug.requestDebugShellRender()
-  buildHtml(tdiv()):
-    if not self.data.ui.menuNode.isNil and not defined(ctmacos):
-      navigationMenuView(self)
 
 when defined(js):
   proc shouldRenderMenuNode(node: MenuNode): bool =
@@ -719,9 +447,7 @@ when defined(js):
     ## Refresh the global menu host directly through IsoNim.
     ##
     ## This replaces the old shared ``#menu`` Karax ``setRenderer`` island.
-    ## The deeper menu state and action callbacks remain on ``MenuComponent``;
-    ## the next migration layer is to remove the remaining legacy VNode helper
-    ## procs above once this direct shell has soaked.
+    ## The deeper menu state and action callbacks remain on ``MenuComponent``.
     if self.isNil:
       return
     let container = dom_api.getElementById(dom_api.document, cstring"menu")
