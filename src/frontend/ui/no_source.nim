@@ -178,10 +178,10 @@ when defined(js):
 
   proc renderNoSourceShellDirect*(self: NoSourceComponent;
                                   placeholder: dom_api.Element) =
-    ## Materialise the no-source shell without a Karax renderer.
+    ## Materialise the no-source shell through direct DOM and IsoNim.
     ##
     ## Preserve the stable ``no-source-{id}`` host, asm-load side effect,
-    ## VM sync, and IsoNim mount lifecycle without a Karax VNode shell.
+    ## VM sync, and IsoNim mount lifecycle.
     let history = self.data.services.debugger.jumpHistory
     if history.len >= 1 and self.instructions == Instructions():
       discard self.getAsmCode(history[^1].location)

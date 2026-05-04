@@ -293,9 +293,9 @@ type
   # fixed "Whoops!" header followed by a free-form message, the
   # current high-level function/path/line trio, and — if jump history
   # was available — the previous location with a "Jump back" button.
-  # The value types below mirror that contract without dragging the
-  # JS-only Karax structures (``Component`` / ``VNode``) into the
-  # view-model layer.
+  # The value types below mirror that UI contract as plain shared data,
+  # keeping the view-model layer independent from JS-only component and
+  # DOM implementation details.
   # -------------------------------------------------------------------
 
   NoSourceLocationInfo* = object

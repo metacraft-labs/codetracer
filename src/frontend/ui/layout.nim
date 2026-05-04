@@ -175,7 +175,7 @@ proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   ## Build the GoldenLayout stack-header dropdown directly.
   ##
   ## This intentionally preserves the legacy class names and labels used by
-  ## the auto-hide GUI specs while avoiding a one-off Karax VNode island.
+  ## the auto-hide GUI specs while keeping the dropdown on the direct-DOM path.
   result = kdom.document.createElement("div")
   result.class = cstring"layout-dropdown hidden"
   result.id = cstring"layout-dropdown-toggle"
@@ -753,7 +753,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         convertComponentLabel(panel.content, panel.componentId)
     # Standalone auto-hide panels are direct IsoNim mounts.  Opening the
     # overlay reparents their existing wrapper, so refresh the specific
-    # ViewModel-backed mount instead of materialising a fresh Karax VNode.
+    # ViewModel-backed mount in place.
     if panel.content == Content.Build:
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:

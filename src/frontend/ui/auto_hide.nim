@@ -715,7 +715,8 @@ proc overlaySideTabsModel*(): tuple[
 when defined(js):
   proc requestOverlaySideEdgeTabsRender*(containerId: cstring) =
     ## Refresh the collapsed overlay side tabs through IsoNim direct DOM.
-    ## This replaces the old Karax VNode materialisation in layout.nim.
+    ## This owns the overlay tab refresh that layout.nim requests when the
+    ## active collapsed edge changes.
     let container = dom_api.getElementById(dom_api.document, containerId)
     if dom_api.isNodeNil(dom_api.Node(container)):
       return

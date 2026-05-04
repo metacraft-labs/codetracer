@@ -791,12 +791,9 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
 
     # The IsoNim event-log shell renders the footer once with a static
     # class string (`data-tables-footer 0to0`) and child counters fixed
-    # at "0".  Under the old Karax footer path that surrounding VNode
-    # was rebuilt on every `redraw()` so its class string and inner
-    # texts updated automatically — but with the IsoNim shell as primary
-    # renderer no such re-render happens.  We
-    # must therefore push the new totals into the existing DOM
-    # explicitly after each ajax callback.  `updateTableRows` recomputes
+    # at "0".  The current shell is mounted once and table redraws do not
+    # rebuild that wrapper, so its class string and inner texts must be
+    # updated explicitly after each ajax callback.  `updateTableRows` recomputes
     # `startRow`/`endRow` from the Scroller's current page and the new
     # `rowsCount`; `updateTableFooter` then writes those values into
     # the visible counters and parent class.  Page-object tests parse

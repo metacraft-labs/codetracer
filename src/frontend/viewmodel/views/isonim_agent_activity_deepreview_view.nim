@@ -80,7 +80,7 @@ import ../viewmodels/agent_activity_deepreview_vm
 const AgentActivityDeepReviewContainerClass* =
   "component-container activity-dr-container"
   ## Outer wrapper class string.  Mirrors the legacy
-  ## ``buildHtml(tdiv(class = "activity-dr-container"))`` root in
+  ## Activity DeepReview root class in
   ## ``ui/agent_activity_deepreview.nim``.  The
   ## ``component-container`` prefix matches the convention used by
   ## the other migrated panels (filesystem / scratchpad / command-
