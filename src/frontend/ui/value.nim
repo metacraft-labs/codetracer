@@ -1,7 +1,7 @@
 import
-  vstyles,
   ui_imports,
   ../[ types, renderer, utils, communication, event_helpers],
+  ../lib/isonim_styles,
   ../../common/ct_event
 
 let ATOM_KINDS = {

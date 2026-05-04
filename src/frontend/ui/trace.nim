@@ -1,7 +1,7 @@
 import
-  vstyles,
   ui_imports, value, datatable,
   ../[ types, lang, utils, renderer, communication, dap, event_helpers ],
+  ../lib/isonim_styles,
   ../../common/ct_event
 
 # ---------------------------------------------------------------------------

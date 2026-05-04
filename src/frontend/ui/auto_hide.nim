@@ -35,7 +35,7 @@
 
 import
   std / [ jsffi, jsconsole, strformat, sequtils ],
-  vstyles, kdom,
+  kdom,
   ../types,
   ../lib/[ jslib, logging ]
 # Node type comes from kdom; do not import dom.Node which conflicts.

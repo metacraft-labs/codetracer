@@ -1,9 +1,9 @@
 import
   strutils, os,
-  vstyles,
   ui_imports,
   value, scratchpad,
   ../[ renderer, communication, dap, event_helpers],
+  ../lib/isonim_styles,
   ../../common/ct_event
 
 from trace import getConfiguration
