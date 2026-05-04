@@ -976,6 +976,237 @@ proc tracepointSearchValue(self: TraceComponent): cstring =
 
   result = inputNode.value.to(cstring)
 
+proc traceTextNode(text: cstring): Node =
+  document.createTextNode(text)
+
+proc traceDiv(className: cstring = cstring""): Node =
+  result = document.createElement(cstring"div")
+  if className != cstring"":
+    result.setAttribute(cstring"class", className)
+
+proc appendTraceText(parent: Node, text: cstring) =
+  parent.appendChild(traceTextNode(text))
+
+proc traceDataTableFooterDom(self: TraceComponent): Node =
+  let table = self.dataTable
+
+  result = traceDiv(cstring(fmt"data-tables-footer {table.startRow}to{table.endRow}"))
+
+  let info = traceDiv(cstring"data-tables-footer-info")
+  result.appendChild(info)
+
+  info.appendTraceText(cstring"Rows")
+
+  let input = document.createElement(cstring"input")
+  input.setAttribute(cstring"class", cstring"ct-input-small mx-2")
+  input.value = cstring($(table.startRow))
+  input.addEventListener(cstring"keydown", proc(ev: Event) =
+    let keyboardEvent = cast[KeyboardEvent](ev)
+    if keyboardEvent.keyCode == ENTER_KEY_CODE:
+      table.inputFieldChange = false
+      scrollTable(table, ev.target.value)
+    else:
+      table.inputFieldChange = true
+      ev.stopPropagation()
+  )
+  info.appendChild(input)
+
+  info.appendTraceText(cstring"to")
+
+  let endRow = traceDiv(cstring"data-tables-footer-end-row")
+  endRow.appendTraceText(cstring($(table.endRow)))
+  info.appendChild(endRow)
+
+  info.appendTraceText(cstring"of")
+
+  let rowsCount = traceDiv(cstring"data-tables-footer-rows-count")
+  rowsCount.appendTraceText(cstring($(table.rowsCount)))
+  info.appendChild(rowsCount)
+
+proc traceChartTableDom(self: TraceComponent): Node =
+  result = traceDiv(cstring"chart-table hidden")
+  result.setAttribute(cstring"id", cstring(fmt"chart-table-{self.id}"))
+
+  let dataTable = traceDiv(cstring"data-table")
+  result.appendChild(dataTable)
+
+  let table = document.createElement(cstring"table")
+  table.setAttribute(cstring"id", cstring(fmt"trace-table-{self.id}"))
+  table.setAttribute(cstring"class", cstring"trace-table")
+  table.addEventListener(cstring"mouseover", proc(ev: Event) =
+    self.mouseIsOverTable = true
+  )
+  table.addEventListener(cstring"mouseleave", proc(ev: Event) =
+    self.mouseIsOverTable = false
+  )
+  dataTable.appendChild(table)
+
+  result.appendChild(self.traceDataTableFooterDom())
+
+proc traceChartCanvasDom(self: TraceComponent, kind: cstring, hidden: bool): Node =
+  let hiddenClass = if hidden: cstring" hidden" else: cstring""
+  result = traceDiv(cstring(fmt"chart-{kind}{hiddenClass}"))
+  result.setAttribute(cstring"id", cstring(fmt"chart-{kind}-{self.chart.chartId}"))
+
+  let canvas = document.createElement(cstring"canvas")
+  canvas.setAttribute(cstring"id", cstring(fmt"chart-{kind}-canvas-{self.chart.chartId}"))
+  result.appendChild(canvas)
+
+proc traceChartDom(self: TraceComponent): Node =
+  result = traceDiv(cstring"chart-results-container")
+  result.appendChild(self.traceChartTableDom())
+  result.appendChild(self.traceChartCanvasDom(cstring"line", self.chart.viewKind != ViewLine))
+  result.appendChild(self.traceChartCanvasDom(cstring"pie", self.chart.viewKind != ViewPie))
+
+proc traceChartKindSwitchDom(self: TraceComponent): Node =
+  let chart = self.chart
+  var kindSelectorClass = cstring"select-view-kind-button"
+  var dropdownClass = cstring"kind-dropdown-menu"
+
+  if not chart.kindSelectorIsClicked:
+    dropdownClass = dropdownClass & cstring" hidden"
+  else:
+    kindSelectorClass = kindSelectorClass & cstring" active"
+
+  result = traceDiv(cstring"select-view-kind")
+  result.setAttribute(cstring"tabindex", cstring"0")
+  result.addEventListener(cstring"mousedown", proc(ev: Event) =
+    chart.kindSelectorIsClicked = not chart.kindSelectorIsClicked
+    redrawAll()
+  )
+  result.addEventListener(cstring"blur", proc(ev: Event) =
+    chart.kindSelectorIsClicked = false
+    redrawAll()
+  )
+
+  let button = traceDiv(cstring(fmt"dropdown-toggle {kindSelectorClass}"))
+  button.setAttribute(cstring"id", cstring"dropdownMenuButton")
+  let kind = ($chart.viewKind)[4..^1].toLowerAscii().cstring
+  button.appendTraceText(kind)
+  result.appendChild(button)
+
+  let dropdown = traceDiv(dropdownClass)
+  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
+    ev.preventDefault()
+  )
+  result.appendChild(dropdown)
+
+  let tableItem = traceDiv(cstring"dropdown-item")
+  tableItem.addEventListener(cstring"mousedown", proc(ev: Event) =
+    if chart.viewKind != ViewTable:
+      chart.changed = true
+      chart.viewKind = ViewTable
+      chart.line = nil
+      chart.pie = nil
+    chart.redraw()
+  )
+  tableItem.appendTraceText(cstring"table")
+  dropdown.appendChild(tableItem)
+
+  let lineItem = traceDiv(cstring"dropdown-item")
+  lineItem.addEventListener(cstring"mousedown", proc(ev: Event) =
+    if chart.viewKind != ViewLine:
+      chart.viewKind = ViewLine
+      chart.pie = nil
+      chart.changed = true
+    chart.redraw()
+  )
+  lineItem.appendTraceText(cstring"line")
+  dropdown.appendChild(lineItem)
+
+  let pieItem = traceDiv(cstring"dropdown-item")
+  pieItem.addEventListener(cstring"mousedown", proc(ev: Event) =
+    if chart.viewKind != ViewPie:
+      chart.viewKind = ViewPie
+      chart.line = nil
+      chart.changed = true
+    chart.redraw()
+  )
+  pieItem.appendTraceText(cstring"pie")
+  dropdown.appendChild(pieItem)
+
+proc traceMenuDom(self: TraceComponent): Node =
+  let search = proc =
+    let value = self.tracepointSearchValue()
+    if not self.dataTable.context.isNil:
+      self.dataTable.context.search(value).draw()
+
+  result = traceDiv(cstring"trace-menu")
+
+  let searchContainer = traceDiv(cstring"trace-search")
+  result.appendChild(searchContainer)
+
+  let input = document.createElement(cstring"input")
+  input.setAttribute(cstring"class", cstring"ct-input-panel ct-input-search-image")
+  input.setAttribute(cstring"id", cstring(fmt"trace-input-{self.id}"))
+  input.setAttribute(cstring"type", cstring"text")
+  input.setAttribute(cstring"placeholder", cstring"Search")
+  input.addEventListener(cstring"change", proc(ev: Event) = search())
+  input.addEventListener(cstring"input", proc(ev: Event) = search())
+  searchContainer.appendChild(input)
+
+  let buttonsContainer = traceDiv(cstring"trace-buttons-container")
+  result.appendChild(buttonsContainer)
+
+  let runButton = document.createElement(cstring"button")
+  runButton.setAttribute(cstring"class", cstring"ct-button-image-md-tertiary")
+  runButton.setAttribute(cstring"id", cstring"trace-run-button")
+  runButton.addEventListener(cstring"click", proc(ev: Event) =
+    runTracepoints(self.data)
+  )
+  let tooltip = traceDiv(cstring"custom-tooltip")
+  tooltip.appendTraceText(cstring"Run tracepoints (Ctrl+Enter)")
+  runButton.appendChild(tooltip)
+  buttonsContainer.appendChild(runButton)
+
+  buttonsContainer.appendChild(self.traceChartKindSwitchDom())
+
+  let hamburgerContainer = traceDiv(cstring"hamburger-dropdown-container")
+  buttonsContainer.appendChild(hamburgerContainer)
+
+  let hamburgerButton = document.createElement(cstring"button")
+  hamburgerButton.setAttribute(cstring"class", cstring"ct-button-image-md-tertiary")
+  hamburgerButton.setAttribute(cstring"id", cstring"hamburger-dropdown")
+  hamburgerButton.setAttribute(cstring"tabindex", cstring"0")
+  hamburgerButton.addEventListener(cstring"click", proc(ev: Event) =
+    self.toggleHamburger()
+  )
+  hamburgerButton.addEventListener(cstring"blur", proc(ev: Event) =
+    self.closeHamburger()
+  )
+  hamburgerContainer.appendChild(hamburgerButton)
+
+  let dropdown = traceDiv(cstring"dropdown-list hidden")
+  dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
+    ev.preventDefault()
+  )
+  hamburgerContainer.appendChild(dropdown)
+
+  let listContainer = traceDiv(cstring"trace-dropdown-list-container")
+  dropdown.appendChild(listContainer)
+
+  let disableItem = traceDiv(cstring"trace-disable dropdown-list-item")
+  disableItem.addEventListener(cstring"click", proc(ev: Event) =
+    self.toggleTraceState()
+    self.data.redraw()
+  )
+  disableItem.appendTraceText(cstring"Disable")
+  listContainer.appendChild(disableItem)
+
+  let minimizeItem = traceDiv(cstring"trace-minimize dropdown-list-item")
+  minimizeItem.addEventListener(cstring"click", proc(ev: Event) =
+    self.editorUI.toggleTrace(self.name, self.line)
+  )
+  minimizeItem.appendTraceText(cstring"Hide")
+  listContainer.appendChild(minimizeItem)
+
+  let closeItem = traceDiv(cstring"trace-close dropdown-list-item")
+  closeItem.addEventListener(cstring"click", proc(ev: Event) =
+    self.closeTrace()
+  )
+  closeItem.appendTraceText(cstring"Delete")
+  listContainer.appendChild(closeItem)
+
 proc traceMenuView(self: TraceComponent): VNode =
   var search = proc =
     let value = self.tracepointSearchValue()
@@ -1059,6 +1290,11 @@ proc renderEdit(self: TraceComponent): VNode =
       text(if self.source.isNil: cstring"                 " else: self.source)
 
   result.isThirdParty = true
+
+proc renderEditDom(self: TraceComponent): Node =
+  result = traceDiv(cstring"edit")
+  result.setAttribute(cstring"id", self.selectorId)
+  result.appendTraceText(if self.source.isNil: cstring"                 " else: self.source)
 
 func traceLine(line: int): cstring =
   cstring($line)
@@ -1165,10 +1401,9 @@ proc setEditorResizeObserver(self: TraceComponent) =
 proc legacyTraceViewZoneBaseDom(self: TraceComponent): Node =
   ## Direct DOM shell for the Monaco trace view zone.
   ##
-  ## The full tracepoint editor/results subtree below this shell is still
-  ## Karax-owned; keep that materialization isolated in
-  ## `appendLegacyTraceViewZoneKaraxContent` until tracepoints get a direct
-  ## DOM/IsoNim renderer.
+  ## `renderTraceDom` appends the direct tracepoint editor/results subtree
+  ## below this shell; the legacy `renderTrace()` VNode path remains only for
+  ## extension surfaces.
   result = document.createElement(cstring"div")
   result.setAttribute(cstring"id", cstring(fmt"trace-{self.id}"))
   result.setAttribute(cstring"class", cstring"trace")
@@ -1177,12 +1412,75 @@ proc legacyTraceViewZoneBaseDom(self: TraceComponent): Node =
   editorHost.setAttribute(cstring"id", cstring(fmt"trace-editor-{self.id}"))
   result.appendChild(editorHost)
 
-proc appendLegacyTraceViewZoneKaraxContent(self: TraceComponent) =
-  ## Legacy boundary: `renderTrace()` still returns the Karax tracepoint
-  ## VNode tree.  Monaco view zones need a concrete DOM node, so this proc is
-  ## the only live trace view-zone materialization bridge until the tracepoint
-  ## subtree itself is migrated.
-  self.viewZone.domNode.appendChild(vnodeToDom(self.renderTrace(), KaraxInstance()))
+proc renderTraceDom*(self: TraceComponent): Node =
+  ## Render the inline tracepoint editor/results subtree directly for Monaco
+  ## view zones.  The legacy `renderTrace()` VNode path remains for extension
+  ## surfaces while the shared value renderer is migrated separately.
+  self.ensureEdit()
+  self.ensureChart()
+
+  result = traceDiv()
+
+  let traceMain = traceDiv(cstring"trace-main")
+  traceMain.addEventListener(cstring"click", proc(ev: Event) =
+    ev.stopPropagation()
+    if self.data.ui.activeFocus != self:
+      self.data.ui.activeFocus = self
+  )
+  result.appendChild(traceMain)
+
+  let chevron = traceDiv(cstring"trace-chevron")
+  chevron.appendChild(traceDiv(cstring"trace-chevron-arrow"))
+  traceMain.appendChild(chevron)
+
+  let editorInfo = traceDiv(cstring"editor-info")
+  traceMain.appendChild(editorInfo)
+
+  let editorTextarea = traceDiv(cstring(fmt"editor-textarea editor-textarea-width-{$self.editorWidth}"))
+  editorTextarea.applyStyle(style(StyleAttr.height, cstring(fmt"{self.traceEditorHeight()}px")))
+  editorInfo.appendChild(editorTextarea)
+
+  let disabledOverlay = traceDiv(cstring"trace-disabled-overlay tracepoint-overlay hidden")
+  let disabledOverlayContent = traceDiv(cstring"trace-overlay")
+  disabledOverlayContent.appendTraceText(cstring"Tracepoint is disabled")
+  disabledOverlay.appendChild(disabledOverlayContent)
+  editorTextarea.appendChild(disabledOverlay)
+
+  editorTextarea.appendChild(traceDiv(cstring"editor-textarea-empty-header"))
+  editorTextarea.appendChild(self.renderEditDom())
+
+  let editorTraces = traceDiv(cstring"editor-traces")
+  editorInfo.appendChild(editorTraces)
+  editorTraces.appendChild(self.traceMenuDom())
+
+  let traceView = traceDiv(cstring"trace-view")
+  traceView.appendChild(self.traceChartDom())
+  editorTraces.appendChild(traceView)
+
+  let resultsOverlay = traceDiv(cstring"trace-results-overlay tracepoint-overlay")
+  let resultsOverlayContent = traceDiv(cstring"trace-overlay")
+  resultsOverlayContent.appendTraceText(cstring"Press Ctrl+Enter to run the trace.")
+  resultsOverlay.appendChild(resultsOverlayContent)
+  editorTraces.appendChild(resultsOverlay)
+
+  let traceModal = traceDiv(cstring"trace-modal")
+  traceModal.setAttribute(cstring"id", cstring(fmt"trace-modal-window-{self.line}"))
+  traceMain.appendChild(traceModal)
+
+  let closeButton = document.createElement(cstring"button")
+  closeButton.setAttribute(cstring"class", cstring"modal-close-button")
+  closeButton.addEventListener(cstring"click", proc(ev: Event) =
+    document.getElementById(cstring(fmt"modal-content-{self.line}")).style.display = "none"
+    document.getElementById(cstring(fmt"trace-modal-window-{self.line}")).style.display = "none"
+  )
+  traceModal.appendChild(closeButton)
+
+  let modalContent = traceDiv()
+  modalContent.setAttribute(cstring"id", cstring(fmt"modal-content-{self.line}"))
+  traceModal.appendChild(modalContent)
+
+proc appendTraceViewZoneDomContent(self: TraceComponent) =
+  self.viewZone.domNode.appendChild(self.renderTraceDom())
 
 proc renderTrace*(self: TraceComponent): VNode =
   ## Render the inline tracepoint editor/results Karax sub-tree.
@@ -1473,7 +1771,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
     data.pointList.tracepoints[trace.tracepoint.tracepointId] = trace.tracepoint
 
     # render current trace component
-    trace.appendLegacyTraceViewZoneKaraxContent()
+    trace.appendTraceViewZoneDomContent()
 
     # sаve references to component dom elements
 
