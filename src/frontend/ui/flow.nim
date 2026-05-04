@@ -1840,34 +1840,35 @@ proc addContentWidget*(
   return widget
 
 proc makeLegend(self: FlowComponent, step: FlowStep): Node =
-  let vNode = buildHtml(
-    tdiv(
-      class="flow-loop-legend",
-      style = flowLoopLegendStyle(self, step.loop)
-    )
-  ):
-    var counter = 0
-    let valuesCount = toSeq(step.beforeValues.keys()).len
-    for expression, value in step.beforeValues:
-      counter += 1
-      tdiv(
-        class = "flow-loop-legend-expression",
-        style = legendValueStyle(self, step, expression)
-      ):
-        text expression
-      if counter < valuesCount:
-        var emptySpaceStyle = style()
-        let emptySpaceWidth =
-          self.loopStates[step.loop].positions[step.position]
-            .legendValueGapPercentage
-        emptySpaceStyle =
-          style((StyleAttr.width, cstring($(emptySpaceWidth) & "%")))
-        tdiv(
-          class = "flow-loop-empty-space",
-          style = emptySpaceStyle
-        )
+  let legendNode = document.createElement(cstring"div")
+  legendNode.setAttribute(cstring"class", cstring"flow-loop-legend")
+  legendNode.style.left = cstring($(self.maxFlowLineWidth + self.distanceToSource) & "px")
+  legendNode.style.width = cstring($(self.loopStates[step.loop].legendWidth) & "px")
 
-  let legendNode = vnodeToDom(vNode, KaraxInstance())
+  var counter = 0
+  let valuesCount = toSeq(step.beforeValues.keys()).len
+  for expression, value in step.beforeValues:
+    counter += 1
+    let valueNode = document.createElement(cstring"div")
+    valueNode.setAttribute(cstring"class", cstring"flow-loop-legend-expression")
+    let valueWidth =
+      self.loopStates[step.loop]
+        .positions[step.position]
+        .positionColumns[step.iteration]
+        .valuesExpressions[expression]
+        .expressionLegendPercent
+    valueNode.style.width = cstring($valueWidth & "%")
+    valueNode.appendChild(document.createTextNode(expression))
+    legendNode.appendChild(valueNode)
+
+    if counter < valuesCount:
+      let emptySpaceNode = document.createElement(cstring"div")
+      emptySpaceNode.setAttribute(cstring"class", cstring"flow-loop-empty-space")
+      let emptySpaceWidth =
+        self.loopStates[step.loop].positions[step.position]
+          .legendValueGapPercentage
+      emptySpaceNode.style.width = cstring($(emptySpaceWidth) & "%")
+      legendNode.appendChild(emptySpaceNode)
 
   self.flowLines[step.position].legendDom = legendNode
 
