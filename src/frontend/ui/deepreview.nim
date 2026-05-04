@@ -45,6 +45,7 @@ var isoNimDeepReviewMountedIds {.used.}: JsAssoc[int, bool] =
 
 proc syncLegacyDeepReviewIntoVM*(self: DeepReviewComponent)
 proc tryMountIsoNimDeepReviewPanel*(componentId: int)
+proc requestDeepReviewPanelRefresh*(self: DeepReviewComponent)
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers
@@ -733,6 +734,15 @@ proc syncLegacyDeepReviewIntoVM*(self: DeepReviewComponent) =
   vm.setUnifiedFiles(legacyUnifiedFilesToVm(drData))
   vm.setCallNodes(legacyCallNodesToVm(drData))
 
+proc requestDeepReviewPanelRefresh*(self: DeepReviewComponent) =
+  ## Refresh the DeepReview IsoNim mount after legacy component state
+  ## changes. Signal writes update mounted views; the mount attempt covers the
+  ## first refresh after the GoldenLayout host is created.
+  if self.isNil:
+    return
+  self.syncLegacyDeepReviewIntoVM()
+  tryMountIsoNimDeepReviewPanel(self.id)
+
 # ---------------------------------------------------------------------------
 # Hunk editor helpers (DeepReview)
 # ---------------------------------------------------------------------------
@@ -821,7 +831,7 @@ proc copyDrSelectedHunksAsPatch(self: DeepReviewComponent) =
     discard windowSetTimeout(
       proc() =
         self.drHunkCopyFeedback = false
-        redrawAll(),
+        self.requestDeepReviewPanelRefresh(),
       2000)
 
 # ---------------------------------------------------------------------------
