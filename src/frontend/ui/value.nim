@@ -1,4 +1,5 @@
 import
+  vstyles,
   ui_imports,
   ../[ types, renderer, utils, communication, event_helpers],
   ../../common/ct_event

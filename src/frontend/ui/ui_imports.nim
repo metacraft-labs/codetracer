@@ -4,7 +4,7 @@ import
     algorithm, jsffi
   ],
   # third party
-  karax, karaxdsl, vstyles, lookuptables, # lookuptables is from karax
+  karax, lookuptables, # lookuptables is from karax
   ../[ types, renderer, config, utils, lang ],
   ../lib/[ jslib, logging, monaco_lib, electron_lib, misc_lib ],
   ../ services / [event_log_service, debugger_service, editor_service, flow_service, search_service, shell_service]
@@ -17,7 +17,7 @@ from dom import Element, getAttribute, Node, preventDefault, document, getElemen
 proc jqFind*(a: cstring): js {.importcpp: "jQuery(#)".}
 
 export
-  karax, karaxdsl, kdom, asyncjs, strformat, strutils, sequtils, vstyles, jsffi, algorithm, lookuptables, vdom, sugar, os, jsconsole,
+  karax, kdom, asyncjs, strformat, strutils, sequtils, jsffi, algorithm, lookuptables, vdom, sugar, os, jsconsole,
   types, renderer, config, utils, focus, lang,
   jslib, logging, monaco_lib, electron_lib, misc_lib,
   event_log_service, debugger_service, editor_service, flow_service, shell_service,

@@ -1,5 +1,6 @@
 import
   strutils, os,
+  vstyles,
   ui_imports,
   value, scratchpad,
   ../[ renderer, communication, dap, event_helpers],
