@@ -8,6 +8,11 @@ let ATOM_KINDS = {
   types.Error, TypeKind.Raw, FunctionKind, TypeKind.None
 } # temp Function
 
+let DIRECT_VALUE_DOM_ATOM_KINDS = {
+  Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
+  FunctionKind, TypeKind.None
+}
+
 proc view(
   self: ValueComponent,
   value: Value,
@@ -17,6 +22,8 @@ proc view(
   depth: int = 0,
   annotation: cstring = ""
 ): VNode
+
+proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem]
 
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
 
@@ -796,6 +803,144 @@ proc atomValueView(self: ValueComponent, valueText: string, expression: cstring,
     else:
       switchChartKindView(self.charts[expression])
 
+proc atomValueTextAndClass(value: Value): (string, string) =
+  case value.kind:
+  of Int, Float, String, CString, Char, Bool:
+    ($value, toLowerAscii($value.kind))
+
+  of Enum, Enum16, Enum32:
+    (value.readableEnum(), "enum")
+
+  of FunctionKind:
+    (value.textRepr, "function")
+
+  of types.None:
+    ("nil", "nil")
+
+  else:
+    ("", "empty")
+
+proc inlineHistoryVisible(self: ValueComponent, expression: cstring): bool =
+  self.charts.hasKey(expression) and
+    self.showInline.hasKey(expression) and
+    self.showInline[expression]
+
+proc appendText(parent: Node, value: cstring) =
+  parent.appendChild(document.createTextNode(value))
+
+proc newElement(tag: cstring, className: cstring = cstring""): Node =
+  result = document.createElement(tag)
+  if className.len > 0:
+    result.setAttribute(cstring"class", className)
+
+proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, active: string): Node =
+  result = newElement(cstring"button")
+  result.setAttribute(cstring"class", cstring(&"{active} ct-button-image-sm-secondary ct-custom-button-size ct-ml-2"))
+  result.setAttribute(cstring"id", cstring"value-history")
+  result.addEventListener(cstring"mousedown", proc(ev: Event) =
+    if cast[MouseEvent](ev).button == 0:
+      discard self.showHistory(expression)
+  )
+
+  let tooltip = newElement(cstring"div", cstring"custom-tooltip")
+  tooltip.appendText(cstring"Toggle history value")
+  result.appendChild(tooltip)
+
+proc renderDirectAtomValueDom(
+  self: ValueComponent,
+  valueText: string,
+  expression: cstring,
+  klass: string,
+  value: Value
+): Node =
+  let klassNumber =
+    if self.i mod 2 == 0:
+      "atom-even"
+    else:
+      "atom-odd"
+
+  self.i += 1
+
+  let defaultClass =
+    if not self.charts.hasKey(expression):
+      "value-expanded-default"
+    else:
+      ""
+
+  result = newElement(
+    cstring"div",
+    cstring(fmt"value-expanded-atom atom-{klass} {klassNumber} {defaultClass}")
+  )
+
+  let textSpan = newElement(cstring"span", cstring"value-expanded-text")
+  textSpan.appendText(cstring(valueText))
+  result.appendChild(textSpan)
+
+  let typeSpan = newElement(cstring"span", cstring"value-type")
+  typeSpan.appendText(value.typ.langType)
+  result.appendChild(typeSpan)
+
+proc renderSimpleValueDom(
+  self: ValueComponent,
+  value: Value,
+  expression: cstring,
+  name: cstring,
+  depth: int = 0
+): Node =
+  var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
+  var isSelected = if self.selected: cstring"value-selected" else: cstring""
+  let active =
+    if self.showInline.hasKey(expression) and self.showInline[expression]:
+      "active"
+    else:
+      ""
+
+  result = newElement(
+    cstring"div",
+    cstring(fmt"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name")
+  )
+
+  let atomParent = newElement(cstring"div", cstring"value-expanded-atom-parent")
+  atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
+    let contextMenu = self.createContextMenuItems(value, ev)
+    let e = ev.toJs
+    let inExtension = not self.state.isNil and self.state.inExtension
+    if inExtension:
+      ev.preventDefault()
+    if contextMenu != []:
+      showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), inExtension)
+  )
+
+  let nameContainer = newElement(cstring"div", cstring"value-name-container")
+  if self.isTooltipValue and expression == self.baseExpression:
+    let scratchpadButton = newElement(cstring"div", cstring"add-to-scratchpad-button")
+    scratchpadButton.addEventListener(cstring"mousedown", proc(ev: Event) =
+      self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
+      self.redraw()
+    )
+    let tooltip = newElement(cstring"div", cstring"custom-tooltip")
+    tooltip.appendText(cstring"Add to scratchpad")
+    scratchpadButton.appendChild(tooltip)
+    nameContainer.appendChild(scratchpadButton)
+
+  let nameSpan = newElement(cstring"span", cstring"value-name")
+  nameSpan.appendText(name & cstring": ")
+  nameContainer.appendChild(nameSpan)
+  atomParent.appendChild(nameContainer)
+
+  let valueContainer = newElement(cstring"div")
+  let valueView = newElement(cstring"span", cstring"value-view")
+  valueView.applyStyle(style(StyleAttr.marginLeft, cstring"0px"))
+  let (valueText, klass) = atomValueTextAndClass(value)
+  valueView.appendChild(self.renderDirectAtomValueDom(valueText, expression, klass, value))
+  valueContainer.appendChild(valueView)
+  atomParent.appendChild(valueContainer)
+
+  if expression == self.baseExpression:
+    atomParent.appendChild(self.renderValueHistoryButtonDom(expression, active))
+
+  result.appendChild(atomParent)
+
 proc expandValueView(self: ValueComponent, value: Value, expression: cstring, left: string, right: string, empty: bool): VNode =
   var list = if empty: "" else: ".."
 
@@ -1302,12 +1447,22 @@ proc renderValue*(self: ValueComponent): VNode =
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
   result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
 
+proc canRenderSimpleValueDom(self: ValueComponent): bool =
+  not self.baseValue.isNil and
+    self.baseValue.kind in DIRECT_VALUE_DOM_ATOM_KINDS and
+    not self.uiExpanded(self.baseValue, self.baseExpression) and
+    not self.inlineHistoryVisible(self.baseExpression)
+
 proc renderValueDom*(self: ValueComponent): Node =
   ## Shared DOM entrypoint for the rich value tree.
   ##
-  ## The renderer is still backed by the existing Karax value VNode internals,
-  ## but callers that need a DOM node should use this proc instead of owning a
-  ## local ``vnodeToDom(self.renderValue(), KaraxInstance())`` bridge.
+  ## Collapsed atom/simple values render directly here. Compound values,
+  ## expanded values, and active inline history/chart states still fall back to
+  ## the legacy Karax value internals while the value renderer is migrated in
+  ## smaller behavior-preserving slices.
+  if self.canRenderSimpleValueDom():
+    return self.renderSimpleValueDom(self.baseValue, self.baseExpression, self.baseExpression, depth=0)
+
   vnodeToDom(self.renderValue(), KaraxInstance())
 
 proc renderValueDomWithLeft*(self: ValueComponent, left: cstring): Node =
@@ -1316,9 +1471,8 @@ proc renderValueDomWithLeft*(self: ValueComponent, left: cstring): Node =
   ## Monaco inline value view zones historically patched this style onto the
   ## root value VNode immediately before materialization.  Keep that contract
   ## centralized with the value DOM entrypoint.
-  var valueVNode = self.renderValue()
-  valueVNode.style = style(StyleAttr.left, left)
-  vnodeToDom(valueVNode, KaraxInstance())
+  result = self.renderValueDom()
+  result.toJs.style.left = left
 
 method redraw*(self: ValueComponent) =
   if not self.state.isNil:
