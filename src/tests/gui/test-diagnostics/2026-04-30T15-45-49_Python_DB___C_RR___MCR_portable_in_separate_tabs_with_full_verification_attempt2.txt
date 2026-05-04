@@ -1,0 +1,23 @@
+Test Failure Report
+===================
+Title: Python DB + C/RR + MCR portable in separate tabs with full verification
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 75560ms
+Timestamp: 2026-04-30T15:45:49.895Z
+
+Error 1:
+  Message: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+  Stack: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+    at EventRow.consoleOutput (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/event-log/event-row.ts:39:47)
+    at maxAttempts (/home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts:587:38)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:9)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts:582:5

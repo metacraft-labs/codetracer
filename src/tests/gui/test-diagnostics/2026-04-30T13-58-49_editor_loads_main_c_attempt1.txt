@@ -1,0 +1,18 @@
+Test Failure Report
+===================
+Title: editor loads main.c
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 12753ms
+Timestamp: 2026-04-30T13:58:49.388Z
+
+Error 1:
+  Message: Error: locator.all: Target page, context or browser has been closed
+  Stack: Error: locator.all: Target page, context or browser has been closed
+    at LayoutPage.editorTabs (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:285:10)
+    at condition (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:44:36)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:15)
+    at Object.assertEditorLoadsFile (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:42:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:14:5

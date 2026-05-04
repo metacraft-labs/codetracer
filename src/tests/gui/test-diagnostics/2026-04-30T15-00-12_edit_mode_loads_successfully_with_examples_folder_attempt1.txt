@@ -1,0 +1,26 @@
+Test Failure Report
+===================
+Title: edit mode loads successfully with examples folder
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 1117ms
+Timestamp: 2026-04-30T15:00:12.094Z
+
+Error 1:
+  Message: Error: page.waitForSelector: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+  Stack: Error: page.waitForSelector: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:41:18
+
+Error 2:
+  Message: Error: locator.isVisible: Target page, context or browser has been closed
+  Stack: Error: locator.isVisible: Target page, context or browser has been closed
+    at ensureMenuClosed (/home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:24:36)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:35:11

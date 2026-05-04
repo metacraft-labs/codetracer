@@ -1,0 +1,14 @@
+Test Failure Report
+===================
+Title: Empty state when no search performed
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/search-results-e2e.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 1136ms
+Timestamp: 2026-04-30T11:31:47.704Z
+
+Error 1:
+  Message: SyntaxError: Cannot use import statement outside a module
+  Stack: SyntaxError: Cannot use import statement outside a module
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/search-results-e2e.spec.ts:66:25

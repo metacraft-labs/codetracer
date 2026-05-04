@@ -1,0 +1,22 @@
+Test Failure Report
+===================
+Title: event log populated
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/fortran-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 7849ms
+Timestamp: 2026-04-30T12:13:25.594Z
+
+Error 1:
+  Message: Error: locator.dispatchEvent: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+
+  Stack: Error: locator.dispatchEvent: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+
+    at clickTabButton (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:20:15)
+    at Object.assertEventLogPopulated (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:61:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/fortran-sudoku.spec.ts:27:5

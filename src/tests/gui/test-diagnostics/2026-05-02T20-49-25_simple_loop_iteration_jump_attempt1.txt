@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: simple loop iteration jump
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 14116ms
+Timestamp: 2026-05-02T20:49:25.460Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for locator('#editorComponent-1').locator('.flow-parallel-value-name, .flow-loop-value-name').filter({ hasText: 'regeneration' }).locator('xpath=following-sibling::*[contains(@class,\'flow-parallel-value-box\') or contains(@class,\'flow-inline-value-box\') or contains(@class,\'flow-multiline-value-box\')]').first().or(locator('#editorComponent-1').locator('[id$="-regeneration"][class*="value-box"]').first()).first() to be visible[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for locator('#editorComponent-1').locator('.flow-parallel-value-name, .flow-loop-value-name').filter({ hasText: 'regeneration' }).locator('xpath=following-sibling::*[contains(@class,\'flow-parallel-value-box\') or contains(@class,\'flow-inline-value-box\') or contains(@class,\'flow-multiline-value-box\')]').first().or(locator('#editorComponent-1').locator('[id$="-regeneration"][class*="value-box"]').first()).first() to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:409:29

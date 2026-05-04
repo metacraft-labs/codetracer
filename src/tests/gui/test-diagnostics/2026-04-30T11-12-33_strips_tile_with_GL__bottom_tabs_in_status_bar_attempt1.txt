@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: strips tile with GL, bottom tabs in status bar
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/strip-layout-verify.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 9178ms
+Timestamp: 2026-04-30T11:12:33.103Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThanOrEqual[2m([22m[32mexpected[39m[2m)[22m
+
+Expected: >= [32m20[39m
+Received:    [31m2.996323347091675[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThanOrEqual[2m([22m[32mexpected[39m[2m)[22m
+
+Expected: >= [32m20[39m
+Received:    [31m2.996323347091675[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/strip-layout-verify.spec.ts:70:33

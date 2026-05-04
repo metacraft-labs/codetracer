@@ -1,0 +1,90 @@
+Test Failure Report
+===================
+Title: tab switching preserves all panel state across tabs
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/comprehensive-tabbed-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 60942ms
+Timestamp: 2026-04-30T12:29:25.897Z
+
+Error 1:
+  Message: Error: Component 'editor' (selector 'div[id^='editorComponent']') did not load; final count=0. Known component-like ids: filesystemComponent, vCSComponent-0, stateComponent-0, scratchpadComponent-0, calltraceComponent-0, agentActivityComponent-0, eventLogComponent-0, terminalComponent-0, auto-hide-standalone-buildComponent-0, buildComponent-0, auto-hide-standalone-errorsComponent-0, errorsComponent-0, auto-hide-standalone-searchResultsComponent-0, searchResultsComponent-0. Body sample: +
+FILES
+VCS
+ 
+source folders
+STATE
+SCRATCHPAD
+No local variables are present in the current point of execution.
+CALLTRACE
+AGENT ACTIVITY
+EVENT LOG
+TERMINAL OUTPUT
+Loading...
+Rows
+to
+0
+of
+0
+_
+_
+stable:
+BUILD
+PROBLEMS
+SEARCH RESULTS
+0
+■
+✕
+↓
+● 0
+⚠ 0
+Total: 0
+All
+Errors
+Warnings
+Group by File
+No problems detected.
+  Stack: Error: Component 'editor' (selector 'div[id^='editorComponent']') did not load; final count=0. Known component-like ids: filesystemComponent, vCSComponent-0, stateComponent-0, scratchpadComponent-0, calltraceComponent-0, agentActivityComponent-0, eventLogComponent-0, terminalComponent-0, auto-hide-standalone-buildComponent-0, buildComponent-0, auto-hide-standalone-errorsComponent-0, errorsComponent-0, auto-hide-standalone-searchResultsComponent-0, searchResultsComponent-0. Body sample: +
+FILES
+VCS
+ 
+source folders
+STATE
+SCRATCHPAD
+No local variables are present in the current point of execution.
+CALLTRACE
+AGENT ACTIVITY
+EVENT LOG
+TERMINAL OUTPUT
+Loading...
+Rows
+to
+0
+of
+0
+_
+_
+stable:
+BUILD
+PROBLEMS
+SEARCH RESULTS
+0
+■
+✕
+↓
+● 0
+⚠ 0
+Total: 0
+All
+Errors
+Warnings
+Group by File
+No problems detected.
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:80:13)
+    at LayoutPage.waitForEditorLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:135:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:169:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForAllComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:168:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/comprehensive-tabbed-replay.spec.ts:185:5

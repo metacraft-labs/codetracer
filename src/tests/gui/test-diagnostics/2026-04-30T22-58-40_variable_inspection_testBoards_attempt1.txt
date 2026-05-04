@@ -1,0 +1,18 @@
+Test Failure Report
+===================
+Title: variable inspection testBoards
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/d-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 17293ms
+Timestamp: 2026-04-30T22:58:40.978Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 10 attempts.
+  Stack: Error: Condition was not satisfied after 10 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at CallTracePane.search (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:126:5)
+    at CallTracePane.navigateToEntry (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:159:5)
+    at Object.assertFlowValueVisible (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:209:19)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/d-sudoku.spec.ts:31:5

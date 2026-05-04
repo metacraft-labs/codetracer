@@ -1,0 +1,30 @@
+Test Failure Report
+===================
+Title: create simple tracepoint
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 9980ms
+Timestamp: 2026-04-30T15:58:47.307Z
+
+Error 1:
+  Message: Error: locator.click: Element is outside of the viewport
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+[2m    - locator resolved to <span class="lm_title">EVENT LOG</span>[22m
+[2m  - attempting click action[22m
+[2m    - scrolling into view if needed[22m
+[2m    - done scrolling[22m
+
+  Stack: Error: locator.click: Element is outside of the viewport
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+[2m    - locator resolved to <span class="lm_title">EVENT LOG</span>[22m
+[2m  - attempting click action[22m
+[2m    - scrolling into view if needed[22m
+[2m    - done scrolling[22m
+
+    at EventLogPane.clickTab (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/event-log/event-log-pane.ts:34:17)
+    at createSimpleTracePoint (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1226:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1192:5

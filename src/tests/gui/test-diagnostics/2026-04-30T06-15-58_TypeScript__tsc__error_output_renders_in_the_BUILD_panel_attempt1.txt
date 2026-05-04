@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: TypeScript (tsc) error output renders in the BUILD panel
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 33853ms
+Timestamp: 2026-04-30T06:15:58.453Z
+
+Error 1:
+  Message: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#build')[22m
+
+  Stack: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#build')[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:293:40

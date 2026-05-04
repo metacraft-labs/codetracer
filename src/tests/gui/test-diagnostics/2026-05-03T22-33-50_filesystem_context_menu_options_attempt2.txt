@@ -1,0 +1,23 @@
+Test Failure Report
+===================
+Title: filesystem context menu options
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 32973ms
+Timestamp: 2026-05-03T22:33:50.685Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'filesystemComponent\']').first().locator('.filesystem') to be visible[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'filesystemComponent\']').first().locator('.filesystem') to be visible[22m
+
+    at FilesystemPane.waitForReady (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/filesystem/filesystem-pane.ts:64:28)
+    at FilesystemPane.nodeBySegments (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/filesystem/filesystem-pane.ts:99:16)
+    at FilesystemPane.nodeByPath (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/filesystem/filesystem-pane.ts:129:17)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:971:35

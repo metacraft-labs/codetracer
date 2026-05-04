@@ -1,0 +1,25 @@
+Test Failure Report
+===================
+Title: value history context menu options
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 50118ms
+Timestamp: 2026-05-01T11:51:23.953Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#context-menu-container') to be visible[22m
+[2m    62 × locator resolved to hidden <div id="context-menu-container"></div>[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#context-menu-container') to be visible[22m
+[2m    62 × locator resolved to hidden <div id="context-menu-container"></div>[22m
+
+    at ContextMenu.waitForVisible (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/components/context-menu.ts:41:26)
+    at FlowValue.openContextMenu (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/editor/flow-value.ts:94:28)
+    at FlowValue.contextMenuEntries (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/editor/flow-value.ts:102:18)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1175:21

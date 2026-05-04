@@ -1,0 +1,38 @@
+Test Failure Report
+===================
+Title: trace log context menu options
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 2
+Duration: 5974ms
+Timestamp: 2026-05-03T22:37:02.865Z
+
+Error 1:
+  Message: Error: page.evaluate: TypeError: Cannot read properties of null (reading 'getPosition')
+    at toggleTrace__5M7JARYTLmd3IychqiXcmQIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:89106:106)
+    at toggleTrace__5M7JARYTLmd3IychqiXcmQ (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:89032:97)
+    at toggleTracepointIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:159722:5)
+    at toggleTracepoint (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:159714:59)
+    at eval (eval at evaluate (:290:30), <anonymous>:9:9)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+  Stack: Error: page.evaluate: TypeError: Cannot read properties of null (reading 'getPosition')
+    at toggleTrace__5M7JARYTLmd3IychqiXcmQIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:89106:106)
+    at toggleTrace__5M7JARYTLmd3IychqiXcmQ (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:89032:97)
+    at toggleTracepointIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:159722:5)
+    at toggleTracepoint (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:159714:59)
+    at eval (eval at evaluate (:290:30), <anonymous>:9:9)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+    at toggleTrace__5M7JARYTLmd3IychqiXcmQIMLP (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:89106:106)
+    at toggleTrace__5M7JARYTLmd3IychqiXcmQ (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:89032:97)
+    at toggleTracepointIMLP (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:159722:5)
+    at toggleTracepoint (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:159714:59)
+    at eval (eval at evaluate (:290:30), <anonymous>:9:9)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+    at EditorPane.openTrace (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/editor/editor-pane.ts:301:21)
+    at maxAttempts (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1099:11)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:9)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1091:5

@@ -1,0 +1,34 @@
+Test Failure Report
+===================
+Title: state panel loaded initially
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/noir_example.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 33089ms
+Timestamp: 2026-05-01T05:23:35.719Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed
+
+Locator: locator('#code-state-line-0')
+Expected substring: [32m"17 | "[39m
+Timeout: 30000ms
+Error: element(s) not found
+
+Call log:
+[2m  - Expect "toContainText" with timeout 30000ms[22m
+[2m  - waiting for locator('#code-state-line-0')[22m
+
+  Stack: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoContainText[2m([22m[32mexpected[39m[2m)[22m failed
+
+Locator: locator('#code-state-line-0')
+Expected substring: [32m"17 | "[39m
+Timeout: 30000ms
+Error: element(s) not found
+
+Call log:
+[2m  - Expect "toContainText" with timeout 30000ms[22m
+[2m  - waiting for locator('#code-state-line-0')[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/noir_example.spec.ts:66:46

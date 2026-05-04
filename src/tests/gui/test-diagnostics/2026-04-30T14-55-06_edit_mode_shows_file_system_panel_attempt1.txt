@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: edit mode shows file system panel
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/edit_mode.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 11730ms
+Timestamp: 2026-04-30T14:55:06.912Z
+
+Error 1:
+  Message: Error: page.waitForSelector: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+  Stack: Error: page.waitForSelector: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/edit_mode.spec.ts:21:18

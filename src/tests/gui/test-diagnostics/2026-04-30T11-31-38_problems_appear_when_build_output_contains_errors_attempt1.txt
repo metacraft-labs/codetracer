@@ -1,0 +1,14 @@
+Test Failure Report
+===================
+Title: problems appear when build output contains errors
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/problems-panel.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 1097ms
+Timestamp: 2026-04-30T11:31:38.352Z
+
+Error 1:
+  Message: SyntaxError: Cannot use import statement outside a module
+  Stack: SyntaxError: Cannot use import statement outside a module
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/problems-panel.spec.ts:40:25

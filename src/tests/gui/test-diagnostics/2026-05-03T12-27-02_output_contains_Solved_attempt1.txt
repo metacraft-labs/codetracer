@@ -1,0 +1,24 @@
+Test Failure Report
+===================
+Title: output contains Solved
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 43632ms
+Timestamp: 2026-05-03T12:27:02.706Z
+
+Error 1:
+  Message: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+  Stack: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+    at EventRow.consoleOutput (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/event-log/event-row.ts:39:47)
+    at maxAttempts (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:351:31)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:9)
+    at Object.assertEventLogContainsText (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:347:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:30:5

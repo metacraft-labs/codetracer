@@ -1,0 +1,34 @@
+Test Failure Report
+===================
+Title: Test 23: trace context selector is visible with correct options
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/deepreview-gui.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 32375ms
+Timestamp: 2026-05-04T05:53:26.603Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+Locator: locator('.deepreview-trace-selector')
+Expected: visible
+Timeout: 30000ms
+Error: element(s) not found
+
+Call log:
+[2m  - Expect "toBeVisible" with timeout 30000ms[22m
+[2m  - waiting for locator('.deepreview-trace-selector')[22m
+
+  Stack: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+Locator: locator('.deepreview-trace-selector')
+Expected: visible
+Timeout: 30000ms
+Error: element(s) not found
+
+Call log:
+[2m  - Expect "toBeVisible" with timeout 30000ms[22m
+[2m  - waiting for locator('.deepreview-trace-selector')[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/deepreview-gui.spec.ts:583:45

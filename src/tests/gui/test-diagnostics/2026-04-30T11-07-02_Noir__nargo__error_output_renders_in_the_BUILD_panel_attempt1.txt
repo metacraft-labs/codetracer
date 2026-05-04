@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: Noir (nargo) error output renders in the BUILD panel
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 16164ms
+Timestamp: 2026-04-30T11:07:03.012Z
+
+Error 1:
+  Message: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+  Stack: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:228:18

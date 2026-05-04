@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: trace log disable button should flip state
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 9880ms
+Timestamp: 2026-04-30T13:44:52.511Z
+
+Error 1:
+  Message: Error: Component 'filesystem' (selector 'div[id^='filesystemComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+  Stack: Error: Component 'filesystem' (selector 'div[id^='filesystemComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:80:13)
+    at LayoutPage.waitForFilesystemLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:89:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:169:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForAllComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:168:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:682:5

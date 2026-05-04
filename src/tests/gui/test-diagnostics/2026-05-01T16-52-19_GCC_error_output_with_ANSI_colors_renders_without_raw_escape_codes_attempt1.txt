@@ -1,0 +1,15 @@
+Test Failure Report
+===================
+Title: GCC error output with ANSI colors renders without raw escape codes
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 35137ms
+Timestamp: 2026-05-01T16:52:19.147Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 30 attempts.
+  Stack: Error: Condition was not satisfied after 30 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:316:5

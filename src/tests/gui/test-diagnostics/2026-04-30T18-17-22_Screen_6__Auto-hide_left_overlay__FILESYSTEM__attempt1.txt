@@ -1,0 +1,34 @@
+Test Failure Report
+===================
+Title: Screen 6: Auto-hide left overlay (FILESYSTEM)
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/comprehensive-v2.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 9105ms
+Timestamp: 2026-04-30T18:17:22.832Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+Locator: locator('#auto-hide-strip-left .auto-hide-strip-tab').first()
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+
+Call log:
+[2m  - Expect "toBeVisible" with timeout 5000ms[22m
+[2m  - waiting for locator('#auto-hide-strip-left .auto-hide-strip-tab').first()[22m
+
+  Stack: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+Locator: locator('#auto-hide-strip-left .auto-hide-strip-tab').first()
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+
+Call log:
+[2m  - Expect "toBeVisible" with timeout 5000ms[22m
+[2m  - waiting for locator('#auto-hide-strip-left .auto-hide-strip-tab').first()[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/comprehensive-v2.spec.ts:584:27

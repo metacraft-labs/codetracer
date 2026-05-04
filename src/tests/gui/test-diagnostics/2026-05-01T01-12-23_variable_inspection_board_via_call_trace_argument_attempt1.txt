@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: variable inspection board via call trace argument
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/python-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 49901ms
+Timestamp: 2026-05-01T01:12:23.678Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 10 attempts.
+  Stack: Error: Condition was not satisfied after 10 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at CallTracePane.navigateToEntry (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:182:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/python-sudoku.spec.ts:67:25

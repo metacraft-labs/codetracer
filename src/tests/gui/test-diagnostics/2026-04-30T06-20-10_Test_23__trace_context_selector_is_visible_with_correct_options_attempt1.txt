@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: Test 23: trace context selector is visible with correct options
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/deepreview-gui.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15529ms
+Timestamp: 2026-04-30T06:20:10.681Z
+
+Error 1:
+  Message: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.deepreview-container') to be visible[22m
+
+  Stack: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.deepreview-container') to be visible[22m
+
+    at DeepReviewPage.waitForReady (/home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/page-objects/deepreview-page.ts:617:21)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/deepreview-gui.spec.ts:579:14

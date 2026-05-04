@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: event log click navigates editor
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts
+Status: failed
+Expected: passed
+Retry: 2
+Duration: 37431ms
+Timestamp: 2026-04-30T10:31:43.288Z
+
+Error 1:
+  Message: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+  Stack: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+    at EventRow.consoleOutput (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/event-log/event-row.ts:39:47)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts:133:32

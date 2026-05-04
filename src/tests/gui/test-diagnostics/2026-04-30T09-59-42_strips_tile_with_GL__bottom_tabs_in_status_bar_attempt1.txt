@@ -1,0 +1,38 @@
+Test Failure Report
+===================
+Title: strips tile with GL, bottom tabs in status bar
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/strip-layout-verify.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15891ms
+Timestamp: 2026-04-30T09:59:42.815Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveCount[2m([22m[32mexpected[39m[2m)[22m failed
+
+Locator:  locator('#status-base .auto-hide-bottom-tabs').locator('.auto-hide-strip-tab')
+Expected: [32m1[39m
+Received: [31m4[39m
+Timeout:  5000ms
+
+Call log:
+[2m  - Expect "toHaveCount" with timeout 5000ms[22m
+[2m  - waiting for locator('#status-base .auto-hide-bottom-tabs').locator('.auto-hide-strip-tab')[22m
+[2m    9 × locator resolved to 4 elements[22m
+[2m      - unexpected value "4"[22m
+
+  Stack: Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveCount[2m([22m[32mexpected[39m[2m)[22m failed
+
+Locator:  locator('#status-base .auto-hide-bottom-tabs').locator('.auto-hide-strip-tab')
+Expected: [32m1[39m
+Received: [31m4[39m
+Timeout:  5000ms
+
+Call log:
+[2m  - Expect "toHaveCount" with timeout 5000ms[22m
+[2m  - waiting for locator('#status-base .auto-hide-bottom-tabs').locator('.auto-hide-strip-tab')[22m
+[2m    9 × locator resolved to 4 elements[22m
+[2m      - unexpected value "4"[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/strip-layout-verify.spec.ts:96:34

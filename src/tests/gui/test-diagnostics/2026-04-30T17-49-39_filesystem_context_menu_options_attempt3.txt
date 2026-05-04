@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: filesystem context menu options
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 2
+Duration: 2422ms
+Timestamp: 2026-04-30T17:49:39.681Z
+
+Error 1:
+  Message: Error: Filesystem node 'source folders' at level 1 was not found.
+  Stack: Error: Filesystem node 'source folders' at level 1 was not found.
+    at FilesystemPane.locateNode (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/filesystem/filesystem-pane.ts:75:11)
+    at FilesystemPane.nodeBySegments (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/filesystem/filesystem-pane.ts:93:28)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:916:18

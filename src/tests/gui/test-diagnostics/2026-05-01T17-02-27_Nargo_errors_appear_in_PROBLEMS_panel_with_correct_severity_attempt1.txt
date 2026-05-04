@@ -1,0 +1,45 @@
+Test Failure Report
+===================
+Title: Nargo errors appear in PROBLEMS panel with correct severity
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 7361ms
+Timestamp: 2026-05-01T17:02:28.163Z
+
+Error 1:
+  Message: Error: page.evaluate: TypeError: Cannot read properties of null (reading 'length')
+    at cstrToNimstrIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:10866:44)
+    at cstrToNimstr (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:10862:51)
+    at syncLegacyBuildIntoVM__dKde9aHAlO4LTuYNaPWeGpAIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:55350:84)
+    at syncLegacyBuildIntoVM__dKde9aHAlO4LTuYNaPWeGpA (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:55330:119)
+    at renderAutoHidePanelById__09cRKdSkNKtMow1k03jEOjAIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:60133:5)
+    at renderAutoHidePanelById__09cRKdSkNKtMow1k03jEOjA (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:60119:123)
+    at window.__ctRenderPanel (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:62137:7)
+    at eval (eval at evaluate (:290:30), <anonymous>:36:14)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+  Stack: Error: page.evaluate: TypeError: Cannot read properties of null (reading 'length')
+    at cstrToNimstrIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:10866:44)
+    at cstrToNimstr (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:10862:51)
+    at syncLegacyBuildIntoVM__dKde9aHAlO4LTuYNaPWeGpAIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:55350:84)
+    at syncLegacyBuildIntoVM__dKde9aHAlO4LTuYNaPWeGpA (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:55330:119)
+    at renderAutoHidePanelById__09cRKdSkNKtMow1k03jEOjAIMLP (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:60133:5)
+    at renderAutoHidePanelById__09cRKdSkNKtMow1k03jEOjA (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:60119:123)
+    at window.__ctRenderPanel (file:///home/zahary/metacraft/codetracer/src/build-debug/ui.js:62137:7)
+    at eval (eval at evaluate (:290:30), <anonymous>:36:14)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+    at cstrToNimstrIMLP (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:10866:44)
+    at cstrToNimstr (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:10862:51)
+    at syncLegacyBuildIntoVM__dKde9aHAlO4LTuYNaPWeGpAIMLP (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:55350:84)
+    at syncLegacyBuildIntoVM__dKde9aHAlO4LTuYNaPWeGpA (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:55330:119)
+    at renderAutoHidePanelById__09cRKdSkNKtMow1k03jEOjAIMLP (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:60133:5)
+    at renderAutoHidePanelById__09cRKdSkNKtMow1k03jEOjA (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:60119:123)
+    at window.__ctRenderPanel (/home/zahary/metacraft/codetracer/src/build-debug/ui.js:62137:7)
+    at eval (eval at evaluate (:290:30), <anonymous>:36:14)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+    at injectBuildProblems (/home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:163:14)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:399:11

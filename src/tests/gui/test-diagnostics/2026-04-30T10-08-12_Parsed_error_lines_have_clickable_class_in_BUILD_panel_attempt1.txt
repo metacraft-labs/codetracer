@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: Parsed error lines have clickable class in BUILD panel
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15602ms
+Timestamp: 2026-04-30T10:08:12.639Z
+
+Error 1:
+  Message: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+  Stack: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:703:18

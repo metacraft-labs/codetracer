@@ -1,0 +1,31 @@
+Test Failure Report
+===================
+Title: Python DB + C/RR + MCR portable in separate tabs with full verification
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 93059ms
+Timestamp: 2026-04-30T11:18:59.378Z
+
+Error 1:
+  Message: Error: ct record failed: error=Error: spawnSync /home/zahary/metacraft/codetracer/src/build-debug/bin/ct ETIMEDOUT; status=0
+stderr: 
+stdout: artifact_cache: enabled=false policy=explicit-opt-in source=default-disabled
+program /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main.c lang c project File
+[codetracer] building with:
+  gcc /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main.c -o /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main -O0 -g3
+binary: /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main
+
+
+  Stack: Error: ct record failed: error=Error: spawnSync /home/zahary/metacraft/codetracer/src/build-debug/bin/ct ETIMEDOUT; status=0
+stderr: 
+stdout: artifact_cache: enabled=false policy=explicit-opt-in source=default-disabled
+program /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main.c lang c project File
+[codetracer] building with:
+  gcc /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main.c -o /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main -O0 -g3
+binary: /home/zahary/metacraft/codetracer/test-programs/c_sudoku_solver/main
+
+
+    at recordTestProgram (/home/zahary/metacraft/codetracer/src/tests/gui/lib/fixtures.ts:389:11)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts:433:39

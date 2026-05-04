@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: variable inspection test_boards
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-mcr-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 16098ms
+Timestamp: 2026-04-30T13:55:32.721Z
+
+Error 1:
+  Message: Error: Component 'filesystem' (selector 'div[id^='filesystemComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+  Stack: Error: Component 'filesystem' (selector 'div[id^='filesystemComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:80:13)
+    at LayoutPage.waitForFilesystemLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:89:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:188:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForBaseComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:187:5)
+    at Object.assertFlowValueVisible (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:176:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-mcr-replay.spec.ts:36:5

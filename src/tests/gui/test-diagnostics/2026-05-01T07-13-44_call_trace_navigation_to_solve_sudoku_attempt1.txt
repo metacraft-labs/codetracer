@@ -1,0 +1,23 @@
+Test Failure Report
+===================
+Title: call trace navigation to solve_sudoku
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-materialized-replay.spec.ts
+Status: interrupted
+Expected: passed
+Retry: 0
+Duration: 11817ms
+Timestamp: 2026-05-01T07:13:44.954Z
+
+Error 1:
+  Message: Error: Channel closed
+  Stack: Error: Channel closed
+
+Error 2:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at condition (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:79:70)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:15)
+    at CallTracePane.waitForReady (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:77:5)
+    at CallTracePane.navigateToEntry (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:153:5)
+    at Object.assertCallTraceNavigation (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:131:17)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-materialized-replay.spec.ts:50:5

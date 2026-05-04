@@ -1,0 +1,266 @@
+Test Failure Report
+===================
+Title: event log shows stdout from all phases
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 10318ms
+Timestamp: 2026-04-30T12:00:31.871Z
+
+Error 1:
+  Message: Error: locator.click: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /home/zahary/metacraft/codetracer/src/build-debug/bin/ct --inspect=0 --remote-debugging-port=0
+<launched> pid=2144596
+[pid=2144596][err] Debugger listening on ws://127.0.0.1:33971/7ab5b629-2211-48f8-829c-989cb6b24507
+[pid=2144596][err] For help, see: https://nodejs.org/en/docs/inspector
+[pid=2144596][err] Debugger attached.
+[pid=2144596][err] 
+[pid=2144596][err] DevTools listening on ws://127.0.0.1:34045/devtools/browser/918c3d1d-1d87-4c64-8f70-34df8e786d8a
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: ready start
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: backendManagerExe = /home/zahary/metacraft/codetracer/src/build-debug/bin/session-manager
+[pid=2144596][out] { stdio: [32m'inherit'[39m, windowsHide: [33mtrue[39m }
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: session-manager started, pid = 2144635
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: waiting for socket at /tmp/codetracer/session-manager/2144635.sock
+[pid=2144596][err] INFO [session_manager::backend_manager] Socket listening on: /tmp/codetracer/session-manager/2144635.sock
+[pid=2144596][err] [2144596:0430/150023.477408:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.Properties.Get: object_path= /org/freedesktop/portal/desktop: org.freedesktop.DBus.Error.InvalidArgs: No such interface “org.freedesktop.portal.FileChooser”
+[pid=2144596][err] [2144596:0430/150023.477431:ERROR:electron/shell/browser/ui/file_dialog_linux_portal.cc:88] Failed to read portal version property
+[pid=2144596][err] INFO [session_manager::backend_manager] Connected
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: session manager socket configured
+[pid=2144596][out] INFO [ct](config.nim:206):index: load config /home/zahary/.config/codetracer/.config.yaml
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: config loaded
+[pid=2144596][out] INFO [ct](window.nim:27):index: TIME for opening the browser window from index: 415ms
+[pid=2144596][out] INFO [ct](window.nim:162):index: registered main window id=1 in session 0
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: main window created
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: layout/helpers loaded, calling data.init
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: data.init dispatched
+[pid=2144596][out] INFO [ct](traces.nim:59):index: assignTrace resolved trace 5278 folder /home/zahary/.local/share/codetracer/trace-5278/
+[pid=2144596][out] INFO [ct](traces.nim:304):index: requesting new replay for trace 5278
+[pid=2144596][out] INFO [ct](traces.nim:304):index: ct/start-replay for trace folder /home/zahary/.local/share/codetracer/trace-5278/
+[pid=2144596][err] INFO [session_manager::backend_manager] Starting replay with id 0. Command: Command { std: "/home/zahary/metacraft/codetracer/src/build-debug/bin/replay-server" "dap-server" "/tmp/codetracer/session-manager/2144635/0.sock", kill_on_drop: false }
+[pid=2144596][err] INFO [session_manager::backend_manager] Awaiting connection!
+[pid=2144596][err] last "/tmp/codetracer/last"
+[pid=2144596][err] INFO [session_manager::backend_manager] Accepted connection!
+[pid=2144596][out] INFO [ct](traces.nim:304):index: selecting replayId 0
+[pid=2144596][err] INFO [session_manager::backend_manager] Selecting replay 0
+[pid=2144596][out] Trying to send acp msg
+[pid=2144596][out] ERROR [ct](traces.nim:126):loadSymbols for self contained trace trying to read from /home/zahary/.local/share/codetracer/trace-5278/symbols.json: {"errno":-2,"code":"ENOENT","syscall":"open","path":"/home/zahary/.local/share/codetracer/trace-5278/symbols.json"}
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=0, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=0, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+[pid=2144596][out] {
+[pid=2144596][out]   location: {
+[pid=2144596][out]     path: [32m'/home/zahary/metacraft/codetracer/test-programs/py_streaming_test/main.py'[39m,
+[pid=2144596][out]     line: [33m-1[39m,
+[pid=2144596][out]     status: [1mnull[22m,
+[pid=2144596][out]     functionName: [32m''[39m,
+[pid=2144596][out]     event: [33m0[39m,
+[pid=2144596][out]     expression: [1mnull[22m,
+[pid=2144596][out]     highLevelPath: [32m'/home/zahary/metacraft/codetracer/test-programs/py_streaming_test/main.py'[39m,
+[pid=2144596][out]     highLevelLine: [33m-1[39m,
+[pid=2144596][out]     highLevelFunctionName: [1mnull[22m,
+[pid=2144596][out]     lowLevelPath: [1mnull[22m,
+[pid=2144596][out]     lowLevelLine: [33m0[39m,
+[pid=2144596][out]     rrTicks: [33m0[39m,
+[pid=2144596][out]     functionFirst: [33m0[39m,
+[pid=2144596][out]     functionLast: [33m0[39m,
+[pid=2144596][out]     highLevelFunctionFirst: [33m0[39m,
+[pid=2144596][out]     highLevelFunctionLast: [33m0[39m,
+[pid=2144596][out]     offset: [33m0[39m,
+[pid=2144596][out]     error: [33mfalse[39m,
+[pid=2144596][out]     callstackDepth: [33m0[39m,
+[pid=2144596][out]     originatingInstructionAddress: [33m0[39m,
+[pid=2144596][out]     key: [1mnull[22m,
+[pid=2144596][out]     globalCallKey: [1mnull[22m,
+[pid=2144596][out]     expansionParents: [],
+[pid=2144596][out]     expansionDepth: [33m0[39m,
+[pid=2144596][out]     expansionId: [33m0[39m,
+[pid=2144596][out]     expansionFirstLine: [33m0[39m,
+[pid=2144596][out]     expansionLastLine: [33m0[39m,
+[pid=2144596][out]     isExpanded: [33mfalse[39m,
+[pid=2144596][out]     missingPath: [33mfalse[39m
+[pid=2144596][out]   },
+[pid=2144596][out]   name: [32m'/home/zahary/metacraft/codetracer/test-programs/py_streaming_test/main.py'[39m,
+[pid=2144596][out]   editorView: [33m0[39m,
+[pid=2144596][out]   lang: [33m23[39m
+[pid=2144596][out] }
+[pid=2144596][out] index_config open: file read succesfully
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=1, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+[pid=2144596][err] /bin/sh: -c: line 1: syntax error near unexpected token `('
+[pid=2144596][err] /bin/sh: -c: line 1: `git branch --format=%(refname:short)'
+[pid=2144596][err] [2m2026-04-30T12:00:25.296227Z[0m [32m INFO[0m [2mcodex_core::config[0m[2m:[0m cwd not set, using current dir
+[pid=2144596][out] Spawning language server: rust-analyzer
+[pid=2144596][out] LSP bridge listening on ws://localhost:46651/lsp
+[pid=2144596][out] INFO [ct](lsp_bridge.nim:209):index:lsp bridge (rust) listening on ws://127.0.0.1:46651/lsp
+[pid=2144596][out] Spawning language server: ruby-lsp
+[pid=2144596][out] LSP bridge listening on ws://localhost:38539/ruby-lsp
+[pid=2144596][out] INFO [ct](lsp_bridge.nim:209):index:lsp bridge (ruby) listening on ws://127.0.0.1:38539/ruby-lsp
+[pid=2144596][out] Spawning language server: nimlangserver
+[pid=2144596][out] LSP bridge listening on ws://localhost:45917/nim-lsp
+[pid=2144596][out] INFO [ct](lsp_bridge.nim:209):index:lsp bridge (nim) listening on ws://127.0.0.1:45917/nim-lsp
+[pid=2144596][err] [2m2026-04-30T12:00:25.319556Z[0m [32m INFO[0m [2mcodex_acp::codex_agent[0m[2m:[0m Creating new session with cwd: /home/zahary/metacraft/codetracer
+[pid=2144596][err] [2m2026-04-30T12:00:25.320827Z[0m [32m INFO[0m [2mcodex_otel::otel_manager[0m[2m:[0m [3mevent.name[0m[2m=[0m"codex.conversation_starts" [3mevent.timestamp[0m[2m=[0m2026-04-30T12:00:25.320Z [3mconversation.id[0m[2m=[0m019dde42-fce8-7aa1-b133-a1649476998e [3mapp.version[0m[2m=[0m0.0.0 [3mauth_mode[0m[2m=[0m"ChatGPT" [3muser.account_id[0m[2m=[0m"2655eeb5-0f4a-40a3-b6a1-0a38f9c9c8ee" [3muser.email[0m[2m=[0m"zahary.karadjov@metacraft-labs.com" [3mterminal.type[0m[2m=[0mtmux/3.5a [3mmodel[0m[2m=[0mgpt-5.5 [3mslug[0m[2m=[0mgpt-5.5 [3mprovider_name[0m[2m=[0mOpenAI [3mreasoning_effort[0m[2m=[0m"xhigh" [3mreasoning_summary[0m[2m=[0mauto [3mapproval_policy[0m[2m=[0mon-request [3msandbox_policy[0m[2m=[0mread-only [3mmcp_servers[0m[2m=[0m""
+[pid=2144596][err] [2m2026-04-30T12:00:25.323882Z[0m [33m WARN[0m [2mcodex_acp::conversation[0m[2m:[0m Received event for unknown submission ID:  McpStartupComplete(McpStartupCompleteEvent { ready: [], failed: [], cancelled: [] })
+[pid=2144596][err] [2m2026-04-30T12:00:25.323894Z[0m [33m WARN[0m [2mcodex_acp::conversation[0m[2m:[0m Received event for unknown submission ID: auto-compact-0 RawResponseItem(RawResponseItemEvent { item: Message { id: None, role: "user", content: [InputText { text: "# AGENTS.md instructions for /home/zahary/metacraft/codetracer\n\n<INSTRUCTIONS>\n# User Environment\n\n- macOS and Linux workstations, both managed by Nix (home-manager).\n- Configuration files under `~/.config/` are often read-only symlinks\n  into the Nix store. Do not attempt to write to them directly.\n- Dotfiles source repo: `~/dotfiles` (uses GNU Stow for `$HOME` symlinks\n  and home-manager for Nix-managed configs).\n- To change a Nix-managed config, edit the source in `~/dotfiles` and\n  rebuild (`home-switch`).\n\n--- project-doc ---\n\n# Instructions for Codex\n\n## Building the full frontend (Nim + Electron)\n\nTo rebuild the full CodeTracer frontend (Nim backend CLI, Nim renderer JS, webpack bundles):\n\n```\njust build-once\n```\n\nThis runs tup (incremental build) and webpack. Use this after modifying any `.nim` files in\n`src/ct/`, `src/frontend/`, or `src/common/`.\n\n## Building the db-backend\n\n```\n# inside src/db-backend\ncargo build\n```\n\n## Running tests\n\n```\n# inside src/db-backend\ncargo test\n```\n\n## Running the linter\n\n```\n# inside src/db-backend\ncargo clippy\n```\n\nDon't disable the lint: try to fix the code instead first!\n\n## Running Playwright e2e tests\n\n```\n# From the repo root (needs Xvfb or a display)\njust test-e2e\n```\n\nThe Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app via the `ct`\nbinary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`\nfirst to rebuild the frontend before running the tests.\n\n## Windows local setup (non-Nix)\n\nFor Windows development (both x64 and ARM64), use the DIY bootstrap:\n\n### Activate environment (auto-installs tools on first run)\n```bash\n# Git Bash / MSYS2\nsource env.sh\n\n# PowerShell\n. .\\env.ps1\n```\n\n### Optional skip flags\nComponents can be skipped via environment variables (e.g. for satellite repos\nthat only need a subset):\n- `WINDOWS_DIY_SKIP_NARGO=1` — skip Noir compiler\n- `WINDOWS_DIY_SKIP_CT_REMOTE=1` — skip ct-remote desktop client\n- `WINDOWS_DIY_ENSURE_TTD=0` — skip TTD/WinDbg validation\n\n### Build commands (Windows)\n```bash\n# Rust components\ncd src/db-backend && cargo build && cargo test && cargo clippy\ncd src/tui && cargo build && cargo test\ncd src/backend-manager && cargo build\n\n# Full frontend (Nim + Tup)\ncd src/build-debug && source ../../env.sh && tup upd\n```\n\n### Version pins\nPinned tool versions are tracked in:\n```\nnon-nix-build/windows/toolchain-versions.env\n```\n\nFor detailed Windows porting progress, see `windows-porting-initiative-status.md`.\n\n## Nix dev shell and local flake overrides\n\nThe `.envrc` auto-detects sibling repos and passes `--override-input` flags\nto `nix develop`. The sibling map is in `.envrc` (the `_ct_sibling_map` array).\n\n### Blockchain recorder tools (circom, forc)\n\nThe codetracer nix dev shell includes `circom` and `forc` from the\n`nix-blockchain-development` flake input. These are needed by the Circom\nand Fuel/Sway recorders at runtime.\n\nFor the packages to resolve, the local `nix-blockchain-development` checkout\nmust be used (the `main` branch has all packages; the pinned `stylus-tools`\nbranch in `flake.lock` does not). The `.envrc` sibling map includes\n`nix-blockchain-development` for automatic local override.\n\n### Invalidating the nix-direnv cache\n\nWhen you modify a local override input (e.g. change a package in\n`../nix-blockchain-development`), `nix-direnv` may serve a stale cached\nenvironment. To force re-evaluation:\n\n```bash\n# Option 1: Delete the cached profile\nrm -rf .direnv/flake-profile-* .direnv/flake-inputs\ndirenv allow\n\n# Option 2: Use nix develop directly (bypasses nix-direnv cache)\nnix develop '.?submodules=1' --override-input nix-blockchain-development path:../nix-blockchain-development -c bash\n```\n\nThe `nix develop` approach always evaluates fresh and is useful for testing\nchanges to override inputs before waiting for nix-direnv to catch up.\n\n### Cadence Go helper\n\nThe `detect-siblings.sh` script auto-builds `cadence-trace-helper` from\n`codetracer-flow-recorder/go-helper/` when the flow recorder sibling is\npresent and `go` is available. The built binary is exported via\n`CADENCE_HELPER_BIN` and added to PATH.\n\n# Keeping notes\n\nIn the `.agents/codebase-insights.txt` file, we try to maintain useful tips that may help\nyou in your development tasks. When you discover something important or surprising about\nthe codebase, add a remark in a comment near the relevant code or in the codebase-insights\nfile. ALWAYS remove older remarks if they are no longer true.\n\nYou can consult this file before starting your coding tasks.\n\n# Code quality guidelines\n\n- ALWAYS strive to achieve high code quality.\n- ALWAYS write secure code.\n- ALWAYS make sure the code is well tested and edge cases are covered. Design the code for testability and be extremely thorough.\n- ALWAYS write defensive code and make sure all potential errors are handled.\n- ALWAYS strive to write highly reusable code with routines that have high fan in and low fan out.\n- ALWAYS keep the code DRY.\n- Aim for low coupling and high cohesion. Encapsulate and hide implementation details.\n- When creating executable, ALWAYS make sure the functionality can also be used as a library.\n  To achieve this, avoid global variables, raise/return errors instead of terminating the program, and think whether the use case of the library requires more control over logging\n  and metrics from the application that integrates the library.\n\n# Code commenting guidelines\n\n- Document public APIs and complex modules using standard code documentation conventions.\n- Comment the intention behind your code extensively. Omit comments only for very obvious\n  facts that almost any developer would know.\n- Maintain the comments together with the code to keep them meaningful and current.\n- When the code is based on specific formats, standards or well-specified behavior of\n  other software, always make sure to include relevant links (URLs) that provide the\n  necessary technical details.\n\n# Writing git commit messages\n\n- You MUST use multiline git commit messages.\n- Use the conventional commits style for the first line of the commit message.\n- Use the summary section of your final response as the remaining lines in the commit message.\n\n</INSTRUCTIONS>" }] } })
+[pid=2144596][err] [2m2026-04-30T12:00:25.323937Z[0m [33m WARN[0m [2mcodex_acp::conversation[0m[2m:[0m Received event for unknown submission ID: auto-compact-0 RawResponseItem(RawResponseItemEvent { item: Message { id: None, role: "user", content: [InputText { text: "<environment_context>\n  <cwd>/home/zahary/metacraft/codetracer</cwd>\n  <approval_policy>on-request</approval_policy>\n  <sandbox_mode>read-only</sandbox_mode>\n  <network_access>restricted</network_access>\n  <shell>zsh</shell>\n</environment_context>" }] } })
+[pid=2144596][out] [acp_ipc] session-init clientSessionId=agent-session-0 acpSessionId=019dde42-fce8-7aa1-b133-a1649476998e workspace=
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=1, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+[2m    - locator resolved to <span class="lm_title">EVENT LOG</span>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - element is outside of the viewport[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - element is outside of the viewport[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    11 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is visible, enabled and stable[22m
+[2m       - scrolling into view if needed[22m
+[2m       - done scrolling[22m
+[2m       - element is outside of the viewport[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m
+
+  Stack: Error: locator.click: Target page, context or browser has been closed
+Browser logs:
+
+<launching> /home/zahary/metacraft/codetracer/src/build-debug/bin/ct --inspect=0 --remote-debugging-port=0
+<launched> pid=2144596
+[pid=2144596][err] Debugger listening on ws://127.0.0.1:33971/7ab5b629-2211-48f8-829c-989cb6b24507
+[pid=2144596][err] For help, see: https://nodejs.org/en/docs/inspector
+[pid=2144596][err] Debugger attached.
+[pid=2144596][err] 
+[pid=2144596][err] DevTools listening on ws://127.0.0.1:34045/devtools/browser/918c3d1d-1d87-4c64-8f70-34df8e786d8a
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: ready start
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: backendManagerExe = /home/zahary/metacraft/codetracer/src/build-debug/bin/session-manager
+[pid=2144596][out] { stdio: [32m'inherit'[39m, windowsHide: [33mtrue[39m }
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: session-manager started, pid = 2144635
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: waiting for socket at /tmp/codetracer/session-manager/2144635.sock
+[pid=2144596][err] INFO [session_manager::backend_manager] Socket listening on: /tmp/codetracer/session-manager/2144635.sock
+[pid=2144596][err] [2144596:0430/150023.477408:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.Properties.Get: object_path= /org/freedesktop/portal/desktop: org.freedesktop.DBus.Error.InvalidArgs: No such interface “org.freedesktop.portal.FileChooser”
+[pid=2144596][err] [2144596:0430/150023.477431:ERROR:electron/shell/browser/ui/file_dialog_linux_portal.cc:88] Failed to read portal version property
+[pid=2144596][err] INFO [session_manager::backend_manager] Connected
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: session manager socket configured
+[pid=2144596][out] INFO [ct](config.nim:206):index: load config /home/zahary/.config/codetracer/.config.yaml
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: config loaded
+[pid=2144596][out] INFO [ct](window.nim:27):index: TIME for opening the browser window from index: 415ms
+[pid=2144596][out] INFO [ct](window.nim:162):index: registered main window id=1 in session 0
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: main window created
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: layout/helpers loaded, calling data.init
+[pid=2144596][out] INFO [ct](ipc_utils.nim:113):index: data.init dispatched
+[pid=2144596][out] INFO [ct](traces.nim:59):index: assignTrace resolved trace 5278 folder /home/zahary/.local/share/codetracer/trace-5278/
+[pid=2144596][out] INFO [ct](traces.nim:304):index: requesting new replay for trace 5278
+[pid=2144596][out] INFO [ct](traces.nim:304):index: ct/start-replay for trace folder /home/zahary/.local/share/codetracer/trace-5278/
+[pid=2144596][err] INFO [session_manager::backend_manager] Starting replay with id 0. Command: Command { std: "/home/zahary/metacraft/codetracer/src/build-debug/bin/replay-server" "dap-server" "/tmp/codetracer/session-manager/2144635/0.sock", kill_on_drop: false }
+[pid=2144596][err] INFO [session_manager::backend_manager] Awaiting connection!
+[pid=2144596][err] last "/tmp/codetracer/last"
+[pid=2144596][err] INFO [session_manager::backend_manager] Accepted connection!
+[pid=2144596][out] INFO [ct](traces.nim:304):index: selecting replayId 0
+[pid=2144596][err] INFO [session_manager::backend_manager] Selecting replay 0
+[pid=2144596][out] Trying to send acp msg
+[pid=2144596][out] ERROR [ct](traces.nim:126):loadSymbols for self contained trace trying to read from /home/zahary/.local/share/codetracer/trace-5278/symbols.json: {"errno":-2,"code":"ENOENT","syscall":"open","path":"/home/zahary/.local/share/codetracer/trace-5278/symbols.json"}
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=0, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=0, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+[pid=2144596][out] {
+[pid=2144596][out]   location: {
+[pid=2144596][out]     path: [32m'/home/zahary/metacraft/codetracer/test-programs/py_streaming_test/main.py'[39m,
+[pid=2144596][out]     line: [33m-1[39m,
+[pid=2144596][out]     status: [1mnull[22m,
+[pid=2144596][out]     functionName: [32m''[39m,
+[pid=2144596][out]     event: [33m0[39m,
+[pid=2144596][out]     expression: [1mnull[22m,
+[pid=2144596][out]     highLevelPath: [32m'/home/zahary/metacraft/codetracer/test-programs/py_streaming_test/main.py'[39m,
+[pid=2144596][out]     highLevelLine: [33m-1[39m,
+[pid=2144596][out]     highLevelFunctionName: [1mnull[22m,
+[pid=2144596][out]     lowLevelPath: [1mnull[22m,
+[pid=2144596][out]     lowLevelLine: [33m0[39m,
+[pid=2144596][out]     rrTicks: [33m0[39m,
+[pid=2144596][out]     functionFirst: [33m0[39m,
+[pid=2144596][out]     functionLast: [33m0[39m,
+[pid=2144596][out]     highLevelFunctionFirst: [33m0[39m,
+[pid=2144596][out]     highLevelFunctionLast: [33m0[39m,
+[pid=2144596][out]     offset: [33m0[39m,
+[pid=2144596][out]     error: [33mfalse[39m,
+[pid=2144596][out]     callstackDepth: [33m0[39m,
+[pid=2144596][out]     originatingInstructionAddress: [33m0[39m,
+[pid=2144596][out]     key: [1mnull[22m,
+[pid=2144596][out]     globalCallKey: [1mnull[22m,
+[pid=2144596][out]     expansionParents: [],
+[pid=2144596][out]     expansionDepth: [33m0[39m,
+[pid=2144596][out]     expansionId: [33m0[39m,
+[pid=2144596][out]     expansionFirstLine: [33m0[39m,
+[pid=2144596][out]     expansionLastLine: [33m0[39m,
+[pid=2144596][out]     isExpanded: [33mfalse[39m,
+[pid=2144596][out]     missingPath: [33mfalse[39m
+[pid=2144596][out]   },
+[pid=2144596][out]   name: [32m'/home/zahary/metacraft/codetracer/test-programs/py_streaming_test/main.py'[39m,
+[pid=2144596][out]   editorView: [33m0[39m,
+[pid=2144596][out]   lang: [33m23[39m
+[pid=2144596][out] }
+[pid=2144596][out] index_config open: file read succesfully
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=1, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+[pid=2144596][err] /bin/sh: -c: line 1: syntax error near unexpected token `('
+[pid=2144596][err] /bin/sh: -c: line 1: `git branch --format=%(refname:short)'
+[pid=2144596][err] [2m2026-04-30T12:00:25.296227Z[0m [32m INFO[0m [2mcodex_core::config[0m[2m:[0m cwd not set, using current dir
+[pid=2144596][out] Spawning language server: rust-analyzer
+[pid=2144596][out] LSP bridge listening on ws://localhost:46651/lsp
+[pid=2144596][out] INFO [ct](lsp_bridge.nim:209):index:lsp bridge (rust) listening on ws://127.0.0.1:46651/lsp
+[pid=2144596][out] Spawning language server: ruby-lsp
+[pid=2144596][out] LSP bridge listening on ws://localhost:38539/ruby-lsp
+[pid=2144596][out] INFO [ct](lsp_bridge.nim:209):index:lsp bridge (ruby) listening on ws://127.0.0.1:38539/ruby-lsp
+[pid=2144596][out] Spawning language server: nimlangserver
+[pid=2144596][out] LSP bridge listening on ws://localhost:45917/nim-lsp
+[pid=2144596][out] INFO [ct](lsp_bridge.nim:209):index:lsp bridge (nim) listening on ws://127.0.0.1:45917/nim-lsp
+[pid=2144596][err] [2m2026-04-30T12:00:25.319556Z[0m [32m INFO[0m [2mcodex_acp::codex_agent[0m[2m:[0m Creating new session with cwd: /home/zahary/metacraft/codetracer
+[pid=2144596][err] [2m2026-04-30T12:00:25.320827Z[0m [32m INFO[0m [2mcodex_otel::otel_manager[0m[2m:[0m [3mevent.name[0m[2m=[0m"codex.conversation_starts" [3mevent.timestamp[0m[2m=[0m2026-04-30T12:00:25.320Z [3mconversation.id[0m[2m=[0m019dde42-fce8-7aa1-b133-a1649476998e [3mapp.version[0m[2m=[0m0.0.0 [3mauth_mode[0m[2m=[0m"ChatGPT" [3muser.account_id[0m[2m=[0m"2655eeb5-0f4a-40a3-b6a1-0a38f9c9c8ee" [3muser.email[0m[2m=[0m"zahary.karadjov@metacraft-labs.com" [3mterminal.type[0m[2m=[0mtmux/3.5a [3mmodel[0m[2m=[0mgpt-5.5 [3mslug[0m[2m=[0mgpt-5.5 [3mprovider_name[0m[2m=[0mOpenAI [3mreasoning_effort[0m[2m=[0m"xhigh" [3mreasoning_summary[0m[2m=[0mauto [3mapproval_policy[0m[2m=[0mon-request [3msandbox_policy[0m[2m=[0mread-only [3mmcp_servers[0m[2m=[0m""
+[pid=2144596][err] [2m2026-04-30T12:00:25.323882Z[0m [33m WARN[0m [2mcodex_acp::conversation[0m[2m:[0m Received event for unknown submission ID:  McpStartupComplete(McpStartupCompleteEvent { ready: [], failed: [], cancelled: [] })
+[pid=2144596][err] [2m2026-04-30T12:00:25.323894Z[0m [33m WARN[0m [2mcodex_acp::conversation[0m[2m:[0m Received event for unknown submission ID: auto-compact-0 RawResponseItem(RawResponseItemEvent { item: Message { id: None, role: "user", content: [InputText { text: "# AGENTS.md instructions for /home/zahary/metacraft/codetracer\n\n<INSTRUCTIONS>\n# User Environment\n\n- macOS and Linux workstations, both managed by Nix (home-manager).\n- Configuration files under `~/.config/` are often read-only symlinks\n  into the Nix store. Do not attempt to write to them directly.\n- Dotfiles source repo: `~/dotfiles` (uses GNU Stow for `$HOME` symlinks\n  and home-manager for Nix-managed configs).\n- To change a Nix-managed config, edit the source in `~/dotfiles` and\n  rebuild (`home-switch`).\n\n--- project-doc ---\n\n# Instructions for Codex\n\n## Building the full frontend (Nim + Electron)\n\nTo rebuild the full CodeTracer frontend (Nim backend CLI, Nim renderer JS, webpack bundles):\n\n```\njust build-once\n```\n\nThis runs tup (incremental build) and webpack. Use this after modifying any `.nim` files in\n`src/ct/`, `src/frontend/`, or `src/common/`.\n\n## Building the db-backend\n\n```\n# inside src/db-backend\ncargo build\n```\n\n## Running tests\n\n```\n# inside src/db-backend\ncargo test\n```\n\n## Running the linter\n\n```\n# inside src/db-backend\ncargo clippy\n```\n\nDon't disable the lint: try to fix the code instead first!\n\n## Running Playwright e2e tests\n\n```\n# From the repo root (needs Xvfb or a display)\njust test-e2e\n```\n\nThe Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app via the `ct`\nbinary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`\nfirst to rebuild the frontend before running the tests.\n\n## Windows local setup (non-Nix)\n\nFor Windows development (both x64 and ARM64), use the DIY bootstrap:\n\n### Activate environment (auto-installs tools on first run)\n```bash\n# Git Bash / MSYS2\nsource env.sh\n\n# PowerShell\n. .\\env.ps1\n```\n\n### Optional skip flags\nComponents can be skipped via environment variables (e.g. for satellite repos\nthat only need a subset):\n- `WINDOWS_DIY_SKIP_NARGO=1` — skip Noir compiler\n- `WINDOWS_DIY_SKIP_CT_REMOTE=1` — skip ct-remote desktop client\n- `WINDOWS_DIY_ENSURE_TTD=0` — skip TTD/WinDbg validation\n\n### Build commands (Windows)\n```bash\n# Rust components\ncd src/db-backend && cargo build && cargo test && cargo clippy\ncd src/tui && cargo build && cargo test\ncd src/backend-manager && cargo build\n\n# Full frontend (Nim + Tup)\ncd src/build-debug && source ../../env.sh && tup upd\n```\n\n### Version pins\nPinned tool versions are tracked in:\n```\nnon-nix-build/windows/toolchain-versions.env\n```\n\nFor detailed Windows porting progress, see `windows-porting-initiative-status.md`.\n\n## Nix dev shell and local flake overrides\n\nThe `.envrc` auto-detects sibling repos and passes `--override-input` flags\nto `nix develop`. The sibling map is in `.envrc` (the `_ct_sibling_map` array).\n\n### Blockchain recorder tools (circom, forc)\n\nThe codetracer nix dev shell includes `circom` and `forc` from the\n`nix-blockchain-development` flake input. These are needed by the Circom\nand Fuel/Sway recorders at runtime.\n\nFor the packages to resolve, the local `nix-blockchain-development` checkout\nmust be used (the `main` branch has all packages; the pinned `stylus-tools`\nbranch in `flake.lock` does not). The `.envrc` sibling map includes\n`nix-blockchain-development` for automatic local override.\n\n### Invalidating the nix-direnv cache\n\nWhen you modify a local override input (e.g. change a package in\n`../nix-blockchain-development`), `nix-direnv` may serve a stale cached\nenvironment. To force re-evaluation:\n\n```bash\n# Option 1: Delete the cached profile\nrm -rf .direnv/flake-profile-* .direnv/flake-inputs\ndirenv allow\n\n# Option 2: Use nix develop directly (bypasses nix-direnv cache)\nnix develop '.?submodules=1' --override-input nix-blockchain-development path:../nix-blockchain-development -c bash\n```\n\nThe `nix develop` approach always evaluates fresh and is useful for testing\nchanges to override inputs before waiting for nix-direnv to catch up.\n\n### Cadence Go helper\n\nThe `detect-siblings.sh` script auto-builds `cadence-trace-helper` from\n`codetracer-flow-recorder/go-helper/` when the flow recorder sibling is\npresent and `go` is available. The built binary is exported via\n`CADENCE_HELPER_BIN` and added to PATH.\n\n# Keeping notes\n\nIn the `.agents/codebase-insights.txt` file, we try to maintain useful tips that may help\nyou in your development tasks. When you discover something important or surprising about\nthe codebase, add a remark in a comment near the relevant code or in the codebase-insights\nfile. ALWAYS remove older remarks if they are no longer true.\n\nYou can consult this file before starting your coding tasks.\n\n# Code quality guidelines\n\n- ALWAYS strive to achieve high code quality.\n- ALWAYS write secure code.\n- ALWAYS make sure the code is well tested and edge cases are covered. Design the code for testability and be extremely thorough.\n- ALWAYS write defensive code and make sure all potential errors are handled.\n- ALWAYS strive to write highly reusable code with routines that have high fan in and low fan out.\n- ALWAYS keep the code DRY.\n- Aim for low coupling and high cohesion. Encapsulate and hide implementation details.\n- When creating executable, ALWAYS make sure the functionality can also be used as a library.\n  To achieve this, avoid global variables, raise/return errors instead of terminating the program, and think whether the use case of the library requires more control over logging\n  and metrics from the application that integrates the library.\n\n# Code commenting guidelines\n\n- Document public APIs and complex modules using standard code documentation conventions.\n- Comment the intention behind your code extensively. Omit comments only for very obvious\n  facts that almost any developer would know.\n- Maintain the comments together with the code to keep them meaningful and current.\n- When the code is based on specific formats, standards or well-specified behavior of\n  other software, always make sure to include relevant links (URLs) that provide the\n  necessary technical details.\n\n# Writing git commit messages\n\n- You MUST use multiline git commit messages.\n- Use the conventional commits style for the first line of the commit message.\n- Use the summary section of your final response as the remaining lines in the commit message.\n\n</INSTRUCTIONS>" }] } })
+[pid=2144596][err] [2m2026-04-30T12:00:25.323937Z[0m [33m WARN[0m [2mcodex_acp::conversation[0m[2m:[0m Received event for unknown submission ID: auto-compact-0 RawResponseItem(RawResponseItemEvent { item: Message { id: None, role: "user", content: [InputText { text: "<environment_context>\n  <cwd>/home/zahary/metacraft/codetracer</cwd>\n  <approval_policy>on-request</approval_policy>\n  <sandbox_mode>read-only</sandbox_mode>\n  <network_access>restricted</network_access>\n  <shell>zsh</shell>\n</environment_context>" }] } })
+[pid=2144596][out] [acp_ipc] session-init clientSessionId=agent-session-0 acpSessionId=019dde42-fce8-7aa1-b133-a1649476998e workspace=
+[pid=2144596][err] [DEBUG update_table] event_db single_tables=1, global_table=0
+[pid=2144596][err] [DEBUG update_table] result returned
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+[2m    - locator resolved to <span class="lm_title">EVENT LOG</span>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - element is outside of the viewport[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - element is outside of the viewport[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    11 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is visible, enabled and stable[22m
+[2m       - scrolling into view if needed[22m
+[2m       - done scrolling[22m
+[2m       - element is outside of the viewport[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts:40:32

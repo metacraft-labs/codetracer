@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: GCC error output with ANSI colors renders without raw escape codes
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 33298ms
+Timestamp: 2026-04-30T08:00:58.892Z
+
+Error 1:
+  Message: TimeoutError: locator.innerHTML: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#build')[22m
+
+  Stack: TimeoutError: locator.innerHTML: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#build')[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:332:40

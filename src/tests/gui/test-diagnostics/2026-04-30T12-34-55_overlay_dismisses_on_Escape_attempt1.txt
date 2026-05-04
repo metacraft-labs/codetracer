@@ -1,0 +1,19 @@
+Test Failure Report
+===================
+Title: overlay dismisses on Escape
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/auto-hide/auto-hide-panes.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 58693ms
+Timestamp: 2026-04-30T12:34:55.116Z
+
+Error 1:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at LayoutPage.waitForEventLogLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:126:43)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:188:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForBaseComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:187:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/auto-hide/auto-hide-panes.spec.ts:266:5

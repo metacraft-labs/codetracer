@@ -1,0 +1,22 @@
+Test Failure Report
+===================
+Title: event log populated
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/ada-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 37954ms
+Timestamp: 2026-04-30T10:37:54.523Z
+
+Error 1:
+  Message: TimeoutError: locator.dispatchEvent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+
+  Stack: TimeoutError: locator.dispatchEvent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'EVENT LOG' }).first()[22m
+
+    at clickTabButton (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:20:15)
+    at Object.assertEventLogPopulated (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:61:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/ada-sudoku.spec.ts:22:5

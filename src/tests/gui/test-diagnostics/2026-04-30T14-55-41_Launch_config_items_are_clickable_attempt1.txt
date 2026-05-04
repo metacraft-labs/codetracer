@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: Launch config items are clickable
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 4124ms
+Timestamp: 2026-04-30T14:55:41.506Z
+
+Error 1:
+  Message: Error: expect.toBeVisible: Target page, context or browser has been closed
+  Stack: Error: expect.toBeVisible: Target page, context or browser has been closed
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:151:35
+
+Error 2:
+  Message: Error: locator.isVisible: Target page, context or browser has been closed
+  Stack: Error: locator.isVisible: Target page, context or browser has been closed
+    at ensureMenuClosed (/home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:24:36)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:35:11

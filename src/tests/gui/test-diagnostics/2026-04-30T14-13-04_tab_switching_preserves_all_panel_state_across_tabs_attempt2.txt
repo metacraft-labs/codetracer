@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: tab switching preserves all panel state across tabs
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/comprehensive-tabbed-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 1880ms
+Timestamp: 2026-04-30T14:13:04.109Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoContain[2m([22m[32mexpected[39m[2m) // indexOf[22m
+
+Expected substring: [32m".py"[39m
+Received string:    [31m""[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoContain[2m([22m[32mexpected[39m[2m) // indexOf[22m
+
+Expected substring: [32m".py"[39m
+Received string:    [31m""[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/comprehensive-tabbed-replay.spec.ts:219:35

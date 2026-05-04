@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: variable inspection test_boards
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 84032ms
+Timestamp: 2026-05-02T11:21:45.359Z
+
+Error 1:
+  Message: Error: Event log did not finish loading; 1 placeholder row(s) remained.
+  Stack: Error: Event log did not finish loading; 1 placeholder row(s) remained.
+    at LayoutPage.waitForEventLogLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:165:13)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:226:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForBaseComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:225:5)
+    at Object.assertFlowValueVisible (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:226:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:26:5

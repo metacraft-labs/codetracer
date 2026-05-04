@@ -1,0 +1,23 @@
+Test Failure Report
+===================
+Title: variable inspection test_boards
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-mcr-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 72715ms
+Timestamp: 2026-04-30T07:55:10.394Z
+
+Error 1:
+  Message: TimeoutError: locator.click: Timeout 60000ms exceeded.
+Call log:
+[2m  - waiting for locator('#next-debug')[22m
+
+  Stack: TimeoutError: locator.click: Timeout 60000ms exceeded.
+Call log:
+[2m  - waiting for locator('#next-debug')[22m
+
+    at maxAttempts (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:218:27)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:9)
+    at Object.assertFlowValueVisible (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:193:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-mcr-replay.spec.ts:36:5

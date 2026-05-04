@@ -1,0 +1,13 @@
+Test Failure Report
+===================
+Title: variable inspection testBoards
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/d-sudoku.spec.ts
+Status: timedOut
+Expected: passed
+Retry: 0
+Duration: 120001ms
+Timestamp: 2026-04-30T23:27:09.945Z
+
+Error 1:
+  Message: [31mTest timeout of 120000ms exceeded.[39m
+  Stack: [31mTest timeout of 120000ms exceeded.[39m

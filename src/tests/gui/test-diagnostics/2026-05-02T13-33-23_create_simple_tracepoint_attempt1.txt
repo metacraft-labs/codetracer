@@ -1,0 +1,17 @@
+Test Failure Report
+===================
+Title: create simple tracepoint
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 19905ms
+Timestamp: 2026-05-02T13:33:23.528Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 30 attempts.
+  Stack: Error: Condition was not satisfied after 30 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at EditorPane.runTracepointsJs (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/editor/editor-pane.ts:321:5)
+    at createSimpleTracePoint (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1292:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:1247:5

@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: Test 2: file list sidebar shows all files with correct basenames
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/deepreview-gui.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15669ms
+Timestamp: 2026-05-03T13:55:16.667Z
+
+Error 1:
+  Message: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.deepreview-container') to be visible[22m
+
+  Stack: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.deepreview-container') to be visible[22m
+
+    at DeepReviewPage.waitForReady (/home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/page-objects/deepreview-page.ts:617:21)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/deepreview/deepreview-gui.spec.ts:88:14

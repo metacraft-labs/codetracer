@@ -1,0 +1,17 @@
+Test Failure Report
+===================
+Title: calculate damage calltrace navigation
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 9941ms
+Timestamp: 2026-04-30T12:30:44.394Z
+
+Error 1:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at EditorPane.activeLineNumber (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/editor/editor-pane.ts:211:47)
+    at maxAttempts (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:179:28)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:9)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:177:5

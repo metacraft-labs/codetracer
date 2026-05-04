@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: call trace navigation to main
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 2951ms
+Timestamp: 2026-04-30T15:03:58.353Z
+
+Error 1:
+  Message: Error: locator.dispatchEvent: Target page, context or browser has been closed
+  Stack: Error: locator.dispatchEvent: Target page, context or browser has been closed
+    at clickTabButton (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:20:15)
+    at Object.assertCallTraceNavigation (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:92:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:22:5

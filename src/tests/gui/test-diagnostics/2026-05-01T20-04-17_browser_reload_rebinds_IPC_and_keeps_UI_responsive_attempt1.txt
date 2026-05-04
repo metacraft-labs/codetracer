@@ -1,0 +1,98 @@
+Test Failure Report
+===================
+Title: browser reload rebinds IPC and keeps UI responsive
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/page-objects-tests/reload_reconnect.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 62439ms
+Timestamp: 2026-05-01T20:04:17.318Z
+
+Error 1:
+  Message: Error: Component 'editor' (selector 'div[id^='editorComponent']') did not load; final count=0. Known component-like ids: filesystemComponent, vCSComponent-0, stateComponent-0, scratchpadComponent-0, calltraceComponent-0, agentActivityComponent-0, eventLogComponent-0, terminalComponent-0, auto-hide-standalone-buildComponent-0, buildComponent-0, auto-hide-standalone-errorsComponent-0, errorsComponent-0, auto-hide-standalone-searchResultsComponent-0, searchResultsComponent-0. Body sample: +
+FILES
+VCS
+ 
+source folders
+STATE
+SCRATCHPAD
+asteroid_masses_negative:
+Sequence(Seq Array<8, ..>): 2000 300 200 20 15 20 1 1Array<8, ..>
+asteroid_masses_positive:
+Sequence(Seq Array<8, ..>): 100 2000 200 100 100 50 50 14Array<8, ..>
+initial_shield:
+10000Field
+shield_regen_percentage:
+10Field
+CALLTRACE
+AGENT ACTIVITY
+main #0
+(
+initial_shield=
+10000
+, 
+shield_regen_percentage=
+10
+, 
+asteroid_masses_positive=
+@[100, 2000, 200, 100, 100, 50, 50, 14]
+, 
+asteroid_masses_negative=
+@[2000, 300, 200, 20, 15, 20, 1, 1]
+)
+iterate_asteroids #1
+(
+initial_shield=
+10000
+, 
+shield_regen_percentage=
+10
+, 
+mas
+  Stack: Error: Component 'editor' (selector 'div[id^='editorComponent']') did not load; final count=0. Known component-like ids: filesystemComponent, vCSComponent-0, stateComponent-0, scratchpadComponent-0, calltraceComponent-0, agentActivityComponent-0, eventLogComponent-0, terminalComponent-0, auto-hide-standalone-buildComponent-0, buildComponent-0, auto-hide-standalone-errorsComponent-0, errorsComponent-0, auto-hide-standalone-searchResultsComponent-0, searchResultsComponent-0. Body sample: +
+FILES
+VCS
+ 
+source folders
+STATE
+SCRATCHPAD
+asteroid_masses_negative:
+Sequence(Seq Array<8, ..>): 2000 300 200 20 15 20 1 1Array<8, ..>
+asteroid_masses_positive:
+Sequence(Seq Array<8, ..>): 100 2000 200 100 100 50 50 14Array<8, ..>
+initial_shield:
+10000Field
+shield_regen_percentage:
+10Field
+CALLTRACE
+AGENT ACTIVITY
+main #0
+(
+initial_shield=
+10000
+, 
+shield_regen_percentage=
+10
+, 
+asteroid_masses_positive=
+@[100, 2000, 200, 100, 100, 50, 50, 14]
+, 
+asteroid_masses_negative=
+@[2000, 300, 200, 20, 15, 20, 1, 1]
+)
+iterate_asteroids #1
+(
+initial_shield=
+10000
+, 
+shield_regen_percentage=
+10
+, 
+mas
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:80:13)
+    at LayoutPage.waitForEditorLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:173:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:207:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForAllComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:206:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/page-objects-tests/reload_reconnect.spec.ts:24:3

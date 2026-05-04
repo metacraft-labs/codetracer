@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: BUILD tab present in bottom auto-hide strip
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/build-panel-e2e.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 11964ms
+Timestamp: 2026-05-01T16:57:55.314Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 10000ms exceeded.
+Call log:
+[2m  - waiting for locator('.auto-hide-bottom-tabs .auto-hide-strip-tab').first() to be visible[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 10000ms exceeded.
+Call log:
+[2m  - waiting for locator('.auto-hide-bottom-tabs .auto-hide-strip-tab').first() to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/build-panel-e2e.spec.ts:28:81

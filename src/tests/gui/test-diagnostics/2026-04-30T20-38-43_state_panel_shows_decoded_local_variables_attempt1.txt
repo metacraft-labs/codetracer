@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: state panel shows decoded local variables
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/sway_example.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15638ms
+Timestamp: 2026-04-30T20:38:43.583Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.location-path') to be visible[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.location-path') to be visible[22m
+
+    at readyOnEntryTest (/home/zahary/metacraft/codetracer/src/tests/gui/lib/fixtures.ts:1117:37)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/sway_example.spec.ts:152:23

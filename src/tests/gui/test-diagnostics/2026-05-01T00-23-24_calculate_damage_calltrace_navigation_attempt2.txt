@@ -1,0 +1,15 @@
+Test Failure Report
+===================
+Title: calculate damage calltrace navigation
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 26912ms
+Timestamp: 2026-05-01T00:23:24.913Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 30 attempts.
+  Stack: Error: Condition was not satisfied after 30 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:212:5

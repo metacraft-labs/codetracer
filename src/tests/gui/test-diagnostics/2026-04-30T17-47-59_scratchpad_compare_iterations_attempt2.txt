@@ -1,0 +1,30 @@
+Test Failure Report
+===================
+Title: scratchpad compare iterations
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 6912ms
+Timestamp: 2026-04-30T17:47:59.929Z
+
+Error 1:
+  Message: Error: locator.click: Element is outside of the viewport
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'CALLTRACE' }).first()[22m
+[2m    - locator resolved to <span class="lm_title">CALLTRACE</span>[22m
+[2m  - attempting click action[22m
+[2m    - scrolling into view if needed[22m
+[2m    - done scrolling[22m
+
+  Stack: Error: locator.click: Element is outside of the viewport
+Call log:
+[2m  - waiting for locator('.lm_title').filter({ hasText: 'CALLTRACE' }).first()[22m
+[2m    - locator resolved to <span class="lm_title">CALLTRACE</span>[22m
+[2m  - attempting click action[22m
+[2m    - scrolling into view if needed[22m
+[2m    - done scrolling[22m
+
+    at CallTracePane.clickTab (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:43:17)
+    at navigateToShieldEditor (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:31:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:567:20

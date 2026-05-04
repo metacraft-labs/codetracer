@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: GCC error output with ANSI colors renders without raw escape codes
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 4966ms
+Timestamp: 2026-05-01T16:42:11.613Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoContain[2m([22m[32mexpected[39m[2m) // indexOf[22m
+
+Expected substring: [32m"<span"[39m
+Received string:    [31m""[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoContain[2m([22m[32mexpected[39m[2m) // indexOf[22m
+
+Expected substring: [32m"<span"[39m
+Received string:    [31m""[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/real-compiler-errors.spec.ts:343:23

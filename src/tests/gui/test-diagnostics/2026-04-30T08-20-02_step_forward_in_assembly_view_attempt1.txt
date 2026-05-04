@@ -1,0 +1,15 @@
+Test Failure Report
+===================
+Title: step forward in assembly view
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/nim-view-switching/stepping-through-views.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 13860ms
+Timestamp: 2026-04-30T08:20:02.329Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 10 attempts.
+  Stack: Error: Condition was not satisfied after 10 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/nim-view-switching/stepping-through-views.spec.ts:371:5

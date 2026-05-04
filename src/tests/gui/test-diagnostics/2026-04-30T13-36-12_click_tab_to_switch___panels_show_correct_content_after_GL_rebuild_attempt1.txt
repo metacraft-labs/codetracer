@@ -1,0 +1,23 @@
+Test Failure Report
+===================
+Title: click tab to switch — panels show correct content after GL rebuild
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/real-tab-switching.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 6191ms
+Timestamp: 2026-04-30T13:36:12.279Z
+
+Error 1:
+  Message: Error: locator.getAttribute: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('div[id^=\'editorComponent\']').first()[22m
+
+  Stack: Error: locator.getAttribute: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('div[id^=\'editorComponent\']').first()[22m
+
+    at condition (/home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/real-tab-switching.spec.ts:86:10)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:15)
+    at waitForEditorFileName (/home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/real-tab-switching.spec.ts:81:14)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/real-tab-switching.spec.ts:130:41

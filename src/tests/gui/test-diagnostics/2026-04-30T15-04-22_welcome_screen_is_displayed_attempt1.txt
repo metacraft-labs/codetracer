@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: welcome screen is displayed
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/welcome_screen.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 2407ms
+Timestamp: 2026-04-30T15:04:22.565Z
+
+Error 1:
+  Message: Error: page.waitForSelector: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.welcome-screen') to be visible[22m
+
+  Stack: Error: page.waitForSelector: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('.welcome-screen') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/welcome_screen.spec.ts:11:18

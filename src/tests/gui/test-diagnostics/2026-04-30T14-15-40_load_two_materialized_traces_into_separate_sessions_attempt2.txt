@@ -1,0 +1,14 @@
+Test Failure Report
+===================
+Title: load two materialized traces into separate sessions
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/multi-trace-load.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 24655ms
+Timestamp: 2026-04-30T14:15:40.959Z
+
+Error 1:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/multi-trace-load.spec.ts:317:29

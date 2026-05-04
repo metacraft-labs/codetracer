@@ -1,0 +1,20 @@
+DOM Summary
+===========
+
+Quick Stats:
+  Total elements: 262
+  Elements with IDs: 27
+  Inputs/textareas: 0
+  Buttons: 2
+  Hidden elements: 235
+
+CodeTracer Components:
+  Event Log: 0
+  Call Trace: 0
+  Editor: 0
+  Monaco editors: 0
+  Trace Log: 0
+  Variables: 0
+  Program State: 0
+  GoldenLayout: 0
+  Flow/Omniscience: 0

@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: editor loads main.py
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-materialized-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 62455ms
+Timestamp: 2026-05-01T07:17:45.951Z
+
+Error 1:
+  Message: Error: Event log did not finish loading; 1 placeholder row(s) remained.
+  Stack: Error: Event log did not finish loading; 1 placeholder row(s) remained.
+    at LayoutPage.waitForEventLogLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:127:13)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:188:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForBaseComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:187:5)
+    at Object.assertEditorLoadsFile (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:76:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-materialized-replay.spec.ts:42:5

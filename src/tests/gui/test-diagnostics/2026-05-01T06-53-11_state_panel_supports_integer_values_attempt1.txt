@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: state panel supports integer values
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 14125ms
+Timestamp: 2026-05-01T06:53:11.298Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: [32m"3"[39m
+Received: [31m"0"[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: [32m"3"[39m
+Received: [31m"0"[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts:116:27

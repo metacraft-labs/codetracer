@@ -1,0 +1,13 @@
+Test Failure Report
+===================
+Title: variable inspection board via call trace argument
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/python-sudoku.spec.ts
+Status: timedOut
+Expected: passed
+Retry: 0
+Duration: 89999ms
+Timestamp: 2026-05-01T00:56:10.060Z
+
+Error 1:
+  Message: [31mTest timeout of 90000ms exceeded.[39m
+  Stack: [31mTest timeout of 90000ms exceeded.[39m

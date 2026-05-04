@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: edit mode loads the main UI
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/edit_mode.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15762ms
+Timestamp: 2026-04-30T14:54:54.467Z
+
+Error 1:
+  Message: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+  Stack: TimeoutError: page.waitForSelector: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('.lm_goldenlayout') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/edit_mode.spec.ts:14:18

@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: event log shows stdout from all phases
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 12379ms
+Timestamp: 2026-04-30T12:26:43.513Z
+
+Error 1:
+  Message: Error: locator.textContent: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+  Stack: Error: locator.textContent: Target page, context or browser has been closed
+Call log:
+[2m  - waiting for locator('div[id^=\'eventLogComponent-\']').first().locator('.eventLog-dense-table tbody tr').first().locator('.eventLog-text')[22m
+
+    at EventRow.consoleOutput (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/event-log/event-row.ts:39:47)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts:58:32

@@ -1,0 +1,13 @@
+Test Failure Report
+===================
+Title: session holds debugger location after stepping
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/replay-session/replay-session-scoping.spec.ts
+Status: timedOut
+Expected: passed
+Retry: 0
+Duration: 120030ms
+Timestamp: 2026-04-30T08:57:30.421Z
+
+Error 1:
+  Message: [31mTest timeout of 120000ms exceeded.[39m
+  Stack: [31mTest timeout of 120000ms exceeded.[39m

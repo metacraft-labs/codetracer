@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: loop iteration slider tracks remaining shield
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 29139ms
+Timestamp: 2026-05-02T13:41:24.791Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 20000ms exceeded.
+Call log:
+[2m  - waiting for locator('#editorComponent-1').locator('.flow-multiline-value-container').first() to be visible[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 20000ms exceeded.
+Call log:
+[2m  - waiting for locator('#editorComponent-1').locator('.flow-multiline-value-container').first() to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:307:32

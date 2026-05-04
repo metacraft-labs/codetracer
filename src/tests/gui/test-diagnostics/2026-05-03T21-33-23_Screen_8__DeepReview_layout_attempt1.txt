@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: Screen 8: DeepReview layout
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/comprehensive-v2.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 30613ms
+Timestamp: 2026-05-03T21:33:23.825Z
+
+Error 1:
+  Message: TimeoutError: page.waitForSelector: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('.deepreview-container') to be visible[22m
+
+  Stack: TimeoutError: page.waitForSelector: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('.deepreview-container') to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/visual-audit/comprehensive-v2.spec.ts:698:18

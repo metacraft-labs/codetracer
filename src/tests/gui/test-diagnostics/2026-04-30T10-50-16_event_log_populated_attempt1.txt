@@ -1,0 +1,18 @@
+Test Failure Report
+===================
+Title: event log populated
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/python-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 47792ms
+Timestamp: 2026-04-30T10:50:16.704Z
+
+Error 1:
+  Message: Error: Performance limit exceeded: "base components loaded" took 45774ms (limit: 45000ms)
+  Stack: Error: Performance limit exceeded: "base components loaded" took 45774ms (limit: 45000ms)
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:115:11)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForBaseComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:187:5)
+    at Object.assertEventLogPopulated (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:58:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/python-sudoku.spec.ts:30:5

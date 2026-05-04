@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: editor loads main.c
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 11139ms
+Timestamp: 2026-04-30T14:03:14.782Z
+
+Error 1:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:65:35)
+    at LayoutPage.waitForFilesystemLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:89:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:188:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForBaseComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:187:5)
+    at Object.assertEditorLoadsFile (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:40:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:14:5

@@ -1,0 +1,21 @@
+Test Failure Report
+===================
+Title: can open main menu by clicking logo
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 32029ms
+Timestamp: 2026-05-04T05:56:14.614Z
+
+Error 1:
+  Message: TimeoutError: locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#menu-root')[22m
+
+  Stack: TimeoutError: locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#menu-root')[22m
+
+    at ensureMenuOpen (/home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:17:20)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/welcome-screen/launch_config.spec.ts:62:7

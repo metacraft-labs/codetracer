@@ -1,0 +1,23 @@
+DOM Summary
+===========
+
+Quick Stats:
+  Total elements: 4857
+  Elements with IDs: 1350
+  Inputs/textareas: 13
+  Buttons: 23
+  Hidden elements: 487
+
+CodeTracer Components:
+  Event Log: 9
+  Call Trace: 0
+  Editor: 2
+  Monaco editors: 4
+  Trace Log: 0
+  Variables: 0
+  Program State: 0
+  GoldenLayout: 1
+  Flow/Omniscience: 28
+  Flow value boxes: 26
+  Flow loop controls: 2
+  Flow value names: <stdout>, return, initial_shield, shield_regen_percentage, asteroid_masses_positive, <stdout>, <stdout>, <stdout>, <stdout>, initial_shield, shield_regen_percentage, asteroid_masses_negative, <stdout>, did_survive_positive, did_survive_negative, did_survive_positive, did_survive_negative, asteroid_masses_negative, asteroid_masses_positive, did_survive_negative, did_survive_positive, initial_shield, shield_regen_percentage, return, initial_shield, return

@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: event log click navigates editor
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts
+Status: failed
+Expected: passed
+Retry: 2
+Duration: 3812ms
+Timestamp: 2026-04-30T12:28:24.390Z
+
+Error 1:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:65:35)
+    at LayoutPage.waitForEditorLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:135:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:169:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForAllComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:168:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/streaming/streaming-recording.spec.ts:115:5

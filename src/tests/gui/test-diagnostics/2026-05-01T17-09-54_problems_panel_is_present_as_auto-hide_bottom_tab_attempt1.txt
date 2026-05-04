@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: problems panel is present as auto-hide bottom tab
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/problems-panel.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 12245ms
+Timestamp: 2026-05-01T17:09:54.423Z
+
+Error 1:
+  Message: TimeoutError: locator.waitFor: Timeout 10000ms exceeded.
+Call log:
+[2m  - waiting for locator('.auto-hide-bottom-tabs .auto-hide-strip-tab').first() to be visible[22m
+
+  Stack: TimeoutError: locator.waitFor: Timeout 10000ms exceeded.
+Call log:
+[2m  - waiting for locator('.auto-hide-bottom-tabs .auto-hide-strip-tab').first() to be visible[22m
+
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/problems-panel.spec.ts:29:81

@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: active session holds trace data
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-window/multi-window-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 2
+Duration: 1826ms
+Timestamp: 2026-04-30T17:40:46.750Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: [32mtrue[39m
+Received: [31mfalse[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: [32mtrue[39m
+Received: [31mfalse[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-window/multi-window-replay.spec.ts:103:40

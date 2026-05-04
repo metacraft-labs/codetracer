@@ -1,0 +1,14 @@
+Test Failure Report
+===================
+Title: stop, clear, and scroll toggle buttons are visible
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/build-header-controls.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 1201ms
+Timestamp: 2026-05-01T17:18:42.874Z
+
+Error 1:
+  Message: SyntaxError: Cannot use import statement outside a module
+  Stack: SyntaxError: Cannot use import statement outside a module
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/build-header-controls.spec.ts:61:25

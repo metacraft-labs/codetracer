@@ -1,0 +1,14 @@
+Test Failure Report
+===================
+Title: header controls container is present in the build panel
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/build-header-controls.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 1223ms
+Timestamp: 2026-05-01T17:17:33.327Z
+
+Error 1:
+  Message: SyntaxError: Cannot use import statement outside a module
+  Stack: SyntaxError: Cannot use import statement outside a module
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/build/build-header-controls.spec.ts:23:25

@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: event log populated
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 6970ms
+Timestamp: 2026-04-30T10:37:17.369Z
+
+Error 1:
+  Message: Error: locator.dispatchEvent: Target page, context or browser has been closed
+  Stack: Error: locator.dispatchEvent: Target page, context or browser has been closed
+    at clickTabButton (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:20:15)
+    at Object.assertEventLogPopulated (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:61:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:18:5

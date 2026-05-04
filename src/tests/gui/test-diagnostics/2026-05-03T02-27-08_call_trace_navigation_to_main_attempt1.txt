@@ -1,0 +1,17 @@
+Test Failure Report
+===================
+Title: call trace navigation to main
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 15697ms
+Timestamp: 2026-05-03T02:27:08.549Z
+
+Error 1:
+  Message: Error: Component 'calltrace' (selector 'div[id^='calltraceComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+  Stack: Error: Component 'calltrace' (selector 'div[id^='calltraceComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:80:13)
+    at LayoutPage.waitForCallTraceLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:97:5)
+    at Object.assertCallTraceNavigation (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:125:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:22:5

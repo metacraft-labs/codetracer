@@ -1,0 +1,13 @@
+Test Failure Report
+===================
+Title: call trace navigation to main
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-mcr-replay.spec.ts
+Status: timedOut
+Expected: passed
+Retry: 0
+Duration: 120100ms
+Timestamp: 2026-04-30T08:58:39.963Z
+
+Error 1:
+  Message: [31mTest timeout of 120000ms exceeded.[39m
+  Stack: [31mTest timeout of 120000ms exceeded.[39m

@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: remaining shield history chronology
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 2
+Duration: 42436ms
+Timestamp: 2026-05-02T13:20:11.361Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 10 attempts.
+  Stack: Error: Condition was not satisfied after 10 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at ScratchpadPane.waitForEntryCount (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/scratchpad/scratchpad-pane.ts:66:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:595:5

@@ -1,0 +1,24 @@
+Test Failure Report
+===================
+Title: Python DB + C/RR + MCR portable in separate tabs with full verification
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts
+Status: failed
+Expected: passed
+Retry: 1
+Duration: 10260ms
+Timestamp: 2026-04-30T13:47:57.199Z
+
+Error 1:
+  Message: Error: Component 'filesystem' (selector 'div[id^='filesystemComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+  Stack: Error: Component 'filesystem' (selector 'div[id^='filesystemComponent']') did not load; final count=0. Known component-like ids: none. Body sample: 
+    at LayoutPage.waitForComponent (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:80:13)
+    at LayoutPage.waitForFilesystemLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:89:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:169:7
+    at timed (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:107:18)
+    at timedVoid (/home/zahary/metacraft/codetracer/src/tests/gui/lib/performance-limits.ts:130:26)
+    at LayoutPage.waitForAllComponentsLoaded (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:168:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/multi-replay/three-trace-types.spec.ts:378:5
+
+Error 2:
+  Message: Error: Channel closed
+  Stack: Error: Channel closed

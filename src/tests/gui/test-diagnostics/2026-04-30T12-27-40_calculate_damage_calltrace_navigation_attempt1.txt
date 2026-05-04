@@ -1,0 +1,22 @@
+Test Failure Report
+===================
+Title: calculate damage calltrace navigation
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 8640ms
+Timestamp: 2026-04-30T12:27:40.099Z
+
+Error 1:
+  Message: Error: locator.count: Target page, context or browser has been closed
+  Stack: Error: locator.count: Target page, context or browser has been closed
+    at condition (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:45:70)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:15)
+    at CallTracePane.waitForReady (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:43:16)
+    at CallTracePane.getEntries (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:52:18)
+    at CallTracePane.findEntry (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:75:32)
+    at condition (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:71:33)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:15)
+    at requireCallTraceEntry (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:68:14)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:162:37

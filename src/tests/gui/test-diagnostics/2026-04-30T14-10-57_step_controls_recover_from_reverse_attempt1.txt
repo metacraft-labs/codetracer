@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: step controls recover from reverse
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 5432ms
+Timestamp: 2026-04-30T14:10:57.711Z
+
+Error 1:
+  Message: Error: locator.dispatchEvent: Target page, context or browser has been closed
+  Stack: Error: locator.dispatchEvent: Target page, context or browser has been closed
+    at EventRow.click (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/event-log/event-row.ts:71:23)
+    at navigateToShieldEditor (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:37:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:623:5

@@ -1,0 +1,18 @@
+Test Failure Report
+===================
+Title: next
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 12696ms
+Timestamp: 2026-05-01T06:52:15.100Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mnot[2m.[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: not [32m11[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mnot[2m.[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: not [32m11[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts:171:34

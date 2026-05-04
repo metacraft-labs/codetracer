@@ -1,0 +1,13 @@
+Test Failure Report
+===================
+Title: terminal output shows solved board
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/python-sudoku.spec.ts
+Status: timedOut
+Expected: passed
+Retry: 0
+Duration: 90001ms
+Timestamp: 2026-05-01T06:10:50.518Z
+
+Error 1:
+  Message: [31mTest timeout of 90000ms exceeded.[39m
+  Stack: [31mTest timeout of 90000ms exceeded.[39m

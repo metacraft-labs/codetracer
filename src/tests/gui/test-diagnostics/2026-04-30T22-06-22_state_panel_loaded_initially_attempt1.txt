@@ -1,0 +1,22 @@
+Test Failure Report
+===================
+Title: state panel loaded initially
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 32138ms
+Timestamp: 2026-04-30T22:06:22.937Z
+
+Error 1:
+  Message: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#code-state-line-0')[22m
+
+  Stack: TimeoutError: locator.textContent: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#code-state-line-0')[22m
+
+    at condition (/home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts:78:55)
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:85:15)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/wasm_example.spec.ts:76:16

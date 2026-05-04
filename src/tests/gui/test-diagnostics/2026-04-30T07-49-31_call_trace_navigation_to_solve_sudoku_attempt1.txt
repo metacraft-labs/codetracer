@@ -1,0 +1,18 @@
+Test Failure Report
+===================
+Title: call trace navigation to solve_sudoku
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-materialized-replay.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 66346ms
+Timestamp: 2026-04-30T07:49:31.608Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 60 attempts.
+  Stack: Error: Condition was not satisfied after 60 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at CallTracePane.waitForReady (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:43:5)
+    at CallTracePane.navigateToEntry (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/call-trace/call-trace-pane.ts:119:5)
+    at Object.assertCallTraceNavigation (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:95:17)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/browser-materialized-replay.spec.ts:33:5

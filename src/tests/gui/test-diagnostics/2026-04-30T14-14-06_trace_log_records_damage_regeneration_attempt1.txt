@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: trace log records damage regeneration
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 9504ms
+Timestamp: 2026-04-30T14:14:06.873Z
+
+Error 1:
+  Message: Error: locator.all: Target page, context or browser has been closed
+  Stack: Error: locator.all: Target page, context or browser has been closed
+    at LayoutPage.editorTabs (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/layout-page.ts:285:10)
+    at navigateToShieldEditor (/home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:47:32)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:412:26

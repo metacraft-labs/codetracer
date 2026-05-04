@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: trace log records damage regeneration
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 25198ms
+Timestamp: 2026-05-01T16:05:53.598Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 30 attempts.
+  Stack: Error: Condition was not satisfied after 30 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at EditorPane.runTracepointsJs (/home/zahary/metacraft/codetracer/src/tests/gui/page-objects/panes/editor/editor-pane.ts:321:5)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts:472:5

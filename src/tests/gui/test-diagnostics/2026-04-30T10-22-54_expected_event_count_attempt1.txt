@@ -1,0 +1,20 @@
+Test Failure Report
+===================
+Title: expected event count
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/noir_example.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 3849ms
+Timestamp: 2026-04-30T10:22:54.870Z
+
+Error 1:
+  Message: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThanOrEqual[2m([22m[32mexpected[39m[2m)[22m
+
+Expected: >= [32m1[39m
+Received:    [31m0[39m
+  Stack: Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThanOrEqual[2m([22m[32mexpected[39m[2m)[22m
+
+Expected: >= [32m1[39m
+Received:    [31m0[39m
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/program_specific_tests/noir_example.spec.ts:49:19

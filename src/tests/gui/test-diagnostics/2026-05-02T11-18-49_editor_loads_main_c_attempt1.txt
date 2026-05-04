@@ -1,0 +1,16 @@
+Test Failure Report
+===================
+Title: editor loads main.c
+File: /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts
+Status: failed
+Expected: passed
+Retry: 0
+Duration: 73389ms
+Timestamp: 2026-05-02T11:18:49.376Z
+
+Error 1:
+  Message: Error: Condition was not satisfied after 60 attempts.
+  Stack: Error: Condition was not satisfied after 60 attempts.
+    at retry (/home/zahary/metacraft/codetracer/src/tests/gui/lib/retry-helpers.ts:116:9)
+    at Object.assertEditorLoadsFile (/home/zahary/metacraft/codetracer/src/tests/gui/lib/language-smoke-test-helpers.ts:78:3)
+    at /home/zahary/metacraft/codetracer/src/tests/gui/tests/sudoku/c-sudoku.spec.ts:14:5
