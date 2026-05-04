@@ -8,16 +8,6 @@ let ATOM_KINDS = {
   types.Error, TypeKind.Raw, FunctionKind, TypeKind.None
 } # temp Function
 
-let DIRECT_VALUE_DOM_ATOM_KINDS = {
-  Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
-  FunctionKind, TypeKind.None
-}
-
-let DIRECT_VALUE_DOM_COLLAPSED_KINDS = DIRECT_VALUE_DOM_ATOM_KINDS + {
-  Pointer, Seq, Set, HashSet, OrderedSet, Array, Varargs, Variant,
-  TableKind, Instance, Union, Tuple, NonExpanded
-}
-
 proc view(
   self: ValueComponent,
   value: Value,
@@ -1855,34 +1845,25 @@ proc directValueDomSubject(self: ValueComponent): Value =
 proc rootValuePath(self: ValueComponent): seq[SubPath] =
   @[SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind}]
 
-proc canRenderValueDomDirectly(self: ValueComponent): bool =
-  let value = self.directValueDomSubject()
-
-  if value.isNil:
-    return false
-
-  if self.uiExpanded(value, self.baseExpression):
-    value.kind notin ATOM_KINDS and
-      value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS
-  else:
-    value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS
-
 proc renderValueDom*(self: ValueComponent): Node =
   ## Shared DOM entrypoint for the rich value tree.
   ##
   ## Collapsed rows, expanded compound shells, child lists, active inline
-  ## history/chart surfaces, and expanded load-more rows render directly here.
-  if self.canRenderValueDomDirectly():
-    let value = self.directValueDomSubject()
-    return self.renderValueRowDom(
-      value,
-      self.baseExpression,
-      self.baseExpression,
-      self.rootValuePath(),
-      depth=0
-    )
+  ## history/chart surfaces, expanded load-more rows, and the legacy fallback
+  ## TypeKind branches now render directly here.
+  let value = self.directValueDomSubject()
+  if value.isNil:
+    result = newElement(cstring"div", cstring"value-empty value-expanded-text")
+    result.appendText(cstring"")
+    return
 
-  vnodeToDom(self.renderValue(), KaraxInstance())
+  result = self.renderValueRowDom(
+    value,
+    self.baseExpression,
+    self.baseExpression,
+    self.rootValuePath(),
+    depth=0
+  )
 
 proc renderValueDomWithLeft*(self: ValueComponent, left: cstring): Node =
   ## Render a value DOM node with the legacy root ``left`` style applied.
