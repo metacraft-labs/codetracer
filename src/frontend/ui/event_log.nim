@@ -226,9 +226,22 @@ for kind, tags in kindTags:
 when defined(ctInExtension):
   var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
 
+  proc bindEventLogExtensionHost(component: EventLogComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension event-log surface has no panel markup of its own; keep the
+    # exported component alive without retaining an empty Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
-    if eventLogComponentForExtension.kxi.isNil:
-      eventLogComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if eventLogComponentForExtension.extensionRendererId.len == 0:
+      eventLogComponentForExtension.extensionRendererId = id
+      eventLogComponentForExtension.bindEventLogExtensionHost()
     result = eventLogComponentForExtension
 
 proc events(self: EventLogComponent)
@@ -1431,6 +1444,10 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
 # EventLogComponent.render() removed: IsoNim is the primary renderer.
 # Generic callers are expected to use direct IsoNim mount paths. All
 # real rendering is handled by tryMountIsoNimEventLogPanel().
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: EventLogComponent) =
+    self.bindEventLogExtensionHost()
 
 proc scrollOnMove*(self: EventLogComponent, rowSelected: int) =
   if rowSelected > self.denseTable.endRow - 1 or rowSelected < self.denseTable.startRow:

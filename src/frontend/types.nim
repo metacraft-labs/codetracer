@@ -613,6 +613,7 @@ type
     programEvents*: seq[ProgramEvent]
     receivedUpdates*: bool
     pendingReloadRetries*: int
+    extensionRendererId*: cstring
 
 
   DebugComponent* = ref object of Component
