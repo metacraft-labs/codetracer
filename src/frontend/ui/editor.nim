@@ -1222,13 +1222,22 @@ proc getSourceLineDomIndex(self:EditorViewComponent, position: int): int =
 
   return result
 
-proc addViewZone(self: EditorViewComponent, vNode: VNode, line: int) =
-  vNode.style = style(StyleAttr.left, &"{self.currentTooltip[0] * 9}px")
+proc legacyValueViewZoneDom(self: EditorViewComponent, value: ValueComponent): Node =
+  ## Legacy boundary for inline Monaco value view zones.
+  ##
+  ## ValueComponent.renderValue() still returns the rich Karax value tree used
+  ## by editor tooltips, flow modals, trace values, and calltrace embeddings.
+  ## Keep the materialization isolated here until the value renderer grows a
+  ## direct DOM/IsoNim entrypoint.
+  var legacyValueVNode = value.renderValue()
+  legacyValueVNode.style = style(StyleAttr.left, &"{self.currentTooltip[0] * 9}px")
+  vnodeToDom(legacyValueVNode, KaraxInstance())
 
+proc addLegacyValueViewZone(self: EditorViewComponent, value: ValueComponent, line: int) =
   let viewZone = js{
     afterLineNumber: line,
     heightInPx: 0,
-    domNode: vnodeToDom(vNode, KaraxInstance())
+    domNode: self.legacyValueViewZoneDom(value)
   }
 
   self.monacoEditor.changeViewZones do (view: js):
@@ -1236,16 +1245,14 @@ proc addViewZone(self: EditorViewComponent, vNode: VNode, line: int) =
     self.viewZones[line] = zoneId
 
 proc renderValueView(self: EditorViewComponent, value: ValueComponent, line: int) =
-  var vNode = value.renderValue()
-  self.addViewZone(vNode, line)
+  self.addLegacyValueViewZone(value, line)
 
 proc customRedraw(self: ValueComponent) =
   let editor = data.ui.editors[data.services.debugger.location.path]
   var line = editor.lastMouseClickLine
-  var vNode = self.renderValue()
 
   editor.clearViewZones()
-  editor.addViewZone(vNode, line)
+  editor.addLegacyValueViewZone(self, line)
 
 proc renderValueTooltip(self: EditorViewComponent) {.async.} =
   let key = &"{self.path}:{self.lastMouseClickLine}"
