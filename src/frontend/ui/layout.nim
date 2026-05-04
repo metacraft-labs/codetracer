@@ -1,6 +1,6 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
-  karax, karaxdsl, vstyles,
+  karax,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
@@ -21,12 +21,6 @@ type
 
 # context handlers for each shortcut
 var contextHandlers*: JsAssoc[cstring, JsAssoc[cstring, ContextHandler]] = JsAssoc[cstring, JsAssoc[cstring, ContextHandler]]{} # app-global
-
-# SEARCH
-
-proc onSearchSubmit(ev: Event, v: VNode) =
-  cast[dom.Event](ev).preventDefault()
-
 
 const RESULT_LIMIT = 20
 
@@ -235,14 +229,6 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
 # search-results footer placeholder is static and no longer has a Karax stub.
 var sharedRenderersInitialised = false
 
-proc renderLayoutComponent(component: Component, content: Content): VNode =
-  ## Render the remaining live Karax-backed GoldenLayout components.
-  ## IsoNim-owned panels must be handled by their direct mount path instead of
-  ## falling back to generic Component.render dispatch.
-  discard component
-  discard content
-  buildHtml(tdiv())
-
 proc ensureSharedRenderers() =
   ## Set up the shared global chrome elements that live outside individual
   ## session GL containers. Safe to call multiple times — it only acts on the
@@ -365,7 +351,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   data.ui.layoutConfig = cast[GoldenLayoutConfigClass](window.toJs.LayoutConfig)
   data.ui.contentItemConfig = cast[GoldenLayoutItemConfigClass](window.toJs.ItemConfig)
 
-  # Set up shared (non-GL) Karax renderers once.  These live outside the
+  # Set up shared non-GL direct renderers once. These live outside the
   # per-session GL container and survive session switches.
   ensureSharedRenderers()
 
@@ -499,10 +485,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
 
-    # IsoNim-migrated components mount directly into the GoldenLayout
-    # container — no Karax setRenderer needed. Other components still
-    # use Karax rendering.
-    let isIsoNimComponent = state.content in {
+    # Components that still enter the generic GoldenLayout route mount
+    # directly into the GoldenLayout container. Editor tabs use the separate
+    # editorComponent route above.
+    let isDirectMountComponent = state.content in {
       Content.Calltrace,
       Content.State,
       Content.EventLog,
@@ -529,15 +515,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.AgentWorkspace,
     }
 
-    # When a background tab becomes visible, force Karax to redraw into the
-    # now-visible DOM element. Only needed for non-IsoNim components that
-    # still use Karax rendering.
-    if not isIsoNimComponent:
-      let label = state.label
-      container.on(cstring"show") do ():
-        if kxiMap.hasKey(label):
-          redrawSync(kxiMap[label])
-
     var containerId: cstring
     containerId = state.label
 
@@ -545,13 +522,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not data.ui.componentMapping[state.content][state.id].isNil:
         let component = data.ui.componentMapping[state.content][state.id]
 
-        if not isIsoNimComponent:
-          kxiMap[state.label] = setRenderer(
-            (proc: VNode = renderLayoutComponent(component, state.content)),
-            containerId,
-            proc = discard
-          )
-          component.kxi = kxiMap[state.label]
+        if not isDirectMountComponent:
+          cwarn "layout: genericUiComponent has no direct mount for " &
+            $state.content & " id " & $state.id
 
         if state.content == Content.Shell:
           let shellComponent = ShellComponent(component)
@@ -757,10 +730,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
         discard component.afterInit()
 
-        # Non-IsoNim components need an explicit redrawAll() after
-        # setRenderer to trigger the initial Karax render.
-        if not isIsoNimComponent:
-          discard windowSetTimeout(proc() = redrawAll(), 200)
       ), 200)
 
   layout.loadLayout(initialLayout)
@@ -849,10 +818,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # whether these panels exist as GL tabs (from a saved layout that
   # still includes them) and pin them from GL, or create standalone
   # auto-hide panels if they were never in GL (the default layout).
-  # Create a hidden container in the DOM to host standalone auto-hide
-  # panel elements. Karax's setRenderer requires the target element to
-  # be in the DOM (it uses getElementById), so we keep a hidden host.
-  # The auto-hide overlay will reparent the wrapper elements when shown.
+  # Create a hidden container in the DOM to host standalone auto-hide panel
+  # elements. The auto-hide overlay reparents the wrapper elements when shown.
   var autoHideHost = kdom.document.getElementById(cstring"auto-hide-standalone-host")
   if autoHideHost.isNil:
     autoHideHost = kdom.document.createElement("div")
