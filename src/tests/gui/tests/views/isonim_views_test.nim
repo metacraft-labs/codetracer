@@ -647,7 +647,9 @@ suite "IsoNim State Panel — structure":
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "state-component"
+      check "component-container" in panel.attributes["class"]
+      check "active-state" in panel.attributes["class"]
+      check "state-component" in panel.attributes["class"]
 
       dispose()
 
@@ -2900,8 +2902,9 @@ suite "IsoNim Point List Panel — interactions":
 # ``method render``; these tests cover the structural shell, value-row
 # rendering, the empty-state placeholder, the per-row close button
 # (``removeValue``), and the ``addFromExpression`` lookup flow.  The
-# rich ``ValueComponent`` rendering follow-up is deliberately not
-# exercised here — the placeholder ``cellText`` semantics are.
+# full expandable ``ValueComponent`` backend tree is deliberately not
+# exercised here because ``ScratchpadValueEntry`` carries a flattened
+# preview, but rows must keep the legacy collapsed ``value-*`` DOM.
 # ---------------------------------------------------------------------------
 
 proc makeScratchpadEntry(expression: string = "i";
@@ -2934,7 +2937,7 @@ suite "IsoNim Scratchpad Panel — structure":
       check panel.tag == "div"
       check "component-container" in panel.attributes["class"]
       check "active-state" in panel.attributes["class"]
-      check panel.attributes["id"] == "values"
+      check panel.attributes["id"] == "scratchpadComponent-0"
 
       dispose()
 
@@ -3014,7 +3017,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
 
       dispose()
 
-  test "row cell renders expression: valueText placeholder text":
+  test "row renders legacy collapsed value DOM":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
@@ -3023,9 +3026,18 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let panel = renderScratchpadPanel(r, vm)
       vm.addValue(makeScratchpadEntry("board[1][2]", "X"))
 
-      let cell = findByClass(panel, "scratchpad-value-cell")
-      check cell != nil
-      check cell.textContent == "board[1][2]: X"
+      let valueRoot = findByClass(panel, "value-expanded")
+      check valueRoot != nil
+      check "border-value-0" in valueRoot.attributes["class"]
+      check "value-expanded-name" in valueRoot.attributes["class"]
+
+      let name = findByClass(panel, "value-name")
+      check name != nil
+      check name.textContent == "board[1][2]: "
+
+      let textNode = findByClass(panel, "value-expanded-text")
+      check textNode != nil
+      check textNode.textContent == "X"
 
       dispose()
 
@@ -3047,7 +3059,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
 
       dispose()
 
-  test "literal entries render bare (no expression: prefix)":
+  test "literal entries keep the value preview in value-expanded-text":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createScratchpadVM(store)
@@ -3057,8 +3069,8 @@ suite "IsoNim Scratchpad Panel — row rendering":
       vm.addValue(makeScratchpadEntry("$msg", "hello world",
                                       isLiteral = true))
 
-      let cell = findByClass(panel, "scratchpad-value-cell")
-      check cell.textContent == "hello world"
+      let textNode = findByClass(panel, "value-expanded-text")
+      check textNode.textContent == "hello world"
 
       dispose()
 
@@ -3075,8 +3087,10 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let row = list.children[0]
       check "scratchpad-value-error" in row.attributes["class"]
 
-      let cell = findByClass(panel, "scratchpad-value-cell")
-      check cell.textContent == "crash: <error: boom>"
+      let errorText = findByClass(panel, "value-error")
+      check errorText != nil
+      check "value-expanded-text" in errorText.attributes["class"]
+      check errorText.textContent == "<error: boom>"
 
       dispose()
 
@@ -3094,11 +3108,17 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let list = findByClass(panel, "value-components-container")
       check list.children.len == 3
       check findByClass(list.children[0],
-                        "scratchpad-value-cell").textContent == "z: 26"
+                        "value-name").textContent == "z: "
+      check findByClass(list.children[0],
+                        "value-expanded-text").textContent == "26"
       check findByClass(list.children[1],
-                        "scratchpad-value-cell").textContent == "a: 1"
+                        "value-name").textContent == "a: "
+      check findByClass(list.children[1],
+                        "value-expanded-text").textContent == "1"
       check findByClass(list.children[2],
-                        "scratchpad-value-cell").textContent == "m: 13"
+                        "value-name").textContent == "m: "
+      check findByClass(list.children[2],
+                        "value-expanded-text").textContent == "13"
 
       dispose()
 
@@ -3272,12 +3292,12 @@ suite "IsoNim Scratchpad Panel — vm":
       "scratchpad-value-view scratchpad-value-error"
 
   test "cellText branches on isLiteral / isError flags":
-    check cellText(makeScratchpadEntry("a", "1")) == "a: 1"
+    check cellText(makeScratchpadEntry("a", "1")) == "1"
     check cellText(makeScratchpadEntry("$msg", "hi",
                                        isLiteral = true)) == "hi"
     check cellText(makeScratchpadEntry("crash", "boom",
                                        isError = true)) ==
-      "crash: <error: boom>"
+      "<error: boom>"
 
 # ===========================================================================
 # Shell panel tests

@@ -226,12 +226,11 @@ when defined(js):
                                ): isonim_dom.Element =
     ## Render the Event Log shell. The `<table>` elements are empty
     ## placeholders; DataTables populates them after `afterMount`.
-    ## `componentId` is currently unused inside the markup but kept on
-    ## the public API so callers do not have to thread it themselves.
-    discard componentId
+    ## `componentId` is threaded into the legacy `eventLogComponent-N`
+    ## root id so page objects and DataTables helpers can locate it.
     ui(r):
       tdiv(id = "eventLogComponent-" & $componentId,
-           class = "component-container eventLog isonim-event-log",
+           class = "component-container eventLog",
            tabindex = "2"):
         tdiv(class = "ct-flex"):
           button(id = "category-image",

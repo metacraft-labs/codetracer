@@ -386,16 +386,30 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-editor-fixture .margin-view-overlays > div {
       box-sizing: border-box;
+      position: relative;
       height: 22px;
       line-height: 22px;
     }
 
     .ct-storybook-editor-fixture .line-numbers {
       box-sizing: border-box;
-      width: 39px;
+      position: absolute;
+      left: 0;
+      width: 39px !important;
       color: #858585;
       text-align: right;
       user-select: none;
+    }
+
+    .ct-storybook-editor-fixture .gutter {
+      width: 39px !important;
+    }
+
+    .ct-storybook-editor-fixture .gutter .gutter-line {
+      width: 39px !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      padding-right: 0.15em !important;
     }
 
     .ct-storybook-editor-fixture .active-line-number {
@@ -404,10 +418,34 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-editor-fixture .folding {
       color: #c4c4c4;
-      display: inline-block;
-      width: 22px;
+      display: inline-flex !important;
+      position: absolute !important;
+      left: 39px;
+      width: 52px !important;
+      height: 22px;
+      align-items: center;
+      justify-content: center;
       text-align: center;
       user-select: none;
+    }
+
+    .ct-storybook-editor-fixture .gutter-highlight-active {
+      position: absolute;
+      inset: 0;
+    }
+
+    .ct-storybook-editor-fixture .gutter-highlight-active:before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 2px;
+      width: 0;
+      height: 0;
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+      border-left: 10px solid #ffd23f;
+      transform: translateY(-50%);
+      z-index: 2;
     }
 
     .ct-storybook-editor-fixture .current-line {
@@ -480,59 +518,6 @@ function injectSurfaceStyles(container) {
       background: rgba(123, 123, 123, 0.72);
     }
 
-    .ct-storybook-calltrace-fixture {
-      box-sizing: border-box;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      color: #d9d9d9;
-      font-family: "FiraCode", monospace !important;
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-search {
-      width: 100%;
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-search-form-0 {
-      margin: 0;
-    }
-
-    .ct-storybook-calltrace-fixture .local-calltrace-view {
-      overflow: hidden;
-      padding-top: 0.5em;
-    }
-
-    .ct-storybook-calltrace-fixture .local-calltrace {
-      min-width: max-content;
-      opacity: 0.58;
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-call-line {
-      display: block;
-      height: 24px;
-      line-height: 24px;
-      overflow: hidden;
-      white-space: pre;
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-child.call-depth {
-      display: inline-block;
-      float: none;
-      width: auto;
-      color: #bcbcbc;
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-call-line.event-selected {
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-name {
-      color: #e8e8e8;
-    }
-
-    .ct-storybook-calltrace-fixture .calltrace-args {
-      color: #a8d9b8;
-    }
   `;
   container.appendChild(style);
 }
@@ -554,55 +539,60 @@ const storybookEditorLines = [
     { t: " main(initial_shield: Field, shield_regen_percentage: Field) {" },
   ],
   [
+    { t: "    " },
     { t: "println", c: "token-function" },
     { t: "(" },
     { t: "\"Positive Test Case\"", c: "token-string" },
     { t: ")" },
   ],
   [],
-  [{ t: "let", c: "token-keyword" }, { t: " did_survive_positive = shield::iterate_asteroids(" }],
-  [{ t: "if", c: "token-keyword" }, { t: "(did_survive_positive)" }, { t: "{", c: "token-operator" }],
+  [{ t: "    " }, { t: "let", c: "token-keyword" }, { t: " did_survive_positive = shield::iterate_asteroids(" }],
+  [{ t: "    " }, { t: "if", c: "token-keyword" }, { t: "(did_survive_positive)" }, { t: "{", c: "token-operator" }],
   [
+    { t: "        " },
     { t: "println", c: "token-function" },
     { t: "(" },
     { t: "\"shields will hold as expected\"", c: "token-string" },
     { t: ")" },
   ],
-  [{ t: "}", c: "token-operator" }],
-  [{ t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
+  [{ t: "    " }, { t: "}", c: "token-operator" }],
+  [{ t: "    " }, { t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
   [
+    { t: "        " },
     { t: "println", c: "token-function" },
     { t: "(" },
     { t: "\"shields will not hold as expected\"", c: "token-string" },
     { t: ")" },
   ],
-  [{ t: "}", c: "token-operator" }],
+  [{ t: "    " }, { t: "}", c: "token-operator" }],
   [],
-  [{ t: "println", c: "token-function" }, { t: "(\"------------------\")", c: "token-string" }],
-  [{ t: "println", c: "token-function" }, { t: "(\"Negative Test Case\")", c: "token-string" }],
-  [{ t: "println", c: "token-function" }, { t: "(\"------------------\")", c: "token-string" }],
+  [{ t: "    " }, { t: "println", c: "token-function" }, { t: "(\"------------------\")", c: "token-string" }],
+  [{ t: "    " }, { t: "println", c: "token-function" }, { t: "(\"Negative Test Case\")", c: "token-string" }],
+  [{ t: "    " }, { t: "println", c: "token-function" }, { t: "(\"------------------\")", c: "token-string" }],
   [],
-  [{ t: "let", c: "token-keyword" }, { t: " did_survive_negative = shield::iterate_asteroids(" }],
-  [{ t: "if", c: "token-keyword" }, { t: "(did_survive_negative)" }, { t: "{", c: "token-operator" }],
+  [{ t: "    " }, { t: "let", c: "token-keyword" }, { t: " did_survive_negative = shield::iterate_asteroids(" }],
+  [{ t: "    " }, { t: "if", c: "token-keyword" }, { t: "(did_survive_negative)" }, { t: "{", c: "token-operator" }],
   [
+    { t: "        " },
     { t: "println", c: "token-function" },
     { t: "(" },
     { t: "\"shields will hold, but should not\"", c: "token-string" },
     { t: ")" },
   ],
-  [{ t: "}", c: "token-operator" }],
-  [{ t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
+  [{ t: "    " }, { t: "}", c: "token-operator" }],
+  [{ t: "    " }, { t: "else", c: "token-keyword" }, { t: "{", c: "token-operator" }],
   [
+    { t: "        " },
     { t: "println", c: "token-function" },
     { t: "(" },
     { t: "\"shields will not hold as expected\"", c: "token-string" },
     { t: ")" },
   ],
-  [{ t: "}", c: "token-operator" }],
+  [{ t: "    " }, { t: "}", c: "token-operator" }],
   [],
-  [{ t: "assert(did_survive_positive == true);" }],
-  [{ t: "assert(did_survive_negative == false);" }],
-  [{ t: "did_survive_positive & !did_survive_negative" }],
+  [{ t: "    assert(did_survive_positive == true);" }],
+  [{ t: "    assert(did_survive_negative == false);" }],
+  [{ t: "    did_survive_positive & !did_survive_negative" }],
   [{ t: "}", c: "token-punctuation" }],
   [],
   [{ t: "fn", c: "token-keyword" }, { t: " calculate_remaining_shield_pct(initial_shield: Field) -> Field {" }],
@@ -662,6 +652,11 @@ function installStorybookEditorFixture(mount) {
     const gutter = document.createElement("div");
     gutter.className = "gutter";
     gutter.dataset.line = String(lineNumber);
+    if (lineNumber === 13) {
+      const activeMarker = document.createElement("div");
+      activeMarker.className = "gutter-highlight-active";
+      gutter.appendChild(activeMarker);
+    }
     const gutterLine = document.createElement("div");
     gutterLine.className = "gutter-line";
     gutterLine.textContent = String(lineNumber);
@@ -680,10 +675,6 @@ function installStorybookEditorFixture(mount) {
     code.style.height = "22px";
     code.style.lineHeight = "22px";
     if (lineNumber === 13) {
-      const arrow = document.createElement("span");
-      arrow.className = "current-arrow";
-      arrow.textContent = ">";
-      code.appendChild(arrow);
       const selected = document.createElement("span");
       selected.className = "selected-text";
       for (const token of tokens) appendToken(selected, token);
@@ -711,112 +702,6 @@ function installStorybookEditorFixture(mount) {
   guard.appendChild(scrollbar);
   editor.appendChild(guard);
   host.appendChild(editor);
-}
-
-const storybookCalltraceRows = [
-  { depth: 0, text: "main #0", args: "(initial_shield=10000, shield_regen_percentage=10)" },
-  { depth: 1, text: "iterate_asteroids #1", args: "(initial_shield=10000, iteration=0)" },
-  { depth: 2, text: "calculate_damage #2", args: "(initial_shield=10000, asteroid_mass=100)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #3", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #4", args: "()" },
-  { depth: 1, text: "status_report #5", args: "(iteration=0)" },
-  { depth: 1, text: "iterate_asteroids #6", args: "(initial_shield=10000, iteration=1)" },
-  { depth: 2, text: "calculate_damage #7", args: "(initial_shield=10000, asteroid_mass=2000)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #8", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #9", args: "()" },
-  { depth: 1, text: "status_report #10", args: "(iteration=1)" },
-  { depth: 1, text: "iterate_asteroids #11", args: "(initial_shield=10000, iteration=2)" },
-  { depth: 2, text: "calculate_damage #12", args: "(initial_shield=10000, asteroid_mass=2000)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #13", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #14", args: "()" },
-  { depth: 1, text: "status_report #15", args: "(iteration=2)" },
-  { depth: 1, text: "iterate_asteroids #16", args: "(initial_shield=10000, iteration=3)" },
-  { depth: 2, text: "calculate_damage #17", args: "(initial_shield=10000, asteroid_mass=2000)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #18", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #19", args: "()" },
-  { depth: 1, text: "status_report #20", args: "(iteration=3)" },
-  { depth: 1, text: "iterate_asteroids #21", args: "(initial_shield=10000, iteration=4)" },
-  { depth: 2, text: "calculate_damage #22", args: "(initial_shield=10000, asteroid_mass=3000)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #23", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #24", args: "()" },
-  { depth: 1, text: "status_report #25", args: "(iteration=4)" },
-  { depth: 1, text: "iterate_asteroids #26", args: "(initial_shield=10000, iteration=5)" },
-  { depth: 2, text: "calculate_damage #27", args: "(initial_shield=10000, asteroid_mass=2500)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #28", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #29", args: "()" },
-  { depth: 1, text: "status_report #30", args: "(iteration=5)" },
-  { depth: 1, text: "iterate_asteroids #31", args: "(initial_shield=10000, iteration=6)" },
-  { depth: 2, text: "calculate_damage #32", args: "(initial_shield=10000, asteroid_mass=3250)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #33", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #34", args: "()" },
-  { depth: 1, text: "status_report #35", args: "(iteration=6)" },
-  { depth: 1, text: "iterate_asteroids #36", args: "(initial_shield=10000, iteration=7)" },
-  { depth: 2, text: "calculate_damage #37", args: "(initial_shield=10000, asteroid_mass=1232)" },
-  { depth: 3, text: "calculate_remaining_shield_pct #38", args: "()" },
-  { depth: 2, text: "calculate_shield_regeneration #39", args: "()" },
-];
-
-function installStorybookCalltraceFixture(mount) {
-  mount.innerHTML = "";
-  const panel = document.createElement("div");
-  panel.id = "calltraceComponent-0";
-  panel.className = "component-container calltrace-view ct-storybook-calltrace-fixture";
-  panel.dataset.label = "calltrace-data-label-0";
-  panel.tabIndex = 2;
-
-  const searchWrapper = document.createElement("div");
-  const search = document.createElement("div");
-  search.className = "calltrace-search";
-  const form = document.createElement("form");
-  form.className = "calltrace-search-form-0";
-  const input = document.createElement("input");
-  input.id = "calltrace-search-input-0";
-  input.className =
-    "calltrace-search-input calltrace-search-input-0 ct-input-panel ct-input-search-image";
-  input.type = "text";
-  input.placeholder = "Search";
-  form.appendChild(input);
-  search.appendChild(form);
-  const results = document.createElement("div");
-  results.className = "call-search-results hidden";
-  search.appendChild(results);
-  searchWrapper.appendChild(search);
-  panel.appendChild(searchWrapper);
-
-  const scroll = document.createElement("div");
-  scroll.id = "calltraceScroll-0";
-  scroll.className = "local-calltrace-view";
-  const localCalltrace = document.createElement("div");
-  localCalltrace.className = "local-calltrace";
-  localCalltrace.style.height = `${storybookCalltraceRows.length * 24}px`;
-  const lines = document.createElement("div");
-  lines.className = "calltrace-lines";
-  lines.style.transform = "translateY(0px)";
-  storybookCalltraceRows.forEach((row, index) => {
-    const line = document.createElement("div");
-    line.className = `calltrace-call-line calltrace-row${index === 0 ? " event-selected" : ""}`;
-    const depth = document.createElement("span");
-    depth.className = "calltrace-child call-depth";
-    depth.textContent = `${"  ".repeat(row.depth)}${row.depth <= 2 ? "[-]" : " . "}`;
-    const toggle = document.createElement("span");
-    toggle.className = "calltrace-toggle";
-    toggle.textContent = " ";
-    const name = document.createElement("span");
-    name.className = "calltrace-name";
-    name.textContent = row.text + " ";
-    const args = document.createElement("span");
-    args.className = "calltrace-args";
-    args.textContent = row.args;
-    line.appendChild(depth);
-    line.appendChild(toggle);
-    line.appendChild(name);
-    line.appendChild(args);
-    lines.appendChild(line);
-  });
-  localCalltrace.appendChild(lines);
-  scroll.appendChild(localCalltrace);
-  panel.appendChild(scroll);
-  mount.appendChild(panel);
 }
 
 function createGoldenPanelHost(frame, title) {
@@ -1359,13 +1244,6 @@ function renderDefaultDebugLayout(container) {
     const disposes = [];
     for (const { name, mount, fixture } of mounts) {
       try {
-        if (name === "calltrace") {
-          installStorybookCalltraceFixture(mount);
-          disposes.push(() => {
-            mount.innerHTML = "";
-          });
-          continue;
-        }
         disposes.push(mountCodeTracerStory(mount, "panel", name, fixture ?? "populated"));
         if (name === "editor") {
           window.requestAnimationFrame(() => installStorybookEditorFixture(mount));

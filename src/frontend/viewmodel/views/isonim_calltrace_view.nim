@@ -274,6 +274,23 @@ when defined(js):
     if line.hasChildren and line.isExpanded: "collapse-call-img"
     else: "dot-call-img"
 
+  proc selectedChildBoxClass(vm: CalltraceVM; item: proc(): CallLine): string =
+    let sel = vm.selectedEntry.val
+    let line = item()
+    if sel.isSome and sel.get == line.index:
+      "call-current call-child-box"
+    else:
+      "call-child-box"
+
+  proc selectedToggleIconClass(vm: CalltraceVM; item: proc(): CallLine): string =
+    let base = toggleIconClass(item)
+    let sel = vm.selectedEntry.val
+    let line = item()
+    if sel.isSome and sel.get == line.index:
+      base & " active"
+    else:
+      base
+
   proc renderCallLineRowWeb(r: WebRenderer; vm: CalltraceVM;
                             item: proc(): CallLine): isonim_dom.Element =
     ## Render a single calltrace row using the Karax-compatible markup.
@@ -293,9 +310,10 @@ when defined(js):
         span(min_width = $(item().depth * 8) & "px"):
           discard
         tdiv(class = "calltrace-child call-depth"):
-          tdiv(id = "local-call-" & $item().index, class = "call-child-box"):
+          tdiv(id = "local-call-" & $item().index,
+               class = selectedChildBoxClass(vm, item)):
             span(class = "toggle-call", onclick = h.onToggle):
-              tdiv(class = toggleIconClass(item)):
+              tdiv(class = selectedToggleIconClass(vm, item)):
                 discard
             tdiv(id = "local-call-text-" & $item().index, class = "call-text",
                  onclick = h.onSelect, ondblclick = h.onDblClick):
@@ -475,18 +493,20 @@ when defined(js):
           tdiv(class = "calltrace-search"):
             form(ref = formEl, class = "calltrace-search-form-0"):
               input(ref = inputEl,
+                    id = "calltrace-search-input-0",
                     class = "calltrace-search-input calltrace-search-input-0 " &
                             "ct-input-panel ct-input-search-image",
                     `type` = "text", placeholder = "Search", tabindex = "0")
-          tdiv(ref = resultsContainer, class = "call-search-results hidden"):
-            discard
+            tdiv(ref = resultsContainer, class = "call-search-results hidden"):
+              discard
         tdiv(ref = scrollContainer,
              id = "calltraceScroll-0",
              class = "local-calltrace-view"):
           tdiv(ref = innerContainer,
                class = "local-calltrace",
                height = $(vm.store.calltrace.totalCallsCount.val.int * 24) & "px"):
-            tdiv(ref = linesContainer, class = "calltrace-lines"):
+            tdiv(ref = linesContainer, class = "calltrace-lines",
+                 transform = "translateY(0px)"):
               discard
         tdiv(class = "calltrace-loading",
              id = "calltrace-toggle-loading-0",

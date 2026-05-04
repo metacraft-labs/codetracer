@@ -9,14 +9,11 @@
 ##
 ## The legacy panel renders each value via the rich
 ## ``ValueComponent`` Karax sub-tree (expandable trees, charts, inline /
-## verbose toggles).  This iteration intentionally renders a minimal
-## ``<div class="scratchpad-value-cell">{expression}: {valueText}</div>``
-## placeholder per row so the panel is fully migrated to IsoNim while
-## the rich ``ValueComponent`` rendering remains a follow-up (the same
-## staging trace_log §1.69 used for ``localsToText``).  The
-## ``ScratchpadValueEntry`` value type already carries
-## ``expression`` / ``valueText`` / ``isError`` / ``isLiteral`` so the
-## follow-up does not need a value-type migration.
+## verbose toggles).  ``ScratchpadValueEntry`` only carries a flattened
+## value preview, so this view restores the stable outer ``value-*`` DOM
+## that the legacy ``ValueComponent`` produced for collapsed atom/error
+## values.  True expandable children and history charts still require
+## the original backend ``Value`` tree and remain outside this VM shape.
 ##
 ## Both renderer overloads (Mock and Web) produce the same outer
 ## structure mirroring the legacy ``componentContainerClass(
@@ -26,8 +23,11 @@
 ##     div.value-components-container
 ##       div.scratchpad-value-view (one per entry)
 ##         button#close-element.ct-button-image-sm-secondary.ct-mr-2
-##         div.scratchpad-value-cell                   (placeholder)
-##           text "<expression>: <valueText>"
+##         div.value-expanded.border-value-0.value-expanded-name
+##           div.value-expanded-atom-parent
+##             div.value-name-container
+##               span.value-name
+##             div > span.value-view > div/span.value-expanded-text
 ##       div.empty-overlay
 ##         text "You can add values from other components by ..."
 ##
@@ -61,9 +61,11 @@ const ScratchpadEmptyStateText* =
   ## Verbatim from the legacy ``method render`` so the wording the
   ## user sees stays unchanged.
 
-const CloseButtonClass* = "ct-button-image-sm-secondary ct-mr-2"
+const CloseButtonClass* =
+  "ct-button-image-sm-secondary ct-mr-2 scratchpad-value-close"
   ## Class string the legacy panel attached to the per-row close
-  ## button.  Kept as a constant so the view + tests share one source.
+  ## button, plus the existing page-object hook for the clickable icon.
+  ## Kept as a constant so the view + tests share one source.
 
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
@@ -81,18 +83,27 @@ proc rowClass*(isError: bool): string =
     "scratchpad-value-view"
 
 proc cellText*(entry: ScratchpadValueEntry): string =
-  ## Single-line preview text the IsoNim placeholder renders inside the
-  ## ``scratchpad-value-cell`` div.  Literal strings render as bare
-  ## text (no ``name=`` prefix); other values render as
-  ## ``"name: value"``.  Errors render as ``"name: <error>"`` so the
-  ## row visibly communicates the failure even before the rich
-  ## ``ValueComponent`` rendering follow-up lands.
+  ## Single-line preview text for tests and literal fallback display.
   if entry.isError:
-    entry.expression & ": <error: " & entry.valueText & ">"
-  elif entry.isLiteral:
-    entry.valueText
+    "<error: " & entry.valueText & ">"
   else:
-    entry.expression & ": " & entry.valueText
+    entry.valueText
+
+proc valueExpandedClass*(): string =
+  ## Root class restored from the legacy ValueComponent collapsed row.
+  ## The Scratchpad VM has no depth/type tree, so every flattened entry
+  ## renders at depth 0.
+  "value-expanded border-value-0 value-expanded-name"
+
+proc valueAtomClass*(entry: ScratchpadValueEntry; index: int): string =
+  ## Atom row class restored from ``ValueComponent.atomValueView``.  The
+  ## legacy component alternated atom-even / atom-odd as rows were
+  ## rendered; keep that visual rhythm for multiple pinned values.
+  let parity = if index mod 2 == 0: "atom-even" else: "atom-odd"
+  if entry.isError:
+    "value-error value-expanded-text"
+  else:
+    "value-expanded-atom atom-string " & parity & " value-expanded-default"
 
 proc onCloseClick(vm: ScratchpadVM; index: int): proc() =
   ## Closure factory that captures the row's index so each row's
@@ -110,9 +121,8 @@ proc onCloseClick(vm: ScratchpadVM; index: int): proc() =
 proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
                    entry: ScratchpadValueEntry; index: int): MockNode =
   ## Render a single scratchpad row.  The close button maps onto
-  ## ``vm.removeValue``; the cell renders the
-  ## ``expression: valueText`` placeholder string the rich
-  ## ValueComponent follow-up will eventually replace.
+  ## ``vm.removeValue``; the value body keeps the collapsed legacy
+  ## ``ValueComponent`` class surface around the flattened preview.
   let onClick = onCloseClick(vm, index)
   let cell = cellText(entry)
   let row = ui(r):
@@ -120,8 +130,20 @@ proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
       button(class = CloseButtonClass, id = "close-element",
              onclick = onClick):
         discard
-      tdiv(class = "scratchpad-value-cell"):
-        text cell
+      tdiv(class = valueExpandedClass()):
+        tdiv(class = "value-expanded-atom-parent"):
+          tdiv(class = "value-name-container"):
+            span(class = "value-name"):
+              text entry.expression & ": "
+          tdiv:
+            span(class = "value-view"):
+              if entry.isError:
+                tdiv(class = valueAtomClass(entry, index)):
+                  text cell
+              else:
+                tdiv(class = valueAtomClass(entry, index)):
+                  span(class = "value-expanded-text"):
+                    text cell
   row
 
 proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
@@ -176,14 +198,9 @@ when defined(js):
       isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
     n
 
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = "";
-                            elemId: string = ""): isonim_dom.Element =
-    ## Helper: create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass, elemId)
+  proc appendWebText(node: isonim_dom.Element; textValue: string) =
     let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
+    isonim_dom.appendChild(isonim_dom.Node(node), t)
 
   proc clearWebChildren(node: isonim_dom.Element) =
     let asNode = isonim_dom.Node(node)
@@ -204,9 +221,35 @@ when defined(js):
                                 proc(ev: isonim_dom.Event) = onClick())
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(closeBtn))
 
-    let cell = createWebTextElement("div", cellText(entry),
-                                    "scratchpad-value-cell")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(cell))
+    let valueRoot = createWebElement("div", valueExpandedClass())
+    let parent = createWebElement("div", "value-expanded-atom-parent")
+    let nameContainer = createWebElement("div", "value-name-container")
+    let nameSpan = createWebElement("span", "value-name")
+    appendWebText(nameSpan, entry.expression & ": ")
+    isonim_dom.appendChild(isonim_dom.Node(nameContainer),
+                           isonim_dom.Node(nameSpan))
+    isonim_dom.appendChild(isonim_dom.Node(parent),
+                           isonim_dom.Node(nameContainer))
+
+    let valueLine = createWebElement("div")
+    let valueView = createWebElement("span", "value-view")
+    let valueAtom = createWebElement("div", valueAtomClass(entry, index))
+    if entry.isError:
+      appendWebText(valueAtom, cellText(entry))
+    else:
+      let valueText = createWebElement("span", "value-expanded-text")
+      appendWebText(valueText, cellText(entry))
+      isonim_dom.appendChild(isonim_dom.Node(valueAtom),
+                             isonim_dom.Node(valueText))
+    isonim_dom.appendChild(isonim_dom.Node(valueView),
+                           isonim_dom.Node(valueAtom))
+    isonim_dom.appendChild(isonim_dom.Node(valueLine),
+                           isonim_dom.Node(valueView))
+    isonim_dom.appendChild(isonim_dom.Node(parent),
+                           isonim_dom.Node(valueLine))
+    isonim_dom.appendChild(isonim_dom.Node(valueRoot),
+                           isonim_dom.Node(parent))
+    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(valueRoot))
     row
 
   proc renderScratchpadPanel*(r: WebRenderer;

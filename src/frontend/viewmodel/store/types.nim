@@ -658,7 +658,7 @@ type
     ## ``expression`` — the source-level expression / variable name the
     ##                  user sent to the scratchpad (e.g. ``"i"`` or
     ##                  ``"board[2][3]"``).  Rendered verbatim in the
-    ##                  ``scratchpad-value-cell`` row.
+    ##                  ``value-name`` label.
     ## ``valueText``  — pre-rendered text representation of the value
     ##                  at capture time, mirroring the legacy
     ##                  ``ValueComponent`` collapsed view.  The

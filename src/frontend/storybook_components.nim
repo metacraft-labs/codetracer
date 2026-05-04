@@ -100,48 +100,62 @@ proc storyCalltraceLines(): seq[CallLine] =
              hasChildren: true, isExpanded: true, callKey: "main:0"),
   ]
   var idx = 1'i64
-  for iteration in 0 .. 9:
-    result.add(CallLine(index: idx, name: "iterate_asteroids",
-      depth: 1, rrTicks: uint64(46 + iteration * 68),
-      location: Location(file: "src/shield.nr", line: 54, column: 3),
-      hasChildren: true, isExpanded: true,
-      callKey: "iterate:" & $iteration))
-    inc idx
+
+  template addIterationBlock(prefix: string; iteration: int;
+                             rrBase: uint64; statusLine: int) =
     result.add(CallLine(index: idx, name: "calculate_damage",
-      depth: 2, rrTicks: uint64(52 + iteration * 68),
+      depth: 2, rrTicks: rrBase,
       location: Location(file: "src/shield.nr", line: 58, column: 3,
                          callstackDepth: 2),
       hasChildren: true, isExpanded: true,
-      callKey: "damage:" & $iteration))
+      callKey: prefix & "-damage:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "calculate_remaining_shield_pct",
-      depth: 3, rrTicks: uint64(58 + iteration * 68),
+      depth: 3, rrTicks: rrBase + 6,
       location: Location(file: "src/shield.nr", line: 61, column: 3,
                          callstackDepth: 3),
       hasChildren: false, isExpanded: false,
-      callKey: "remaining:" & $iteration))
+      callKey: prefix & "-remaining:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "calculate_shield_regeneration",
-      depth: 2, rrTicks: uint64(72 + iteration * 68),
+      depth: 2, rrTicks: rrBase + 20,
       location: Location(file: "src/shield.nr", line: 66, column: 3,
                          callstackDepth: 2),
       hasChildren: false, isExpanded: false,
-      callKey: "regen:" & $iteration))
+      callKey: prefix & "-regen:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "status_report",
-      depth: 1, rrTicks: uint64(114 + iteration * 68),
-      location: Location(file: "src/main.nr", line: 17, column: 3,
+      depth: 1, rrTicks: rrBase + 62,
+      location: Location(file: "src/main.nr", line: statusLine, column: 3,
                          callstackDepth: 1),
       hasChildren: true, isExpanded: true,
-      callKey: "status:" & $iteration))
+      callKey: prefix & "-status:" & $iteration))
     inc idx
     result.add(CallLine(index: idx, name: "calculate_remaining_shield_pct",
-      depth: 2, rrTicks: uint64(120 + iteration * 68),
       location: Location(file: "src/shield.nr", line: 61, column: 3,
                          callstackDepth: 2),
+      depth: 2, rrTicks: rrBase + 68,
       hasChildren: false, isExpanded: false,
-      callKey: "status-remaining:" & $iteration))
+      callKey: prefix & "-status-remaining:" & $iteration))
     inc idx
+
+  result.add(CallLine(index: idx, name: "iterate_asteroids",
+    depth: 1, rrTicks: 46'u64,
+    location: Location(file: "src/shield.nr", line: 54, column: 3),
+    hasChildren: true, isExpanded: true,
+    callKey: "iterate:positive"))
+  inc idx
+  for iteration in 0 .. 7:
+    addIterationBlock("positive", iteration, uint64(52 + iteration * 68), 17)
+
+  result.add(CallLine(index: idx, name: "iterate_asteroids",
+    depth: 1, rrTicks: 590'u64,
+    location: Location(file: "src/shield.nr", line: 54, column: 3),
+    hasChildren: true, isExpanded: true,
+    callKey: "iterate:negative"))
+  inc idx
+  for iteration in 0 .. 3:
+    addIterationBlock("negative", iteration, uint64(596 + iteration * 68), 27)
 
 proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
   result = initTable[string, seq[CallArg]]()
@@ -149,52 +163,82 @@ proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
     CallArg(name: "initial_shield", text: "10000"),
     CallArg(name: "shield_regen_percentage", text: "10"),
     CallArg(name: "asteroid_masses_positive",
-            text: "@[100, 2000, 2000, 50, 50, 2500, 3250, 1232]"),
+            text: "@[100, 2000, 200, 100, 100, 50, 50, 14]"),
     CallArg(name: "asteroid_masses_negative",
-            text: "@[2000, 2000, 50, 3250, 1232]"),
+            text: "@[2000, 300, 200, 20, 15, 20, 1, 1]"),
+    CallArg(name: "__return", text: "nil"),
   ]
-  let masses = [100, 2000, 2000, 50, 50, 2500, 3250, 1232, 800, 450]
-  let remainingBefore = [10000, 10000, 8000, 7000, 5000, 3500, 1250, 18, 10000, 9550]
-  let remainingAfter = [9900, 8000, 6000, 6950, 4950, 1000, 18, 0, 9200, 9100]
-  for iteration in 0 .. 9:
-    result["iterate:" & $iteration] = @[
+
+  template addIterateArgs(key, masses, returnValue: string) =
+    result[key] = @[
       CallArg(name: "initial_shield", text: "10000"),
       CallArg(name: "shield_regen_percentage", text: "10"),
-      CallArg(name: "masses",
-              text: "@[100, 2000, 2000, 50, 50, 2500, 3250, 1232]"),
+      CallArg(name: "masses", text: masses),
+      CallArg(name: "__return", text: returnValue),
     ]
-    result["damage:" & $iteration] = @[
+
+  template addBlockArgs(prefix: string; iteration: int; remainingBefore,
+                        remainingAfter, damage, mass, regenerated,
+                        statusRemaining, pctReturn: int) =
+    result[prefix & "-damage:" & $iteration] = @[
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
-      CallArg(name: "mass", text: $masses[iteration]),
-      CallArg(name: "__return",
-              text: $(remainingBefore[iteration] - remainingAfter[iteration])),
+      CallArg(name: "remaining_shield", text: $remainingBefore),
+      CallArg(name: "mass", text: $mass),
+      CallArg(name: "__return", text: $damage),
     ]
-    result["remaining:" & $iteration] = @[
+    result[prefix & "-remaining:" & $iteration] = @[
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
-      CallArg(name: "__return", text: $(remainingBefore[iteration] div 100)),
+      CallArg(name: "remaining_shield", text: $remainingBefore),
+      CallArg(name: "__return", text: $(remainingBefore div 100)),
     ]
-    result["regen:" & $iteration] = @[
+    result[prefix & "-regen:" & $iteration] = @[
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "remaining_shield", text: $remainingAfter[iteration]),
+      CallArg(name: "remaining_shield", text: $remainingAfter),
       CallArg(name: "shield_regen_percentage", text: "10"),
-      CallArg(name: "__return", text: "1000"),
+      CallArg(name: "__return", text: $regenerated),
     ]
-    result["status:" & $iteration] = @[
+    result[prefix & "-status:" & $iteration] = @[
       CallArg(name: "iteration", text: $iteration),
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
-      CallArg(name: "damage",
-              text: $(remainingBefore[iteration] - remainingAfter[iteration])),
-      CallArg(name: "regenerated_shield", text: "1000"),
+      CallArg(name: "remaining_shield", text: $statusRemaining),
+      CallArg(name: "damage", text: $damage),
+      CallArg(name: "regenerated_shield", text: $regenerated),
       CallArg(name: "__return", text: "nil"),
     ]
-    result["status-remaining:" & $iteration] = @[
+    result[prefix & "-status-remaining:" & $iteration] = @[
       CallArg(name: "initial_shield", text: "10000"),
-      CallArg(name: "remaining_shield", text: $remainingBefore[iteration]),
-      CallArg(name: "__return", text: $(remainingBefore[iteration] div 100)),
+      CallArg(name: "remaining_shield", text: $statusRemaining),
+      CallArg(name: "__return", text: $pctReturn),
     ]
+
+  addIterateArgs("iterate:positive",
+    "@[100, 2000, 200, 100, 100, 50, 50, 14]", "true")
+  let positiveMasses = [100, 2000, 200, 100, 100, 50, 50, 14]
+  let positiveDamage = [100, 2000, 2000, 2000, 3000, 2500, 3250, 1232]
+  let positiveBefore = [10000, 10000, 9000, 8000, 7000, 5000, 3500, 1250]
+  let positiveAfter = [9900, 8000, 7000, 6000, 4000, 2500, 250, 18]
+  let positiveRegen = [100, 1000, 1000, 1000, 1000, 1000, 1000, 1000]
+  let positiveStatus = [10000, 9000, 8000, 7000, 5000, 3500, 1250, 1018]
+  let positivePct = [100, 90, 80, 70, 50, 35, 12, 10]
+  for iteration in 0 .. 7:
+    addBlockArgs("positive", iteration, positiveBefore[iteration],
+                 positiveAfter[iteration], positiveDamage[iteration],
+                 positiveMasses[iteration], positiveRegen[iteration],
+                 positiveStatus[iteration], positivePct[iteration])
+
+  addIterateArgs("iterate:negative",
+    "@[2000, 300, 200, 20, 15, 20, 1, 1]", "false")
+  let negativeMasses = [2000, 300, 200, 20]
+  let negativeDamage = [2000, 3000, 6000, 1600]
+  let negativeBefore = [10000, 9000, 7000, 2000]
+  let negativeAfter = [8000, 6000, 1000, 400]
+  let negativeStatus = [9000, 7000, 2000, 1400]
+  let negativePct = [90, 70, 20, 14]
+  for iteration in 0 .. 3:
+    addBlockArgs("negative", iteration, negativeBefore[iteration],
+                 negativeAfter[iteration], negativeDamage[iteration],
+                 negativeMasses[iteration], 1000, negativeStatus[iteration],
+                 negativePct[iteration])
 
 proc makeStore(): ReplayDataStore =
   let mock = newMockBackendService(autoRespond = true)
@@ -232,7 +276,7 @@ proc makeStore(): ReplayDataStore =
   ]
   result.calltrace.lines.val = storyCalltraceLines()
   result.calltrace.args.val = storyCalltraceArgs()
-  result.calltrace.totalCallsCount.val = uint64(result.calltrace.lines.val.len)
+  result.calltrace.totalCallsCount.val = 80'u64
   result.calltrace.finished.val = true
 
 proc mountWithStore(container: isonim_dom.Element; body: MountBody): DisposeProc =
@@ -474,6 +518,21 @@ proc applyErrors(vm: ErrorsVM) =
 
 proc applyScratchpad(vm: ScratchpadVM) =
   vm.clearValues()
+  vm.addValue(ScratchpadValueEntry(
+    expression: "remaining_shield",
+    valueText: "71",
+    isError: false,
+    isLiteral: false))
+  vm.addValue(ScratchpadValueEntry(
+    expression: "ship",
+    valueText: "{ hull: 100, shield: 71 }",
+    isError: false,
+    isLiteral: false))
+  vm.addValue(ScratchpadValueEntry(
+    expression: "last_error",
+    valueText: "division by zero",
+    isError: true,
+    isLiteral: false))
 
 proc applySearchResults(vm: SearchResultsVM) =
   vm.setQuery("shield")
@@ -1248,7 +1307,22 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "event-log":
         let vm = createEventLogVM(store); vm.applyEventLog()
-        mountIsoNimEventLog(section.content, vm)
+        let denseTableId = "eventLog-default-dense-table-0"
+        let detailedTableId = "eventLog-default-detailed-table-0"
+        let searchInputId = "eventLog-default-search"
+        mountIsoNimEventLogWithDataTables(
+          section.content,
+          vm,
+          0,
+          denseTableId,
+          detailedTableId,
+          searchInputId,
+          proc() =
+            populateStorybookEventLogTables(
+              cstring(denseTableId),
+              cstring(detailedTableId),
+              cstring(storyEventDenseHtml(vm.eventRows.val, vm.selectedRow.val)),
+              cstring(storyEventDetailedHtml())))
         disposers.add(proc() = vm.dispose())
       of "flow":
         let vm = createFlowVM(store); vm.iterationCount.val = 12; vm.selectIteration(5)
