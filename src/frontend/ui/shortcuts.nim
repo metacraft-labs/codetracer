@@ -1,6 +1,6 @@
 import
   jsffi,
-  karax, ui_imports, trace
+  ui_imports, trace
 
 const
   NO_CODE: int = -1
