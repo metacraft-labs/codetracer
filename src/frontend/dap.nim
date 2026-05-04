@@ -247,7 +247,6 @@ when not defined(ctInExtension):
 
 
 else:
-  import .. / .. / libs / karax / karax / kdom
   proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject)
 
   proc asyncSendCtRequest(dap: DapApi, kind: CtEventKind, rawValue: JsObject) {.async.} =
