@@ -49,6 +49,7 @@ var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
 
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent)
 proc tryMountIsoNimAgentActivityPanel*(componentId: int)
+proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent)
 
 proc scrollAgentCom() =
   let el = document.getElementsByClassName("agent-com")
@@ -115,8 +116,7 @@ proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring,
     message.canceled = true
 
   console.log cstring(fmt"[agent-activity] storing message sessionKey={self.currentSessionKey()} messageId={messageId} role={role} canceled={canceled} content={message.content} append={append}")
-  self.syncLegacyAgentActivityIntoVM()
-  redrawAll()
+  self.requestAgentActivityPanelRefresh()
 
 proc bufferMessageChunk(self: AgentActivityComponent, messageId: cstring, content: cstring) =
   ## Accumulate streamed content for a message id until the stop event.
@@ -146,7 +146,7 @@ proc addTerminal(self: AgentActivityComponent, terminalId: cstring): AgentTermin
     except:
       discard
   result = self.terminals[terminalId]
-  self.syncLegacyAgentActivityIntoVM()
+  self.requestAgentActivityPanelRefresh()
 
 const INPUT_ID = cstring"agent-query-text"
 
@@ -278,6 +278,15 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   vm.setReRecordInProgress(self.reRecordInProgress)
   vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
 
+proc requestAgentActivityPanelRefresh*(self: AgentActivityComponent) =
+  ## Refresh the Agent Activity IsoNim mount after legacy component state
+  ## changes. Signal writes update mounted views; the mount attempt covers the
+  ## first refresh after the GoldenLayout host is created.
+  if self.isNil:
+    return
+  self.syncLegacyAgentActivityIntoVM()
+  tryMountIsoNimAgentActivityPanel(self.id)
+
 proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring) =
   if not self.sessionMessageIds.hasKey(sessionKey):
     self.sessionMessageIds[sessionKey] = @[]
@@ -342,7 +351,6 @@ proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
   # self.addMessageToSession(self.currentSessionKey(), userMessageId)
   # self.addMessageToSession(self.currentSessionKey(), PLACEHOLDER_MSG)
   discard kdom.setTimeout(proc() = scrollAgentCom(), 0)
-  redrawAll()
   sendAcpPrompt(self, promptText)
   self.promptInFlight = true
   self.clear()
@@ -698,7 +706,6 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
         target = self.sessionMessageIds[self.sessionId][^1]
       for d in placeholderDiffs:
         target.addDiffPreview(d.path, d.original, d.modified)
-    redrawAll()
   elif hasContent or messageId notin self.messageOrder:
     try:
       console.log cstring(fmt"[agent-activity] render update sessionKey={self.currentSessionKey()} componentId={self.id} messageId={messageId} append={appendFlag} canceled={canceledFlag} len={content.len}")
@@ -709,8 +716,7 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
   else:
     # No final stopReason yet: keep placeholder and collected diffs in place.
     discard
-  self.syncLegacyAgentActivityIntoVM()
-  redrawAll()
+  self.requestAgentActivityPanelRefresh()
 
 proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
 
@@ -732,7 +738,6 @@ proc onAcpCreateTerminal*(sender: js, response: JsObject) {.async.} =
       cstring(fmt"{TERMINAL_PREFIX}{self.terminalOrder.len}")
 
   discard self.addTerminal(terminalId)
-  self.redraw()
 
 proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
 
@@ -780,8 +785,7 @@ proc onAcpRenderDiff*(sender: js, response: JsObject) {.async.} =
   self.ensureSessionMessageList(sessionId)
   self.sessionMessageIds[sessionId][^1].addDiffPreview(path, original, modified)
   echo "NEW: ", self.sessionMessageIds[sessionId][^1].sessionDiffs.len()
-  self.syncLegacyAgentActivityIntoVM()
-  redrawAll()
+  self.requestAgentActivityPanelRefresh()
 
 proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =
   let clientSessionId =
