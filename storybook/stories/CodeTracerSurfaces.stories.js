@@ -40,6 +40,13 @@ function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function titleize(name) {
+  return name
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function injectSurfaceStyles(container) {
   const style = document.createElement("style");
   style.textContent = `
@@ -51,19 +58,243 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-frame {
       box-sizing: border-box;
-      min-height: 100vh;
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
       overflow: auto;
+    }
+
+    .ct-storybook-root-container {
+      top: 0 !important;
+      height: 100vh !important;
+    }
+
+    .ct-storybook-root-container #main.ct-storybook-frame {
+      flex-wrap: nowrap;
+      min-height: 0;
+    }
+
+    .ct-storybook-golden-panel {
+      box-sizing: border-box;
+      display: flex;
+      flex: 1 1 100%;
+      flex-direction: column;
+      width: 100%;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+    }
+
+    .ct-storybook-golden-panel .lm_stack {
+      box-sizing: border-box;
+      display: flex;
+      flex: 1 1 100%;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .ct-storybook-golden-panel .lm_header {
+      box-sizing: border-box;
+      display: flex;
+      align-items: flex-end;
+      flex: 0 0 30px;
+      min-height: 30px;
+      height: 30px !important;
+      overflow: visible;
+    }
+
+    .ct-storybook-golden-panel .lm_tabs {
+      box-sizing: border-box;
+      align-items: flex-end;
+      height: 30px;
+      margin: 0;
+      padding: 0 30px 0 0;
+    }
+
+    .ct-storybook-golden-panel .lm_controls {
+      box-sizing: border-box;
+      display: flex !important;
+      align-items: center !important;
+      height: 30px !important;
+      top: 0 !important;
+      right: 0 !important;
+    }
+
+    .ct-storybook-golden-panel .lm_controls > * {
+      box-sizing: border-box;
+      width: 16px !important;
+      height: 16px !important;
+      margin-top: 0 !important;
+    }
+
+    .ct-storybook-golden-panel .lm_items {
+      box-sizing: border-box;
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+    }
+
+    .ct-storybook-golden-panel .lm_content {
+      box-sizing: border-box;
+      display: flex;
+      flex: 1 1 100%;
+      min-width: 0;
+      min-height: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .ct-storybook-panel-content {
+      box-sizing: border-box;
+      display: flex;
+      flex: 1 1 100%;
+      min-width: 0;
+      min-height: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .ct-storybook-panel-content > .component-container,
+    .ct-storybook-panel-content > .component-container.terminal,
+    .ct-storybook-panel-content > .terminal,
+    .ct-storybook-panel-content > .build-panel,
+    .ct-storybook-panel-content > .panel {
+      box-sizing: border-box;
+      flex: 1 1 100%;
+      width: 100%;
+      min-width: 0;
+      height: 100%;
+      min-height: 0;
     }
 
     .ct-storybook-frame > .component-container,
     .ct-storybook-frame > .component-container.terminal,
     .ct-storybook-frame > .terminal,
+    .ct-storybook-frame > .build-panel,
     .ct-storybook-frame > .panel,
     .ct-storybook-frame > .isonim-app-shell {
+      box-sizing: border-box;
+      flex: 1 1 100%;
+      width: 100%;
+      min-width: 0;
       min-height: 100vh;
     }
   `;
   container.appendChild(style);
+}
+
+function createGoldenPanelHost(frame, title) {
+  const layout = document.createElement("div");
+  layout.className = "lm_goldenlayout lm_item lm_root ct-storybook-golden-panel";
+
+  const stack = document.createElement("div");
+  stack.className = "lm_item lm_stack";
+
+  const header = document.createElement("div");
+  header.className = "lm_header";
+
+  const tabs = document.createElement("ul");
+  tabs.className = "lm_tabs";
+
+  const tab = document.createElement("li");
+  tab.className = "lm_tab lm_active";
+
+  const tabTitle = document.createElement("span");
+  tabTitle.className = "lm_title";
+  tabTitle.textContent = title;
+  tab.appendChild(tabTitle);
+
+  const closeTab = document.createElement("div");
+  closeTab.className = "lm_close_tab";
+  tab.appendChild(closeTab);
+  tabs.appendChild(tab);
+  header.appendChild(tabs);
+
+  const controls = document.createElement("div");
+  controls.className = "lm_controls";
+  for (const controlClass of ["lm_maximise", "lm_close"]) {
+    const control = document.createElement("div");
+    control.className = controlClass;
+    controls.appendChild(control);
+  }
+  header.appendChild(controls);
+
+  const items = document.createElement("div");
+  items.className = "lm_items";
+
+  const content = document.createElement("div");
+  content.className = "lm_item lm_content";
+
+  const mount = document.createElement("div");
+  mount.className = "ct-storybook-panel-content";
+  content.appendChild(mount);
+  items.appendChild(content);
+  stack.appendChild(header);
+  stack.appendChild(items);
+  layout.appendChild(stack);
+  frame.appendChild(layout);
+
+  return mount;
+}
+
+function createAppShell(container, kind, name) {
+  if (kind === "view" || kind === "component") {
+    const frame = document.createElement("div");
+    frame.className = "ct-storybook-frame";
+    container.appendChild(frame);
+    return frame;
+  }
+
+  const rootContainer = document.createElement("div");
+  rootContainer.id = "root-container";
+  rootContainer.className = "ct-storybook-root-container";
+
+  const layoutRow = document.createElement("div");
+  layoutRow.id = "auto-hide-layout-row";
+
+  const leftStrip = document.createElement("div");
+  leftStrip.id = "auto-hide-strip-left";
+
+  const root = document.createElement("div");
+  root.id = "ROOT";
+
+  const contextMenu = document.createElement("div");
+  contextMenu.id = "context-menu-container";
+  contextMenu.style.display = "none";
+  root.appendChild(contextMenu);
+
+  const fixedSearch = document.createElement("div");
+  fixedSearch.id = "fixed-search";
+  root.appendChild(fixedSearch);
+
+  const session = document.createElement("div");
+  session.id = "session-container-0";
+  session.className = "session-container";
+
+  const frame = document.createElement("section");
+  frame.id = "main";
+  frame.className = "ct-storybook-frame";
+  session.appendChild(frame);
+  root.appendChild(session);
+
+  const rightStrip = document.createElement("div");
+  rightStrip.id = "auto-hide-strip-right";
+
+  layoutRow.appendChild(leftStrip);
+  layoutRow.appendChild(root);
+  layoutRow.appendChild(rightStrip);
+  rootContainer.appendChild(layoutRow);
+  container.appendChild(rootContainer);
+
+  if (kind === "panel") {
+    return createGoldenPanelHost(frame, titleize(name));
+  }
+
+  return frame;
 }
 
 function renderSurface(kind, name, fixture = "populated") {
@@ -73,9 +304,7 @@ function renderSurface(kind, name, fixture = "populated") {
   container.dataset.surface = name;
   injectSurfaceStyles(container);
 
-  const frame = document.createElement("div");
-  frame.className = "ct-storybook-frame";
-  container.appendChild(frame);
+  const frame = createAppShell(container, kind, name);
 
   ensureComponentsLoaded().then(() => {
     const dispose = mountCodeTracerStory(frame, kind, name, fixture);

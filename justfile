@@ -34,6 +34,8 @@ storybook: build-storybook-components
   cd storybook && npm run storybook
 
 storybook-build: build-storybook-components
+  chmod -R u+w storybook/storybook-static 2>/dev/null || true
+  rm -rf storybook/storybook-static
   cd storybook && npm run build-storybook
 
 serve-docs hostname="localhost" port="3000":

@@ -228,14 +228,35 @@ proc storyFilesystem(): FilesystemEntryNode =
 proc applyBuild(vm: BuildVM; fixture: string) =
   vm.setCommand("nargo test")
   vm.setRunning(fixture == "loading")
-  vm.appendLine(BuildOutputLine(htmlText: "Compiling noir-space-ship",
+  vm.appendLine(BuildOutputLine(htmlText: "$ nargo test --workspace noir-space-ship",
+                                isStdout: true, severity: blsInfo))
+  vm.appendLine(BuildOutputLine(htmlText: "Compiling noir-space-ship v0.2.0",
+                                isStdout: true, severity: blsInfo))
+  vm.appendLine(BuildOutputLine(htmlText: "Checking src/main.nr",
                                 isStdout: true, severity: blsInfo))
   vm.appendLine(BuildOutputLine(
-    htmlText: "<span class=\"ansi-bright-red-fg\">error:</span> expected u32",
+    htmlText: "<span class=\"ansi-bright-red-fg\">src/combat.nr:42:7 error:</span> expected u32",
     isStdout: false,
     severity: blsError,
     locationPath: "src/combat.nr",
     locationLine: 42,
+  ))
+  vm.appendLine(BuildOutputLine(
+    htmlText: "  let remaining_shield = shield - damage",
+    isStdout: false,
+    severity: blsError,
+  ))
+  vm.appendLine(BuildOutputLine(
+    htmlText: "      ^^^^^^^^^^^^^^^ expected field `shield` to be u32",
+    isStdout: false,
+    severity: blsError,
+  ))
+  vm.appendLine(BuildOutputLine(
+    htmlText: "<span class=\"ansi-bright-yellow-fg\">src/main.nr:18:3 warning:</span> unused variable `debug_mode`",
+    isStdout: false,
+    severity: blsWarning,
+    locationPath: "src/main.nr",
+    locationLine: 18,
   ))
   for problem in storyProblems():
     vm.appendProblem(problem)

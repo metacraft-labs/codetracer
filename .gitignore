@@ -153,6 +153,8 @@ src/tests/gdb/*_gdb
 src/tests/run/gdb/
 dist/
 storybook/storybook-static/
+tools/visual-review/reports/
+tools/visual-review/screenshots/
 ctail
 #dispatcher
 gmon.out
