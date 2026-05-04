@@ -153,7 +153,7 @@ proc redrawFlow*(self: FlowComponent)
 proc resizeFlowSlider*(self: FlowComponent)
 proc makeSlider(self: FlowComponent, position: int)
 proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int)
-proc makeLoopLine(self: FlowComponent, step: FlowStep, allIterations: int): VNode
+proc makeLoopLine(self: FlowComponent, step: FlowStep, allIterations: int): Node
 
 const
   SLIDER_OFFSET = 6 # in px
@@ -3220,7 +3220,7 @@ proc makeLoopLine(
   self: FlowComponent,
   step: FlowStep,
   allIterations: int
-): VNode =
+): Node =
   let fontSize = if self.fontSize != 0: cstring($(self.fontSize) & "px") else: cstring("inherit")
   let style = style(
     (StyleAttr.fontSize, fontSize),
@@ -3244,28 +3244,22 @@ proc makeLoopLine(
   # utilities for layout, the legacy class for tests + styling
   # consistency with the (post-fix-1.12) flow-parallel-value-box DOM
   # contract.
-  let vNode = buildHtml(
-    tdiv(
-      id = &"flow-multiline-value-{step.position}-{step.stepCount}",
-      class = "flow-multiline-value-container ct-flex ct-p-0"
-    )
-  ):
-    if step.rrTicks != -1:
-      backLoopControlButton(self, step, bStyle)
-      flowLoopValue(self, step, allIterations, style)
-      nextLoopControlButton(self, step, bStyle)
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(&"flow-multiline-value-{step.position}-{step.stepCount}"))
+  result.setAttribute(cstring"class", cstring"flow-multiline-value-container ct-flex ct-p-0")
 
-    # self.redraw()
+  if step.rrTicks != -1:
+    result.appendChild(vnodeToDom(backLoopControlButton(self, step, bStyle), KaraxInstance()))
+    result.appendChild(vnodeToDom(flowLoopValue(self, step, allIterations, style), KaraxInstance()))
+    result.appendChild(vnodeToDom(nextLoopControlButton(self, step, bStyle), KaraxInstance()))
 
-  return vNode
+  # self.redraw()
 
 proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   let expression = &"for-{step.position}"
   # render variable lines in the viewZone
   let allIterations = self.flow.loops[step.loop].rrTicksForIterations.len - 1
-  let dom = vnodeToDom(self.makeLoopLine(
-    step,
-    allIterations), KaraxInstance())
+  let dom = self.makeLoopLine(step, allIterations)
   cast[Node](self.flowLoops[step.position].flowZones.dom).appendChild(dom)
 
   self.flowLoops[step.position].flowDom = dom
