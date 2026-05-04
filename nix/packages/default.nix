@@ -66,7 +66,9 @@
         cargo-build-sbf =
           inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-build-sbf;
 
-        sui = inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.sui;
+        # TODO: Point this back at `nix-blockchain-development` when all composed
+        # Metacraft flakes share nixos-modules and inherit nixpkgs through it.
+        sui = inputs.nix-blockchain-development-sui.outputs.legacyPackages.${system}.metacraft-labs.sui;
 
         codex-acp =
           let

@@ -1533,6 +1533,82 @@
         "type": "github"
       }
     },
+    "nix-blockchain-development-sui": {
+      "inputs": {
+        "crane": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "crane"
+        ],
+        "devenv": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "devenv"
+        ],
+        "ethereum_nix": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "ethereum-nix"
+        ],
+        "fenix": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "fenix"
+        ],
+        "flake-compat": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "flake-compat"
+        ],
+        "flake-parts": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "flake-parts"
+        ],
+        "flake-utils": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "flake-utils"
+        ],
+        "nix2container": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "nix2container"
+        ],
+        "nixos-modules": [
+          "nix-blockchain-development",
+          "nixos-modules"
+        ],
+        "nixpkgs": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "nixpkgs"
+        ],
+        "nixpkgs-unstable": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "nixpkgs-unstable"
+        ],
+        "treefmt-nix": [
+          "nix-blockchain-development-sui",
+          "nixos-modules",
+          "treefmt-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1776026144,
+        "narHash": "sha256-YAPtDapiKjV8evzVcEXyTQUokjnWF6V1A42ytAZuYZ4=",
+        "owner": "metacraft-labs",
+        "repo": "nix-blockchain-development",
+        "rev": "b4e89efa9c9cc325123804a2b571bf4fec66a327",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nix-blockchain-development",
+        "type": "github"
+      }
+    },
     "nix-bundle": {
       "inputs": {
         "nixpkgs": [
@@ -2303,6 +2379,7 @@
         "flake-utils": "flake-utils_3",
         "git-hooks-nix": "git-hooks-nix",
         "nix-blockchain-development": "nix-blockchain-development",
+        "nix-blockchain-development-sui": "nix-blockchain-development-sui",
         "nixpkgs": [
           "codetracer-toolchains",
           "nixpkgs"

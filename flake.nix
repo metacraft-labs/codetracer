@@ -53,6 +53,19 @@
       flake = true;
     };
 
+    # TODO: Remove this temporary Sui-only input after nix-blockchain-development
+    # is updated and cached with the latest metacraft-labs/nixos-modules graph.
+    # The intended composition is that all Metacraft repos share the same
+    # nixos-modules input, and each repo gets nixpkgs / nixpkgs-unstable through
+    # that nixos-modules flake rather than overriding nixpkgs independently.
+    # Once nix-blockchain-development follows that pattern, Sui should come from
+    # the regular nix-blockchain-development input.
+    nix-blockchain-development-sui = {
+      url = "github:metacraft-labs/nix-blockchain-development";
+      inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
+      flake = true;
+    };
+
     codetracer-ruby-recorder = {
       url = "github:metacraft-labs/codetracer-ruby-recorder";
       inputs.nixpkgs.follows = "nixpkgs";

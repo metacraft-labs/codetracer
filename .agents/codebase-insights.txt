@@ -1,4 +1,16 @@
 # Codebase insights
+- 2026-05-04: `nix develop` and direnv can disagree when `.direnv/flake-profile-*`
+  is stale. The current dev shell includes `ourPkgs.sui`; an older cached
+  direnv profile may still enter successfully because it references forc/miden/
+  cargo-build-sbf but not Sui. Use `nix build --dry-run .#devShells.x86_64-linux.default`
+  or clear `.direnv/flake-profile-* .direnv/flake-inputs` before comparing shells.
+- 2026-05-04: `nix-blockchain-development-sui` is a temporary cache workaround:
+  the upstream nix-blockchain-development input graph had cached Sui 1.68.1,
+  while forcing that flake to follow CodeTracer's nixpkgs changed Sui to a local
+  GCC 15 build that failed in vendored RocksDB/librocksdb-sys headers. The
+  durable fix is to update nix-blockchain-development itself; local testing with
+  Sui 1.70.2 and metacraft-labs/nixos-modules b4c1815 built successfully when
+  using a large Nix build dir such as `/var/tmp`.
 - When adding new UI component modules under `src/frontend/ui/`, they must be imported from `src/frontend/ui_js.nim` (the main entry point) so their `render` methods are compiled into the JS output. Without this import, the component's render falls back to the base `Component.render()` which returns an empty VNode.
 - Ruby loops were originally detected only for 'while' and 'until'.
 - 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.
