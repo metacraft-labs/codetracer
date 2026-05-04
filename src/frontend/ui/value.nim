@@ -637,6 +637,10 @@ proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event)
   if contextMenu != []:
     showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.state.inExtension)
 
+proc appendText(parent: Node, value: cstring)
+
+proc newElement(tag: cstring, className: cstring = cstring""): Node
+
 proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
@@ -664,6 +668,100 @@ proc historyValueView(self: ValueComponent, event: HistoryResult): VNode =
     )
   ):
     text event.value.textRepr
+
+proc renderChartCanvasDom(self: ChartComponent, kind: cstring, hidden: bool): Node =
+  let hiddenClass = if hidden: cstring" hidden" else: cstring""
+
+  result = newElement(cstring"div", cstring(fmt"chart-{kind}{hiddenClass}"))
+  result.setAttribute(cstring"id", cstring(fmt"chart-{kind}-{self.getId}"))
+
+  let canvas = document.createElement(cstring"canvas")
+  canvas.setAttribute(cstring"id", cstring(fmt"chart-{kind}-canvas-{self.getId}"))
+  result.appendChild(canvas)
+
+proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: ChartComponent): Node =
+  let key =
+    if self.baseAddress == NO_ADDRESS:
+      expression
+    else:
+      cstring($self.baseAddress)
+  let activeClass =
+    if chart.viewKind == ViewTable:
+      cstring"view-active"
+    else:
+      cstring"view-inactive"
+
+  result = newElement(cstring"div", cstring(fmt"history-text {activeClass}"))
+
+  let textElement = newElement(cstring"div", cstring"history-text-element")
+  let locationElement = newElement(cstring"div", cstring"history-location-element")
+  let valueElement = newElement(cstring"div", cstring"history-value-element")
+
+  if self.state.valueHistory.hasKey(key):
+    for event in self.state.valueHistory[key].results:
+      let locationNode = newElement(cstring"div", cstring"history-location")
+      locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
+        ev.preventDefault()
+        self.historyContextAction(event, ev)
+      )
+      locationNode.appendText(cstring($event.location.rrTicks))
+      locationElement.appendChild(locationNode)
+
+      let valueNode = newElement(cstring"div", cstring"history-value")
+      valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
+        if cast[MouseEvent](ev).button == 0:
+          self.historyClick(event.location)
+      )
+      valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
+        ev.preventDefault()
+        self.historyContextAction(event, ev)
+      )
+      valueNode.appendText(event.value.textRepr)
+      valueElement.appendChild(valueNode)
+
+  textElement.appendChild(locationElement)
+  textElement.appendChild(valueElement)
+  result.appendChild(textElement)
+
+proc renderChartDom(self: ValueComponent, expression: cstring): Node =
+  let chart = self.charts[expression]
+
+  result = newElement(cstring"div", cstring"chart-results-container")
+  result.appendChild(self.renderHistoryTableDom(expression, chart))
+  result.appendChild(chart.renderChartCanvasDom(cstring"line", chart.viewKind != ViewLine))
+  result.appendChild(chart.renderChartCanvasDom(cstring"pie", chart.viewKind != ViewPie))
+
+proc renderInlineHistoryDom(self: ValueComponent, expression: cstring): Node =
+  let chart = self.charts[expression]
+  let chartElement = self.renderChartDom(expression)
+
+  chart.ensure()
+
+  self.state.kxi.afterRedraws.add(proc =
+    let container = document.getElementById(cstring(fmt"history-{expression}"))
+    if not container.isNil:
+      container.toJs.scrollTop = self.historyScrollTop
+      self.state.redrawForExtension()
+  )
+
+  result = newElement(cstring"div", cstring"history-container")
+
+  let inlineHistory = newElement(cstring"div", cstring"inline-history")
+  inlineHistory.setAttribute(cstring"id", cstring(fmt"history-{expression}"))
+  inlineHistory.appendChild(chartElement)
+  result.appendChild(inlineHistory)
+
+  proc setupExtraScrollHandlers() =
+    let el = document.getElementById(cstring("history-" & $expression))
+    if not el.isNil:
+      el.addEventListener(
+        cstring"wheel",
+        proc (ev: Event) =
+          kout el.scrollTop
+          self.historyScrollTop = cast[int](el.scrollTop)
+      )
+
+  discard setTimeout(proc() = setupExtraScrollHandlers(), 1)
 
 proc addChart(self: ValueComponent, expression: cstring): ChartComponent =
   self.charts[expression] = makeChartComponent(self.data)
@@ -892,7 +990,7 @@ proc inlineHistoryVisible(self: ValueComponent, expression: cstring): bool =
 proc appendText(parent: Node, value: cstring) =
   parent.appendChild(document.createTextNode(value))
 
-proc newElement(tag: cstring, className: cstring = cstring""): Node =
+proc newElement(tag: cstring, className: cstring): Node =
   result = document.createElement(tag)
   if className.len > 0:
     result.setAttribute(cstring"class", className)
@@ -1261,6 +1359,9 @@ proc renderValueRowDom(
     atomParent.appendChild(self.renderValueHistoryButtonDom(expression, active))
 
   result.appendChild(atomParent)
+
+  if expression == self.baseExpression and self.inlineHistoryVisible(expression):
+    result.appendChild(self.renderInlineHistoryDom(expression))
 
 proc expandValueView(self: ValueComponent, value: Value, expression: cstring, left: string, right: string, empty: bool): VNode =
   var list = if empty: "" else: ".."
@@ -1766,7 +1867,7 @@ proc hasExpandedLoadMoreValue(self: ValueComponent, value: Value, expression: cs
 proc canRenderValueDomDirectly(self: ValueComponent): bool =
   let value = self.directValueDomSubject()
 
-  if value.isNil or self.inlineHistoryVisible(self.baseExpression):
+  if value.isNil:
     return false
 
   if self.uiExpanded(value, self.baseExpression):
@@ -1779,10 +1880,10 @@ proc canRenderValueDomDirectly(self: ValueComponent): bool =
 proc renderValueDom*(self: ValueComponent): Node =
   ## Shared DOM entrypoint for the rich value tree.
   ##
-  ## Collapsed rows plus expanded compound shells and child lists render
-  ## directly here. Active inline history/chart states and expanded load-more
-  ## rows still fall back to the legacy Karax value internals while those
-  ## behavior-heavy surfaces are migrated separately.
+  ## Collapsed rows, expanded compound shells, child lists, and active inline
+  ## history/chart surfaces render directly here. Expanded load-more rows still
+  ## fall back to the legacy Karax value internals while that async append path
+  ## is migrated separately.
   if self.canRenderValueDomDirectly():
     let value = self.directValueDomSubject()
     return self.renderValueRowDom(
