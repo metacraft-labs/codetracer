@@ -32,8 +32,7 @@ var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
 
 # Track which editor instances have been IsoNim-mounted by their id.
-# Once an editor's container is created by IsoNim, the Karax render()
-# returns a stub and the kxiMap entry is removed.
+# Once an editor's container is created by IsoNim, the kxiMap entry is removed.
 var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 
 # ---------------------------------------------------------------------------
@@ -111,7 +110,6 @@ const MONACO_SHORTCUTS_WHITELIST: seq[cstring] =
   ]
 const EDITOR_GUTTER_PADDING = 2 #px
 
-proc renderEditor*(self: EditorViewComponent): VNode
 proc getLineFunctionName(self: EditorViewComponent, line: int): cstring
 proc removeClasses(index: int, class: cstring, name: string)
 proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[MonacoLineStyle])
@@ -329,16 +327,6 @@ proc closeActiveTab*(data: Data) {.locks: 0.} =
     cwarn "editor: closing tab, but  implemented close expanded.nim"
 
 proc getBoundingClientRect(s: js): HTMLBoundingRect {.importcpp: "#.getBoundingClientRect()".}
-
-proc assemblyRegisterView(state: JsAssoc[cstring, cstring]): VNode =
-  buildHtml(table(class = "assembly-registers")):
-    for label, value in state:
-      tr(class = "assembly-register"):
-        td(class = "assembly-register-label"):
-          text(label)
-        td(class = "assembly-register-value"):
-          text(value)
-
 
 proc removeClasses(index: int, class: cstring, name: string) =
   let elements = jqall(&"#{name}-{index} .{class}")
@@ -1709,8 +1697,7 @@ proc clearTest(self: EditorViewComponent) =
 
 proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   ## Initialise Monaco Editor inside the container identified by `selector`.
-  ## Extracted from the legacy Karax afterRedraws callback so it can be
-  ## called from both the Karax path and the IsoNim mount path.
+  ## Shared by the top-level and expanded direct IsoNim editor mount paths.
   ## Runs only once — guarded by `tabInfo.monacoEditor.isNil`.
   var tabInfo = self.tabInfo
   if tabInfo.isNil or not tabInfo.monacoEditor.isNil:
@@ -1900,8 +1887,7 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
 
 proc editorAfterRedraw(self: EditorViewComponent) =
   ## Per-redraw work for the editor: flow rendering, line styles, test
-  ## actions, trace/expansion redraws. Extracted from the legacy Karax
-  ## afterRedraws callback so it can be called from both paths.
+  ## actions, inline values, trace/expansion redraws.
   let tabInfo = self.tabInfo
   if tabInfo.isNil:
     return
@@ -1952,6 +1938,9 @@ proc editorAfterRedraw(self: EditorViewComponent) =
   except Exception as e:
     cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
 
+  if self.data.ui.activeFocus == self:
+    discard self.renderValueTooltip()
+
   var toggleList: seq[int] = @[]
 
   for line, trace in self.traces:
@@ -1965,19 +1954,11 @@ proc editorAfterRedraw(self: EditorViewComponent) =
       expandedInstance.renderExpandedEditorDirect()
 
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
-  ## Mount the IsoNim editor view as the primary renderer, following
-  ## the calltrace panel pattern. Karax renders the initial container
-  ## div, Monaco initializes on it, then IsoNim takes ownership by
-  ## removing the Karax instance from the rendering loop.
+  ## Mark the IsoNim editor view as the primary renderer once Monaco
+  ## has initialized inside the direct editor host.
   ##
-  ## Called from `editorView()`'s afterRedraws callback after Monaco
-  ## has been initialised. The proc is exported so `layout.nim` can
-  ## also schedule a delayed mount as a safety net.
-  ##
-  ## What this does:
-  ## - Removes the kxiMap entry so `redrawAll()` no longer triggers
-  ##   Karax VDOM diffing for this component (protecting Monaco's DOM).
-  ## - Marks the editor as IsoNim-mounted so `renderEditor()` returns a stub.
+  ## Called after Monaco has been initialised by the direct IsoNim editor
+  ## mount path.
   ##
   ## Safe to call multiple times per editor — mounts only once per id.
   let editorId = self.id
@@ -2153,74 +2134,6 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
 
   self.editorAfterRedraw()
 
-proc editorView(self: EditorViewComponent): VNode = #{.time.} =
-  var tabInfo = self.tabInfo
-
-  if tabInfo.isNil:
-    return buildHtml(
-      tdiv()
-    ):
-      text "file not loaded"
-
-  let index = self.id
-
-  # -----------------------------------------------------------------------
-  # IsoNim primary rendering path — when mounted, the kxiMap entry has
-  # been removed so redrawAll() no longer calls this. This guard is a
-  # safety net in case renderEditor()/editorView() is called from another path.
-  # -----------------------------------------------------------------------
-  if isoNimEditorMountedIds.hasKey(index):
-    return buildHtml(tdiv())
-
-  # -----------------------------------------------------------------------
-  # Legacy Karax rendering path — active until IsoNim takes over.
-  # -----------------------------------------------------------------------
-  var selector = cstring""
-
-  if not self.isExpansion:
-    selector = cstring(&"#editorComponent-{index}")
-  else:
-    selector = cstring(&"#expanded-{self.parentLine}")
-
-  let path = tabInfo.name
-
-  if self.renderer.isNil:
-    result = buildHtml(tdiv())
-    return
-
-  if tabInfo.monacoEditor.isNil:
-    self.renderer.afterRedraws.add(proc: void =
-      self.initMonacoForEditor(selector)
-      # After Monaco init succeeds, schedule the IsoNim takeover.
-      # The mount runs via setTimeout so it happens AFTER the current
-      # Karax render cycle completes — this prevents Karax from
-      # diffing and corrupting the Monaco DOM.
-      if not editorVMInstance.isNil and not self.isExpansion and
-         not tabInfo.monacoEditor.isNil:
-        discard setTimeout(proc() =
-          self.tryMountIsoNimEditorPanel()
-        , 200)
-    )
-
-  self.renderer.afterRedraws.add(proc: void =
-    self.editorAfterRedraw()
-  )
-
-  let depth = self.tabInfo.location.expansionDepth
-  let expansionClass = if self.isExpansion: &"expansion expansion-{depth}" else: ""
-
-  if self.data.ui.activeFocus == self:
-    discard self.renderValueTooltip()
-
-  result = buildHtml(
-    tdiv(
-      id = &"editorComponent-{index}",
-      class = &"editor code-editor tab {expansionClass}",
-      `data-label`= tabInfo.name,
-      tabIndex = "2"
-    )
-  )
-
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int) =
   if expanded.viewZone.isNil:
     let id = cstring(&"expanded-{line}")
@@ -2259,18 +2172,6 @@ proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, l
           expanded.zoneId = cast[int](view.addZone(expanded.viewZone))
 
     discard
-
-proc loadingLowLevel: VNode =
-  text("LOADING CODE")
-
-proc loadingEditorView(index: int, tab: cstring): VNode =
-  buildHtml(
-    tdiv(
-      id = &"editorComponent-{index}",
-      class="editor code-editor tab",
-      `data-label`= tab
-    )
-  )
 
 method afterInit*(self: EditorViewComponent) {.async.} =
   # ``[NSS-1.64]`` Diagnostic: the noir-space-ship loop-iteration GUI tests
@@ -2462,29 +2363,6 @@ proc onSelectFlow*(data: Data) {.async.} =
 
 proc onSelectState*(data: Data) {.async.} =
   await data.ui.componentMapping[Content.State][0].select()
-
-proc renderEditor*(self: EditorViewComponent): VNode =
-  ## Render the legacy Karax editor shell used before the IsoNim editor panel
-  ## takes ownership of the mounted Monaco container.
-  self.ensureEditorLspStarted()
-
-  # When the IsoNim editor view is mounted, return a stable empty stub.
-  # The Karax kxiMap entry is removed on mount so redrawAll() no longer
-  # calls this. This guard is a safety net in case renderEditor() is called
-  # from another path.
-  if isoNimEditorMountedIds.hasKey(self.id):
-    return buildHtml(tdiv())
-
-  if self.editorView == ViewNoSource:
-    # Live no-source tabs are mounted through renderTopLevelEditorDirect(),
-    # which replaces the GoldenLayout placeholder with the direct DOM shell.
-    # This legacy VNode renderer is retained only as an inert compatibility
-    # fallback for stale callers.
-    result = buildHtml(tdiv())
-  elif not self.isExpansion and (not self.service.open.hasKey(self.name) or not self.service.open[self.name].received):
-    result = loadingEditorView(self.id, self.name)
-  else:
-    result = editorView(self)
 
 method onEnter*(self: EditorViewComponent) {.async.} =
 
