@@ -1097,44 +1097,6 @@ proc moveTab*(path: cstring) =
   #     break
   # redraw()
 
-proc separateBar*(): VNode =
-  buildHtml(tdiv(class="separate-bar"))
-
-proc isWindowMaximized(): bool {.importjs: "(window.outerWidth == screen.availWidth) && (window.outerHeight == screen.availHeight)".} =
-  false
-
-proc windowMenu*(data: Data, fromWelcomeScreen: bool = false): VNode =
-  # Only run when not in macOS, since there we render the native traffic light buttons instead of our own
-  # window control buttons.
-  if inElectron and not defined(ctmacos):
-    return buildHtml(tdiv(class = "window-menu")):
-      tdiv(
-        class = "menu-button-svg minimize",
-        onclick = proc =
-          data.ipc.send "CODETRACER::minimize-window")
-      if isWindowMaximized():
-        tdiv(
-          class = "menu-button-svg restore",
-          onclick = proc =
-            data.ipc.send "CODETRACER::restore-window"
-            if fromWelcomeScreen:
-              discard setTimeout(proc() = data.redraw(), 100)
-        )
-      else:
-        tdiv(
-          class = "menu-button-svg maximize",
-          onclick = proc =
-            data.ipc.send "CODETRACER::maximize-window"
-            if fromWelcomeScreen:
-              discard setTimeout(proc() = data.redraw(), 100)
-        )
-      tdiv(
-        class = "menu-button-svg close",
-        onclick = proc =
-          data.ipc.send "CODETRACER::close-app")
-  else:
-    discard
-
 proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
   let y = yPos - 30
   let container = dom.document.getElementById("context-menu-container")

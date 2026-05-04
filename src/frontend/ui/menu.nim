@@ -518,8 +518,6 @@ proc renderMenu*(self: MenuComponent): VNode =
     if not self.data.ui.menuNode.isNil and not defined(ctmacos):
       navigationMenuView(self)
 
-    windowMenu(self.data)
-
 when defined(js):
   proc shouldRenderMenuNode(node: MenuNode): bool =
     if ui_imports.electron_lib.inElectron:
