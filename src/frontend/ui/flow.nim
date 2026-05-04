@@ -2265,25 +2265,25 @@ proc renderContinuousStep(
   name: cstring,
   singleValue: bool,
   style: VStyle
-): VNode =
+): Node =
   stepContainer.toJs.classList.toJs.add("continuous")
 
   let id = &"flow-loop-shrinked-iteration-step-{step.stepCount}"
 
-  buildHtml(
-    tdiv(
-      id = id,
-      class = "flow-loop-continuous-iteration",
-      style = style,
-      onclick = proc =
-        self.jumpToLocalStep(step.stepCount),
-      ondblclick = proc =
-        self.openValue(step.stepCount, name, before=true),
-      onmouseover = proc(ev: Event, tg: VNode) =
-        ev.stopPropagation()
-    )
-  ):
-    text ""
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(id))
+  result.setAttribute(cstring"class", cstring"flow-loop-continuous-iteration")
+  result.applyStyle(style)
+  result.addEventListener(cstring"click", proc(ev: Event) =
+    self.jumpToLocalStep(step.stepCount)
+  )
+  result.addEventListener(cstring"dblclick", proc(ev: Event) =
+    self.openValue(step.stepCount, name, before=true)
+  )
+  result.addEventListener(cstring"mouseover", proc(ev: Event) =
+    ev.stopPropagation()
+  )
+  result.appendChild(document.createTextNode(cstring""))
 
 proc renderShrinkedStep(
   self: FlowComponent,
@@ -2292,25 +2292,25 @@ proc renderShrinkedStep(
   name: cstring,
   singleValue: bool,
   style: VStyle
-): VNode =
+): Node =
   stepContainer.toJs.classList.toJs.add("shrinked")
 
   let id = &"flow-loop-shrinked-iteration-step-{step.stepCount}"
 
-  buildHtml(
-    tdiv(
-      id = id,
-      class = "flow-loop-shrinked-iteration",
-      style = style,
-      onclick = proc =
-        self.jumpToLocalStep(step.stepCount),
-      ondblclick = proc =
-        self.openValue(step.stepCount, name, before=true),
-      onmouseover = proc(ev: Event, tg: VNode) =
-        ev.stopPropagation()
-    )
-  ):
-    text ""
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", cstring(id))
+  result.setAttribute(cstring"class", cstring"flow-loop-shrinked-iteration")
+  result.applyStyle(style)
+  result.addEventListener(cstring"click", proc(ev: Event) =
+    self.jumpToLocalStep(step.stepCount)
+  )
+  result.addEventListener(cstring"dblclick", proc(ev: Event) =
+    self.openValue(step.stepCount, name, before=true)
+  )
+  result.addEventListener(cstring"mouseover", proc(ev: Event) =
+    ev.stopPropagation()
+  )
+  result.appendChild(document.createTextNode(cstring""))
 
 proc makeFlowStepContainer(self: FlowComponent, step: FlowStep): Node =
   result = document.createElement(cstring"div")
@@ -2326,7 +2326,6 @@ proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
   var topOffset = 0
   let editor = self.editorUI.monacoEditor
   let editorLineHeight = editor.config.lineHeight
-  var stepVNode: VNode
 
   for expression, variable in self.flowLines[step.position].sortedVariables:
     let style = style(
@@ -2335,13 +2334,15 @@ proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
 
     case self.loopStates[step.loop].viewState:
     of LoopContinuous:
-      stepVNode = renderContinuousStep(self, stepContainer, step, expression, singleValue=true, style)
+      let stepNode = renderContinuousStep(self, stepContainer, step, expression, singleValue=true, style)
+      stepContainer.appendChild(stepNode)
 
     of LoopShrinked:
-      stepVNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=true, style)
+      let stepNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=true, style)
+      stepContainer.appendChild(stepNode)
 
     else:
-      stepVNode = flowSimpleValue(
+      let stepVNode = flowSimpleValue(
         self,
         expression,
         step.beforeValues[expression],
@@ -2350,8 +2351,7 @@ proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
         false,
         style
       )
-
-    stepContainer.appendChild(vnodeToDom(stepVNode, KaraxInstance()))
+      stepContainer.appendChild(vnodeToDom(stepVNode, KaraxInstance()))
     topOffset += 1
 
   return stepContainer
@@ -2369,19 +2369,24 @@ proc makeComplexLoopStepView(self: FlowComponent, step: FlowStep): Node =
 
   # create step vNode
   var stepVNode: VNode
+  var stepNode: Node
   case self.loopStates[step.loop].viewState:
   of LoopContinuous:
     for expression, value in step.beforeValues:
-      stepVNode = renderContinuousStep(self, stepContainer, step, expression, singleValue=false, style())
+      stepNode = renderContinuousStep(self, stepContainer, step, expression, singleValue=false, style())
 
   of LoopShrinked:
     for expression, value in step.beforeValues:
-      stepVNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=false, style())
+      stepNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=false, style())
 
   else:
     stepVNode = flowComplexStep(self, step)
 
-  stepContainer.appendChild(vnodeToDom(stepVNode, KaraxInstance()))
+  case self.loopStates[step.loop].viewState:
+  of LoopContinuous, LoopShrinked:
+    stepContainer.appendChild(stepNode)
+  else:
+    stepContainer.appendChild(vnodeToDom(stepVNode, KaraxInstance()))
 
   return stepContainer
 
@@ -2564,21 +2569,22 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
   # add step container to flow line step cells register
   steploopCells[step.loop][step.iteration] = stepContainer
 
-  # create step vNode
+  # create step node
   var stepVNode: VNode
+  var stepNode: Node
 
   case self.loopStates[step.loop].viewState:
   of LoopContinuous:
-    stepVNode = renderContinuousStep(self, stepContainer, step, "complex", singleValue=false, style())
+    stepNode = renderContinuousStep(self, stepContainer, step, "complex", singleValue=false, style())
 
   of LoopShrinked:
-    stepVNode = renderShrinkedStep(self, stepContainer, step, "complex", singleValue=false, style())
+    stepNode = renderShrinkedStep(self, stepContainer, step, "complex", singleValue=false, style())
 
   else:
     stepVNode = flowComplexStep(self, step)
 
-  # create step Node
-  let stepNode = vnodeToDom(stepVNode, KaraxInstance())
+  if self.loopStates[step.loop].viewState notin {LoopContinuous, LoopShrinked}:
+    stepNode = vnodeToDom(stepVNode, KaraxInstance())
 
   # append step Node to stepContainer
   stepContainer.appendChild(stepNode)
