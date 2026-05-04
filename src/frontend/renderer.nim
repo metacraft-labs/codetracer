@@ -189,6 +189,20 @@ proc redrawAfterSessionSwitch* =
   ## point directly.
   redrawAll()
 
+proc removeLegacyRendererInstance*(label: cstring) =
+  ## Drop a remaining Karax-backed renderer instance by its GoldenLayout label.
+  ## Layout owns component lifetime, but renderer/utils still own kxiMap.
+  if kxiMap.hasKey(label):
+    discard jsDelete(kxiMap[label])
+
+proc redrawLegacyRendererInstance*(label: cstring): bool =
+  ## Redraw a remaining Karax-backed renderer instance by label when present.
+  ## IsoNim-owned panels do not have kxiMap entries and intentionally no-op.
+  if kxiMap.hasKey(label):
+    redrawSync(kxiMap[label])
+    return true
+  return false
+
 
 # proc getSelectionText: cstring =
 #   var text = cstring""

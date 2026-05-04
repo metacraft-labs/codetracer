@@ -1,6 +1,5 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
-  karax,
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
@@ -214,11 +213,10 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
 
-  # remove component karax instance (only for components that still use Karax,
-  # e.g. editor tabs — IsoNim GL components no longer have kxiMap entries)
+  # remove component renderer instance (only for remaining legacy-backed
+  # components, e.g. editor tabs; IsoNim GL components no longer register one)
   let label = convertComponentLabel(content, id)
-  if kxiMap.hasKey(label):
-    discard jsDelete(kxiMap[label])
+  renderer.removeLegacyRendererInstance(label)
 
   # remove component from open components registry from the same content type (if there is any)
   if data.ui.openComponentIds[content].find(id) != -1:
@@ -740,10 +738,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # Auto-hide panes: initialise state and set up the edge strip renderer
   # and overlay event handlers.
   initAutoHideState()
-  # When an auto-hide panel's overlay is shown, trigger a Karax redraw
-  # for that panel's renderer so standalone panels display current content.
+  # When an auto-hide panel's overlay is shown, refresh that panel's mounted
+  # surface so it displays current content after reparenting.
   autoHideState.onPanelShown = proc(panel: AutoHidePanel) =
-    # Map Content type to the kxiMap label used by standalone panels.
+    # Map Content type to the renderer label used by standalone panels.
     let label = case panel.content
       of Content.Build:         cstring"buildComponent-0"
       of Content.BuildErrors:   cstring"errorsComponent-0"
@@ -776,11 +774,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       search_results.tryMountIsoNimSearchResultsPanel()
       return
     # Pinned GoldenLayout panels already carry a liveElement that showOverlay()
-    # reparents into the overlay.  For the remaining Karax-backed GL panels
-    # (currently Editor), only ask Karax to redraw its existing instance.
-    # IsoNim-owned panels have no kxiMap entry and need no work here.
-    if kxiMap.hasKey(label):
-      redrawSync(kxiMap[label])
+    # reparents into the overlay. Remaining legacy-backed GL panels (currently
+    # Editor) keep their renderer instance behind renderer.nim; IsoNim-owned
+    # panels have no instance and need no work here.
+    discard renderer.redrawLegacyRendererInstance(label)
 
   autoHideState.onChanged = proc() =
     # Re-render the side strip tabs whenever the auto-hide state changes.
@@ -824,8 +821,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   if autoHideHost.isNil:
     autoHideHost = kdom.document.createElement("div")
     autoHideHost.id = cstring"auto-hide-standalone-host"
-    # Use offscreen positioning instead of display:none — Karax cannot
-    # render into elements with display:none (zero dimensions).
+    # Use offscreen positioning instead of display:none so mounts keep
+    # measurable host dimensions while hidden.
     autoHideHost.style.position = cstring"absolute"
     autoHideHost.style.left = cstring"-9999px"
     autoHideHost.style.width = cstring"1px"
@@ -837,7 +834,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     type AutoHidePanelDef = tuple
       content: Content
       title: cstring
-      label: cstring   ## The component label used as DOM id and kxiMap key
+      label: cstring   ## The component label used as DOM id and renderer key
 
     let standaloneAutoHidePanels: seq[AutoHidePanelDef] = @[
       (content: Content.Build,         title: cstring"BUILD",          label: cstring"buildComponent-0"),
