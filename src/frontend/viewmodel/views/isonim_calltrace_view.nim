@@ -143,9 +143,9 @@ proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
         discard
 
   # Reactively populate the args container with one ``.call-arg`` element
-  # per call argument. Mirrors the legacy ``callArgsView`` markup
-  # (``frontend/ui/calltrace.nim``) so headless tests can assert the
-  # same DOM contract Playwright relies on.  We rebuild children from
+  # per call argument. Mirrors the historical Karax call-argument markup
+  # so headless tests can assert the same DOM contract Playwright relies on.
+  # We rebuild children from
   # scratch on each fire — this stays cheap because typical call-arg
   # counts are small (<10) and the effect only fires when the row's args
   # actually change.
@@ -274,8 +274,8 @@ when defined(js):
               discard
 
     # Reactively populate the args container with one ``.call-arg``
-    # element per argument. Mirrors the legacy ``callArgsView`` Karax
-    # markup in ``frontend/ui/calltrace.nim`` so Playwright's
+    # element per argument. Mirrors the historical Karax call-argument
+    # markup so Playwright's
     # ``CallTraceEntry.arguments()`` (page object) can locate each
     # arg via ``.call-arg`` and read the name from ``.call-arg-name``
     # (with the trailing ``=`` stripped) and the value from

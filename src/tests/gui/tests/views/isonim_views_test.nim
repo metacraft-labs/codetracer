@@ -1410,8 +1410,7 @@ suite "IsoNim Calltrace Panel — call lines":
 # element per argument with nested ``.call-arg-name`` / ``.call-arg-text``
 # children, so Playwright's ``CallTraceEntry.arguments()`` page object
 # can locate args after navigating to a function in the calltrace.
-# Mirrors the legacy Karax ``callArgsView`` markup
-# (``frontend/ui/calltrace.nim`` ~line 464).
+# Mirrors the historical Karax call-argument markup.
 
 suite "IsoNim Calltrace Panel — call arguments":
 

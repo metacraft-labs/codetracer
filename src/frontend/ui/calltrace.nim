@@ -75,15 +75,8 @@ when defined(ctInExtension):
     result = calltraceComponentForExtension
 
 proc calltraceJump(self: CalltraceComponent, location: types.Location) =
-  # if not self.supportCallstackOnly:
   self.api.emit(CtCalltraceJump, location)
   self.api.emit(InternalNewOperation, NewOperation(stableBusy: true, name: "calltrace-jump"))
-  # else:
-    # self.callstackJump(location.depth)
-
-# proc callstackJump(self: CalltraceComponent, depth: int) =
-#   self.api.emit(CtCallstackJump, location)
-#   self.api.emit(InternalNewOperation, NewOperation(stableBusy: true, name: "calltrace-jump"))
 
 proc isAtStart(self: CalltraceComponent): bool =
   self.startCallLineIndex < START_BUFFER
@@ -94,19 +87,6 @@ proc getStartBufferLen(self: CalltraceComponent): int =
   else:
     START_BUFFER
 
-func calcScrollHeight(self: CalltraceComponent): cstring =
-  cstring(fmt"{self.totalCallsCount * CALL_HEIGHT_PX}px")
-
-func calltraceStyle(self: CalltraceComponent): VStyle =
-  style((StyleAttr.height, self.calcScrollHeight()))
-
-func calltraceLinesTransformTranslateY(self: CalltraceComponent): cstring =
-  let buffer = self.getStartBufferLen()
-  cstring(fmt"translateY({(self.startCallLineIndex - buffer) * CALL_HEIGHT_PX}px)")
-
-func calltraceLinesStyle(self: CalltraceComponent): VStyle =
-  style((StyleAttr.transform, self.calltraceLinesTransformTranslateY()))
-
 proc toggleCalls*(
   self: CalltraceComponent,
   kind: CtEventKind,
@@ -116,63 +96,6 @@ proc toggleCalls*(
 ) =
   let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
   self.api.emit(kind, target)
-
-proc createContextMenuItems(
-  self: CalltraceComponent,
-  ev: js,
-  callLine: CallLineContent
-): seq[ContextMenuItem] =
-  if self.inExtension:
-    ev.preventDefault()
-  var expandCallstack:  ContextMenuItem
-  var collapseCallChildren: ContextMenuItem
-  var expandCallChildren: ContextMenuItem
-  var contextMenu:      seq[ContextMenuItem]
-
-  let call = callLine.call
-
-  if callLine.hiddenChildren:
-    expandCallChildren =
-      ContextMenuItem(
-        name: "Expand Call Children",
-        hint: "",
-        handler: proc(e: Event) =
-          self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, 0)
-          self.loadLines(fromScroll=false)
-      )
-    contextMenu&= expandCallChildren
-  elif callLine.count > 0 or call.children.len() > 0:
-    collapseCallChildren =
-      ContextMenuItem(
-        name: "Collapse Call Children",
-        hint: "",
-        handler: proc(e: Event) =
-          self.toggleCalls(COLLAPSE_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, 0)
-          self.loadLines(fromScroll=false)
-      )
-    contextMenu&= collapseCallChildren
-
-  expandCallstack = ContextMenuItem(name: "Expand Full Callstack", hint: "", handler: proc(e: Event) =
-    self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.CallstackInternal, -1)
-    self.loadLines(fromScroll=false))
-  contextMenu &= expandCallstack
-
-  return contextMenu
-
-proc createContextMenuItems(self: CallArg, component: CalltraceComponent, ev: js): seq[ContextMenuItem] =
-  var addToScratchpad:  ContextMenuItem
-  var contextMenu:      seq[ContextMenuItem]
-
-  addToScratchpad =
-    ContextMenuItem(
-      name: "Add value to scratchpad",
-      hint: "CTRL+&lt;click on value&gt;",
-      handler: proc(e: Event) =
-        component.api.emit(InternalAddToScratchpad, ValueWithExpression(expression: self.name, value: self.value))
-    )
-  contextMenu &= addToScratchpad
-
-  return contextMenu
 
 proc `$`*(c: CallCount): string =
   case c.kind:
@@ -199,27 +122,6 @@ proc scrollRawPosition*(self: CalltraceComponent): int =
 proc scrollLineIndex*(self: CalltraceComponent): int =
   (self.scrollRawPosition() / CALL_HEIGHT_PX).floor
 
-proc showCallValue*(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring) =
-  let id = keyOrIndex & "_" & arg.name
-  let valueHostId = calltraceValueDomHostId(cstring"call-tooltip-value", id)
-  let value = ValueComponent(
-    expanded: JsAssoc[cstring, bool]{arg.name: true},
-    charts: JsAssoc[cstring, ChartComponent]{},
-    showInLine: JsAssoc[cstring, bool]{},
-    baseExpression: arg.name,
-    baseValue: arg.value,
-    stateID: -1,
-    nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-    valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    data: data,
-    location: self.location,
-    customRedraw: proc(value: ValueComponent) =
-      mountCalltraceValueDom(valueHostId, value)
-  )
-
-  self.forceRerender[id] = true
-  self.modalValueComponent[id] = value
-
 proc domIdToken(raw: cstring): string =
   for ch in $raw:
     if ch in {'a'..'z'} or ch in {'A'..'Z'} or ch in {'0'..'9'} or ch in {'-', '_'}:
@@ -243,11 +145,6 @@ proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent) =
   host.innerHTML = cstring""
   host.appendChild(value.renderValueDom())
 
-proc scheduleCalltraceValueDomMount(hostId: cstring, value: ValueComponent) =
-  discard setTimeout(proc() =
-    mountCalltraceValueDom(hostId, value)
-  , 0)
-
 proc getLastKey(assoc: JsAssoc[cstring, ValueComponent]): cstring =
   var keys: seq[cstring] = @[]
 
@@ -255,111 +152,6 @@ proc getLastKey(assoc: JsAssoc[cstring, ValueComponent]): cstring =
     keys.add(key)
 
   result = keys[keys.len - 1]
-
-proc callOffset(depth: int): VStyle =
-  style((StyleAttr.minWidth, cstring(&"{depth * 8}px")))
-
-proc setCallOffset(
-  depth: int,
-  backIndentCounter: int = 1,
-  isFirstChild: bool = false,
-  isLastChild: bool = false,
-  isLastElement: bool = false,
-  hasChildren: bool = false,
-  hasExpandedValues: bool = false,
-  isNextCall: bool = false,
-  isActiveCall: bool = false,
-  parentIsActive: bool = false
-): VNode =
-  var emptyOffsetCount = depth - backIndentCounter
-  var bottomBorderedOffsetCount = backIndentCounter
-
-  if isFirstChild:
-    emptyOffsetCount -= 1
-
-    if bottomBorderedOffsetCount > 0:
-      bottomBorderedOffsetCount -= 1
-
-    if isLastChild and not hasChildren:
-      emptyOffsetCount += 1
-
-  if (isLastChild and hasExpandedValues) or isLastElement:
-    emptyOffsetCount += bottomBorderedOffsetCount
-    bottomBorderedOffsetCount = 0
-
-  buildHtml(
-    tdiv(class = "call-offsets")
-  ):
-
-    for i in 0..<emptyOffsetCount:
-      tdiv(class = "empty-offset"):
-        text " "
-
-    for i in 0..<bottomBorderedOffsetCount:
-      tdiv(class = "empty-offset empty-offset-bottom-border"):
-        text " "
-
-    if isFirstChild:
-      if isLastChild:
-        if hasChildren or hasExpandedValues or isLastElement:
-          tdiv(class = "empty-offset empty-offset-top-border"):
-            text " "
-        else:
-          tdiv(class = "empty-offset empty-offset-top-border empty-offset-bottom-border"):
-            text " "
-      else:
-        tdiv(class = "empty-offset empty-offset-top-border"):
-          text " "
-
-    tdiv(class = "call-offset-icon"):
-      tdiv(class = "call-offset-icon-1")
-
-      if isLastElement:
-        tdiv(class = "call-offset-icon-6")
-      else:
-        tdiv(class = "call-offset-icon-2")
-
-      tdiv(class = "call-offset-icon-3")
-
-      if isNextCall and parentIsActive:
-        tdiv(class = "call-offset-icon-4")
-      if isActiveCall and not hasChildren:
-        tdiv(class = "call-offset-icon-5")
-
-proc setExpandedValueOffset(
-  depth: int,
-  isLastValue: bool = false,
-  backIndentCount: int = 0,
-  callHasChildren: bool = false,
-  callIsLastChild: bool = false,
-  callIsCollapsed: bool = false,
-  callIsLastElement: bool = false
-): VNode =
-  var emptyOffsetCount = depth - 1
-
-  if isLastValue:
-    if backIndentCount > 0:
-      emptyOffsetCount -= (backIndentCount - 1)
-
-  buildHtml(
-    tdiv(class = "call-offsets")
-  ):
-    if callIsLastElement:
-      for i in 0..<depth:
-        tdiv(class = "empty-offset")
-    else:
-      for i in 0..<emptyOffsetCount:
-        tdiv(class = "empty-offset")
-      if isLastValue:
-        for i in 0..<backIndentCount - 1 :
-          tdiv(class = "empty-offset empty-offset-bottom-border")
-      if isLastValue and (not callHasChildren or callIsCollapsed):
-        if callIsLastChild:
-          tdiv(class = "empty-offset empty-offset-right-border empty-offset-bottom-border")
-        else:
-          tdiv(class = "empty-offset empty-offset-right-border")
-      else:
-        tdiv(class = "empty-offset empty-offset-right-border")
 
 proc calltraceText(value: cstring): Node =
   document.createTextNode(value)
@@ -410,552 +202,6 @@ proc setExpandedValueOffsetDom(
         cstring"div",
         cstring"empty-offset empty-offset-right-border"))
 
-proc childlessCallView(self: CalltraceComponent, call: Call, active: cstring): VNode =
-  let internalActive =
-    if active != "" and call.location.key == self.location.key:
-      "active"
-    else:
-      ""
-  buildHtml(
-    span(
-      class = "toggle-call",
-    )
-  ):
-    tdiv(class = fmt"dot-call-img {internalActive}")
-    if call.location.rrTicks < self.location.rrTicks and active != "" and call.location.key != self.location.key:
-      tdiv(class = "active-call-location")
-
-proc endOfProgramCallView(self: CalltraceComponent, isError: bool): VNode =
-  let cl = if isError: "end-of-program-error" else: ""
-  buildHtml(
-    span(
-      class = "toggle-call",
-    )
-  ):
-    tdiv(class = "end-of-program-img " & cl)
-
-proc expandCallView(self: CalltraceComponent, call: Call, count: int, active: cstring): VNode =
-  buildHtml(
-    span(
-      class = "toggle-call",
-      onclick = proc(ev: Event, v: VNode) =
-        self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.Children, count)
-        self.loadLines(fromScroll=false)
-    )
-  ):
-    tdiv(class = fmt"expand-call-img {active}")
-
-proc collapseCallView(
-  self: CalltraceComponent,
-  call: Call,
-  kind: CalltraceNonExpandedKind,
-  count: int,
-  active: cstring,
-): VNode =
-  buildHtml(
-    span(
-      class = "toggle-call",
-      onclick = proc(ev: Event, v: VNode) =
-        self.toggleCalls(COLLAPSE_CALLS_KIND, call.key, kind, count)
-        self.loadLines(fromScroll=false)
-    )
-  ):
-    tdiv(class=fmt"collapse-call-img {active}")
-
-proc resetValueView(self: CalltraceComponent) =
-  for key in self.forceRerender.keys:
-    self.forceRerender[key] = false
-
-proc calcValueLeftPosition(self: CalltraceComponent, ev: Event, id: cstring) =
-  let scrollLeft = cast[float](jq("#" & "calltraceScroll-" & $self.id).toJs.scrollLeft)
-  self.callValuePosition[id] = cast[float](ev.toJs.clientX) - self.startPositionX + scrollLeft
-
-proc callArgView(self: CalltraceComponent, arg: CallArg, keyOrIndex: cstring): VNode =
-  let id = fmt"{keyOrIndex}_{arg.name}"
-
-  buildHtml(
-    tdiv(
-      class = "call-arg",
-      id = &"call-arg-{keyOrIndex}-{arg.name}",
-      onclick = proc(ev: Event, v: VNode) =
-        if cast[bool](ev.toJs.ctrlKey):
-          ev.stopPropagation()
-          self.api.emit(
-            InternalAddToScratchpad,
-            ValueWithExpression(
-              expression: arg.name,
-              value: arg.value
-            )
-          )
-        elif not self.modalValueComponent.hasKey(id):
-          self.resetValueView()
-          showCallValue(self, arg, keyOrIndex)
-          self.calcValueLeftPosition(ev, id)
-        else:
-          if not self.forceRerender[id]:
-            self.resetValueView()
-          self.calcValueLeftPosition(ev, id)
-          self.forceRerender[id] = not self.forceRerender[id]
-        self.redraw(),
-      oncontextmenu = proc(ev: Event, v: VNode) {.gcsafe.} =
-        let e = ev.toJs
-        ev.stopPropagation()
-        let contextMenu = arg.createContextMenuItems(self, e)
-        if contextMenu != @[]:
-            showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.inExtension)
-    )
-  ):
-    let value = arg.value.textRepr
-    tdiv(class = "call-arg-header", id = &"call-arg-header-{keyOrIndex}-{arg.name}"):
-      tdiv(class = "call-arg-name", id = &"call-arg-name-{keyOrIndex}-{arg.name}"):
-        text &"{arg.name}="
-      tdiv(class = "call-arg-text", id = &"call-arg-text-{keyOrIndex}-{arg.name}"):
-        text value
-
-proc ensureValueComponent(
-  self: CallExpandedValuesComponent,
-  name: cstring,
-  value: Value,
-  valueHostId: cstring
-) =
-  if not self.values.hasKey(name):
-    self.values[name] = ValueComponent(
-      expanded: JsAssoc[cstring, bool]{},
-      charts: JsAssoc[cstring, ChartComponent]{},
-      showInline: JsAssoc[cstring, bool]{},
-      baseExpression: name,
-      baseValue: value,
-      stateID: -1,
-      data: self.data,
-      nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-      valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-      customRedraw: proc(value: ValueComponent) =
-        mountCalltraceValueDom(valueHostId, value))
-    self.data.registerComponent(self.values[name], Content.Value)
-
-proc makeCallExpandedValueComponent(data: Data, callDepth: int): CallExpandedValuesComponent =
-  result = CallExpandedValuesComponent(
-    values: JsAssoc[cstring, ValueComponent]{},
-    depth: callDepth
-  )
-  data.registerComponent(result, Content.CallExpandedValue)
-
-proc callArgListView(
-  self: CalltraceComponent,
-  arg: CallArg,
-  callKey: cstring,
-  callDepth: int
-): VNode =
-  buildHtml(
-    li(
-      onclick = proc =
-        if not self.expandedValues.hasKey(callKey):
-          self.expandedValues[callKey] = makeCallExpandedValueComponent(self.data, callDepth)
-        ensureValueComponent(
-          self.expandedValues[callKey],
-          arg.name,
-          arg.value,
-          calltraceValueDomHostId(cstring"call-expanded-value-dom", callKey, arg.name)
-        )
-    )
-  ):
-    span(class = "call-arg-tooltip-name"): text $(arg.name)
-    text " : "
-    span(class = "call-arg-tooltip-value"): text $(arg.value.textRepr)
-
-proc renderExpandedValueHost(hostId: cstring, value: ValueComponent): VNode =
-  scheduleCalltraceValueDomMount(hostId, value)
-  buildHtml(tdiv(
-    id = hostId,
-    class = "calltrace-direct-value-host",
-    style = style(StyleAttr.width, cstring"100%")
-  ))
-
-proc callArgsView(
-  self: CalltraceComponent,
-  args: seq[CallArg],
-  isCallstack: bool,
-  keyOrIndex: cstring,
-  callDepth: int
-): VNode =
-  if self.modalValueComponent.isNil:
-    self.modalValueComponent = JsAssoc[cstring, ValueComponent]{}
-    self.forceRerender = JsAssoc[cstring, bool]{}
-
-  buildHtml(
-    tdiv(
-      id = &"call-args-{isCallstack}-{keyOrIndex}",
-      class = "call-args"
-    )
-  ):
-    text "("
-    for i, arg in args:
-      let id = fmt"{keyOrIndex}_{arg.name}"
-      callArgView(self, arg, keyOrIndex)
-      if self.forceRerender[id]:
-        tdiv(class = "call-tooltip",
-          style = style(StyleAttr.left, fmt"{self.callValuePosition[id]}px")
-        ):
-          renderExpandedValueHost(
-            calltraceValueDomHostId(cstring"call-tooltip-value", cstring(id)),
-            self.modalValueComponent[id]
-          )
-      if i < args.len - 1:
-        text ", "
-    text ")"
-
-proc returnValueView(
-  self: CalltraceComponent,
-  callkey: cstring,
-  callDepth: int,
-  ret: Value
-): VNode =
-  buildHtml(
-    span(
-      class="return",
-      onclick = proc =
-        if not self.expandedValues.hasKey(callKey):
-          self.expandedValues[callKey] = makeCallExpandedValueComponent(self.data, callDepth)
-        ensureValueComponent(
-          self.expandedValues[callKey],
-          returnValueName,
-          ret,
-          calltraceValueDomHostId(cstring"call-expanded-value-dom", callKey, returnValueName)
-        )
-    )
-  ):
-    let value = ret.textRepr
-    span(class = "return-arrow"):
-      text " => "
-    span(class = "return-text"):
-      text value
-
-proc searchResultView(self: CalltraceComponent, call: Call): VNode =
-  let location = call.location
-  let ticksText = if self.usesMaterializedTracesTrace: "stepId" else: "rrTicks"
-
-  buildHtml(
-    tdiv(
-      class = "search-result",
-      onmousedown = proc =
-        self.calltraceJump(location)
-        self.redraw()
-    )
-  ):
-    text &"#{location.key} - {ticksText}({location.rrTicks}): {location.highLevelFunctionName}"
-
-
-proc emptyResultView(self: CalltraceComponent): VNode =
-  buildHtml(
-    tdiv(
-      class = "empty-search-result",
-      onclick = proc =
-        self.isSearching = false
-        self.redraw()
-    )
-  ):
-    text &"Couldn't find any results for '{self.searchText}'!\n-Click To Close-"
-
-proc searchResultsView(self: CalltraceComponent): VNode =
-  let hiddenClass = if self.isSearching: "" else: "hidden"
-  result = buildHtml(
-    tdiv(class = fmt"call-search-results {hiddenClass}")
-  ):
-    if self.searchResults.len > 0:
-      for call in self.searchResults:
-        searchResultView(self, call)
-    elif self.searchText.len() > 0:
-      emptyResultView(self)
-
-func calltraceSearchInputId(self: CalltraceComponent): cstring =
-  cstring(fmt"calltrace-search-input-{self.id}")
-
-proc submitCalltraceSearch(self: CalltraceComponent) =
-  let query = if self.searchText.isNil: cstring"" else: self.searchText
-
-  if query.len == 0:
-    self.searchResults = @[]
-    self.isSearching = false
-    self.redraw()
-    return
-
-  self.lastQuery = query
-  self.api.emit(CtSearchCalltrace, CallSearchArg(value: query))
-
-proc searchCalltraceView(self: CalltraceComponent): VNode =
-  let onSearch = proc(ev: KeyboardEvent, v: VNode) =
-    if ev.keyCode == ENTER_KEY_CODE:
-      ev.preventDefault()
-      ev.stopPropagation()
-      self.searchText = cast[cstring](ev.target.toJs.value)
-      self.submitCalltraceSearch()
-
-  buildHtml(
-    tdiv(class = "calltrace-search")
-  ):
-    form(
-      class = &"calltrace-search-form-{self.id}",
-      onsubmit = proc(ev: Event, v: VNode) =
-        ev.preventDefault()
-        ev.stopPropagation()
-        self.submitCalltraceSearch()
-    ):
-      input(
-        tabIndex = "0",
-        id = self.calltraceSearchInputId(),
-        class = fmt"calltrace-search-input calltrace-search-input-{self.id} ct-input-panel ct-input-search-image",
-        `type` = "text",
-        value = if self.searchText.isNil: cstring"" else: self.searchText,
-        placeholder = "Search",
-        oninput = proc(ev: Event, v: VNode) =
-          self.searchText = cast[cstring](ev.target.toJs.value)
-          if self.searchText.len == 0 and (self.isSearching or self.searchResults.len > 0):
-            self.searchResults = @[]
-            self.isSearching = false
-            self.redraw()
-        ,
-        onkeydown = onSearch,
-        onblur = proc() =
-          self.isSearching = false
-      )
-
-    searchResultsView(self)
-
-method locationLang*(self: CalltraceComponent): Lang =
-  self.location.path.toLangFromFilename()
-
-proc filterCalltraceView(self: CalltraceComponent): VNode =
-  let onFilterKeyUp = proc(ev: Event, v: VNode) {.async.} =
-    if cast[cstring](ev.toJs.key) == cstring"Enter":
-      ev.preventDefault()
-      ev.stopPropagation()
-      let rawIgnorePatterns = cast[cstring](ev.target.toJs.value)
-      if self.rawIgnorePatterns != rawIgnorePatterns:
-        self.rawIgnorePatterns = rawIgnorePatterns
-        self.startCallLineIndex = 0
-        self.loadLines(fromScroll=false)
-
-        self.redraw()
-
-  if self.rawIgnorePatterns.isNil:
-    if self.locationLang() != LangNim:
-      self.rawIgnorePatterns = cstring""
-    else:
-      self.rawIgnorePatterns = cstring"path~lib/system;path~chronicles"
-
-  let value = self.rawIgnorePatterns
-
-  buildHtml(
-    tdiv(class = "calltrace-filter")
-  ):
-    form(
-        class = &"calltrace-filter-form",
-        onsubmit = proc(ev: Event, v: VNode) =
-          ev.preventDefault()
-    ):
-      input(
-        class = "calltrace-filter-raw-ignored-patterns",
-        `type` = "text",
-        placeholder = "filter: ignore those patterns",
-        value = value,
-        onkeyup = proc(ev: Event, v: VNode) = discard onFilterKeyUp(ev, v)
-      )
-
-proc callView*(
-  self: CalltraceComponent,
-  callLine: CallLineContent,
-  index: int,
-  depth: int
-): VNode =
-  let currentCallKey = self.location.key
-  let call = callLine.call
-  let childrenCount = callLine.count
-  let hiddenChildren = callLine.hiddenChildren
-  let isCurrentCall = call.key == currentCallKey
-  let callClass = if isCurrentCall: "call-current" else: ""
-  let key = call.key
-  let activeClass = ""
-
-  var isExpanded = false
-  var args: seq[CallArg]
-  var returnValue: Value
-
-  args =
-    if self.args.hasKey(key):
-      self.args[key]
-    else:
-      call.args
-
-  returnValue =
-    if self.returnValues.hasKey(key):
-      self.returnValues[key]
-    else:
-      call.returnValue
-
-  buildHtml(
-    tdiv(class = "calltrace-child call-depth")
-  ):
-    tdiv(
-      id = fmt"local-call-{key}",
-      class = fmt"{activeClass} {callClass} call-child-box",
-      oncontextmenu = proc(ev: Event, v: VNode) {.gcsafe.} =
-        let e = ev.toJs
-        let contextMenu = self.createContextMenuItems(e, callLine)
-        if contextMenu != @[]:
-          showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.inExtension)
-    ):
-      let count = if childrenCount > 0:
-          childrenCount
-        else:
-          call.children.len
-      let active =
-        if call.location.key == self.location.globalCallKey:
-          "active"
-        else:
-          ""
-      if count == 0:
-        childlessCallView(self, call, active)
-      elif not hiddenChildren or call.children.len > 0:
-        isExpanded = true
-        if self.usesMaterializedTracesTrace:
-          collapseCallView(self, call, CalltraceNonExpandedKind.Children, count, active)
-      elif not isExpanded:
-        expandCallView(self, call, count, active)
-
-      tdiv(
-        id = &"local-call-text-{key}",
-        class = "call-text",
-        onclick = proc =
-          clog fmt"calltrace: jump onclick call key " & $key
-          self.resetValueView()
-          self.selectedCallNumber = self.lineIndex[call.key]
-          self.lastSelectedCallKey = call.key
-          self.calltraceJump(call.location)
-          self.redrawCallLines()
-      ):
-        if key != cstring"-1 -1 -1":
-          text $call.location.highLevelFunctionName & " #" & $call.key
-
-        # Continuation jump link: show ↗ icon if this call has an async continuation
-        if self.continuationsByCallKey.hasKey(key):
-          let link = self.continuationsByCallKey[key]
-          span(
-            class = "continuation-jump-link",
-            title = cstring("Jump to continuation (" & $link.linkType & ")"),
-          ):
-            proc onclick(ev: Event, v: VNode) =
-              ev.stopPropagation()
-              # Seek to the continuation GEID
-              console.log("Jump to continuation at GEID ", link.continuationGEID)
-              # In full integration: self.api.emit(CtSeekToGEID, link.continuationGEID)
-            text "↗"
-
-      callArgsView(self, args, isCallstack = false, keyOrIndex = key, callDepth = depth)
-
-      if not returnValue.isNil:
-        returnValueView(self, key, call.depth, returnValue)
-
-proc endOfProgramView*(
-  self: CalltraceComponent,
-  callLine: CallLineContent,
-  index: int,
-  depth: int
-): VNode =
-  let call = callLine.call
-  let childrenCount = callLine.count
-  let hiddenChildren = callLine.hiddenChildren
-  let key = call.key
-
-  let errorClass = if callLine.isError: "end-of-program-error" else: ""
-
-  buildHtml(
-    tdiv(class = "calltrace-child call-depth")
-  ):
-    tdiv(
-      id = fmt"local-call--1",
-      class = "call-child-box",
-      onclick = proc(e: Event, tg: VNode) =
-        self.calltraceJump(callLine.call.location)
-    ):
-      endOfProgramCallView(self, callLine.isError)
-      tdiv(
-        id = fmt"local-call-text-{key}",
-        class = fmt"end-of-program-text {errorClass}"
-      ):
-        if key != cstring"-1 -1 -1":
-          text call.rawName
-
-proc hiddenCallstackView(
-  self: CalltraceComponent,
-  content: CallLineContent,
-  index: int,
-  depth: int
-): VNode =
-  let call = content.call
-  let count = content.count
-  let key = call.key
-
-  buildHtml(
-    tdiv(class = "calltrace-child call-depth")
-  ):
-    tdiv(
-      class = "call-child-box",
-      id = fmt"local-call-{key}"
-    ):
-      span(
-        class = "toggle-call",
-      )
-      span(
-        class = "collapse-call",
-        onclick = proc(ev: Event, v: VNode) =
-          if content.kind == CallLineContentKind.StartCallstackCount:
-            self.depthStart = call.depth
-            self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.Callstack, count)
-          else:
-            self.toggleCalls(EXPAND_CALLS_KIND, call.key, CalltraceNonExpandedKind.CallstackInternal, count)
-          self.loadLines(fromScroll=false)
-      ):
-        if content.kind == CallLineContentKind.CallstackInternalCount:
-          text fmt"{count} calls"
-        else:
-          text fmt"{count} callstack calls"
-
-proc callLineContentView*(
-  self: CalltraceComponent,
-  content: CallLineContent,
-  index: int,
-  depth: int
-): VNode =
-  if content.kind == CallLineContentKind.EndOfProgramCall:
-    endOfProgramView(self, content, index, depth)
-  elif content.kind != CallLineContentKind.CallstackInternalCount and
-      content.kind != CallLineContentKind.StartCallstackCount:
-    callView(self, content, index, depth)
-  else:
-    if self.usesMaterializedTracesTrace:
-      hiddenCallstackView(self, content, index, depth)
-    else:
-      buildHtml(tdiv())
-
-proc callLineView*(self: CalltraceComponent, callLine: CallLine, index: int): VNode =
-  let buffer = self.getStartBufferLen()
-
-  let selected =
-    if self.activeCallIndex == self.startCallLineIndex + index - buffer:
-      "event-selected"
-    else:
-      ""
-
-  if callLine.content.kind == CallLineContentKind.StartCallstackCount:
-    self.depthStart = callLine.depth
-
-  result = buildHtml(
-    tdiv(class = fmt"calltrace-call-line calltrace-row {selected}")
-  ):
-    if self.usesMaterializedTracesTrace:
-      span(style = callOffset(callLine.depth - self.depthStart))
-    callLineContentView(self, callLine.content, index, callLine.depth)
-
 proc updateTooltipOrigin(self: CalltraceComponent, callLine: kdom.Node) =
   if self.startPositionX != -1:
     return
@@ -970,37 +216,6 @@ proc syncSvgContainerBounds(svgContainer: Element, width, height: float) =
   svgContainer.setAttribute(cstring"width", cstring($safeWidth))
   svgContainer.setAttribute(cstring"height", cstring($safeHeight))
   svgContainer.setAttribute(cstring"viewBox", cstring(fmt"0 0 {safeWidth} {safeHeight}"))
-
-proc ensureSvgContainer(self: CalltraceComponent): VNode =
-  buildHtml(
-    svg(
-      class = "calltrace-svg-line",
-      id = fmt"svg-content-{self.id}",
-      width = "1",
-      height = "1",
-      viewBox = "0 0 1 1",
-      xmlns = "http://www.w3.org/2000/svg"
-    )
-  )
-
-proc calltraceLines*(self: CalltraceComponent): VNode =
-  let callLineCountLimit = self.panelHeight()
-
-  # based on https://dev.to/adamklein/build-your-own-virtual-scroll-part-i-11ib
-  result = buildHtml(
-    tdiv(class="calltrace-lines", style=calltraceLinesStyle(self))
-  ):
-    ensureSvgContainer(self)
-    if self.usesMaterializedTracesTrace:
-      for i, callLine in self.callLines:
-        callLineView(self, callLine, i)
-    else:
-      for i in countdown(self.callLines.len - 1, 0):
-        callLineView(self, self.callLines[i], i)
-
-proc localCalltraceView*(self: CalltraceComponent): VNode =
-  buildHtml(tdiv(class= &"local-calltrace")):
-    tdiv(class="calltrace-lines")
 
 proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
   let current = if self.searchText.isNil: cstring"" else: self.searchText
@@ -1164,7 +379,8 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   for i, callLine in results.callLines:
     let call = callLine.content.call
     let loc = call.location
-    # Determine children count and expand state matching legacy callView logic.
+    # Determine children count and expand state matching the legacy call-line
+    # semantics now mirrored by the IsoNim calltrace view.
     let childrenCount = callLine.content.count
     let hiddenChildren = callLine.content.hiddenChildren
     let count = if childrenCount > 0: childrenCount else: call.children.len
@@ -1195,13 +411,13 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   let backendStartIndex = cast[int64](results.startCallLineIndex)
   # Mirror the per-call argument values into the store so the IsoNim
   # calltrace view can render one ``.call-arg`` element per arg per row
-  # (matching the legacy Karax ``callArgsView`` markup that Playwright's
+  # (matching the legacy call-argument markup that Playwright's
   # ``CallTraceEntry.arguments()`` reads). Without this, the args column
   # collapses to a static ``()`` and the ``variable inspection board via
   # call trace argument`` test fails to find the named arg.
   #
   # The args data has TWO independent sources, mirroring the lookup
-  # ``callView`` (~line 665) does in the legacy Karax view:
+  # the old Karax call-line renderer used:
   #
   #   1. ``results.args`` — a TableLike keyed by callKey, populated by
   #      the backend for callstack-loaded calls.
@@ -1216,8 +432,8 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   proc convertCallArgs(args: seq[CallArg]): seq[vm_types.CallArg] =
     result = @[]
     for arg in args:
-      # ``arg.value.textRepr`` mirrors what the legacy ``callArgView``
-      # used to render inside ``.call-arg-text``. Pre-rendering the text
+      # ``arg.value.textRepr`` mirrors the old call-argument text node.
+      # Pre-rendering the text
       # here keeps the view layer pure and avoids re-evaluating the
       # ``Value`` type tree on every reactive update.
       let rendered = $arg.value.textRepr
@@ -1315,10 +531,6 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
 #     self.processStackFrame(i, frame)
 #   self.redrawCallLines()
 #   self.redraw()
-
-func supportCallstackOnly(self: CalltraceComponent): bool =
-  not self.config.calltrace or self.locationLang() == LangRust or not self.usesMaterializedTracesTrace
-
 
 method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   self.api = api
@@ -1586,7 +798,6 @@ method onEnter*(self: CalltraceComponent) {.async.} =
       of CallLineContentKind.Call:
         let call = self.callLines[callLinesIndex].content.call
 
-        self.resetValueView()
         self.lastSelectedCallKey = call.key
         self.calltraceJump(call.location)
 
@@ -1725,29 +936,6 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     if calltraceVMInstance.isNil:
       self.loadLines(fromScroll=false)
   self.redraw()
-
-proc asyncFlowToggleView(self: CalltraceComponent): VNode =
-  ## Renders the Real/Virtual call trace mode toggle.
-  ## Only visible when the current view has async continuation data.
-  if self.continuationLinks.len == 0:
-    return buildHtml(tdiv())  # Hidden when no async data
-
-  buildHtml(
-    tdiv(class = "calltrace-async-toggle")
-  ):
-    span(class = "async-toggle-label"):
-      text "Call Trace:"
-    tdiv(class = "async-toggle-buttons"):
-      let realClass = if self.asyncFlowMode == afmReal: "toggle-btn active" else: "toggle-btn"
-      let virtualClass = if self.asyncFlowMode == afmVirtual: "toggle-btn active" else: "toggle-btn"
-      button(class = cstring(realClass)):
-        proc onclick(ev: Event, v: VNode) =
-          self.asyncFlowMode = afmReal
-        text "Real"
-      button(class = cstring(virtualClass)):
-        proc onclick(ev: Event, v: VNode) =
-          self.asyncFlowMode = afmVirtual
-        text "Virtual"
 
 proc setContinuationLinks*(self: CalltraceComponent, links: seq[ContinuationLinkInfo]) =
   ## Called by the backend when continuation links are discovered.

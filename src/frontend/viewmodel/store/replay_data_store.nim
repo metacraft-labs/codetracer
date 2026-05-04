@@ -50,11 +50,11 @@ type
   CalltraceStore* = object
     ## Reactive state for the calltrace panel.
     lines*: Signal[seq[CallLine]]
-    ## Per-call argument values keyed by ``CallLine.callKey``. The legacy
-    ## Karax view (``frontend/ui/calltrace.nim`` ``callArgsView``) reads
-    ## the same map (``CalltraceComponent.args``) to render each row's
-    ## ``.call-arg`` children. Mirroring it into the store lets the
-    ## IsoNim view emit identical DOM driven purely by reactive data.
+    ## Per-call argument values keyed by ``CallLine.callKey``. The old
+    ## Karax calltrace rows read the same map (``CalltraceComponent.args``)
+    ## to render each row's ``.call-arg`` children. Mirroring it into the
+    ## store lets the IsoNim view emit identical DOM driven purely by
+    ## reactive data.
     args*: Signal[Table[string, seq[CallArg]]]
     startLineIndex*: Signal[int64]
     totalCallsCount*: Signal[uint64]

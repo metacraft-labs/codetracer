@@ -122,8 +122,8 @@ type
     ## The ``text`` field holds the rendered text representation of the
     ## value at the moment the calltrace section was loaded, so the view
     ## layer can render it verbatim without re-evaluating the ``Value``
-    ## type tree. This matches the ``arg.value.textRepr`` call the legacy
-    ## ``callArgView`` made in ``frontend/ui/calltrace.nim``.
+    ## type tree. This matches the ``arg.value.textRepr`` call the old
+    ## Karax calltrace argument renderer used.
     name*: string
     text*: string
 

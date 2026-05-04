@@ -43,7 +43,7 @@
 ##   - createRoot proc(dispose): … dispose() at the end.
 ##   - `makeStoreWithMock(autoRespond = true)` produces a `ReplayDataStore`
 ##     fronted by `MockBackendService` so backend dispatches are no-ops.
-##   - VM signals (calltraceLines on the store side, `eventRows` on the VM
+##   - VM signals (calltrace line data on the store side, `eventRows` on the VM
 ##     side, etc.) are populated directly to seed the canned trace.
 ##   - Derived memos (visibleLines, currentVariables, activeFileName)
 ##     recompute synchronously after the seed thanks to the reactive
