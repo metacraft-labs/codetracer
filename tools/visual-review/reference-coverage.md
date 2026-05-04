@@ -50,6 +50,7 @@ Representative partial/missing-reference surfaces were captured successfully at
 | Flow | `flow` | confirmed current IsoNim panel with populated steps, `tools/visual-review/reports/flow-laptop.json` |
 | VCS | `vcs` | confirmed current IsoNim panel, `tools/visual-review/reports/vcs-laptop.json` |
 | Request panel | `request-panel` | confirmed current IsoNim panel, `tools/visual-review/reports/request-panel-laptop.json` |
+| Build errors | `errors` | confirmed current IsoNim problems/build-errors panel, `tools/visual-review/reports/errors-laptop.json`; `noir-build-open` also confirms the panel tab in a default layout |
 | Deep review panel | `deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/deepreview-laptop.json` |
 | Agent activity deep review | `agent-activity-deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/agent-activity-deepreview-laptop.json` |
 | Auto-hide bottom tabs | `auto-hide-bottom-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-bottom-tabs-laptop.json` |

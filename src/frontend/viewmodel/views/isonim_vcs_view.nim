@@ -37,10 +37,24 @@ type
 
 proc statusClass*(status: string): string =
   case status
-  of "A": "vcs-status-added"
-  of "D": "vcs-status-deleted"
-  of "M": "vcs-status-modified"
+  of "A", "added": "vcs-status-added"
+  of "D", "deleted": "vcs-status-deleted"
+  of "M", "modified": "vcs-status-modified"
   else: "vcs-status-other"
+
+proc diffStatusClass*(status: string): string =
+  case status
+  of "A", "added": "deepreview-diff-status deepreview-diff-added"
+  of "D", "deleted": "deepreview-diff-status deepreview-diff-deleted"
+  of "M", "modified": "deepreview-diff-status deepreview-diff-modified"
+  else: "deepreview-diff-status"
+
+proc statusLabel*(status: string): string =
+  case status
+  of "added": "A"
+  of "deleted": "D"
+  of "modified": "M"
+  else: status
 
 proc commitRowClass*(selected: bool): string =
   if selected: "vcs-commit-item vcs-commit-selected" else: "vcs-commit-item"
@@ -57,9 +71,9 @@ proc hunkClass*(selected: bool): string =
 
 proc diffLineClass*(lineType: string): string =
   case lineType
-  of "added": "deepreview-unified-line deepreview-line-added"
-  of "removed": "deepreview-unified-line deepreview-line-removed"
-  else: "deepreview-unified-line deepreview-line-context"
+  of "added": "deepreview-unified-line deepreview-unified-line-added"
+  of "removed": "deepreview-unified-line deepreview-unified-line-removed"
+  else: "deepreview-unified-line deepreview-unified-line-context"
 
 proc fileStatsText*(additions, deletions: int): string =
   if additions == 0 and deletions == 0:
@@ -75,7 +89,7 @@ proc hunkToolbarText*(count: int): string =
 
 proc appendStatus(r: MockRenderer; parent: MockNode; status: string) =
   let cls = "vcs-file-status " & statusClass(status)
-  let statusLocal = status
+  let statusLocal = statusLabel(status)
   let node = ui(r):
     span(class = cls):
       text statusLocal
@@ -251,14 +265,15 @@ proc renderUnifiedDiffMock(r: MockRenderer; vm: VCSVM;
     r.appendChild(panel, empty)
     return panel
   for file in vm.diffFiles.val:
-    let fileStatus = file.status
+    let fileStatus = statusLabel(file.status)
+    let fileStatusClass = diffStatusClass(file.status)
     let filePath = file.path
     let fileStats = fileStatsText(file.additions, file.deletions)
     let fileIndexForRows = file.fileIndex
     let fileNode = ui(r):
       tdiv(class = "deepreview-unified-file"):
         tdiv(class = "deepreview-unified-file-header"):
-          span(class = "deepreview-diff-status"):
+          span(class = fileStatusClass):
             text fileStatus
           span(class = "deepreview-unified-file-path"):
             text filePath
@@ -290,9 +305,9 @@ proc renderUnifiedDiffMock(r: MockRenderer; vm: VCSVM;
           else: " "
         let lineNode = ui(r):
           tdiv(class = lineClass):
-            span(class = "deepreview-unified-line-old"):
+            span(class = "deepreview-unified-gutter-old"):
               text oldText
-            span(class = "deepreview-unified-line-new"):
+            span(class = "deepreview-unified-gutter-new"):
               text newText
             span(class = "deepreview-unified-line-prefix"):
               text prefix
@@ -385,9 +400,24 @@ when defined(js):
         };
         const statusClass = (status) => {
           if (status === 'A') return 'vcs-status-added';
+          if (status === 'added') return 'vcs-status-added';
           if (status === 'D') return 'vcs-status-deleted';
+          if (status === 'deleted') return 'vcs-status-deleted';
           if (status === 'M') return 'vcs-status-modified';
+          if (status === 'modified') return 'vcs-status-modified';
           return 'vcs-status-other';
+        };
+        const diffStatusClass = (status) => {
+          if (status === 'A' || status === 'added') return 'deepreview-diff-status deepreview-diff-added';
+          if (status === 'D' || status === 'deleted') return 'deepreview-diff-status deepreview-diff-deleted';
+          if (status === 'M' || status === 'modified') return 'deepreview-diff-status deepreview-diff-modified';
+          return 'deepreview-diff-status';
+        };
+        const statusLabel = (status) => {
+          if (status === 'added') return 'A';
+          if (status === 'deleted') return 'D';
+          if (status === 'modified') return 'M';
+          return status;
         };
         const fileRowClass = (selected) =>
           selected ? 'vcs-file-item vcs-file-selected' : 'vcs-file-item';
@@ -545,7 +575,7 @@ when defined(js):
               }
               if (`callbacks`.onSelectFile) `callbacks`.onSelectFile(fileIndex, filePath);
             });
-            row.appendChild(make('span', 'vcs-file-status ' + statusClass(`status`), `status`));
+            row.appendChild(make('span', 'vcs-file-status ' + statusClass(`status`), statusLabel(`status`)));
             row.appendChild(make('span', 'vcs-file-name', `name`));
             if (`additions` > 0 || `deletions` > 0) {
               const stats = make('span', 'vcs-file-stats');
@@ -582,7 +612,7 @@ when defined(js):
               const fileEl = make('div', 'deepreview-unified-file');
               fileEl.setAttribute('data-file-index', String(`fileIndex`));
               const header = make('div', 'deepreview-unified-file-header');
-              header.appendChild(make('span', 'deepreview-diff-status', `status`));
+              header.appendChild(make('span', diffStatusClass(`status`), statusLabel(`status`)));
               header.appendChild(make('span', 'deepreview-unified-file-path', `path`));
               if (`stats`.length > 0) header.appendChild(make('span', 'deepreview-unified-file-stats', `stats`));
               fileEl.appendChild(header);
@@ -627,8 +657,8 @@ when defined(js):
                 const hunk = hunks[hunks.length - 1];
                 if (hunk) {
                   const row = make('div', `cls`);
-                  row.appendChild(make('span', 'deepreview-unified-line-old', `oldText`));
-                  row.appendChild(make('span', 'deepreview-unified-line-new', `newText`));
+                  row.appendChild(make('span', 'deepreview-unified-gutter-old', `oldText`));
+                  row.appendChild(make('span', 'deepreview-unified-gutter-new', `newText`));
                   row.appendChild(make('span', 'deepreview-unified-line-prefix', `prefix`));
                   row.appendChild(make('span', 'deepreview-unified-line-content', `content`));
                   hunk.appendChild(row);

@@ -7,9 +7,18 @@
   display: flex
   flex-direction: column
   overflow: hidden
+  background: BACKGROUND_COLOR
   color: TEXT_CONTENT_COLOR
-  font-family: "SpaceGrotesk", sans-serif
+  font-family: "FiraCode", monospace
   font-size: 13px
+  line-height: 20px
+
+.vcs-panel-body
+  display: flex
+  flex: 1 1 auto
+  flex-direction: column
+  min-height: 0
+  overflow: hidden
 
 // ---------------------------------------------------------------------------
 // No-repo placeholder
@@ -21,7 +30,7 @@
   align-items: center
   justify-content: center
   height: 100%
-  color: #888
+  color: VALUE_TYPE_COLOR
   gap: 12px
 
 .vcs-no-repo-icon
@@ -40,8 +49,8 @@
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  border-bottom: 1px solid #3c3c3c
-  background: #252526
+  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+  background: HEADER_PANEL_BACKGROUND_COLOR
 
 .vcs-branch-current
   display: flex
@@ -52,7 +61,7 @@
   user-select: none
 
   &:hover
-    background: #3c3c3c
+    background: ACTIVE_MENU_BACKGROUND
 
 .vcs-branch-icon
   font-size: 14px
@@ -75,8 +84,8 @@
   left: 0
   right: 0
   z-index: 100
-  background: #1e1e1e
-  border: 1px solid #3c3c3c
+  background: BACKGROUND_COLOR
+  border: 1px solid ACTIVE_MENU_BACKGROUND
   max-height: 200px
   overflow-y: auto
 
@@ -88,7 +97,7 @@
   text-overflow: ellipsis
 
   &:hover
-    background: #3c3c3c
+    background: ACTIVE_MENU_BACKGROUND
 
 .vcs-branch-active-marker
   color: #4ec9b0
@@ -104,9 +113,9 @@
   font-weight: 600
   text-transform: uppercase
   letter-spacing: 0.5px
-  color: #888
-  background: #252526
-  border-bottom: 1px solid #3c3c3c
+  color: VALUE_TYPE_COLOR
+  background: HEADER_PANEL_BACKGROUND_COLOR
+  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
   flex-shrink: 0
   user-select: none
 
@@ -116,7 +125,40 @@
   font-weight: 400
   text-transform: none
   letter-spacing: 0
-  color: #666
+  color: VALUE_TYPE_COLOR
+
+// ---------------------------------------------------------------------------
+// Unified diff mode toggle
+// ---------------------------------------------------------------------------
+
+.vcs-diff-toggle
+  flex: 0 0 auto
+  display: flex
+  align-items: center
+  gap: 6px
+  padding: 6px 8px
+  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+  background: BACKGROUND_COLOR
+
+.vcs-toggle-button
+  height: 24px
+  display: inline-flex
+  align-items: center
+  padding: 0 10px
+  border-radius: 4px
+  cursor: pointer
+  color: DROPDOWN_TEXT_COLOR
+  background: HEADER_ELEMENT_BACKGROUND_COLOR
+  user-select: none
+  font-size: 12px
+
+  &:hover
+    background: ACTIVE_MENU_BACKGROUND
+    color: TEXT_CONTENT_COLOR
+
+  &.vcs-toggle-active
+    background: ACTIVE_MENU_BACKGROUND
+    color: TEXT_CONTENT_COLOR
 
 // ---------------------------------------------------------------------------
 // Commit history
@@ -127,7 +169,7 @@
   display: flex
   flex-direction: column
   min-height: 0
-  border-bottom: 1px solid #3c3c3c
+  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
 
 .vcs-commit-list
   flex: 1
@@ -139,14 +181,14 @@
   flex-direction: column
   padding: 4px 8px
   cursor: pointer
-  border-bottom: 1px solid #2a2a2a
+  border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
   gap: 1px
 
   &:hover
-    background: #2a2d2e
+    background: ACTIVE_ROW
 
 .vcs-commit-selected
-  background: #094771 !important
+  background: ACTIVE_ROW !important
 
 .vcs-commit-hash
   font-family: "Fira Code", "Consolas", monospace
@@ -159,11 +201,11 @@
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
-  color: #ccc
+  color: TEXT_CONTENT_COLOR
 
 .vcs-commit-time
   font-size: 10px
-  color: #666
+  color: VALUE_TYPE_COLOR
 
 // ---------------------------------------------------------------------------
 // Changed files
@@ -182,7 +224,7 @@
 
 .vcs-no-files
   padding: 8px
-  color: #666
+  color: VALUE_TYPE_COLOR
   font-style: italic
   text-align: center
 
@@ -194,7 +236,10 @@
   gap: 6px
 
   &:hover
-    background: #2a2d2e
+    background: ACTIVE_ROW
+
+.vcs-file-selected
+  background: ACTIVE_ROW
 
 .vcs-file-status
   font-family: "Fira Code", "Consolas", monospace
@@ -246,14 +291,14 @@
   text-align: center
   cursor: pointer
   font-size: 11px
-  color: #888
-  background: #252526
-  border-top: 1px solid #3c3c3c
+  color: VALUE_TYPE_COLOR
+  background: HEADER_PANEL_BACKGROUND_COLOR
+  border-top: 1px solid ACTIVE_MENU_BACKGROUND
   user-select: none
 
   &:hover
-    background: #3c3c3c
-    color: #ccc
+    background: ACTIVE_MENU_BACKGROUND
+    color: TEXT_CONTENT_COLOR
 
 // ---------------------------------------------------------------------------
 // Hunk editor: selection, toolbar, and visual indicators
@@ -265,7 +310,7 @@
   transition: background 0.1s ease
 
   &:hover
-    background: #3a3d41
+    background: ACTIVE_MENU_BACKGROUND
 
 .hunk-selected
   border-left: 3px solid #569cd6
@@ -290,15 +335,15 @@
   align-items: center
   justify-content: space-between
   padding: 4px 10px
-  background: #1e1e1e
-  border: 1px solid #3c3c3c
+  background: BACKGROUND_COLOR
+  border: 1px solid ACTIVE_MENU_BACKGROUND
   border-radius: 4px
   margin: 4px 0 6px 0
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3)
   font-size: 12px
 
 .hunk-toolbar-count
-  color: #ccc
+  color: TEXT_CONTENT_COLOR
   white-space: nowrap
 
 .hunk-toolbar-actions
@@ -320,9 +365,9 @@
 
 .hunk-toolbar-button-subtle
   background: transparent
-  color: #888
-  border: 1px solid #3c3c3c
+  color: VALUE_TYPE_COLOR
+  border: 1px solid ACTIVE_MENU_BACKGROUND
 
   &:hover
-    background: #3c3c3c
-    color: #ccc
+    background: ACTIVE_MENU_BACKGROUND
+    color: TEXT_CONTENT_COLOR
