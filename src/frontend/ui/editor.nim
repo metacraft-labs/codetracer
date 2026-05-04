@@ -1943,8 +1943,7 @@ proc editorAfterRedraw(self: EditorViewComponent) =
 
   for line, trace in self.traces:
     if trace.expanded:
-      if not trace.m.isNil:
-        trace.m.redraw()
+      trace.refreshTraceViewZoneDom()
 
   for line, expandedInstance in self.expanded:
     self.ensureExpanded(expandedInstance, line)

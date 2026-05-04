@@ -9,10 +9,9 @@
 ## to it. The new session inherits the current layout config so the
 ## panel arrangement is preserved.
 ##
-## Rendering uses IsoNim WebRenderer for direct DOM construction,
-## replacing the legacy Karax buildHtml approach. The tab bar still
-## uses the same CSS classes and DOM structure for backward compatibility
-## with Playwright tests and CSS styling.
+## Rendering uses IsoNim WebRenderer for direct DOM construction while keeping
+## the same CSS classes and DOM structure for backward compatibility with
+## Playwright tests and CSS styling.
 
 import
   std/strformat,

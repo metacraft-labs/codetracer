@@ -30,8 +30,8 @@
  *    in a broken state where the active session index does not change
  *    and the original session's panels are not restored.
  *
- * The tab bar DOM DOES correctly render 2 tabs (karax re-renders
- * properly). The issue is in the switchSession/restoreSessionLayout
+ * The tab bar DOM DOES correctly render 2 tabs. The issue is in the
+ * switchSession/restoreSessionLayout
  * flow when handling transitions involving empty (no-trace) sessions.
  */
 
@@ -209,7 +209,7 @@ test.describe("Real tab switching with GL rebuild", () => {
     );
     expect(await getActiveIndex(ctPage)).toBe(1);
 
-    // Verify the tab bar DOM shows 2 tabs (this proves karax re-rendered)
+    // Verify the tab bar DOM shows 2 tabs.
     await retry(
       async () => {
         const count = await ctPage.locator(".session-tab").count();

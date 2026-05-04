@@ -3,21 +3,18 @@ import
     asyncjs, strformat, strutils, sequtils, sugar, os, jsconsole,
     algorithm, jsffi
   ],
-  # third party
-  karax,
   ../[ types, renderer, config, utils, lang, js_assoc ],
   ../lib/[ jslib, logging, monaco_lib, electron_lib, misc_lib ],
   ../ services / [event_log_service, debugger_service, editor_service, flow_service, search_service, shell_service]
 
 import kdom except Location
 
-import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document, getElementById, querySelectorAll, querySelector, focus
 
 proc jqFind*(a: cstring): js {.importcpp: "jQuery(#)".}
 
 export
-  karax, kdom, asyncjs, strformat, strutils, sequtils, jsffi, algorithm, js_assoc, vdom, sugar, os, jsconsole,
+  kdom, asyncjs, strformat, strutils, sequtils, jsffi, algorithm, js_assoc, sugar, os, jsconsole,
   types, renderer, config, utils, focus, lang,
   jslib, logging, monaco_lib, electron_lib, misc_lib,
   event_log_service, debugger_service, editor_service, flow_service, shell_service,

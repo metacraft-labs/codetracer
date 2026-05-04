@@ -1375,8 +1375,17 @@ proc renderTraceDom*(self: TraceComponent): Node =
   modalContent.setAttribute(cstring"id", cstring(fmt"modal-content-{self.line}"))
   traceModal.appendChild(modalContent)
 
+proc finishTraceDomMount(self: TraceComponent)
+
 proc appendTraceViewZoneDomContent(self: TraceComponent) =
   self.viewZone.domNode.appendChild(self.renderTraceDom())
+
+proc refreshTraceViewZoneDom*(self: TraceComponent) =
+  if self.viewZone.isNil:
+    return
+  self.viewZone.domNode.innerHTML = cstring""
+  self.appendTraceViewZoneDomContent()
+  self.finishTraceDomMount()
 
 proc bindTraceDomRefs(self: TraceComponent) =
   self.searchInput =
@@ -1521,7 +1530,7 @@ proc togglePoint*(trace: TraceComponent) =
 
     # config new view zone in monaco editor
     trace.viewZone = js{
-      afterLineNumber: line,
+      afterLineNumber: trace.line,
       heightInPx: trace.traceViewZoneHeight(),
       domNode: traceNode
     }

@@ -106,8 +106,6 @@ proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialCo
 proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring, content: cstring, append: bool, role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
   self.addAgentMessage(messageId, content, role, canceled)
   var message = self.sessionMessageIds[self.sessionId][^1]
-  echo "####### CHECK ME OUT"
-  kout message
   if append and message.content.len > 0:
     message.content = message.content & content
   else:

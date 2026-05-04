@@ -148,9 +148,7 @@ async function injectBuildOutput(
       component.build.code = exitCode;
       component.build.running = running;
       component.build.command = output[0]?.[0] ?? "";
-      // Trigger a full redraw via __ctRedrawAll and __ctRenderPanel.
-      // component.kxi.redraw() does not work because Nim's redraw() is
-      // a module-level proc, not a method on the KaraxInstance JS object.
+      // Trigger the direct redraw hooks used by the IsoNim-mounted panels.
       if (true) {
         if ((window as any).__ctRedrawAll) (window as any).__ctRedrawAll();
         if ((window as any).__ctRenderPanel) (window as any).__ctRenderPanel(contentId);
@@ -551,9 +549,8 @@ test.describe("Visual Audit v2 — Trace Mode Screens", () => {
     // helper (registered in layout.nim ~869) bypasses the heuristic and
     // sets `collapsedMode = false` + clears `leftBounded`/`rightBounded`.
     //
-    // The wait after the force-off lets Karax flush its redraw queue
-    // (`onChanged` → `redraw(kxiMap[…])` is async) so the next
-    // `pinPanel` runs against a strip that is already in the 28px
+    // The wait after the force-off lets the direct auto-hide refresh settle so
+    // the next `pinPanel` runs against a strip that is already in the 28px
     // text-tab rendering mode, not the 1px collapsed line.
     await ctPage.evaluate(() => {
       const f = (window as any).__ctForceCollapsedMode;

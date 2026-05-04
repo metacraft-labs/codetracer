@@ -11,7 +11,6 @@ import
   ../lib/[ logging, misc_lib, jslib ]
 
 import kdom except Location
-import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 

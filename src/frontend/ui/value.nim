@@ -557,12 +557,12 @@ proc renderInlineHistoryDom(self: ValueComponent, expression: cstring): Node =
 
   chart.ensure()
 
-  self.state.kxi.afterRedraws.add(proc =
+  discard setTimeout(proc =
     let container = document.getElementById(cstring(fmt"history-{expression}"))
     if not container.isNil:
       container.toJs.scrollTop = self.historyScrollTop
       self.state.redrawForExtension()
-  )
+  , 0)
 
   result = newElement(cstring"div", cstring"history-container")
 
@@ -577,7 +577,6 @@ proc renderInlineHistoryDom(self: ValueComponent, expression: cstring): Node =
       el.addEventListener(
         cstring"wheel",
         proc (ev: Event) =
-          kout el.scrollTop
           self.historyScrollTop = cast[int](el.scrollTop)
       )
 

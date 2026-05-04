@@ -1,6 +1,6 @@
 import
   std/[ jsffi, asyncjs, macros, sequtils, strutils ],
-  dom, vdom
+  dom
 
 import kdom except Location, document
 

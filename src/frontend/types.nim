@@ -1,6 +1,6 @@
 import
   std/[ jsffi, dom, asyncjs, typetraits, tables ],
-  karax, kdom,
+  kdom,
   lang, communication, dap,
   lib/[ monaco_lib, jslib ],
   rr_gdb
@@ -560,9 +560,6 @@ type
     readOnly*: js
     content*: Content
     layoutItem*: GoldenContentItem
-    # Live compatibility boundary: extension/state value refresh paths still
-    # schedule redraws and afterRedraw callbacks through the base renderer.
-    kxi*: KaraxInstance
     inExtension*: bool
     api*: MediatorWithSubscribers
     location*: Location
@@ -1125,9 +1122,6 @@ type
     tableCallback*: proc(data: js)
     drawId*:        int
     locals*:        seq[seq[(langstring, Value)]]
-    # Live compatibility boundary: expanded Monaco trace view zones still use
-    # this renderer handle for editor-after-redraw trace refreshes.
-    m*:             KaraxInstance
     zoneId*:                int
     newZoneId*:             int
     dataTable*:             DataTableComponent
@@ -2414,12 +2408,10 @@ method handleHistoryJump*(self: Component, isForward: bool) {.base.} =
   discard
 
 method redrawForExtension*(self: Component) {.base.} =
-  if not self.kxi.isNil:
-    self.kxi.redraw()
+  discard
 
 method redrawForSinglePage*(self: Component) {.base.} =
-  if not self.kxi.isNil:
-    self.kxi.redraw()
+  discard
 
 method redraw*(self: Component) {.base.} =
   if self.inExtension:

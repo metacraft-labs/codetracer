@@ -17,7 +17,6 @@ import
 when defined(ctInExtension):
   import vscode
 
-import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
@@ -1890,7 +1889,6 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     data.services.editor.open[newPath].name = newPath
     # data.services.editor.open[newPath].fileInfo.path = newPath
     discard jsDelete(data.services.editor.open[untitledName])
-    moveKaraxInstanceKey(untitledName, newPath)
     data.ui.editors[newPath] = data.ui.editors[untitledName]
     discard jsDelete(data.ui.editors[untitledName])
     data.ui.editors[newPath].path = newPath
@@ -2181,8 +2179,6 @@ proc restoreLayoutState*(layout: GoldenLayout, conf: GoldenLayoutResolvedConfig)
     item.remove()  # Assuming remove is a method on the content items
 
   # Now restore content from the passed `GoldenLayoutResolvedConfig`
-  echo "### KUR"
-  kout conf
   for item in conf.root:
     root.addChild(item)  # Assuming addChild is a method to add items back into the layout
 

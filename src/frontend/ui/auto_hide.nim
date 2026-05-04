@@ -539,9 +539,8 @@ proc showOverlay*(panel: AutoHidePanel) =
   # We fire the callback both immediately (so the content is available
   # as soon as possible) and after a short delay. The delayed call
   # ensures the browser has committed the reparented DOM element to
-  # the layout before Karax patches it — without this, the first
-  # redrawSync can target a zero-size element that the browser hasn't
-  # laid out yet, resulting in an empty overlay.
+  # the layout before the direct renderer refreshes it; without this, the
+  # first render can target a zero-size element and leave an empty overlay.
   if not autoHideState.onPanelShown.isNil:
     autoHideState.onPanelShown(panel)
     let shownPanel = panel

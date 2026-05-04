@@ -96,7 +96,8 @@ proc tryMountIsoNimEventLogPanel() =
   ## After mounting:
   ## - `isoNimEventLogMounted` is set to true
   ## - Generic component rendering stays on the direct mount path
-  ## - The kxiMap entry is removed so redrawAll() skips this component
+  ## - The GoldenLayout component remains registered while the IsoNim view owns
+  ##   the panel DOM directly
   ## - The EventLogComponent's events() runs to init DataTables on the
   ##   IsoNim-created `<table>` elements
   ## - Event handlers (onUpdatedTable, onUpdatedEvents, etc.) still feed

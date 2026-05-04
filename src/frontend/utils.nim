@@ -1,20 +1,11 @@
 import
   async, strutils, strformat, sequtils, algorithm, jsffi, jsconsole,
-  karax, vdom, kdom, dom,
+  kdom, dom,
   types, lang,
   lib / [ logging, monaco_lib, jslib ],
   ui / auto_hide
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
-
-var kxiMap* = JsAssoc[cstring, KaraxInstance]{}
-
-proc moveKaraxInstanceKey*(oldKey, newKey: cstring) =
-  ## Preserve the legacy GoldenLayout Karax renderer instance when an editor
-  ## tab changes identity, for example after saving an untitled file as a
-  ## concrete path.
-  kxiMap[newKey] = kxiMap[oldKey]
-  discard jsDelete(kxiMap[oldKey])
 
 const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0

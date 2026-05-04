@@ -17,7 +17,7 @@ Most of the components are defined in their own modules:
 * `chronology` the chronology and input
 * `colors` some constants
 * `debug` the debug toolbar
-* `editor` the main editor, uses monaco: kinda weird with karax
+* `editor` the main editor, uses Monaco
 * `events` support coloring the output code as in terminal
 * `flow` the preload ui
 * `history` the history ui which reuses the value ui
@@ -32,12 +32,12 @@ Most of the components are defined in their own modules:
 
 Important stuff:
 
-* Use style for css (karax) and stylus for css files
+* Use direct style helpers for generated DOM and stylus for css files
 * You can watch debug output in the console
-* Monaco, datatables and charts have a weird integration as they're not a karax tree
+* Monaco, datatables and charts have a custom DOM integration
 * Layouts can be loaded from files: look at `config.nim`, we have to fix this
 * We have themes: defined by variables in name_theme.styl
-* Redraw needs to be manual sometimes: karax does it after event listeners, but e.g. it can't guess ipc listeners
+* Redraw needs to be manual sometimes, especially after IPC listeners or direct DOM integrations
 * A lot of the helper code is in `types.nim`(types) or `lib.nim` (signatures for third party or our helpers)
 * We use `view` in the name of views to easily spot them, normal functions don't need it
 * When we're changing css, it's best to change the current code: remove literals and define them in defaults and theme styles, we might get the designer to color pick better colors and new themes

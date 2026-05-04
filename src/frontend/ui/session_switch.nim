@@ -315,7 +315,7 @@ proc closeSession*(data: Data, targetIndex: int) =
           oldContainer.id = sessionContainerId(i)
 
   refreshSessionTabBar()
-  redrawRoot()
+  redrawAfterSessionSwitch()
 
 proc switchSession*(data: Data, targetIndex: int) =
   ## Switch from the currently active replay session to ``targetIndex``.

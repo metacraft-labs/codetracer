@@ -6,7 +6,7 @@ import
     async, jsconsole, os
   ],
   # third party
-  karax, kdom, results,
+  kdom, results,
   # internal
   types, utils, lang,
   communication, dap,
@@ -155,20 +155,6 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
 
 
 proc redrawAll* =
-  # echo "redraw"
-  # echo "## REDRAW"
-  # if not data.ui.layout.isNil: # TODO: Remove
-    # data.updateViewer()
-  var e = 0
-  for name, kxi in kxiMap:
-    try:
-      # echo "redraw ", name
-      redraw(kxi)
-    except:
-      cerror "redrawAll: error when calling redraw"
-    e += 1
-  if e != kxiMap.len:
-    cerror "redrawAll: not all redrawed, e != kxiMap.len"
   if not sharedDirectRedraw.isNil:
     try:
       sharedDirectRedraw()
@@ -176,11 +162,7 @@ proc redrawAll* =
       cerror "redrawAll: error when calling shared direct redraw"
 
   data.ui.lastRedraw = now()
-  # echo "## FINISH REDRAW"
 data.redraw = redrawAll
-
-proc redrawRoot* =
-  kxi.redraw()
 
 proc redrawAfterSessionSwitch* =
   ## Session switching changes Data's active session forwarding while keeping
@@ -196,21 +178,12 @@ proc redrawAfterModeSwitch* =
   redrawAll()
 
 proc removeLegacyRendererInstanceByKey*(key: cstring) =
-  ## Drop a remaining Karax-backed renderer instance by its renderer key.
-  ## Callers own component lifetime; renderer/utils still own kxiMap.
-  if kxiMap.hasKey(key):
-    discard jsDelete(kxiMap[key])
+  discard
 
 proc removeLegacyRendererInstance*(label: cstring) =
-  ## Drop a remaining Karax-backed renderer instance by its GoldenLayout label.
-  removeLegacyRendererInstanceByKey(label)
+  discard
 
 proc redrawLegacyRendererInstance*(label: cstring): bool =
-  ## Redraw a remaining Karax-backed renderer instance by label when present.
-  ## IsoNim-owned panels do not have kxiMap entries and intentionally no-op.
-  if kxiMap.hasKey(label):
-    redrawSync(kxiMap[label])
-    return true
   return false
 
 
@@ -531,8 +504,6 @@ proc expand*(path: cstring, line: int) {.exportc, used.} =
   ipc.send("CODETRACER::dap-raw-message", packet)
 
 var debugResponse* = DebugOutput(kind: DebugResult, output: cstring"") # per-replay
-
-karaxSilent = true #SILENT_LOG
 
 proc onDebugOutput*(sender: js, response: jsobject(output=DebugOutput)) =
   clog fmt"debug output: {response.output}"
@@ -1025,46 +996,40 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
     # TODO command component
     # data.activeFocus = Content.EditorView
     data.ui.commandPalette.active = true
-    let name = cstring"menu"
-    kxiMap[name].afterRedraws.add(proc =
-      discard windowSetTimeout(proc =
-        let input = cstring"#command-query-text"
-        data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
-        cast[kdom.Node](data.ui.commandPalette.inputField).focus(), 200))
+    discard windowSetTimeout(proc =
+      let input = cstring"#command-query-text"
+      data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
+      cast[kdom.Node](data.ui.commandPalette.inputField).focus(), 200)
 
   else:
     data.ui.commandPalette.selected = 0
-    let name = cstring"menu"
     let input = cstring"#command-query-text"
     if query.len == 0:
-      kxiMap[name].afterRedraws.add(proc =
-        discard windowSetTimeout(
-          proc =
-            data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
-            cast[kdom.Node](data.ui.commandPalette.inputField).focus()
-            case mode
-            of SearchCommandRealTime:
-              data.ui.commandPalette.inputField.toJs.value = cstring(commandPrefix)
-            of SearchFindInFiles:
-              data.ui.commandPalette.inputField.toJs.value = cstring(":grep ")
-            of SearchFindSymbol:
-              data.ui.commandPalette.inputField.toJs.value = cstring(":sym ")
-            else:
-              discard
-          ,
-          100
-        )
+      discard windowSetTimeout(
+        proc =
+          data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
+          cast[kdom.Node](data.ui.commandPalette.inputField).focus()
+          case mode
+          of SearchCommandRealTime:
+            data.ui.commandPalette.inputField.toJs.value = cstring(commandPrefix)
+          of SearchFindInFiles:
+            data.ui.commandPalette.inputField.toJs.value = cstring(":grep ")
+          of SearchFindSymbol:
+            data.ui.commandPalette.inputField.toJs.value = cstring(":sym ")
+          else:
+            discard
+        ,
+        100
       )
     else:
-      kxiMap[name].afterRedraws.add(proc =
-        discard windowSetTimeout(proc =
-         let element = jq(input)
-         element.toJs.value = query
-         let event = dom.window.toJs.document.createEvent(cstring"Event")
-         event.initEvent(cstring"keydown")
-         event.keyCode = ENTER_KEY_CODE # enter
-         # TODO do we need event.which
-         element.toJs.dispatchEvent(event), 50))
+      discard windowSetTimeout(proc =
+       let element = jq(input)
+       element.toJs.value = query
+       let event = dom.window.toJs.document.createEvent(cstring"Event")
+       event.initEvent(cstring"keydown")
+       event.keyCode = ENTER_KEY_CODE # enter
+       # TODO do we need event.which
+       element.toJs.dispatchEvent(event), 50)
 
     data.ui.activeFocus = data.ui.commandPalette
   data.redraw()
