@@ -47,6 +47,7 @@ import viewmodels/agent_activity_deepreview_vm
 import viewmodels/agent_workspace_vm
 import viewmodels/deepreview_vm
 import viewmodels/welcome_screen_vm
+import viewmodels/editor_vm
 import app/isonim_app_shell
 import views/isonim_state_view
 import views/isonim_calltrace_view
@@ -84,6 +85,7 @@ import views/isonim_auto_hide_bottom_tabs_view
 import views/isonim_auto_hide_side_strip_view
 import views/isonim_status_view
 import views/isonim_menu_shell_view
+import views/isonim_editor_view
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -110,6 +112,51 @@ proc findByClass*(node: MockNode; cls: string): MockNode =
     if found != nil:
       return found
   return nil
+
+suite "IsoNim Editor Panel - structure":
+
+  test "top-level editor keeps legacy editorComponent host id":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEditorVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEditorPanel(
+        r,
+        vm,
+        index = 7,
+        path = "src/main.nim",
+        isExpansion = false,
+        expansionDepth = 0)
+
+      check panel.attributes["id"] == "editorComponent-7"
+      check panel.attributes["class"] == "editor code-editor tab"
+      check panel.attributes["data-label"] == "src/main.nim"
+      check panel.attributes["tabindex"] == "2"
+
+      dispose()
+
+  test "expanded editor can reuse Monaco view-zone host id":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEditorVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEditorPanel(
+        r,
+        vm,
+        index = 8,
+        path = "expanded-42",
+        isExpansion = true,
+        expansionDepth = 2,
+        hostId = "expanded-42")
+
+      check panel.attributes["id"] == "expanded-42"
+      check panel.attributes["class"] == "editor code-editor tab expansion expansion-2"
+      check panel.attributes["data-label"] == "expanded-42"
+      check panel.attributes["tabindex"] == "2"
+
+      dispose()
 
 proc findAllByClass*(node: MockNode; cls: string): seq[MockNode] =
   ## Find all descendants (including self) whose "class" attribute

@@ -18,10 +18,12 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
   EditorVM, createEditorVM
-# The IsoNim editor view is defined in isonim_editor_view.nim. The
-# current mount strategy reuses the Karax-rendered container and only
-# removes the kxiMap entry. The view file exists for future expansion
-# (e.g. expansion editors, tests) and to follow the panel pattern.
+when defined(js):
+  import isonim/web/web_renderer
+  from isonim/web/dom_api import nil
+  from ../viewmodel/views/isonim_editor_view import renderEditorPanel
+# The IsoNim editor view owns direct editor containers for top-level and
+# expansion editors; Monaco still manages the container's internal DOM.
 
 # Module-level EditorVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
@@ -119,6 +121,7 @@ proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetT
 proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
 proc editorAfterRedraw(self: EditorViewComponent)
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
+proc renderExpandedEditorDirect(self: EditorViewComponent)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
@@ -1958,7 +1961,7 @@ proc editorAfterRedraw(self: EditorViewComponent) =
   for line, expandedInstance in self.expanded:
     self.ensureExpanded(expandedInstance, line)
     if expandedInstance.isExpanded:
-      expandedInstance.renderer.redraw()
+      expandedInstance.renderExpandedEditorDirect()
 
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
   ## Mount the IsoNim editor view as the primary renderer, following
@@ -2004,6 +2007,48 @@ proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
   isoNimEditorMountedIds[editorId] = true
 
   clog "IsoNim editor: mounted as primary renderer for editorComponent-" & cstring($editorId)
+
+proc renderExpandedEditorDirect(self: EditorViewComponent) =
+  ## Refresh a Monaco macro-expansion editor without registering a Karax
+  ## renderer. The view-zone host keeps the stable ``expanded-{line}`` id that
+  ## Monaco attaches to, while the host structure comes from the shared IsoNim
+  ## editor view.
+  if not self.isExpansion or self.viewZone.isNil:
+    return
+
+  initEditorVM()
+  if editorVMInstance.isNil or self.tabInfo.isNil:
+    return
+
+  let hostId = cstring(&"expanded-{self.parentLine}")
+  var host = dom_api.getElementById(dom_api.document, hostId)
+  if dom_api.isNodeNil(dom_api.Node(host)):
+    return
+
+  if dom_api.getAttribute(host, cstring"data-isonim-editor-host") != cstring"true":
+    let r = WebRenderer()
+    let panel = renderEditorPanel(
+      r,
+      editorVMInstance,
+      self.id,
+      $self.tabInfo.name,
+      true,
+      self.tabInfo.location.expansionDepth,
+      $hostId)
+    let parent = host.parentNode
+    if dom_api.isNodeNil(parent):
+      return
+    discard dom_api.replaceChild(
+      parent,
+      dom_api.Node(panel),
+      dom_api.Node(host))
+    dom_api.setAttribute(panel, cstring"data-isonim-editor-host", cstring"true")
+    host = panel
+
+  if self.tabInfo.monacoEditor.isNil:
+    self.initMonacoForEditor(hostId)
+
+  self.editorAfterRedraw()
 
 proc editorView(self: EditorViewComponent): VNode = #{.time.} =
   var tabInfo = self.tabInfo
@@ -2092,7 +2137,6 @@ proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, l
     self.monacoEditor.changeViewZones do (view: js):
       expanded.zoneId = cast[int](view.addZone(expanded.viewZone))
 
-    expanded.renderer = setRenderer(proc: VNode = expanded.renderEditor(), id, proc = discard)
     domwindow.toJs.parent = expanded.viewZone.domNode.parentNode
     expanded.isExpanded = true
 

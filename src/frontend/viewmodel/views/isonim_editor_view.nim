@@ -32,7 +32,7 @@ import ../viewmodels/editor_vm
 # Class composition
 # ---------------------------------------------------------------------------
 
-proc editorClass(isExpansion: bool; expansionDepth: int): string =
+proc editorClass*(isExpansion: bool; expansionDepth: int): string =
   ## Static class string for the editor container. Includes the
   ## optional `expansion expansion-{depth}` suffix when this editor
   ## instance is hosted as an expansion view inside another editor.
@@ -40,6 +40,15 @@ proc editorClass(isExpansion: bool; expansionDepth: int): string =
   if isExpansion:
     result.add " expansion expansion-"
     result.add $expansionDepth
+
+proc editorHostId*(index: int; hostId: string = ""): string =
+  ## DOM id for the editor container. Top-level editors keep the legacy
+  ## ``editorComponent-{index}`` id, while Monaco expansion view zones reuse
+  ## their ``expanded-{line}`` host id because Monaco attaches to that node.
+  if hostId.len > 0:
+    hostId
+  else:
+    "editorComponent-" & $index
 
 # ---------------------------------------------------------------------------
 # Container builder
@@ -54,10 +63,11 @@ proc editorClass(isExpansion: bool; expansionDepth: int): string =
 # rendering and Playwright tests can locate the editor.
 
 template renderEditorContainerImpl(r, index, path,
-                                    isExpansion, expansionDepth: untyped):
+                                    isExpansion, expansionDepth,
+                                    hostId: untyped):
                                     untyped =
   ui(r):
-    tdiv(id = "editorComponent-" & $index,
+    tdiv(id = editorHostId(index, hostId),
          class = editorClass(isExpansion, expansionDepth),
          `data-label` = path,
          tabindex = "2"):
@@ -69,42 +79,47 @@ template renderEditorContainerImpl(r, index, path,
 
 proc renderEditorContainer*(r: MockRenderer; vm: EditorVM;
                             index: int; path: string;
-                            isExpansion: bool; expansionDepth: int): MockNode =
+                            isExpansion: bool; expansionDepth: int;
+                            hostId: string = ""): MockNode =
   ## Mock-renderer overload — used by headless tests.
   discard vm
-  renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth)
+  renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth, hostId)
 
 proc renderEditorPanel*(r: MockRenderer; vm: EditorVM;
                         index: int; path: string;
-                        isExpansion: bool; expansionDepth: int): MockNode =
+                        isExpansion: bool; expansionDepth: int;
+                        hostId: string = ""): MockNode =
   ## Public name retained for symmetry with the other panel views.
-  renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth)
+  renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId)
 
 when defined(js):
   proc renderEditorContainer*(r: WebRenderer; vm: EditorVM;
                               index: int; path: string;
                               isExpansion: bool;
-                              expansionDepth: int): isonim_dom.Element =
+                              expansionDepth: int;
+                              hostId: string = ""): isonim_dom.Element =
     discard vm
-    renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth)
+    renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth, hostId)
 
   proc renderEditorPanel*(r: WebRenderer; vm: EditorVM;
                           index: int; path: string;
                           isExpansion: bool;
-                          expansionDepth: int): isonim_dom.Element =
-    renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth)
+                          expansionDepth: int;
+                          hostId: string = ""): isonim_dom.Element =
+    renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId)
 
   proc mountIsoNimEditor*(container: isonim_dom.Element;
                           vm: EditorVM;
                           index: int; path: string;
                           isExpansion: bool;
-                          expansionDepth: int): isonim_dom.Element =
+                          expansionDepth: int;
+                          hostId: string = ""): isonim_dom.Element =
     ## Mount the IsoNim editor container as a child of `container` and
     ## return the element so the caller can pass its selector to
     ## `createMonacoEditor`. Unlike the other panel mounts, this view
     ## returns the element reference because Monaco needs it for
     ## initialisation.
     let r = WebRenderer()
-    let panel = renderEditorPanel(r, vm, index, path, isExpansion, expansionDepth)
+    let panel = renderEditorPanel(r, vm, index, path, isExpansion, expansionDepth, hostId)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
     panel
