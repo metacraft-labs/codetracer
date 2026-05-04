@@ -1027,6 +1027,7 @@ type
 
   RequestPanelComponent* = ref object of Component
     panelState*: RequestPanelState
+    extensionRendererId*: cstring
 
   LowLevelCodeComponent* = ref object of Component
     editor*: EditorViewComponent

@@ -69,7 +69,7 @@ proc tryMountIsoNimRequestPanel*()
 #
 # Preserved from the legacy module so the extension entry-point still
 # resolves to a valid ``RequestPanelComponent``; the in-extension
-# render path installs an empty Karax shell since the IsoNim view is
+# surface has no panel markup of its own because the IsoNim view is
 # the production renderer.
 # ---------------------------------------------------------------------------
 
@@ -77,10 +77,22 @@ when defined(ctInExtension):
   var requestPanelComponentForExtension* {.exportc.}: RequestPanelComponent =
     makeRequestPanelComponent(data, 0, inExtension = true)
 
+  proc bindRequestPanelExtensionHost(component: RequestPanelComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension request-panel surface is an empty compatibility host; keep
+    # the exported component usable without retaining a Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeRequestPanelComponentForExtension*(id: cstring): RequestPanelComponent {.exportc.} =
-    if requestPanelComponentForExtension.kxi.isNil:
-      requestPanelComponentForExtension.kxi = setRenderer(
-        proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if requestPanelComponentForExtension.extensionRendererId.len == 0:
+      requestPanelComponentForExtension.extensionRendererId = id
+      requestPanelComponentForExtension.bindRequestPanelExtensionHost()
     result = requestPanelComponentForExtension
 
 # ---------------------------------------------------------------------------
@@ -302,6 +314,10 @@ else:
 # Component registration — IsoNim primary renderer; no Karax method
 # render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: RequestPanelComponent) =
+    self.bindRequestPanelExtensionHost()
 
 method register*(self: RequestPanelComponent, api: MediatorWithSubscribers) =
   ## Register the RequestPanelComponent with the mediator.  Bring up
