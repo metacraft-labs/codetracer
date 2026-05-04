@@ -13,6 +13,11 @@ let DIRECT_VALUE_DOM_ATOM_KINDS = {
   FunctionKind, TypeKind.None
 }
 
+let DIRECT_VALUE_DOM_COLLAPSED_KINDS = DIRECT_VALUE_DOM_ATOM_KINDS + {
+  Pointer, Seq, Set, HashSet, OrderedSet, Array, Varargs, Variant,
+  TableKind, Instance, Union, Tuple, NonExpanded
+}
+
 proc view(
   self: ValueComponent,
   value: Value,
@@ -157,6 +162,45 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
 
     if self.customRedraw.isNil:
       self.redraw()
+    else:
+      self.customRedraw(self)
+
+proc expandValue(self: ValueComponent, path: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
+  # We need to emit expand value event and sub to the expand value response
+  # and then to resolve the Future[Value]
+  # Before we were calling data.services.debugger.expandValue(path)
+  # let count = 50
+  # var value = await self.data.asyncSend("expand-value", ExpandValueTarget(subPath: subPath, rrTicks: self.location.rrTicks, isLoadMore: isLoadMore, startIndex: startIndex, count: count), $self.location.rrTicks & " " & $subPath, Value)
+  # return value
+  discard
+
+proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
+  var expand: bool = value.kind == NonExpanded
+
+  if value.kind == Pointer:
+    for child in value.refValue.elements:
+      if child.kind == NonExpanded:
+        expand = true
+
+        break
+  else:
+    for child in value.elements:
+      if child.kind == NonExpanded:
+        expand = true
+
+        break
+
+  # TODO: Rework with the new db-backend and init
+  if expand:
+    let newValue = await self.expandValue(path)
+
+    if value.kind != Pointer:
+      objectAssign(value.toJs, newValue.toJs)
+    else:
+      objectAssign(value.refValue.toJs, newValue.refValue.toJs)
+
+    if self.customRedraw.isNil:
+      self.state.redraw()
     else:
       self.customRedraw(self)
 
@@ -820,6 +864,26 @@ proc atomValueTextAndClass(value: Value): (string, string) =
   else:
     ("", "empty")
 
+proc collapsedValueTextAndClass(value: Value): (string, string) =
+  case value.kind:
+  of Pointer:
+    ($value.textRepr, "pointer")
+
+  of Seq, Set, HashSet, OrderedSet, Array, Varargs:
+    ($value.textRepr, "seq")
+
+  of Variant:
+    ($value.textRepr, "variant")
+
+  of TableKind:
+    ($value.textRepr, "table")
+
+  of Instance, Union, Tuple:
+    ($value.textRepr, "instance")
+
+  else:
+    atomValueTextAndClass(value)
+
 proc inlineHistoryVisible(self: ValueComponent, expression: cstring): bool =
   self.charts.hasKey(expression) and
     self.showInline.hasKey(expression) and
@@ -832,6 +896,11 @@ proc newElement(tag: cstring, className: cstring = cstring""): Node =
   result = document.createElement(tag)
   if className.len > 0:
     result.setAttribute(cstring"class", className)
+
+proc compoundOrPointsToCompound(value: Value): bool =
+  return value.kind notin ATOM_KINDS and
+    (value.kind != Pointer or
+    (not value.refValue.isNil and value.refValue.kind notin ATOM_KINDS))
 
 proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, active: string): Node =
   result = newElement(cstring"button")
@@ -880,15 +949,35 @@ proc renderDirectAtomValueDom(
   typeSpan.appendText(value.typ.langType)
   result.appendChild(typeSpan)
 
-proc renderSimpleValueDom(
+proc renderExpandButtonDom(
+  self: ValueComponent,
+  value: Value,
+  expression: cstring,
+  path: seq[SubPath],
+  fresh: cstring
+): Node =
+  result = newElement(cstring"span", cstring("value-expand-button " & fresh))
+  result.addEventListener(cstring"mousedown", proc(ev: Event) =
+    self.data.focusComponent(self)
+    ev.stopPropagation()
+    capture expression, value, path:
+      discard self.expandNewValues(value, path)
+      discard self.toggleExpanded(value, expression)
+  )
+
+  result.appendChild(newElement(cstring"div", cstring"caret-collapse"))
+
+proc renderCollapsedValueDom(
   self: ValueComponent,
   value: Value,
   expression: cstring,
   name: cstring,
+  path: seq[SubPath],
   depth: int = 0
 ): Node =
   var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
   var isSelected = if self.selected: cstring"value-selected" else: cstring""
+  var fresh = if self.fresh: cstring("value-fresh-" & $self.freshIndex) else: cstring""
   let active =
     if self.showInline.hasKey(expression) and self.showInline[expression]:
       "active"
@@ -923,6 +1012,9 @@ proc renderSimpleValueDom(
     scratchpadButton.appendChild(tooltip)
     nameContainer.appendChild(scratchpadButton)
 
+  if compoundOrPointsToCompound(value):
+    nameContainer.appendChild(self.renderExpandButtonDom(value, expression, path, fresh))
+
   let nameSpan = newElement(cstring"span", cstring"value-name")
   nameSpan.appendText(name & cstring": ")
   nameContainer.appendChild(nameSpan)
@@ -931,8 +1023,19 @@ proc renderSimpleValueDom(
   let valueContainer = newElement(cstring"div")
   let valueView = newElement(cstring"span", cstring"value-view")
   valueView.applyStyle(style(StyleAttr.marginLeft, cstring"0px"))
-  let (valueText, klass) = atomValueTextAndClass(value)
-  valueView.appendChild(self.renderDirectAtomValueDom(valueText, expression, klass, value))
+  try:
+    if value.kind == NonExpanded:
+      let nonExpanded = newElement(cstring"div", cstring"value-non-expanded value-expanded-text")
+      nonExpanded.appendText(cstring"<non expanded>")
+      valueView.appendChild(nonExpanded)
+    else:
+      let (valueText, klass) = collapsedValueTextAndClass(value)
+      valueView.appendChild(self.renderDirectAtomValueDom(valueText, expression, klass, value))
+  except:
+    let errorValue = newElement(cstring"div", cstring"value-error")
+    echo "VALUE ERROR: ", getCurrentExceptionMsg()
+    errorValue.appendText(cstring(fmt"^ error: Can't show value: {getCurrentExceptionMsg()}"))
+    valueView.appendChild(errorValue)
   valueContainer.appendChild(valueView)
   atomParent.appendChild(valueContainer)
 
@@ -1038,12 +1141,6 @@ proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[
 #   ):
 #     fa "search"
 
-proc compoundOrPointsToCompound(value: Value): bool =
-  return value.kind notin ATOM_KINDS and
-    (value.kind != Pointer or
-    (not value.refValue.isNil and value.refValue.kind notin ATOM_KINDS))
-
-
 proc view(
   self: ValueComponent,
   value: Value,
@@ -1053,8 +1150,6 @@ proc view(
   depth: int = 0,
   annotation: cstring = ""
 ): VNode =
-  proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.}
-
   if value.kind == Ref and not value.refValue.toJs.isNil:
     result = self.view(value.refValue, expression, name, path, depth)
     return
@@ -1275,45 +1370,6 @@ proc view(
   #   else:
   #     raise newException(ValueError, "chart not in right context")
 
-  proc expandValue(self: ValueComponent, path: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
-    # We need to emit expand value event and sub to the expand value response
-    # and then to resolve the Future[Value]
-    # Before we were calling data.services.debugger.expandValue(path)
-    # let count = 50
-    # var value = await self.data.asyncSend("expand-value", ExpandValueTarget(subPath: subPath, rrTicks: self.location.rrTicks, isLoadMore: isLoadMore, startIndex: startIndex, count: count), $self.location.rrTicks & " " & $subPath, Value)
-    # return value
-    discard
-
-  proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
-    var expand: bool = value.kind == NonExpanded
-
-    if value.kind == Pointer:
-      for child in value.refValue.elements:
-        if child.kind == NonExpanded:
-          expand = true
-
-          break
-    else:
-      for child in value.elements:
-        if child.kind == NonExpanded:
-          expand = true
-
-          break
-
-    # TODO: Rework with the new db-backend and init
-    if expand:
-      let newValue = await self.expandValue(path)
-
-      if value.kind != Pointer:
-        objectAssign(value.toJs, newValue.toJs)
-      else:
-        objectAssign(value.refValue.toJs, newValue.refValue.toJs)
-
-      if self.customRedraw.isNil:
-        self.state.redraw()
-      else:
-        self.customRedraw(self)
-
   proc loadMoreValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
     var newValue: Value
 
@@ -1447,21 +1503,41 @@ proc renderValue*(self: ValueComponent): VNode =
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
   result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
 
-proc canRenderSimpleValueDom(self: ValueComponent): bool =
-  not self.baseValue.isNil and
-    self.baseValue.kind in DIRECT_VALUE_DOM_ATOM_KINDS and
-    not self.uiExpanded(self.baseValue, self.baseExpression) and
+proc directValueDomSubject(self: ValueComponent): Value =
+  if not self.baseValue.isNil and
+      self.baseValue.kind == Ref and
+      not self.baseValue.refValue.isNil:
+    self.baseValue.refValue
+  else:
+    self.baseValue
+
+proc rootValuePath(self: ValueComponent): seq[SubPath] =
+  @[SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind}]
+
+proc canRenderCollapsedValueDom(self: ValueComponent): bool =
+  let value = self.directValueDomSubject()
+
+  not value.isNil and
+    value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS and
+    not self.uiExpanded(value, self.baseExpression) and
     not self.inlineHistoryVisible(self.baseExpression)
 
 proc renderValueDom*(self: ValueComponent): Node =
   ## Shared DOM entrypoint for the rich value tree.
   ##
-  ## Collapsed atom/simple values render directly here. Compound values,
-  ## expanded values, and active inline history/chart states still fall back to
+  ## Collapsed atom/simple and pointer/compound rows render directly here.
+  ## Expanded values and active inline history/chart states still fall back to
   ## the legacy Karax value internals while the value renderer is migrated in
   ## smaller behavior-preserving slices.
-  if self.canRenderSimpleValueDom():
-    return self.renderSimpleValueDom(self.baseValue, self.baseExpression, self.baseExpression, depth=0)
+  if self.canRenderCollapsedValueDom():
+    let value = self.directValueDomSubject()
+    return self.renderCollapsedValueDom(
+      value,
+      self.baseExpression,
+      self.baseExpression,
+      self.rootValuePath(),
+      depth=0
+    )
 
   vnodeToDom(self.renderValue(), KaraxInstance())
 
