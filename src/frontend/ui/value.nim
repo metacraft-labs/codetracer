@@ -902,6 +902,12 @@ proc compoundOrPointsToCompound(value: Value): bool =
     (value.kind != Pointer or
     (not value.refValue.isNil and value.refValue.kind notin ATOM_KINDS))
 
+proc valueLanguage(self: ValueComponent): Lang =
+  try:
+    self.data.trace.lang
+  except:
+    LangNoir
+
 proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, active: string): Node =
   result = newElement(cstring"button")
   result.setAttribute(cstring"class", cstring(&"{active} ct-button-image-sm-secondary ct-custom-button-size ct-ml-2"))
@@ -965,16 +971,207 @@ proc renderExpandButtonDom(
       discard self.toggleExpanded(value, expression)
   )
 
-  result.appendChild(newElement(cstring"div", cstring"caret-collapse"))
+  let caretClass =
+    if self.uiExpanded(value, expression):
+      cstring"caret-expand"
+    else:
+      cstring"caret-collapse"
 
-proc renderCollapsedValueDom(
+  result.appendChild(newElement(cstring"div", caretClass))
+
+proc renderExpandMarkerDom(self: ValueComponent, value: Value, left: string, right: string, empty: bool): Node =
+  var list = if empty: "" else: ".."
+
+  if value.kind == NonExpanded:
+    list = ".."
+
+  let klass = if self.i mod 2 == 0: "atom-even" else: "atom-odd"
+
+  self.i += 1
+
+  result = newElement(cstring"span", cstring(fmt"value-expand {klass}"))
+  result.appendText(cstring(&"{left}{list}{right}"))
+
+proc childPathForExpandedValue(parent: Value, childName: cstring, element: Value, path: seq[SubPath]): seq[SubPath] =
+  result = path
+
+  if element.kind notin ATOM_KINDS and parent.kind != Variant:
+    try:
+      let index = parseInt(($childName)[1..^2])
+      result.add(SubPath{kind: Index, index: index, typeKind: parent.kind})
+    except:
+      result.add(SubPath{kind: Field, name: childName, typeKind: parent.kind})
+
+proc expandedChildrenAndDelimiters(
+  self: ValueComponent,
+  value: Value,
+  lang: Lang
+): (seq[(cstring, Value)], string, string) =
+  var children: seq[(cstring, Value)] = @[]
+  var left = ""
+  var right = ""
+
+  case value.kind:
+  of Seq, Set, HashSet, OrderedSet, Array, Varargs:
+    left =
+      if value.kind in {Array, Varargs}:
+        TOKEN_TEXTS[lang][ArrayOpen]
+      else:
+        TOKEN_TEXTS[lang][SeqOpen]
+    right =
+      if value.kind in {Array, Varargs}:
+        TOKEN_TEXTS[lang][ArrayClose]
+      else:
+        TOKEN_TEXTS[lang][SeqClose]
+
+    for i, element in value.elements:
+      children.add((cstring("[" & $i & "]"), element))
+
+  of Variant:
+    if not value.activeVariantValue.isNil:
+      for label, fieldValue in unionChildren(value):
+        children.add((label, fieldValue))
+
+    left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
+    right = TOKEN_TEXTS[lang][InstanceClose]
+
+  of TableKind:
+    for items in value.items:
+      children.add((($items[0]).cstring, items[1]))
+
+    left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
+    right = TOKEN_TEXTS[lang][InstanceClose]
+
+  of Instance, Union, Tuple:
+    if value.kind == Union:
+      for label, fieldValue in unionChildren(value):
+        children.add((label, fieldValue))
+    else:
+      for i, label in value.typ.labels:
+        let fieldValue = value.elements[i]
+        children.add((label, fieldValue))
+
+    left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
+    right = TOKEN_TEXTS[lang][InstanceClose]
+
+  else:
+    discard
+
+  (children, left, right)
+
+proc renderValueRowDom(
   self: ValueComponent,
   value: Value,
   expression: cstring,
   name: cstring,
   path: seq[SubPath],
+  depth: int = 0,
+  annotation: cstring = ""
+): Node
+
+proc renderExpandedCompoundDom(
+  self: ValueComponent,
+  value: Value,
+  expression: cstring,
+  children: seq[(cstring, Value)],
+  path: seq[SubPath],
+  left: string,
+  right: string,
   depth: int = 0
 ): Node =
+  result = newElement(cstring"div", cstring(fmt"value-expanded-compound depth-{depth}"))
+  result.applyStyle(style(StyleAttr.marginLeft, cstring"17px"))
+
+  if children.len == 0:
+    result.appendChild(self.renderExpandMarkerDom(value, left, right, children.len == 0))
+  else:
+    for child in children:
+      let (childName, element) = child
+      let childPath = childPathForExpandedValue(value, childName, element, path)
+
+      echo "view expandCompoundView ", expression, " ", childName
+      result.appendChild(self.renderValueRowDom(
+        element,
+        cstring(fmt"{expression} {childName}"),
+        childName,
+        childPath,
+        depth + 1
+      ))
+
+proc renderValueContentDom(
+  self: ValueComponent,
+  value: Value,
+  expression: cstring,
+  path: seq[SubPath],
+  depth: int,
+  annotation: cstring,
+  atomClass: var cstring
+): Node =
+  let lang = self.valueLanguage()
+
+  case value.kind:
+  of Pointer:
+    if self.uiExpanded(value, expression):
+      var nextPath = path
+      nextPath.add(SubPath{kind: Dereference, typeKind: value.kind})
+      result = self.renderValueRowDom(value.refValue, expression, cstring"_", nextPath, depth, value.address & " ->")
+    else:
+      let (valueText, klass) = collapsedValueTextAndClass(value)
+      result = self.renderDirectAtomValueDom(valueText, expression, klass, value)
+
+  of Seq, Set, HashSet, OrderedSet, Array, Varargs,
+      Variant, TableKind, Instance, Union, Tuple:
+    if self.uiExpanded(value, expression):
+      let (children, left, right) = self.expandedChildrenAndDelimiters(value, lang)
+
+      if children.len == 0:
+        atomClass = cstring"value-expanded-atom-parent"
+
+      result = self.renderExpandedCompoundDom(value, expression, children, path, left, right, depth)
+    else:
+      let (valueText, klass) = collapsedValueTextAndClass(value)
+      result = self.renderDirectAtomValueDom(valueText, expression, klass, value)
+
+  of Int, Float, String, CString, Char, Bool,
+      Enum, Enum16, Enum32, FunctionKind, types.None:
+    let (valueText, klass) = atomValueTextAndClass(value)
+    result = self.renderDirectAtomValueDom(valueText, expression, klass, value)
+
+  of TypeKind.Raw:
+    result = newElement(cstring"div", cstring"value-raw value-expanded-text")
+    result.appendText(value.r)
+
+  of NonExpanded:
+    result = newElement(cstring"div", cstring"value-non-expanded value-expanded-text")
+    result.appendText(cstring"<non expanded>")
+
+  of types.Error:
+    result = newElement(cstring"div", cstring"value-error value-expanded-text")
+    result.appendText(value.msg)
+
+  of Ref:
+    result = newElement(cstring"div", cstring"value-bug")
+    result.appendText(cstring"bug in proc view -> value.nim")
+
+  else:
+    result = newElement(cstring"div", cstring"value-empty value-expanded-text")
+    result.appendText(cstring"")
+
+proc renderValueRowDom(
+  self: ValueComponent,
+  value: Value,
+  expression: cstring,
+  name: cstring,
+  path: seq[SubPath],
+  depth: int = 0,
+  annotation: cstring = ""
+): Node =
+  if value.kind == Ref and not value.refValue.toJs.isNil:
+    return self.renderValueRowDom(value.refValue, expression, name, path, depth)
+
+  if self.uiExpanded(value, expression):
+    discard self.expandNewValues(value, path)
+
   var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
   var isSelected = if self.selected: cstring"value-selected" else: cstring""
   var fresh = if self.fresh: cstring("value-fresh-" & $self.freshIndex) else: cstring""
@@ -984,12 +1181,18 @@ proc renderCollapsedValueDom(
     else:
       ""
 
+  var atomClass =
+    if value.kind in ATOM_KINDS or not self.uiExpanded(value, expression):
+      cstring"value-expanded-atom-parent"
+    else:
+      cstring"value-expanded-compound-parent"
+
   result = newElement(
     cstring"div",
     cstring(fmt"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name")
   )
 
-  let atomParent = newElement(cstring"div", cstring"value-expanded-atom-parent")
+  let atomParent = newElement(cstring"div", atomClass)
   atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
     let contextMenu = self.createContextMenuItems(value, ev)
     let e = ev.toJs
@@ -1018,19 +1221,33 @@ proc renderCollapsedValueDom(
   let nameSpan = newElement(cstring"span", cstring"value-name")
   nameSpan.appendText(name & cstring": ")
   nameContainer.appendChild(nameSpan)
+
+  if self.uiExpanded(value, expression) and value.kind notin ATOM_KINDS:
+    let typeSpan = newElement(cstring"span", cstring"value-type")
+    typeSpan.appendText(value.typ.langType)
+    nameContainer.appendChild(typeSpan)
+
+    let annotationSpan = newElement(cstring"span", cstring"value-annotation")
+    annotationSpan.appendText(annotation)
+    nameContainer.appendChild(annotationSpan)
+
+    if expression == self.baseExpression:
+      nameContainer.appendChild(self.renderValueHistoryButtonDom(expression, active))
+
   atomParent.appendChild(nameContainer)
 
   let valueContainer = newElement(cstring"div")
   let valueView = newElement(cstring"span", cstring"value-view")
-  valueView.applyStyle(style(StyleAttr.marginLeft, cstring"0px"))
-  try:
-    if value.kind == NonExpanded:
-      let nonExpanded = newElement(cstring"div", cstring"value-non-expanded value-expanded-text")
-      nonExpanded.appendText(cstring"<non expanded>")
-      valueView.appendChild(nonExpanded)
+
+  let valueViewStyle =
+    if value.kind == types.Error:
+      style(StyleAttr.marginLeft, cstring"10px")
     else:
-      let (valueText, klass) = collapsedValueTextAndClass(value)
-      valueView.appendChild(self.renderDirectAtomValueDom(valueText, expression, klass, value))
+      style(StyleAttr.marginLeft, cstring"0px")
+  valueView.applyStyle(valueViewStyle)
+
+  try:
+    valueView.appendChild(self.renderValueContentDom(value, expression, path, depth, annotation, atomClass))
   except:
     let errorValue = newElement(cstring"div", cstring"value-error")
     echo "VALUE ERROR: ", getCurrentExceptionMsg()
@@ -1038,8 +1255,9 @@ proc renderCollapsedValueDom(
     valueView.appendChild(errorValue)
   valueContainer.appendChild(valueView)
   atomParent.appendChild(valueContainer)
+  atomParent.setAttribute(cstring"class", atomClass)
 
-  if expression == self.baseExpression:
+  if expression == self.baseExpression and not self.uiExpanded(value, expression):
     atomParent.appendChild(self.renderValueHistoryButtonDom(expression, active))
 
   result.appendChild(atomParent)
@@ -1514,24 +1732,60 @@ proc directValueDomSubject(self: ValueComponent): Value =
 proc rootValuePath(self: ValueComponent): seq[SubPath] =
   @[SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind}]
 
-proc canRenderCollapsedValueDom(self: ValueComponent): bool =
+proc hasExpandedLoadMoreValue(self: ValueComponent, value: Value, expression: cstring): bool =
+  if value.isNil:
+    return false
+
+  if value.kind == Ref and not value.refValue.toJs.isNil:
+    return self.hasExpandedLoadMoreValue(value.refValue, expression)
+
+  if not self.uiExpanded(value, expression):
+    return false
+
+  if value.partiallyExpanded:
+    return true
+
+  case value.kind:
+  of Pointer:
+    self.hasExpandedLoadMoreValue(value.refValue, expression)
+
+  of Seq, Set, HashSet, OrderedSet, Array, Varargs,
+      Variant, TableKind, Instance, Union, Tuple:
+    let (children, _, _) = self.expandedChildrenAndDelimiters(value, self.valueLanguage())
+
+    for child in children:
+      let (childName, element) = child
+      if self.hasExpandedLoadMoreValue(element, cstring(fmt"{expression} {childName}")):
+        return true
+
+    false
+
+  else:
+    false
+
+proc canRenderValueDomDirectly(self: ValueComponent): bool =
   let value = self.directValueDomSubject()
 
-  not value.isNil and
-    value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS and
-    not self.uiExpanded(value, self.baseExpression) and
-    not self.inlineHistoryVisible(self.baseExpression)
+  if value.isNil or self.inlineHistoryVisible(self.baseExpression):
+    return false
+
+  if self.uiExpanded(value, self.baseExpression):
+    value.kind notin ATOM_KINDS and
+      value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS and
+      not self.hasExpandedLoadMoreValue(value, self.baseExpression)
+  else:
+    value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS
 
 proc renderValueDom*(self: ValueComponent): Node =
   ## Shared DOM entrypoint for the rich value tree.
   ##
-  ## Collapsed atom/simple and pointer/compound rows render directly here.
-  ## Expanded values and active inline history/chart states still fall back to
-  ## the legacy Karax value internals while the value renderer is migrated in
-  ## smaller behavior-preserving slices.
-  if self.canRenderCollapsedValueDom():
+  ## Collapsed rows plus expanded compound shells and child lists render
+  ## directly here. Active inline history/chart states and expanded load-more
+  ## rows still fall back to the legacy Karax value internals while those
+  ## behavior-heavy surfaces are migrated separately.
+  if self.canRenderValueDomDirectly():
     let value = self.directValueDomSubject()
-    return self.renderCollapsedValueDom(
+    return self.renderValueRowDom(
       value,
       self.baseExpression,
       self.baseExpression,
