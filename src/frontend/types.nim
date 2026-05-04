@@ -1,6 +1,6 @@
 import
   std/[ jsffi, dom, asyncjs, typetraits, tables ],
-  vdom, karax, kdom,
+  karax, kdom,
   lang, communication, dap,
   lib/[ monaco_lib, jslib ],
   rr_gdb
@@ -1556,7 +1556,6 @@ type
   NoSourceComponent* = ref object of Component
     message*: cstring
     instructions*: Instructions
-    state*: VNode
 
   MenuComponent* = ref object of Component
     active*: bool
@@ -1704,7 +1703,6 @@ type
     # or readonly editor to browse
     layoutSizes*:    LayoutSizes
     activeFocus*:    Component
-    contentViews*:   array[Content, proc: VNode]
     fontSize*:       int
     monacoEditors*:  seq[MonacoEditor]
     traceMonacoEditors*: seq[MonacoEditor]
