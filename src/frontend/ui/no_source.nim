@@ -181,6 +181,34 @@ when defined(js):
 
     doMount()
 
+  proc renderNoSourceShellDirect*(self: NoSourceComponent;
+                                  placeholder: dom_api.Element) =
+    ## Materialise the no-source shell without a Karax renderer.
+    ##
+    ## This is the direct-DOM equivalent of ``renderNoSourceShell`` for the
+    ## editor GoldenLayout path.  It preserves the same stable
+    ## ``no-source-{id}`` host, asm-load side effect, VM sync, and IsoNim
+    ## mount lifecycle while avoiding a top-level editor ``setRenderer``.
+    let history = self.data.services.debugger.jumpHistory
+    if history.len >= 1 and self.instructions == Instructions():
+      discard self.getAsmCode(history[^1].location)
+
+    syncNoSourceVM(self)
+
+    let shell = dom_api.createElement(dom_api.document, cstring"div")
+    dom_api.setAttribute(shell, cstring"id", cstring("no-source-" & $self.id))
+    dom_api.setAttribute(shell, cstring"class", cstring"unknown-location")
+
+    let parent = placeholder.parentNode
+    if dom_api.isNodeNil(parent):
+      return
+    discard dom_api.replaceChild(
+      parent,
+      dom_api.Node(shell),
+      dom_api.Node(placeholder))
+
+    self.tryMountIsoNimNoSourcePanel()
+
 # ---------------------------------------------------------------------------
 # Karax shell proc (shell only)
 # ---------------------------------------------------------------------------

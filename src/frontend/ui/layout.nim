@@ -239,10 +239,9 @@ proc renderLayoutComponent(component: Component, content: Content): VNode =
   ## Render the remaining live Karax-backed GoldenLayout components.
   ## IsoNim-owned panels must be handled by their direct mount path instead of
   ## falling back to generic Component.render dispatch.
-  if content == Content.EditorView:
-    EditorViewComponent(component).renderEditor()
-  else:
-    buildHtml(tdiv())
+  discard component
+  discard content
+  buildHtml(tdiv())
 
 proc ensureSharedRenderers() =
   ## Set up the shared global chrome elements that live outside individual
@@ -467,15 +466,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not data.ui.componentMapping[state.content][state.id].isNil:
         let component = data.ui.componentMapping[state.content][state.id]
 
-        kxiMap[state.label] = setRenderer(
-          (proc: VNode = EditorViewComponent(component).renderEditor()),
-          containerId,
-          proc = discard)
-        component.kxi = kxiMap[state.label]
-
-        EditorViewComponent(component).renderer = kxiMap[state.fullPath]
-
-        discard component.afterInit()
+        EditorViewComponent(component).renderTopLevelEditorDirect(containerId)
 
       ), 200)
 

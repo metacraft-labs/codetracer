@@ -121,6 +121,7 @@ proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetT
 proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
 proc editorAfterRedraw(self: EditorViewComponent)
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
+proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring)
 proc renderExpandedEditorDirect(self: EditorViewComponent)
 func multilineFlowLines*: JsAssoc[int, KaraxInstance]
 
@@ -2008,6 +2009,108 @@ proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
 
   clog "IsoNim editor: mounted as primary renderer for editorComponent-" & cstring($editorId)
 
+proc editorSourceReady(self: EditorViewComponent): bool =
+  not self.service.open.hasKey(self.name) or self.service.open[self.name].received
+
+proc ensureEditorLspStarted(self: EditorViewComponent) =
+  if not self.data.lspStarted:
+    self.data.ipc.send("CODETRACER::start-lsp", js{})
+    self.data.lspStarted = true
+
+when defined(js):
+  proc replaceWithIsoNimEditorPanel(self: EditorViewComponent;
+                                    host: dom_api.Element): dom_api.Element =
+    initEditorVM()
+    if editorVMInstance.isNil:
+      return nil
+
+    let path =
+      if not self.tabInfo.isNil:
+        $self.tabInfo.name
+      else:
+        $self.name
+    let depth =
+      if not self.tabInfo.isNil:
+        self.tabInfo.location.expansionDepth
+      else:
+        0
+    let hostId = cstring(&"editorComponent-{self.id}")
+
+    if dom_api.getAttribute(host, cstring"data-isonim-editor-host") == cstring"true":
+      return host
+
+    let r = WebRenderer()
+    let panel = renderEditorPanel(
+      r,
+      editorVMInstance,
+      self.id,
+      path,
+      false,
+      depth,
+      $hostId)
+    let parent = host.parentNode
+    if dom_api.isNodeNil(parent):
+      return nil
+
+    discard dom_api.replaceChild(parent, dom_api.Node(panel), dom_api.Node(host))
+    dom_api.setAttribute(panel, cstring"data-isonim-editor-host", cstring"true")
+    panel
+
+  proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring) =
+    ## Mount the top-level editor GoldenLayout surface directly through IsoNim.
+    ##
+    ## GoldenLayout creates a temporary ``component-container`` with the stable
+    ## ``editorComponent-{id}`` id.  This proc replaces that placeholder with
+    ## the IsoNim editor host using the same id, then initializes Monaco once
+    ## source data is available.  Loading tabs keep the shell mounted and retry
+    ## until the legacy editor service marks the source as received.
+    self.ensureEditorLspStarted()
+
+    let componentId = self.id
+    var retryCount = 0
+    var afterInitScheduled = false
+
+    proc doMount() =
+      retryCount += 1
+      var host = dom_api.getElementById(dom_api.document, containerId)
+      if dom_api.isNodeNil(dom_api.Node(host)):
+        if retryCount <= 200:
+          discard setTimeout(proc() = doMount(), 10)
+        return
+
+      if self.editorView == ViewNoSource and not self.noInfo.isNil:
+        self.noInfo.renderNoSourceShellDirect(host)
+        if not afterInitScheduled:
+          afterInitScheduled = true
+          discard self.afterInit()
+        return
+
+      let panel = self.replaceWithIsoNimEditorPanel(host)
+      if dom_api.isNodeNil(dom_api.Node(panel)):
+        if retryCount <= 200:
+          discard setTimeout(proc() = doMount(), 10)
+        return
+
+      if not afterInitScheduled:
+        afterInitScheduled = true
+        discard self.afterInit()
+
+      let sourceReady = self.editorSourceReady()
+      if self.tabInfo.isNil or not sourceReady:
+        if retryCount <= 1200:
+          discard setTimeout(proc() = doMount(), 25)
+        return
+
+      let selector = cstring(&"#editorComponent-{componentId}")
+      if self.tabInfo.monacoEditor.isNil:
+        self.initMonacoForEditor(selector)
+
+      if not self.tabInfo.monacoEditor.isNil:
+        self.tryMountIsoNimEditorPanel()
+        self.editorAfterRedraw()
+
+    doMount()
+
 proc renderExpandedEditorDirect(self: EditorViewComponent) =
   ## Refresh a Monaco macro-expansion editor without registering a Karax
   ## renderer. The view-zone host keeps the stable ``expanded-{line}`` id that
@@ -2363,9 +2466,7 @@ proc onSelectState*(data: Data) {.async.} =
 proc renderEditor*(self: EditorViewComponent): VNode =
   ## Render the legacy Karax editor shell used before the IsoNim editor panel
   ## takes ownership of the mounted Monaco container.
-  if not self.data.lspStarted:
-    self.data.ipc.send("CODETRACER::start-lsp", js{})
-    self.data.lspStarted = true
+  self.ensureEditorLspStarted()
 
   # When the IsoNim editor view is mounted, return a stable empty stub.
   # The Karax kxiMap entry is removed on mount so redrawAll() no longer
