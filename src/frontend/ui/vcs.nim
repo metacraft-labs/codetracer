@@ -17,6 +17,21 @@
 import
   ui_imports
 
+import deepreview
+import ../viewmodel/viewmodels/vcs_vm
+
+when defined(js):
+  from isonim/web/dom_api as isonim_dom_api import nil
+  from ../viewmodel/views/isonim_vcs_view import
+    mountIsoNimVCSPanel, VCSCallbacks
+
+var vcsVMInstances*: JsAssoc[int, VCSVM] = JsAssoc[int, VCSVM]{}
+var vcsComponentRefs: JsAssoc[int, VCSComponent] = JsAssoc[int, VCSComponent]{}
+var isoNimVCSMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
+
+proc syncLegacyVCSIntoVM*(self: VCSComponent)
+proc tryMountIsoNimVCSPanel*(componentId: int)
+
 # ---------------------------------------------------------------------------
 # Node.js child_process bindings (renderer process, nodeIntegration=true)
 # ---------------------------------------------------------------------------
@@ -442,6 +457,14 @@ proc startFileWatching(self: VCSComponent) =
   {.emit: """
     window.addEventListener('focus', `refreshOnFocus`);
   """.}
+
+proc ensureVCSVM(self: VCSComponent): VCSVM =
+  if self.isNil:
+    return nil
+  if vcsVMInstances.hasKey(self.id):
+    return vcsVMInstances[self.id]
+  result = createVCSVM()
+  vcsVMInstances[self.id] = result
 
 # ---------------------------------------------------------------------------
 # DeepReview mode helpers
@@ -966,60 +989,249 @@ proc renderGitUnifiedDiff(self: VCSComponent): VNode =
                 span(class = "deepreview-unified-line-content"):
                   text lineItem.content
 
-proc renderVCS*(self: VCSComponent): VNode =
-  ## Render the VCS / DeepReview changed-files chrome.
-  ##
-  ## This panel still returns a Karax VNode tree for its GoldenLayout surface,
-  ## but it is intentionally a regular proc rather than a render-method
-  ## override so it no longer participates in the generic Karax component
-  ## render-dispatch audit.
-  # In DeepReview mode, show the review's changed files instead of git data.
-  if self.isDeepReviewMode():
-    return buildHtml(tdiv(class = componentContainerClass("vcs-container"))):
-      renderDeepReviewHeader(self)
-      renderDeepReviewChangedFiles(self)
+proc basename(path: cstring): string =
+  let pathStr = $path
+  let slashIdx = pathStr.rfind('/')
+  if slashIdx >= 0:
+    pathStr[slashIdx + 1 .. ^1]
+  else:
+    pathStr
 
-  # Normal git mode: lazy initialization on first render.
+proc safeStr(s: cstring): string =
+  if s.isNil: "" else: $s
+
+proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
     self.refreshVCSData()
-    # Start file watching after the initial load (Task #68).
     if self.isGitRepo:
       self.startFileWatching()
 
-  buildHtml(tdiv(class = componentContainerClass("vcs-container"))):
-    if not self.isGitRepo:
-      tdiv(class = "vcs-no-repo"):
-        tdiv(class = "vcs-no-repo-icon"):
-          text "\xEF\x84\xA6" # git icon
-        tdiv(class = "vcs-no-repo-message"):
-          text self.errorMessage
+proc currentReviewTitle(self: VCSComponent): string =
+  let drData = self.data.deepReviewData
+  if drData.isNil:
+    return ""
+  if not drData.sessionTitle.isNil and ($drData.sessionTitle).len > 0:
+    return $drData.sessionTitle
+  let commitDisplay =
+    if drData.commitSha.len > 12:
+      ($drData.commitSha)[0 ..< 12] & "..."
     else:
-      renderBranchPicker(self)
+      safeStr(drData.commitSha)
+  "Review: " & commitDisplay
 
-      # Unified Diff toggle (Task #69).
-      tdiv(class = "vcs-diff-toggle"):
-        let toggleClass = if self.unifiedDiffActive: " vcs-toggle-active" else: ""
-        tdiv(class = cstring("vcs-toggle-button" & toggleClass),
-             onclick = proc(ev: Event, tg: VNode) =
-               self.unifiedDiffActive = not self.unifiedDiffActive
-               if self.unifiedDiffActive:
-                 self.loadGitDiffForUnifiedView()
-               data.redraw()):
-          text "Unified Diff"
-
-      if self.unifiedDiffActive and not self.gitDiffData.isNil:
-        # Show the unified diff view for working tree changes (Task #69).
-        # Reuses the DeepReview CSS classes for consistent rendering.
-        renderGitUnifiedDiff(self)
+proc deepReviewRows(self: VCSComponent): seq[VCSFileRow] =
+  result = @[]
+  let drData = self.data.deepReviewData
+  if drData.isNil:
+    return
+  for i, file in drData.files:
+    var coverageExecuted = 0
+    for cov in file.coverage:
+      if cov.executed:
+        coverageExecuted += 1
+    let coverageText =
+      if file.coverage.len > 0:
+        $coverageExecuted & "/" & $file.coverage.len
       else:
-        renderCommitHistory(self)
-        renderChangedFiles(self)
+        ""
+    let status =
+      if not file.diff.isNil and ($file.diff.status).len > 0:
+        safeStr(file.diff.status)
+      else:
+        "M"
+    result.add(VCSFileRow(
+      status: status,
+      path: safeStr(file.path),
+      baseName: basename(file.path),
+      additions: if file.diff.isNil: 0 else: file.diff.linesAdded,
+      deletions: if file.diff.isNil: 0 else: file.diff.linesRemoved,
+      coverageText: coverageText,
+      selected: i == self.data.deepReviewSelectedFileIndex,
+    ))
 
-      tdiv(class = "vcs-refresh",
-           onclick = proc(ev: Event, tg: VNode) =
-             self.refreshVCSData()
-             if self.unifiedDiffActive:
-               self.loadGitDiffForUnifiedView()
-             data.redraw()):
-        text "Refresh"
+proc gitChangedRows(self: VCSComponent): seq[VCSFileRow] =
+  result = @[]
+  for file in self.changedFiles:
+    result.add(VCSFileRow(
+      status: safeStr(file.status),
+      path: safeStr(file.filename),
+      baseName: basename(file.filename),
+      additions: file.additions,
+      deletions: file.deletions,
+      coverageText: "",
+      selected: false,
+    ))
+
+proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
+  result = @[]
+  for commit in self.commits:
+    result.add(VCSCommitRow(
+      hash: safeStr(commit.hash),
+      message: safeStr(commit.message),
+      relativeTime: safeStr(commit.relativeTime),
+    ))
+
+proc diffRows(self: VCSComponent): seq[VCSDiffFileRow] =
+  result = @[]
+  let drData = self.gitDiffData
+  if drData.isNil:
+    return
+  for fileIdx, file in drData.files:
+    if file.diff.isNil or file.diff.hunks.len == 0:
+      continue
+    var hunks: seq[VCSHunkRow] = @[]
+    for hunkIdx, hunk in file.diff.hunks:
+      var lines: seq[VCSDiffLineRow] = @[]
+      for line in hunk.lines:
+        lines.add(VCSDiffLineRow(
+          lineType: safeStr(line.`type`),
+          content: safeStr(line.content),
+          oldLine: line.oldLine,
+          newLine: line.newLine,
+        ))
+      hunks.add(VCSHunkRow(
+        oldStart: hunk.oldStart,
+        oldCount: hunk.oldCount,
+        newStart: hunk.newStart,
+        newCount: hunk.newCount,
+        selected: self.isHunkSelected(fileIdx, hunkIdx),
+        lines: lines,
+      ))
+    result.add(VCSDiffFileRow(
+      fileIndex: fileIdx,
+      status: safeStr(file.diff.status),
+      path: safeStr(file.path),
+      additions: file.diff.linesAdded,
+      deletions: file.diff.linesRemoved,
+      hunks: hunks,
+    ))
+
+proc syncDeepReviewPanelSelection(self: VCSComponent) =
+  let component = self.data.ui.componentMapping[Content.DeepReview][0]
+  if not component.isNil:
+    deepreview.syncLegacyDeepReviewIntoVM(DeepReviewComponent(component))
+
+proc syncLegacyVCSIntoVM*(self: VCSComponent) =
+  if self.isNil:
+    return
+  vcsComponentRefs[self.id] = self
+  let vm = ensureVCSVM(self)
+  if vm.isNil:
+    return
+  if self.isDeepReviewMode():
+    vm.setDeepReviewMode(true)
+    vm.setHeader(self.currentReviewTitle())
+    vm.setGitRepoState(true)
+    vm.setBranchState("", @[], false)
+    vm.setCommits(@[], -1)
+    vm.setChangedFiles(self.deepReviewRows())
+    vm.setUnifiedDiff(false, @[])
+    vm.setHunkState(@[], false, false)
+    return
+
+  self.ensureVCSDataLoaded()
+  vm.setDeepReviewMode(false)
+  vm.setHeader(safeStr(self.currentBranch))
+  vm.setGitRepoState(self.isGitRepo, safeStr(self.errorMessage))
+  vm.setBranchState(safeStr(self.currentBranch),
+                    self.branches.mapIt(safeStr(it)),
+                    self.branchDropdownOpen)
+  vm.setCommits(self.commitRows(), self.selectedCommitIndex)
+  vm.setChangedFiles(self.gitChangedRows())
+  vm.setUnifiedDiff(self.unifiedDiffActive, self.diffRows())
+  vm.setHunkState(self.selectedHunks, self.hunkToolbarVisible,
+                  self.hunkCopyFeedback)
+
+proc handleVCSFileSelection(self: VCSComponent; index: int; path: string) =
+  if self.isDeepReviewMode():
+    self.data.deepReviewSelectedFileIndex = index
+    self.syncLegacyVCSIntoVM()
+    self.syncDeepReviewPanelSelection()
+    return
+  if self.unifiedDiffActive:
+    self.loadGitDiffForUnifiedView()
+    self.syncLegacyVCSIntoVM()
+  else:
+    self.data.openTab(cstring(path), ViewSource)
+
+proc handleHunkSelection(self: VCSComponent; fileIdx, hunkIdx: int;
+                         shiftKey, ctrlKey: bool) =
+  let drData = self.gitDiffData
+  if shiftKey and self.lastHunkClickIndex >= 0 and not drData.isNil:
+    let currentOrd = flatHunkOrdinal(drData, fileIdx, hunkIdx)
+    self.selectHunkRange(self.lastHunkClickIndex, currentOrd)
+  elif ctrlKey:
+    self.toggleHunkSelection(fileIdx, hunkIdx)
+  else:
+    if self.selectedHunks.len == 1 and self.isHunkSelected(fileIdx, hunkIdx):
+      self.clearHunkSelection()
+    else:
+      self.clearHunkSelection()
+      self.selectedHunks.add((fileIdx, hunkIdx))
+      self.hunkToolbarVisible = true
+  if not drData.isNil:
+    self.lastHunkClickIndex = flatHunkOrdinal(drData, fileIdx, hunkIdx)
+  self.syncLegacyVCSIntoVM()
+
+proc tryMountIsoNimVCSPanel*(componentId: int) =
+  when defined(js):
+    if isoNimVCSMountedIds.hasKey(componentId) and
+       isoNimVCSMountedIds[componentId]:
+      return
+    if not vcsComponentRefs.hasKey(componentId):
+      return
+    let component = vcsComponentRefs[componentId]
+    let vm = ensureVCSVM(component)
+    if vm.isNil:
+      return
+    let container = document.getElementById(
+      cstring(fmt"vcsComponent-{componentId}"))
+    if container.isNil:
+      return
+    component.syncLegacyVCSIntoVM()
+    let callbacks = VCSCallbacks(
+      onToggleBranchDropdown: proc() =
+        component.branchDropdownOpen = not component.branchDropdownOpen
+        component.syncLegacyVCSIntoVM(),
+      onCheckoutBranch: proc(branch: string) =
+        component.branchDropdownOpen = false
+        discard gitExec(@[cstring"checkout", cstring(branch)],
+                        component.getWorkingDirectory())
+        component.refreshVCSData()
+        component.syncLegacyVCSIntoVM(),
+      onSelectCommit: proc(index: int) =
+        component.selectedCommitIndex = index
+        if index >= 0 and index < component.commits.len:
+          component.loadChangedFiles(component.getWorkingDirectory(),
+                                     component.commits[index].hash)
+        component.syncLegacyVCSIntoVM(),
+      onSelectFile: proc(index: int; path: string) =
+        component.handleVCSFileSelection(index, path),
+      onToggleUnifiedDiff: proc() =
+        component.unifiedDiffActive = not component.unifiedDiffActive
+        if component.unifiedDiffActive:
+          component.loadGitDiffForUnifiedView()
+        component.syncLegacyVCSIntoVM(),
+      onRefresh: proc() =
+        component.refreshVCSData()
+        if component.unifiedDiffActive:
+          component.loadGitDiffForUnifiedView()
+        component.syncLegacyVCSIntoVM(),
+      onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
+        component.handleHunkSelection(fileIdx, hunkIdx, shiftKey, ctrlKey),
+      onCopySelectedHunks: proc() =
+        component.copySelectedHunksAsPatch()
+        component.syncLegacyVCSIntoVM(),
+      onStageSelectedHunks: proc() =
+        component.stageSelectedHunks()
+        component.syncLegacyVCSIntoVM(),
+      onClearSelectedHunks: proc() =
+        component.clearHunkSelection()
+        component.syncLegacyVCSIntoVM(),
+    )
+    mountIsoNimVCSPanel(cast[isonim_dom_api.Element](container), vm,
+                        callbacks)
+    isoNimVCSMountedIds[componentId] = true
+  else:
+    discard

@@ -241,8 +241,6 @@ proc renderLayoutComponent(component: Component, content: Content): VNode =
   ## falling back to generic Component.render dispatch.
   if content == Content.EditorView:
     EditorViewComponent(component).renderEditor()
-  elif content == Content.VCS:
-    VCSComponent(component).renderVCS()
   else:
     buildHtml(tdiv())
 
@@ -541,6 +539,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.Filesystem,
       Content.CommandPalette,
       Content.DeepReview,
+      Content.VCS,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
       Content.AgentWorkspace,
@@ -730,6 +729,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             DeepReviewComponent(component))
           deepreview.tryMountIsoNimDeepReviewPanel(component.id)
 
+        if state.content == Content.VCS:
+          vcs.syncLegacyVCSIntoVM(VCSComponent(component))
+          vcs.tryMountIsoNimVCSPanel(component.id)
+
         if state.content == Content.AgentActivity:
           agent_activity.syncLegacyAgentActivityIntoVM(
             AgentActivityComponent(component))
@@ -821,7 +824,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       return
     # Pinned GoldenLayout panels already carry a liveElement that showOverlay()
     # reparents into the overlay.  For the remaining Karax-backed GL panels
-    # (currently Editor/VCS), only ask Karax to redraw its existing instance.
+    # (currently Editor), only ask Karax to redraw its existing instance.
     # IsoNim-owned panels have no kxiMap entry and need no work here.
     if kxiMap.hasKey(label):
       redrawSync(kxiMap[label])

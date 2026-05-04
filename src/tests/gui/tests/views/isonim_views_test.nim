@@ -46,6 +46,7 @@ import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_deepreview_vm
 import viewmodels/agent_workspace_vm
 import viewmodels/deepreview_vm
+import viewmodels/vcs_vm
 import viewmodels/welcome_screen_vm
 import viewmodels/editor_vm
 import app/isonim_app_shell
@@ -76,6 +77,7 @@ import views/isonim_agent_activity_view
 import views/isonim_agent_activity_deepreview_view
 import views/isonim_agent_workspace_view
 import views/isonim_deepreview_view
+import views/isonim_vcs_view
 import views/isonim_welcome_screen_view
 import views/isonim_session_tabs_view
 import views/isonim_debug_shell_view
@@ -9922,6 +9924,149 @@ suite "IsoNim Agent Workspace Panel — helpers":
       "agent-workspace-file-item selected"
     check isonim_agent_workspace_view.overlayToggleText(true) == "Hide Coverage"
     check isonim_agent_workspace_view.overlayToggleText(false) == "Show Coverage"
+
+# ===========================================================================
+# VCS panel tests (§1.172 — VCS GoldenLayout Karax -> IsoNim shell/list slice,
+# mission goal #3).
+# ===========================================================================
+
+proc makeVcsDiffFile(): VCSDiffFileRow =
+  VCSDiffFileRow(
+    fileIndex: 0,
+    status: "M",
+    path: "src/main.nim",
+    additions: 1,
+    deletions: 1,
+    hunks: @[
+      VCSHunkRow(
+        oldStart: 10,
+        oldCount: 2,
+        newStart: 10,
+        newCount: 2,
+        selected: true,
+        lines: @[
+          VCSDiffLineRow(lineType: "removed", content: "old", oldLine: 10),
+          VCSDiffLineRow(lineType: "added", content: "new", newLine: 10),
+        ],
+      )
+    ],
+  )
+
+suite "IsoNim VCS Panel — structure":
+
+  test "no-repo shell renders legacy empty state selectors":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      let panel = renderVCSPanel(r, vm)
+
+      vm.setGitRepoState(false, "Not a git repository")
+
+      check panel.attributes["class"] == VCSContainerClass
+      let noRepo = findByClass(panel, VCSNoRepoClass)
+      check noRepo != nil
+      check findByClass(noRepo, "vcs-no-repo-message").textContent ==
+        "Not a git repository"
+
+      dispose()
+
+  test "normal git mode renders branch commits changed files and callbacks":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var selectedCommit = -1
+      var selectedFile = ""
+      var toggled = false
+      let callbacks = VCSCallbacks(
+        onSelectCommit: proc(index: int) = (selectedCommit = index),
+        onSelectFile: proc(index: int; path: string) =
+          (discard index; selectedFile = path),
+        onToggleUnifiedDiff: proc() =
+          (toggled = true; vm.setUnifiedDiff(true, @[makeVcsDiffFile()])),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setBranchState("main", @["main", "feature"], false)
+      vm.setCommits(@[
+        VCSCommitRow(hash: "abc123", message: "initial", relativeTime: "1h"),
+      ], selectedIndex = 0)
+      vm.setChangedFiles(@[
+        VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
+                   additions: 2, deletions: 1),
+      ])
+
+      check findByClass(panel, "vcs-branch-name").textContent == "main"
+      check findByClass(panel, "vcs-commit-hash").textContent == "abc123"
+      check findByClass(panel, "vcs-file-name").textContent == "main.nim"
+
+      findByClass(panel, "vcs-commit-item").fireEvent("click")
+      findByClass(panel, "vcs-file-item").fireEvent("click")
+      findByClass(panel, "vcs-toggle-button").fireEvent("click")
+
+      check selectedCommit == 0
+      check selectedFile == "src/main.nim"
+      check toggled
+      check findByClass(panel, "deepreview-unified-diff") != nil
+
+      dispose()
+
+  test "DeepReview changed files mode renders selected file and coverage":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var selected = -1
+      let callbacks = VCSCallbacks(
+        onSelectFile: proc(index: int; path: string) =
+          (discard path; selected = index),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setDeepReviewMode(true)
+      vm.setHeader("Review session")
+      vm.setChangedFiles(@[
+        VCSFileRow(status: "A", path: "src/new.nim", baseName: "new.nim",
+                   additions: 4, coverageText: "3/4", selected: true),
+      ])
+
+      check findByClass(panel, "vcs-branch-name").textContent ==
+        "Review session"
+      check findByClass(panel, "vcs-file-item").attributes["class"] ==
+        "vcs-file-item vcs-file-selected"
+      check findByClass(panel, "vcs-file-coverage").textContent == "3/4"
+
+      findByClass(panel, "vcs-file-item").fireEvent("click")
+      check selected == 0
+
+      dispose()
+
+  test "unified diff renders toolbar selection and hunk callback":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var selectedHunk = (-1, -1)
+      let callbacks = VCSCallbacks(
+        onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
+          (discard shiftKey; discard ctrlKey; selectedHunk = (fileIdx, hunkIdx)),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
+      vm.setHunkState(@[(0, 0)], toolbarVisible = true, copyFeedback = false)
+
+      check findByClass(panel, "hunk-toolbar-count").textContent ==
+        "1 hunk selected"
+      check findByClass(panel, "deepreview-unified-file-path").textContent ==
+        "src/main.nim"
+      check findAllByClass(panel, "deepreview-unified-line").len == 2
+
+      findByClass(panel, "deepreview-unified-hunk-header").fireEvent("click")
+      check selectedHunk == (0, 0)
+
+      dispose()
 
 # ===========================================================================
 # DeepReview panel tests (§1.77 — deepreview Karax -> IsoNim migration,
