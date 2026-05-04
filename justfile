@@ -24,6 +24,8 @@ build-storybook-components:
   mkdir -p storybook/dist
   nim \
     -d:chronicles_enabled=off \
+    -d:ctRenderer \
+    --path:../nim-everywhere/src \
     --hints:off \
     --out:storybook/dist/components.js \
     js src/frontend/storybook_components.nim
