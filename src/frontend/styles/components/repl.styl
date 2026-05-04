@@ -1,3 +1,11 @@
+.repl-component
+  height: 100%
+  width: 100%
+  min-height: 0
+  background-color: BACKGROUND_COLOR
+  color: COLOR
+  overflow: hidden
+
 .repl-msg-wrapper
   width: inherit
   height: inherit
@@ -12,8 +20,15 @@
     white-space: break-spaces
 
 #repl
+  height: 100%
+  min-height: 0
+  display: flex
+  flex-direction: column
   background-color: BACKGROUND_COLOR
   color: COLOR
+
+  form
+    flex: 0 0 auto
 
   #repl-input
     color: TEXT_CONTENT_COLOR
@@ -39,6 +54,9 @@
       white-space: nowrap !important
 
   #repl-history
+    flex: 1 1 auto
+    min-height: 0
+    overflow: auto
 
     .repl-input-history
       background-color: BACKGROUND_NEIGHBOUR_COLOR

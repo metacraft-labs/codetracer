@@ -129,7 +129,7 @@ template renderMenuShellImpl(
     model: MenuShellModel;
     callbacks: MenuShellCallbacks): untyped =
   ui(r):
-    tdiv(class = MenuShellRootClass):
+    tdiv(id = "menu", class = MenuShellRootClass):
       if model.showNavigation:
         tdiv(
             id = NavigationMenuId,

@@ -1,3 +1,54 @@
+.shell-component
+  display: flex
+  flex-direction: column
+  height: 100%
+  width: 100%
+  min-height: 0
+  box-sizing: border-box
+  background-color: BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  font-family: "FiraCode", monospace
+  font-size: 13px
+  overflow: hidden
+
+  .shell-output
+    flex: 1 1 auto
+    min-height: 0
+    overflow: auto
+    padding: 0.5em
+
+  .shell-input-row
+    flex: 0 0 auto
+    display: flex
+    align-items: center
+    gap: 0.35em
+    padding: 0.35em 0.5em
+    border-top: 0.0625em solid ACTIVE_MENU_BACKGROUND
+
+  .shell-prompt,
+  .shell-history-indicator,
+  .shell-scroll-indicator
+    color: VALUE_TYPE_COLOR
+
+  .shell-input
+    flex: 1 1 auto
+    min-width: 0
+    height: 1.75em
+    border: 0.0625em solid BORDERS_COLOR
+    border-radius: 0.25em
+    background-color: HEADER_ELEMENT_BACKGROUND_COLOR
+    color: TEXT_CONTENT_COLOR
+    font: inherit
+    padding: 0 0.5em
+    outline: 0
+
+    &:focus
+      border-color: CT_PRIMARY_DEFAULT
+
+  .shell-history-indicator
+    flex: 0 0 auto
+    padding: 0 0.5em 0.35em
+
 .shell-container
   // background-color: BACKGROUND_COLOR
   display: flex

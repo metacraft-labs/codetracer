@@ -110,7 +110,7 @@ template renderStatusShellImpl(
     model: StatusShellModel;
     callbacks: StatusShellCallbacks): untyped =
   ui(r):
-    tdiv(class = StatusRootClass):
+    tdiv(id = "status", class = StatusRootClass):
       tdiv(
           id = "active-notifications",
           onmouseenter = proc() = callbacks.invokePause(),
@@ -324,7 +324,9 @@ when defined(js):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
     let shell = renderStatusShell(r, model, callbacks)
-    discard isonim_dom.appendChild(containerNode, isonim_dom.Node(shell))
+    let shellNode = isonim_dom.Node(shell)
+    while not isonim_dom.isNodeNil(shellNode.firstChild):
+      discard isonim_dom.appendChild(containerNode, shellNode.firstChild)
 
     if model.showBugReport:
       let button = isonim_dom.getElementById(

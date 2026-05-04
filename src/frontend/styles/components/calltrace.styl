@@ -486,77 +486,112 @@
 //   min-width: fit-content
 
 .step-list
+  background-color: BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  font-family: "FiraCode", monospace
+  font-size: 13px
+  line-height: 1.5em
   overflow: auto
   height: 100%
 
+  .step-list-lines-box,
+  .step-lines
+    min-height: 100%
+
   .step-line-pre
     display: inline
+    margin: 0
+    font: inherit
+    white-space: pre
+    background-color: transparent
 
   .active-step-line-pre
-    background-color: ACTIVE_COLOR_BG
-    color: ACTIVE_COLOR_FG !important
+    background-color: transparent
+    color: TEXT_CONTENT_COLOR !important
 
   .inactive-step-line-pre
-    background-color: BACKGROUND_COLOR
-    color: COLOR
+    background-color: transparent
+    color: TEXT_CONTENT_COLOR
 
   .step-line
-    margin-left: 1.25em
-    height: 1.625em
+    display: grid
+    grid-template-columns: 3em 13em minmax(18em, 1fr) minmax(14em, 24em)
+    align-items: center
+    column-gap: 0.75em
+    margin-left: 0
+    min-height: 1.625em
     width: 100%
+    box-sizing: border-box
+    border-top: 0.0625em solid EVENT_LOG_ROWS_BORDERS_COLOR
+    padding: 0 0.75em
     cursor: pointer
 
+    &:hover
+      background-color: ACTIVE_ROW
+
   .active-step-line
-    background-color: ACTIVE_COLOR_BG
-    color: ACTIVE_COLOR_FG !important
+    background-color: ACTIVE_ROW
+    color: TEXT_CONTENT_COLOR !important
 
   .step-line-column
-    display: inline-block
+    display: block
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
 
   .step-line-delta
-    width: 5%
+    width: auto
+    color: VALUE_TYPE_COLOR
 
   .step-line-location
-    width: 20%
+    width: auto
+    color: #9cdcfe
 
   .step-line-source-code
-    width: 45%
+    width: auto
 
   .step-line-call
-    background-color: yellow
-    color: black
+    grid-template-columns: minmax(0, 1fr) minmax(14em, 24em)
+    background-color: rgba(210, 153, 34, 0.12)
+    color: TEXT_CONTENT_COLOR
 
   .step-line-return
-    background-color: orange
-    color: white
+    grid-template-columns: minmax(0, 1fr) minmax(14em, 24em)
+    background-color: rgba(251, 146, 60, 0.16)
+    color: TEXT_CONTENT_COLOR
 
   .step-line-description
-    display: inline-block
+    display: block
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
-    width: 75%
+    width: auto
 
   .step-line-args,.step-line-return-value
-    display: inline-block
+    display: block
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
-    width: 25%
+    width: auto
+    color: VALUE_TYPE_COLOR
 
   .step-line-flow-values
-    width: 30%
-    background-color: lightblue
+    width: auto
+    background-color: transparent
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
 
     .step-line-flow-value
       margin-left: 0.625em
 
+      &:first-child
+        margin-left: 0
+
     .step-line-flow-value-repr
       margin-left: 0.3125em
-      background-color: lightgray
+      color: VALUE_RESULT_COLOR
+      background-color: transparent
 
 .excerpt-code
   color: TEXT_CONTENT_COLOR
