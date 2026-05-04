@@ -636,7 +636,6 @@ type
 
 
   ChartComponent* = ref object of Component
-    tableView*:     proc: VNode
     viewKind*:      ViewKind
     stateID*:       int
     line*:          js

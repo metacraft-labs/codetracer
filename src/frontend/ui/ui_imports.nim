@@ -14,9 +14,6 @@ import kdom except Location
 import vdom except Event
 from dom import Element, getAttribute, Node, preventDefault, document, getElementById, querySelectorAll, querySelector, focus
 
-proc fa*(typ: string, kl: string = ""): VNode =
-  result = buildHtml(italic(class = cstring(fmt"fa fa-{typ} {kl}")))
-
 proc jqFind*(a: cstring): js {.importcpp: "jQuery(#)".}
 
 export

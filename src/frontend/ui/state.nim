@@ -190,8 +190,8 @@ proc initStateVM() =
   tryMountIsoNimStatePanel()
 
 proc valueDisplayText(v: Value): string =
-  ## Rendered text representation matching what the legacy Karax
-  ## ``value-component`` emitted in ``atomValueView``.
+  ## Rendered text representation matching what the legacy value row emitted
+  ## for atom values.
   ##
   ## Atomic kinds are stringified via ``$v`` (which dispatches into
   ## ``common_types/utils/text_representation.text(value, depth)`` —
@@ -211,8 +211,8 @@ proc valueDisplayText(v: Value): string =
 
 proc valueDisplayType(v: Value): string =
   ## Original-language type name (``i32``, ``int``, ``string`` …)
-  ## matching the legacy ``span.value-type`` text. The legacy code
-  ## used ``value.typ.langType`` directly inside ``atomValueView``;
+  ## matching the legacy ``span.value-type`` text. The legacy value
+  ## renderer used ``value.typ.langType`` directly for atom rows;
   ## fall back to the ``TypeKind`` enum string when the type metadata
   ## is missing so something useful still shows up in the view.
   if v.isNil:
@@ -231,8 +231,8 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## the rendered text — that field is only populated for Strings, so
   ## DB traces (whose primitives expose ``value.i`` / ``value.f`` /
   ## ``value.b``) reached the IsoNim view as empty rows.  The
-  ## ``valueDisplayText`` helper now mirrors the legacy
-  ## ``atomValueView`` ``$value`` call which dispatches into the
+  ## ``valueDisplayText`` helper now mirrors the legacy atom-value
+  ## ``$value`` call which dispatches into the
   ## proper field per ``TypeKind``.
   if stateVMStore.isNil:
     return

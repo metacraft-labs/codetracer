@@ -8,16 +8,6 @@ let ATOM_KINDS = {
   types.Error, TypeKind.Raw, FunctionKind, TypeKind.None
 } # temp Function
 
-proc view(
-  self: ValueComponent,
-  value: Value,
-  expression: cstring,
-  name: cstring,
-  path: seq[SubPath],
-  depth: int = 0,
-  annotation: cstring = ""
-): VNode
-
 proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem]
 
 proc addValues*(self: ChartComponent, expression: cstring, values: seq[Value])
@@ -218,70 +208,6 @@ proc loadMoreValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.as
   self.baseValue.partiallyExpanded = newValue.partiallyExpanded
   self.redrawAfterValueMutation()
 
-proc switchChartKindView*(self: ChartComponent): VNode =
-  # based on https://getbootstrap.com/docs/4.3/components/dropdowns/ : good to use
-  var kindSelectorClass = cstring"select-view-kind-button"
-  var dropdownClass = cstring"kind-dropdown-menu"
-
-  if not self.kindSelectorIsClicked:
-    dropdownClass = dropdownClass & cstring" hidden"
-  else:
-    kindSelectorClass = kindSelectorClass & cstring" active"
-
-  buildHtml(
-    tdiv(
-      class = "select-view-kind",
-      tabindex = "0",
-      onmousedown = proc =
-        self.kindSelectorIsClicked = not self.kindSelectorIsClicked
-        redrawAll(),
-      onblur = proc =
-        self.kindSelectorIsClicked = false
-        redrawAll()
-      )
-    ):
-      tdiv(
-        class = cstring(fmt"dropdown-toggle {kindSelectorClass}"),
-        id = "dropdownMenuButton"
-      ):
-        let kind = ($self.viewKind)[4..^1].toLowerAscii().cstring
-        text kind
-      tdiv(
-        class = dropdownClass,
-        onmousedown = proc(ev: Event, tg: VNode) = ev.preventDefault()
-      ):
-        tdiv(
-          class = "dropdown-item",
-          onmousedown = proc =
-            if self.viewKind != ViewTable:
-              self.changed = true
-              self.viewKind = ViewTable
-              self.line = nil
-              self.pie = nil
-            self.redraw()
-        ):
-          text "table"
-        tdiv(
-          class = "dropdown-item",
-          onmousedown = proc =
-            if self.viewKind != ViewLine:
-              self.viewKind = ViewLine
-              self.pie = nil
-              self.changed = true
-            self.redraw()
-        ):
-          text "line"
-        tdiv(
-          class = "dropdown-item",
-          onmousedown = proc =
-            if self.viewKind != ViewPie:
-              self.viewKind = ViewPie
-              self.line = nil
-              self.changed = true
-            self.redraw()
-        ):
-          text "pie"
-
 func getId(c: ChartComponent): int =
   c.chartId
 
@@ -397,22 +323,6 @@ proc ensure*(self: ChartComponent) =
     # alexander: not sure if this problematic : now code is different..
     cwarn "value: " & label & " cant be called"
     return
-
-proc renderLine*(self: ChartComponent): VNode =
-  let hidden =
-    if self.viewKind != ViewLine:
-      " hidden"
-    else:
-      ""
-
-  result = buildHtml(
-    tdiv(
-      class = cstring(fmt"chart-line{hidden}"),
-      id = cstring(fmt"chart-line-{self.getId}"),
-    )
-  ):
-    canvas(id = cstring(fmt"chart-line-canvas-{self.getId}"))
-
 
 proc lineData*(self: ChartComponent, values: seq[Value]): seq[float] =
   result = @[]
@@ -542,72 +452,6 @@ proc update*(self: ChartComponent, values: seq[Value], replace: bool) =
   else:
     self.results = lineData
 
-proc renderPie*(self: ChartComponent): VNode =
-  let hidden =
-    if self.viewKind != ViewPie:
-      " hidden"
-    else:
-      ""
-
-  result = buildHtml(
-    tdiv(
-      class = cstring(fmt"chart-pie{hidden}"),
-      id = cstring(fmt"chart-pie-{self.getId}"),
-    )
-  ):
-    canvas(id = cstring(fmt"chart-pie-canvas-{self.getId}"))
-
-proc renderChart*(self: ChartComponent): VNode =
-  ## Render the rich Karax chart sub-tree used by legacy value views.
-  ##
-  ## This remains a Karax VNode renderer for inline history charts, but it is a
-  ## regular proc so ChartComponent no longer participates in generic
-  ## Component.render dispatch while the surrounding surfaces are migrated.
-  var table = self.tableView()
-
-  result = buildHtml(
-    tdiv(class="chart-results-container")
-  ):
-    table
-    renderLine(self)
-    renderPie(self)
-
-  result.isThirdParty = true
-
-proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
-  let chart = self.charts[expression]
-  var chartElement = chart.renderChart()
-
-  chart.ensure()
-
-  self.state.kxi.afterRedraws.add(proc =
-    let container = document.getElementById(cstring(fmt"history-{expression}"))
-    if not container.isNil:
-      container.toJs.scrollTop = self.historyScrollTop
-      self.state.redrawForExtension()
-  )
-
-  result = buildHtml(
-    tdiv(class = "history-container")
-  ):
-    tdiv(
-      class = "inline-history",
-      id = cstring(fmt"history-{expression}"),
-    ):
-      chartElement
-
-  proc setupExtraScrollHandlers() =
-    let el = document.getElementById("history-" & $expression)
-    if not el.isNil:
-      el.addEventListener(
-        "wheel",
-        proc (ev: Event) =
-          kout el.scrollTop
-          self.historyScrollTop = cast[int](el.scrollTop)
-      )
-
-  discard setTimeout(proc() = setupExtraScrollHandlers(), 1)
-
 proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: Value, ev: Event): seq[ContextMenuItem] =
   var addToScratchpad:  ContextMenuItem
   var contextMenu: seq[ContextMenuItem]
@@ -642,31 +486,6 @@ proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event)
 proc appendText(parent: Node, value: cstring)
 
 proc newElement(tag: cstring, className: cstring = cstring""): Node
-
-proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
-  buildHtml(
-    tdiv(
-      class = "history-location",
-      oncontextmenu = proc(ev: Event, tg: VNode) =
-        ev.preventDefault()
-        self.historyContextAction(event, ev)
-    )
-  ):
-    text $event.location.rrTicks
-
-proc historyValueView(self: ValueComponent, event: HistoryResult): VNode =
-  buildHtml(
-    tdiv(
-      class = "history-value",
-      onmousedown = proc(ev: Event, tg: VNode) =
-        if cast[MouseEvent](ev).button == 0:
-          self.historyClick(event.location),
-      oncontextmenu = proc(ev: Event, tg: VNode) =
-        ev.preventDefault()
-        self.historyContextAction(event, ev)
-    )
-  ):
-    text event.value.textRepr
 
 proc renderChartCanvasDom(self: ChartComponent, kind: cstring, hidden: bool): Node =
   let hiddenClass = if hidden: cstring" hidden" else: cstring""
@@ -773,29 +592,6 @@ proc addChart(self: ValueComponent, expression: cstring): ChartComponent =
 
   return self.charts[expression]
 
-method ensureCollectionElementsChart*(
-  self: ValueComponent,
-  value: Value,
-  expression: cstring,
-  valueView: proc(value: Value): VNode
-) {.base.} =
-  let tableView = proc: VNode =
-    let kl = if self.charts[expression].viewKind == ViewTable: cstring"view-active" else: cstring"view-inactive"
-    buildHtml(tdiv(class=kl)):
-      valueView(value)
-  if not self.charts.hasKey(expression):
-    let chart = self.addChart(expression)
-
-    chart.tableView = tableView
-    chart.ensure()
-    chart.addValues(expression, value.elements)
-
-    self.data.ui.idMap[cstring"chart"] = self.data.ui.idMap[cstring"chart"] + 1
-  else:
-    if self.charts.hasKey(expression):
-      self.charts[expression].tableView = tableView
-      self.charts[expression].update(value.elements, replace=true)
-
 proc checkHistoryLocation*(self: ValueComponent, expression: cstring) =
   # for now this applicable for db traces only
   let currentLocation = self.location
@@ -827,25 +623,7 @@ method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = tr
 
     self.showInline[expression] = true
 
-    var tableView = proc: VNode =
-      let kl =
-        if self.charts[expression].viewKind == ViewTable:
-          "view-active"
-        else:
-          "view-inactive"
-
-      buildHtml(tdiv(class = cstring(fmt"history-text {kl}"))):
-        tdiv(class = "history-text-element"):
-          tdiv(class = "history-location-element"):
-            for event in self.state.valueHistory[key].results:
-              historyLocationView(self, event)
-          tdiv(class = "history-value-element"):
-            for event in self.state.valueHistory[key].results:
-              historyValueView(self, event)
-
-    let chart = self.addChart(expression)
-
-    chart.tableView = tableView
+    discard self.addChart(expression)
     # chart.ensure()
     # self.ensureValueComponent()
     if not hasValueHistory:
@@ -916,33 +694,6 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
 
     self.redraw()
 
-
-proc atomValueView(self: ValueComponent, valueText: string, expression: cstring, klass: string, value: Value): VNode =
-  let klassNumber =
-    if self.i mod 2 == 0:
-      "atom-even"
-    else:
-      "atom-odd"
-
-  self.i += 1
-
-  let htmlText = valueText
-  let defaultClass =
-    if not self.charts.hasKey(expression):
-      "value-expanded-default"
-    else:
-      ""
-
-  result = buildHtml(
-    tdiv(class = cstring(fmt"value-expanded-atom atom-{klass} {klassNumber} {defaultClass}"))
-  ):
-    if not self.uiExpanded(value, expression) or not self.charts.hasKey(expression):
-      span(class = "value-expanded-text"):
-        text htmlText
-      span(class = "value-type"):
-        text(value.typ.langType)
-    else:
-      switchChartKindView(self.charts[expression])
 
 proc atomValueTextAndClass(value: Value): (string, string) =
   case value.kind:
@@ -1378,76 +1129,10 @@ proc renderValueRowDom(
   if expression == self.baseExpression and self.inlineHistoryVisible(expression):
     result.appendChild(self.renderInlineHistoryDom(expression))
 
-proc expandValueView(self: ValueComponent, value: Value, expression: cstring, left: string, right: string, empty: bool): VNode =
-  var list = if empty: "" else: ".."
-
-  if value.kind == NonExpanded:
-    list = ".."
-
-  let klass = if self.i mod 2 == 0: "atom-even" else: "atom-odd"
-
-  self.i += 1
-
-  result = buildHtml(
-    span(class = cstring(fmt"value-expand {klass}"))
-  ):
-    text(&"{left}{list}{right}")
-
 method delete*(self: ValueComponent) {.async.} =
   if self.selected:
     var state = self.data.stateComponent(self.stateID)
     state.deleteWatch(self.baseExpression)
-
-proc expandedCompoundView*(
-  self: ValueComponent,
-  value: Value,
-  expression: cstring,
-  children: seq[(cstring, Value)],
-  path: seq[SubPath],
-  left: string,
-  right: string,
-  depth: int = 0
-): VNode =
-  result = buildHtml(
-    tdiv(
-      class = cstring(fmt"value-expanded-compound depth-{depth}"),
-      style = style(StyleAttr.marginLeft, cstring"17px")
-    )
-  ):
-    if children.len == 0:
-      expandValueView(self, value, expression, left, right, children.len == 0)
-    else:
-      for child in children:
-        let (name, element) = child
-        var childPath = path
-
-        if element.kind notin ATOM_KINDS and value.kind != Variant:
-          try:
-            let index = parseInt(($name)[1..^2])
-            block: childPath.add(SubPath{kind: Index, index: index, typeKind: value.kind})
-          except:
-            block: childPath.add(SubPath{kind: Field, name: name, typeKind: value.kind})
-
-        # TODO: when fixing expansion of values/fields:
-        #   rework with activeVariantValue fields or elements
-        #   no `activeFields` anymore!
-        #
-        # if value.kind == Variant and value.activeFields.len != 0:
-        #   block: path.add(
-        #     SubPath{
-        #       kind: VariantKind,
-        #       kindNumber: parseInt($value.activeVariant),
-        #       variantName: name,
-        #       typeKind: value.kind
-        #     }
-        #   )
-
-        #   if name in value.activeFields:
-        #     view(self, element, cstring(fmt"{expression} {name}"), name, path, depth + 1)
-        # else:
-
-        echo "view expandCompoundView ", expression, " ", name
-        view(self, element, cstring(fmt"{expression} {name}"), name, childPath, depth + 1)
 
 proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem] =
   var showHistory:  ContextMenuItem
@@ -1464,278 +1149,6 @@ proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[
     contextMenu &= showHistory
 
   return contextMenu
-
-proc view(
-  self: ValueComponent,
-  value: Value,
-  expression: cstring,
-  name: cstring,
-  path: seq[SubPath],
-  depth: int = 0,
-  annotation: cstring = ""
-): VNode =
-  if value.kind == Ref and not value.refValue.toJs.isNil:
-    result = self.view(value.refValue, expression, name, path, depth)
-    return
-
-  if self.uiExpanded(value, expression):
-    discard self.expandNewValues(value, path)
-
-  # var isExpandedCompoundParent = value.kind notin ATOM_KINDS and self.uiExpanded(value, expression)
-  var atom = if value.kind in ATOM_KINDS or not self.uiExpanded(value, expression): "value-expanded-atom-parent" else: "value-expanded-compound-parent"
-  var lang = LangUnknown
-  try:
-    lang = self.data.trace.lang
-  except:
-    lang = LangNoir
-  var valueView = proc(value: Value): VNode =
-    case value.kind:
-    of Int, Float, String, CString, Char, Bool:
-      self.atomValueView($value, expression, toLowerAscii($value.kind), value)
-
-    of Enum, Enum16, Enum32:
-      self.atomValueView(value.readableEnum(), expression, "enum", value)
-
-    of FunctionKind:
-      self.atomValueView(value.textRepr, expression, "function", value)
-
-    of Pointer:
-      if self.uiExpanded(value, expression):
-        var nextPath = path
-        nextPath.add(SubPath{kind: Dereference, typeKind: value.kind})
-        self.view(value.refValue, expression, "_", nextPath, depth, value.address & " ->")
-      else:
-        self.atomValueView($value.textRepr, expression, "pointer", value)
-
-    of Seq, Set, HashSet, OrderedSet, Array, Varargs:
-      let left =
-        if value.kind in {Array, Varargs}:
-          TOKEN_TEXTS[lang][ArrayOpen]
-        else:
-          TOKEN_TEXTS[lang][SeqOpen]
-      let right =
-        if value.kind in {Array, Varargs}:
-          TOKEN_TEXTS[lang][ArrayClose]
-        else:
-         TOKEN_TEXTS[lang][SeqClose]
-
-      if self.uiExpanded(value, expression):
-        var children: seq[(cstring, Value)]
-
-        for i, element in value.elements:
-          children.add((cstring("[" & $i & "]"), element))
-
-        if children.len == 0:
-          atom = "value-expanded-atom-parent"
-
-        self.expandedCompoundView(value, expression, children, path, left, right, depth)
-      else:
-        self.atomValueView($value.textRepr, expression, "seq", value)
-
-    of Variant:
-      if self.uiExpanded(value, expression):
-        var children: seq[(cstring, Value)] = @[]
-
-        if not value.activeVariantValue.isNil:
-          for label, fieldValue in unionChildren(value):
-            children.add((label, fieldValue))
-
-        let left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
-        let right = TOKEN_TEXTS[lang][InstanceClose]
-
-        self.expandedCompoundView(value, expression, children, path, left, right, depth)
-      else:
-        self.atomValueView($value.textRepr, expression, "variant", value)
-
-    of TableKind:
-      if self.uiExpanded(value, expression):
-        var children: seq[(cstring, Value)] = @[]
-
-        for items in value.items:
-          children.add((($items[0]).cstring, items[1]))
-
-        let left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
-        let right = TOKEN_TEXTS[lang][InstanceClose]
-
-        self.expandedCompoundView(value, expression, children, path, left, right, depth)
-      else:
-        self.atomValueView($value.textRepr, expression, "table", value)
-
-    of Instance, Union, Tuple:
-      if self.uiExpanded(value, expression):
-        var children: seq[(cstring, Value)] = @[]
-
-        if value.kind == Union:
-          for label, fieldValue in unionChildren(value):
-            children.add((label, fieldValue))
-        else:
-          for i, label in value.typ.labels:
-            let fieldValue = value.elements[i]
-
-            children.add((label, fieldValue))
-
-        if children.len == 0:
-          atom = "value-expanded-atom-parent"
-
-        let left = $value.typ.langType & TOKEN_TEXTS[lang][InstanceOpen]
-        let right = TOKEN_TEXTS[lang][InstanceClose]
-
-        self.expandedCompoundView(value, expression, children, path, left, right, depth)
-      else:
-        self.atomValueView($value.textRepr, expression, "instance", value)
-
-    of Ref:
-      buildHtml(
-        tdiv(class = "value-bug")
-      ):
-        text cstring"bug in proc view -> value.nim"
-
-    of TypeKind.Raw:
-      buildHtml(
-        tdiv(class = "value-raw value-expanded-text")
-      ):
-        text(value.r)
-
-    of types.None:
-      self.atomValueView("nil", expression, "nil", value)
-
-    of NonExpanded:
-      buildHtml(
-        tdiv(class = "value-non-expanded value-expanded-text")
-      ):
-        text "<non expanded>"
-
-    of types.Error:
-      buildHtml(
-        tdiv(class = "value-error value-expanded-text")
-      ):
-        text value.msg
-
-    else:
-      buildHtml(
-        tdiv(class = "value-empty value-expanded-text")
-      ):
-        text("")
-
-  var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
-  var isSelected = if self.selected: cstring"value-selected" else: cstring""
-  # var nameSelected = if self.selected: cstring"value-name-selected" else: cstring""
-  var fresh = if self.fresh: cstring("value-fresh-" & $self.freshIndex) else: cstring""
-
-  let cPath = path
-
-  self.isOperationRunning = false
-  let active = if self.showInline[expression]: "active" else: ""
-
-  result = buildHtml(
-    tdiv(class = cstring(fmt"value-expanded {isWatch} {isSelected} border-value-{depth} value-expanded-name"))
-  ):
-    tdiv(
-      class = cstring(fmt"{atom}"),
-      onContextMenu = proc(ev: Event, v: VNode) =
-        let contextMenu = self.createContextMenuItems(value, ev)
-        let e = ev.toJs
-        if not self.state.isNil and self.state.inExtension:
-          ev.preventDefault()
-        if contextMenu != []:
-          showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), not self.state.isNil and self.state.inExtension)
-    ):
-      tdiv(class = "value-name-container"):
-        if self.isTooltipValue and expression == self.baseExpression:
-          tdiv(
-            class = "add-to-scratchpad-button",
-            onmousedown = proc(ev: Event, v: VNode) =
-              self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
-              self.redraw()
-          ):
-            tdiv(class = "custom-tooltip"):
-              text "Add to scratchpad"
-        if compoundOrPointsToCompound(value):
-          span(
-            class = "value-expand-button " & fresh,
-            onmousedown = proc(ev: Event, v: VNode) =
-              self.data.focusComponent(self)
-              ev.stopPropagation()
-              capture expression, value, cPath:
-                discard self.expandNewValues(value, cPath)
-                discard self.toggleExpanded(value, expression)
-          ):
-            if self.uiExpanded(value, expression):
-              tdiv(class = "caret-expand")
-            else:
-              tdiv(class = "caret-collapse")
-        span(class = "value-name"):
-          text(name & ": ")
-        if self.uiExpanded(value, expression) and value.kind notin ATOM_KINDS:
-          span(class = "value-type"):
-            text(value.typ.langType)
-          span(class = "value-annotation"):
-            text(annotation)
-          if expression == self.baseExpression:
-            button(
-              class = &"{active} ct-button-image-sm-secondary ct-custom-button-size ct-ml-2",
-              id = "value-history",
-              onmousedown = proc(ev: Event, tg: VNode) =
-                if cast[MouseEvent](ev).button == 0:
-                  discard self.showHistory(expression)
-            ):
-              tdiv(class = "custom-tooltip"):
-                text "Toggle history value"
-      tdiv():
-        var s: VStyle
-
-        if value.kind == types.Error:
-          s = style(StyleAttr.marginLeft, cstring"10px")
-        else:
-          s = style(StyleAttr.marginLeft, cstring"0px")
-
-        span(
-          class = "value-view",
-          style = s
-        ):
-          try:
-            valueView(value)
-          except:
-            tdiv(class = "value-error"):
-              echo "VALUE ERROR: ", getCurrentExceptionMsg()
-              text fmt"^ error: Can't show value: {getCurrentExceptionMsg()}"
-      if expression == self.baseExpression and not self.uiExpanded(value, expression):
-        button(
-          class = &"{active} ct-button-image-sm-secondary ct-custom-button-size ct-ml-2",
-          id = "value-history",
-          onmousedown = proc(ev: Event, tg: VNode) =
-            if cast[MouseEvent](ev).button == 0:
-              discard self.showHistory(expression)
-        ):
-          tdiv(class = "custom-tooltip"):
-            text "Toggle history value"
-      if value.partiallyExpanded and self.uiExpanded(value, expression):
-        button(
-          class = "value-load-more-button",
-          onmousedown = proc(ev: Event, v: VNode)=
-            capture value, cPath:
-              if not self.isOperationRunning:
-                self.isOperationRunning = true
-                discard self.loadMoreValues(value, cPath)
-        ):
-          text("Load More")
-    if expression == self.baseExpression and
-      self.charts.hasKey(expression) and
-      self.showInline.hasKey(expression) and
-      self.showInline[expression]:
-        inlineHistoryView(self, expression)
-  result.alwaysChange = true
-
-proc renderValue*(self: ValueComponent): VNode =
-  ## Render the rich Karax value sub-tree used by legacy/IsoNim-adjacent views.
-  ##
-  ## The expandable value tree still feeds editor, flow, trace and calltrace
-  ## embeddings, but this regular proc avoids a residual generic render-method
-  ## override while preserving the exact VNode tree.
-  var path: seq[SubPath] = @[]
-
-  path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
-  result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
 
 proc directValueDomSubject(self: ValueComponent): Value =
   if not self.baseValue.isNil and
@@ -1772,7 +1185,7 @@ proc renderValueDomWithLeft*(self: ValueComponent, left: cstring): Node =
   ## Render a value DOM node with the legacy root ``left`` style applied.
   ##
   ## Monaco inline value view zones historically patched this style onto the
-  ## root value VNode immediately before materialization.  Keep that contract
+  ## root value node immediately before materialization.  Keep that contract
   ## centralized with the value DOM entrypoint.
   result = self.renderValueDom()
   result.toJs.style.left = left
