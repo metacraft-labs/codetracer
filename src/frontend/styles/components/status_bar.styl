@@ -65,12 +65,36 @@
   .build-output-container
     flex: 1
     overflow: auto
+    font-family: "FiraCode" !important
+    font-size: 14px
+    line-height: 24px
+    white-space: pre-wrap
+
+    .build-stdout, .build-stderr, .build-output-line
+      min-height: 24px
+      padding-left: 0.5em
+      font-family: "FiraCode" !important
+      font-size: 14px
+      line-height: 24px
+      white-space: pre-wrap
 
 #build, #build-errors
   background-color: BACKGROUND_COLOR
+  font-family: "FiraCode" !important
+  font-size: 14px
+  line-height: 24px
+  white-space: pre-wrap
 
   .build-stdout, .build-error
     color: COLOR
+
+  .build-stdout, .build-stderr, .build-error, .build-output-line
+    min-height: 24px
+    padding-left: 0.5em
+    font-family: "FiraCode" !important
+    font-size: 14px
+    line-height: 24px
+    white-space: pre-wrap
 
   .build-stderr
     color: #f85149

@@ -213,3 +213,45 @@
 
 .low-level-editor
   height: 100%
+
+.low-level-code
+  background-color: BACKGROUND_COLOR
+  color: TEXT_CONTENT_COLOR
+  display: flex
+  flex-direction: column
+  overflow: auto
+  font-family: "FiraCode", monospace
+
+.low-level-code-header
+  flex: 0 0 auto
+  padding: 0.35em 0.5em
+  border-bottom: 1px solid HEADER_PANEL_BACKGROUND_COLOR
+  opacity: 0.85
+
+.low-level-code-instructions
+  min-width: max-content
+  padding: 0.25em 0
+
+.low-level-code-instruction
+  display: grid
+  grid-template-columns: 5em 6em 18em 14em 1fr
+  min-height: 1.55em
+  line-height: 1.55em
+  padding: 0 0.5em
+  white-space: nowrap
+
+  &:hover
+    background-color: HOVERED_BUTTON_BACKGROUND_COLOR
+
+  &.active-instruction
+    background-color: ACTIVE_ROW
+    color: TEXT_CONTENT_COLOR
+
+.low-level-code-instruction-offset
+  opacity: 0.65
+
+.low-level-code-instruction-name
+  color: VALUE_TYPE_COLOR
+
+.low-level-code-instruction-source
+  opacity: 0.65

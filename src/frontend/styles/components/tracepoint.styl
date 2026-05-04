@@ -27,6 +27,74 @@
   display: flex;
   flex-direction: column;
   color: COLOR
+  height: 100%
+  min-height: 0
+  overflow: hidden
+
+  .trace-log-table-header
+    display: grid
+    grid-template-columns: 120px 160px 180px minmax(0, 1fr)
+    flex: 0 0 24px
+    align-items: center
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    color: VALUE_TYPE_COLOR
+    font-family: "FiraCode"
+    font-size: 13px
+    line-height: 20px
+    padding: 0 8px
+
+  .trace-log-table-body
+    flex: 1 1 auto
+    min-height: 0
+    overflow-y: auto
+    overflow-x: hidden
+    font-family: "FiraCode"
+    font-size: 13px
+    line-height: 20px
+
+  .trace-log-row
+    display: grid
+    grid-template-columns: 120px 160px 180px minmax(0, 1fr)
+    min-height: 24px
+    align-items: center
+    border-top: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    color: TEXT_CONTENT_COLOR
+    padding: 0 8px
+    cursor: pointer
+
+    &:hover,
+    &.selected
+      background: ACTIVE_ROW
+
+  .trace-col-rr-ticks,
+  .trace-col-location,
+  .trace-col-function,
+  .trace-col-locals
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .trace-col-rr-ticks
+    position: relative
+    padding-left: 4px
+
+    .event-rr-ticks-line
+      position: absolute
+      left: 0
+      right: 12px
+      bottom: 4px
+      height: 2px
+      background: CT_SECONDARY_BLUE
+
+  .trace-log-empty
+    padding: 12px 8px
+    color: VALUE_TYPE_COLOR
+    font-family: "FiraCode"
+    font-size: 13px
+
+    &.hidden
+      display: none
 
   .trace-location
     width: 20%

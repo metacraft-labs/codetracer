@@ -52,8 +52,9 @@ function injectSurfaceStyles(container) {
   style.textContent = `
     .ct-storybook-surface {
       box-sizing: border-box;
-      min-height: 100vh;
+      min-height: 0;
       padding: 0;
+      background: #1b1b1b;
     }
 
     .ct-storybook-frame {
@@ -69,9 +70,23 @@ function injectSurfaceStyles(container) {
       height: 100vh !important;
     }
 
-    .ct-storybook-root-container #main.ct-storybook-frame {
-      flex-wrap: nowrap;
+    .ct-storybook-karax-root-container {
+      top: 2.27em !important;
+      height: calc(100vh - 2.27em - 2em) !important;
+      width: auto !important;
+      max-width: none !important;
+    }
+
+    .ct-storybook-karax-root-container #ROOT {
+      flex: 0 0 auto !important;
+      width: calc(100vw - 0.5em) !important;
+      min-width: 0;
+    }
+
+    .ct-storybook-karax-root-container #main.ct-storybook-frame {
       min-height: 0;
+      height: 0;
+      overflow: hidden;
     }
 
     .ct-storybook-golden-panel {
@@ -134,8 +149,7 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-default-layout {
       box-sizing: border-box;
-      width: 100%;
-      height: 100%;
+      display: block;
       min-height: 0;
       font-size: 16px;
       line-height: 24px;
@@ -144,55 +158,17 @@ function injectSurfaceStyles(container) {
     .ct-storybook-default-layout .lm_row,
     .ct-storybook-default-layout .lm_column {
       box-sizing: border-box;
-      display: flex;
       min-width: 0;
       min-height: 0;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .ct-storybook-default-layout > .lm_row {
-      width: 100%;
-      height: 100%;
-      flex-direction: row;
-      gap: 4px;
-    }
-
-    .ct-storybook-default-layout .lm_column {
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .ct-storybook-layout-sidebar {
-      flex: 0 0 14%;
-    }
-
-    .ct-storybook-layout-editor {
-      flex: 0 0 33%;
-    }
-
-    .ct-storybook-layout-right {
-      flex: 1 1 53%;
-    }
-
-    .ct-storybook-layout-right-top {
-      flex: 1 1 50%;
-      flex-direction: row;
-      gap: 4px;
-    }
-
-    .ct-storybook-layout-right-top > .lm_column {
-      flex: 1 1 50%;
-    }
-
-    .ct-storybook-layout-right-bottom {
-      flex: 1 1 50%;
+      overflow: visible;
     }
 
     .ct-storybook-default-layout .lm_stack {
       box-sizing: border-box;
-      display: flex;
-      flex: 1 1 100%;
-      flex-direction: column;
       min-width: 0;
       min-height: 0;
       overflow: hidden;
@@ -200,7 +176,6 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-default-layout .lm_header {
       box-sizing: border-box;
-      flex: 0 0 32px;
       height: 32px !important;
       min-height: 32px;
       overflow: visible;
@@ -208,7 +183,6 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-default-layout .lm_items {
       box-sizing: border-box;
-      flex: 1 1 auto;
       min-height: 0;
       overflow: hidden;
     }
@@ -221,6 +195,46 @@ function injectSurfaceStyles(container) {
       height: 100%;
       min-width: 0;
       min-height: 0;
+    }
+
+    .ct-storybook-default-layout .lm_hidden_item {
+      display: none;
+    }
+
+    .ct-storybook-default-layout .lm_splitter {
+      box-sizing: border-box;
+      display: block;
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .ct-storybook-default-layout .lm_splitter.lm_horizontal {
+      float: left;
+      height: 100%;
+      width: 4px !important;
+    }
+
+    .ct-storybook-default-layout .lm_splitter.lm_vertical {
+      height: 4px !important;
+      width: 100%;
+      clear: both;
+    }
+
+    .ct-storybook-default-layout .lm_drag_handle {
+      position: absolute;
+    }
+
+    .ct-storybook-default-layout .lm_splitter.lm_horizontal .lm_drag_handle {
+      left: -0.5px !important;
+      width: 5px !important;
+      height: 100%;
+    }
+
+    .ct-storybook-default-layout .lm_splitter.lm_vertical .lm_drag_handle {
+      top: -0.5px !important;
+      height: 5px !important;
+      width: 100%;
     }
 
     .ct-storybook-default-layout .ct-storybook-panel-content > .component-container,
@@ -344,7 +358,8 @@ function createGoldenPanelHost(frame, title) {
   return mount;
 }
 
-function createGoldenStack(title) {
+function createGoldenStack(tabsConfig) {
+  const tabsData = Array.isArray(tabsConfig) ? tabsConfig : [{ title: tabsConfig }];
   const stack = document.createElement("div");
   stack.className = "lm_item lm_stack";
 
@@ -354,93 +369,410 @@ function createGoldenStack(title) {
   const tabs = document.createElement("section");
   tabs.className = "lm_tabs";
 
-  const tab = document.createElement("div");
-  tab.className = "lm_tab lm_active";
+  const mounts = [];
+  tabsData.forEach((tabData, index) => {
+    const tab = document.createElement("div");
+    tab.className = `lm_tab${index === 0 ? " lm_active" : ""}`;
+    tab.title = tabData.title;
 
-  const tabTitle = document.createElement("span");
-  tabTitle.className = "lm_title";
-  tabTitle.textContent = title;
-  tab.appendChild(tabTitle);
+    const tabTitle = document.createElement("span");
+    tabTitle.className = "lm_title";
+    tabTitle.textContent = tabData.title;
+    tab.appendChild(tabTitle);
 
-  const closeTab = document.createElement("div");
-  closeTab.className = "lm_close_tab";
-  tab.appendChild(closeTab);
-  tabs.appendChild(tab);
+    const closeTab = document.createElement("div");
+    closeTab.className = "lm_close_tab";
+    tab.appendChild(closeTab);
+    tabs.appendChild(tab);
+  });
+
+  const layoutButtons = document.createElement("div");
+  layoutButtons.className = "layout-buttons-container";
+  layoutButtons.tabIndex = 0;
+  const layoutDropdown = document.createElement("div");
+  layoutDropdown.id = "layout-dropdown-toggle";
+  layoutDropdown.className = "layout-dropdown hidden";
+  for (const label of ["Close all", "Maximise container"]) {
+    const node = document.createElement("div");
+    node.className = "layout-dropdown-node";
+    node.textContent = label;
+    layoutDropdown.appendChild(node);
+  }
+  layoutButtons.appendChild(layoutDropdown);
+  tabs.appendChild(layoutButtons);
   header.appendChild(tabs);
+
+  const controls = document.createElement("section");
+  controls.className = "lm_controls";
+  header.appendChild(controls);
+
+  const dropdownList = document.createElement("section");
+  dropdownList.className = "lm_tabdropdown_list";
+  dropdownList.style.display = "none";
+  header.appendChild(dropdownList);
 
   const items = document.createElement("section");
   items.className = "lm_items";
 
-  const item = document.createElement("div");
-  const content = document.createElement("div");
-  content.className = "lm_content";
-  const mount = document.createElement("div");
-  mount.className = "ct-storybook-panel-content";
-  content.appendChild(mount);
-  item.appendChild(content);
-  items.appendChild(item);
+  tabsData.forEach((tabData, index) => {
+    const item = document.createElement("div");
+    if (index !== 0) item.className = "lm_hidden_item";
+    const content = document.createElement("div");
+    content.className = "lm_content";
+    const mount = document.createElement("div");
+    mount.className = "ct-storybook-panel-content";
+    content.appendChild(mount);
+    item.appendChild(content);
+    items.appendChild(item);
+    mounts.push({
+      name: tabData.name,
+      mount,
+      item,
+      content,
+      active: index === 0,
+    });
+  });
   stack.appendChild(header);
   stack.appendChild(items);
 
-  return { stack, mount };
+  return { stack, items, mounts };
 }
 
-function appendDefaultDebugLayout(frame) {
-  const root = document.createElement("div");
-  root.className = "lm_goldenlayout lm_item lm_root ct-storybook-default-layout";
+function createSplitter(orientation) {
+  const splitter = document.createElement("div");
+  splitter.className = `lm_splitter lm_${orientation}`;
+
+  const handle = document.createElement("div");
+  handle.className = "lm_drag_handle";
+  splitter.appendChild(handle);
+
+  return splitter;
+}
+
+function setBox(element, width, height) {
+  element.style.width = `${Math.max(0, Math.round(width))}px`;
+  element.style.height = `${Math.max(0, Math.round(height))}px`;
+}
+
+function sizeStack(stack, items, width, height) {
+  const headerHeight = 32;
+  const contentHeight = Math.max(0, height - headerHeight);
+  setBox(stack, width, height);
+  stack.querySelector(".lm_header").style.height = `${headerHeight}px`;
+  setBox(items, width, contentHeight);
+  for (const item of items.children) {
+    if (item.classList.contains("lm_hidden_item")) continue;
+    setBox(item, width, contentHeight);
+    const content = item.querySelector(".lm_content");
+    if (content) setBox(content, width, contentHeight);
+  }
+}
+
+function syncDefaultLayoutGeometry(root) {
+  const layout = root.querySelector(".ct-storybook-default-layout");
+  if (!layout) return;
+
+  const width = root.getBoundingClientRect().width;
+  const height = root.getBoundingClientRect().height;
+  const splitterSize = 4;
+  setBox(layout, width, height);
+
+  const outerRow = layout.querySelector(":scope > .lm_row");
+  setBox(outerRow, width, height);
+
+  const leftWidth = Math.max(120, Math.round(width * 0.133));
+  const editorWidth = Math.max(240, Math.round(width * 0.331));
+  const rightWidth = Math.max(
+    240,
+    width - leftWidth - editorWidth - splitterSize * 2,
+  );
+  const rightTopHeight = Math.floor((height - splitterSize) / 2);
+  const rightBottomHeight = height - rightTopHeight - splitterSize;
+  const rightTopLeftWidth = Math.floor((rightWidth - splitterSize) / 2);
+  const rightTopRightWidth = rightWidth - rightTopLeftWidth - splitterSize;
+
+  const boxes = {
+    sidebar: { width: leftWidth, height },
+    editor: { width: editorWidth, height },
+    right: { width: rightWidth, height },
+    rightTop: { width: rightWidth, height: rightTopHeight },
+    rightTopLeft: { width: rightTopLeftWidth, height: rightTopHeight },
+    rightTopRight: { width: rightTopRightWidth, height: rightTopHeight },
+    rightBottom: { width: rightWidth, height: rightBottomHeight },
+  };
+
+  for (const [name, box] of Object.entries(boxes)) {
+    const element = layout.querySelector(`[data-layout-box="${name}"]`);
+    if (element) setBox(element, box.width, box.height);
+  }
+
+  for (const stack of layout.querySelectorAll(".lm_stack")) {
+    const box = boxes[stack.dataset.layoutBox];
+    if (box) sizeStack(stack, stack.querySelector(".lm_items"), box.width, box.height);
+  }
+
+  for (const splitter of layout.querySelectorAll(".lm_splitter.lm_horizontal")) {
+    const parentHeight = splitter.parentElement.getBoundingClientRect().height || height;
+    setBox(splitter, splitterSize, parentHeight);
+  }
+  for (const splitter of layout.querySelectorAll(".lm_splitter.lm_vertical")) {
+    const parentWidth = splitter.parentElement.getBoundingClientRect().width || rightWidth;
+    setBox(splitter, parentWidth, splitterSize);
+  }
+}
+
+function appendDefaultDebugLayout(shellRoot) {
+  const layoutRoot = document.createElement("div");
+  layoutRoot.className = "lm_goldenlayout lm_item lm_root ct-storybook-default-layout";
 
   const row = document.createElement("div");
   row.className = "lm_item lm_row";
 
   const leftColumn = document.createElement("div");
   leftColumn.className = "lm_item lm_column ct-storybook-layout-sidebar";
+  leftColumn.dataset.layoutBox = "sidebar";
 
-  const editorColumn = document.createElement("div");
-  editorColumn.className = "lm_item lm_column ct-storybook-layout-editor";
+  const editorStackParent = document.createElement("div");
+  editorStackParent.className = "lm_item ct-storybook-layout-editor";
+  editorStackParent.dataset.layoutBox = "editor";
 
   const rightColumn = document.createElement("div");
   rightColumn.className = "lm_item lm_column ct-storybook-layout-right";
+  rightColumn.dataset.layoutBox = "right";
 
   const rightTop = document.createElement("div");
   rightTop.className = "lm_item lm_row ct-storybook-layout-right-top";
+  rightTop.dataset.layoutBox = "rightTop";
 
   const rightTopLeft = document.createElement("div");
-  rightTopLeft.className = "lm_item lm_column";
+  rightTopLeft.className = "lm_item";
+  rightTopLeft.dataset.layoutBox = "rightTopLeft";
 
   const rightTopRight = document.createElement("div");
-  rightTopRight.className = "lm_item lm_column";
+  rightTopRight.className = "lm_item";
+  rightTopRight.dataset.layoutBox = "rightTopRight";
 
   const rightBottom = document.createElement("div");
   rightBottom.className = "lm_item lm_column ct-storybook-layout-right-bottom";
+  rightBottom.dataset.layoutBox = "rightBottom";
 
   const panels = [
-    { parent: leftColumn, title: "FILESYSTEM", name: "filesystem" },
-    { parent: editorColumn, title: "src/main.nr", name: "editor" },
-    { parent: rightTopLeft, title: "SCRATCHPAD", name: "scratchpad" },
-    { parent: rightTopRight, title: "CALLTRACE", name: "calltrace" },
-    { parent: rightBottom, title: "EVENT LOG", name: "event-log" },
-    { parent: rightBottom, title: "TERMINAL OUTPUT", name: "terminal-output" },
+    {
+      parent: leftColumn,
+      layoutBox: "sidebar",
+      tabs: [{ title: "FILESYSTEM", name: "filesystem" }],
+    },
+    {
+      parent: editorStackParent,
+      layoutBox: "editor",
+      tabs: [{ title: "src/main.nr", name: "editor" }],
+    },
+    {
+      parent: rightTopLeft,
+      layoutBox: "rightTopLeft",
+      tabs: [
+        { title: "STATE", name: "state" },
+        { title: "SCRATCHPAD", name: "scratchpad" },
+      ],
+    },
+    {
+      parent: rightTopRight,
+      layoutBox: "rightTopRight",
+      tabs: [
+        { title: "CALLTRACE", name: "calltrace" },
+        { title: "AGENT ACTIVITY", name: null },
+      ],
+    },
+    {
+      parent: rightBottom,
+      layoutBox: "rightBottom",
+      tabs: [
+        { title: "EVENT LOG", name: "event-log" },
+        { title: "TERMINAL OUTPUT", name: "terminal-output" },
+      ],
+    },
   ];
 
   const mounts = [];
   for (const panel of panels) {
-    const { stack, mount } = createGoldenStack(panel.title);
-    stack.dataset.panelName = panel.name;
+    const { stack, mounts: stackMounts } = createGoldenStack(panel.tabs);
+    stack.dataset.layoutBox = panel.layoutBox;
+    stack.dataset.panelName = panel.tabs.map((tab) => tab.name).filter(Boolean).join(" ");
     panel.parent.appendChild(stack);
-    mounts.push({ name: panel.name, mount });
+    mounts.push(...stackMounts.filter(({ name }) => name));
   }
 
   rightTop.appendChild(rightTopLeft);
+  rightTop.appendChild(createSplitter("horizontal"));
   rightTop.appendChild(rightTopRight);
   rightColumn.appendChild(rightTop);
+  rightColumn.appendChild(createSplitter("vertical"));
   rightColumn.appendChild(rightBottom);
   row.appendChild(leftColumn);
-  row.appendChild(editorColumn);
+  row.appendChild(createSplitter("horizontal"));
+  row.appendChild(editorStackParent);
+  row.appendChild(createSplitter("horizontal"));
   row.appendChild(rightColumn);
-  root.appendChild(row);
-  frame.appendChild(root);
+  layoutRoot.appendChild(row);
+  shellRoot.appendChild(layoutRoot);
+  syncDefaultLayoutGeometry(shellRoot);
+  window.requestAnimationFrame(() => syncDefaultLayoutGeometry(shellRoot));
 
   return mounts;
+}
+
+function createKaraxReferenceShell(container) {
+  document.body.classList.add("monaco-workbench", "linux", "web", "enable-motion");
+
+  const menu = document.createElement("div");
+  menu.id = "menu";
+
+  const navigation = document.createElement("div");
+  navigation.id = "navigation-menu";
+  navigation.tabIndex = 0;
+  const menuRoot = document.createElement("div");
+  menuRoot.id = "menu-root";
+  const logo = document.createElement("div");
+  logo.id = "menu-logo-img";
+  menuRoot.appendChild(logo);
+  navigation.appendChild(menuRoot);
+  menu.appendChild(navigation);
+
+  const debug = document.createElement("div");
+  debug.id = "debug";
+  debug.className = "ct-header";
+  const debugItems = [
+    "history-back-image",
+    "history-forward-image",
+    "reverse-next-image",
+    "next-image",
+    "reverse-step-in-image",
+    "step-in-image",
+    "reverse-step-out-image",
+    "step-out-image",
+    "debug-run-to-entry-image",
+    "run-to-exit-image",
+    "run-to-cursor-image",
+    "toggle-current-line-breakpoint-image",
+    "restart-image",
+  ];
+  for (const id of debugItems) {
+    if (debug.children.length % 5 === 0) {
+      const separator = document.createElement("div");
+      separator.className = "separate-bar";
+      debug.appendChild(separator);
+    }
+    const button = document.createElement("button");
+    button.id = id;
+    button.className = "ct-button-image-md-secondary ct-button-no-border";
+    debug.appendChild(button);
+  }
+  const commandView = document.createElement("div");
+  commandView.id = "command-view";
+  commandView.className = "command-view";
+  const commandSurface = document.createElement("div");
+  commandSurface.className = "command-surface";
+  const commandInput = document.createElement("input");
+  commandInput.id = "command-query-text";
+  commandInput.className = "mousetrap ct-input-com-pal ct-input-search-image";
+  commandInput.type = "text";
+  commandInput.name = "command-query";
+  commandInput.placeholder = "Navigate to file or run a :command";
+  commandSurface.appendChild(commandInput);
+  commandView.appendChild(commandSurface);
+  debug.appendChild(commandView);
+  menu.appendChild(debug);
+
+  const windowMenu = document.createElement("div");
+  windowMenu.className = "window-menu";
+  for (const className of ["minimize", "maximize", "close"]) {
+    const button = document.createElement("div");
+    button.className = `menu-button-svg ${className}`;
+    windowMenu.appendChild(button);
+  }
+  menu.appendChild(windowMenu);
+  container.appendChild(menu);
+
+  const welcome = document.createElement("div");
+  welcome.id = "welcomeScreen";
+  container.appendChild(welcome);
+  const deepreview = document.createElement("div");
+  deepreview.id = "deepreview";
+  container.appendChild(deepreview);
+
+  const rootContainer = document.createElement("div");
+  rootContainer.id = "root-container";
+  rootContainer.className = "container ct-storybook-root-container ct-storybook-karax-root-container";
+
+  const root = document.createElement("div");
+  root.id = "ROOT";
+
+  const contextMenu = document.createElement("div");
+  contextMenu.id = "context-menu-container";
+  contextMenu.style.display = "none";
+  root.appendChild(contextMenu);
+
+  const fixedSearch = document.createElement("div");
+  fixedSearch.id = "fixed-search";
+  fixedSearch.className = "fixed-search-non-active";
+  root.appendChild(fixedSearch);
+
+  const frame = document.createElement("section");
+  frame.id = "main";
+  frame.className = "ct-storybook-frame";
+  root.appendChild(frame);
+
+  rootContainer.appendChild(root);
+  container.appendChild(rootContainer);
+
+  const footer = document.createElement("footer");
+  const status = document.createElement("div");
+  status.id = "status";
+  const activeNotifications = document.createElement("div");
+  activeNotifications.id = "active-notifications";
+  status.appendChild(activeNotifications);
+  const statusBase = document.createElement("div");
+  statusBase.id = "status-base";
+  const fileInfo = document.createElement("div");
+  fileInfo.id = "file-info-status";
+  for (const label of ["Noir", "UTF-8"]) {
+    const span = document.createElement("span");
+    span.className = "status-inline";
+    span.textContent = label;
+    fileInfo.appendChild(span);
+    const separator = document.createElement("div");
+    separator.className = "separate-bar";
+    fileInfo.appendChild(separator);
+  }
+  const operation = document.createElement("span");
+  operation.id = "operation-status";
+  const stable = document.createElement("span");
+  stable.id = "stable-status";
+  stable.className = "ready-status";
+  stable.textContent = "stable: ready";
+  operation.appendChild(stable);
+  fileInfo.appendChild(operation);
+  statusBase.appendChild(fileInfo);
+  const movement = document.createElement("span");
+  movement.className = "test-movement";
+  movement.textContent = "1";
+  statusBase.appendChild(movement);
+  const statusRight = document.createElement("span");
+  statusRight.className = "status-right";
+  const location = document.createElement("span");
+  location.id = "location-status";
+  const locationPath = document.createElement("span");
+  locationPath.className = "location-path status-inline";
+  locationPath.textContent =
+    "/home/zahary/metacraft/codetracer-main/test-programs/noir_space_ship/src/main.nr:13#0";
+  location.appendChild(locationPath);
+  statusRight.appendChild(location);
+  statusBase.appendChild(statusRight);
+  status.appendChild(statusBase);
+  footer.appendChild(status);
+  container.appendChild(footer);
+
+  return root;
 }
 
 function createAppShell(container, kind, name) {
@@ -500,13 +832,18 @@ function createAppShell(container, kind, name) {
 }
 
 function renderDefaultDebugLayout(container) {
-  const frame = createAppShell(container, "layout", "default-debug");
-  const mounts = appendDefaultDebugLayout(frame);
+  const root = createKaraxReferenceShell(container);
+  const mounts = appendDefaultDebugLayout(root);
 
   ensureComponentsLoaded().then(() => {
-    const disposes = mounts.map(({ name, mount }) =>
-      mountCodeTracerStory(mount, "panel", name, "populated"),
-    );
+    const disposes = [];
+    for (const { name, mount } of mounts) {
+      try {
+        disposes.push(mountCodeTracerStory(mount, "panel", name, "populated"));
+      } catch (error) {
+        console.error(`Failed to mount default layout panel "${name}"`, error);
+      }
+    }
     container.__dispose = () => {
       for (const dispose of disposes) {
         if (typeof dispose === "function") dispose();
@@ -544,9 +881,8 @@ export function story(kind, name, fixture = "populated", storyName = null) {
     play: async ({ canvasElement }) => {
       await ensureComponentsLoaded();
       await tick();
-      const frame = canvasElement.querySelector(".ct-storybook-frame");
-      expect(frame).toBeTruthy();
-      expect(frame.children.length).toBeGreaterThan(0);
+      const surface = canvasElement.querySelector(".lm_goldenlayout, .ct-storybook-frame > *");
+      expect(surface).toBeTruthy();
     },
   };
 }

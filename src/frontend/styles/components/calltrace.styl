@@ -1,7 +1,7 @@
 .local-calltrace-view
   flex-grow: 1
   overflow: auto
-  padding-top: 0.5em
+  padding-top: 0.25em
 
 .calltrace-loading
   position: absolute
@@ -149,6 +149,8 @@
 
   .calltrace-row
     padding-left: 0.3125em
+    min-height: 1.55em
+    line-height: 1.55em
 
   .calltrace-row
   .call-name
@@ -334,6 +336,7 @@
     display: flex
     align-items: center
     z-index: 2
+    min-width: max-content
 
   .collapse-call
     z-index: 2
@@ -751,16 +754,18 @@
   margin-bottom: .5em
 
 .call-search-results
-  height: 10ch
+  max-height: 5.5em
   overflow: scroll
   background-color: TRACEPOINT_BACKGROUND_COLOR
-  margin-left: 1.5ch
+  margin-left: 0
+  margin-bottom: 0.25em
 
 .call-search-results, .search-result
   color: COLOR !important
   cursor: pointer
   text-decoration: none
   padding-left: 0.5em
+  line-height: 1.45em
 
 .empty-search-result
   color: red

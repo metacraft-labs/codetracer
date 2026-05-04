@@ -233,7 +233,7 @@ const meta = {
 export default meta;
 
 export const Populated = {
-  render: () => renderTerminalOutput("populated"),
+  render: () => renderTerminalOutput("demo"),
   play: async ({ canvasElement }) => {
     await ensureComponentsLoaded();
     await tick();

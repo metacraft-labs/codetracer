@@ -15,16 +15,18 @@ Shared project brief: `../project-visual-brief.md`
 
 ## Seeded State
 
-The fixture shows a Noir replay that has printed three terminal lines. The
-middle line is the active replay position.
+The fixture shows the Noir space-ship replay terminal transcript from the
+Karax terminal-visible reference. All lines are ahead of the current replay
+position, matching the reference state.
 
 ## Expected Visible Content
 
 - Dark CodeTracer app background and app font styling.
 - Terminal output panel with CodeTracer terminal row styling.
-- Three terminal lines including "CodeTracer replay started",
-  "noir-space-ship", and a warning line.
-- Active/past/future terminal fragments should be visually distinguishable.
+- Dense terminal output including "Positive Test Case", shield status rows,
+  and the final "shields will not hold as expected" line.
+- Future terminal fragments should use the same dimmed terminal row styling as
+  the Karax reference.
 
 ## Must Not Show
 

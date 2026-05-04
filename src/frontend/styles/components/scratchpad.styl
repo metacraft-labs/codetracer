@@ -24,6 +24,18 @@
 .scratchpad-value-view
   display: flex
   align-items: start
+  min-height: 1.5em
+  padding: 0.15em 0.35em
+  color: TEXT_CONTENT_COLOR
+
+  .scratchpad-value-cell
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+    line-height: 1.45em
+
+  &.scratchpad-value-error .scratchpad-value-cell
+    color: CALLTRACE_RETURN_COLOR
 
   .toggle-value-history
     display: none

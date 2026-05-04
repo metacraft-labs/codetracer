@@ -1,0 +1,72 @@
+.timeline-component
+  display: flex
+  flex-direction: column
+  height: 100%
+  width: 100%
+  min-height: 0
+  box-sizing: border-box
+  overflow: hidden
+  color: TEXT_CONTENT_COLOR
+  font-family: "FiraCode"
+  font-size: 13px
+  line-height: 20px
+
+  .timeline-position
+    display: flex
+    align-items: center
+    gap: 12px
+    padding: 6px 8px
+    flex: 0 0 auto
+    color: VALUE_TYPE_COLOR
+
+  .position-ticks
+    color: TEXT_CONTENT_COLOR
+
+  .timeline-zoom-controls
+    display: flex
+    align-items: center
+    gap: 4px
+    padding: 0 8px 8px
+    flex: 0 0 auto
+
+    button
+      width: 24px
+      height: 24px
+      border: 0
+      border-radius: 4px
+      background: HEADER_ELEMENT_BACKGROUND_COLOR
+      color: TEXT_CONTENT_COLOR
+      cursor: pointer
+      font: inherit
+
+  .zoom-level
+    min-width: 42px
+    text-align: center
+    color: VALUE_TYPE_COLOR
+
+  .timeline-track
+    position: relative
+    height: 28px
+    margin: 0 8px
+    border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    background:
+      linear-gradient(90deg, EVENT_LOG_ROWS_BORDERS_COLOR 1px, transparent 1px)
+    background-size: 40px 100%
+    flex: 0 0 auto
+
+  .timeline-playhead
+    position: absolute
+    top: 0
+    bottom: 0
+    width: 2px
+    background: CT_SECONDARY_BLUE
+
+  .timeline-hover-tooltip
+    width: fit-content
+    margin: 8px
+    padding: 2px 6px
+    border-radius: 4px
+    background: HEADER_ELEMENT_BACKGROUND_COLOR
+    color: TEXT_CONTENT_COLOR
+    font-size: 12px

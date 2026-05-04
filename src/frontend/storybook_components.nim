@@ -6,7 +6,7 @@
 when not defined(js):
   {.error: "storybook_components.nim requires the JS backend (nim js)".}
 
-import std/[options, tables]
+import std/[options, strutils, tables]
 
 import isonim/rxcore
 import isonim/viewmodel
@@ -93,6 +93,65 @@ type
   DisposeProc = proc()
   MountBody = proc(store: ReplayDataStore): DisposeProc
 
+proc storyCalltraceLines(): seq[CallLine] =
+  result = @[
+    CallLine(index: 0, name: "main", depth: 0, rrTicks: 2'u64,
+             location: Location(file: "src/main.nr", line: 13, column: 3),
+             hasChildren: true, isExpanded: true, callKey: "main:0"),
+  ]
+  var idx = 1'i64
+  for iteration in 0 .. 7:
+    result.add(CallLine(index: idx, name: "iterate_asteroids",
+      depth: 1, rrTicks: uint64(46 + iteration * 68),
+      location: Location(file: "src/shield.nr", line: 54, column: 3),
+      hasChildren: true, isExpanded: true,
+      callKey: "iterate:" & $iteration))
+    inc idx
+    result.add(CallLine(index: idx, name: "calculate_damage",
+      depth: 2, rrTicks: uint64(52 + iteration * 68),
+      location: Location(file: "src/shield.nr", line: 58, column: 3,
+                         callstackDepth: 2),
+      hasChildren: true, isExpanded: true,
+      callKey: "damage:" & $iteration))
+    inc idx
+    result.add(CallLine(index: idx, name: "calculate_remaining_shield_pct",
+      depth: 3, rrTicks: uint64(58 + iteration * 68),
+      location: Location(file: "src/shield.nr", line: 61, column: 3,
+                         callstackDepth: 3),
+      hasChildren: false, isExpanded: false,
+      callKey: "remaining:" & $iteration))
+    inc idx
+    result.add(CallLine(index: idx, name: "calculate_shield_regeneration",
+      depth: 2, rrTicks: uint64(72 + iteration * 68),
+      location: Location(file: "src/shield.nr", line: 66, column: 3,
+                         callstackDepth: 2),
+      hasChildren: false, isExpanded: false,
+      callKey: "regen:" & $iteration))
+    inc idx
+    result.add(CallLine(index: idx, name: "status_report",
+      depth: 1, rrTicks: uint64(114 + iteration * 68),
+      location: Location(file: "src/main.nr", line: 17, column: 3,
+                         callstackDepth: 1),
+      hasChildren: false, isExpanded: false,
+      callKey: "status:" & $iteration))
+    inc idx
+
+proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
+  result = initTable[string, seq[CallArg]]()
+  result["main:0"] = @[
+    CallArg(name: "initial_shield", text: "10000"),
+    CallArg(name: "shield_regen_percentage", text: "10"),
+  ]
+  for iteration in 0 .. 7:
+    result["iterate:" & $iteration] = @[
+      CallArg(name: "initial_shield", text: "10000"),
+      CallArg(name: "iteration", text: $iteration),
+    ]
+    result["damage:" & $iteration] = @[
+      CallArg(name: "initial_shield", text: "10000"),
+      CallArg(name: "asteroid_mass", text: $(100 + iteration * 350)),
+    ]
+
 proc makeStore(): ReplayDataStore =
   let mock = newMockBackendService(autoRespond = true)
   result = createReplayDataStore(mock.toBackendService)
@@ -127,27 +186,9 @@ proc makeStore(): ReplayDataStore =
   result.locals.globals.val = @[
     Variable(name: "MAX_SHIELD", value: "100", typeName: "u32"),
   ]
-  result.calltrace.lines.val = @[
-    CallLine(index: 0, name: "main", depth: 0, rrTicks: 100'u64,
-             location: Location(file: "src/main.nr", line: 8, column: 1),
-             hasChildren: true, isExpanded: true, callKey: "main:0"),
-    CallLine(index: 1, name: "calculate_damage", depth: 1, rrTicks: 180'u64,
-             location: Location(file: "src/combat.nr", line: 42, column: 3,
-                                callstackDepth: 1),
-             hasChildren: false, isExpanded: false, callKey: "damage:1"),
-    CallLine(index: 2, name: "apply_shield_regeneration", depth: 1,
-             rrTicks: 240'u64,
-             location: Location(file: "src/combat.nr", line: 64, column: 3,
-                                callstackDepth: 1),
-             hasChildren: false, isExpanded: false, callKey: "regen:1"),
-  ]
-  var args = initTable[string, seq[CallArg]]()
-  args["damage:1"] = @[
-    CallArg(name: "ship", text: "ShipState(hull: 100, shield: 71)"),
-    CallArg(name: "weapon", text: "laser"),
-  ]
-  result.calltrace.args.val = args
-  result.calltrace.totalCallsCount.val = 3'u64
+  result.calltrace.lines.val = storyCalltraceLines()
+  result.calltrace.args.val = storyCalltraceArgs()
+  result.calltrace.totalCallsCount.val = uint64(result.calltrace.lines.val.len)
   result.calltrace.finished.val = true
 
 proc mountWithStore(container: isonim_dom.Element; body: MountBody): DisposeProc =
@@ -169,15 +210,22 @@ proc mountWithStore(container: isonim_dom.Element; body: MountBody): DisposeProc
       rootDisposer()
     container.innerHTML = ""
 
-proc storyLines(): seq[TerminalLine] =
+proc terminalLine(lineIndex: int; htmlText: string; rrTicks: uint64): TerminalLine =
+  TerminalLine(lineIndex: lineIndex, fragments: @[
+    TerminalEventFragment(
+      htmlText: htmlText,
+      eventIndex: lineIndex,
+      rrTicks: rrTicks,
+    ),
+  ])
+
+proc demoTerminalLines(): seq[TerminalLine] =
   @[
-    TerminalLine(lineIndex: 0, fragments: @[
-      TerminalEventFragment(
-        htmlText: "<span class=\"ansi-bright-green-fg\">CodeTracer</span> replay started",
-        eventIndex: 10,
-        rrTicks: 100'u64,
-      ),
-    ]),
+    terminalLine(
+      0,
+      "<span class=\"ansi-bright-green-fg\">CodeTracer</span> replay started",
+      100'u64,
+    ),
     TerminalLine(lineIndex: 1, fragments: @[
       TerminalEventFragment(htmlText: "running ", eventIndex: 11, rrTicks: 140'u64),
       TerminalEventFragment(
@@ -186,14 +234,90 @@ proc storyLines(): seq[TerminalLine] =
         rrTicks: 180'u64,
       ),
     ]),
-    TerminalLine(lineIndex: 2, fragments: @[
-      TerminalEventFragment(
-        htmlText: "<span class=\"ansi-bright-yellow-fg\">warning:</span> flow loop still rendering",
-        eventIndex: 13,
-        rrTicks: 220'u64,
-      ),
-    ]),
+    terminalLine(
+      2,
+      "<span class=\"ansi-bright-yellow-fg\">warning:</span> flow loop still rendering",
+      220'u64,
+    ),
   ]
+
+const noirTerminalTranscript = [
+  "Positive Test Case",
+  "----- iteration 0 -----",
+  "Damage: 100",
+  "Regenerated 100 energy",
+  "Shield status 100% 10000",
+  "----- iteration 1 -----",
+  "Damage: 2000",
+  "Regenerated 1000 energy",
+  "Shield status 90% 9000",
+  "----- iteration 2 -----",
+  "Damage: 2000",
+  "Regenerated 1000 energy",
+  "Shield status 80% 8000",
+  "----- iteration 3 -----",
+  "Damage: 2000",
+  "Regenerated 1000 energy",
+  "Shield status 70% 7000",
+  "----- iteration 4 -----",
+  "Damage: 3000",
+  "Regenerated 1000 energy",
+  "Shield status 50% 5000",
+  "----- iteration 5 -----",
+  "Damage: 2500",
+  "Regenerated 1000 energy",
+  "Shield status 35% 3500",
+  "----- iteration 6 -----",
+  "Damage: 3250",
+  "Regenerated 1000 energy",
+  "Shield status 12% 1250",
+  "----- iteration 7 -----",
+  "Damage: 1232",
+  "Regenerated 1000 energy",
+  "Shield status 10% 1018",
+  "shields will hold as expected",
+  "------------------",
+  "Negative Test Case",
+  "------------------",
+  "----- iteration 0 -----",
+  "Damage: 2000",
+  "Regenerated 1000 energy",
+  "Shield status 90% 9000",
+  "----- iteration 1 -----",
+  "Damage: 3000",
+  "Regenerated 1000 energy",
+  "Shield status 70% 7000",
+  "----- iteration 2 -----",
+  "Damage: 6000",
+  "Regenerated 1000 energy",
+  "Shield status 20% 2000",
+  "----- iteration 3 -----",
+  "Damage: 1600",
+  "Regenerated 1000 energy",
+  "Shield status 14% 1400",
+  "----- iteration 4 -----",
+  "Damage: 1290",
+  "Regenerated 1000 energy",
+  "Shield status 11% 1110",
+  "----- iteration 5 -----",
+  "Damage: 1110",
+  "Regenerated 0 energy",
+  "Shield status 0% 0",
+  "----- iteration 6 -----",
+  "Damage: 0",
+  "Regenerated 0 energy",
+  "Shield status 0% 0",
+  "----- iteration 7 -----",
+  "Damage: 0",
+  "Regenerated 0 energy",
+  "Shield status 0% 0",
+  "shields will not hold as expected",
+]
+
+proc storyLines(): seq[TerminalLine] =
+  result = @[]
+  for lineIndex, text in noirTerminalTranscript:
+    result.add(terminalLine(lineIndex, text, uint64(100 + lineIndex * 6)))
 
 proc storyProblems(): seq[BuildProblemLine] =
   @[
@@ -206,22 +330,39 @@ proc storyProblems(): seq[BuildProblemLine] =
 proc storyFilesystem(): FilesystemEntryNode =
   FilesystemEntryNode(
     id: "root",
-    text: "noir-space-ship",
-    path: "/workspace/noir-space-ship",
+    text: "source folders",
+    path: "/workspace/source folders",
     isFolder: true,
     isExpanded: true,
     children: @[
-      FilesystemEntryNode(id: "src", text: "src", path: "/workspace/noir-space-ship/src",
+      FilesystemEntryNode(id: "codetracer-main", text: "codetracer-main",
+                          path: "/workspace/source folders/codetracer-main",
                           isFolder: true, isExpanded: true, children: @[
-        FilesystemEntryNode(id: "main", text: "main.nr",
-                            path: "/workspace/noir-space-ship/src/main.nr",
-                            icon: "devicon-nim-plain", diffClass: fdcChanged),
-        FilesystemEntryNode(id: "combat", text: "combat.nr",
-                            path: "/workspace/noir-space-ship/src/combat.nr",
-                            icon: "devicon-nim-plain", diffClass: fdcAdded),
+        FilesystemEntryNode(id: "test-programs", text: "test-programs",
+                            path: "/workspace/source folders/codetracer-main/test-programs",
+                            isFolder: true, isExpanded: true, children: @[
+          FilesystemEntryNode(id: "noir-space-ship", text: "noir_space_ship",
+                              path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship",
+                              isFolder: true, isExpanded: true, children: @[
+            FilesystemEntryNode(id: "nargo", text: "Nargo.toml",
+                                path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/Nargo.toml",
+                                icon: "devicon-rust-original"),
+            FilesystemEntryNode(id: "prover", text: "Prover.toml",
+                                path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/Prover.toml",
+                                icon: "devicon-rust-original"),
+            FilesystemEntryNode(id: "src", text: "src",
+                                path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src",
+                                isFolder: true, isExpanded: true, children: @[
+              FilesystemEntryNode(id: "main", text: "main.nr",
+                                  path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src/main.nr",
+                                  icon: "custom-noir-icon", diffClass: fdcChanged),
+              FilesystemEntryNode(id: "shield", text: "shield.nr",
+                                  path: "/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src/shield.nr",
+                                  icon: "custom-noir-icon"),
+            ]),
+          ]),
+        ]),
       ]),
-      FilesystemEntryNode(id: "readme", text: "README.md",
-                          path: "/workspace/noir-space-ship/README.md"),
     ],
   )
 
@@ -266,11 +407,7 @@ proc applyErrors(vm: ErrorsVM) =
   vm.setProblems(storyProblems())
 
 proc applyScratchpad(vm: ScratchpadVM) =
-  vm.addValue(ScratchpadValueEntry(expression: "remaining_shield",
-                                   valueText: "71", isLiteral: true))
-  vm.addValue(ScratchpadValueEntry(expression: "ship.weapon.cooldown",
-                                   valueText: "Error: field missing",
-                                   isError: true))
+  vm.clearValues()
 
 proc applySearchResults(vm: SearchResultsVM) =
   vm.setQuery("shield")
@@ -282,30 +419,145 @@ proc applySearchResults(vm: SearchResultsVM) =
   ])
   vm.setActive(true)
 
+proc storyEventLine(index: int; text: string): int =
+  if index == 0:
+    13
+  elif index == 33:
+    17
+  elif index == 34:
+    23
+  elif index == 35:
+    24
+  elif index == 36:
+    25
+  elif index == 69:
+    32
+  elif text.startsWith("----- iteration"):
+    54
+  elif text.startsWith("Damage:"):
+    58
+  elif text.startsWith("Regenerated"):
+    61
+  elif text.startsWith("Shield status"):
+    66
+  else:
+    13
+
+proc storyEventRows(): seq[EventLogRow] =
+  result = @[]
+  for index, text in noirTerminalTranscript:
+    let rrTicks =
+      if index == 0: 2'u64
+      else: uint64(40 + index * 6)
+    result.add EventLogRow(
+      eventId: rrTicks,
+      kind: "",
+      line: storyEventLine(index, text),
+      value: "stdout: " & text)
+
 proc applyEventLog(vm: EventLogVM) =
-  vm.eventRows.val = @[
-    EventLogRow(eventId: 10'u64, kind: "Call", line: 8, value: "main"),
-    EventLogRow(eventId: 12'u64, kind: "Write", line: 42, value: "remaining_shield = 71"),
-    EventLogRow(eventId: 13'u64, kind: "Return", line: 43, value: "71"),
-  ]
-  vm.totalEventCount.val = 3
-  vm.selectRow(some(1))
+  vm.eventRows.val = storyEventRows()
+  vm.totalEventCount.val = vm.eventRows.val.len
+  vm.selectRow(some(0))
 
 proc applyCalltrace(vm: CalltraceVM) =
-  vm.setViewportHeight(12)
-  vm.selectEntry(some(1'i64))
+  vm.setViewportHeight(48)
+  vm.selectEntry(some(2'i64))
   vm.setSearchQuery("damage")
-  vm.setBackendSearchResults(@[(name: "calculate_damage", rrTicks: 180, key: "damage:1")])
+  vm.setBackendSearchResults(@[
+    (name: "calculate_damage", rrTicks: 52, key: "damage:0"),
+    (name: "calculate_damage", rrTicks: 120, key: "damage:1"),
+  ])
+  vm.store.calltrace.loadingState.val = lsIdle
 
 proc applyState(vm: StateVM) =
   vm.selectPath("ship.shield")
-  vm.addWatch("remaining_shield")
+
+proc htmlEscape(text: string): string =
+  result = text
+  result = result.replace("&", "&amp;")
+  result = result.replace("<", "&lt;")
+  result = result.replace(">", "&gt;")
+  result = result.replace("\"", "&quot;")
+
+proc storyEventPath(row: EventLogRow): string =
+  if row.line in [13, 17, 23, 24, 25, 32]: "main.nr:" & $row.line
+  elif row.line >= 38 and row.line <= 43: "combat.nr:" & $row.line
+  else: "shield.nr:" & $row.line
+
+proc storyEventDenseHtml(rows: seq[EventLogRow]; selected: Option[int]): string =
+  result.add "<div class=\"dt-container dts DTS dt-empty-footer\">"
+  result.add "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">"
+  result.add "<div class=\"dt-scroll\"><div class=\"dt-scroll-head\"><div class=\"dt-scroll-headInner\">"
+  result.add "<table class=\"dataTable\"><thead><tr><th>direction location rr ticks</th><th>index</th><th>location</th><th>event</th><th>text</th></tr></thead></table>"
+  result.add "</div></div><div class=\"dt-scroll-body\"><table class=\"dataTable\"><tbody>"
+  for i, row in rows:
+    let rowState =
+      if selected.isSome and selected.get == i: "past active"
+      elif i > 2: "future"
+      else: "past"
+    let percent = min(100, int(row.eventId))
+    result.add "<tr class=\"" & rowState & "\">"
+    result.add "<td class=\"direct-location-rr-ticks eventLog-cell dt-type-numeric sorting_1\">"
+    result.add "<div class=\"rr-ticks-time-container\"><span class=\"rr-ticks-time\">" & $row.eventId & "</span></div>"
+    result.add "<div class=\"rr-ticks-line-container\"><span class=\"rr-ticks-line event-rr-ticks-line\"></span>"
+    result.add "<span class=\"rr-ticks-empty-remaining\" style=\"width:" & $(100 - percent) & "%; left:" & $percent & "%\"></span></div></td>"
+    result.add "<td class=\"eventLog-index eventLog-cell dt-type-numeric\">" & $i & "</td>"
+    result.add "<td class=\"eventLog-fullpath eventLog-cell\">" & htmlEscape(storyEventPath(row)) & "</td>"
+    result.add "<td class=\"eventLog-event eventLog-cell\">" & htmlEscape(row.kind) & "</td>"
+    result.add "<td class=\"eventLog-text eventLog-cell\">" & htmlEscape(row.value) & "</td>"
+    result.add "</tr>"
+  result.add "</tbody></table></div></div></div></div></div>"
+
+proc storyEventDetailedHtml(): string =
+  "<div class=\"dt-container dt-empty-footer\" style=\"display: none;\">" &
+    "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">" &
+    "<table class=\"dataTable\"><tbody><tr><td class=\"dt-empty\">No data available in table</td></tr></tbody></table>" &
+    "</div></div></div>"
+
+proc populateStorybookEventLogTables(
+    denseTableId, detailedTableId, denseHtml, detailedHtml: cstring) =
+  {.emit: """
+    const denseTable = document.getElementById(`denseTableId`);
+    if (denseTable) {
+      const denseHost = denseTable.closest('.eventLog-dense-table');
+      if (denseHost) {
+        denseHost.innerHTML = `denseHtml`;
+        const eventLog = denseHost.closest('.eventLog');
+        const rowCount = denseHost.querySelectorAll('tbody tr').length;
+        const footer = eventLog && eventLog.querySelector('.data-tables-footer');
+        if (footer) {
+          footer.className = 'data-tables-footer 1to40';
+          const startInput = footer.querySelector('input');
+          const endRow = footer.querySelector('.data-tables-footer-end-row');
+          const rowsCount = footer.querySelector('.data-tables-footer-rows-count');
+          if (startInput) {
+            const startValue = rowCount > 0 ? '1' : '0';
+            startInput.value = startValue;
+            startInput.setAttribute('value', startValue);
+          }
+          if (endRow) endRow.textContent = String(Math.min(40, rowCount));
+          if (rowsCount) rowsCount.textContent = String(rowCount);
+        }
+      }
+    }
+    const detailedTable = document.getElementById(`detailedTableId`);
+    if (detailedTable) {
+      const detailedHost = detailedTable.closest('.eventLog-detailed-table');
+      if (detailedHost) detailedHost.innerHTML = `detailedHtml`;
+    }
+  """.}
 
 proc applyFilesystem(vm: FilesystemVM) =
   vm.setRoot(storyFilesystem())
+  vm.expandPath("/workspace/source folders")
+  vm.expandPath("/workspace/source folders/codetracer-main")
+  vm.expandPath("/workspace/source folders/codetracer-main/test-programs")
+  vm.expandPath("/workspace/source folders/codetracer-main/test-programs/noir_space_ship")
+  vm.expandPath("/workspace/source folders/codetracer-main/test-programs/noir_space_ship/src")
   vm.setDiffEntries(@[
     FilesystemDiffEntry(path: "src/main.nr", zebra: false),
-    FilesystemDiffEntry(path: "src/combat.nr", zebra: true),
+    FilesystemDiffEntry(path: "src/shield.nr", zebra: true),
   ])
 
 proc applyTraceLog(vm: TraceLogVM) =
@@ -582,7 +834,22 @@ proc mountEventLog(container: isonim_dom.Element; fixture: string): DisposeProc 
       vm.loadingState.val = lsLoading
     else:
       vm.applyEventLog()
-    mountIsoNimEventLog(container, vm)
+    let denseTableId = "eventLog-story-dense-table-0"
+    let detailedTableId = "eventLog-story-detailed-table-0"
+    let searchInputId = "eventLog-story-search"
+    mountIsoNimEventLogWithDataTables(
+      container,
+      vm,
+      0,
+      denseTableId,
+      detailedTableId,
+      searchInputId,
+      proc() =
+        populateStorybookEventLogTables(
+          cstring(denseTableId),
+          cstring(detailedTableId),
+          cstring(storyEventDenseHtml(vm.eventRows.val, vm.selectedRow.val)),
+          cstring(storyEventDetailedHtml())))
     return proc() = vm.dispose())
 
 proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -596,7 +863,9 @@ proc mountState(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createStateVM(store)
     if fixture != "empty": vm.applyState()
+    store.locals.loadingState.val = lsIdle
     mountIsoNimStatePanel(container, vm)
+    store.locals.loadingState.val = lsIdle
     return proc() = vm.dispose())
 
 proc mountEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -775,9 +1044,12 @@ proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): Dispos
     of "empty":
       vm.setLines(@[])
       vm.setCurrentRRTicks(0'u64)
+    of "demo":
+      vm.setLines(demoTerminalLines())
+      vm.setCurrentRRTicks(180'u64)
     else:
       vm.setLines(storyLines())
-      vm.setCurrentRRTicks(180'u64)
+      vm.setCurrentRRTicks(0'u64)
     mountIsoNimTerminalOutput(container, vm)
     return proc() = vm.dispose())
 

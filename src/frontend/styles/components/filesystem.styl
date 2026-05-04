@@ -7,7 +7,7 @@
 
 .filesystem
   font-family: "SpaceGrotesk" !important
-  // font-size: 14px !important
+  font-size: 0.95em !important
   font-style: normal !important
   font-weight: 400 !important
   overflow: auto
@@ -21,6 +21,68 @@
 
   &:focus
     outline: 0px
+
+.filesystem-tree
+  min-width: max-content
+  padding: 0.5em 0.25em
+
+.filesystem-entry
+  display: grid
+  grid-template-columns: 1em 1.35em max-content
+  align-items: center
+  min-height: 1.55em
+  line-height: 1.55em
+  cursor: default
+  white-space: nowrap
+
+  &:hover
+    background-color: ACTIVE_ROW
+
+.filesystem-entry-children
+  grid-column: 1 / -1
+  padding-left: 1.35em
+
+.filesystem-entry-twisty
+  color: TEXT_CONTENT_COLOR
+  opacity: 0.85
+  text-align: center
+
+.filesystem-entry-icon
+  width: 1.1em
+  height: 1.1em
+  position: relative
+  opacity: 0.95
+
+  &.custom-noir-icon::before
+    position: static
+    transform: none
+    width: 1em
+    height: 1em
+
+.filesystem-entry-folder-icon
+  border: 0.09em solid TEXT_CONTENT_COLOR
+  border-radius: 0.12em
+  width: 0.95em
+  height: 0.7em
+
+  &::before
+    content: ""
+    position: absolute
+    left: 0.08em
+    top: -0.28em
+    width: 0.45em
+    height: 0.25em
+    border: 0.09em solid TEXT_CONTENT_COLOR
+    border-bottom: 0
+    border-radius: 0.12em 0.12em 0 0
+
+.filesystem-entry-file-icon
+  border-left: 0.12em solid TEXT_CONTENT_COLOR
+  height: 1em
+
+.filesystem-entry-label
+  overflow: hidden
+  text-overflow: ellipsis
 
 .jstree-anchor
   color: TEXT_CONTENT_COLOR !important

@@ -15,16 +15,20 @@ Shared project brief: `../project-visual-brief.md`
 
 ## Seeded State
 
-The fixture includes a Golden Layout-style debugging workspace with Filesystem,
-Editor, Scratchpad, Calltrace, Event Log, and Terminal Output panels populated
-from real IsoNim panel views.
+The fixture includes a Karax-reference-shaped Golden Layout debugging workspace
+with Filesystem, Editor, State/Scratchpad, Calltrace/Agent Activity, and Event
+Log/Terminal Output stacks. Visible panels are real IsoNim views; inactive tabs
+should remain present in the DOM but hidden like the Karax reference.
 
 ## Expected Visible Content
 
 - Dark CodeTracer app styling loaded in the iframe.
-- Golden Layout panel headers, tabs, and content cells should be visible.
+- Golden Layout panel headers, grouped tabs, splitters, and content cells should
+  be visible.
 - Multiple real IsoNim panels should look like CodeTracer surfaces, not browser defaults.
-- The layout should show a coherent full-screen debugging workspace.
+- The layout should use the Karax shell framing: dark body, top-offset
+  root-container, `#ROOT`, empty `#main`, and GoldenLayout immediately under
+  `#ROOT`.
 
 ## Must Not Show
 

@@ -156,6 +156,18 @@ proc deepReviewStatusClass*(status: string): string =
   of "D": "deepreview-diff-deleted"
   else: ""
 
+proc iconClass*(entry: FilesystemEntryNode): string =
+  ## Add the devicon / custom file-icon class directly to the icon slot.
+  ## The legacy jstree renderer did this on its theme icon span; keeping the
+  ## class in the DOM lets the existing icon font and Noir SVG rules render
+  ## instead of exposing the class name as row text.
+  if entry.icon.len > 0:
+    "filesystem-entry-icon " & entry.icon
+  elif entry.isFolder:
+    "filesystem-entry-icon filesystem-entry-folder-icon"
+  else:
+    "filesystem-entry-icon filesystem-entry-file-icon"
+
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
@@ -176,8 +188,8 @@ proc renderMockEntry(r: MockRenderer; vm: FilesystemVM;
              vm.toggleExpanded(path)):
       span(class = "filesystem-entry-twisty"):
         text twistyText(entry, expandedFlag)
-      tdiv(class = "filesystem-entry-icon"):
-        text entry.icon
+      tdiv(class = iconClass(entry)):
+        discard
       span(class = "filesystem-entry-label"):
         text entry.text
       tdiv(class = "filesystem-entry-children"):
@@ -224,7 +236,10 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     # -- Tree --
     let root = vm.rootEntry.val
     r.clearChildren(treeContainer)
-    if root.children.len > 0:
+    if root.text.len > 0 and root.text != "/":
+      let node = renderMockEntry(r, vm, root)
+      r.appendChild(treeContainer, node)
+    elif root.children.len > 0:
       for child in root.children:
         let childNode = renderMockEntry(r, vm, child)
         r.appendChild(treeContainer, childNode)
@@ -359,8 +374,7 @@ when defined(js):
                                       "filesystem-entry-twisty")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(twisty))
 
-    let icon = createWebTextElement("div", entry.icon,
-                                    "filesystem-entry-icon")
+    let icon = createWebElement("div", iconClass(entry))
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(icon))
 
     let label = createWebTextElement("span", entry.text,
@@ -404,7 +418,11 @@ when defined(js):
       # -- Tree --
       let root = vm.rootEntry.val
       clearWebChildren(treeContainer)
-      if root.children.len > 0:
+      if root.text.len > 0 and root.text != "/":
+        let node = renderWebEntry(vm, root)
+        isonim_dom.appendChild(isonim_dom.Node(treeContainer),
+                               isonim_dom.Node(node))
+      elif root.children.len > 0:
         for child in root.children:
           let childNode = renderWebEntry(vm, child)
           isonim_dom.appendChild(isonim_dom.Node(treeContainer),

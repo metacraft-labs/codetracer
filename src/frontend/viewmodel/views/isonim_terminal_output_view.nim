@@ -23,7 +23,8 @@
 ##     pre
 ##       div.terminal-line#terminal-line-{lineIndex}
 ##         div.{past|active|future}                ← fragment, click → jumpToEvent
-##           [innerHTML / textContent = fragment.htmlText]
+##           div                                  ← content wrapper
+##             [innerHTML / textContent = fragment.htmlText]
 ##       div.empty-overlay[display reactive]
 ##         text "Loading..." | "no terminal output ..."
 ##
@@ -128,7 +129,8 @@ proc renderTerminalOutputPanel*(r: MockRenderer;
         let fragNode = ui(r):
           tdiv(class = fragmentClass(focus, fragRRTicks),
                onclick = onClick):
-            text fragText
+            tdiv:
+              text fragText
         r.appendChild(lineNode, fragNode)
 
   panel
@@ -175,7 +177,10 @@ when defined(js):
                                   cstring(fragmentClass(focus, frag.rrTicks)))
           # innerHTML — the htmlText carries ANSI-decorated <span>
           # runs from ansi_up (legacy view used Karax's `verbatim`).
-          fragNode.innerHTML = cstring(frag.htmlText)
+          let contentNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
+          contentNode.innerHTML = cstring(frag.htmlText)
+          isonim_dom.appendChild(isonim_dom.Node(fragNode),
+                                 isonim_dom.Node(contentNode))
           let handler = onFragmentClick(vm, frag.eventIndex)
           isonim_dom.addEventListener(isonim_dom.Node(fragNode), cstring"click",
                                       proc(ev: isonim_dom.Event) = handler())

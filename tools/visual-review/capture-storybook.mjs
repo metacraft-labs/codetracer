@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -32,6 +32,14 @@ const views = {
   },
 };
 
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 const sizes = {
   wide: { width: 1920, height: 1080 },
   laptop: { width: 1440, height: 900 },
@@ -47,6 +55,42 @@ function argValue(name) {
 
 function hasArg(name) {
   return process.argv.includes(name);
+}
+
+function loadStorybookViews() {
+  const indexPath = join(staticDir, "index.json");
+  if (!existsSync(indexPath)) return {};
+
+  const index = JSON.parse(readFileSync(indexPath, "utf8"));
+  const entries = Object.values(index.entries ?? {});
+  const discovered = {};
+  for (const entry of entries) {
+    if (entry.type !== "story" || !entry.title?.startsWith("CodeTracer/")) continue;
+
+    const group = entry.title.slice("CodeTracer/".length);
+    const groupSlug = slugify(group);
+    const nameSlug = slugify(entry.name);
+    const keys = [
+      nameSlug,
+      `${groupSlug}-${nameSlug}`,
+      entry.id,
+    ];
+
+    for (const key of keys) {
+      if (!key || discovered[key] || views[key]) continue;
+      discovered[key] = {
+        storyId: entry.id,
+        brief: views[nameSlug]?.brief ?? "tools/visual-review/project-visual-brief.md",
+      };
+    }
+  }
+  return discovered;
+}
+
+function printViewList(map) {
+  for (const [name, view] of Object.entries(map).sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`${name}\t${view.storyId}\t${view.brief}`);
+  }
 }
 
 function run(command, args, options = {}) {
@@ -105,6 +149,7 @@ async function main() {
   const selectedView = argValue("--view");
   const selectedSize = argValue("--size");
   const noBuild = hasArg("--no-build");
+  const listViews = hasArg("--list-views");
   const port = Number(argValue("--port") ?? "6106");
 
   if (!noBuild) {
@@ -138,6 +183,16 @@ async function main() {
     throw new Error("Missing storybook/storybook-static. Run without --no-build first.");
   }
 
+  const allViews = {
+    ...loadStorybookViews(),
+    ...views,
+  };
+
+  if (listViews) {
+    printViewList(allViews);
+    return;
+  }
+
   const server = startStaticServer(port);
   try {
     await waitForServer(port);
@@ -148,7 +203,7 @@ async function main() {
     });
 
     const reports = [];
-    for (const [viewName, view] of selectedEntries(views, selectedView)) {
+    for (const [viewName, view] of selectedEntries(allViews, selectedView)) {
       for (const [sizeName, viewport] of selectedEntries(sizes, selectedSize)) {
         const page = await browser.newPage({ viewport });
         const resourceErrors = [];
@@ -318,6 +373,26 @@ async function main() {
             ".build-clickable",
             ".build-line-error",
             ".build-line-warning",
+            ".filesystem-container",
+            ".filesystem-entry-row",
+            ".filesystem-entry",
+            ".filesystem-entry-icon",
+            ".filesystem-entry-name",
+            ".calltrace-view",
+            ".calltrace-line",
+            ".calltrace-name",
+            ".calltrace-args",
+            ".eventLog",
+            ".eventLog-cell",
+            ".eventLog-dense-table",
+            ".dataTable",
+            ".data-tables-footer",
+            ".scratchpad",
+            ".scratchpad-table",
+            ".low-level-code",
+            ".flow",
+            ".timeline",
+            ".trace-log",
             ".isonim-app-shell",
             ".isonim-panel-section",
             ".isonim-section-content",

@@ -9,6 +9,87 @@
   padding-left: 2px
   padding-right: 2px
 
+.flow-component
+  display: flex
+  flex-direction: column
+  height: 100%
+  width: 100%
+  min-height: 0
+  box-sizing: border-box
+  overflow: hidden
+  color: TEXT_CONTENT_COLOR
+  font-family: "FiraCode"
+  font-size: 13px
+  line-height: 20px
+
+  .flow-mode-selector
+    display: flex
+    align-items: center
+    gap: 4px
+    padding: 6px 8px
+    flex: 0 0 auto
+
+    button
+      height: 24px
+      min-width: 64px
+      padding: 0 10px
+      border: 0
+      border-radius: 4px
+      background: HEADER_ELEMENT_BACKGROUND_COLOR
+      color: DROPDOWN_TEXT_COLOR
+      cursor: pointer
+      font: inherit
+
+      &.active
+        background: ACTIVE_MENU_BACKGROUND
+        color: TEXT_CONTENT_COLOR
+
+  .flow-loading
+    padding: 0 8px 6px
+    color: VALUE_TYPE_COLOR
+
+  .flow-iteration-slider
+    display: grid
+    grid-template-columns: max-content minmax(140px, 360px)
+    gap: 10px
+    align-items: center
+    padding: 0 8px 8px
+    flex: 0 0 auto
+
+  .iteration-range
+    width: 100%
+
+  .flow-steps
+    flex: 1 1 auto
+    min-height: 0
+    border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    background:
+      linear-gradient(EVENT_LOG_ROWS_BORDERS_COLOR 1px, transparent 1px)
+    background-size: 100% 24px
+
+  .flow-value-display
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+    padding: 4px 8px
+    border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    flex: 0 0 auto
+
+  .raw-value-toggle
+    height: 22px
+    padding: 0 8px
+    border: 0
+    border-radius: 4px
+    background: HEADER_ELEMENT_BACKGROUND_COLOR
+    color: DROPDOWN_TEXT_COLOR
+    cursor: pointer
+    font: inherit
+
+    &.active
+      background: ACTIVE_MENU_BACKGROUND
+      color: TEXT_CONTENT_COLOR
+
 .flow-loop-legend
   position: absolute
   display: inline-flex
