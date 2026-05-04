@@ -1404,42 +1404,12 @@ proc refreshTraceOverlay*(self: CalltraceComponent) =
     self.redrawTraceLine()
 
 proc redrawCallLines(self: CalltraceComponent) =
-  # When IsoNim is the primary renderer, skip the legacy Karax
-  # DOM manipulation.  The IsoNim reactive effects update the DOM
-  # automatically when the store signals change.  Allowing the
-  # legacy code to run would replace the IsoNim-managed
-  # `.calltrace-lines` element with a Karax-rendered one,
-  # destroying the reactive bindings.
-  if isoNimCalltraceMounted:
-    return
-  let scrollElement = jq(cstring(fmt"#calltraceScroll-{self.id}"))
-  let calltraceLinesVdom = self.calltraceLines()
-  let calltraceLinesDom = cast[kdom.Element](vnodeToDom(calltraceLinesVdom, KaraxInstance()))
-  let localCalltraceNode =
-    if scrollElement.isNil:
-      nil
-    else:
-      findNodeInElement(cast[kdom.Node](scrollElement), ".local-calltrace")
-  let calltraceLinesNode =
-    if localCalltraceNode.isNil:
-      nil
-    else:
-      findNodeInElement(cast[kdom.Node](localCalltraceNode), ".calltrace-lines")
-
-  if not localCalltraceNode.isNil and not calltraceLinesNode.isNil:
-    let localCalltraceElement = cast[Element](localCalltraceNode)
-    let calltraceLinesElement = cast[Node](calltraceLinesNode)
-
-    localCalltraceElement.style.height = self.calcScrollHeight()
-
-    localCalltraceElement.replaceChild(
-      cast[Node](calltraceLinesDom),
-      calltraceLinesElement)
-    if self.usesMaterializedTracesTrace:
-      self.redrawTraceLine()
-
-  if not self.inExtension and self.resizeObserver.isNil:
-    self.setCalltraceMutationObserver()
+  ## Historical selection/scroll paths still call this proc, but the
+  ## calltrace panel no longer has a live Karax renderer to redraw.
+  ## `layout.nim` classifies `Content.Calltrace` as IsoNim-owned, and the
+  ## extension build registers only an empty stub.  The real DOM is updated by
+  ## `mountIsoNimCalltrace` reactive effects fed through `syncCalltraceData`.
+  discard
 
 proc changeLastCallSelection(self: CalltraceComponent) =
   self.lastSelectedCallKey = self.callsByLine[self.selectedCallNumber].call.key
