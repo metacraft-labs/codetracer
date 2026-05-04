@@ -84,61 +84,6 @@ proc editorLineNumber(self: AgentActivityComponent, line: int): cstring =
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
   result = cstring"<div class='gutter " & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & lineHtml & cstring"</div>"
 
-proc createUserMessageContent(msg: AgentMessage): VNode =
-  buildHtml(tdiv(class="agent-msg-wrapper user-wrapper")):
-    tdiv(class="header-wrapper"):
-      tdiv(class="content-header"):
-        tdiv(class="user-img")
-        span(class="user-name"): text "author"
-      tdiv(class="msg-controls"):
-        button(class="ct-button-image-sm-secondary command-palette-copy-button", `type`="button")
-        # tdiv(class="command-palette-edit-button")
-    tdiv(class="msg-content"):
-      text msg.content
-
-proc createAgentMessageContent(self: AgentActivityComponent, msg: AgentMessage): VNode =
-  result = buildHtml(tdiv(class="agent-msg-wrapper")):
-    tdiv(class="header-wrapper"):
-      tdiv(class="content-header"):
-        tdiv(class="ai-img")
-        span(class="ai-name"):
-          text "agent"
-          if msg.canceled:
-            span(style=style((StyleAttr.color, cstring"red"))):
-              text " (canceled)"
-        if msg.isLoading and not msg.canceled:
-          span(class="ai-status")
-      tdiv(class="msg-controls"):
-        button(class="ct-button-image-sm-secondary command-palette-copy-button", `type`="button")
-        # tdiv(class="command-palette-upload-button")
-        # tdiv(class="command-palette-redo-button")
-    tdiv(class="msg-content", id = fmt"{AGENT_MSG_DIV}-{msg.id}"):
-      text msg.content
-    for diff in msg.sessionDiffs:
-      tdiv(class="component-wrapper"):
-        tdiv(class="header-wrapper"):
-          tdiv(class="task-name"): text fmt"{diff.path}"
-        tdiv(class=fmt"agent-editor-wrapper"):
-          tdiv(class=fmt"agent-editor", id = fmt"{DIFF_EDITOR_DIV}-{self.id}-{diff.id}")
-
-proc createTerminalContent(self: AgentActivityComponent, term: AgentTerminal): VNode =
-  # Ensure the terminal is created after the VNode mounts so the container exists.
-  let shellRef = term.shell
-  if not shellRef.initialized:
-    self.kxi.afterRedraws.add(proc() =
-      if not shellRef.initialized:
-        discard shellRef.createShell()
-        shellRef.initialized = true
-    )
-
-  result = buildHtml(tdiv(class="terminal-wrapper")):
-    tdiv(class="header-wrapper"):
-      tdiv(class="task-name"): text fmt"Terminal {term.id}"
-      tdiv(class="msg-controls"):
-        button(class="ct-button-image-sm-secondary command-palette-copy-button terminal-copy-button", `type`="button")
-        tdiv(class="agent-model-img")
-    tdiv(id=fmt"shellComponent-{term.shell.id}{self.commandInputId}", class="shell-container")
-
 proc currentSessionKey(self: AgentActivityComponent): cstring
 
 proc ensureAgentMessage(self: AgentActivityComponent): seq[AgentMessage] =
@@ -424,13 +369,6 @@ proc clear(self: AgentActivityComponent) =
     autoResizeTextarea(INPUT_ID & fmt"-{self.id}{self.commandInputId}")
   self.syncLegacyAgentActivityIntoVM()
 
-proc passwordPromp(self: AgentActivityComponent): VNode =
-  result = buildHtml(tdiv(class="prompt-wrapper")):
-    tdiv(class="password-wrapper"):
-      input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
-      button(class="ct-button-sm-primary password-continue-button", `type`="button"):
-        text "Continue"
-
 proc parseUnifiedDiff(patch: string): (string, string) =
   ## Very simple unified diff parser:
   ## - skips headers: diff/index/---/+++/@@
@@ -472,25 +410,6 @@ proc parseUnifiedDiff(patch: string): (string, string) =
       modLines.add(line)
 
   (origLines.join("\n"), modLines.join("\n"))
-
-proc createPasswordPrompt(self: AgentActivityComponent): VNode =
-  result = buildHtml(tdiv(class="prompt-wrapper")):
-    tdiv(class="password-wrapper"):
-      input(class="password-prompt-input", `type`="password", placeholder="Password to continue")
-      button(class="ct-button-sm-primary password-continue-button", `type`="button"):
-        text "Continue"
-
-proc createUserPrompt(self: AgentActivityComponent, prompt: cstring, options: seq[cstring]): VNode =
-  result = buildHtml(tdiv(class="prompt-wrapper")):
-    tdiv(class="header-wrapper"):
-      text prompt
-    tdiv(class="user-options-wrapper"):
-      for option in options:
-        button(class="ct-button-sm-secondary user-option", `type`="button"):
-          text option
-
-proc loadingState(self: AgentActivityComponent): VNode =
-  result = buildHtml(tdiv(class="loading-animation"))
 
 proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
   if self.isNil:
