@@ -179,6 +179,9 @@ proc redrawAll* =
   # echo "## FINISH REDRAW"
 data.redraw = redrawAll
 
+proc redrawRoot* =
+  kxi.redraw()
+
 
 # proc getSelectionText: cstring =
 #   var text = cstring""

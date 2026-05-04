@@ -12,7 +12,6 @@
 
 import
   std/[strformat, jsffi, asyncjs],
-  karax,
   ../types,
   ../dap,
   ../renderer,
@@ -316,7 +315,7 @@ proc closeSession*(data: Data, targetIndex: int) =
           oldContainer.id = sessionContainerId(i)
 
   refreshSessionTabBar()
-  kxi.redraw()
+  redrawRoot()
 
 proc switchSession*(data: Data, targetIndex: int) =
   ## Switch from the currently active replay session to ``targetIndex``.
