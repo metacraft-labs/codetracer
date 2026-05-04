@@ -1092,7 +1092,7 @@ proc redrawTraceLine(self: CalltraceComponent) =
         cast[Node](svgContainer).appendChild(cast[Node](renderLineElement(x1, bottom1, x2, bottom1)))
 
 proc refreshTraceOverlay*(self: CalltraceComponent) =
-  if self.isDbBasedTrace:
+  if self.usesMaterializedTracesTrace:
     self.redrawTraceLine()
 
 proc redrawCallLines(self: CalltraceComponent) =

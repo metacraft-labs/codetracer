@@ -2093,7 +2093,7 @@ proc refreshCalltraceOverlays(data: Data) =
   for _, component in data.ui.componentMapping[Content.Calltrace]:
     if not component.isNil:
       let calltrace = CalltraceComponent(component)
-      if calltrace.isDbBasedTrace:
+      if calltrace.usesMaterializedTracesTrace:
         calltrace.refreshTraceOverlay()
 
 proc updateLayout(data: Data) =
