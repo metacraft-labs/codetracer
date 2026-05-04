@@ -391,12 +391,6 @@ proc ensure*(self: ChartComponent) =
     else:
       "ensurePie"
 
-  # if self.stateID != -1:
-  #   # TODO: think how this would work in extension
-  #   kxiMap[cstring("stateComponent-" & $self.stateID)].afterRedraws.add(proc =
-  #     discard windowSetTimeout(proc = self.ensureBase(), 500)
-  #   )
-  # else:
   if not self.trace.isNil:
     self.ensureBase()
   elif self.viewKind != ViewTable:
@@ -586,12 +580,6 @@ proc inlineHistoryView*(self: ValueComponent, expression: cstring): VNode =
 
   chart.ensure()
 
-  # if self.stateID != -1:
-  #   kxiMap[&"stateComponent-{self.stateID}"].afterRedraws.add(proc =
-  #     let container = document.getElementById(cstring(fmt"history-{expression}"))
-  #     if not container.isNil:
-  #       container.toJs.scrollTop = chart.historyScrollTop
-  #   ) # TODO: Handle multiple state components
   self.state.kxi.afterRedraws.add(proc =
     let container = document.getElementById(cstring(fmt"history-{expression}"))
     if not container.isNil:
@@ -659,9 +647,6 @@ proc historyLocationView(self: ValueComponent, event: HistoryResult): VNode =
   buildHtml(
     tdiv(
       class = "history-location",
-      # onmousedown = proc(ev: Event, tg: VNode) =
-      #   if cast[MouseEvent](ev).button == 0:
-      #     self.historyClick(event.location),
       oncontextmenu = proc(ev: Event, tg: VNode) =
         ev.preventDefault()
         self.historyContextAction(event, ev)
@@ -1480,16 +1465,6 @@ proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[
 
   return contextMenu
 
-# proc historyButtonView(self: ValueComponent, expression: cstring): VNode =
-#   buildHtml(
-#     tdiv(
-#       class = "value-history-button",
-#       onclick = proc =
-#         discard self.showHistory(expression)
-#     )
-#   ):
-#     fa "search"
-
 proc view(
   self: ValueComponent,
   value: Value,
@@ -1642,82 +1617,10 @@ proc view(
       ):
         text("")
 
-  # var selectRow = proc =
-  #   if value.isWatch:
-  #     if self.selected:
-  #       self.selected = false
-  #     else:
-  #       let state = self.data.stateComponent(self.stateID)
-
-  #       for name, valueComponent in state.values:
-  #         valueComponent.selected = false
-  #         self.selected = true
-  #         self.data.focusComponent(self)
-
-  #         kxiMap[cstring"stateComponent-" & cstring($self.stateID)].afterRedraws.add(proc =
-  #           discard windowSetTimeout(proc =
-  #             jq(cstring".value-name-selected").focus(), 50)
-  #         )
-
-  #     self.data.redraw()
-
-  # var nameEdit = proc =
-  #   if value.isWatch:
-  #     if not self.selected:
-  #       let state = self.data.stateComponent(self.stateID)
-
-  #       for name, valueComponent in state.values:
-  #         valueComponent.selected = false
-  #         self.selected = true
-  #         self.data.focusComponent(self)
-
-  #         kxiMap[cstring"stateComponent-" & cstring($self.stateID)].afterRedraws.add(proc =
-  #           discard windowSetTimeout(proc =
-  #             jq(cstring".value-name-selected").focus(), 50)
-  #         )
-
-  #       self.data.redraw()
-
-  # var renameWatch = proc(e: Event, v: VNode) =
-  #   var element = e.target
-  #   let state = self.data.stateComponent(self.stateID)
-  #   var text = cast[cstring](cast[js](element).innerText)
-
-  #   if text.len > 0:
-  #     state.renameWatch(expression, text)
-  #   else:
-  #     state.deleteWatch(expression)
-
-  #   self.data.redraw()
-
   var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
   var isSelected = if self.selected: cstring"value-selected" else: cstring""
   # var nameSelected = if self.selected: cstring"value-name-selected" else: cstring""
   var fresh = if self.fresh: cstring("value-fresh-" & $self.freshIndex) else: cstring""
-
-  # let ensureCollectionElementsChart = proc: VNode =
-  #   if isExpandedCompoundParent:
-  #     self.ensureCollectionElementsChart(
-  #       value,
-  #       expression,
-  #       proc(value: Value): VNode =
-  #         buildHtml(tdiv()):
-  #           valueView(value)
-  #     )
-  #   else:
-  #     raise newException(ValueError, "chart not in right context")
-
-  # let renderSelectedView = proc: VNode =
-  #   if isExpandedCompoundParent:
-  #     if self.charts.hasKey(expression):
-  #       let chart = self.charts[expression]
-
-  #       result = chart.renderChart()
-  #       chart.ensure()
-  #     else:
-  #       result = nil
-  #   else:
-  #     raise newException(ValueError, "chart not in right context")
 
   let cPath = path
 
