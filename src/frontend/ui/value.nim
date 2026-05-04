@@ -204,6 +204,30 @@ proc expandNewValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.a
     else:
       self.customRedraw(self)
 
+proc redrawAfterValueMutation(self: ValueComponent) =
+  if self.customRedraw.isNil:
+    self.redraw()
+  else:
+    self.customRedraw(self)
+
+proc loadMoreValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
+  var newValue: Value
+
+  if value.kind != TableKind:
+    newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.elements.len)
+
+    for element in newValue.elements:
+      self.baseValue.elements.add(element)
+  else:
+    newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.items.len)
+
+    for item in newValue.items:
+      self.baseValue.items.add(item)
+
+  self.isOperationRunning = false
+  self.baseValue.partiallyExpanded = newValue.partiallyExpanded
+  self.redrawAfterValueMutation()
+
 proc switchChartKindView*(self: ChartComponent): VNode =
   # based on https://getbootstrap.com/docs/4.3/components/dropdowns/ : good to use
   var kindSelectorClass = cstring"select-view-kind-button"
@@ -1090,6 +1114,18 @@ proc renderExpandMarkerDom(self: ValueComponent, value: Value, left: string, rig
   result = newElement(cstring"span", cstring(fmt"value-expand {klass}"))
   result.appendText(cstring(&"{left}{list}{right}"))
 
+proc renderLoadMoreButtonDom(self: ValueComponent, value: Value, path: seq[SubPath]): Node =
+  let cPath = path
+
+  result = newElement(cstring"button", cstring"value-load-more-button")
+  result.addEventListener(cstring"mousedown", proc(ev: Event) =
+    capture value, cPath:
+      if not self.isOperationRunning:
+        self.isOperationRunning = true
+        discard self.loadMoreValues(value, cPath)
+  )
+  result.appendText(cstring"Load More")
+
 proc childPathForExpandedValue(parent: Value, childName: cstring, element: Value, path: seq[SubPath]): seq[SubPath] =
   result = path
 
@@ -1273,6 +1309,7 @@ proc renderValueRowDom(
   var isWatch = if value.isWatch: cstring"value-watch" else: cstring""
   var isSelected = if self.selected: cstring"value-selected" else: cstring""
   var fresh = if self.fresh: cstring("value-fresh-" & $self.freshIndex) else: cstring""
+  self.isOperationRunning = false
   let active =
     if self.showInline.hasKey(expression) and self.showInline[expression]:
       "active"
@@ -1357,6 +1394,9 @@ proc renderValueRowDom(
 
   if expression == self.baseExpression and not self.uiExpanded(value, expression):
     atomParent.appendChild(self.renderValueHistoryButtonDom(expression, active))
+
+  if value.partiallyExpanded and self.uiExpanded(value, expression):
+    atomParent.appendChild(self.renderLoadMoreButtonDom(value, path))
 
   result.appendChild(atomParent)
 
@@ -1689,24 +1729,6 @@ proc view(
   #   else:
   #     raise newException(ValueError, "chart not in right context")
 
-  proc loadMoreValues(self: ValueComponent, value: Value, path: seq[SubPath]) {.async.} =
-    var newValue: Value
-
-    if value.kind != TableKind:
-      newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.elements.len)
-
-      for element in newValue.elements:
-        self.baseValue.elements.add(element)
-    else:
-      newValue = await self.expandValue(path, isLoadMore = true, startIndex = value.items.len)
-
-      for item in newValue.items:
-        self.baseValue.items.add(item)
-
-    self.isOperationRunning = false
-    self.baseValue.partiallyExpanded = newValue.partiallyExpanded
-    self.redraw()
-
   let cPath = path
 
   self.isOperationRunning = false
@@ -1833,37 +1855,6 @@ proc directValueDomSubject(self: ValueComponent): Value =
 proc rootValuePath(self: ValueComponent): seq[SubPath] =
   @[SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind}]
 
-proc hasExpandedLoadMoreValue(self: ValueComponent, value: Value, expression: cstring): bool =
-  if value.isNil:
-    return false
-
-  if value.kind == Ref and not value.refValue.toJs.isNil:
-    return self.hasExpandedLoadMoreValue(value.refValue, expression)
-
-  if not self.uiExpanded(value, expression):
-    return false
-
-  if value.partiallyExpanded:
-    return true
-
-  case value.kind:
-  of Pointer:
-    self.hasExpandedLoadMoreValue(value.refValue, expression)
-
-  of Seq, Set, HashSet, OrderedSet, Array, Varargs,
-      Variant, TableKind, Instance, Union, Tuple:
-    let (children, _, _) = self.expandedChildrenAndDelimiters(value, self.valueLanguage())
-
-    for child in children:
-      let (childName, element) = child
-      if self.hasExpandedLoadMoreValue(element, cstring(fmt"{expression} {childName}")):
-        return true
-
-    false
-
-  else:
-    false
-
 proc canRenderValueDomDirectly(self: ValueComponent): bool =
   let value = self.directValueDomSubject()
 
@@ -1872,18 +1863,15 @@ proc canRenderValueDomDirectly(self: ValueComponent): bool =
 
   if self.uiExpanded(value, self.baseExpression):
     value.kind notin ATOM_KINDS and
-      value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS and
-      not self.hasExpandedLoadMoreValue(value, self.baseExpression)
+      value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS
   else:
     value.kind in DIRECT_VALUE_DOM_COLLAPSED_KINDS
 
 proc renderValueDom*(self: ValueComponent): Node =
   ## Shared DOM entrypoint for the rich value tree.
   ##
-  ## Collapsed rows, expanded compound shells, child lists, and active inline
-  ## history/chart surfaces render directly here. Expanded load-more rows still
-  ## fall back to the legacy Karax value internals while that async append path
-  ## is migrated separately.
+  ## Collapsed rows, expanded compound shells, child lists, active inline
+  ## history/chart surfaces, and expanded load-more rows render directly here.
   if self.canRenderValueDomDirectly():
     let value = self.directValueDomSubject()
     return self.renderValueRowDom(
