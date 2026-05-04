@@ -2476,7 +2476,11 @@ proc renderEditor*(self: EditorViewComponent): VNode =
     return buildHtml(tdiv())
 
   if self.editorView == ViewNoSource:
-    result = self.noInfo.renderNoSourceShell()
+    # Live no-source tabs are mounted through renderTopLevelEditorDirect(),
+    # which replaces the GoldenLayout placeholder with the direct DOM shell.
+    # This legacy VNode renderer is retained only as an inert compatibility
+    # fallback for stale callers.
+    result = buildHtml(tdiv())
   elif not self.isExpansion and (not self.service.open.hasKey(self.name) or not self.service.open[self.name].received):
     result = loadingEditorView(self.id, self.name)
   else:

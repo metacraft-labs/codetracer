@@ -2,27 +2,22 @@
 ##
 ## NoSource panel host module.  The IsoNim view at
 ## ``viewmodel/views/isonim_no_source_view.nim`` is the primary
-## renderer; this module keeps the legacy Karax surface area minimal
-## (a stable container ``<div>`` plus the asm-load + history-jump
-## helpers Karax callers still rely on) and exposes the bridge procs
-## that feed the IsoNim ``NoSourceVM``.
+## renderer; this module exposes the direct DOM host helper plus the
+## asm-load + history-jump helpers that feed the IsoNim ``NoSourceVM``.
 ##
 ## Lifecycle:
 ## 1. ``openNoSourceView`` (in ``utils.nim``) creates a
 ##    ``NoSourceComponent`` and stashes it on its parent
 ##    ``EditorViewComponent.noInfo`` field.
-## 2. The editor's ``method render`` notices ``editorView ==
-##    ViewNoSource`` and returns ``self.noInfo.renderNoSourceShell()``.
-##    The VNode returned here is a stable
-##    ``<div id="no-source-{id}" class="unknown-location">`` shell —
-##    Karax diff-ing leaves the IsoNim-managed children alone on
-##    subsequent redraws because the VDOM has no children declared
-##    inside the shell.
-## 3. After Karax materialises the shell the bridge proc
-##    ``tryMountIsoNimNoSourcePanel`` mounts the IsoNim
-##    ``renderNoSourcePanel`` view inside it.  The mount runs once per
-##    component id; subsequent renders are driven by the VM's reactive
-##    signals.
+## 2. The editor direct GoldenLayout mount path calls
+##    ``renderNoSourceShellDirect`` with the temporary
+##    ``editorComponent-{id}`` placeholder.
+## 3. ``renderNoSourceShellDirect`` replaces that placeholder with the
+##    stable ``<div id="no-source-{id}" class="unknown-location">``
+##    shell and asks ``tryMountIsoNimNoSourcePanel`` to mount the
+##    IsoNim ``renderNoSourcePanel`` view inside it.  The mount runs
+##    once per component id; subsequent renders are driven by the VM's
+##    reactive signals.
 ## 4. Callers feed live data into the VM via ``syncNoSourceVM``.
 
 import
@@ -185,10 +180,8 @@ when defined(js):
                                   placeholder: dom_api.Element) =
     ## Materialise the no-source shell without a Karax renderer.
     ##
-    ## This is the direct-DOM equivalent of ``renderNoSourceShell`` for the
-    ## editor GoldenLayout path.  It preserves the same stable
-    ## ``no-source-{id}`` host, asm-load side effect, VM sync, and IsoNim
-    ## mount lifecycle while avoiding a top-level editor ``setRenderer``.
+    ## Preserve the stable ``no-source-{id}`` host, asm-load side effect,
+    ## VM sync, and IsoNim mount lifecycle without a Karax VNode shell.
     let history = self.data.services.debugger.jumpHistory
     if history.len >= 1 and self.instructions == Instructions():
       discard self.getAsmCode(history[^1].location)
@@ -208,47 +201,6 @@ when defined(js):
       dom_api.Node(placeholder))
 
     self.tryMountIsoNimNoSourcePanel()
-
-# ---------------------------------------------------------------------------
-# Karax shell proc (shell only)
-# ---------------------------------------------------------------------------
-
-proc renderNoSourceShell*(self: NoSourceComponent): VNode =
-  ## Return the ``<div id="no-source-{id}">``
-  ## that the IsoNim view mounts inside.  The shell carries the same
-  ## ``unknown-location`` class the legacy view emitted on its root
-  ## so any CSS rules keyed on that class still apply.
-  ##
-  ## The shell deliberately declares no children — the IsoNim view
-  ## owns them.  Karax's VDOM diff therefore leaves the IsoNim-injected
-  ## subtree intact on subsequent redraws.
-  ##
-  ## ``getAsmCode`` is still kicked off here so the assembly view
-  ## (rendered in the legacy fallback) loads its instructions in the
-  ## background.  When the asm response lands the originating-address
-  ## row is fed into the VM via ``syncNoSourceVM``.
-  ##
-  ## This is intentionally a regular proc rather than a
-  ## Component.render override.  The parent editor still needs
-  ## a Karax VNode container while it owns the no-source branch, but the
-  ## no-source component itself no longer participates in the generic
-  ## Karax render-dispatch audit.
-  let history = self.data.services.debugger.jumpHistory
-  if history.len >= 1 and self.instructions == Instructions():
-    discard self.getAsmCode(history[^1].location)
-
-  syncNoSourceVM(self)
-
-  result = buildHtml(
-    tdiv(
-      id = cstring("no-source-" & $self.id),
-      class = "unknown-location"
-    )
-  )
-
-  when defined(js):
-    self.tryMountIsoNimNoSourcePanel()
-
 # ---------------------------------------------------------------------------
 # VM lifecycle hooks called from ui_js.configureMiddleware.
 # ---------------------------------------------------------------------------
