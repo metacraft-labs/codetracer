@@ -199,10 +199,26 @@ proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value
 when defined(ctInExtension):
   var flowComponentForExtension* {.exportc.}: FlowComponent = makeFlowComponent(data, 13, inExtension = true)
 
+  proc bindFlowExtensionHost(component: FlowComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # The extension flow surface has no panel markup of its own; keep the
+    # exported component usable without retaining an empty Karax renderer.
+    host.innerHTML = cstring""
+
   proc makeFlowComponentForExtension*(id: cstring): FlowComponent {.exportc.} =
-    if flowComponentForExtension.kxi.isNil:
-      flowComponentForExtension.kxi = setRenderer(proc: VNode = buildHtml(tdiv()), id, proc = discard)
+    if flowComponentForExtension.extensionRendererId.len == 0:
+      flowComponentForExtension.extensionRendererId = id
+      flowComponentForExtension.bindFlowExtensionHost()
     result = flowComponentForExtension
+
+  method redrawForExtension*(self: FlowComponent) =
+    self.bindFlowExtensionHost()
 
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api

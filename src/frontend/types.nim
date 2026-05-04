@@ -1347,6 +1347,7 @@ type
     leftPos*: cstring
     lastScrollFireTime*: int64
     position*: int
+    extensionRendererId*: cstring
     # codeID*: int64
 
 
