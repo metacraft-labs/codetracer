@@ -1009,6 +1009,38 @@ proc traceChartDom(self: TraceComponent): Node =
   result.appendChild(self.traceChartCanvasDom(cstring"line", self.chart.viewKind != ViewLine))
   result.appendChild(self.traceChartCanvasDom(cstring"pie", self.chart.viewKind != ViewPie))
 
+proc refreshTraceChartKindSwitch(self: TraceComponent) =
+  ## Update the direct-DOM chart kind dropdown after its local open/blur state
+  ## changes. The trace view-zone shell is already mounted, so this avoids a
+  ## broad application redraw for a button/dropdown class toggle.
+  if self.isNil or self.chart.isNil:
+    return
+
+  if self.kindSwitchButton.isNil:
+    self.kindSwitchButton =
+      cast[Element](jq(cstring(&"#trace-{self.id} .select-view-kind-button")))
+
+  if self.kindSwitchDropDownList.isNil:
+    self.kindSwitchDropDownList =
+      cast[Element](jq(cstring(&"#trace-{self.id} .kind-dropdown-menu")))
+
+  var kindSelectorClass = cstring"select-view-kind-button"
+  var dropdownClass = cstring"kind-dropdown-menu"
+  if self.chart.kindSelectorIsClicked:
+    kindSelectorClass = kindSelectorClass & cstring" active"
+  else:
+    dropdownClass = dropdownClass & cstring" hidden"
+
+  if not self.kindSwitchButton.isNil:
+    self.kindSwitchButton.setAttribute(
+      cstring"class",
+      cstring(fmt"dropdown-toggle {kindSelectorClass}"))
+    self.kindSwitchButton.innerHTML =
+      ($self.chart.viewKind)[4..^1].toLowerAscii().cstring
+
+  if not self.kindSwitchDropDownList.isNil:
+    self.kindSwitchDropDownList.setAttribute(cstring"class", dropdownClass)
+
 proc traceChartKindSwitchDom(self: TraceComponent): Node =
   let chart = self.chart
   var kindSelectorClass = cstring"select-view-kind-button"
@@ -1023,11 +1055,11 @@ proc traceChartKindSwitchDom(self: TraceComponent): Node =
   result.setAttribute(cstring"tabindex", cstring"0")
   result.addEventListener(cstring"mousedown", proc(ev: Event) =
     chart.kindSelectorIsClicked = not chart.kindSelectorIsClicked
-    redrawAll()
+    self.refreshTraceChartKindSwitch()
   )
   result.addEventListener(cstring"blur", proc(ev: Event) =
     chart.kindSelectorIsClicked = false
-    redrawAll()
+    self.refreshTraceChartKindSwitch()
   )
 
   let button = traceDiv(cstring(fmt"dropdown-toggle {kindSelectorClass}"))
