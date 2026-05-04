@@ -1,9 +1,6 @@
 import
-  std/[ jsffi, jsconsole, asyncjs, strformat, strutils ],
-  karax, vdom, karaxdsl, kdom, vstyles, dom, jsffi, jsconsole, paths,
-  types, lang,
-  results,
-  utils
+  std/[ jsffi, strformat, strutils ],
+  kdom, paths
 
 when defined(linux):
   var startMenuChecked = true
@@ -33,6 +30,8 @@ proc onDismiss() =
 
   closeWindow()
 
+proc renderSubwindow()
+
 proc onInstall() =
 
   let options: JsObject = js{}
@@ -48,6 +47,7 @@ proc onInstall() =
 
   ipc.send("CODETRACER::install-ct-frontend", options)
   installOverallStatus = "installing"
+  renderSubwindow()
 
 proc stepDisplayName(step: string): string =
   ## Returns a user-friendly label for each install step.
@@ -66,135 +66,178 @@ proc stepStatusIcon(status: string): string =
   of "skipped": "skipped"
   else: ""
 
-proc installStatusView: VNode =
-  buildHtml(tdiv(class = "dialog-install-status")):
-    if installSteps.len == 0 and installOverallStatus == "installing":
-      tdiv(class = "dialog-install-status-installing"):
-        text "Installing..."
-    else:
-      for step in installSteps:
-        let statusClass = "install-step-" & step.status
-        buildHtml(tdiv(class = fmt"install-step {statusClass}")):
-          span(class = "step-icon"):
-            text stepStatusIcon(step.status)
-          span(class = "step-name"):
-            text stepDisplayName(step.step)
-          if step.message.len > 0 and step.status == "failed":
-            span(class = "step-message"):
-              text " — " & step.message
-      if installOverallStatus == "ok":
-        tdiv(class = "dialog-install-status-ok"):
-          text "Installation complete."
-      elif installOverallStatus == "problem":
-        tdiv(class = "dialog-install-status-problem"):
-          text "Installation encountered errors."
+proc appendText(parent: Node, value: string) =
+  parent.appendChild(document.createTextNode(cstring(value)))
 
-proc dialogBox(): VNode =
+proc newElement(tag: cstring, className: cstring = cstring""): Element =
+  result = document.createElement(tag)
+  if className != cstring"":
+    result.setAttribute(cstring"class", className)
+
+proc newTextElement(tag: cstring, className: cstring, value: string): Element =
+  result = newElement(tag, className)
+  result.appendText(value)
+
+proc appendInfoTooltip(parent: Node, lines: openArray[string]) =
+  let icon = newTextElement(cstring"span", cstring"info-icon", "ⓘ ")
+  let tooltip = newElement(cstring"div", cstring"custom-tooltip")
+  for i, line in lines:
+    if i > 0:
+      tooltip.appendChild(document.createElement(cstring"br"))
+    tooltip.appendText(line)
+  icon.appendChild(tooltip)
+  parent.appendChild(icon)
+
+proc appendCheckboxOption(
+    parent: Node,
+    labelText: string,
+    checked: bool,
+    onToggle: proc(),
+    tooltipLines: openArray[string],
+  ) =
+  let label = document.createElement(cstring"label")
+  let input = document.createElement(cstring"input")
+  input.setAttribute(cstring"type", cstring"checkbox")
+  input.checked = checked
+  input.addEventListener(cstring"click", proc(ev: Event) =
+    onToggle()
+  )
+  label.appendChild(input)
+  label.appendText(labelText)
+  label.appendInfoTooltip(tooltipLines)
+  parent.appendChild(label)
+
+proc newActionButton(className, label: cstring, action: proc()): Element =
+  result = newTextElement(cstring"button", className, $label)
+  result.addEventListener(cstring"click", proc(ev: Event) =
+    action()
+  )
+
+proc installStatusView: Node =
+  result = newElement(cstring"div", cstring"dialog-install-status")
+  if installSteps.len == 0 and installOverallStatus == "installing":
+    result.appendChild(newTextElement(
+      cstring"div",
+      cstring"dialog-install-status-installing",
+      "Installing..."
+    ))
+  else:
+    for step in installSteps:
+      let statusClass = "install-step-" & step.status
+      let stepNode = newElement(cstring"div", cstring(fmt"install-step {statusClass}"))
+      stepNode.appendChild(newTextElement(cstring"span", cstring"step-icon", stepStatusIcon(step.status)))
+      stepNode.appendChild(newTextElement(cstring"span", cstring"step-name", stepDisplayName(step.step)))
+      if step.message.len > 0 and step.status == "failed":
+        stepNode.appendChild(newTextElement(cstring"span", cstring"step-message", " — " & step.message))
+      result.appendChild(stepNode)
+    if installOverallStatus == "ok":
+      result.appendChild(newTextElement(
+        cstring"div",
+        cstring"dialog-install-status-ok",
+        "Installation complete."
+      ))
+    elif installOverallStatus == "problem":
+      result.appendChild(newTextElement(
+        cstring"div",
+        cstring"dialog-install-status-problem",
+        "Installation encountered errors."
+      ))
+
+proc dialogBox(): Node =
   echo "codetracerPrefix: ", codetracerPrefix
-  buildHtml(tdiv):
-    tdiv(class="dialog-box"):
-      tdiv(class="dialog-header"):
-        img(
-          src="./public/resources/shared/" &
-            "codetracer_welcome_logo.svg",
-          class="dialog-icon")
-      tdiv(class="dialog-content"):
-          text "CodeTracer is not installed."
-          br()
-          text "Do you want to install it now?"
-      if installOverallStatus == "":
-        tdiv(class="dialog-options"):
-          when defined(linux):
-            label:
-              input(
-                `type`="checkbox",
-                checked=toChecked(startMenuChecked),
-                onClick=proc() =
-                  startMenuChecked =
-                    not startMenuChecked)
-              text "Add CodeTracer to my start menu"
-              span(class="info-icon"):
-                text "ⓘ "
-                tdiv(
-                  class = "custom-tooltip",
-                ):
-                  text "This will install a " &
-                    ".desktop file in " &
-                    "~/.local/share/applications"
-                  br()
-                  text "which will exec the binary you ran this executable with"
-          label:
-            input(
-              `type`="checkbox",
-              checked=toChecked(pathChecked),
-              onClick=proc() =
-                pathChecked = not pathChecked)
-            text "Add the ct command to my PATH"
-            span(class="info-icon"):
-              text "ⓘ "
-              tdiv(
-                class = "custom-tooltip",
-              ):
-                text "This will create a symlink" &
-                  " to the current executable" &
-                  " in ~/.local/bin"
-          when defined(linux):
-            label:
-              input(
-                `type`="checkbox",
-                checked=toChecked(bpfChecked),
-                onClick=proc() =
-                  bpfChecked = not bpfChecked)
-              text "Enable BPF process monitoring (requires admin password)"
-              span(class="info-icon"):
-                text "ⓘ "
-                tdiv(
-                  class = "custom-tooltip",
-                ):
-                  text "Sets up BPF capabilities for" &
-                    " process tree monitoring."
-                  br()
-                  text "Requires sudo for initial" &
-                    " setup. Can be skipped" &
-                    " and configured later."
-            label:
-              input(
-                `type`="checkbox",
-                checked=toChecked(agentHarborChecked),
-                onClick=proc() =
-                  agentHarborChecked =
-                    not agentHarborChecked)
-              text "Install Agent Harbor (requires admin password)"
-              span(class="info-icon"):
-                text "ⓘ "
-                tdiv(
-                  class = "custom-tooltip",
-                ):
-                  text "Installs Agent Harbor for" &
-                    " AI-powered debugging."
-                  br()
-                  text "Downloads the official" &
-                    " installer. Requires sudo."
-        tdiv(class="dialog-actions"):
-          button(class="install-btn", onClick=onInstall): text "Install"
-          button(class="dismiss-btn", onClick=onDismiss): text "Dismiss"
-        tdiv(class="dialog-options dialog-ask-again"):
-          label:
-              text "Don't ask me again!"
-              input(
-                `type`="checkbox",
-                checked=toChecked(dontAskChecked),
-                onClick=proc() = dontAskChecked = not dontAskChecked
-              )
-      else:
-        installStatusView()
-        if installOverallStatus in ["ok", "problem"]:
-          tdiv(class="dialog-actions"):
-            button(class="dismiss-btn", onClick=onDismiss): text "Close"
+  result = document.createElement(cstring"div")
 
-proc main(): VNode =
-  buildHtml(tdiv):
-    dialogBox()
+  let box = newElement(cstring"div", cstring"dialog-box")
+  result.appendChild(box)
+
+  let header = newElement(cstring"div", cstring"dialog-header")
+  let icon = document.createElement(cstring"img")
+  icon.setAttribute(cstring"src", cstring"./public/resources/shared/codetracer_welcome_logo.svg")
+  icon.setAttribute(cstring"class", cstring"dialog-icon")
+  header.appendChild(icon)
+  box.appendChild(header)
+
+  let content = newElement(cstring"div", cstring"dialog-content")
+  content.appendText("CodeTracer is not installed.")
+  content.appendChild(document.createElement(cstring"br"))
+  content.appendText("Do you want to install it now?")
+  box.appendChild(content)
+
+  if installOverallStatus == "":
+    let options = newElement(cstring"div", cstring"dialog-options")
+    when defined(linux):
+      options.appendCheckboxOption(
+        "Add CodeTracer to my start menu",
+        startMenuChecked,
+        proc() = startMenuChecked = not startMenuChecked,
+        [
+          "This will install a .desktop file in ~/.local/share/applications",
+          "which will exec the binary you ran this executable with"
+        ]
+      )
+    options.appendCheckboxOption(
+      "Add the ct command to my PATH",
+      pathChecked,
+      proc() = pathChecked = not pathChecked,
+      [
+        "This will create a symlink to the current executable in ~/.local/bin"
+      ]
+    )
+    when defined(linux):
+      options.appendCheckboxOption(
+        "Enable BPF process monitoring (requires admin password)",
+        bpfChecked,
+        proc() = bpfChecked = not bpfChecked,
+        [
+          "Sets up BPF capabilities for process tree monitoring.",
+          "Requires sudo for initial setup. Can be skipped and configured later."
+        ]
+      )
+      options.appendCheckboxOption(
+        "Install Agent Harbor (requires admin password)",
+        agentHarborChecked,
+        proc() = agentHarborChecked = not agentHarborChecked,
+        [
+          "Installs Agent Harbor for AI-powered debugging.",
+          "Downloads the official installer. Requires sudo."
+        ]
+      )
+    box.appendChild(options)
+
+    let actions = newElement(cstring"div", cstring"dialog-actions")
+    actions.appendChild(newActionButton(cstring"install-btn", cstring"Install", onInstall))
+    actions.appendChild(newActionButton(cstring"dismiss-btn", cstring"Dismiss", onDismiss))
+    box.appendChild(actions)
+
+    let askAgain = newElement(cstring"div", cstring"dialog-options dialog-ask-again")
+    let askLabel = document.createElement(cstring"label")
+    askLabel.appendText("Don't ask me again!")
+    let askInput = document.createElement(cstring"input")
+    askInput.setAttribute(cstring"type", cstring"checkbox")
+    askInput.checked = dontAskChecked
+    askInput.addEventListener(cstring"click", proc(ev: Event) =
+      dontAskChecked = not dontAskChecked
+    )
+    askLabel.appendChild(askInput)
+    askAgain.appendChild(askLabel)
+    box.appendChild(askAgain)
+  else:
+    box.appendChild(installStatusView())
+    if installOverallStatus in ["ok", "problem"]:
+      let actions = newElement(cstring"div", cstring"dialog-actions")
+      actions.appendChild(newActionButton(cstring"dismiss-btn", cstring"Close", onDismiss))
+      box.appendChild(actions)
+
+proc main(): Node =
+  result = document.createElement(cstring"div")
+  result.appendChild(dialogBox())
+
+proc renderSubwindow() =
+  let root = document.getElementById(cstring"ROOT")
+  if root.isNil:
+    return
+  root.innerHTML = cstring""
+  root.appendChild(main())
 
 proc onCtInstallStatus(sender: js, data: js) =
   ## Handles install progress events from the main process.
@@ -219,8 +262,8 @@ proc onCtInstallStatus(sender: js, data: js) =
       installSteps.add(info)
   elif kind == "done":
     installOverallStatus = $cast[cstring](data["status"])
-  redraw()
+  renderSubwindow()
 
 ipc.on("CODETRACER::ct-install-status", onCtInstallStatus)
 
-setRenderer(main, "ROOT")
+renderSubwindow()
