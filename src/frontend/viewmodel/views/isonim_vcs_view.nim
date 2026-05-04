@@ -442,11 +442,12 @@ when defined(js):
           const dropdown = body.querySelector('.vcs-branch-dropdown');
           if (dropdown) {
             const row = make('div', 'vcs-branch-option');
+            const branchName = `branchLocal`;
             row.addEventListener('click', () => {
-              if (`callbacks`.onCheckoutBranch) `callbacks`.onCheckoutBranch(`branchLocal`);
+              if (`callbacks`.onCheckoutBranch) `callbacks`.onCheckoutBranch(branchName);
             });
             if (`active`) row.appendChild(make('span', 'vcs-branch-active-marker', '* '));
-            row.appendChild(document.createTextNode(`branchLocal`));
+            row.appendChild(document.createTextNode(branchName));
             dropdown.appendChild(row);
           }
         """.}
@@ -474,8 +475,9 @@ when defined(js):
             const list = body.querySelector('.vcs-commit-list');
             if (list) {
               const row = make('div', `rowClass`);
+              const commitIndex = `idx`;
               row.addEventListener('click', () => {
-                if (`callbacks`.onSelectCommit) `callbacks`.onSelectCommit(`idx`);
+                if (`callbacks`.onSelectCommit) `callbacks`.onSelectCommit(commitIndex);
               });
               row.appendChild(make('span', 'vcs-commit-hash', `hash`));
               row.appendChild(make('span', 'vcs-commit-message', `message`));
@@ -532,8 +534,16 @@ when defined(js):
           const list = body.querySelector('.vcs-file-list');
           if (list) {
             const row = make('div', `rowClass`);
+            const fileIndex = `index`;
+            const filePath = `path`;
             row.addEventListener('click', () => {
-              if (`callbacks`.onSelectFile) `callbacks`.onSelectFile(`index`, `path`);
+              if (`deepReviewMode`) {
+                list.querySelectorAll('.vcs-file-item').forEach((item) => {
+                  item.classList.remove('vcs-file-selected');
+                });
+                row.classList.add('vcs-file-selected');
+              }
+              if (`callbacks`.onSelectFile) `callbacks`.onSelectFile(fileIndex, filePath);
             });
             row.appendChild(make('span', 'vcs-file-status ' + statusClass(`status`), `status`));
             row.appendChild(make('span', 'vcs-file-name', `name`));
@@ -543,7 +553,8 @@ when defined(js):
               if (`deletions` > 0) stats.appendChild(make('span', 'vcs-stat-deleted', '-' + `deletions`));
               row.appendChild(stats);
             }
-            if (`coverage`.length > 0) row.appendChild(make('span', 'vcs-file-coverage', `coverage`));
+            const coverageText = `coverage` || '';
+            if (coverageText.length > 0) row.appendChild(make('span', 'vcs-file-coverage', coverageText));
             list.appendChild(row);
           }
         """.}
@@ -588,11 +599,13 @@ when defined(js):
               if (fileEl) {
                 const hunk = make('div', `hunkCls`);
                 const header = make('div', 'deepreview-unified-hunk-header hunk-header-selectable');
+                const selectedFileIndex = `fileIndex`;
+                const selectedHunkIndex = `hidx`;
                 if (`selected`) header.appendChild(make('span', 'hunk-selection-indicator', 'v'));
                 header.appendChild(document.createTextNode(`headerText`));
                 header.addEventListener('click', (ev) => {
                   if (`callbacks`.onSelectHunk) {
-                    `callbacks`.onSelectHunk(`fileIndex`, `hidx`, !!ev.shiftKey, !!(ev.ctrlKey || ev.metaKey));
+                    `callbacks`.onSelectHunk(selectedFileIndex, selectedHunkIndex, !!ev.shiftKey, !!(ev.ctrlKey || ev.metaKey));
                   }
                   ev.preventDefault();
                 });
