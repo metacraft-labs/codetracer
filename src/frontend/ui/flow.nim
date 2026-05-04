@@ -2026,67 +2026,58 @@ proc realignPositionWidths(self: FlowComponent, loopPosition: LoopPosition) =
       expressionColumn.expressionLegendPercent =
         expressionColumn.expressionCharacters * 100 / loopPosition.expressionsChars
 
-proc flowComplexStep(self: FlowComponent, step: FlowStep): VNode =
+proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
-  var vNodeStyle: VStyle
-  var parentId: cstring
-  var parentClass: cstring
 
-  vNodeStyle = self.flowLeftStyle(step.position)
+  let nodeStyle = self.flowLeftStyle(step.position)
+  let parentId = cstring(&"flow-{flowMode}-value-{step.position}")
+  let parentClass = cstring(&"flow-{flowMode} flow-{flowMode}-value-single")
 
-  parentId = &"flow-{flowMode}-value-{step.position}"
-  parentClass = &"flow-{flowMode} flow-{flowMode}-value-single"
+  result = document.createElement(cstring"div")
+  result.setAttribute(cstring"id", parentId)
+  result.setAttribute(cstring"class", parentClass)
+  result.applyStyle(nodeStyle)
 
-  let vNode = buildHtml(
-    tdiv(
-      id = parentId,
-      class = parentClass,
-      style = vNodeStyle
+  var counter = 0
+  let valuesCount = toSeq(step.beforeValues.keys()).len
+  var style = style(
+    (StyleAttr.fontSize, cstring($(self.fontSize) & "px")),
+    (StyleAttr.lineHeight, cstring($self.lineHeight & "px")),
+    (StyleAttr.height, cstring($self.lineHeight & "px")),
+    (StyleAttr.backgroundSize, cstring($(self.fontSize + 2) & "px"))
+  )
+  for i, event in step.events:
+    let eventVNode = flowEventValue(self, event, step.stepCount, style, i)
+    result.appendChild(vnodeToDom(eventVNode, KaraxInstance()))
+
+  for i, expression in step.exprOrder:
+    let beforeValue = step.beforeValues[expression]
+    let afterValue = step.afterValues[expression]
+    if beforeValue.isNil and afterValue.isNil:
+      continue
+    counter += 1
+    var showName = true
+
+    let valueVNode = flowSimpleValue(
+      self,
+      expression,
+      beforeValue,
+      step.afterValues[expression],
+      step.stepCount,
+      showName,
+      style,
+      i
     )
-  ):
-    var counter = 0
-    let valuesCount = toSeq(step.beforeValues.keys()).len
-    var style = style(
-      (StyleAttr.fontSize, cstring($(self.fontSize) & "px")),
-      (StyleAttr.lineHeight, cstring($self.lineHeight & "px")),
-      (StyleAttr.height, cstring($self.lineHeight & "px")),
-      (StyleAttr.backgroundSize, cstring($(self.fontSize + 2) & "px"))
-    )
-    for i, event in step.events:
-      flowEventValue(self, event, step.stepCount, style, i)
+    result.appendChild(vnodeToDom(valueVNode, KaraxInstance()))
 
-    for i, expression in step.exprOrder:
-      let beforeValue = step.beforeValues[expression]
-      let afterValue = step.afterValues[expression]
-      if beforeValue.isNil and afterValue.isNil:
-        continue
-      counter += 1
-      var showName = true
-
-
-      flowSimpleValue(
-        self,
-        expression,
-        beforeValue,
-        step.afterValues[expression],
-        step.stepCount,
-        showName,
-        style,
-        i
-      )
-
-      if counter < valuesCount:
-        var emptySpaceStyle = style()
-
-        tdiv(
-          class = "flow-loop-empty-space",
-          style = emptySpaceStyle
-        )
-
-  return vNode
+    if counter < valuesCount:
+      let emptySpace = document.createElement(cstring"div")
+      emptySpace.setAttribute(cstring"class", cstring"flow-loop-empty-space")
+      emptySpace.applyStyle(style())
+      result.appendChild(emptySpace)
 
 proc getEditorFirstLineNumber(self: FlowComponent): int =
   let editorId = self.editorUI.id
@@ -2367,8 +2358,7 @@ proc makeComplexLoopStepView(self: FlowComponent, step: FlowStep): Node =
   let stepContainer = self.makeFlowStepContainer(step)
   self.stepNodes[step.stepCount] = stepContainer
 
-  # create step vNode
-  var stepVNode: VNode
+  # create step node
   var stepNode: Node
   case self.loopStates[step.loop].viewState:
   of LoopContinuous:
@@ -2380,13 +2370,9 @@ proc makeComplexLoopStepView(self: FlowComponent, step: FlowStep): Node =
       stepNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=false, style())
 
   else:
-    stepVNode = flowComplexStep(self, step)
+    stepNode = flowComplexStep(self, step)
 
-  case self.loopStates[step.loop].viewState:
-  of LoopContinuous, LoopShrinked:
-    stepContainer.appendChild(stepNode)
-  else:
-    stepContainer.appendChild(vnodeToDom(stepVNode, KaraxInstance()))
+  stepContainer.appendChild(stepNode)
 
   return stepContainer
 
@@ -2511,11 +2497,8 @@ proc addParallelRegularStepValues(self: FlowComponent, step: FlowStep) =
   # get widget as a parent container
   let parentContainer = self.flowDom[step.position]
 
-  # create step vNode
-  let stepVNode = flowComplexStep(self, step)
-
   # create step Node
-  let stepNode = vnodeToDom(stepVNode, KaraxInstance())
+  let stepNode = flowComplexStep(self, step)
 
   # append step Node to stepContainer
   stepContainer.appendChild(stepNode)
@@ -2570,7 +2553,6 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
   steploopCells[step.loop][step.iteration] = stepContainer
 
   # create step node
-  var stepVNode: VNode
   var stepNode: Node
 
   case self.loopStates[step.loop].viewState:
@@ -2581,10 +2563,7 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
     stepNode = renderShrinkedStep(self, stepContainer, step, "complex", singleValue=false, style())
 
   else:
-    stepVNode = flowComplexStep(self, step)
-
-  if self.loopStates[step.loop].viewState notin {LoopContinuous, LoopShrinked}:
-    stepNode = vnodeToDom(stepVNode, KaraxInstance())
+    stepNode = flowComplexStep(self, step)
 
   # append step Node to stepContainer
   stepContainer.appendChild(stepNode)
