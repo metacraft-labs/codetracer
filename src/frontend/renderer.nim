@@ -189,6 +189,12 @@ proc redrawAfterSessionSwitch* =
   ## point directly.
   redrawAll()
 
+proc redrawAfterModeSwitch* =
+  ## Edit/debug mode and read-only toggles update global layout/editor state.
+  ## Keep the broad mounted-surface refresh owned by the renderer while those
+  ## state transitions remain coordinated from ui_js.
+  redrawAll()
+
 proc removeLegacyRendererInstanceByKey*(key: cstring) =
   ## Drop a remaining Karax-backed renderer instance by its renderer key.
   ## Callers own component lifetime; renderer/utils still own kxiMap.

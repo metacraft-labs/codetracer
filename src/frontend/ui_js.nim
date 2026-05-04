@@ -712,7 +712,7 @@ proc switchToEdit*(data: Data) =
         except:
           cerror "layout: component clear: " & getCurrentExceptionMsg()
   data.setEditorsReadOnlyState(false)
-  redrawAll()
+  redrawAfterModeSwitch()
 
 proc switchToDebug*(data: Data) =
   # Save current edit layout before switching
@@ -734,7 +734,7 @@ proc switchToDebug*(data: Data) =
         cerror fmt"debug-mode: failed to restore debug layout: {getCurrentExceptionMsg()}"
 
   data.setEditorsReadOnlyState(true)
-  redrawAll()
+  redrawAfterModeSwitch()
 
 proc toggleMode*(data: Data) =
   if data.ui.mode == DebugMode:
@@ -750,7 +750,7 @@ proc toggleReadOnly*(data: Data) =
     data.ui.mode = DebugMode
   else:
     data.ui.mode = EditMode
-  redrawAll()
+  redrawAfterModeSwitch()
 
 data.functions.toggleMode = toggleMode
 data.functions.toggleReadOnly = toggleReadOnly
