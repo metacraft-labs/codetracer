@@ -1223,15 +1223,11 @@ proc getSourceLineDomIndex(self:EditorViewComponent, position: int): int =
   return result
 
 proc legacyValueViewZoneDom(self: EditorViewComponent, value: ValueComponent): Node =
-  ## Legacy boundary for inline Monaco value view zones.
+  ## DOM entrypoint for inline Monaco value view zones.
   ##
-  ## ValueComponent.renderValue() still returns the rich Karax value tree used
-  ## by editor tooltips, flow modals, trace values, and calltrace embeddings.
-  ## Keep the materialization isolated here until the value renderer grows a
-  ## direct DOM/IsoNim entrypoint.
-  var legacyValueVNode = value.renderValue()
-  legacyValueVNode.style = style(StyleAttr.left, &"{self.currentTooltip[0] * 9}px")
-  vnodeToDom(legacyValueVNode, KaraxInstance())
+  ## The value module owns the remaining value-tree DOM materialization.  Editor
+  ## only supplies the legacy root-left style required by Monaco view zones.
+  value.renderValueDomWithLeft(&"{self.currentTooltip[0] * 9}px")
 
 proc addLegacyValueViewZone(self: EditorViewComponent, value: ValueComponent, line: int) =
   let viewZone = js{

@@ -1302,6 +1302,24 @@ proc renderValue*(self: ValueComponent): VNode =
   path.add(SubPath{kind: Expression, expression: self.baseExpression, typeKind: self.baseValue.kind})
   result = self.view(self.baseValue, self.baseExpression, self.baseExpression, path, depth=0)
 
+proc renderValueDom*(self: ValueComponent): Node =
+  ## Shared DOM entrypoint for the rich value tree.
+  ##
+  ## The renderer is still backed by the existing Karax value VNode internals,
+  ## but callers that need a DOM node should use this proc instead of owning a
+  ## local ``vnodeToDom(self.renderValue(), KaraxInstance())`` bridge.
+  vnodeToDom(self.renderValue(), KaraxInstance())
+
+proc renderValueDomWithLeft*(self: ValueComponent, left: cstring): Node =
+  ## Render a value DOM node with the legacy root ``left`` style applied.
+  ##
+  ## Monaco inline value view zones historically patched this style onto the
+  ## root value VNode immediately before materialization.  Keep that contract
+  ## centralized with the value DOM entrypoint.
+  var valueVNode = self.renderValue()
+  valueVNode.style = style(StyleAttr.left, left)
+  vnodeToDom(valueVNode, KaraxInstance())
+
 method redraw*(self: ValueComponent) =
   if not self.state.isNil:
     self.state.redraw()

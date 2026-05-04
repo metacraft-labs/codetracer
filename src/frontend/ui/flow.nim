@@ -742,9 +742,7 @@ proc customRedraw(self: ValueComponent) =
   discard
 
 proc renderModalValueDom(self: FlowComponent, containerId: cstring): Node =
-  # ValueComponent.renderValue() remains Karax-owned. Keep this bridge narrow
-  # until the value renderer itself has a direct DOM/IsoNim entrypoint.
-  vnodeToDom(self.modalValueComponent[containerId].renderValue(), KaraxInstance())
+  self.modalValueComponent[containerId].renderValueDom()
 
 proc openTooltip*(self: FlowComponent, containerId: cstring, value: Value) =
   let valueDom = self.renderModalValueDom(containerId)
@@ -1554,8 +1552,8 @@ proc flowSimpleValue*(
     valueSpan.addEventListener(cstring"contextmenu", proc(e: Event) =
       onContextMenu(e, value)
     )
-    # ValueComponent.renderValue() is still Karax-owned; only this nested
-    # modal/tooltip value rendering stays materialized in this narrow cleanup.
+    # Tooltip/modal value rendering is centralized through ValueComponent's
+    # DOM entrypoint so flow no longer owns a local Karax materialization bridge.
     valueSpan.addEventListener(cstring"mouseover", proc(e: Event) =
       if not self.modalValueComponent.hasKey(id):
         self.ensureValueComponent(id, name, value)
