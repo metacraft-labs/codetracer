@@ -26,6 +26,18 @@ const views = {
     storyId: "codetracer-panels--build",
     brief: "tools/visual-review/briefs/storybook-build-panel.md",
   },
+  "agent-activity-deepreview": {
+    storyId: "codetracer-panels--agent-activity-deep-review",
+    brief: "tools/visual-review/project-visual-brief.md",
+  },
+  deepreview: {
+    storyId: "codetracer-panels--deep-review",
+    brief: "tools/visual-review/project-visual-brief.md",
+  },
+  status: {
+    storyId: "codetracer-components--status-shell",
+    brief: "tools/visual-review/project-visual-brief.md",
+  },
   "default-layout": {
     storyId: "codetracer-layouts--default-debug",
     brief: "tools/visual-review/briefs/storybook-default-layout.md",
@@ -51,6 +63,17 @@ function argValue(name) {
   const index = process.argv.indexOf(name);
   if (index === -1) return null;
   return process.argv[index + 1] ?? null;
+}
+
+function argValues(name) {
+  const values = [];
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] === name && process.argv[i + 1]) {
+      values.push(process.argv[i + 1]);
+      i++;
+    }
+  }
+  return values;
 }
 
 function hasArg(name) {
@@ -118,12 +141,21 @@ function startStaticServer(port) {
     cwd: staticDir,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  child.stderrText = "";
+  child.stderr.on("data", (chunk) => {
+    child.stderrText += chunk.toString();
+  });
   return child;
 }
 
-async function waitForServer(port) {
+async function waitForServer(port, child) {
   const url = `http://127.0.0.1:${port}/iframe.html`;
   for (let i = 0; i < 60; i++) {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `Static server exited before startup on port ${port}: ${child.stderrText.trim()}`,
+      );
+    }
     try {
       const response = await fetch(url);
       if (response.ok) return;
@@ -136,7 +168,15 @@ async function waitForServer(port) {
 }
 
 function selectedEntries(map, selected) {
-  if (selected) {
+  if (Array.isArray(selected) && selected.length > 0) {
+    return selected.map((name) => {
+      if (!map[name]) {
+        throw new Error(`Unknown selection "${name}"`);
+      }
+      return [name, map[name]];
+    });
+  }
+  if (typeof selected === "string" && selected) {
     if (!map[selected]) {
       throw new Error(`Unknown selection "${selected}"`);
     }
@@ -146,7 +186,12 @@ function selectedEntries(map, selected) {
 }
 
 async function main() {
-  const selectedView = argValue("--view");
+  const selectedViews = [
+    ...argValues("--view"),
+    ...argValues("--views").flatMap((value) =>
+      value.split(",").map((item) => item.trim()).filter(Boolean),
+    ),
+  ];
   const selectedSize = argValue("--size");
   const noBuild = hasArg("--no-build");
   const listViews = hasArg("--list-views");
@@ -170,7 +215,7 @@ async function main() {
   mkdirSync(reportDir, { recursive: true });
   mkdirSync(dumpDir, { recursive: true });
 
-  if (!selectedView && !selectedSize) {
+  if (!listViews && selectedViews.length === 0 && !selectedSize) {
     rmSync(outDir, { recursive: true, force: true });
     rmSync(reportDir, { recursive: true, force: true });
     rmSync(dumpDir, { recursive: true, force: true });
@@ -195,7 +240,7 @@ async function main() {
 
   const server = startStaticServer(port);
   try {
-    await waitForServer(port);
+    await waitForServer(port, server);
     const browser = await chromium.launch({
       executablePath: "/run/current-system/sw/bin/chromium",
       headless: true,
@@ -203,7 +248,7 @@ async function main() {
     });
 
     const reports = [];
-    for (const [viewName, view] of selectedEntries(allViews, selectedView)) {
+    for (const [viewName, view] of selectedEntries(allViews, selectedViews)) {
       for (const [sizeName, viewport] of selectedEntries(sizes, selectedSize)) {
         const page = await browser.newPage({ viewport });
         const resourceErrors = [];
@@ -214,12 +259,24 @@ async function main() {
         });
         page.on("console", (message) => {
           if (message.type() === "error") {
-            resourceErrors.push(`console: ${message.text()}`);
+            const text = message.text();
+            if (
+              !text.startsWith("[PIPELINE]") &&
+              !text.startsWith("Failed to load resource:")
+            ) {
+              resourceErrors.push(`console: ${text}`);
+            }
           }
         });
+        const navigationWarnings = [];
 
         const url = `http://127.0.0.1:${port}/iframe.html?id=${view.storyId}&viewMode=story`;
-        await page.goto(url, { waitUntil: "networkidle" });
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        try {
+          await page.waitForLoadState("networkidle", { timeout: 10000 });
+        } catch (error) {
+          navigationWarnings.push(`networkidle timeout: ${error.message}`);
+        }
         await page.waitForTimeout(750);
 
         const captureId = `${viewName}-${sizeName}`;
@@ -245,7 +302,11 @@ async function main() {
           const panel =
             document.querySelector(".component-container") ||
             document.querySelector(".build-panel") ||
+            document.querySelector(".ct-storybook-panel-content > *") ||
             document.querySelector(".isonim-app-shell") ||
+            document.querySelector("#status-base") ||
+            document.querySelector("#status") ||
+            document.querySelector(".ct-storybook-frame > *") ||
             document.body;
           const panelStyle = getComputedStyle(panel);
           const rootStyle = root ? getComputedStyle(root) : null;
@@ -345,6 +406,8 @@ async function main() {
             "#auto-hide-layout-row",
             "#ROOT",
             "#main",
+            "#status",
+            "#status-base",
             ".lm_goldenlayout",
             ".lm_row",
             ".lm_column",
@@ -439,10 +502,54 @@ async function main() {
             ".local-calltrace-view",
             ".local-calltrace",
             ".calltrace-search-input",
+            "#fixed-search",
+            ".fixed-search-query-field",
+            ".fixed-search-include-field",
+            ".fixed-search-exclude-field",
+            ".search-component",
+            ".search-mode-selector",
+            ".search-input-row",
+            ".search-query-input",
+            ".search-result-row",
+            ".search-results-header",
+            ".search-results-find-query",
+            ".search-results-body",
+            ".search-results-file-group",
+            ".search-results-match-row",
+            ".search-results-highlight",
+            ".command-container",
+            ".command-view",
+            ".command-input-row",
+            ".command-input-field",
+            ".command-input-placeholder",
+            ".command-results",
+            ".command-result",
+            ".command-selected",
             ".low-level-code",
-            ".flow",
-            ".timeline",
+            ".flow-component",
+            ".isonim-flow",
+            ".timeline-component",
+            ".isonim-timeline",
+            ".point-list-component",
+            ".isonim-point-list",
+            ".request-panel",
+            ".vcs-container",
+            ".traceLog",
             ".trace-log",
+            ".trace-log-table-header",
+            ".trace-log-table-body",
+            ".trace-log-row",
+            ".event-rr-ticks-line",
+            ".ct-header",
+            ".isonim-debug-controls",
+            ".debug-controls",
+            ".debug-button-svg",
+            ".session-tab-bar",
+            ".session-tab",
+            ".auto-hide-bottom-tabs",
+            ".auto-hide-strip-tab",
+            ".auto-hide-collapsed-icon",
+            ".auto-hide-overlay-tab",
             ".isonim-app-shell",
             ".isonim-panel-section",
             ".isonim-section-content",
@@ -505,6 +612,7 @@ async function main() {
           url,
           viewport,
           resourceErrors,
+          navigationWarnings,
           diagnostics,
         };
         const reportPath = join(reportDir, `${captureId}.json`);

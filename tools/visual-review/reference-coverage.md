@@ -1,5 +1,8 @@
 # Storybook Reference Coverage
 
+<!-- cspell:ignore Karax karax worktree zahary isonim viewmodel -->
+<!-- cspell:ignore deepreview capturable -->
+
 This file tracks Karax reference captures used for IsoNim visual parity work.
 Generated screenshots, HTML dumps, and computed-style dumps are intentionally
 kept out of this repository; the rows below point to the local reference
@@ -18,6 +21,48 @@ Some old Karax panels were less developed than current IsoNim surfaces. Use
 these references for mature shell, Golden Layout, design-system class, and
 spacing contracts. Do not downgrade richer current IsoNim behavior to match an
 old empty, blocked, or partial Karax state.
+
+## Current Storybook Audit
+
+Last audited: 2026-05-05 on `codetracer-viewmodel`.
+
+Current Storybook views are discovered with:
+
+```sh
+nix shell nixpkgs#nodejs --command node tools/visual-review/capture-storybook.mjs --list-views --no-build
+```
+
+The generated list includes all real IsoNim panel stories exported through
+`mountCodeTracerStory`, plus structure stories for session tabs, menu/status
+shells, debug shell, auto-hide controls, and default/app-shell layouts. The
+capture tool also exposes source-slug aliases for `deepreview` and
+`agent-activity-deepreview`, in addition to Storybook's display-name slugs
+`deep-review` and `agent-activity-deep-review`; `status` aliases the
+`status-shell` component story.
+
+Representative partial/missing-reference surfaces were captured successfully at
+`laptop` size on 2026-05-05:
+
+| Surface | Current Storybook view | Current status |
+| --- | --- | --- |
+| Point list | `point-list` | confirmed current IsoNim panel, `tools/visual-review/reports/point-list-laptop.json` |
+| Timeline | `timeline` | confirmed current IsoNim panel, `tools/visual-review/reports/timeline-laptop.json` |
+| Flow | `flow` | confirmed current IsoNim panel with populated steps, `tools/visual-review/reports/flow-laptop.json` |
+| VCS | `vcs` | confirmed current IsoNim panel, `tools/visual-review/reports/vcs-laptop.json` |
+| Request panel | `request-panel` | confirmed current IsoNim panel, `tools/visual-review/reports/request-panel-laptop.json` |
+| Deep review panel | `deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/deepreview-laptop.json` |
+| Agent activity deep review | `agent-activity-deepreview` | confirmed current IsoNim panel, `tools/visual-review/reports/agent-activity-deepreview-laptop.json` |
+| Auto-hide bottom tabs | `auto-hide-bottom-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-bottom-tabs-laptop.json` |
+| Auto-hide collapsed icons | `auto-hide-collapsed-icons` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-collapsed-icons-laptop.json` |
+| Auto-hide overlay tabs | `auto-hide-overlay-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/auto-hide-overlay-tabs-laptop.json` |
+| Auto-hide side strip | `auto-hide-side-strip` and `auto-hide-side-strip-collapsed` | confirmed populated and collapsed current IsoNim variants |
+| Session tabs | `session-tabs` | confirmed current IsoNim component, `tools/visual-review/reports/session-tabs-laptop.json` |
+| Default layout variants | `default-layout`, `standalone-app-shell`, `noir-filesystem-active`, `noir-state-active`, `noir-calltrace-active`, `noir-calltrace-search-status-report`, `noir-menu-view-open`, `noir-status-expanded` | confirmed current layout stories; use a non-default `--port` if another static server is already bound to `6106` |
+
+Current confirmation does not change the old reference status below. Rows marked
+`blocked`, `partial`, or `missing` still mean the old Karax reference capture is
+blocked, partial, or absent; the current IsoNim story can still be valid and
+capturable.
 
 ## Coverage Matrix
 
@@ -59,6 +104,8 @@ old empty, blocked, or partial Karax state.
 
 1. Capture current Storybook for a matching story with
    `tools/visual-review/capture-storybook.mjs --view <slug> --size laptop`.
+   Use repeated `--view` flags or `--views a,b,c` for batch captures. If the
+   default port is occupied, pass `--port <free-port>`.
 2. Compare HTML and computed-style dumps against the reference capture with the
    same surface name.
 3. Compare screenshots with `tools/visual-review/compare-screenshots.sh` when
