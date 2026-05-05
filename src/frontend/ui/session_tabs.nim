@@ -23,6 +23,9 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
+  proc toggleClass(el: isonim_dom.Element; className: cstring) {.
+    importcpp: "#.classList.toggle(#)".}
+
 # ---------------------------------------------------------------------------
 # Model derivation and direct rendering
 # ---------------------------------------------------------------------------
@@ -43,7 +46,16 @@ proc sessionTabCallbacks(data: Data): SessionTabsCallbacks =
   SessionTabsCallbacks(
     onSelect: proc(index: int) = switchSession(data, index),
     onClose: proc(index: int) = closeSession(data, index),
-    onAdd: proc() = createNewSession(data))
+    onAdd: proc() = createNewSession(data),
+    onToggleOverflow: proc() =
+      when defined(js):
+        let bar = isonim_dom.getElementById(
+          isonim_dom.document,
+          cstring SessionTabBarId)
+        if not isonim_dom.isNodeNil(isonim_dom.Node(bar)):
+          bar.toggleClass(cstring"overflow-open")
+      else:
+        discard)
 
 # ---------------------------------------------------------------------------
 # IsoNim WebRenderer rendering

@@ -237,6 +237,8 @@ proc ensureSharedRenderers() =
   renderer.sharedDirectRedraw = proc() =
     if not data.ui.menu.isNil:
       data.ui.menu.requestMenuRender()
+    if not data.ui.status.isNil:
+      data.ui.status.requestStatusRender()
     requestFixedSearchRender()
   if not data.ui.menu.isNil:
     discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
@@ -266,6 +268,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     renderer.sharedDirectRedraw = proc() =
       if not data.ui.menu.isNil:
         data.ui.menu.requestMenuRender()
+      if not data.ui.status.isNil:
+        data.ui.status.requestStatusRender()
       requestFixedSearchRender()
     if not data.ui.menu.isNil:
       discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)

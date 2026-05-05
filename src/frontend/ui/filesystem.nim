@@ -215,10 +215,10 @@ var filesystemVMInstance*: FilesystemVM
 var filesystemVMStore: ReplayDataStore
 var filesystemComponentRef: FilesystemComponent
 # Track which FilesystemComponent ids have already mounted their IsoNim
-# view.  The GL container is keyed by ``filesystemComponent-{id}`` so
-# each panel instance gets its own mount.
-var isoNimFilesystemMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
+# view for each session. GoldenLayout component ids are reused across
+# sessions, so the key must include the active session index.
+var isoNimFilesystemMountedIds {.used.}: JsAssoc[cstring, bool] =
+  JsAssoc[cstring, bool]{}
 
 proc tryMountIsoNimFilesystemPanel*()
 
@@ -346,7 +346,7 @@ proc initFilesystemVMWithStore*(store: ReplayDataStore) =
   ## was available) it is replaced so the panel uses the real backend.
   if filesystemVMInstance != nil:
     clog "FilesystemVM: replacing existing instance with shared-store version"
-    isoNimFilesystemMountedIds = JsAssoc[int, bool]{}
+    isoNimFilesystemMountedIds = JsAssoc[cstring, bool]{}
   filesystemVMStore = store
   filesystemVMInstance = createFilesystemVM(store)
   clog "FilesystemVM: parallel ViewModel instance created (shared store)"
@@ -385,6 +385,28 @@ proc initFilesystemVM*() =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc findFilesystemMountContainer(
+      keyedId, legacyId: cstring;
+      sessionIndex: int): dom_api.Element =
+    let activeSessionContainer = document.getElementById(
+      cstring("session-container-" & $sessionIndex))
+    if not activeSessionContainer.isNil:
+      let keyed = cast[Element](findNodeInElement(
+        Node(activeSessionContainer),
+        cstring("#" & $keyedId)))
+      if not keyed.isNil:
+        return cast[dom_api.Element](keyed)
+
+      let legacy = cast[Element](findNodeInElement(
+        Node(activeSessionContainer),
+        cstring("#" & $legacyId)))
+      if not legacy.isNil:
+        return cast[dom_api.Element](legacy)
+
+    result = dom_api.getElementById(dom_api.document, keyedId)
+    if dom_api.isNodeNil(dom_api.Node(result)):
+      result = dom_api.getElementById(dom_api.document, legacyId)
+
   proc tryMountIsoNimFilesystemPanel*() =
     ## Mount the IsoNim Filesystem panel view into the GoldenLayout-
     ## managed container.  The container's id is
@@ -401,19 +423,22 @@ when defined(js):
     if filesystemComponentRef.isNil:
       return
     let componentId = filesystemComponentRef.id
-    if isoNimFilesystemMountedIds.hasKey(componentId):
+    let sessionIndex = data.activeSessionIndex
+    let mountKey = cstring($sessionIndex & ":" & $componentId)
+    if isoNimFilesystemMountedIds.hasKey(mountKey):
       return
 
     let keyedId = cstring("filesystemComponent-" & $componentId)
     let legacyId = cstring"filesystemComponent"
     var retryCount = 0
     proc doMount() =
-      if isoNimFilesystemMountedIds.hasKey(componentId):
+      if isoNimFilesystemMountedIds.hasKey(mountKey):
         return
       retryCount += 1
-      var container = dom_api.getElementById(dom_api.document, keyedId)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        container = dom_api.getElementById(dom_api.document, legacyId)
+      let container = findFilesystemMountContainer(
+        keyedId,
+        legacyId,
+        sessionIndex)
       if dom_api.isNodeNil(dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimFilesystemPanel: not ready after 200 retries, giving up"
@@ -427,7 +452,7 @@ when defined(js):
       while not dom_api.isNodeNil(containerNode.firstChild):
         discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-      isoNimFilesystemMountedIds[componentId] = true
+      isoNimFilesystemMountedIds[mountKey] = true
       try:
         mountIsoNimFilesystemPanel(container, filesystemVMInstance)
       except:

@@ -21,6 +21,7 @@ type
     onSelect*: proc(index: int)
     onClose*: proc(index: int)
     onAdd*: proc()
+    onToggleOverflow*: proc()
 
 const
   SessionTabBarId* = "session-tab-bar"
@@ -37,7 +38,12 @@ const
   SessionTabIdPrefix* = "session-tab-"
 
 proc tabBarClass*(tabCount: int): string =
-  if tabCount <= 1: SessionTabBarSingleClass else: SessionTabBarClass
+  if tabCount <= 1:
+    SessionTabBarSingleClass
+  elif tabCount > 3:
+    SessionTabBarClass & " has-overflow"
+  else:
+    SessionTabBarClass
 
 proc tabClass*(active: bool): string =
   if active: SessionTabActiveClass else: SessionTabClass
@@ -53,6 +59,22 @@ proc invokeClose(callbacks: SessionTabsCallbacks; index: int) =
 proc invokeAdd(callbacks: SessionTabsCallbacks) =
   if not callbacks.onAdd.isNil:
     callbacks.onAdd()
+
+proc invokeToggleOverflow(callbacks: SessionTabsCallbacks) =
+  if not callbacks.onToggleOverflow.isNil:
+    callbacks.onToggleOverflow()
+
+proc tabSelectHandler(
+    callbacks: SessionTabsCallbacks;
+    index: int): proc() =
+  let capturedIndex = index
+  result = proc() = callbacks.invokeSelect(capturedIndex)
+
+proc tabCloseHandler(
+    callbacks: SessionTabsCallbacks;
+    index: int): proc() =
+  let capturedIndex = index
+  result = proc() = callbacks.invokeClose(capturedIndex)
 
 proc renderSessionTab(
     r: MockRenderer;
@@ -104,6 +126,8 @@ proc renderOverflowMenu(
     r.appendChild(result, item)
 
 when defined(js):
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+
   proc renderSessionTab(
       r: WebRenderer;
       tab: SessionTabRecord;
@@ -125,7 +149,7 @@ when defined(js):
     if multiSession:
       isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
         proc(ev: isonim_dom.Event) =
-          {.emit: "`ev`.stopPropagation();".}
+          ev.stopPropagation()
           callbacks.invokeClose(index))
     node
 
@@ -156,14 +180,11 @@ when defined(js):
       r.appendChild(result, item)
 
   proc renderOverflowButton(
-      r: WebRenderer): isonim_dom.Element =
+      r: WebRenderer;
+      callbacks: SessionTabsCallbacks): isonim_dom.Element =
     ui(r):
       tdiv(class = SessionTabOverflowClass,
-           onclick = proc() =
-             {.emit: """
-               const bar = document.getElementById('session-tab-bar');
-               if (bar) bar.classList.toggle('overflow-open');
-             """.}):
+           onclick = proc() = callbacks.invokeToggleOverflow()):
         text "v"
 
 proc renderSessionTabsPanel*(
@@ -172,14 +193,31 @@ proc renderSessionTabsPanel*(
     activeIndex: int;
     callbacks: SessionTabsCallbacks = SessionTabsCallbacks()): MockNode =
   let multiSession = tabs.len > 1
-  result = ui(r):
-    tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len))
-  for i, tab in tabs:
-    r.appendChild(result,
-      renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))
-  r.appendChild(result, renderOverflowButton(r))
-  r.appendChild(result, renderAddButton(r, callbacks))
-  r.appendChild(result, renderOverflowMenu(r, tabs, activeIndex, callbacks))
+  ui(r):
+    tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len)):
+      for i, tab in tabs:
+        tdiv(class = tabClass(i == activeIndex),
+             id = SessionTabIdPrefix & $i,
+             onclick = tabSelectHandler(callbacks, i)):
+          span(class = SessionTabLabelClass):
+            text tab.label
+          if multiSession:
+            span(class = SessionTabCloseClass,
+                 onclick = tabCloseHandler(callbacks, i)):
+              text "×"
+      tdiv(class = SessionTabOverflowClass):
+        text "v"
+      tdiv(class = SessionTabAddClass,
+           onclick = proc() = callbacks.invokeAdd()):
+        text "+"
+      tdiv(class = SessionTabOverflowMenuClass):
+        for i, tab in tabs:
+          let tabIndex = i
+          let itemClass = SessionTabOverflowItemClass &
+            (if i == activeIndex: " active" else: "")
+          tdiv(class = itemClass,
+               onclick = tabSelectHandler(callbacks, tabIndex)):
+            text tab.label
 
 when defined(js):
   proc renderSessionTabsPanel*(
@@ -194,7 +232,7 @@ when defined(js):
     for i, tab in tabs:
       r.appendChild(result,
         renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))
-    r.appendChild(result, renderOverflowButton(r))
+    r.appendChild(result, renderOverflowButton(r, callbacks))
     r.appendChild(result, renderAddButton(r, callbacks))
     r.appendChild(result, renderOverflowMenu(r, tabs, activeIndex, callbacks))
 
@@ -213,16 +251,3 @@ when defined(js):
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):
       discard isonim_dom.appendChild(containerNode, panelNode.firstChild)
-
-    {.emit: """
-      requestAnimationFrame(() => {
-        const bar = `container`;
-        if (!bar) return;
-        const tabs = Array.from(bar.querySelectorAll('.session-tab'));
-        const add = bar.querySelector('.session-tab-add');
-        const needed = tabs.reduce((sum, el) => sum + el.getBoundingClientRect().width, 0) +
-          (add ? add.getBoundingClientRect().width : 0) + 34;
-        bar.classList.toggle('has-overflow', needed > bar.clientWidth);
-        if (needed <= bar.clientWidth) bar.classList.remove('overflow-open');
-      });
-    """.}

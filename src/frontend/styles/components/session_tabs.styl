@@ -11,7 +11,7 @@
   top 0
   // Place tabs after the centered omnibox and before the window controls.
   right 120px
-  left calc(2.25em + min(20em, 20vw) + 34em)
+  left calc(2.25em + 34em + min(20em, 20vw) + 1.5em)
   height 38px
   padding 0 4px
   z-index 21  // Above #menu (z-index 20) so tabs are clickable
@@ -39,7 +39,8 @@
 .session-tab
   display flex
   align-items center
-  flex 0 0 auto
+  flex 0 1 160px
+  min-width 36px
   padding 0 10px
   height 26px
   cursor pointer
@@ -65,7 +66,8 @@
   overflow hidden
   text-overflow ellipsis
   white-space nowrap
-  min-width 80px
+  min-width 0
+  flex 1 1 auto
   max-width 160px
 
 .session-tab-close
