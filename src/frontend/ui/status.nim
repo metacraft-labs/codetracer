@@ -19,6 +19,7 @@ method onCompleteMove*(self: StatusComponent, response: MoveState) {.async.} =
   self.location = response.location
   self.state.stableBusy = false
   self.completeMoveId += 1
+  self.redraw()
 
 proc deactivateNotification*(self: StatusComponent, notification: Notification) =
   notification.active = false
@@ -247,14 +248,20 @@ when defined(js):
     ## Refresh the shared status bar through IsoNim direct DOM.
     let container = dom_api.getElementById(dom_api.document, cstring"status")
     if dom_api.isNodeNil(dom_api.Node(container)):
+      cerror "status: #status container missing during render"
       return
 
-    let r = WebRenderer()
-    renderStatusInto(r, container, self.statusShellModel(), self.statusShellCallbacks())
-    discard windowSetTimeout(proc() =
-      requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
-      requestBottomAutoHideTabsRender(cstring"auto-hide-bottom-tabs")
-    , 0)
+    try:
+      let model = self.statusShellModel()
+      cerror "status: rendering status bar location=" & model.base.locationText
+      let r = WebRenderer()
+      renderStatusInto(r, container, model, self.statusShellCallbacks())
+      discard windowSetTimeout(proc() =
+        requestCollapsedIconZoneRender(cstring"auto-hide-collapsed-icon-zone")
+        requestBottomAutoHideTabsRender(cstring"auto-hide-bottom-tabs")
+      , 0)
+    except CatchableError as e:
+      cerror "status: render failed: " & e.msg
 
   method redraw*(self: StatusComponent) =
     self.requestStatusRender()

@@ -2084,6 +2084,10 @@ when defined(ctRenderer):
       trace: TraceService(),
       search: SearchService(
         paths: JsAssoc[cstring, bool]{},
+        pathsPrepared: @[],
+        commandsPrepared: @[],
+        functionsPrepared: @[],
+        functionsInSourcemapPrepared: @[],
         pluginCommands: JsAssoc[cstring, SearchSource]{},
         activeCommandName: cstring"",
         selected: 0),

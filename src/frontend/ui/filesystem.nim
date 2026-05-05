@@ -346,7 +346,10 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
   ## layout when the panel container becomes visible (or is rebuilt)
   ## so the panel reflects whatever ``EditorService.filesystem`` /
   ## ``data.startOptions.diff`` already accumulated.
-  if filesystemVMInstance.isNil or self.isNil:
+  if self.isNil:
+    return
+  filesystemComponentRef = self
+  if filesystemVMInstance.isNil:
     return
   if not self.service.isNil and not self.service.filesystem.isNil:
     var openedPaths = initHashSet[string]()
@@ -381,7 +384,13 @@ proc initFilesystemVMWithStore*(store: ReplayDataStore) =
   filesystemVMStore = store
   filesystemVMInstance = createFilesystemVM(store)
   wireFilesystemOpenBridge()
-  clog "FilesystemVM: parallel ViewModel instance created (shared store)"
+  when defined(js):
+    if not data.isNil:
+      if data.ui.componentMapping[Content.Filesystem].len == 0:
+        discard data.makeFilesystemComponent(0)
+      for _, component in data.ui.componentMapping[Content.Filesystem]:
+        syncLegacyFilesystemIntoVM(FilesystemComponent(component))
+        break
   tryMountIsoNimFilesystemPanel()
 
 proc initFilesystemVM*() =
@@ -410,7 +419,6 @@ proc initFilesystemVM*() =
   filesystemVMStore = createReplayDataStore(stubBackend)
   filesystemVMInstance = createFilesystemVM(filesystemVMStore)
   wireFilesystemOpenBridge()
-  clog "FilesystemVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimFilesystemPanel()
 
 # ---------------------------------------------------------------------------
@@ -485,12 +493,17 @@ when defined(js):
       while not dom_api.isNodeNil(containerNode.firstChild):
         discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
-      isoNimFilesystemMountedIds[mountKey] = true
       try:
         mountIsoNimFilesystemPanel(container, filesystemVMInstance)
+        isoNimFilesystemMountedIds[mountKey] = true
       except:
+        if isoNimFilesystemMountedIds.hasKey(mountKey):
+          isoNimFilesystemMountedIds.del(mountKey)
         cerror "tryMountIsoNimFilesystemPanel: mount EXCEPTION: " &
           getCurrentExceptionMsg()
+        if retryCount <= 200:
+          discard setTimeout(proc() = doMount(), 10)
+        return
 
       # Re-sync any state the legacy component already carries so the
       # freshly-mounted view reflects the latest tree.

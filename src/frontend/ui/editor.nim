@@ -1796,10 +1796,11 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     let leftPos = fmt"{e.scrollLeft}px".cstring
     for trace in self.traces:
       trace.viewZone.domNode.style.toJs.left = leftPos
-    for flowLoop in self.flow.flowLoops:
-      if not flowLoop.flowZones.isNil:
-        self.flow.leftPos = leftPos
-        flowLoop.flowZones.dom.style.toJs.left = leftPos
+    if not self.flow.isNil and not self.flow.flowLoops.isNil:
+      for flowLoop in self.flow.flowLoops:
+        if not flowLoop.flowZones.isNil:
+          self.flow.leftPos = leftPos
+          flowLoop.flowZones.dom.style.toJs.left = leftPos
   )
 
   tabInfo.monacoEditor.onMouseDown(proc(e: js) =

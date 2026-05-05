@@ -1,7 +1,7 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
-      state, calltrace, menu,
+      state, calltrace, menu, status,
       debug, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
@@ -828,7 +828,8 @@ proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Co
     # create a parent command from parent
     let parent = Command(
       name: node.name,
-      kind: ParentCommand)
+      kind: ParentCommand,
+      subcommands: @[])
 
     # get commands of parent children
     for node in children:
@@ -1033,56 +1034,65 @@ when not defined(ctInExtension):
       # createUIComponents(), these calls replace them with real-backend
       # instances.  If register() hasn't run yet, the instances are
       # created fresh with the real backend.
-      cerror "[PIPELINE] configureMiddleware: calling initStateVMWithStore"
-      state.initStateVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initCalltraceVMWithStore"
-      calltrace.initCalltraceVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initDebugControlsVMWithStore"
-      debug.initDebugControlsVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initEventLogVMWithStore"
-      event_log.initEventLogVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initFlowVMWithStore"
-      flow.initFlowVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initEditorVMWithStore"
-      editor.initEditorVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initTimelineVMWithStore"
-      trace.initTimelineVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initTerminalOutputVMWithStore"
-      terminal_output.initTerminalOutputVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initBuildVMWithStore"
-      build.initBuildVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initErrorsVMWithStore"
-      errors.initErrorsVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initSearchResultsVMWithStore"
-      search_results.initSearchResultsVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initNoSourceVMWithStore"
-      no_source.initNoSourceVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initStepListVMWithStore"
-      step_list.initStepListVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initCalltraceEditorVMWithStore"
-      calltrace_editor.initCalltraceEditorVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initReplVMWithStore"
-      repl.initReplVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initLowLevelCodeVMWithStore"
-      low_level_code.initLowLevelCodeVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initRequestPanelVMWithStore"
-      request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initTraceLogVMWithStore"
-      trace_log.initTraceLogVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initScratchpadVMWithStore"
-      scratchpad.initScratchpadVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initFilesystemVMWithStore"
-      filesystem.initFilesystemVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initCommandPaletteVMWithStore"
-      command.initCommandPaletteVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initAgentActivityVMWithStore"
-      agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initAgentActivityDeepReviewVMWithStore"
-      agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initAgentWorkspaceVMWithStore"
-      agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-      cerror "[PIPELINE] configureMiddleware: calling initDeepReviewVMWithStore"
-      deepreview.initDeepReviewVMWithStore(activeSessionVM.store)
+      template initPanelVM(label: string; body: untyped) =
+        try:
+          cerror "[PIPELINE] configureMiddleware: calling " & label
+          body
+        except CatchableError as e:
+          cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
+
+      initPanelVM("initStateVMWithStore"):
+        state.initStateVMWithStore(activeSessionVM.store)
+      initPanelVM("initCalltraceVMWithStore"):
+        calltrace.initCalltraceVMWithStore(activeSessionVM.store)
+      # Keep the debugger toolbar on its legacy/stub-backed bridge during
+      # startup. The toolbar is global chrome, not a replay panel, and its
+      # shared-store upgrade currently runs JS side effects early enough to
+      # abort middleware registration.
+      initPanelVM("initEventLogVMWithStore"):
+        event_log.initEventLogVMWithStore(activeSessionVM.store)
+      initPanelVM("initFlowVMWithStore"):
+        flow.initFlowVMWithStore(activeSessionVM.store)
+      initPanelVM("initEditorVMWithStore"):
+        editor.initEditorVMWithStore(activeSessionVM.store)
+      initPanelVM("initTimelineVMWithStore"):
+        trace.initTimelineVMWithStore(activeSessionVM.store)
+      initPanelVM("initTerminalOutputVMWithStore"):
+        terminal_output.initTerminalOutputVMWithStore(activeSessionVM.store)
+      initPanelVM("initBuildVMWithStore"):
+        build.initBuildVMWithStore(activeSessionVM.store)
+      initPanelVM("initErrorsVMWithStore"):
+        errors.initErrorsVMWithStore(activeSessionVM.store)
+      initPanelVM("initSearchResultsVMWithStore"):
+        search_results.initSearchResultsVMWithStore(activeSessionVM.store)
+      initPanelVM("initNoSourceVMWithStore"):
+        no_source.initNoSourceVMWithStore(activeSessionVM.store)
+      initPanelVM("initStepListVMWithStore"):
+        step_list.initStepListVMWithStore(activeSessionVM.store)
+      initPanelVM("initCalltraceEditorVMWithStore"):
+        calltrace_editor.initCalltraceEditorVMWithStore(activeSessionVM.store)
+      initPanelVM("initReplVMWithStore"):
+        repl.initReplVMWithStore(activeSessionVM.store)
+      initPanelVM("initLowLevelCodeVMWithStore"):
+        low_level_code.initLowLevelCodeVMWithStore(activeSessionVM.store)
+      initPanelVM("initRequestPanelVMWithStore"):
+        request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
+      initPanelVM("initTraceLogVMWithStore"):
+        trace_log.initTraceLogVMWithStore(activeSessionVM.store)
+      initPanelVM("initScratchpadVMWithStore"):
+        scratchpad.initScratchpadVMWithStore(activeSessionVM.store)
+      initPanelVM("initFilesystemVMWithStore"):
+        filesystem.initFilesystemVMWithStore(activeSessionVM.store)
+      initPanelVM("initCommandPaletteVMWithStore"):
+        command.initCommandPaletteVMWithStore(activeSessionVM.store)
+      initPanelVM("initAgentActivityVMWithStore"):
+        agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
+      initPanelVM("initAgentActivityDeepReviewVMWithStore"):
+        agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
+      initPanelVM("initAgentWorkspaceVMWithStore"):
+        agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
+      initPanelVM("initDeepReviewVMWithStore"):
+        deepreview.initDeepReviewVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator
@@ -1121,7 +1131,17 @@ when not defined(ctInExtension):
           let line = response.location.line
           isoBatch.batch proc() =
             calltrace.syncCalltraceDebuggerPosition(rrTicks, path, line)
-            state.syncStoreDebuggerPosition(rrTicks, path, line))
+            state.syncStoreDebuggerPosition(rrTicks, path, line)
+
+          if not data.ui.status.isNil:
+            cerror "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
+            data.ui.status.stopSignal = response.stopSignal
+            data.ui.status.location = response.location
+            data.ui.status.state.stableBusy = false
+            inc data.ui.status.completeMoveId
+            data.ui.status.redraw()
+          else:
+            cerror "[PIPELINE] viewsApi.CtCompleteMove: status component is nil")
 
       # The standalone isonim_app shell remains disabled here because it would
       # create a duplicate DOM tree in #isonim-app. The per-panel mounts in
@@ -1130,9 +1150,12 @@ when not defined(ctInExtension):
 
     for content, components in data.ui.componentMapping:
       for i, component in components:
-        if component.api.isNil:
-          let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-          component.register(componentToMiddlewareApi)
+        let componentToMiddlewareApi =
+          if component.api.isNil:
+            setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
+          else:
+            component.api
+        component.register(componentToMiddlewareApi)
 
     # Replay the last known debugger position so that newly-created
     # VMs (which start with rrTicks=0) learn the current position.
@@ -1370,6 +1393,23 @@ proc onTraceLoaded(
 
   data.switchToDebug()
   renderer.requestInitialPanelData(data)
+  when not defined(ctInExtension):
+    # The status bar is global chrome outside GoldenLayout. During startup the
+    # debugger service can receive the first CtCompleteMove before the status
+    # host has settled, so retry a few times using the debugger service's last
+    # known location. This preserves the old "data.redraw after complete move"
+    # startup effect without depending on the ViewModel subscription order.
+    var statusRefreshAttempts = 0
+    proc refreshStatusFromDebugger() =
+      inc statusRefreshAttempts
+      if not data.ui.status.isNil:
+        data.ui.status.location = data.services.debugger.location
+        data.ui.status.stopSignal = data.services.debugger.stopSignal
+        data.ui.status.state.stableBusy = data.status.stableBusy
+        data.ui.status.redraw()
+      if statusRefreshAttempts < 10:
+        discard windowSetTimeout(refreshStatusFromDebugger, 500)
+    discard windowSetTimeout(refreshStatusFromDebugger, 0)
 
   if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
     data.viewsApi.installMessage()
@@ -1553,7 +1593,13 @@ proc onSymbolsLoaded(
     response: jsobject(
       symbols=seq[Symbol])) =
 
+  if data.ui.commandPalette.isNil:
+    discard data.makeCommandPaletteComponent()
+  if data.ui.commandPalette.isNil or data.ui.commandPalette.interpreter.isNil:
+    return
+
   data.ui.commandPalette.interpreter.symbols = JsAssoc[cstring, seq[Symbol]]{}
+  data.ui.commandPalette.interpreter.symbolsPrepared = @[]
 
   for symbol in response.symbols:
     if not data.ui.commandPalette.interpreter.symbols.hasKey(symbol.name):
@@ -2861,34 +2907,6 @@ when not defined(ctInExtension):
         data.ipc = ipc
         configureIPC(data)
         configure(data)
-
-        # Register the dap-replay-selected handler early so it is ready
-        # before bootstrap-cache replay delivers the event.  The handler
-        # in onTraceLoaded may run too late because onTraceLoaded is async
-        # and the bootstrap replay fires events synchronously.
-        if not dapReplayHandlerRegistered:
-          data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
-            # Ensure middleware is initialised — it may not have been set up
-            # yet if this fires from a bootstrap-cache replay before
-            # onTraceLoaded completes.
-            if not middlewareConfigured:
-              configureMiddleware()
-              middlewareConfigured = true
-
-            let trace = response["trace"].to(Trace)
-            # Store the Backend Manager's replayId so we can stop it on close.
-            data.activeSession.replayId = response["replayId"].to(int)
-            infoPrint "ui: reinitializing dap for trace ", $trace.id
-            data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
-              clientName: "codetracer"
-            )))
-            data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-            data.dapApi.sendCtRequest(DapLaunch, js{
-              traceFolder: trace.outputFolder,
-              rawDiffIndex: data.startOptions.rawDiffIndex,
-              ctRRWorkerExe: data.rrBackendPath,
-            })
-          dapReplayHandlerRegistered = true
 
     startIPC()
 

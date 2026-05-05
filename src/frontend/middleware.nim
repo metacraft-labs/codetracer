@@ -5,7 +5,7 @@ import
   types,
   communication, dap,
   event_helpers,
-  ui/calltrace
+  ui/[calltrace, status]
 from isonim/core/batch as isoBatch import batch
 
 
@@ -70,7 +70,6 @@ when not defined(ctInExtension):
     if data.lastRestartKind == RestartSubsystem:
       data.services.debugger.dapSetBreakpoints()
 
-    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     # in db-backend/rust: interpret as Some(Location..) in the first case
     #   and None: in the second case
     let restoreLocation = if data.lastRestartKind == RestartSubsystem:
@@ -86,6 +85,7 @@ when not defined(ctInExtension):
         data.config.rrBackend.path
       else:
         cstring""
+    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     data.dapApi.sendCtRequest(DapLaunch, js{
       traceFolder: data.trace.outputFolder,
       rawDiffIndex: data.startOptions.rawDiffIndex,
@@ -156,6 +156,16 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     cerror "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
       $value.location.rrTicks &
       ", emitting to viewsApi"
+    when not defined(ctInExtension):
+      if not data.ui.isNil and not data.ui.status.isNil:
+        cerror "[PIPELINE] middleware.CtCompleteMove: refreshing status before viewsApi fan-out"
+        data.ui.status.stopSignal = value.stopSignal
+        data.ui.status.location = value.location
+        data.ui.status.state.stableBusy = false
+        inc data.ui.status.completeMoveId
+        data.ui.status.redraw()
+      else:
+        cerror "[PIPELINE] middleware.CtCompleteMove: status unavailable before fan-out"
     # Wrap the entire CtCompleteMove fan-out in a single isonim batch.
     # Subscribers (the legacy CalltraceComponent / StateComponent
     # `onCompleteMove` methods, the viewsApi-level fallback that calls

@@ -288,7 +288,9 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
 
       let sliceStart = (viewStart - storeStart).int
       let sliceEnd = (viewEnd - storeStart).int
-      result = lines[sliceStart .. sliceEnd]
+      result = newSeq[CallLine]()
+      for index in sliceStart .. sliceEnd:
+        result.add(lines[index])
       when defined(js):
         cerror "[PIPELINE] visibleLines memo: returning " &
           $result.len & " lines (slice " & $sliceStart & ".." &

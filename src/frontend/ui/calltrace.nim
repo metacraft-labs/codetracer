@@ -536,8 +536,13 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
 method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
   self.api = api
 
-  # Initialize the parallel ViewModel instance (no-op if already created).
-  initCalltraceVM()
+  # The replay session store owns the production CalltraceVM.  Creating the
+  # stub-backed fallback during component registration can run reactive memos
+  # before the session store has been installed, aborting startup before the
+  # caption bar and Golden Layout panels finish hydrating.  The real VM is
+  # installed by configureMiddleware through initCalltraceVMWithStore.
+  if calltraceVMInstance != nil:
+    tryMountIsoNimCalltrace()
 
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)

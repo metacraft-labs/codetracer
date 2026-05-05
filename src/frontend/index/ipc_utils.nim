@@ -3,9 +3,11 @@ import
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
-  ../lib/[ jslib, misc_lib ],
+  ../lib/[ jslib, misc_lib, electron_lib ],
   ../[ types, config, trace_metadata ],
   ../../common/[ ct_logging, paths ]
+
+var Object {.importc, nodecl.}: JsObject
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>
@@ -117,6 +119,14 @@ proc ready*(): Future[void] {.async.} =
     js{ "windowsHide": true }
   else:
     js{ "stdio": cstring"inherit" }
+  let processEnv = js{}
+  let nodeEnv = nodeProcess.toJs.env
+  let envKeys = Object.keys(nodeEnv)
+  for i in 0..<cast[int](envKeys.length):
+    let key = envKeys[i].to(cstring)
+    processEnv[key] = nodeEnv[key]
+  processEnv[cstring"CODETRACER_TMP_PATH"] = cstring(codetracerTmpPath)
+  spawnOptions["env"] = processEnv
   let backendManager = await startProcess(backendManagerExe.cstring, @[], spawnOptions)
   if backendManager.isOk:
     backendManagerProcess = backendManager.value

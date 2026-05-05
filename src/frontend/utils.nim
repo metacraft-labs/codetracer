@@ -675,7 +675,11 @@ proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
     interpreter: CommandInterpreter(
       data: data,
       commands: JsAssoc[cstring, Command]{},
-      files: JsAssoc[cstring, cstring]{}),
+      commandsPrepared: @[],
+      files: JsAssoc[cstring, cstring]{},
+      filesPrepared: @[],
+      symbols: JsAssoc[cstring, seq[Symbol]]{},
+      symbolsPrepared: @[]),
     inputValue: cstring(""),
     inputPlaceholder: cstring(""))
   data.ui.commandPalette = result

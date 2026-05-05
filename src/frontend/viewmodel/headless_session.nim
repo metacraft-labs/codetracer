@@ -143,7 +143,7 @@ proc newHeadlessDebugSession*(tracePath: string;
   let initializedEvent = backend.waitForEvent("initialized")
   discard initializedEvent  # we just need to consume it
 
-  # 3. Configuration done (required by DAP before launch)
+  # 3. Configuration done mirrors the GUI startup order.
   let configResp = backend.sendDapRequest("configurationDone")
   discard configResp
 

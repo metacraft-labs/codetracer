@@ -236,10 +236,19 @@ proc ensureSharedRenderers() =
 
   renderer.sharedDirectRedraw = proc() =
     if not data.ui.menu.isNil:
-      data.ui.menu.requestMenuRender()
+      try:
+        data.ui.menu.requestMenuRender()
+      except:
+        cerror "layout: menu redraw failed: " & getCurrentExceptionMsg()
     if not data.ui.status.isNil:
-      data.ui.status.requestStatusRender()
-    requestFixedSearchRender()
+      try:
+        data.ui.status.requestStatusRender()
+      except:
+        cerror "layout: status redraw failed: " & getCurrentExceptionMsg()
+    try:
+      requestFixedSearchRender()
+    except:
+      cerror "layout: fixed search redraw failed: " & getCurrentExceptionMsg()
   if not data.ui.menu.isNil:
     discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
   discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)
@@ -267,10 +276,19 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   if data.startOptions.shellUi:
     renderer.sharedDirectRedraw = proc() =
       if not data.ui.menu.isNil:
-        data.ui.menu.requestMenuRender()
+        try:
+          data.ui.menu.requestMenuRender()
+        except:
+          cerror "layout: menu redraw failed: " & getCurrentExceptionMsg()
       if not data.ui.status.isNil:
-        data.ui.status.requestStatusRender()
-      requestFixedSearchRender()
+        try:
+          data.ui.status.requestStatusRender()
+        except:
+          cerror "layout: status redraw failed: " & getCurrentExceptionMsg()
+      try:
+        requestFixedSearchRender()
+      except:
+        cerror "layout: fixed search redraw failed: " & getCurrentExceptionMsg()
     if not data.ui.menu.isNil:
       discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
     discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)
@@ -443,6 +461,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     containerId = cstring(fmt"editorComponent-{state.id}")
 
     discard windowSetTimeout((proc =
+      if not data.ui.componentMapping[state.content].hasKey(state.id):
+        discard data.makeComponent(state.content, state.id)
       if not data.ui.componentMapping[state.content][state.id].isNil:
         let component = data.ui.componentMapping[state.content][state.id]
 
@@ -520,6 +540,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     containerId = state.label
 
     discard windowSetTimeout((proc =
+      if not data.ui.componentMapping[state.content].hasKey(state.id):
+        discard data.makeComponent(state.content, state.id)
       if not data.ui.componentMapping[state.content][state.id].isNil:
         let component = data.ui.componentMapping[state.content][state.id]
 

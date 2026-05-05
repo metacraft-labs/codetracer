@@ -251,11 +251,15 @@ proc runInitial*(conf: CodetracerConf) =
     of StartupCommand.noCommand:
       # When ct is launched with no subcommand, show the welcome screen.
       # If --deepreview is provided, open the deepreview view instead.
+      # Playwright launches the ct binary directly and passes the trace to
+      # the Electron index process via CODETRACER_TRACE_ID. In that case we
+      # must not force --welcome-screen, or the renderer never enters replay
+      # mode and GUI tests time out before the first real window.
       var frontendArgs: seq[string] = @[]
       if conf.deepreview.len > 0:
         frontendArgs.add("--deepreview")
         frontendArgs.add(conf.deepreview)
-      else:
+      elif getEnv("CODETRACER_TRACE_ID", "").len == 0:
         frontendArgs.add("--welcome-screen")
       launchElectron(
         args = frontendArgs,
