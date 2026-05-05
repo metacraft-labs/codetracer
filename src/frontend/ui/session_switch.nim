@@ -16,6 +16,7 @@ import
   ../dap,
   ../renderer,
   menu,
+  debug,
   welcome_screen,
   search_results,
   ../utils,
@@ -405,6 +406,7 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    Empty welcome sessions also own the singleton shared components, so
   #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
+  debug.rewireDebugControlsBridgeForActiveSession(data)
   if not data.activeSession.ui.layout.isNil or data.activeSession.startOptions.welcomeScreen:
     if data.activeSession.startOptions.welcomeScreen:
       if not data.ui.welcomeScreen.isNil:
@@ -415,4 +417,6 @@ proc switchSession*(data: Data, targetIndex: int) =
     redrawAfterSessionSwitch()
     if not data.ui.menu.isNil:
       discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
+      discard windowSetTimeout(proc() =
+        debug.rewireDebugControlsBridgeForActiveSession(data), 0)
     discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)

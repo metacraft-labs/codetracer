@@ -26,6 +26,8 @@ import std/[strutils, unittest]
 const
   SessionSwitchPath = "src/frontend/ui/session_switch.nim"
   LayoutPath = "src/frontend/ui/layout.nim"
+  DebugPath = "src/frontend/ui/debug.nim"
+  UiJsPath = "src/frontend/ui_js.nim"
 
 proc sectionBetween(source, startMarker, endMarker: string): string =
   let start = source.find(startMarker)
@@ -144,6 +146,43 @@ else:
       check welcomeBranchIndex < showWelcomeIndex
       check showWelcomeIndex < renderWelcomeIndex
       check welcomeBranchIndex < clearIndex
+
+    test "switchSession rebinds debug toolbar bridge for active session":
+      let source = readFile(SessionSwitchPath)
+      let body = sectionBetween(source,
+        "proc switchSession*(data: Data, targetIndex: int) =",
+        "")
+
+      let tabBarIndex = indexOfRequired(body, "refreshSessionTabBar()")
+      let rewireIndex =
+        indexOfRequired(body, "debug.rewireDebugControlsBridgeForActiveSession(data)")
+      let redrawIndex =
+        indexOfRequired(body, "if not data.activeSession.ui.layout.isNil")
+
+      check tabBarIndex < rewireIndex
+      check rewireIndex < redrawIndex
+
+    test "debug bridge rewire uses active session component mediator":
+      let source = readFile(DebugPath)
+      let body = sectionBetween(source,
+        "proc rewireDebugControlsBridgeForActiveSession*(data: Data) =",
+        "proc jumpBeforeList*(self: DebugComponent) =")
+
+      check body.contains("data.ui.componentMapping[Content.Debug][0]")
+      check body.contains("component.api")
+      check body.contains("debugControlsVMInstance.onDapStep")
+
+    test "folder edit mode opens an indexed project file":
+      let source = readFile(UiJsPath)
+      let body = sectionBetween(source,
+        "proc onNoTrace(",
+        "configureShortcuts()")
+
+      let filenameFallbackIndex =
+        indexOfRequired(body, "elif data.startOptions.edit and response.filenames.len > 0:")
+      let openIndex = indexOfRequired(body, "data.openTab(initialEditPath, ViewSource)")
+
+      check filenameFallbackIndex < openIndex
 
     test "initLayout installs shared chrome before welcome early return":
       let source = readFile(LayoutPath)

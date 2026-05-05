@@ -69,6 +69,28 @@ async function waitForStepComplete(page: import("@playwright/test").Page): Promi
   );
 }
 
+async function currentRRTicks(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => {
+    const d = (window as any).data;
+    return d?.services?.debugger?.location?.rrTicks ?? -1;
+  });
+}
+
+async function waitForRRTicksChange(
+  page: import("@playwright/test").Page,
+  before: number,
+): Promise<number> {
+  let after = before;
+  await retry(
+    async () => {
+      after = await currentRRTicks(page);
+      return after >= 0 && after !== before;
+    },
+    { maxAttempts: 60, delayMs: 500 },
+  );
+  return after;
+}
+
 /**
  * Wait for the editor component to have a non-empty data-label attribute
  * (the filename). The attribute is set asynchronously after the backend
@@ -373,5 +395,14 @@ test.describe("Real tab switching with GL rebuild", () => {
       { maxAttempts: 30, delayMs: 500 },
     );
     expect(finalLine).toBe(steppedLine);
+
+    const beforeToolbarStep = await currentRRTicks(ctPage);
+    await layout.nextButton().click({ force: true });
+    const afterToolbarStep = await waitForRRTicksChange(ctPage, beforeToolbarStep);
+    expect(afterToolbarStep).not.toBe(beforeToolbarStep);
+
+    await ctPage.keyboard.press("F10");
+    const afterShortcutStep = await waitForRRTicksChange(ctPage, afterToolbarStep);
+    expect(afterShortcutStep).not.toBe(afterToolbarStep);
   });
 });

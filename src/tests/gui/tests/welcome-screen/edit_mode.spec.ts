@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import { test, expect, testProgramsPath } from "../../lib/fixtures";
 
 function sleep(ms: number): Promise<void> {
@@ -15,6 +14,18 @@ test.describe("Edit Mode", () => {
 
     const layout = ctPage.locator(".lm_goldenlayout");
     await expect(layout).toBeVisible();
+
+    await expect.poll(async () => {
+      const state = await ctPage.evaluate(() => {
+        const d = (window as any).data;
+        return {
+          edit: d?.startOptions?.edit === true,
+          pathCount: d?.services?.debugger?.paths?.length ?? 0,
+          openCount: Object.keys(d?.services?.editor?.open ?? {}).length,
+        };
+      });
+      return state.edit && state.pathCount > 0 && state.openCount > 0;
+    }).toBe(true);
   });
 
   test("edit mode shows file system panel", async ({ ctPage }) => {
@@ -40,5 +51,37 @@ test.describe("Edit Mode", () => {
 
     const layoutContent = ctPage.locator(".lm_content").first();
     await expect(layoutContent).toBeVisible({ timeout: 10000 });
+  });
+
+});
+
+test.describe("Welcome Open Folder", () => {
+  test.use({ launchMode: "welcome" });
+
+  test("welcome open-folder handoff initializes edit mode", async ({ ctPage, electronApp }) => {
+    test.skip(!electronApp, "requires Electron main-process access");
+
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15000 });
+    await electronApp!.evaluate(({ BrowserWindow }, folderPath) => {
+      const [window] = BrowserWindow.getAllWindows();
+      window.webContents.send("CODETRACER::load-folder-edit-mode", {
+        folderPath,
+      });
+    }, testFolder);
+
+    await expect.poll(async () => {
+      const state = await ctPage.evaluate(() => {
+        const d = (window as any).data;
+        return {
+          edit: d?.startOptions?.edit === true,
+          welcome: d?.startOptions?.welcomeScreen === true,
+          pathCount: d?.services?.debugger?.paths?.length ?? 0,
+          openCount: Object.keys(d?.services?.editor?.open ?? {}).length,
+        };
+      });
+      return state.edit && !state.welcome && state.pathCount > 0 && state.openCount > 0;
+    }).toBe(true);
+
+    await expect(ctPage.locator(".lm_goldenlayout")).toBeVisible({ timeout: 15_000 });
   });
 });

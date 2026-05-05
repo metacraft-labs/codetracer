@@ -219,6 +219,31 @@ proc syncDebugControlsPosition(rrTicks: int, path: cstring, line: int) =
   debugControlsVMStore.updateDebuggerPosition(ticks, $path, line)
   clog fmt"DebugControlsVM: synced debugger rrTicks={ticks}"
 
+proc rewireDebugControlsBridgeForActiveSession*(data: Data) =
+  ## Re-bind singleton debug chrome callbacks after session switching.
+  ##
+  ## The caption toolbar is mounted once outside each GoldenLayout tree, while
+  ## the DebugComponent/Mediator pair is owned by the active ReplaySession.
+  ## After switching away to a welcome tab and back, clicks and shortcuts must
+  ## emit through the restored session's mediator.
+  if data.isNil or data.ui.isNil:
+    return
+  if not data.ui.componentMapping[Content.Debug].hasKey(0):
+    return
+
+  let component = DebugComponent(data.ui.componentMapping[Content.Debug][0])
+  if component.isNil or component.api.isNil:
+    return
+
+  initDebugControlsVM()
+  debugComponentForBridge = component
+  debugApiForBridge = component.api
+  if not debugControlsVMInstance.isNil:
+    debugControlsVMInstance.onDapStep = proc(action: cstring) =
+      dapStep(component.api, action)
+    debugControlsVMInstance.onAction = proc(id: string) =
+      component.action(id)
+
 proc jumpBeforeList*(self: DebugComponent) =
   self.after = false
   self.before = true

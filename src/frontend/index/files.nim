@@ -384,29 +384,62 @@ proc onOpenTab*(sender: js, response: js) {.async.} =
 
 var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
 
+proc shouldSkipIndexedDirectory(path: cstring): bool =
+  let name = $nodePath.basename(path)
+  name in [".git", ".hg", ".svn", "node_modules", ".direnv", ".devenv",
+           "result", "dist", "build", ".next", ".cache"]
+
+proc collectDirectoryFilenames(
+    path: cstring,
+    res: var seq[string],
+    limit: int = 5000): Future[void] {.async.} =
+  if res.len >= limit:
+    return
+
+  var stat: js
+  try:
+    stat = await cast[Future[js]](fsAsync.lstat(path))
+  except:
+    return
+
+  if cast[bool](stat.isFile()) or cast[bool](stat.isSymbolicLink()):
+    res.add($path)
+    return
+
+  if not cast[bool](stat.isDirectory()) or shouldSkipIndexedDirectory(path):
+    return
+
+  var entries: seq[cstring] = @[]
+  try:
+    entries = await cast[Future[seq[cstring]]](fsAsync.readdir(path))
+  except:
+    return
+
+  for entry in entries:
+    if res.len >= limit:
+      return
+    await collectDirectoryFilenames(nodePath.join(path, entry), res, limit)
+
 proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bool): Future[seq[string]] {.async.} =
   var res: seq[string] = @[]
-  var repoPathSet: JsAssoc[cstring, bool] = JsAssoc[cstring, bool]{}
 
   if not selfContained:
-    for i in 0 ..< paths.len:
-      let path = paths[i]
+    for path in paths:
       try:
-        let (stdoutRev, stderrRev, errRev) = await childProcessExec(cstring(&"git rev-parse --show-toplevel"), js{cwd: path})
-        repoPathSet[stdoutRev.trim] = true
-      except Exception as e:
-        errorPrint "git rev-parse error for ", path, ": ", e.repr
-    for repoPath, _ in repoPathSet:
-      let repoPathCopy = repoPath
-      let (stdout, stderr, err) = await childProcessExec(cstring(&"git ls-tree HEAD -r --name-only"), js{cwd: repoPathCopy})
-      if err.isNil:
-        res = res.concat(($stdout).splitLines().mapIt($repoPathCopy & "/" & it))
-      else:
+        let repoCheck =
+          await childProcessExec(cstring(&"git rev-parse --show-toplevel"), js{cwd: path})
+        let errRoot = repoCheck[2]
+        if errRoot.isNil:
+          let pathPrefix = path.stripLastChar(cstring"/")
+          let (stdout, stderr, err) =
+            await childProcessExec(cstring(&"git ls-files -- ."), js{cwd: path})
+          if err.isNil:
+            res = res.concat(($stdout).splitLines().filterIt(it.len > 0).mapIt($pathPrefix & "/" & it))
+      except:
         discard
-        #res = cast[seq[string]](@[])
-        # if not a git repo: just load some files? empty for now
-        # for now for self-contained load files from trace
-        # TODO discuss
+    if res.len == 0:
+      for path in paths:
+        await collectDirectoryFilenames(path, res)
   else:
     # for now assume db-backend, otherwise empty
     if traceFolder.len > 0:

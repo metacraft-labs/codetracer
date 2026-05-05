@@ -1780,9 +1780,18 @@ proc onNoTrace(
   else:
     data.switchToEdit()
 
-  # Open the file AFTER layout is initialized
-  if response.path.len > 0:
-    data.openTab(response.path, ViewSource) # , response.lang)
+  # Open the file AFTER layout is initialized. Folder edit mode has no
+  # explicit path, so seed the editor from the indexed project files instead
+  # of leaving the workspace looking blank.
+  let initialEditPath =
+    if response.path.len > 0:
+      response.path
+    elif data.startOptions.edit and response.filenames.len > 0:
+      cstring(response.filenames[0])
+    else:
+      cstring""
+  if initialEditPath.len > 0:
+    data.openTab(initialEditPath, ViewSource) # , response.lang)
   let ext = $toJsLang(response.lang)
   # for i, file in data.save.files:
     # if i < TAB_LIMIT:
