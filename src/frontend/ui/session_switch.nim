@@ -20,7 +20,6 @@ import
   welcome_screen,
   search_results,
   ../utils,
-  ../viewmodel/app_vm_bridge,
   ../lib/[logging, jslib]
 
 import kdom except Location
@@ -258,7 +257,6 @@ proc createNewSession*(data: Data) =
     session.savedLayoutConfig = data.ui.resolvedConfig
 
   data.sessions.add(session)
-  discard app_vm_bridge.noteWelcomeTabCreated()
 
   # Empty tabs still need the shared chrome and welcome screen components.
   # Component factory helpers write through Data's active-session forwarding,
@@ -362,7 +360,6 @@ proc switchSession*(data: Data, targetIndex: int) =
 
   clog "session_switch: switching from session " &
     $data.activeSessionIndex & " to " & $targetIndex
-  discard app_vm_bridge.noteSessionSwitched(targetIndex)
 
   # 1. Hide the current session's container.
   let currentContainer = getSessionContainer(data.activeSessionIndex)

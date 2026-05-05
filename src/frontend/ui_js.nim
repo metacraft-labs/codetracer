@@ -35,7 +35,6 @@ const TAB_LIMIT = 20
 # individual panels so they all share a single real backend connection.
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
-import viewmodel/app_vm_bridge
 import viewmodel/backend/[backend_service, real_backend]
 import viewmodel/app/isonim_app
 from isonim/core/batch as isoBatch import batch
@@ -1024,7 +1023,6 @@ when not defined(ctInExtension):
                 handler($kind, raw)),
       )
       activeSessionVM = createSessionVM(realBackend)
-      initAppVMBridge(activeSessionVM)
       cerror "[PIPELINE] configureMiddleware: SessionVM created"
       cerror "[PIPELINE] configureMiddleware: RealBackendService created"
       clog "SessionViewModel: created with real DapApi backend"
@@ -1620,7 +1618,6 @@ proc onLoadFolderEditMode(
   sender: js,
   response: jsobject(folderPath=cstring)) =
   # Load a folder in edit mode (from welcome screen)
-  discard app_vm_bridge.noteFolderOpened($response.folderPath)
   # This triggers a reload similar to how `ct edit <path>` works
   # For now, we send a request to the index process to load the folder
   data.ipc.send "CODETRACER::init-edit-mode", js{ folder: response.folderPath }
@@ -1794,7 +1791,6 @@ proc onNoTrace(
     else:
       cstring""
   if initialEditPath.len > 0:
-    discard app_vm_bridge.noteFileOpened($initialEditPath)
     data.openTab(initialEditPath, ViewSource) # , response.lang)
   let ext = $toJsLang(response.lang)
   # for i, file in data.save.files:

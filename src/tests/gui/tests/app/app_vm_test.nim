@@ -4,7 +4,7 @@
 ## Electron, no GoldenLayout, no IPC. Tests drive the same ViewModel
 ## composition that production adapters should call.
 
-import std/[options, unittest]
+import std/[options, tables, unittest]
 
 import vm_test_helpers
 import isonim/core/computation
@@ -124,3 +124,55 @@ suite "CodeTracerAppVM":
     check dispatchDebugAction("next")
     drain()
     check mock.findCommand("next").isSome
+
+  test "runtime bridge initialization preserves populated session store":
+    resetAppVMBridgeForTests()
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.toBackendService())
+    let store = session.store
+
+    store.calltrace.lines.val = @[
+      CallLine(
+        index: 1,
+        name: "SudokuSolver#solve",
+        depth: 0,
+        rrTicks: 42'u64,
+        location: Location(file: "sudoku_solver.rb", line: 17, column: 0),
+        hasChildren: false,
+        isExpanded: false,
+        callKey: "call-1",
+      )
+    ]
+    var args = initTable[string, seq[CallArg]]()
+    args["call-1"] = @[CallArg(name: "board", text: "[[1, 2], [3, 4]]")]
+    store.calltrace.args.val = args
+    store.locals.locals.val = @[
+      Variable(name: "board", value: "[[1, 2], [3, 4]]",
+        typeName: "Array", hasChildren: false, children: @[])
+    ]
+    store.locals.codeStateLine.val = "17 | def solve"
+    store.session.val = SessionState(connectionStatus: csConnected)
+    store.timeline.val = TimelineState(
+      minRRTicks: 0'u64,
+      maxRRTicks: 100'u64,
+      currentRRTicks: 42'u64,
+    )
+    store.debugger.val = DebuggerState(
+      location: Location(file: "sudoku_solver.rb", line: 17, column: 0),
+      rrTicks: 42'u64,
+      status: dsIdle,
+      threadId: 1'u32,
+    )
+
+    initAppVMBridge(session)
+
+    check activeAppVM.sessionCount == 1
+    check activeAppVM.activeSession.session.store == store
+    check store.calltrace.lines.val.len == 1
+    check store.calltrace.lines.val[0].name == "SudokuSolver#solve"
+    check store.calltrace.args.val["call-1"][0].name == "board"
+    check store.locals.locals.val[0].name == "board"
+    check store.locals.codeStateLine.val == "17 | def solve"
+    check store.session.val.connectionStatus == csConnected
+    check store.timeline.val.currentRRTicks == 42'u64
+    check store.debugger.val.location.file == "sudoku_solver.rb"
