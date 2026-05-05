@@ -78,6 +78,9 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/flow-jump",
   "ct/timeline-seek",
   "ct/shell-eval",
+  "ct/mcr-get-recording-head",
+  "ct/mcr-restore-at",
+  "ct/mcr-live-step",
 ]
 
 let VALID_DAP_COMMANDS*: HashSet[string] = VALID_DAP_COMMANDS_SEQ.toHashSet

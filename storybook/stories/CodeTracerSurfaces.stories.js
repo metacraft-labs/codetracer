@@ -1415,6 +1415,12 @@ export const Calltrace = story("panel", "calltrace", "populated", "Calltrace");
 export const CalltraceEditor = story("panel", "calltrace-editor", "populated", "Calltrace Editor");
 export const CommandPalette = story("panel", "command-palette", "populated", "Command Palette");
 export const DebugControls = story("panel", "debug-controls", "populated", "Debug Controls");
+export const LiveMcrDebugControls = story(
+  "panel",
+  "debug-controls",
+  "live-mcr",
+  "Live MCR Debug Controls",
+);
 export const DeepReview = story("panel", "deepreview", "populated", "Deep Review");
 export const Editor = story("panel", "editor", "populated", "Editor");
 export const Errors = story("panel", "errors", "populated", "Errors");

@@ -40,6 +40,14 @@ type
     sdReverseStepIn
     sdReverseStepOut
 
+  DebugSessionMode* = enum
+    ## Whether the debugger controls target a finished replay or a live MCR
+    ## session. ``historicalFromLive`` means the user restored into already
+    ## recorded history while the live recording head is still tracked.
+    completedReplay
+    liveMcr
+    historicalFromLive
+
   Location* = object
     ## Source-code position.
     file*: string
@@ -57,6 +65,9 @@ type
   SessionState* = object
     ## Top-level session information.
     connectionStatus*: ConnectionStatus
+    debugSessionMode*: DebugSessionMode
+    recordingHeadRRTicks*: uint64
+    recordingHeadLoadingState*: LoadingState
 
   ReplayDeploymentMode* = enum
     ## Where a replay session is hosted.

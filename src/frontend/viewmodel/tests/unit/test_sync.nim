@@ -87,10 +87,18 @@ suite "Signal serialization round-trips":
     check parsed.threadId == 7'u32
 
   test "SessionState round-trips through JSON":
-    let state = SessionState(connectionStatus: csConnected)
+    let state = SessionState(
+      connectionStatus: csConnected,
+      debugSessionMode: historicalFromLive,
+      recordingHeadRRTicks: 4096'u64,
+      recordingHeadLoadingState: lsLoading,
+    )
     let j = state.toJson
     let parsed = parseSessionState(j)
     check parsed.connectionStatus == csConnected
+    check parsed.debugSessionMode == historicalFromLive
+    check parsed.recordingHeadRRTicks == 4096'u64
+    check parsed.recordingHeadLoadingState == lsLoading
 
   test "TimelineState round-trips through JSON":
     let state = TimelineState(
@@ -215,10 +223,18 @@ suite "applySignalUpdate":
     createRoot proc(dispose: proc()) =
       let (session, store, _) = makeSessionVM()
       let update = serializeSignalUpdate("session", "state",
-        SessionState(connectionStatus: csConnected).toJson)
+        SessionState(
+          connectionStatus: csConnected,
+          debugSessionMode: liveMcr,
+          recordingHeadRRTicks: 512'u64,
+          recordingHeadLoadingState: lsIdle,
+        ).toJson)
       applySignalUpdate(session, update)
 
       check store.session.val.connectionStatus == csConnected
+      check store.session.val.debugSessionMode == liveMcr
+      check store.session.val.recordingHeadRRTicks == 512'u64
+      check store.session.val.recordingHeadLoadingState == lsIdle
       dispose()
 
   test "applies timeline state to mirror store":

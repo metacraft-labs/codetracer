@@ -78,6 +78,9 @@ type
     CtFlowJump,
     CtTimelineSeek,
     CtShellEval,
+    CtMcrGetRecordingHead,
+    CtMcrRestoreAt,
+    CtMcrLiveStep,
 
 when defined(js):
   import std / jsffi

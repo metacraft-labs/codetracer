@@ -6,7 +6,7 @@
 when not defined(js):
   {.error: "storybook_components.nim requires the JS backend (nim js)".}
 
-import std/[options, strutils, tables]
+import std/[json, options, strutils, tables]
 
 import isonim/core/async_compat
 import isonim/rxcore
@@ -15,6 +15,7 @@ import isonim/web/dom_api as isonim_dom
 import isonim/web/web_renderer
 
 import viewmodel/backend/mock_backend
+import viewmodel/backend/backend_service
 import viewmodel/store/[replay_data_store, types]
 import viewmodel/viewmodels/[
   agent_activity_deepreview_vm,
@@ -1252,6 +1253,69 @@ proc mountVcs(container: isonim_dom.Element; fixture: string): DisposeProc =
     container.innerHTML = ""
 
 proc mountDebugControls(container: isonim_dom.Element; fixture: string): DisposeProc =
+  if fixture == "live-mcr":
+    var rootDisposer: proc()
+    var store: ReplayDataStore
+    var vm: DebugControlsVM
+    var commands: seq[string] = @[]
+    let r = WebRenderer()
+    let logNode = r.createElement("pre")
+    r.setAttribute(logNode, "id", "live-mcr-command-log")
+    r.setAttribute(logNode, "hidden", "true")
+    r.setTextContent(logNode, "[]")
+
+    let updateLog = proc(command: string; args: JsonNode) =
+      var entry = %*{"command": command}
+      entry["args"] = args
+      commands.add($entry)
+      r.setTextContent(logNode, "[" & commands.join(",") & "]")
+
+    let backend = BackendService(
+      sendProc: proc(command: string,
+                     args: JsonNode): BackendFuture[JsonNode] =
+        updateLog(command, args)
+        if command == LiveMcrGetRecordingHeadCommand:
+          return newPromise proc(resolve: proc(response: JsonNode)) =
+            resolve(%*{"rrTicks": 400})
+        return newPromise proc(resolve: proc(response: JsonNode)) =
+          resolve(%*{}),
+      onEventProc: proc(handler: backend_service.EventHandler) = discard,
+      disconnectProc: proc() = discard,
+    )
+
+    createRoot proc(dispose: proc()) =
+      rootDisposer = dispose
+      store = createReplayDataStore(backend)
+      store.session.val = SessionState(
+        connectionStatus: csConnected,
+        debugSessionMode: liveMcr,
+        recordingHeadRRTicks: 400'u64,
+        recordingHeadLoadingState: lsIdle,
+      )
+      store.timeline.val = TimelineState(
+        minRRTicks: 0'u64,
+        maxRRTicks: 400'u64,
+        currentRRTicks: 180'u64,
+      )
+      store.debugger.val = DebuggerState(
+        location: Location(file: "examples/noir/noir-space-ship/src/main.nr",
+                           line: 42, column: 3, callstackDepth: 1),
+        rrTicks: 180'u64,
+        status: dsIdle,
+        threadId: 1'u32,
+      )
+      vm = createDebugControlsVM(store)
+      mountIsoNimDebugControls(container, vm)
+      discard isonim_dom.appendChild(isonim_dom.Node(container),
+                                     isonim_dom.Node(logNode))
+      store.requestRecordingHead()
+
+    return proc() =
+      if vm != nil: vm.dispose()
+      if store != nil: store.dispose()
+      if rootDisposer != nil: rootDisposer()
+      container.innerHTML = ""
+
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createDebugControlsVM(store)
     mountIsoNimDebugControls(container, vm)

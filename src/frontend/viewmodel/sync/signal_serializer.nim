@@ -48,6 +48,14 @@ proc toJson*(status: ConnectionStatus): JsonNode =
   ## Serialize a ConnectionStatus enum to its string representation.
   %($status)
 
+proc toJson*(state: DebugSessionMode): JsonNode =
+  ## Serialize a DebugSessionMode enum to its string representation.
+  %($state)
+
+proc toJson*(state: LoadingState): JsonNode =
+  ## Serialize a LoadingState enum to its string representation.
+  %($state)
+
 proc toJson*(state: DebuggerState): JsonNode =
   ## Serialize a full DebuggerState to JSON.
   %*{
@@ -59,7 +67,12 @@ proc toJson*(state: DebuggerState): JsonNode =
 
 proc toJson*(state: SessionState): JsonNode =
   ## Serialize a SessionState to JSON.
-  %*{"connectionStatus": state.connectionStatus.toJson}
+  %*{
+    "connectionStatus": state.connectionStatus.toJson,
+    "debugSessionMode": state.debugSessionMode.toJson,
+    "recordingHeadRRTicks": % state.recordingHeadRRTicks,
+    "recordingHeadLoadingState": state.recordingHeadLoadingState.toJson,
+  }
 
 proc toJson*(state: TimelineState): JsonNode =
   ## Serialize a TimelineState to JSON.
@@ -139,6 +152,20 @@ proc parseConnectionStatus*(s: string): ConnectionStatus =
   of "csError": csError
   else: csDisconnected
 
+proc parseDebugSessionMode*(s: string): DebugSessionMode =
+  ## Parse a DebugSessionMode from its string representation.
+  case s
+  of "liveMcr": liveMcr
+  of "historicalFromLive": historicalFromLive
+  else: completedReplay
+
+proc parseLoadingState*(s: string): LoadingState =
+  ## Parse a LoadingState from its string representation.
+  case s
+  of "lsLoading": lsLoading
+  of "lsError": lsError
+  else: lsIdle
+
 proc parseDebuggerState*(j: JsonNode): DebuggerState =
   ## Parse a DebuggerState from JSON.
   DebuggerState(
@@ -152,6 +179,12 @@ proc parseSessionState*(j: JsonNode): SessionState =
   ## Parse a SessionState from JSON.
   SessionState(
     connectionStatus: parseConnectionStatus(j["connectionStatus"].getStr),
+    debugSessionMode: parseDebugSessionMode(
+      j{"debugSessionMode"}.getStr($completedReplay)),
+    recordingHeadRRTicks:
+      j{"recordingHeadRRTicks"}.getBiggestInt.uint64,
+    recordingHeadLoadingState: parseLoadingState(
+      j{"recordingHeadLoadingState"}.getStr($lsIdle)),
   )
 
 proc parseTimelineState*(j: JsonNode): TimelineState =

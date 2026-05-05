@@ -122,6 +122,9 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtFlowJump: "ct/flow-jump",
   CtTimelineSeek: "ct/timeline-seek",
   CtShellEval: "ct/shell-eval",
+  CtMcrGetRecordingHead: "ct/mcr-get-recording-head",
+  CtMcrRestoreAt: "ct/mcr-restore-at",
+  CtMcrLiveStep: "ct/mcr-live-step",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}

@@ -46,8 +46,13 @@ type
     canStepForward*: Memo[bool]
     canStepBackward*: Memo[bool]
     canContinue*: Memo[bool]
+    canReverseContinue*: Memo[bool]
     isRunning*: Memo[bool]
     statusText*: Memo[string]
+    toolbarModeText*: Memo[string]
+    recordingHeadText*: Memo[string]
+    showJumpToLive*: Memo[bool]
+    canJumpToLive*: Memo[bool]
 
     # -- Legacy bridge callbacks --
     # These are set by the Karax debug component to delegate stepping
@@ -94,7 +99,7 @@ proc continueExecution*(vm: DebugControlsVM) =
 
 proc reverseContinue*(vm: DebugControlsVM) =
   ## Issue a reverse-continue command if the debugger is in a continuable state.
-  if vm.canContinue.val:
+  if vm.canReverseContinue.val:
     vm.store.requestStep(sdReverseContinue)
 
 proc reverseStepIn*(vm: DebugControlsVM) =
@@ -107,12 +112,30 @@ proc reverseStepOut*(vm: DebugControlsVM) =
   if vm.canStepBackward.val:
     vm.store.requestStep(sdReverseStepOut)
 
+proc restoreAt*(vm: DebugControlsVM; rrTicks: uint64) =
+  ## Restore a live MCR session into recorded history.
+  vm.store.requestRestoreAt(rrTicks)
+
+proc jumpToLive*(vm: DebugControlsVM) =
+  ## Restore to the current live recording head.
+  if vm.canJumpToLive.val:
+    vm.store.jumpToLive()
+
+proc liveToolbarActionAllowed(actionId: string): bool =
+  actionId in ["next", "step-in", "step-out", "continue"]
+
 proc invokeToolbarStep*(vm: DebugControlsVM; actionId: string) =
   ## Dispatch a production toolbar step action.
   ##
   ## The legacy DAP bridge is still the preferred route because it also emits
   ## operation-status events.  If the bridge is not installed yet, fall back to
   ## the shared ReplayDataStore backend so the button still reaches DAP.
+  if vm.store.session.val.debugSessionMode == liveMcr:
+    if actionId.liveToolbarActionAllowed and
+        (if actionId == "continue": vm.canContinue.val else: vm.canStepForward.val):
+      vm.store.requestLiveToolbarAction(actionId)
+    return
+
   if not vm.onDapStep.isNil:
     vm.onDapStep(cstring(actionId))
     return
@@ -152,12 +175,19 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
     let canStepBackward = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       let tl = store.timeline.val
-      dbg.status == dsIdle and dbg.rrTicks > tl.minRRTicks
+      let session = store.session.val
+      session.debugSessionMode != liveMcr and
+        dbg.status == dsIdle and dbg.rrTicks > tl.minRRTicks
 
     # Derived: continue is possible when the debugger is idle.
     let canContinue = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       dbg.status == dsIdle
+
+    let canReverseContinue = createMemo[bool] proc(): bool =
+      let dbg = store.debugger.val
+      let session = store.session.val
+      session.debugSessionMode != liveMcr and dbg.status == dsIdle
 
     # Derived: the debugger is running if it is stepping or running.
     let isRunning = createMemo[bool] proc(): bool =
@@ -174,12 +204,44 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       of dsFinished: "Finished"
       of dsError:    "Error"
 
+    let toolbarModeText = createMemo[string] proc(): string =
+      case store.session.val.debugSessionMode
+      of completedReplay: "Completed replay"
+      of liveMcr: "Live MCR"
+      of historicalFromLive: "Historical replay"
+
+    let recordingHeadText = createMemo[string] proc(): string =
+      let session = store.session.val
+      if session.recordingHeadLoadingState == lsLoading:
+        "Head: loading"
+      elif session.recordingHeadLoadingState == lsError:
+        "Head: error"
+      else:
+        "Head: " & $session.recordingHeadRRTicks
+
+    let showJumpToLive = createMemo[bool] proc(): bool =
+      store.session.val.debugSessionMode in {liveMcr, historicalFromLive}
+
+    let canJumpToLive = createMemo[bool] proc(): bool =
+      let session = store.session.val
+      let dbg = store.debugger.val
+      session.debugSessionMode in {liveMcr, historicalFromLive} and
+        session.recordingHeadLoadingState != lsLoading and
+        session.recordingHeadLoadingState != lsError and
+        session.recordingHeadRRTicks > 0'u64 and
+        dbg.status == dsIdle
+
     DebugControlsVM(
       store: store,
       canStepForward: canStepForward,
       canStepBackward: canStepBackward,
       canContinue: canContinue,
+      canReverseContinue: canReverseContinue,
       isRunning: isRunning,
       statusText: statusText,
+      toolbarModeText: toolbarModeText,
+      recordingHeadText: recordingHeadText,
+      showJumpToLive: showJumpToLive,
+      canJumpToLive: canJumpToLive,
       disposeProc: dispose,
     )

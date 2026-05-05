@@ -26,6 +26,11 @@ import isonim/viewmodel
 import ../backend/backend_service
 import types, request_tracker
 
+const
+  LiveMcrGetRecordingHeadCommand* = "ct/mcr-get-recording-head"
+  LiveMcrRestoreAtCommand* = "ct/mcr-restore-at"
+  LiveMcrStepCommand* = "ct/mcr-live-step"
+
 # ---------------------------------------------------------------------------
 # Store identity tracking — unique ID per store instance for diagnostics
 # ---------------------------------------------------------------------------
@@ -43,6 +48,21 @@ proc onComplete(fut: BackendFuture[JsonNode];
   async_compat.onComplete(fut,
     onSuccess = proc(val: JsonNode) = onSuccess(),
     onError = proc(msg: string) = onError())
+
+proc readRRTicks(response: JsonNode; fallback: uint64): uint64 =
+  ## Accept the likely fake/real backend response shapes used while MCR live
+  ## support is still behind test seams.
+  if response.kind != JObject:
+    return fallback
+
+  for key in ["rrTicks", "recordingHead", "head"]:
+    if response.hasKey(key):
+      let raw = response[key].getBiggestInt
+      if raw < 0:
+        return 0'u64
+      return uint64(raw)
+
+  fallback
 
 # ---------------------------------------------------------------------------
 # Sub-store aggregates — group related signals
@@ -93,6 +113,34 @@ type
     locals*: LocalsStore
     backend*: BackendService
     requestTracker*: RequestTracker
+
+proc setDebuggerSnapshot(store: ReplayDataStore; rrTicks: uint64;
+                         status: DebuggerStatus) =
+  let current = store.debugger.val
+  store.debugger.val = DebuggerState(
+    rrTicks: rrTicks,
+    location: current.location,
+    status: status,
+    threadId: current.threadId,
+  )
+
+proc setSessionMode*(store: ReplayDataStore; mode: DebugSessionMode) =
+  ## Update only the debug-session mode, preserving connection/head state.
+  var session = store.session.val
+  session.debugSessionMode = mode
+  store.session.val = session
+
+proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
+  ## Mirror a backend recording-head update into session and timeline state.
+  var session = store.session.val
+  session.recordingHeadRRTicks = rrTicks
+  session.recordingHeadLoadingState = lsIdle
+  store.session.val = session
+
+  var timeline = store.timeline.val
+  if rrTicks > timeline.maxRRTicks:
+    timeline.maxRRTicks = rrTicks
+  store.timeline.val = timeline
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -461,3 +509,108 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
       dbg.status = dsError
       s.debugger.val = dbg,
   )
+
+proc requestRecordingHead*(store: ReplayDataStore) =
+  ## Query the live MCR backend for the current recording head and mirror it
+  ## into the session/timeline signals.
+  let key = "mcr-recording-head"
+  if store.requestTracker.isDuplicate(key, ""):
+    return
+
+  store.requestTracker.markPending(key, "")
+  var session = store.session.val
+  session.recordingHeadLoadingState = lsLoading
+  store.session.val = session
+
+  let fut = store.backend.send(LiveMcrGetRecordingHeadCommand, %*{})
+  let s = store
+  async_compat.onComplete(fut,
+    onSuccess = proc(response: JsonNode) =
+      s.requestTracker.markComplete(key)
+      let head = response.readRRTicks(s.session.val.recordingHeadRRTicks)
+      s.updateRecordingHead(head),
+    onError = proc(msg: string) =
+      s.requestTracker.markComplete(key)
+      var failedSession = s.session.val
+      failedSession.recordingHeadLoadingState = lsError
+      s.session.val = failedSession,
+  )
+
+proc requestLiveToolbarAction*(store: ReplayDataStore; actionId: string) =
+  ## Route a toolbar action to the fake/real live MCR command path instead of
+  ## the completed-replay DAP step commands.
+  let key = "mcr-live-step"
+  if store.requestTracker.isDuplicate(key, actionId):
+    return
+
+  store.requestTracker.markPending(key, actionId)
+  let current = store.debugger.val
+  let runningStatus =
+    if actionId == "continue": dsRunning
+    else: dsStepping
+  store.setDebuggerSnapshot(current.rrTicks, runningStatus)
+
+  let threadId =
+    if current.threadId == 0'u32:
+      1
+    else:
+      current.threadId.int
+  let args = %*{"action": actionId, "threadId": threadId}
+  let fut = store.backend.send(LiveMcrStepCommand, args)
+
+  let s = store
+  fut.onComplete(
+    onSuccess = proc() =
+      s.requestTracker.markComplete(key)
+      s.setDebuggerSnapshot(s.debugger.val.rrTicks, dsIdle),
+    onError = proc() =
+      s.requestTracker.markComplete(key)
+      var dbg = s.debugger.val
+      dbg.status = dsError
+      s.debugger.val = dbg,
+  )
+
+proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
+                       jumpToLive: bool = false) =
+  ## Restore execution at a recorded MCR position. A regular restore puts the
+  ## toolbar into historical replay mode; jump-to-live restores to the tracked
+  ## head and switches controls back to live mode.
+  let key = if jumpToLive: "mcr-jump-to-live" else: "mcr-restore-at"
+  let argsStr = $rrTicks
+  if store.requestTracker.isDuplicate(key, argsStr):
+    return
+
+  store.requestTracker.markPending(key, argsStr)
+  store.setDebuggerSnapshot(store.debugger.val.rrTicks, dsStepping)
+
+  let args = %*{"rrTicks": rrTicks, "jumpToLive": jumpToLive}
+  let fut = store.backend.send(LiveMcrRestoreAtCommand, args)
+  let s = store
+  fut.onComplete(
+    onSuccess = proc() =
+      s.requestTracker.markComplete(key)
+
+      var session = s.session.val
+      session.debugSessionMode =
+        if jumpToLive: liveMcr else: historicalFromLive
+      if jumpToLive and session.recordingHeadRRTicks < rrTicks:
+        session.recordingHeadRRTicks = rrTicks
+      s.session.val = session
+
+      var timeline = s.timeline.val
+      timeline.currentRRTicks = rrTicks
+      if rrTicks > timeline.maxRRTicks:
+        timeline.maxRRTicks = rrTicks
+      s.timeline.val = timeline
+      s.setDebuggerSnapshot(rrTicks, dsIdle),
+    onError = proc() =
+      s.requestTracker.markComplete(key)
+      var dbg = s.debugger.val
+      dbg.status = dsError
+      s.debugger.val = dbg,
+  )
+
+proc jumpToLive*(store: ReplayDataStore) =
+  ## Restore to the last known live recording head.
+  store.requestRestoreAt(store.session.val.recordingHeadRRTicks,
+                         jumpToLive = true)
