@@ -123,6 +123,37 @@ test.describe("noir example — basic layout", () => {
       .toBeTruthy();
   });
 
+  test("clicking the already-open main file in Files does not duplicate the editor tab", async ({
+    ctPage,
+  }) => {
+    await readyOnEntry(ctPage);
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForFilesystemLoaded();
+
+    const filesystem = (await layout.filesystemTabs(true))[0];
+    await filesystem.clickTab();
+    await filesystem.waitForReady();
+
+    const beforeCount = (await layout.editorTabs(true)).filter(
+      (editor) => editor.fileName === "main.nr",
+    ).length;
+    expect(beforeCount).toBe(1);
+
+    const mainNr = await filesystem.nodeByPath(
+      "source folders",
+      "src",
+      "main.nr",
+    );
+    await mainNr.leftClick();
+
+    await expect
+      .poll(async () =>
+        (await layout.editorTabs(true)).filter((editor) => editor.fileName === "main.nr")
+          .length,
+      )
+      .toBe(1);
+  });
+
   test("debug toolbar next click reaches the DAP backend", async ({ ctPage }) => {
     await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
@@ -146,6 +177,32 @@ test.describe("noir example — basic layout", () => {
     await expect
       .poll(async () =>
         ctPage.evaluate(() => (window as any).__debugToolbarRequests.length),
+      )
+      .toBeGreaterThan(0);
+  });
+
+  test("debug toolbar keyboard shortcut reaches the DAP backend", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
+
+    await ctPage.evaluate(() => {
+      const appData = (window as any).data;
+      const original = appData.ipc.send.bind(appData.ipc);
+      (window as any).__debugShortcutRequests = [];
+      appData.ipc.send = (channel: unknown, payload: unknown) => {
+        if (String(channel) === "CODETRACER::dap-raw-message") {
+          (window as any).__debugShortcutRequests.push(
+            JSON.parse(JSON.stringify(payload ?? null)),
+          );
+        }
+        return original(channel, payload);
+      };
+    });
+
+    await ctPage.keyboard.press("F10");
+
+    await expect
+      .poll(async () =>
+        ctPage.evaluate(() => (window as any).__debugShortcutRequests.length),
       )
       .toBeGreaterThan(0);
   });

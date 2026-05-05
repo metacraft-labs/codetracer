@@ -68,6 +68,35 @@ suite "Caption session tabs overflow":
     check overflowItems.len == 5
     check overflowItems[4].attributes["class"].contains("active")
 
+  test "active overflow tab replaces the last visible tab":
+    check visibleTabIndexes(tabCount = 5, activeIndex = 1,
+      visibleTabCount = 3) == @[0, 1, 2]
+    check visibleTabIndexes(tabCount = 5, activeIndex = 4,
+      visibleTabCount = 3) == @[0, 1, 4]
+    check visibleTabIndexes(tabCount = 5, activeIndex = 4,
+      visibleTabCount = 1) == @[4]
+
+    let r = MockRenderer()
+    let panel = renderSessionTabsPanel(
+      r,
+      @[
+        SessionTabRecord(label: "Trace 1"),
+        SessionTabRecord(label: "Trace 2"),
+        SessionTabRecord(label: "Trace 3"),
+        SessionTabRecord(label: "Trace 4"),
+        SessionTabRecord(label: "Trace 5")
+      ],
+      activeIndex = 4,
+      visibleTabCount = 3)
+
+    let visibleTabs = findAllByClass(panel, SessionTabClass)
+    check visibleTabs.len == 3
+    check findById(panel, "session-tab-0") != nil
+    check findById(panel, "session-tab-1") != nil
+    check findById(panel, "session-tab-2").isNil
+    check findById(panel, "session-tab-4") != nil
+    check findById(panel, "session-tab-4").attributes["class"].contains("active")
+
   test "overflow menu items can select tabs hidden from the bar":
     var selected: seq[int] = @[]
     let r = MockRenderer()

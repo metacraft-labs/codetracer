@@ -2568,14 +2568,30 @@ proc toggleTracepoint*(path: cstring, line: int) {.exportc.} =
   data.ui.editors[path].toggleTrace(path, line)
 
 var actions*: array[ClientAction, ClientActionHandler] = [
-  proc(actionData: JsObject) = forwardContinue(fromShortcut=true),
-  proc(actionData: JsObject) = reverseContinue(fromShortcut=true),
-  proc(actionData: JsObject) = next(fromShortcut=true),
-  proc(actionData: JsObject) = reverseNext(fromShortcut=true),
-  proc(actionData: JsObject) = stepIn(fromShortcut=true),
-  proc(actionData: JsObject) = reverseStepIn(fromShortcut=true),
-  proc(actionData: JsObject) = stepOut(fromShortcut=true),
-  proc(actionData: JsObject) = reverseStepOut(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"continue"):
+      forwardContinue(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"reverse-continue"):
+      reverseContinue(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"next"):
+      next(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"reverse-next"):
+      reverseNext(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"step-in"):
+      stepIn(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"reverse-step-in"):
+      reverseStepIn(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"step-out"):
+      stepOut(fromShortcut=true),
+  proc(actionData: JsObject) =
+    if not invokeDebugStepAction(cstring"reverse-step-out"):
+      reverseStepOut(fromShortcut=true),
   proc(actionData: JsObject) = stopAction(),
   proc(actionData: JsObject) = data.update(build=true),
   proc(actionData: JsObject) = switchTab(change = -1),

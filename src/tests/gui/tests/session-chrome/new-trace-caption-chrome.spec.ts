@@ -378,6 +378,10 @@ async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
     "overflowing session tabs should expose a chevron/list affordance",
   ).toBeVisible({ timeout: 10_000 });
   await expect(addTab).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator("#session-tab-11.session-tab.active"),
+    "newly-created overflowed tab should replace the last visible tab",
+  ).toBeVisible({ timeout: 10_000 });
 
   await retryAction(async () => {
     const omniboxBox = await omnibox.boundingBox();
@@ -452,6 +456,9 @@ async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
     async () => (await getActiveSessionIndex(page)) === 0,
     { maxAttempts: 30, delayMs: 500 },
   );
+  await expect(page.locator("#session-tab-0.session-tab.active")).toBeVisible({
+    timeout: 5_000,
+  });
 
   await overflow.click();
   await expect(overflowMenu).toBeVisible({ timeout: 5_000 });
@@ -460,6 +467,10 @@ async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
     async () => (await getActiveSessionIndex(page)) === 11,
     { maxAttempts: 30, delayMs: 500 },
   );
+  await expect(
+    page.locator("#session-tab-11.session-tab.active"),
+    "selecting an overflow menu item should make that tab visible",
+  ).toBeVisible({ timeout: 5_000 });
 }
 
 async function expectWelcomeFillsAvailableView(page: Page): Promise<void> {

@@ -1352,13 +1352,27 @@ proc openTab*(
     editorView: EditorView = EditorView.ViewSource,
     noInfoMessage: cstring = cstring"",
     line: int = NO_LINE) = #  lang: Lang = LangUnknown) =
-  cdebug "editor: openTab: " & $name & " " & $editorView
+  var tabName = name
+  if editorView in {EditorView.ViewSource, EditorView.ViewTargetSource} and
+      not data.services.editor.open.hasKey(tabName):
+    let nameText = $name
+    if nameText.len > 0 and not nameText.startsWith("/") and
+        not (nameText.len >= 3 and nameText[1] == ':' and
+             (nameText[2] == '\\' or nameText[2] == '/')):
+      let suffix = "/" & nameText
+      for openName, info in data.services.editor.open:
+        let openText = $openName
+        if openText == nameText or openText.endsWith(suffix):
+          tabName = openName
+          break
+
+  cdebug "editor: openTab: " & $tabName & " " & $editorView
   # let tabName = if name != "unknown": name else: "NO SOURCE"
   # singleton no info page?
-  if not data.services.editor.open.hasKey(name):
-    discard data.openNewEditorView(name, editorView, noInfoMessage=noInfoMessage, line=line)
-  elif not data.services.editor.open[name].loading:
-    data.showTab(name, noInfoMessage=noInfoMessage, line=line)
+  if not data.services.editor.open.hasKey(tabName):
+    discard data.openNewEditorView(tabName, editorView, noInfoMessage=noInfoMessage, line=line)
+  elif not data.services.editor.open[tabName].loading:
+    data.showTab(tabName, noInfoMessage=noInfoMessage, line=line)
   # TODO: For now comment out and find a workaround later on
   # Issue is with recursion imports with event_helpers(communication.nim)
   # else:

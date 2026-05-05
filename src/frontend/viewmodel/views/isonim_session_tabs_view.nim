@@ -53,6 +53,27 @@ proc normalizedVisibleTabCount*(tabCount, visibleTabCount: int): int =
 proc hasTabOverflow*(tabCount, visibleTabCount: int): bool =
   normalizedVisibleTabCount(tabCount, visibleTabCount) < tabCount
 
+proc visibleTabIndexes*(tabCount, activeIndex, visibleTabCount: int): seq[int] =
+  ## Keep a selected tab visible without shrinking tabs below their minimum
+  ## width. When an overflowed tab becomes active, it replaces the last visible
+  ## tab and pushes that previous tab into the overflow menu.
+  let visibleCount = normalizedVisibleTabCount(tabCount, visibleTabCount)
+  if visibleCount <= 0:
+    return @[]
+
+  let active =
+    if activeIndex >= 0 and activeIndex < tabCount: activeIndex
+    else: 0
+  if active < visibleCount:
+    for i in 0 ..< visibleCount:
+      result.add(i)
+  elif visibleCount == 1:
+    result.add(active)
+  else:
+    for i in 0 ..< visibleCount - 1:
+      result.add(i)
+    result.add(active)
+
 proc tabBarClass*(tabCount: int; visibleTabCount: int = -1): string =
   if tabCount <= 1:
     SessionTabBarSingleClass
@@ -211,18 +232,20 @@ proc renderSessionTabsPanel*(
     callbacks: SessionTabsCallbacks = SessionTabsCallbacks()): MockNode =
   let multiSession = tabs.len > 1
   let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
+  let visibleIndexes = visibleTabIndexes(tabs.len, activeIndex, visibleCount)
   ui(r):
     tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount)):
-      for i in 0 ..< visibleCount:
-        let tab = tabs[i]
-        tdiv(class = tabClass(i == activeIndex),
-             id = SessionTabIdPrefix & $i,
-             onclick = tabSelectHandler(callbacks, i)):
+      for visibleIndex in visibleIndexes:
+        let tabIndex = visibleIndex
+        let tab = tabs[tabIndex]
+        tdiv(class = tabClass(tabIndex == activeIndex),
+             id = SessionTabIdPrefix & $tabIndex,
+             onclick = tabSelectHandler(callbacks, tabIndex)):
           span(class = SessionTabLabelClass):
             text tab.label
           if multiSession:
             span(class = SessionTabCloseClass,
-                 onclick = tabCloseHandler(callbacks, i)):
+                 onclick = tabCloseHandler(callbacks, tabIndex)):
               text "×"
       tdiv(class = SessionTabOverflowClass):
         text "⌄"
@@ -248,9 +271,10 @@ when defined(js):
       isonim_dom.Element =
     let multiSession = tabs.len > 1
     let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
+    let visibleIndexes = visibleTabIndexes(tabs.len, activeIndex, visibleCount)
     result = ui(r):
       tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount))
-    for i in 0 ..< visibleCount:
+    for i in visibleIndexes:
       let tab = tabs[i]
       r.appendChild(result,
         renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))

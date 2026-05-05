@@ -14,7 +14,7 @@ import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/debug_controls_vm import
-  DebugControlsVM, createDebugControlsVM
+  DebugControlsVM, createDebugControlsVM, invokeToolbarStep
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_debug_controls_view import
   mountIsoNimDebugControls
@@ -49,6 +49,18 @@ var debugApiForBridge: MediatorWithSubscribers
 # re-applying the bridge after replacing the VM instance.
 proc dapStep*(api: MediatorWithSubscribers, action: cstring)
 proc action(self: DebugComponent, id: string)
+
+proc invokeDebugStepAction*(action: cstring): bool =
+  ## Route keyboard/menu debug step actions through the same bridge used by the
+  ## IsoNim toolbar buttons.  The older ``data.step`` path bypasses this bridge
+  ## and can diverge from the button behaviour after the ViewModel migration.
+  if not debugControlsVMInstance.isNil:
+    debugControlsVMInstance.invokeToolbarStep($action)
+    return true
+  if not debugApiForBridge.isNil:
+    dapStep(debugApiForBridge, action)
+    return true
+  false
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
