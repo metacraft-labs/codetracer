@@ -1,6 +1,14 @@
 // Welcome screen widget styles
 #welcomeScreen
-  position: relative;
+  position: fixed
+  top: 2.27em
+  left: 0
+  right: 0
+  bottom: 0
+  z-index: 10
+  display: none
+  pointer-events: none
+  overflow: auto
 
   .window-menu
     align-items: start
@@ -50,14 +58,15 @@
 .welcome-screen-wrapper
   color: WELCOME_SCREEN_TEXT_COLOR;
   background-color: WELCOME_SCREEN_BACKGROUND_COLOR;
-  height: 100vh;
+  min-height: 100%;
   position: relative;
-  width: 100vw;
+  width: 100%;
   z-index: 50
   display: flex;
   justify-content: center;
   align-items: center
-  border-radius: 8px
+  border-radius: 0
+  pointer-events: auto
 
   .welcome-screen
     position: relative

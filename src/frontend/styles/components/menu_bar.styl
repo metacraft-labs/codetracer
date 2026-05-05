@@ -14,9 +14,11 @@
     -webkit-app-region: no-drag
     flex: 1 1 auto
     min-width: 0
+    max-width: calc(100vw - 30em)
     gap: 0.5em
-    align-items: start
+    align-items: center
     justify-content: center
+    order: 3
 
   .debug-finished-background
     background-color: BACKGROUND_COLOR
@@ -84,9 +86,18 @@
     color: white // TODO is this correct
     z-index: 10
     -webkit-app-region: no-drag
+    order: 1
+    flex: 0 0 auto
 
     &:focus
       outline: 0 !important
+
+  #isonim-debug-controls
+    order: 2
+
+  #debug
+    .component-container
+      min-width: 0
 
   #menu-root
     height: 100%

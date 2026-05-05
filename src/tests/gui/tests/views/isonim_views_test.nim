@@ -530,6 +530,9 @@ suite "IsoNim Menu Shell — structure":
     check findById(panel, "menu-logo-img") != nil
     check findById(panel, DebugShellId) != nil
     check findById(panel, "isonim-debug-controls") != nil
+    check panel.children[0].attributes["id"] == NavigationMenuId
+    check panel.children[1].attributes["id"] == "isonim-debug-controls"
+    check panel.children[2].attributes["id"] == DebugShellId
     check findByClass(panel, WindowMenuClass) != nil
     check findByClass(panel, "maximize") != nil
     check findByClass(panel, "restore").isNil

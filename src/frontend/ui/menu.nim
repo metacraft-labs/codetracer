@@ -506,10 +506,7 @@ when defined(js):
         self.toggle()
         focusNavigationSoon(),
       onNavBlur: proc() =
-        if not self.search:
-          self.active = false
-          self.closeMenu()
-          self.data.redraw(),
+        discard,
       onNavMouseDown: proc() =
         self.activeDomElement =
           cast[dom.Node](dom.window.document.activeElement),

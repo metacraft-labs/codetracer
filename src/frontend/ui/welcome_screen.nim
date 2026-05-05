@@ -385,6 +385,7 @@ when defined(js):
                                               cstring"welcomeScreen")
     if container.isNil:
       return
+    isonim_dom.setAttribute(container, cstring"style", cstring"display: block")
     if isoNimWelcomeScreenMounted and
         welcomeScreenMountedComponentRef == welcomeScreenComponentRef:
       return
@@ -403,6 +404,7 @@ when defined(js):
                                               cstring"welcomeScreen")
     if not container.isNil:
       container.innerHTML = cstring""
+      isonim_dom.setAttribute(container, cstring"style", cstring"display: none")
     isoNimWelcomeScreenMounted = false
     welcomeScreenMountedComponentRef = nil
 

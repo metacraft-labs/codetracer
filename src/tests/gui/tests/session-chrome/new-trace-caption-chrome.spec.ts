@@ -1,5 +1,5 @@
 import { test, expect } from "../../lib/fixtures";
-import { retry } from "../../lib/retry-helpers";
+import { retry, retryAction } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import type { Page, TestInfo } from "@playwright/test";
 
@@ -63,6 +63,9 @@ async function attachCaptionDump(page: Page, testInfo: TestInfo): Promise<void> 
         inspect("#menu-logo-img"),
         inspect("#debug"),
         inspect("#debug [id^='commandPaletteComponent-']"),
+        inspect("#debug .command-container"),
+        inspect("#debug .command-input-row"),
+        inspect("#debug .command-input-field"),
         inspect("#isonim-debug-controls"),
         inspect("#isonim-debug-controls .isonim-debug-controls"),
         inspect(".session-tab-add"),
@@ -110,6 +113,8 @@ async function expectCaptionChrome(page: Page): Promise<void> {
   await expect(debugHost.locator("[id^='commandPaletteComponent-']")).toHaveCount(1, {
     timeout: 10_000,
   });
+  const omnibox = debugHost.locator(".command-input-field");
+  await expect(omnibox).toBeVisible({ timeout: 10_000 });
 
   const toolbarHost = page.locator("#isonim-debug-controls");
   await expect(toolbarHost).toBeVisible({ timeout: 10_000 });
@@ -117,18 +122,31 @@ async function expectCaptionChrome(page: Page): Promise<void> {
   await expect(toolbar).toBeVisible({ timeout: 10_000 });
   await expect(toolbar.locator("button")).toHaveCount(13, { timeout: 10_000 });
 
-  const menuBox = await menu.boundingBox();
-  const toolbarBox = await toolbar.boundingBox();
-  const debugBox = await debugHost.boundingBox();
-  expect(menuBox, "caption bar should have layout").not.toBeNull();
-  expect(toolbarBox, "debugger toolbar should have layout").not.toBeNull();
-  expect(debugBox, "omnibox host should have layout").not.toBeNull();
-  expect(toolbarBox!.height).toBeGreaterThan(20);
-  expect(debugBox!.height).toBeGreaterThan(20);
-  expect(toolbarBox!.y).toBeGreaterThanOrEqual(menuBox!.y - 1);
-  expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(
-    menuBox!.y + menuBox!.height + 8,
-  );
+  await retryAction(async () => {
+    const menuBox = await menu.boundingBox();
+    const logoBox = await logo.boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
+    const debugBox = await debugHost.boundingBox();
+    const omniboxBox = await omnibox.boundingBox();
+    expect(menuBox, "caption bar should have layout").not.toBeNull();
+    expect(logoBox, "menu logo should have layout").not.toBeNull();
+    expect(toolbarBox, "debugger toolbar should have layout").not.toBeNull();
+    expect(debugBox, "omnibox host should have layout").not.toBeNull();
+    expect(omniboxBox, "omnibox input should have layout").not.toBeNull();
+    expect(toolbarBox!.height).toBeGreaterThan(20);
+    expect(debugBox!.height).toBeGreaterThan(20);
+    expect(omniboxBox!.height).toBeGreaterThan(16);
+    expect(toolbarBox!.x).toBeGreaterThanOrEqual(logoBox!.x + logoBox!.width - 2);
+    expect(toolbarBox!.x).toBeLessThan(logoBox!.x + logoBox!.width + 260);
+    expect(omniboxBox!.x).toBeGreaterThan(toolbarBox!.x + toolbarBox!.width);
+    expect(Math.abs(
+      (omniboxBox!.x + omniboxBox!.width / 2) - (menuBox!.x + menuBox!.width / 2),
+    )).toBeLessThan(menuBox!.width * 0.18);
+    expect(toolbarBox!.y).toBeGreaterThanOrEqual(menuBox!.y - 1);
+    expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(
+      menuBox!.y + menuBox!.height + 8,
+    );
+  }, { maxAttempts: 50, delayMs: 100 });
 
   const menuStyles = await menu.evaluate((element) => {
     const style = window.getComputedStyle(element);
@@ -141,6 +159,20 @@ async function expectCaptionChrome(page: Page): Promise<void> {
   expect(menuStyles.position).toBe("fixed");
   expect(menuStyles.height).toBeGreaterThan(20);
   expect(menuStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+}
+
+async function expectMenuStaysOpenAwayFromLogo(page: Page): Promise<void> {
+  await page.locator("#menu-logo-img").click();
+  const menuMain = page.locator("#menu-main");
+  await expect(menuMain).toBeVisible({ timeout: 5_000 });
+
+  const box = await menuMain.boundingBox();
+  expect(box, "menu dropdown should have layout").not.toBeNull();
+  await page.mouse.move(box!.x + box!.width - 4, box!.y + box!.height - 4);
+  await expect(menuMain).toBeVisible({ timeout: 1_000 });
+
+  await page.locator("#menu-logo-img").click();
+  await expect(menuMain).toBeHidden({ timeout: 5_000 });
 }
 
 test.describe("New Trace caption chrome", () => {
@@ -159,6 +191,7 @@ test.describe("New Trace caption chrome", () => {
       const layout = new LayoutPage(ctPage);
       await layout.waitForTraceLoaded();
       await expectCaptionChrome(ctPage);
+      await expectMenuStaysOpenAwayFromLogo(ctPage);
 
       await retry(
         async () => (await getSessionCount(ctPage)) >= 1,
@@ -186,6 +219,11 @@ test.describe("New Trace caption chrome", () => {
       });
 
       await expectCaptionChrome(ctPage);
+      const menuBox = await ctPage.locator("#menu").boundingBox();
+      const welcomeBox = await welcomeScreen.boundingBox();
+      expect(menuBox, "caption bar should remain visible above welcome").not.toBeNull();
+      expect(welcomeBox, "welcome screen should have layout").not.toBeNull();
+      expect(welcomeBox!.y).toBeGreaterThanOrEqual(menuBox!.y + menuBox!.height - 2);
     } finally {
       await attachCaptionArtifacts(ctPage, testInfo);
     }
