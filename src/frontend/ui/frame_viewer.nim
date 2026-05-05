@@ -4,11 +4,23 @@ import
   ../viewmodel/viewmodels/[frame_viewer_vm, visual_replay_client],
   ../viewmodel/views/isonim_frame_viewer_view
 
-import std/options
+import std/[json, options]
+import isonim/core/async_compat
 import isonim/web/dom_api as dom_api
 
 when not defined(js):
   import std/asyncdispatch
+
+when defined(js):
+  proc fetchJsonText(url: cstring): VisualReplayFuture[cstring] {.importjs: """
+    ((async function(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("visual replay request failed: " + response.status);
+      }
+      return await response.text();
+    })(#))
+  """.}
 
 var frameViewerVMInstance: FrameViewerVM
 var frameViewerComponentRef: FrameViewerComponent
@@ -45,6 +57,21 @@ proc createInactiveVisualReplayClient(playerUrl: string): VisualReplayClient =
       completedVisualFuture(newSeq[VisualReplayDrawCall]()),
   )
 
+proc createHttpVisualReplayClient(playerUrl: string): VisualReplayClient =
+  when defined(js):
+    createJsonVisualReplayClient(
+      playerUrl,
+      proc(url: string): VisualReplayFuture[JsonNode] =
+        let textFuture = fetchJsonText(cstring(url))
+        result = newPromise proc(resolve: proc(value: JsonNode)) =
+          async_compat.onComplete(textFuture,
+            onSuccess = proc(raw: cstring) =
+              resolve(parseJson($raw)),
+            onError = proc(message: string) =
+              raise newException(CatchableError, message)))
+  else:
+    createInactiveVisualReplayClient(playerUrl)
+
 proc syncVisualReplaySessionIntoVM*() =
   if frameViewerVMInstance.isNil:
     return
@@ -52,9 +79,20 @@ proc syncVisualReplaySessionIntoVM*() =
   let playerUrl =
     if session.visualReplayPlayerUrl.isNil: ""
     else: $session.visualReplayPlayerUrl
+  let playerError =
+    if session.visualReplayPlayerError.isNil: ""
+    else: $session.visualReplayPlayerError
+  if frameViewerVMInstance.client.isNil or
+      frameViewerVMInstance.client.playerUrl != normalizedPlayerUrl(playerUrl):
+    frameViewerVMInstance.client =
+      if playerUrl.len > 0:
+        createHttpVisualReplayClient(playerUrl)
+      else:
+        createInactiveVisualReplayClient(playerUrl)
   frameViewerVMInstance.setVisualReplayConnection(
     session.visualReplayAvailable,
-    playerUrl)
+    playerUrl,
+    playerError)
 
 proc initFrameViewerVM() =
   if not frameViewerVMInstance.isNil:

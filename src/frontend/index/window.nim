@@ -1,6 +1,7 @@
 import
   std / [ async, jsffi, json, strutils, strformat, os ],
   electron_vars, server_config, base_handlers, config, lsp_bridge,
+  visual_replay_player,
   ../lib/[ jslib, electron_lib ],
   ../[ types, config as frontend_config ],
   ../../common/[ paths, ct_logging ]
@@ -21,6 +22,7 @@ proc stopBackendManager* =
   if not backendManagerProcess.isNil:
     backendManagerProcess.stopProcess()
     backendManagerProcess = nil
+  stopAllVisualReplayPlayers()
   stopAllLspBridges()
 
 proc duration*(name: string) =

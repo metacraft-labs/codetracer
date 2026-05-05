@@ -1765,6 +1765,7 @@ type
     # controls layout/panel availability; M2 will populate player lifecycle.
     visualReplayAvailable*: bool
     visualReplayPlayerUrl*: cstring
+    visualReplayPlayerError*: cstring
 
   Data* = ref object
     redraw*:                proc: void

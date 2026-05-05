@@ -6,6 +6,7 @@ import
   ../lib/[ jslib, electron_lib ],
   ../[ trace_metadata, config, types ],
   ../viewmodel/viewmodels/visual_replay_layout,
+  visual_replay_player,
   ../../common/[ ct_logging, paths, ],
   # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
@@ -315,6 +316,27 @@ proc traceVisualReplayAvailable(trace: Trace): bool =
     warnPrint "failed to inspect visual replay capability: ", getCurrentExceptionMsg()
     false
 
+proc startVisualReplayForTrace(trace: Trace): Future[VisualReplayPlayerResult] {.async.} =
+  if trace.isNil or not traceVisualReplayAvailable(trace):
+    return VisualReplayPlayerResult(ok: false, url: "", error: "")
+
+  when defined(js):
+    let tracePath = findTraceContainerPath($trace.outputFolder)
+    let lifecycle = createVisualReplayPlayerLifecycle(
+      tracePath,
+      defaultVisualReplayPlayerDeps())
+    let result = await lifecycle.start()
+    if result.ok and selectedReplayId >= 0:
+      registerVisualReplayPlayer(selectedReplayId, lifecycle)
+    else:
+      lifecycle.shutdown()
+    return result
+  else:
+    return VisualReplayPlayerResult(
+      ok: false,
+      url: "",
+      error: "Visual replay player is only available in the main process.")
+
 proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
   # Copy into a local var to work around Nim 2.2's capture check.
   # On the JS backend, this is a reference copy, so mutations propagate.
@@ -371,6 +393,17 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     if macroSourcemapPath.len > 0:
       infoPrint "index: found macro sourcemap at ", $macroSourcemapPath
 
+  let visualReplayAvailable = traceVisualReplayAvailable(trace)
+  var visualReplayPlayerUrl = cstring""
+  var visualReplayPlayerError = cstring""
+  if visualReplayAvailable:
+    let visualReplayPlayer = await startVisualReplayForTrace(trace)
+    if visualReplayPlayer.ok:
+      visualReplayPlayerUrl = cstring(visualReplayPlayer.url)
+    elif visualReplayPlayer.error.len > 0:
+      visualReplayPlayerError = cstring(visualReplayPlayer.error)
+      warnPrint "visual replay player failed: ", visualReplayPlayer.error
+
   main.webContents.send "CODETRACER::trace-loaded", js{
     trace: trace,
     functions: functions,
@@ -381,8 +414,9 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     dontAskAgain: dontAskAgain,
     sourcemapPath: sourcemapPath,
     macroSourcemapPath: macroSourcemapPath,
-    visualReplayAvailable: traceVisualReplayAvailable(trace),
-    visualReplayPlayerUrl: cstring"",
+    visualReplayAvailable: visualReplayAvailable,
+    visualReplayPlayerUrl: visualReplayPlayerUrl,
+    visualReplayPlayerError: visualReplayPlayerError,
   }
 
 proc loadExistingRecord*(traceId: int) {.async.} =
@@ -492,6 +526,8 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
     "arguments": replayId
   }
   backendManagerSocket.write(stopPacket)
+
+  stopVisualReplayPlayer(replayId)
 
   # Clear the legacy alias if it matches.
   if selectedReplayId == replayId:

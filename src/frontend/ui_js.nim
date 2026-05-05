@@ -1299,7 +1299,8 @@ proc onTraceLoaded(
     sourcemapPath=cstring,
     macroSourcemapPath=cstring,
     visualReplayAvailable=bool,
-    visualReplayPlayerUrl=cstring)) {.async.} =
+    visualReplayPlayerUrl=cstring,
+    visualReplayPlayerError=cstring)) {.async.} =
 
   clog "trace loaded"
   # console.log response.withDiff, response.diff, response.rawDiffIndex
@@ -1343,6 +1344,9 @@ proc onTraceLoaded(
   data.activeSession.visualReplayPlayerUrl =
     if response.visualReplayPlayerUrl.isNil: cstring""
     else: response.visualReplayPlayerUrl
+  data.activeSession.visualReplayPlayerError =
+    if response.visualReplayPlayerError.isNil: cstring""
+    else: response.visualReplayPlayerError
   frame_viewer.syncVisualReplaySessionIntoVM()
   if data.activeSession.visualReplayAvailable and data.ui.layout.isNil:
     data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](

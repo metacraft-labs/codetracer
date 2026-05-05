@@ -363,6 +363,7 @@ function cleanupCodetracerEnvVars(): void {
   delete process.env.CODETRACER_CALLER_PID;
   delete process.env.CODETRACER_IN_UI_TEST;
   delete process.env.CODETRACER_TEST;
+  delete process.env.CODETRACER_VISUAL_REPLAY_FAKE_PLAYER;
 }
 
 // Cache trace IDs by source path so multiple tests for the same program

@@ -127,11 +127,14 @@ proc previousFrame*(vm: FrameViewerVM) =
 
 proc setVisualReplayConnection*(vm: FrameViewerVM;
                                 available: bool;
-                                playerUrl: string) =
+                                playerUrl: string;
+                                errorMessage = "") =
   vm.visualReplayAvailable.val = available
   vm.playerUrl.val = playerUrl
   if not available:
     vm.error.val = "Visual replay is absent for this session."
+  elif errorMessage.len > 0:
+    vm.error.val = errorMessage
   elif playerUrl.len == 0:
     vm.error.val = "Visual replay is available, but no player is connected."
   elif vm.error.val.startsWith("Visual replay is"):
