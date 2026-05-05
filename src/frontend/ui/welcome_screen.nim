@@ -22,10 +22,12 @@ when defined(js):
 var welcomeScreenVMInstance*: WelcomeScreenVM
 var welcomeScreenVMStore: ReplayDataStore
 var welcomeScreenComponentRef: WelcomeScreenComponent
+var welcomeScreenMountedComponentRef: WelcomeScreenComponent
 var isoNimWelcomeScreenMounted = false
 
 proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent)
 proc tryMountIsoNimWelcomeScreen*()
+proc clearIsoNimWelcomeScreen*()
 proc requestWelcomeScreenRender*(self: WelcomeScreenComponent)
 
 proc safeStr(s: cstring): string =
@@ -383,7 +385,8 @@ when defined(js):
                                               cstring"welcomeScreen")
     if container.isNil:
       return
-    if isoNimWelcomeScreenMounted:
+    if isoNimWelcomeScreenMounted and
+        welcomeScreenMountedComponentRef == welcomeScreenComponentRef:
       return
     container.innerHTML = cstring""
     let callbacks =
@@ -393,6 +396,16 @@ when defined(js):
         welcomeScreenComponentRef.buildWelcomeCallbacks()
     mountIsoNimWelcomeScreen(container, welcomeScreenVMInstance, callbacks)
     isoNimWelcomeScreenMounted = true
+    welcomeScreenMountedComponentRef = welcomeScreenComponentRef
+
+  proc clearIsoNimWelcomeScreen*() =
+    let container = isonim_dom.getElementById(isonim_dom.document,
+                                              cstring"welcomeScreen")
+    if not container.isNil:
+      container.innerHTML = cstring""
+    isoNimWelcomeScreenMounted = false
+    welcomeScreenMountedComponentRef = nil
 
 when not defined(js):
   proc tryMountIsoNimWelcomeScreen*() = discard
+  proc clearIsoNimWelcomeScreen*() = discard

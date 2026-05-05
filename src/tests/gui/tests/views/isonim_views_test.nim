@@ -115,6 +115,16 @@ proc findByClass*(node: MockNode; cls: string): MockNode =
       return found
   return nil
 
+proc findById*(node: MockNode; id: string): MockNode =
+  ## Find the first descendant (or self) with the given id.
+  if node.kind == mnkElement and node.attributes.getOrDefault("id", "") == id:
+    return node
+  for child in node.children:
+    let found = findById(child, id)
+    if found != nil:
+      return found
+  return nil
+
 suite "IsoNim Editor Panel - structure":
 
   test "top-level editor keeps legacy editorComponent host id":
@@ -515,10 +525,29 @@ suite "IsoNim Menu Shell — structure":
         maximized: false))
 
     check panel.attributes["class"] == MenuShellRootClass
+    check findById(panel, NavigationMenuId) != nil
+    check findById(panel, MenuRootId) != nil
+    check findById(panel, "menu-logo-img") != nil
+    check findById(panel, DebugShellId) != nil
+    check findById(panel, "isonim-debug-controls") != nil
     check findByClass(panel, WindowMenuClass) != nil
     check findByClass(panel, "maximize") != nil
     check findByClass(panel, "restore").isNil
     check findAllByClass(panel, "menu-node").len == 0
+
+  test "caption bar hosts survive without navigation menu":
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: false,
+        active: false,
+        showWindowMenu: false))
+
+    check findById(panel, NavigationMenuId).isNil
+    check findById(panel, DebugShellId) != nil
+    check findById(panel, "isonim-debug-controls") != nil
+    check findByClass(panel, WindowMenuClass).isNil
 
   test "visible menu renders search host, root nodes, and window restore":
     let r = MockRenderer()
@@ -537,6 +566,8 @@ suite "IsoNim Menu Shell — structure":
 
     check findByClass(panel, "menu-active-node") != nil
     check findAllByClass(panel, "menu-node").len == 2
+    check findById(panel, DebugShellId).attributes["class"] == DebugShellClass
+    check findById(panel, "isonim-debug-controls") != nil
     check findByClass(panel, "menu-node-shortcut").textContent == "CTRL+R"
     check findByClass(panel, "restore") != nil
     check findByClass(panel, "maximize").isNil
@@ -552,7 +583,37 @@ suite "IsoNim Menu Shell — structure":
         showWindowMenu: false))
 
     check findByClass(panel, WindowMenuClass).isNil
+    check findById(panel, DebugShellId) != nil
+    check findById(panel, "isonim-debug-controls") != nil
     check findByClass(panel, "menu-folder").textContent.contains("Shell")
+
+  test "caption shell keeps chrome hosts when menu nodes are unavailable":
+    ## Regression guard for welcome / newly-created empty sessions: the caption
+    ## bar must still provide the CodeTracer logo/menu trigger, command-palette
+    ## host, and debugger-toolbar host before the menu model has populated its
+    ## root menu tree. Earlier tests only covered populated trace sessions, so a
+    ## blank New Trace tab could lose the shared chrome without being detected.
+    let r = MockRenderer()
+    let panel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: false,
+        rootNodes: @[],
+        showWindowMenu: true,
+        maximized: false))
+
+    let navigation = findById(panel, NavigationMenuId)
+    let logo = findById(panel, "menu-logo-img")
+    let debugHost = findById(panel, DebugShellId)
+    let toolbarHost = findById(panel, "isonim-debug-controls")
+
+    check navigation != nil
+    check logo != nil
+    check debugHost != nil
+    check debugHost.attributes["class"] == DebugShellClass
+    check toolbarHost != nil
+    check findByClass(panel, WindowMenuClass) != nil
 
 suite "IsoNim Session Tabs — structure":
 

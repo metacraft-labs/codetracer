@@ -46,6 +46,8 @@ const EDITOR_GUTTER_PADDING = 2 #px
 
 var disconnectedNotification: Notification
 
+proc seqIsNil[T](s: seq[T]): bool {.importjs: "(# == null)".}
+
 proc rrBackendPath(data: Data): cstring =
   ## Safely retrieve the RR backend executable path from the config.
   ## Returns an empty string when config or rrBackend is nil — this can
@@ -459,9 +461,13 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         macfolder "Help", "help"
 
     # Add dynamic launch configurations to Debug menu if available
-    if data.ui.launchConfigs.len > 0:
-      for element in result.elements:
+    if not seqIsNil(data.ui.launchConfigs) and data.ui.launchConfigs.len > 0:
+      let topLevelMenuNodes =
+        if seqIsNil(result.elements): @[] else: result.elements
+      for element in topLevelMenuNodes:
         if element.kind == MenuFolder and element.name == cstring"Debug":
+          if seqIsNil(element.elements):
+            element.elements = @[]
           var launchFolder = MenuNode(
             kind: MenuFolder,
             name: cstring"Launch Configurations",
@@ -791,9 +797,16 @@ proc loadShortcut*(action: ClientAction, config: Config): cstring =
     else:
       result = result & cstring" " & shortcutValue.renderer.toUpperCase()
 
+proc menuNodeChildren(node: MenuNode): seq[MenuNode] =
+  if node.isNil or seqIsNil(node.elements):
+    @[]
+  else:
+    node.elements
+
 proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Command = nil) =
   # check if node has children and is enabled
-  if node.elements.len == 0 and node.enabled:
+  let children = menuNodeChildren(node)
+  if children.len == 0 and node.enabled:
 
     # add node as a subcommand to its parent if it  has one
     if not parent.isNil:
@@ -816,7 +829,7 @@ proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Co
       kind: ParentCommand)
 
     # get commands of parent children
-    for node in node.elements:
+    for node in children:
       node.getCommand(names, parent)
 
 proc getCommands(node: MenuNode): JsAssoc[cstring, Command] =
@@ -1241,6 +1254,8 @@ proc onTraceLoaded(
   data.save = response.save
   data.save.fileMap = JsAssoc[cstring, int]{}
   data.ui.menuNode = data.webTechMenu(baseName(response.trace.program))
+  if not data.ui.menu.isNil:
+    data.ui.menu.requestMenuRender()
 
   dom.document.title = cstring(fmt"CodeTracer | Trace {data.trace.id}: {data.trace.program}")
 
@@ -1354,6 +1369,8 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
 
   if data.ui.menu.isNil:
     discard data.makeMenuComponent()
+  if not data.ui.menu.isNil:
+    data.ui.menu.requestMenuRender()
 
   data.ui.initEventReceived = true
   data.tryInitLayout()

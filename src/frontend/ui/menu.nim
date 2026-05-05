@@ -1,6 +1,6 @@
 from std / dom import Document
 import
-  ui_imports, debug
+  ui_imports, debug, command
 
 when defined(js):
   import isonim/web/web_renderer
@@ -14,6 +14,14 @@ when defined(js):
     false
 
 const FONT_UPPERCASE_WIDTH_FACTOR = 1.5
+
+proc seqIsNil[T](s: seq[T]): bool {.importjs: "(# == null)".}
+
+proc menuNodeChildren(node: MenuNode): seq[MenuNode] =
+  if node.isNil or seqIsNil(node.elements):
+    @[]
+  else:
+    node.elements
 
 proc enterElement*(self: MenuComponent, node: MenuNode)
 
@@ -35,7 +43,7 @@ proc closeMenu(self: MenuComponent) =
 proc openMainMenu(self: MenuComponent) =
   self.data.focusComponent(self)
   self.activeIndex = 0
-  self.activeLength = self.data.ui.menuNode.elements.len
+  self.activeLength = menuNodeChildren(self.data.ui.menuNode).len
   self.activePath = @[]
   self.activePathWidths = JsAssoc[int, int]{}
   self.activePathOffsets = JsAssoc[int, int]{}
@@ -64,31 +72,39 @@ proc iconClass(name: cstring): cstring =
 proc nodeAtPath(self: MenuComponent; path: seq[int]): MenuNode =
   result = self.data.ui.menuNode
   for index in path:
-    if result.isNil or index < 0 or index >= result.elements.len:
+    let elements = menuNodeChildren(result)
+    if index < 0 or index >= elements.len:
       return nil
-    result = result.elements[index]
+    result = elements[index]
 
 proc parentNodeAtPath(self: MenuComponent; path: seq[int]): MenuNode =
   result = self.data.ui.menuNode
   if path.len == 0:
     return
   for index in path[0 ..< path.len - 1]:
-    if result.isNil or index < 0 or index >= result.elements.len:
+    let elements = menuNodeChildren(result)
+    if index < 0 or index >= elements.len:
       return nil
-    result = result.elements[index]
+    result = elements[index]
 
 proc enterFolder*(self: MenuComponent) =
   var node = self.data.ui.menuNode
 
   for index in self.activePath:
-    node = node.elements[index]
+    let elements = menuNodeChildren(node)
+    if index < 0 or index >= elements.len:
+      return
+    node = elements[index]
 
-  var enteredNode = node.elements[self.activeIndex]
+  let elements = menuNodeChildren(node)
+  if self.activeIndex < 0 or self.activeIndex >= elements.len:
+    return
+  var enteredNode = elements[self.activeIndex]
 
   if enteredNode.enabled and enteredNode.kind == MenuFolder:
     self.activePath.add(self.activeIndex)
     self.activeIndex = 0
-    self.activeLength = enteredNode.elements.len
+    self.activeLength = menuNodeChildren(enteredNode).len
     self.data.redraw()
 
 proc closeFolder*(self: MenuComponent) =
@@ -98,9 +114,14 @@ proc closeFolder*(self: MenuComponent) =
     var node = self.data.ui.menuNode
 
     for index in self.activePath:
-      node = node.elements[index]
+      let elements = menuNodeChildren(node)
+      if index < 0 or index >= elements.len:
+        self.activeLength = 0
+        self.data.redraw()
+        return
+      node = elements[index]
 
-    self.activeLength = node.elements.len
+    self.activeLength = menuNodeChildren(node).len
     self.data.redraw()
 
 proc runAction*(self: MenuComponent, action: ClientActionHandler, actionData: JsObject = nil) =
@@ -121,12 +142,18 @@ proc enterElement*(self: MenuComponent) =
     var node = self.data.ui.menuNode
 
     for index in self.activePath:
-      node = node.elements[index]
+      let elements = menuNodeChildren(node)
+      if index < 0 or index >= elements.len:
+        return
+      node = elements[index]
 
     enteredNode = node
 
     if enteredNode.kind == MenuFolder:
-      enteredNode = enteredNode.elements[self.activeIndex]
+      let elements = menuNodeChildren(enteredNode)
+      if self.activeIndex < 0 or self.activeIndex >= elements.len:
+        return
+      enteredNode = elements[self.activeIndex]
 
     if enteredNode.enabled and enteredNode.kind == MenuElement:
       self.enterElement(enteredNode)
@@ -175,7 +202,7 @@ method onEscape*(self: MenuComponent) {.async.} =
   self.closeFolder()
 
 proc countSeparators(node: MenuNode, i: int): int =
-  for index, n in node.elements:
+  for index, n in menuNodeChildren(node):
     if index >= i:
       break
     if n.isBeforeNextSubGroup:
@@ -199,7 +226,7 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
   var maxNameWidth = 0
   var maxShortcutWidth = 0
   # calculate max name and shortcut for current menu
-  for node in currentMenuNode.elements:
+  for node in menuNodeChildren(currentMenuNode):
     let commandWidth = node.name.len
     if commandWidth > maxNameWidth:
       maxNameWidth = commandWidth
@@ -223,10 +250,10 @@ proc calculateMaxMenuElementWidth(self: MenuComponent, currentMenuNode: MenuNode
 
 proc prepareSearch*(node: MenuNode): seq[js] =
   result = @[]
-  if not node.enabled:
+  if node.isNil or not node.enabled:
     return
   if node.kind == MenuFolder:
-    for element in node.elements:
+    for element in menuNodeChildren(node):
       result = result.concat(prepareSearch(element))
   else:
     result = @[fuzzysort.prepare(node.name)]
@@ -236,10 +263,10 @@ proc generateNameMap*(node: MenuNode, res: JsAssoc[cstring, ClientAction] = nil)
     result = JsAssoc[cstring, ClientAction]{}
   else:
     result = res
-  if not node.enabled:
+  if node.isNil or not node.enabled:
     return
   if node.kind == MenuFolder:
-    for element in node.elements:
+    for element in menuNodeChildren(node):
       discard generateNameMap(element, result)
   else:
     result[node.name] = node.action
@@ -299,9 +326,10 @@ when defined(js):
       nodeClass: self.activeNodeClass(path),
       path: path,
       nameWidth: folderItemWidth,
-      beforeNextSubGroup: node.isBeforeNextSubGroup)
+      beforeNextSubGroup: node.isBeforeNextSubGroup,
+      children: @[])
     if node.kind == MenuFolder:
-      for childIndex, child in node.elements:
+      for childIndex, child in menuNodeChildren(node):
         if child.shouldRenderMenuNode():
           let childWidths = self.calculateMaxMenuElementWidth(node)
           result.children.add(self.menuRecord(
@@ -314,8 +342,9 @@ when defined(js):
       self: MenuComponent;
       node: MenuNode;
       pathPrefix: seq[int]): seq[MenuNodeRecord] =
+    result = @[]
     let widths = self.calculateMaxMenuElementWidth(node)
-    for index, child in node.elements:
+    for index, child in menuNodeChildren(node):
       if child.shouldRenderMenuNode():
         result.add(self.menuRecord(
           child,
@@ -334,13 +363,19 @@ when defined(js):
     fmt"top: {value * 28 + separators * 28 - 56}px; left: calc({left}px + {2 * depth}px)"
 
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
+    result.rootNodes = @[]
+    result.searchResults = @[]
+    result.nestedMenus = @[]
+
     if not self.data.ui.menuNode.isNil and not self.data.isNil:
       self.prepared = prepareSearch(self.data.ui.menuNode)
       self.nameMap = generateNameMap(self.data.ui.menuNode)
 
     result.showNavigation = not self.data.ui.menuNode.isNil and not defined(ctmacos)
     result.active = self.active
-    result.searchQuery = $self.searchQuery
+    result.searchQuery =
+      if self.searchQuery.isNil: ""
+      else: $self.searchQuery
     result.showWindowMenu = ui_imports.electron_lib.inElectron and not defined(ctmacos)
     result.maximized = isWindowMaximizedForMenu()
 
@@ -360,10 +395,11 @@ when defined(js):
     var current = menu
     var sum = 0
     for depth, index in self.activePath:
-      if current.isNil or index < 0 or index >= current.elements.len:
+      let currentElements = menuNodeChildren(current)
+      if current.isNil or index < 0 or index >= currentElements.len:
         break
       var separators = countSeparators(current, index)
-      current = current.elements[index]
+      current = currentElements[index]
       sum += index
       separators += 1
 
@@ -395,10 +431,11 @@ when defined(js):
           self.activePath[depth] = index
     else:
       if node.enabled and not self.keyNavigation:
-        if node.elements.len > 0:
+        let elements = menuNodeChildren(node)
+        if elements.len > 0:
           self.activePath.setLen(depth + 1)
           self.activeIndex = 0
-          self.activeLength = node.elements.len
+          self.activeLength = elements.len
           if self.activePath[depth] != index:
             self.activePath[depth] = index
 
@@ -497,5 +534,7 @@ when defined(js):
     renderMenuShellInto(r, container, model, callbacks)
     if not self.data.startOptions.shellUi:
       self.debug.requestDebugShellRender()
+      if not self.data.ui.commandPalette.isNil:
+        self.data.ui.commandPalette.requestCommandPalettePanelRefresh()
       self.debug.requestDebugControlsRender()
     wireMenuKeyboard(container, self)

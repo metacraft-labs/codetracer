@@ -631,6 +631,7 @@ proc makeMenuComponent*(data: Data): MenuComponent =
     prepared: @[],
     searchResults: @[],
     nameMap: JsAssoc[cstring, ClientAction]{},
+    searchQuery: cstring"",
     debug: data.debugComponent,
     service: data.services.editor,
     iconWidth: 24,

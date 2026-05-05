@@ -58,7 +58,7 @@ when defined(js):
   from ../viewmodel/views/isonim_command_palette_view import
     mountIsoNimCommandPalettePanel
 
-proc requestCommandPalettePanelRefresh(self: CommandPaletteComponent)
+proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent)
 
 proc clear(self: CommandPaletteComponent) =
   self.selected = 0
@@ -354,7 +354,7 @@ proc syncLegacyCommandPaletteIntoVM*(self: CommandPaletteComponent) =
   else:
     commandPaletteVMInstance.close()
 
-proc requestCommandPalettePanelRefresh(self: CommandPaletteComponent) =
+proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent) =
   ## Refresh the Command Palette's IsoNim surface after local legacy-state
   ## mutations. The legacy component remains the command interpreter/event-bus
   ## carrier, while the VM and direct mount own the visible DOM.
@@ -432,14 +432,9 @@ when defined(js):
     if commandPaletteComponentRef.isNil:
       return
     let componentId = commandPaletteComponentRef.id
-    if isoNimCommandPaletteMountedIds.hasKey(componentId):
-      return
-
     let key = cstring("commandPaletteComponent-" & $componentId)
     var retryCount = 0
     proc doMount() =
-      if isoNimCommandPaletteMountedIds.hasKey(componentId):
-        return
       retryCount += 1
       let container = isonim_dom_api.getElementById(
         isonim_dom_api.document, key)
@@ -449,6 +444,10 @@ when defined(js):
           return
         discard setTimeout(proc() = doMount(), 10)
         return
+      if isoNimCommandPaletteMountedIds.hasKey(componentId):
+        let containerNode = isonim_dom_api.Node(container)
+        if not isonim_dom_api.isNodeNil(containerNode.firstChild):
+          return
 
       # Replace any prior content (Karax may have planted a stub
       # element before the IsoNim mount fires).
@@ -488,6 +487,5 @@ method register*(self: CommandPaletteComponent, api: MediatorWithSubscribers) =
   ## ``configureMiddleware`` if the ViewModel layer is enabled.
   self.api = api
   initCommandPaletteVM()
-  if commandPaletteComponentRef.isNil:
-    commandPaletteComponentRef = self
-    tryMountIsoNimCommandPalettePanel()
+  commandPaletteComponentRef = self
+  tryMountIsoNimCommandPalettePanel()

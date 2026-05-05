@@ -15,6 +15,9 @@ import
   ../types,
   ../dap,
   ../renderer,
+  menu,
+  welcome_screen,
+  search_results,
   ../utils,
   ../lib/[logging, jslib]
 
@@ -187,6 +190,11 @@ proc createNewSession*(data: Data) =
     editModeLayout: nil,
     lastUsedEditLayout: nil
   )
+  session.ui.menuNode = data.ui.menuNode
+  session.ui.launchConfigs = data.ui.launchConfigs
+  session.ui.mode = data.ui.mode
+  session.ui.readOnly = data.ui.readOnly
+  session.ui.fontSize = data.ui.fontSize
   # Initialize component mapping arrays — required by ``createUIComponents``
   # and ``generateId`` which access ``componentMapping[content]`` and expect
   # initialised JsAssoc objects, not nil/undefined.  Without this, the
@@ -398,4 +406,13 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
   if not data.activeSession.ui.layout.isNil or data.activeSession.startOptions.welcomeScreen:
+    if data.activeSession.startOptions.welcomeScreen:
+      if not data.ui.welcomeScreen.isNil:
+        data.ui.welcomeScreen.showWelcomeView()
+        data.ui.welcomeScreen.requestWelcomeScreenRender()
+    else:
+      welcome_screen.clearIsoNimWelcomeScreen()
     redrawAfterSessionSwitch()
+    if not data.ui.menu.isNil:
+      discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
+    discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)

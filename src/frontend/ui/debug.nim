@@ -1,6 +1,7 @@
 import
   results,
   ui_imports,
+  command,
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
 
@@ -119,6 +120,8 @@ proc requestDebugShellRender*(self: DebugComponent) =
   let r = WebRenderer()
   renderDebugChromeInto(r, container, commandPaletteId)
   debugShellMountedCommandPaletteId = commandPaletteId
+  if not data.ui.commandPalette.isNil:
+    data.ui.commandPalette.requestCommandPalettePanelRefresh()
 
 proc requestDebugControlsRender*(self: DebugComponent) =
   if self.isNil:
