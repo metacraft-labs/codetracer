@@ -12,9 +12,10 @@
 ## - `currentVariables`: the variable list for the active tab
 ## - `isLoading`: whether the store is currently fetching data
 ##
-## Also creates an auto-load effect that calls `store.requestLocals`
-## whenever the debugger's rrTicks position changes, so the panel
-## always shows data for the current execution point.
+## Runtime data loading is still driven by the legacy StateComponent
+## mediator path so language-specific locals requests keep the same
+## behaviour as the pre-IsoNim UI; the VM displays the mirrored store
+## data and owns presentation state such as the active tab/expansion.
 ##
 ## Usage:
 ##   let vm = createStateVM(store)
@@ -68,6 +69,10 @@ type
       ## position — the view renders the ``no-code`` fallback in that
       ## case so the ``#code-state-line-{id}`` element is always
       ## present in the DOM (Playwright tests rely on its presence).
+    onToggleHistory*: proc(expression: string)
+      ## Optional bridge installed by StateComponent so the IsoNim
+      ## value-history button can still enter the legacy history
+      ## request pipeline.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -119,6 +124,10 @@ proc removeWatch*(vm: StateVM; expression: string) =
     exprs.delete(idx)
     vm.watchExpressions.val = exprs
 
+proc toggleHistory*(vm: StateVM; expression: string) =
+  if not vm.onToggleHistory.isNil:
+    vm.onToggleHistory(expression)
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -130,7 +139,7 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
   ## Sets up:
   ## 1. Mutable signals with sensible defaults
   ## 2. Derived memos for `currentVariables` and `isLoading`
-  ## 3. An auto-load effect that requests locals when rrTicks changes
+  ## 3. Optional bridge callbacks supplied by the legacy component
   withViewModel proc(dispose: proc()): StateVM =
     let activeTab = createSignal(stLocals)
     let expandedPaths = createSignal(initHashSet[string]())
@@ -173,18 +182,5 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
       codeStateLine: codeStateLine,
       disposeProc: dispose,
     )
-
-    # Auto-load effect: whenever rrTicks or watchExpressions change,
-    # request fresh locals.  This replaces the legacy `loadLocals()`
-    # call that used to happen inside `onMove` / `onCompleteMove`.
-    createEffect proc() =
-      let ticks = store.debugger.val.rrTicks
-      let watches = watchExpressions.val
-      let diagStoreId = store.storeId
-      when defined(js):
-        {.emit: "console.error('[PIPELINE] StateVM.autoLoad: storeId=' + `diagStoreId` + ' rrTicks=' + `ticks` + ' watches=' + `watches`.length);".}
-      # No rrTicks guard — DB-based traces always have rrTicks=0.
-      # RequestTracker deduplicates redundant backend requests.
-      store.requestLocals(ticks, watchExpressions = watches)
 
     vm

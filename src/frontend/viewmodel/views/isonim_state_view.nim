@@ -204,6 +204,11 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
             showIf atomTypeVisible(item):
               span(class = "value-type"):
                 text item().typeName
+            button(id = "value-history",
+                   class = "ct-button-image-sm-secondary ct-custom-button-size ct-ml-2",
+                   onclick = proc() = vm.toggleHistory(item().path)):
+              tdiv(class = "custom-tooltip"):
+                text "Toggle history value"
 
 proc renderVariableRow*(r: MockRenderer; vm: StateVM;
                         item: proc(): VariableViewState): MockNode =

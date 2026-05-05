@@ -326,6 +326,13 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
     filesystemVMInstance.clearRoot()
   filesystemVMInstance.setDiffEntries(legacyDiffEntries())
 
+proc refreshIsoNimFilesystemPanel*() =
+  ## Re-sync the mounted IsoNim tree after IPC handlers mutate the
+  ## legacy EditorService filesystem cache.
+  if not filesystemComponentRef.isNil:
+    syncLegacyFilesystemIntoVM(filesystemComponentRef)
+  tryMountIsoNimFilesystemPanel()
+
 # ---------------------------------------------------------------------------
 # VM bootstrap
 # ---------------------------------------------------------------------------

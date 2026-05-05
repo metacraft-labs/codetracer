@@ -1544,6 +1544,7 @@ proc onFilesystemLoaded(
   response: jsobject(
     folders=CodetracerFile)) =
   data.services.editor.filesystem = response.folders
+  filesystem.refreshIsoNimFilesystemPanel()
   data.redraw()
 
 proc onFilesystemCategoryLoaded(
@@ -1574,6 +1575,7 @@ proc onFilesystemCategoryLoaded(
     newRoot.children.add(response.folders)
 
     data.services.editor.filesystem = newRoot
+  filesystem.refreshIsoNimFilesystemPanel()
   data.redraw()
 
 proc onLoadFolderEditMode(
@@ -1600,22 +1602,28 @@ proc onUpdatePathContent(
     nodeId=cstring,
     nodeIndex=int,
     nodeParentIndices=seq[int])) =
-  let tree = jqFind(".filesystem").jstree(true)
-  let parent = tree.get_node(response.nodeId)
-  var children = parent.children.to(seq[cstring])
-
-  # remove current jstree node children
-  if children.len > 0:
-    var deletedItems = 0
-    for i in 0..<children.len:
-      tree.delete_node(children[i - deletedItems])
-      deletedItems += 1
-
-  # create new jstree node children
   response.content.changeIcons()
-  if response.content.children.len > 0:
-    for child in response.content.children:
-      tree.create_node(response.nodeId, child)
+
+  # Keep the old jstree path alive for any remaining legacy hosts, but
+  # do not let its absence abort the service-cache update that feeds the
+  # IsoNim filesystem renderer.
+  try:
+    let tree = jqFind(".filesystem").jstree(true)
+    if not tree.isNil:
+      let parent = tree.get_node(response.nodeId)
+      var children = parent.children.to(seq[cstring])
+
+      if children.len > 0:
+        var deletedItems = 0
+        for i in 0..<children.len:
+          tree.delete_node(children[i - deletedItems])
+          deletedItems += 1
+
+      if response.content.children.len > 0:
+        for child in response.content.children:
+          tree.create_node(response.nodeId, child)
+  except:
+    discard
 
   # update component state
   var nodeParent = data.services.editor.filesystem
@@ -1625,6 +1633,7 @@ proc onUpdatePathContent(
 
   var node = nodeParent.children[response.nodeIndex]
   node[] = response.content[]
+  filesystem.refreshIsoNimFilesystemPanel()
 
 
 proc onUpdateTrace(sender: js, response: jsobject(trace=Trace)) =

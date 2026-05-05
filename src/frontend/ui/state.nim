@@ -54,14 +54,11 @@ proc submitWatchExpression(self: StateComponent) =
 
   self.watchExpressions.add(expression)
 
-  # Sync the new watch expression to the StateVM so its auto-load
-  # effect re-requests locals with the updated watch list.
+  # Sync the new watch expression to the StateVM and use the legacy
+  # load path so language-specific locals requests keep the right shape.
   if stateVMInstance != nil:
     stateVMInstance.addWatch($expression)
-  else:
-    # Fallback: if the ViewModel is not yet initialised, use the
-    # legacy path directly.
-    self.loadLocals()
+  self.loadLocals()
 
   input.toJs.value = cstring""
 
@@ -370,16 +367,20 @@ proc loadLocals*(self: StateComponent) =
   self.api.emit(CtLoadLocals, arguments)
 
 method onMove(self: StateComponent) {.async.} =
-  # Data loading is driven by the StateVM's auto-load effect which fires
-  # when syncStoreDebuggerPosition (called in onCompleteMove) updates the
-  # store's rrTicks signal. IsoNim reactive effects handle all DOM updates.
-  discard
+  self.loadLocals()
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api
 
   # Initialize the parallel ViewModel instance (no-op if already created).
   initStateVM()
+  let stateComponent = self
+  stateVMInstance.onToggleHistory = proc(expression: string) =
+    if not stateComponent.api.isNil:
+      stateComponent.api.emit(
+        CtLoadHistory,
+        LoadHistoryArg(expression: cstring(expression),
+                       location: stateComponent.location))
 
   # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
     # discard self.onMove())
