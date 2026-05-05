@@ -44,7 +44,15 @@ proc createMainWindow*: js =
   when not defined(server):
     # TODO load from config
 
-    let iconPath = linksPath & "/resources/Icon.iconset/icon_256x256.png"
+    let
+      bundledIconPath = codetracerPrefix / "resources" / "Icon.iconset" / "icon_256x256.png"
+      sourceIconPath = currentSourcePath().parentDir.parentDir.parentDir.parentDir /
+        "resources" / "Icon.iconset" / "icon_256x256.png"
+      iconPath =
+        if fs.existsSync(cstring(bundledIconPath)):
+          bundledIconPath
+        else:
+          sourceIconPath
 
     var initInfo = newJsObject()
     initInfo = js{
