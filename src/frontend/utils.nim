@@ -328,6 +328,8 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
   if editorView == ViewInstructions:
     tabInfo.sourceLines = tabInfo.instructions.instructions.mapIt(formatLine(it))
     tabInfo.source = tabInfo.sourceLines.join(jsNl) & jsNl
+  if tabInfo.lastSyncedSource.isNil:
+    tabInfo.lastSyncedSource = tabInfo.source
 
   if not self.data.services.debugger.breakpointTable.hasKey(location.path):
     self.data.services.debugger.breakpointTable[location.path] = JsAssoc[int, UIBreakpoint]{}
@@ -1158,6 +1160,7 @@ proc makeEditorView*(
       functionName: cstring"",
       missingPath: true),
     source: content,
+    lastSyncedSource: content,
     sourceLines: content.split(jsNl),
     path: name
   )

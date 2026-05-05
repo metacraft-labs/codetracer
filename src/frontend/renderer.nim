@@ -9,6 +9,7 @@ import
   kdom, results,
   # internal
   types, utils, lang,
+  file_conflicts,
   communication, dap,
   event_helpers,
   .. / common / ct_event,
@@ -1195,31 +1196,13 @@ proc onStarted*(sender: js, response: js) =
     startedSent = true
     ipc.send "CODETRACER::started", js{}
 
-proc updateDialog(data: Data, path: cstring) =
-  vex.dialog.open(js{
-    message: cstring"",
-    input: cstring(&"{path} changed, update?"),
-    buttons: @[
-      vex.dialog.buttons.YES, vex.dialog.buttons.NO
-    ],
-    callback: proc (update: bool) =
-      if update:
-        data.services.editor.open[path].changed = false
-        ipc.send "CODETRACER::reload-file", js{path: path}
-      else:
-        ipc.send "CODETRACER::no-reload-file", js{path: path}
-  })
+proc openThreeWayMergeTab(data: Data, path, base, ours, theirs: cstring) =
+  let mergePath = cstring("merge:" & $path)
+  let content = cstring(buildThreeWayMergeDocument($path, $base, $ours, $theirs))
+  data.makeEditorView(mergePath, content, ViewSource, LangUnknown)
 
-
-proc onChangeFile*(sender: js, response: jsobject(path=cstring)) =
-  if data.services.editor.open.hasKey(response.path) and data.services.editor.open[response.path].changed:
-    data.updateDialog(response.path)
-  else:
-    ipc.send "CODETRACER::reload-file", response
-
-## Refresh any open Monaco editors that point at the changed path
-proc onReloadFile*(sender: js, response: jsobject(path=cstring)) {.async.} =
-  let targetPath = response.path
+## Refresh any open Monaco editors that point at the changed path.
+proc reloadOpenFileFromDisk(data: Data, targetPath: cstring) {.async.} =
   echo fmt"reload-file: received request for {targetPath}"
   for name, tab in data.services.editor.open:
     # Match either by the tab key (usual case) or the stored path in TabInfo
@@ -1247,6 +1230,7 @@ proc onReloadFile*(sender: js, response: jsobject(path=cstring)) {.async.} =
         cwarn fmt"reload-file: fs read failed for {targetPath}: {getCurrentExceptionMsg()}"
 
       tab.source = newSource
+      tab.lastSyncedSource = newSource
       tab.sourceLines = newSource.split(jsNl)
       tab.changed = false
       tab.reloadChange = true
@@ -1259,6 +1243,95 @@ proc onReloadFile*(sender: js, response: jsobject(path=cstring)) {.async.} =
         editorView.monacoEditor.setValue(tab.source)
     except:
       cerror fmt"reload-file: failed to refresh {name}: {getCurrentExceptionMsg()}"
+
+proc updateDialog(data: Data, path: cstring) {.async.} =
+  let tab =
+    if data.services.editor.open.hasKey(path):
+      data.services.editor.open[path]
+    else:
+      nil
+  if tab.isNil:
+    await data.reloadOpenFileFromDisk(path)
+    ipc.send "CODETRACER::no-reload-file", js{path: path}
+    return
+
+  let diskSource =
+    try:
+      await readFileUtf8(path)
+    except:
+      cwarn fmt"external-change: failed to read changed file {path}: {getCurrentExceptionMsg()}"
+      cstring""
+
+  let overlay = kdom.document.createElement(cstring"div")
+  overlay.class = cstring"file-conflict-dialog-backdrop"
+  overlay.innerHTML = cstring(&"""
+    <div class="file-conflict-dialog" role="dialog" aria-modal="true">
+      <h2>File changed on disk</h2>
+      <p>{path} changed on disk while the editor has unsaved changes.</p>
+      <div class="file-conflict-dialog-actions">
+        <button type="button" data-action="discard">Discard and reload</button>
+        <button type="button" data-action="save">Save in-memory version</button>
+        <button type="button" data-action="merge">Open three-way merge</button>
+        <button type="button" data-action="keep">Keep editing</button>
+      </div>
+    </div>
+  """)
+
+  proc closeDialog() =
+    overlay.toJs.remove()
+
+  proc handleAction(action: cstring) =
+    closeDialog()
+    try:
+      if action == cstring"discard":
+        tab.changed = false
+        discard data.reloadOpenFileFromDisk(path)
+        ipc.send "CODETRACER::no-reload-file", js{path: path}
+      elif action == cstring"save":
+        data.saveFiles(path)
+        ipc.send "CODETRACER::no-reload-file", js{path: path}
+      elif action == cstring"merge":
+        let ours =
+          if not tab.monacoEditor.isNil:
+            tab.monacoEditor.getValue()
+          else:
+            tab.source
+        let base =
+          if not tab.lastSyncedSource.isNil:
+            tab.lastSyncedSource
+          else:
+            tab.source
+        data.openThreeWayMergeTab(path, base, ours, diskSource)
+        ipc.send "CODETRACER::no-reload-file", js{path: path}
+      else:
+        ipc.send "CODETRACER::no-reload-file", js{path: path}
+    except:
+      cerror fmt"external-change: failed to handle {action} for {path}: {getCurrentExceptionMsg()}"
+      ipc.send "CODETRACER::no-reload-file", js{path: path}
+
+  for action in [cstring"discard", cstring"save", cstring"merge", cstring"keep"]:
+    let button = overlay.toJs.querySelector(cstring("[data-action='" & $action & "']"))
+    if not button.isNil:
+      button.addEventListener(cstring"click", proc(e: Event) =
+        handleAction(action))
+
+  kdom.document.body.appendChild(overlay)
+
+
+proc onChangeFile*(sender: js, response: jsobject(path=cstring)) {.async.} =
+  let tab =
+    if data.services.editor.open.hasKey(response.path):
+      data.services.editor.open[response.path]
+    else:
+      nil
+  if not tab.isNil and classifyExternalChange(tab.changed) == ecdPrompt:
+    await data.updateDialog(response.path)
+  else:
+    await data.reloadOpenFileFromDisk(response.path)
+    ipc.send "CODETRACER::no-reload-file", response
+
+proc onReloadFile*(sender: js, response: jsobject(path=cstring)) {.async.} =
+  await data.reloadOpenFileFromDisk(response.path)
 
 proc openNormalEditor* =
   # TODO

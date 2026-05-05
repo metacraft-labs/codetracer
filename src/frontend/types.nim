@@ -47,6 +47,7 @@ type
     name*:            cstring
     changed*:          bool
     reloadChange*:    bool
+    lastSyncedSource*: cstring
     untitled*:        bool
     location*:        Location
     offset*:          int

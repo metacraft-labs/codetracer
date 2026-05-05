@@ -2000,10 +2000,13 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
 proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.services.editor.open.hasKey(response.name):
     data.services.editor.open[response.name].changed = false
+    data.services.editor.open[response.name].lastSyncedSource =
+      data.services.editor.open[response.name].source
   if data.ui.editors.hasKey(response.name):
     let editor = data.ui.editors[response.name]
     if not editor.tabInfo.isNil:
       editor.tabInfo.changed = false
+      editor.tabInfo.lastSyncedSource = editor.tabInfo.source
     editor.name = response.name
     if not data.services.search.paths.hasKey(response.name):
       data.services.search.pathsPrepared.add(fuzzysort.prepare(response.name))

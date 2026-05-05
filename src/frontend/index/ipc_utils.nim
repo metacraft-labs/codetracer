@@ -32,6 +32,7 @@ proc configureIpcMain* =
     "path-validation"
     "save-file"
     "save-untitled"
+    "no-reload-file"
     "run-test"
     "restart-subsystem"
 

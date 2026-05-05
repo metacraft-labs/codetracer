@@ -217,6 +217,8 @@ proc getSave*(folders: seq[cstring], test: bool): Future[Save] {.async.} =
 
 proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
   try:
+    if data.tabs.hasKey(response.name):
+      data.tabs[response.name].ignoreNext += 1
     discard await writeFileAsync(fsAsync, response.name, response.raw)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
@@ -226,12 +228,18 @@ proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveA
 
 proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, saveAs=bool)) {.async.} =
   try:
+    if data.tabs.hasKey(response.name):
+      data.tabs[response.name].ignoreNext += 1
     discard await writeFileAsync(fsAsync, response.name, response.raw)
     mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()
     mainWindow.webContents.send "CODETRACER::save-file-error",
       js{name: response.name, error: cstring(getCurrentExceptionMsg())}
+
+proc onNoReloadFile*(sender: js, response: jsobject(path=cstring)) =
+  if data.tabs.hasKey(response.path):
+    data.tabs[response.path].waitsPrompt = false
 
 proc selectFileOrFolder*(options: JsObject): Future[cstring] {.async.} =
   let selection = await electron.dialog.showOpenDialog(mainWindow, options)

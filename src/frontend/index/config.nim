@@ -1,5 +1,6 @@
 import
   std / [ async, jsffi, os, strformat, strutils, sequtils, jsconsole ],
+  electron_vars,
   ../[ config, types, lang ],
   ../lib/[ jslib, electron_lib, misc_lib ],
   ./bootstrap_cache,
@@ -125,22 +126,17 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
 
   if err.isNil:
     if not data.tabs.hasKey(filename):
-      # TODO: enable again, but
-      # try to not send event for our own saves/changes
-
-      # fs.watch(filename) do (e: cstring, filenameArg: cstring):
-      #   if e == cstring"change":
-      #     # debugPrint "change?", filename
-      #     # TODO: try to not send event for our own saves/changes
-      #     if not data.tabs.hasKey(filename):
-      #       data.tabs[filename] = ServerTab(path: filename, lang: LangUnknown, fileWatched: true)
-      #     if data.tabs[filename].fileWatched and data.tabs[filename].ignoreNext == 0 and not data.tabs[filename].waitsPrompt:
-      #       data.tabs[filename].waitsPrompt = true
-      #       mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
-      #     elif data.tabs[filename].ignoreNext > 0:
-      #       data.tabs[filename].ignoreNext = data.tabs[filename].ignoreNext - 1
-
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
+      fs.watch(filename) do (e: cstring, filenameArg: cstring):
+        if e == cstring"change":
+          if not data.tabs.hasKey(filename):
+            data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
+          let tab = data.tabs[filename]
+          if tab.ignoreNext > 0:
+            tab.ignoreNext = tab.ignoreNext - 1
+          elif tab.fileWatched and not tab.waitsPrompt:
+            tab.waitsPrompt = true
+            mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
 
   echo "index_config open: file read succesfully"
   var sourceLines = source.split(jsNl)
