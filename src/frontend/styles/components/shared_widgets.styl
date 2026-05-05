@@ -20,15 +20,7 @@ if !IS_EXTENSION
   ::-webkit-scrollbar-thumb:horizontal:active
     background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
 
-@font-face {
-  font-family: 'SpaceGrotesk';
-  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: "FiraCode";
-  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
-}
+@import "../generated/fonts"
 
 if IS_EXTENSION
   .component-container-html
@@ -244,7 +236,7 @@ body
 
 // TODO: Fix it?
 .component-container
-  font-family: "FiraCode" !important
+  font-family: "FiraMono" !important
   font-size: inherit !important
   line-height: 1.5em !important
   font-weight: 400 !important
@@ -351,7 +343,7 @@ input:checked ~ .checkmark:after
   position: absolute
   background-color: PRIMARY_BASE
   z-index: 3
-  font-family: "FiraCode"
+  font-family: "FiraMono"
   margin-bottom: 0
   list-style-type: none
   opacity: 0
@@ -506,7 +498,7 @@ input:checked ~ .checkmark:after
   height: inherit
   justify-content: center
   align-items: center
-  font-family: 'FiraCode'
+  font-family: 'FiraMono'
   // font-size: 14px
   // padding-left: 12px
   // padding-right: 12px
