@@ -38,7 +38,8 @@
 import
   ui_imports,
   ../[ types, communication ],
-  tables
+  tables,
+  sets
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -49,11 +50,13 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM, FilesystemDeepReviewFile,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
-  isExpanded, setDiffEntries, setDeepReview, emptyEntry
+  setExpandedPaths, isExpanded, setDiffEntries, setDeepReview, emptyEntry
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_filesystem_view import
     mountIsoNimFilesystemPanel
+
+proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
 # ---------------------------------------------------------------------------
 # Devicon mapping (preserved from the legacy module).
@@ -290,6 +293,25 @@ proc legacyFileToVm*(file: CodetracerFile): FilesystemEntryNode =
   for child in file.children:
     result.children.add(legacyFileToVm(child))
 
+proc legacyFileIsOpened(file: CodetracerFile): bool =
+  if file.isNil or file.state.isNil:
+    return false
+  try:
+    if jsHasKey(file.state, cstring"opened"):
+      return file.state.opened.to(bool)
+  except:
+    discard
+  false
+
+proc collectLegacyOpenedPaths(file: CodetracerFile;
+                              openedPaths: var HashSet[string]) =
+  if file.isNil:
+    return
+  if file.legacyFileIsOpened():
+    openedPaths.incl(safeStr(file.original.path))
+  for child in file.children:
+    collectLegacyOpenedPaths(child, openedPaths)
+
 proc legacyDiffEntries*(): seq[FilesystemDiffEntry] =
   ## Build the synthetic diff-files-list rows from
   ## ``data.startOptions.diff.files``.  Returns an empty seq when no
@@ -321,7 +343,10 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
   if filesystemVMInstance.isNil or self.isNil:
     return
   if not self.service.isNil and not self.service.filesystem.isNil:
+    var openedPaths = initHashSet[string]()
+    collectLegacyOpenedPaths(self.service.filesystem, openedPaths)
     filesystemVMInstance.setRoot(legacyFileToVm(self.service.filesystem))
+    filesystemVMInstance.setExpandedPaths(openedPaths)
   else:
     filesystemVMInstance.clearRoot()
   filesystemVMInstance.setDiffEntries(legacyDiffEntries())

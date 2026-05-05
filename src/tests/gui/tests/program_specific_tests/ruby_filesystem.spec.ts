@@ -27,8 +27,20 @@ test.describe("ruby example — filesystem", () => {
         const emptyOverlay = root?.querySelector(".filesystem-empty-overlay");
         const nodes = Array.from(root?.querySelectorAll("li.jstree-node") ?? []);
         const anchors = Array.from(root?.querySelectorAll(".jstree-anchor") ?? []);
+        const appData = (window as any).data;
+        const activeSessionIndex = appData?.activeSessionIndex ?? 0;
+        const filesystem = appData?.sessions?.[activeSessionIndex]?.services?.editor?.filesystem;
         return {
+          activeSessionId: activeSession?.id ?? "",
+          activeSessionHidden: activeSession?.classList.contains("hidden") ?? true,
+          activeSessionIndex,
+          allFilesystemRootIds: Array.from(
+            document.querySelectorAll("div[id^='filesystemComponent']"),
+          ).map((node) => node.id),
+          serviceRootText: filesystem?.text ?? "",
+          serviceChildCount: filesystem?.children?.length ?? 0,
           rootHtml: root?.outerHTML.slice(0, 4_000) ?? "",
+          rootId: root?.id ?? "",
           nodeCount: nodes.length,
           labels: anchors.map((node) => node.textContent?.trim() ?? "").slice(0, 20),
           emptyOverlayVisible: emptyOverlay
@@ -49,8 +61,11 @@ test.describe("ruby example — filesystem", () => {
     }
 
     const dump = await captureFilesystemDump();
+    expect(dump.activeSessionHidden, "Filesystem must be mounted in the active session").toBe(false);
+    expect(dump.serviceRootText, "filesystem-loaded should populate the editor service").toBe("source folders");
+    expect(dump.serviceChildCount, "filesystem-loaded should include source roots").toBeGreaterThan(0);
     expect(dump.nodeCount, "Files panel should expose the Ruby source tree").toBeGreaterThan(0);
-    expect(dump.labels.join("\n")).toMatch(/source folders|sudoku_solver\.rb|rb_sudoku_solver/i);
+    expect(dump.labels.join("\n")).toMatch(/sudoku_solver\.rb/i);
     expect(dump.emptyOverlayVisible).toBe(false);
   });
 });

@@ -380,9 +380,26 @@ async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
 
     expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(omniboxBox!.x - 6);
     expect(omniboxBox!.x + omniboxBox!.width).toBeLessThanOrEqual(tabBox!.x - 4);
+    expect(
+      tabBox!.x - (omniboxBox!.x + omniboxBox!.width),
+      "tab bar should start directly after the omnibox without wasting caption space",
+    ).toBeLessThanOrEqual(48);
     expect(omniboxBox!.x + omniboxBox!.width).toBeLessThanOrEqual(overflowBox!.x - 4);
     expect(overflowBox!.x + overflowBox!.width).toBeLessThanOrEqual(addBox!.x - 2);
   }, { maxAttempts: 30, delayMs: 100 });
+
+  await overflow.click();
+  const overflowMenu = page.locator(".session-tab-overflow-menu");
+  await expect(overflowMenu).toBeVisible({ timeout: 5_000 });
+  await expect(overflowMenu.locator(".session-tab-overflow-item")).toHaveCount(8, {
+    timeout: 5_000,
+  });
+
+  await overflowMenu.locator(".session-tab-overflow-item").first().click();
+  await retry(
+    async () => (await getActiveSessionIndex(page)) === 0,
+    { maxAttempts: 30, delayMs: 500 },
+  );
 }
 
 async function expectWelcomeFillsAvailableView(page: Page): Promise<void> {

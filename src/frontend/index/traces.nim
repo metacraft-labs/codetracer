@@ -159,19 +159,76 @@ proc isAbsoluteFilesystemPath(path: string): bool =
     return true
   path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/')
 
+proc addUniquePath(paths: var seq[cstring]; path: cstring) =
+  if path.len == 0:
+    return
+  for existing in paths:
+    if $existing == $path:
+      return
+  paths.add(path)
+
+proc pathExists(path: cstring): bool =
+  if path.len == 0:
+    return false
+  try:
+    return fs.existsSync(path)
+  except:
+    return false
+
+proc materializedTraceRootHasEntries(trace: Trace; root: string): bool =
+  let materializedPath = nodePath.join(trace.outputFolder, cstring"files", cstring(root))
+  if not pathExists(materializedPath):
+    return false
+  try:
+    let data = fs.lstatSync(materializedPath)
+    if cast[bool](data.isFile()) or cast[bool](data.isSymbolicLink()):
+      return true
+    if cast[bool](data.isDirectory()):
+      return fs.readdirSync(materializedPath).len > 0
+  except:
+    discard
+  false
+
+proc resolveAgainstWorkdir(trace: Trace; folders: seq[cstring]): seq[cstring] =
+  for folder in folders:
+    let path = $folder
+    if path.len == 0:
+      continue
+    if path.isAbsoluteFilesystemPath or trace.workdir.len == 0:
+      result.addUniquePath(folder)
+    else:
+      result.addUniquePath(nodePath.join(trace.workdir, folder))
+
+proc fallbackLiveSourceFolders(trace: Trace): seq[cstring] =
+  if trace.program.len > 0:
+    if ($trace.program).isAbsoluteFilesystemPath:
+      if pathExists(trace.program):
+        result.addUniquePath(trace.program)
+    elif trace.workdir.len > 0:
+      let programPath = nodePath.join(trace.workdir, trace.program)
+      if pathExists(programPath):
+        result.addUniquePath(programPath)
+
+  if result.len == 0 and trace.workdir.len > 0 and pathExists(trace.workdir):
+    result.addUniquePath(trace.workdir)
+
 proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
   ## Materialized/self-contained traces can store source files under
   ## ``trace/files`` using relative paths from ``trace_paths.json``.  In that
   ## case the trace index's workspace source folder is not a valid root inside
   ## the self-contained file store, so prefer the relative trace-path folders.
-  result = trace.sourceFolders
+  var sourceFolders: seq[cstring] = trace.sourceFolders
   if not trace.imported:
-    return result
+    if sourceFolders.len == 0:
+      sourceFolders = fallbackLiveSourceFolders(trace)
+    return sourceFolders
 
   let (rawTracePaths, err) = await fsReadFileWithErr(
     nodePath.join(trace.outputFolder, cstring"trace_paths.json"))
   if not err.isNil:
-    return result
+    if sourceFolders.len == 0:
+      sourceFolders = fallbackLiveSourceFolders(trace)
+    return sourceFolders
 
   var folders: seq[cstring] = @[]
   try:
@@ -186,14 +243,20 @@ proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
           path
         else:
           folder
-      if root.len > 0 and cstring(root) notin folders:
-        folders.add(cstring(root))
+      folders.addUniquePath(cstring(root))
   except:
     warnPrint "failed to derive filesystem folders from trace_paths.json: ",
       getCurrentExceptionMsg()
 
   if folders.len > 0:
-    result = folders
+    if folders.allIt(materializedTraceRootHasEntries(trace, $it)):
+      sourceFolders = folders
+    else:
+      sourceFolders = resolveAgainstWorkdir(trace, folders)
+
+  if sourceFolders.len == 0:
+    sourceFolders = fallbackLiveSourceFolders(trace)
+  return sourceFolders
 
 proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
   try:

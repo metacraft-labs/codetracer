@@ -57,7 +57,7 @@ proc loadFile(
   if path.len == 0:
     return res
 
-  let realPath = if not selfContained:
+  var realPath = if not selfContained:
       path
     else:
       # Strip the path root (drive letter on Windows, leading / on Unix)
@@ -68,8 +68,16 @@ proc loadFile(
   try:
     data = await cast[Future[js]](fsAsync.lstat(realPath))
   except:
-    errorPrint "lstat error: ", getCurrentExceptionMsg()
-    return res
+    if selfContained and path != realPath:
+      try:
+        data = await cast[Future[js]](fsAsync.lstat(path))
+        realPath = path
+      except:
+        errorPrint "lstat error: ", getCurrentExceptionMsg()
+        return res
+    else:
+      errorPrint "lstat error: ", getCurrentExceptionMsg()
+      return res
 
   if path.len == 0:
     return res
@@ -82,7 +90,11 @@ proc loadFile(
     try:
       # returning just the filenames, not full paths!
       let files = await cast[Future[seq[cstring]]](fsAsync.readdir(realPath))
-      let depthLimit = subParts.len() - 2
+      let depthLimit =
+        if selfContained:
+          int.high
+        else:
+          subParts.len() - 2
       res = CodetracerFile(
         text: name,
         children: @[],

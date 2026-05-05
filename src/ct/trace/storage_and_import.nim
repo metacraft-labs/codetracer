@@ -1,37 +1,25 @@
 import
-  std/[ os, json, strutils, strformat, sets, algorithm ],
+  std/[ os, json, strutils, strformat, sets, algorithm, sequtils ],
   ../../common/[ trace_index, lang, types, paths ],
   ../utilities/[ git, language_detection ],
+  source_paths,
   json_serialization, results
 
 proc isAbsolutePath(path: string): bool =
-  ## Check if path is absolute on either Unix or Windows.
-  if path.len > 0 and (path[0] == '/' or path[0] == '\\'):
-    return true
-  if path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/'):
-    return true
-  return false
+  isAbsoluteTracePath(path)
 
 proc stripPathRoot(path: string): string =
-  ## Strip the root/drive from an absolute path for use as a relative sub-path.
-  ## Unix: /path/to/file -> path/to/file
-  ## Windows: D:\path\to\file -> path\to\file
-  if path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/'):
-    return path[3..^1]
-  elif path.len > 0 and (path[0] == '/' or path[0] == '\\'):
-    return path[1..^1]
-  else:
-    return path
+  stripTracePathRoot(path)
 
-proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
+proc storeTraceFiles(paths: seq[string], traceFolder, workdir: string, lang: Lang) =
   let filesFolder = traceFolder / "files"
   createDir(filesFolder)
 
-  var sourcePaths = paths
+  var sourcePaths = paths.mapIt(resolveTraceSourcePath(it, workdir))
 
   if lang in {LangNoir, LangRustWasm, LangCppWasm}:
     var baseFolder = ""
-    for path in paths:
+    for path in sourcePaths:
       if path.len > 0 and isAbsolutePath(path):
         let originalFolder = path.parentDir
         if baseFolder.len == 0 or baseFolder.len > originalFolder.len and
@@ -48,10 +36,14 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
 
     # echo baseFolder, " ", sourcePaths
 
-  for path in sourcePaths:
+  for pathIndex, path in sourcePaths:
     if path.len > 0:
       # echo "store path ", path
-      let traceFilePath = filesFolder / stripPathRoot(path)
+      let traceFilePath =
+        if pathIndex < paths.len:
+          filesFolder / tracePayloadRelativePath(paths[pathIndex], workdir)
+        else:
+          filesFolder / tracePayloadRelativePath(path, workdir)
       let traceFileFolder = traceFilePath.parentDir
       try:
         # echo "create ", traceFileFolder
@@ -240,7 +232,7 @@ proc importTrace*(
     # it happens on the original machine
     # when the source files are still available and unchanged
     if paths.len > 0:
-      storeTraceFiles(paths, outputFolder, lang)
+      storeTraceFiles(paths, outputFolder, workdir, lang)
 
   var sourceFoldersInitialSet = initHashSet[string]()
   for path in paths:

@@ -211,6 +211,11 @@ proc collapsePath*(vm: FilesystemVM; path: string) =
   current.excl(path)
   vm.expandedPaths.val = current
 
+proc setExpandedPaths*(vm: FilesystemVM; paths: HashSet[string]) =
+  ## Bulk-replace the expansion set. Used by the legacy bridge to preserve
+  ## jstree's ``state.opened`` flags when mirroring a loaded filesystem.
+  vm.expandedPaths.val = paths
+
 proc isExpanded*(vm: FilesystemVM; path: string): bool =
   ## Predicate the view uses to decide whether to render a folder's
   ## children.  Pure read-only.

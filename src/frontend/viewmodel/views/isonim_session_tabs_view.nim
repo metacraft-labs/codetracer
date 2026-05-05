@@ -105,7 +105,7 @@ proc renderAddButton(
 proc renderOverflowButton(r: MockRenderer): MockNode =
   ui(r):
     tdiv(class = SessionTabOverflowClass):
-      text "v"
+      text "⌄"
 
 proc renderOverflowMenu(
     r: MockRenderer;
@@ -121,7 +121,7 @@ proc renderOverflowMenu(
       (if i == activeIndex: " active" else: "")
     let item = ui(r):
       tdiv(class = itemClass,
-           onclick = proc() = callbacks.invokeSelect(tabIndex)):
+           onclick = tabSelectHandler(callbacks, tabIndex)):
         text tab.label
     r.appendChild(result, item)
 
@@ -175,7 +175,7 @@ when defined(js):
         (if i == activeIndex: " active" else: "")
       let item = ui(r):
         tdiv(class = itemClass,
-             onclick = proc() = callbacks.invokeSelect(tabIndex)):
+             onclick = tabSelectHandler(callbacks, tabIndex)):
           text tab.label
       r.appendChild(result, item)
 
@@ -185,7 +185,7 @@ when defined(js):
     ui(r):
       tdiv(class = SessionTabOverflowClass,
            onclick = proc() = callbacks.invokeToggleOverflow()):
-        text "v"
+        text "⌄"
 
 proc renderSessionTabsPanel*(
     r: MockRenderer;
@@ -206,7 +206,7 @@ proc renderSessionTabsPanel*(
                  onclick = tabCloseHandler(callbacks, i)):
               text "×"
       tdiv(class = SessionTabOverflowClass):
-        text "v"
+        text "⌄"
       tdiv(class = SessionTabAddClass,
            onclick = proc() = callbacks.invokeAdd()):
         text "+"
