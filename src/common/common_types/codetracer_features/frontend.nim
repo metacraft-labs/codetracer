@@ -264,7 +264,8 @@ type
     CaptionBarProgress = 38,
     AgentActivityDeepReview = 39,
     RequestPanel = 40,
-    VCS = 41
+    VCS = 41,
+    FrameViewer = 42
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

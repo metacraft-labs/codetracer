@@ -10,6 +10,12 @@ const meta = {
 export default meta;
 
 export const DefaultDebug = story("layout", "default-debug", "populated", "Default Debug");
+export const McrVisualDebug = story(
+  "layout",
+  "default-debug",
+  "mcr-visual",
+  "MCR Visual Debug",
+);
 export const NoirFilesystemActive = story(
   "layout",
   "default-debug",

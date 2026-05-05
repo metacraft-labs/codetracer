@@ -1,6 +1,6 @@
 ## FrameViewerVM — ViewModel for MCR visual replay frames.
 
-import std/options
+import std/[options, strutils]
 
 import isonim/core/[async_compat, signals]
 import isonim/viewmodel
@@ -15,6 +15,7 @@ type
   FrameViewerVM* = ref object of ViewModel
     client*: VisualReplayClient
 
+    visualReplayAvailable*: Signal[bool]
     playerUrl*: Signal[string]
     currentGeid*: Signal[Option[uint64]]
     currentFrame*: Signal[int]
@@ -124,10 +125,23 @@ proc nextFrame*(vm: FrameViewerVM) =
 proc previousFrame*(vm: FrameViewerVM) =
   vm.loadFrameByIndex(max(vm.currentFrame.val - 1, 0))
 
+proc setVisualReplayConnection*(vm: FrameViewerVM;
+                                available: bool;
+                                playerUrl: string) =
+  vm.visualReplayAvailable.val = available
+  vm.playerUrl.val = playerUrl
+  if not available:
+    vm.error.val = "Visual replay is absent for this session."
+  elif playerUrl.len == 0:
+    vm.error.val = "Visual replay is available, but no player is connected."
+  elif vm.error.val.startsWith("Visual replay is"):
+    vm.error.val = ""
+
 proc createFrameViewerVM*(client: VisualReplayClient): FrameViewerVM =
   withViewModel proc(dispose: proc()): FrameViewerVM =
     FrameViewerVM(
       client: client,
+      visualReplayAvailable: createSignal(false),
       playerUrl: createSignal(client.playerUrl),
       currentGeid: createSignal(none(uint64)),
       currentFrame: createSignal(0),

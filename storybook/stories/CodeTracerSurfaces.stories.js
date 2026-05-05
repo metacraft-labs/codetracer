@@ -806,6 +806,10 @@ function syncDefaultLayoutGeometry(root) {
 
 const defaultDebugVariants = {
   populated: { focusedPanel: "rightTopRight" },
+  "mcr-visual": {
+    focusedPanel: "sidebar",
+    sidebarTabs: [{ title: "FRAME VIEWER", name: "frame-viewer" }],
+  },
   "debug-controls-header": { focusedPanel: "rightTopRight" },
   "filesystem-active": { focusedPanel: "sidebar" },
   "state-active": { focusedPanel: "rightTopLeft" },
@@ -923,7 +927,7 @@ function appendDefaultDebugLayout(shellRoot, variant) {
     {
       parent: leftColumn,
       layoutBox: "sidebar",
-      tabs: [{ title: "FILESYSTEM", name: "filesystem" }],
+      tabs: variant.sidebarTabs ?? [{ title: "FILESYSTEM", name: "filesystem" }],
     },
     {
       parent: editorStackParent,

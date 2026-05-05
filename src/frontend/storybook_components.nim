@@ -1130,6 +1130,7 @@ proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposePr
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
     vm = createFrameViewerVM(client)
+    vm.setVisualReplayConnection(true, client.playerUrl)
     vm.frameCount.val = 2
     vm.frameWidth.val = 320
     vm.frameHeight.val = 180

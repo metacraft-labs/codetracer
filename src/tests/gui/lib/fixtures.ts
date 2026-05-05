@@ -15,6 +15,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
@@ -228,6 +229,8 @@ interface CodetracerOptions {
   editWorkingDirectory: string;
   /** JSON path for deepreview mode. */
   deepreviewJsonPath: string;
+  /** Mark the recorded trace as visual-capable before launching replay. */
+  visualReplayTrace: boolean;
 }
 
 /**
@@ -407,6 +410,18 @@ function recordTestProgram(recordArg: string): number {
   console.log(`# recorded trace for ${recordArg} with id ${traceId}`);
   recordingCache.set(recordArg, traceId);
   return traceId;
+}
+
+function traceFolderForId(traceId: number): string {
+  const dataHome =
+    process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
+  return path.join(dataHome, "codetracer", `trace-${traceId}`);
+}
+
+function markTraceVisualReplayCapable(traceId: number): void {
+  const gfxDir = path.join(traceFolderForId(traceId), "gfx_stream");
+  fs.mkdirSync(gfxDir, { recursive: true });
+  fs.writeFileSync(path.join(gfxDir, "gfx_commands.dat"), "");
 }
 
 function sleep(ms: number): Promise<void> {
@@ -612,7 +627,11 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
   }).catch(() => { /* page may be closed */ });
 }
 
-async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SMALL_RECORDING_MS): Promise<LaunchResult> {
+async function launchTraceElectron(
+  sourcePath: string,
+  recordingLimit = LIMIT_SMALL_RECORDING_MS,
+  visualReplayTrace = false,
+): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
   const t0 = Date.now();
@@ -627,6 +646,7 @@ async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SM
     recordingLimit,
     async () => recordTestProgram(fullSourcePath),
   );
+  if (visualReplayTrace) markTraceVisualReplayCapable(traceId);
 
   console.log(`# launching Electron for trace ${traceId} (record: ${recordMs}ms)`);
 
@@ -686,7 +706,11 @@ async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SM
   };
 }
 
-async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_RECORDING_MS): Promise<LaunchResult> {
+async function launchTraceWeb(
+  sourcePath: string,
+  recordingLimit = LIMIT_SMALL_RECORDING_MS,
+  visualReplayTrace = false,
+): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
   const t0 = Date.now();
@@ -701,6 +725,7 @@ async function launchTraceWeb(sourcePath: string, recordingLimit = LIMIT_SMALL_R
     recordingLimit,
     async () => recordTestProgram(fullSourcePath),
   );
+  if (visualReplayTrace) markTraceVisualReplayCapable(traceId);
 
   const httpPort = await getFreeTcpPort();
   const backendPort = await getFreeTcpPort();
@@ -941,6 +966,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   editFolderPath: ["", { option: true }],
   editWorkingDirectory: [codetracerInstallDir, { option: true }],
   deepreviewJsonPath: ["", { option: true }],
+  visualReplayTrace: [false, { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -975,6 +1001,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         editFolderPath,
         editWorkingDirectory,
         deepreviewJsonPath,
+        visualReplayTrace,
       },
       use,
       testInfo,
@@ -1008,9 +1035,9 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
             );
           }
           if (deploymentMode === "web") {
-            result = await launchTraceWeb(sourcePath, recordingLimit);
+            result = await launchTraceWeb(sourcePath, recordingLimit, visualReplayTrace);
           } else {
-            result = await launchTraceElectron(sourcePath, recordingLimit);
+            result = await launchTraceElectron(sourcePath, recordingLimit, visualReplayTrace);
           }
           break;
         }

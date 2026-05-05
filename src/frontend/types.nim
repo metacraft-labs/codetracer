@@ -995,6 +995,8 @@ type
     expanded*: bool
     lastUpdateMs*: int
 
+  FrameViewerComponent* = ref object of Component
+
   AgentActivityDeepReviewComponent* = ref object of Component
     ## Enhanced agent activity pane that displays DeepReview data
     ## (coverage summary, test results, traced functions) alongside
@@ -1759,6 +1761,10 @@ type
     # The actual macro expansion resolution happens in the backend;
     # this flag lets the frontend know that ALT+E expansion is available.
     hasMacroSourcemap*: bool
+    # MCR visual replay capability advertised for this session. M1 only
+    # controls layout/panel availability; M2 will populate player lifecycle.
+    visualReplayAvailable*: bool
+    visualReplayPlayerUrl*: cstring
 
   Data* = ref object
     redraw*:                proc: void

@@ -25,6 +25,22 @@ proc frameStatusText(vm: FrameViewerVM): string =
 proc frameCountText(vm: FrameViewerVM): string =
   if vm.frameCount.val > 0: " / " & $(vm.frameCount.val - 1) else: ""
 
+proc connectionStatusText(vm: FrameViewerVM): string =
+  if not vm.visualReplayAvailable.val:
+    "Visual replay absent"
+  elif vm.playerUrl.val.len > 0:
+    "Visual replay connected"
+  else:
+    "Visual replay not connected"
+
+proc connectionStatusClass(vm: FrameViewerVM): string =
+  if not vm.visualReplayAvailable.val:
+    "frame-viewer-connection-status absent"
+  elif vm.playerUrl.val.len > 0:
+    "frame-viewer-connection-status connected"
+  else:
+    "frame-viewer-connection-status disconnected"
+
 proc selectedPixelText(vm: FrameViewerVM): string =
   let pixel = vm.selectedPixel.val
   if pixel.isSome:
@@ -73,6 +89,8 @@ template renderFrameViewerPanelImpl(r, vm, rootClass: untyped): untyped =
       tdiv(class = "frame-viewer-toolbar"):
         span(class = "frame-viewer-player-url"):
           text vm.playerUrl.val
+        span(class = connectionStatusClass(vm)):
+          text connectionStatusText(vm)
         tdiv(class = "frame-viewer-frame-controls"):
           button(class = "frame-viewer-prev-frame",
                  onclick = proc() = vm.previousFrame()):

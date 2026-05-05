@@ -98,4 +98,19 @@ test.describe("Frame Viewer StoryBook", () => {
     await expect.poll(() => image.getAttribute("src")).not.toBe(firstSrc);
     await expect(page.locator(".frame-viewer-frame-label")).toContainText("GEID 220");
   });
+
+  test("e2e_mcr_visual_layout_contains_frame_viewer", async ({ page }) => {
+    await page.goto(`${baseUrl}/iframe.html?id=codetracer-layouts--mcr-visual-debug&viewMode=story`);
+
+    await expect(page.locator(".lm_tab", { hasText: "FRAME VIEWER" })).toBeVisible();
+    await expect(page.locator(".frame-viewer-component")).toBeVisible();
+    await expect(page.locator(".frame-viewer-connection-status")).toContainText(
+      "Visual replay connected",
+    );
+    await expect(page.locator(".lm_tab", { hasText: "src/main.nr" })).toBeVisible();
+    await expect(page.locator(".lm_tab", { hasText: "STATE" })).toBeVisible();
+    await expect(page.locator(".lm_tab", { hasText: "CALLTRACE" })).toBeVisible();
+    await expect(page.locator(".lm_tab", { hasText: "EVENT LOG" })).toBeVisible();
+    await expect(page.locator(".lm_tab", { hasText: "TERMINAL OUTPUT" })).toBeVisible();
+  });
 });

@@ -6,7 +6,7 @@ import
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
-      request_panel, session_switch, session_tabs, command],
+      request_panel, session_switch, session_tabs, command, frame_viewer],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
   ../common/ct_logging,
@@ -37,6 +37,7 @@ const TAB_LIMIT = 20
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
 import viewmodel/app/isonim_app
+import viewmodel/viewmodels/visual_replay_layout
 from isonim/core/batch as isoBatch import batch
 var activeSessionVM: SessionViewModel
 var activeIsoNimApp: IsoNimApp
@@ -1296,7 +1297,9 @@ proc onTraceLoaded(
     # traceKind=cstring,
     dontAskAgain=bool,
     sourcemapPath=cstring,
-    macroSourcemapPath=cstring)) {.async.} =
+    macroSourcemapPath=cstring,
+    visualReplayAvailable=bool,
+    visualReplayPlayerUrl=cstring)) {.async.} =
 
   clog "trace loaded"
   # console.log response.withDiff, response.diff, response.rawDiffIndex
@@ -1335,6 +1338,15 @@ proc onTraceLoaded(
     not response.macroSourcemapPath.isNil and response.macroSourcemapPath.len > 0
   if data.activeSession.hasMacroSourcemap:
     clog cstring("macro sourcemap available at: " & $response.macroSourcemapPath)
+
+  data.activeSession.visualReplayAvailable = response.visualReplayAvailable
+  data.activeSession.visualReplayPlayerUrl =
+    if response.visualReplayPlayerUrl.isNil: cstring""
+    else: response.visualReplayPlayerUrl
+  frame_viewer.syncVisualReplaySessionIntoVM()
+  if data.activeSession.visualReplayAvailable and data.ui.layout.isNil:
+    data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](
+      JSON.parse(cstring(defaultVisualReplayLayoutJson)))
 
   if data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
     data.startOptions.loading = false

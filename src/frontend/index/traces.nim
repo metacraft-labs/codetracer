@@ -5,6 +5,7 @@ import
   ipc_subsystems/[ dap, socket ],
   ../lib/[ jslib, electron_lib ],
   ../[ trace_metadata, config, types ],
+  ../viewmodel/viewmodels/visual_replay_layout,
   ../../common/[ ct_logging, paths, ],
   # ../../common/common_types/codetracer_features/notifications,
   ./js_helpers,
@@ -298,6 +299,22 @@ proc findMacroSourcemapPath(outputFolder: cstring): cstring =
     warnPrint "failed to scan trace dir for macro_sourcemap: ", getCurrentExceptionMsg()
   return cstring""
 
+proc traceVisualReplayAvailable(trace: Trace): bool =
+  if trace.isNil:
+    return false
+  try:
+    detectVisualReplayAvailability(
+      $trace.outputFolder,
+      proc(path: string): bool = pathExists(cstring(path)),
+      proc(path: string): string = $fs.readFileSync(cstring(path), cstring"utf8"),
+      proc(path: string): seq[string] =
+        let entries = fs.readdirSync(cstring(path))
+        for entry in entries:
+          result.add($entry))
+  except:
+    warnPrint "failed to inspect visual replay capability: ", getCurrentExceptionMsg()
+    false
+
 proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
   # Copy into a local var to work around Nim 2.2's capture check.
   # On the JS backend, this is a reference copy, so mutations propagate.
@@ -364,6 +381,8 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     dontAskAgain: dontAskAgain,
     sourcemapPath: sourcemapPath,
     macroSourcemapPath: macroSourcemapPath,
+    visualReplayAvailable: traceVisualReplayAvailable(trace),
+    visualReplayPlayerUrl: cstring"",
   }
 
 proc loadExistingRecord*(traceId: int) {.async.} =
