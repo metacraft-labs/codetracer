@@ -174,10 +174,27 @@ proc renderAgentWorkspacePanel*(r: MockRenderer; vm: AgentWorkspaceVM;
   panel
 
 when defined(js):
-  proc clearChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
+  proc renderFileRow(r: WebRenderer; vm: AgentWorkspaceVM; index: int;
+                     entry: AgentWorkspaceFileEntry;
+                     callbacks: AgentWorkspaceCallbacks):
+      isonim_dom.Element =
+    let selected = index == vm.selectedFileIndex.val
+    let fileIdx = index
+    ui(r):
+      tdiv(class = fileItemClass(selected),
+           onclick = proc() =
+             vm.setSelectedFileIndex(fileIdx)
+             if callbacks.onSelectFile != nil:
+               callbacks.onSelectFile(fileIdx)):
+        tdiv(class = "agent-workspace-file-name"):
+          text fileBasename(entry.path)
+        tdiv(class = "agent-workspace-file-path"):
+          text entry.path
+        span(class = "agent-workspace-coverage-badge"):
+          text coverageBadgeText(entry)
+        if entry.hasFlow:
+          span(class = "agent-workspace-flow-badge"):
+            text "flow"
 
   proc renderAgentWorkspacePanel*(r: WebRenderer; vm: AgentWorkspaceVM;
       componentId: int; callbacks: AgentWorkspaceCallbacks =
@@ -196,113 +213,69 @@ when defined(js):
           discard
 
     createRenderEffect proc() =
-      clearChildren(header)
-      clearChildren(summary)
-      clearChildren(body)
+      # Host slots captured by `ref` are intentionally cleared here; all
+      # replacement children are built through the IsoNim DSL below.
+      r.clearChildren(header)
+      r.clearChildren(summary)
+      r.clearChildren(body)
 
       if not vm.hasWorkspace.val:
         let empty = ui(r):
           tdiv(class = AgentWorkspaceEmptyClass):
             text AgentWorkspaceEmptyText
-        isonim_dom.appendChild(isonim_dom.Node(body), isonim_dom.Node(empty))
+        r.appendChild(body, empty)
         return
 
-      var currentKind = cstring(viewLabel(vm.viewKind.val))
-      var currentToggle = cstring(toggleViewText(vm.viewKind.val))
-      var currentPath = cstring(vm.workspacePath.val)
-      var coverage = cstring("Coverage: " & summaryCoverageText(vm.summary.val))
-      var tests = cstring("Tests: " & testsText(vm.summary.val))
-      var functions = cstring("Functions traced: " & $vm.summary.val.functionsTraced)
-      var overlay = cstring(overlayToggleText(vm.coverageOverlayEnabled.val))
-      var editorIdValue = cstring(editorId(componentId))
-      {.emit: """
-        const headerEl = document.createElement('div');
-        headerEl.className = 'agent-workspace-header';
-        const label = document.createElement('span');
-        label.className = 'agent-workspace-header-label';
-        label.textContent = `currentKind`;
-        headerEl.appendChild(label);
-        if (`currentPath`.length > 0) {
-          const path = document.createElement('span');
-          path.className = 'agent-workspace-header-path';
-          path.textContent = `currentPath`;
-          headerEl.appendChild(path);
-        }
-        const viewToggle = document.createElement('div');
-        viewToggle.className = 'agent-workspace-view-toggle';
-        viewToggle.textContent = `currentToggle`;
-        viewToggle.addEventListener('click', () => {
-          if (`callbacks`.onToggleView) `callbacks`.onToggleView();
-        });
-        headerEl.appendChild(viewToggle);
-        `header`.appendChild(headerEl);
+      let currentKind = vm.viewKind.val
+      let currentPath = vm.workspacePath.val
+      let currentSummary = vm.summary.val
+      let overlayEnabled = vm.coverageOverlayEnabled.val
 
-        const summaryEl = document.createElement('div');
-        summaryEl.className = 'agent-workspace-summary';
-        for (const text of [`coverage`, `tests`, `functions`]) {
-          const item = document.createElement('span');
-          item.className = 'agent-workspace-summary-item';
-          item.textContent = text;
-          summaryEl.appendChild(item);
-        }
-        const overlayToggle = document.createElement('div');
-        overlayToggle.className = 'agent-workspace-overlay-toggle';
-        overlayToggle.textContent = `overlay`;
-        overlayToggle.addEventListener('click', () => {
-          if (`callbacks`.onToggleOverlay) `callbacks`.onToggleOverlay();
-        });
-        summaryEl.appendChild(overlayToggle);
-        `summary`.appendChild(summaryEl);
+      let headerNode = ui(r):
+        tdiv(class = AgentWorkspaceHeaderClass):
+          span(class = "agent-workspace-header-label"):
+            text viewLabel(currentKind)
+          if currentPath.len > 0:
+            span(class = "agent-workspace-header-path"):
+              text currentPath
+          tdiv(class = "agent-workspace-view-toggle",
+               onclick = proc() =
+                 if vm.viewKind.val == awvkUserWorkspace:
+                   vm.setViewKind(awvkAgentWorkspace)
+                 else:
+                   vm.setViewKind(awvkUserWorkspace)
+                 if callbacks.onToggleView != nil:
+                   callbacks.onToggleView()):
+            text toggleViewText(currentKind)
+      r.appendChild(header, headerNode)
 
-        const bodyEl = document.createElement('div');
-        bodyEl.className = 'agent-workspace-body';
-        const fileList = document.createElement('div');
-        fileList.className = 'agent-workspace-file-list';
-        bodyEl.appendChild(fileList);
-        const editorArea = document.createElement('div');
-        editorArea.className = 'agent-workspace-editor-area';
-        const editor = document.createElement('div');
-        editor.className = 'agent-workspace-editor';
-        editor.id = `editorIdValue`;
-        editorArea.appendChild(editor);
-        bodyEl.appendChild(editorArea);
-        `body`.appendChild(bodyEl);
-      """.}
+      let summaryNode = ui(r):
+        tdiv(class = AgentWorkspaceSummaryClass):
+          span(class = "agent-workspace-summary-item"):
+            text "Coverage: " & summaryCoverageText(currentSummary)
+          span(class = "agent-workspace-summary-item"):
+            text "Tests: " & testsText(currentSummary)
+          span(class = "agent-workspace-summary-item"):
+            text "Functions traced: " & $currentSummary.functionsTraced
+          tdiv(class = "agent-workspace-overlay-toggle",
+               onclick = proc() =
+                 vm.toggleCoverageOverlay()
+                 if callbacks.onToggleOverlay != nil:
+                   callbacks.onToggleOverlay()):
+            text overlayToggleText(overlayEnabled)
+      r.appendChild(summary, summaryNode)
+
+      var fileList: isonim_dom.Element
+      let bodyNode = ui(r):
+        tdiv(class = AgentWorkspaceBodyClass):
+          tdiv(ref = fileList, class = AgentWorkspaceFileListClass)
+          tdiv(class = AgentWorkspaceEditorAreaClass):
+            tdiv(class = AgentWorkspaceEditorClass,
+                 id = editorId(componentId))
+      r.appendChild(body, bodyNode)
 
       for i, entry in vm.files.val:
-        var selectedClass = cstring(fileItemClass(i == vm.selectedFileIndex.val))
-        var name = cstring(fileBasename(entry.path))
-        var path = cstring(entry.path)
-        var badge = cstring(coverageBadgeText(entry))
-        var hasFlow = entry.hasFlow
-        var fileIdx = i
-        {.emit: """
-          const fileList = `body`.querySelector('.agent-workspace-file-list');
-          const row = document.createElement('div');
-          row.className = `selectedClass`;
-          row.addEventListener('click', () => {
-            if (`callbacks`.onSelectFile) `callbacks`.onSelectFile(`fileIdx`);
-          });
-          const nameEl = document.createElement('div');
-          nameEl.className = 'agent-workspace-file-name';
-          nameEl.textContent = `name`;
-          const pathEl = document.createElement('div');
-          pathEl.className = 'agent-workspace-file-path';
-          pathEl.textContent = `path`;
-          const badgeEl = document.createElement('span');
-          badgeEl.className = 'agent-workspace-coverage-badge';
-          badgeEl.textContent = `badge`;
-          row.appendChild(nameEl);
-          row.appendChild(pathEl);
-          row.appendChild(badgeEl);
-          if (`hasFlow`) {
-            const flow = document.createElement('span');
-            flow.className = 'agent-workspace-flow-badge';
-            flow.textContent = 'flow';
-            row.appendChild(flow);
-          }
-          fileList.appendChild(row);
-        """.}
+        r.appendChild(fileList, renderFileRow(r, vm, i, entry, callbacks))
 
       if callbacks.afterDynamicRender != nil:
         callbacks.afterDynamicRender()

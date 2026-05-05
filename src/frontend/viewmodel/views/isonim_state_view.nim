@@ -168,15 +168,15 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
   ##   div.value-expanded.value-expanded-name.border-value-{depth}
   ##     div.value-expanded-{atom|compound}-parent
   ##       div.value-name-container
-  ##         showIf hasChildren:
+  ##         if hasChildren:
   ##           span.value-expand-button > div.{caret-expand|caret-collapse}
   ##         span.value-name : "{name}: "
-  ##         showIf compoundTypeVisible:
+  ##         if compoundTypeVisible:
   ##           span.value-type : "{typeName}"
   ##       div
   ##         span.value-view
   ##           span.value-expanded-text : "{value}"
-  ##           showIf atomTypeVisible:
+  ##           if atomTypeVisible:
   ##             span.value-type : "{typeName}"
   ##
   ## Every attribute and text expression that reads `item()` becomes
@@ -188,20 +188,20 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
          padding_left = rowPaddingLeft(item, 16)):
       tdiv(class = atomOrCompoundClass(item)):
         tdiv(class = "value-name-container"):
-          showIf item().hasChildren:
+          if item().hasChildren:
             span(class = "value-expand-button", onclick = onToggle):
               tdiv(class = caretClass(item)):
                 discard
           span(class = "value-name"):
             text item().name & ": "
-          showIf compoundTypeVisible(item):
+          if compoundTypeVisible(item):
             span(class = "value-type"):
               text item().typeName
         tdiv:
           span(class = "value-view"):
             span(class = "value-expanded-text"):
               text item().value
-            showIf atomTypeVisible(item):
+            if atomTypeVisible(item):
               span(class = "value-type"):
                 text item().typeName
             button(id = "value-history",

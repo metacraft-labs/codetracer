@@ -51,14 +51,12 @@ function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-function injectSurfaceStyles(container) {
+export function injectSurfaceStyles(container) {
   const style = document.createElement("style");
   style.textContent = `
     .ct-storybook-surface {
       box-sizing: border-box;
       min-height: 0;
-      padding: 0;
-      background: #1b1b1b;
     }
 
     .ct-storybook-frame {
@@ -102,8 +100,6 @@ function injectSurfaceStyles(container) {
       min-width: 0;
       min-height: 0;
       height: 100%;
-      font-size: 16px;
-      line-height: 24px;
     }
 
     .ct-storybook-golden-panel .lm_stack {
@@ -117,46 +113,9 @@ function injectSurfaceStyles(container) {
       height: 100%;
     }
 
-    .ct-storybook-golden-panel .lm_header {
-      box-sizing: border-box;
-      display: flex;
-      align-items: flex-end;
-      flex: 0 0 30px;
-      min-height: 30px;
-      height: 30px !important;
-      overflow: visible;
-    }
-
-    .ct-storybook-golden-panel .lm_tabs {
-      box-sizing: border-box;
-      align-items: flex-end;
-      height: 30px;
-      margin: 0;
-      padding: 0 30px 0 0;
-    }
-
-    .ct-storybook-golden-panel .lm_controls {
-      box-sizing: border-box;
-      display: flex !important;
-      align-items: center !important;
-      height: 30px !important;
-      top: 0 !important;
-      right: 0 !important;
-    }
-
-    .ct-storybook-golden-panel .lm_controls > * {
-      box-sizing: border-box;
-      width: 16px !important;
-      height: 16px !important;
-      margin-top: 0 !important;
-    }
-
     .ct-storybook-default-layout {
       box-sizing: border-box;
-      display: block;
       min-height: 0;
-      font-size: 16px;
-      line-height: 24px;
     }
 
     .ct-storybook-default-layout .lm_row,
@@ -167,22 +126,11 @@ function injectSurfaceStyles(container) {
       overflow: visible;
     }
 
-    .ct-storybook-default-layout > .lm_row {
-      overflow: visible;
-    }
-
     .ct-storybook-default-layout .lm_stack {
       box-sizing: border-box;
       min-width: 0;
       min-height: 0;
       overflow: hidden;
-    }
-
-    .ct-storybook-default-layout .lm_header {
-      box-sizing: border-box;
-      height: 32px !important;
-      min-height: 32px;
-      overflow: visible;
     }
 
     .ct-storybook-default-layout .lm_items {
@@ -207,7 +155,6 @@ function injectSurfaceStyles(container) {
 
     .ct-storybook-default-layout .lm_splitter {
       box-sizing: border-box;
-      display: block;
       position: relative;
       min-width: 0;
       min-height: 0;
@@ -216,11 +163,9 @@ function injectSurfaceStyles(container) {
     .ct-storybook-default-layout .lm_splitter.lm_horizontal {
       float: left;
       height: 100%;
-      width: 4px !important;
     }
 
     .ct-storybook-default-layout .lm_splitter.lm_vertical {
-      height: 4px !important;
       width: 100%;
       clear: both;
     }
@@ -230,14 +175,12 @@ function injectSurfaceStyles(container) {
     }
 
     .ct-storybook-default-layout .lm_splitter.lm_horizontal .lm_drag_handle {
-      left: -0.5px !important;
-      width: 5px !important;
+      inset: 0;
       height: 100%;
     }
 
     .ct-storybook-default-layout .lm_splitter.lm_vertical .lm_drag_handle {
-      top: -0.5px !important;
-      height: 5px !important;
+      inset: 0;
       width: 100%;
     }
 
@@ -316,27 +259,12 @@ function injectSurfaceStyles(container) {
       min-height: 100vh;
     }
 
-    .ct-storybook-default-layout .code-editor {
-      box-sizing: border-box;
-      width: 100% !important;
-      height: 100% !important;
-      min-width: 0;
-      min-height: 0;
-      overflow: hidden !important;
-      background: transparent;
-    }
-
     .ct-storybook-editor-fixture {
       box-sizing: border-box;
       position: relative;
       width: 100%;
       height: 100%;
       overflow: hidden;
-      color: #d8d8d8;
-      font-family: "FiraCode", monospace;
-      font-size: 16px;
-      line-height: 25px;
-      background: transparent !important;
     }
 
     .ct-storybook-editor-fixture .overflow-guard {
@@ -360,8 +288,6 @@ function injectSurfaceStyles(container) {
       box-sizing: border-box;
       position: absolute;
       inset: 0;
-      font-family: "FiraCode", monospace;
-      font-size: 16px;
       line-height: 22px;
     }
 
@@ -393,9 +319,6 @@ function injectSurfaceStyles(container) {
       height: 22px;
       line-height: 22px;
       white-space: pre;
-      color: #e3e3e3;
-      font-family: "FiraCode", monospace !important;
-      font-weight: 400;
       min-width: 38em;
     }
 
@@ -411,7 +334,6 @@ function injectSurfaceStyles(container) {
       position: absolute;
       left: 0;
       width: 39px !important;
-      color: #858585;
       text-align: right;
       user-select: none;
     }
@@ -427,12 +349,7 @@ function injectSurfaceStyles(container) {
       padding-right: 0.15em !important;
     }
 
-    .ct-storybook-editor-fixture .active-line-number {
-      color: #d3d3d3;
-    }
-
     .ct-storybook-editor-fixture .folding {
-      color: #c4c4c4;
       display: inline-flex !important;
       position: absolute !important;
       left: 39px;
@@ -449,56 +366,11 @@ function injectSurfaceStyles(container) {
       inset: 0;
     }
 
-    .ct-storybook-editor-fixture .gutter-highlight-active:before {
-      content: "";
-      position: absolute;
-      top: 50%;
-      left: 2px;
-      width: 0;
-      height: 0;
-      border-top: 6px solid transparent;
-      border-bottom: 6px solid transparent;
-      border-left: 10px solid #ffd23f;
-      transform: translateY(-50%);
-      z-index: 2;
-    }
-
-    .ct-storybook-editor-fixture .current-line {
-      background: #555;
-    }
-
     .ct-storybook-editor-fixture .current-arrow {
-      color: #ffd23f;
       display: inline-block;
       width: 1.1em;
       margin-left: -1.1em;
       padding-right: 0.35em;
-    }
-
-    .ct-storybook-editor-fixture .token-keyword,
-    .ct-storybook-editor-fixture .token-function {
-      color: #4fa8e8;
-    }
-
-    .ct-storybook-editor-fixture .token-comment {
-      color: #72ad6b;
-    }
-
-    .ct-storybook-editor-fixture .token-string {
-      color: #d79d7f;
-    }
-
-    .ct-storybook-editor-fixture .token-number,
-    .ct-storybook-editor-fixture .token-type {
-      color: #b6e8c4;
-    }
-
-    .ct-storybook-editor-fixture .token-punctuation {
-      color: #f0cb4b;
-    }
-
-    .ct-storybook-editor-fixture .token-operator {
-      color: #9d72ff;
     }
 
     .ct-storybook-editor-fixture .indent-guide {
@@ -507,12 +379,7 @@ function injectSurfaceStyles(container) {
       bottom: 0;
       left: 194px;
       width: 1px;
-      background: rgba(142, 142, 142, 0.35);
       pointer-events: none;
-    }
-
-    .ct-storybook-editor-fixture .selected-text {
-      background: rgba(96, 96, 96, 0.82);
     }
 
     .ct-storybook-editor-fixture .scrollbar.vertical {
@@ -521,7 +388,6 @@ function injectSurfaceStyles(container) {
       right: 0;
       width: 0.875rem;
       height: 100%;
-      background: transparent;
     }
 
     .ct-storybook-editor-fixture .scrollbar.vertical .slider {
@@ -530,7 +396,6 @@ function injectSurfaceStyles(container) {
       right: 0;
       width: 0.875rem;
       height: 22%;
-      background: rgba(123, 123, 123, 0.72);
     }
 
   `;
@@ -719,7 +584,7 @@ function installStorybookEditorFixture(mount) {
   host.appendChild(editor);
 }
 
-function createGoldenPanelHost(frame, title) {
+export function createGoldenPanelHost(frame, title) {
   const layout = document.createElement("div");
   layout.className = "lm_goldenlayout lm_item lm_root ct-storybook-golden-panel";
 

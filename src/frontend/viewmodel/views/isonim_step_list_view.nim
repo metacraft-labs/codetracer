@@ -105,18 +105,10 @@ proc onLineClick(vm: StepListVM; line: StepLine): proc() =
   let captured = line
   result = proc() = vm.jumpToStepLine(captured)
 
-# ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
-# ---------------------------------------------------------------------------
-
-proc renderLineRowMock(r: MockRenderer; vm: StepListVM;
-                       line: StepLine; isCurrent: bool): MockNode =
-  ## One ``Line`` row.  Carries the source-line text inside
-  ## ``<pre><code>`` plus the inline flow values.  Click handler maps
-  ## to ``vm.jumpToStepLine``.
-  let onClick = onLineClick(vm, line)
-  let panel = ui(r):
-    tdiv(class = rowClass(isCurrent), onclick = onClick):
+template renderLineRow(r, vm, line, isCurrent: untyped): untyped =
+  ui(r):
+    tdiv(class = rowClass(isCurrent),
+         onclick = onLineClick(vm, line)):
       span(class = "step-line-column step-line-delta"):
         text deltaText(line)
       span(class = "step-line-column step-line-location"):
@@ -126,97 +118,71 @@ proc renderLineRowMock(r: MockRenderer; vm: StepListVM;
           code:
             text line.sourceLine
       span(class = "step-line-column step-line-flow-values"):
-        discard
-  # Append flow-value spans imperatively because the count is dynamic
-  # and the DSL macro cannot iterate over a runtime ``seq`` directly.
-  # Index into the seq (rather than ``for fv in line.values``) so the
-  # captured value is a plain copy — Nim 2's iterator yields a
-  # ``lent StepLineFlowValue`` which cannot be captured by the closure
-  # the ``text`` helper records.
-  let flowsSpan = panel.children[^1]
-  for i in 0 ..< line.values.len:
-    let fv = line.values[i]
-    let entry = ui(r):
-      span(class = "step-line-flow-value"):
-        span(class = "step-line-flow-value-expression"):
-          text fv.expression
-        span(class = "step-line-flow-value-repr"):
-          text fv.value
-    r.appendChild(flowsSpan, entry)
-  panel
+        for valueIndex in 0 ..< line.values.len:
+          let fv = line.values[valueIndex]
+          span(class = "step-line-flow-value"):
+            span(class = "step-line-flow-value-expression"):
+              text fv.expression
+            span(class = "step-line-flow-value-repr"):
+              text fv.value
 
-proc renderCallRowMock(r: MockRenderer; vm: StepListVM;
-                       line: StepLine): MockNode =
-  ## One ``Call`` row.  Renders the description text (the call site
-  ## source line) plus a list of ``arg = repr`` pairs.
-  let panel = ui(r):
+template renderCallRow(r, line: untyped): untyped =
+  ui(r):
     tdiv(class = "step-line step-line-call"):
       span(class = "step-line-description step-line-call-description"):
         text line.sourceLine
       span(class = "step-line-args"):
-        discard
-  let argsSpan = panel.children[^1]
-  for i in 0 ..< line.values.len:
-    let arg = line.values[i]
-    let entry = ui(r):
-      span(class = "step-line-value"):
-        span(class = "step-line-value-expression"):
-          text arg.expression
-        span(class = "step-line-value-repr"):
-          text arg.value
-    r.appendChild(argsSpan, entry)
-  panel
+        for valueIndex in 0 ..< line.values.len:
+          let arg = line.values[valueIndex]
+          span(class = "step-line-value"):
+            span(class = "step-line-value-expression"):
+              text arg.expression
+            span(class = "step-line-value-repr"):
+              text arg.value
 
-proc renderReturnRowMock(r: MockRenderer; vm: StepListVM;
-                         line: StepLine): MockNode =
-  ## One ``Return`` row.  Same description shape as ``Call`` but only
-  ## the first ``values`` entry is rendered, mirroring the legacy
-  ## ``if lineStep.values.len > 0: ... text values[0].expression`` guard.
-  let panel = ui(r):
+template renderReturnRow(r, line: untyped): untyped =
+  ui(r):
     tdiv(class = "step-line step-line-return"):
       span(class = "step-line-description step-line-return-description"):
         text line.sourceLine
-  if line.values.len > 0:
-    let arg = line.values[0]
-    let retSpan = ui(r):
-      span(class = "step-line-return-value"):
-        span(class = "step-line-return-value-expression"):
-          text arg.expression
-        span(class = "step-line-return-value-repr"):
-          text arg.value
-    r.appendChild(panel, retSpan)
-  panel
+      if line.values.len > 0:
+        let arg = line.values[0]
+        span(class = "step-line-return-value"):
+          span(class = "step-line-return-value-expression"):
+            text arg.expression
+          span(class = "step-line-return-value-repr"):
+            text arg.value
 
-proc renderStepListPanel*(r: MockRenderer; vm: StepListVM): MockNode =
-  ## Render the Step List panel for the Mock renderer.
-  ##
-  ## The static shell (``.step-list`` + ``.step-list-lines-box`` + the
-  ## inner ``.step-lines`` container) is built once via the DSL.  An
-  ## outer ``createRenderEffect`` rebuilds the row list whenever
-  ## ``vm.lineSteps`` or ``vm.currentLocation`` changes.  Using
-  ## imperative MockRenderer ops inside the effect keeps the dynamic
-  ## dispatch over the three row variants straightforward — the DSL
-  ## cannot express ``case lineStep.kind`` over a runtime list.
-  var linesContainer: MockNode
-
-  let panel = ui(r):
+template renderStepListShell(r, linesContainer: untyped): untyped =
+  ui(r):
     tdiv(class = "step-list"):
       tdiv(class = "step-list-lines-box"):
         tdiv(ref = linesContainer, class = "step-lines"):
           discard
 
+# ---------------------------------------------------------------------------
+# Mock renderer — headless test DOM
+# ---------------------------------------------------------------------------
+
+proc renderStepListPanel*(r: MockRenderer; vm: StepListVM): MockNode =
+  ## Render the Step List panel for the Mock renderer.
+  var linesContainer: MockNode
+
+  let panel = renderStepListShell(r, linesContainer)
+
   createRenderEffect proc() =
     let lines = vm.lineSteps.val
     let loc = vm.currentLocation.val
     r.clearChildren(linesContainer)
-    for line in lines:
+    for lineIndex in 0 ..< lines.len:
+      let line = lines[lineIndex]
       let row = case line.kind
         of slkLine:
-          renderLineRowMock(r, vm, line, isCurrentRow(line, loc))
+          renderLineRow(r, vm, line, isCurrentRow(line, loc))
         of slkCall:
-          renderCallRowMock(r, vm, line)
+          renderCallRow(r, line)
         of slkReturn:
-          renderReturnRowMock(r, vm, line)
+          renderReturnRow(r, line)
       r.appendChild(linesContainer, row)
 
   panel
@@ -227,131 +193,26 @@ proc renderStepListPanel*(r: MockRenderer; vm: StepListVM): MockNode =
 
 when defined(js):
 
-  proc createWebElement(tag: string; cssClass: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with an optional class attribute.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element + a text-node child in one shot.
-    let n = createWebElement(tag, cssClass)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderLineRowWeb(vm: StepListVM; line: StepLine;
-                        isCurrent: bool): isonim_dom.Element =
-    ## Build a Line row in the real DOM.  Same shape as the Mock
-    ## variant; click handler is wired imperatively via
-    ## ``addEventListener``.
-    let row = createWebElement("div", rowClass(isCurrent))
-
-    let deltaSpan = createWebTextElement("span", deltaText(line),
-                                          "step-line-column step-line-delta")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(deltaSpan))
-
-    let locSpan = createWebTextElement("span", locationText(line.location),
-                                        "step-line-column step-line-location")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(locSpan))
-
-    let srcSpan = createWebElement("span",
-                                   "step-line-column step-line-source-code")
-    let preEl = createWebElement("pre", preClasses(isCurrent))
-    let codeEl = createWebTextElement("code", line.sourceLine)
-    isonim_dom.appendChild(isonim_dom.Node(preEl), isonim_dom.Node(codeEl))
-    isonim_dom.appendChild(isonim_dom.Node(srcSpan), isonim_dom.Node(preEl))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(srcSpan))
-
-    let flowsSpan = createWebElement("span",
-                                     "step-line-column step-line-flow-values")
-    for fv in line.values:
-      let entry = createWebElement("span", "step-line-flow-value")
-      let exprSpan = createWebTextElement("span", fv.expression,
-                                          "step-line-flow-value-expression")
-      let reprSpan = createWebTextElement("span", fv.value,
-                                          "step-line-flow-value-repr")
-      isonim_dom.appendChild(isonim_dom.Node(entry), isonim_dom.Node(exprSpan))
-      isonim_dom.appendChild(isonim_dom.Node(entry), isonim_dom.Node(reprSpan))
-      isonim_dom.appendChild(isonim_dom.Node(flowsSpan), isonim_dom.Node(entry))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(flowsSpan))
-
-    let handler = onLineClick(vm, line)
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                proc(ev: isonim_dom.Event) = handler())
-    row
-
-  proc renderCallRowWeb(vm: StepListVM;
-                        line: StepLine): isonim_dom.Element =
-    ## Build a Call row in the real DOM.
-    let row = createWebElement("div", "step-line step-line-call")
-    let descSpan = createWebTextElement("span", line.sourceLine,
-        "step-line-description step-line-call-description")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(descSpan))
-
-    let argsSpan = createWebElement("span", "step-line-args")
-    for arg in line.values:
-      let entry = createWebElement("span", "step-line-value")
-      let exprSpan = createWebTextElement("span", arg.expression,
-                                           "step-line-value-expression")
-      let reprSpan = createWebTextElement("span", arg.value,
-                                           "step-line-value-repr")
-      isonim_dom.appendChild(isonim_dom.Node(entry), isonim_dom.Node(exprSpan))
-      isonim_dom.appendChild(isonim_dom.Node(entry), isonim_dom.Node(reprSpan))
-      isonim_dom.appendChild(isonim_dom.Node(argsSpan), isonim_dom.Node(entry))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(argsSpan))
-    row
-
-  proc renderReturnRowWeb(vm: StepListVM;
-                          line: StepLine): isonim_dom.Element =
-    ## Build a Return row in the real DOM.
-    let row = createWebElement("div", "step-line step-line-return")
-    let descSpan = createWebTextElement("span", line.sourceLine,
-        "step-line-description step-line-return-description")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(descSpan))
-    if line.values.len > 0:
-      let arg = line.values[0]
-      let retSpan = createWebElement("span", "step-line-return-value")
-      let exprSpan = createWebTextElement("span", arg.expression,
-                                          "step-line-return-value-expression")
-      let reprSpan = createWebTextElement("span", arg.value,
-                                          "step-line-return-value-repr")
-      isonim_dom.appendChild(isonim_dom.Node(retSpan), isonim_dom.Node(exprSpan))
-      isonim_dom.appendChild(isonim_dom.Node(retSpan), isonim_dom.Node(reprSpan))
-      isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(retSpan))
-    row
-
   proc renderStepListPanel*(r: WebRenderer; vm: StepListVM): isonim_dom.Element =
     ## Render the Step List panel for the real DOM.
     var linesContainer: isonim_dom.Element
 
-    let panel = ui(r):
-      tdiv(class = "step-list"):
-        tdiv(class = "step-list-lines-box"):
-          tdiv(ref = linesContainer, class = "step-lines"):
-            discard
+    let panel = renderStepListShell(r, linesContainer)
 
     createRenderEffect proc() =
       let lines = vm.lineSteps.val
       let loc = vm.currentLocation.val
-      clearWebChildren(linesContainer)
-      for line in lines:
+      r.clearChildren(linesContainer)
+      for lineIndex in 0 ..< lines.len:
+        let line = lines[lineIndex]
         let row = case line.kind
           of slkLine:
-            renderLineRowWeb(vm, line, isCurrentRow(line, loc))
+            renderLineRow(r, vm, line, isCurrentRow(line, loc))
           of slkCall:
-            renderCallRowWeb(vm, line)
+            renderCallRow(r, line)
           of slkReturn:
-            renderReturnRowWeb(vm, line)
-        isonim_dom.appendChild(isonim_dom.Node(linesContainer),
-                               isonim_dom.Node(row))
+            renderReturnRow(r, line)
+        r.appendChild(linesContainer, row)
 
     panel
 

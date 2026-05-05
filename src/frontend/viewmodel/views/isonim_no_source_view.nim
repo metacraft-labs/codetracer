@@ -199,6 +199,57 @@ proc renderNoSourcePanel*(r: MockRenderer; vm: NoSourceVM): MockNode =
 
 when defined(js):
 
+  proc renderMessageBorder(r: WebRenderer; message: string):
+      isonim_dom.Element =
+    ui(r):
+      tdiv(class = "unknown-border"):
+        p(class = "unknown-location-message"):
+          text message
+
+  proc renderLocationBorder(r: WebRenderer; location: NoSourceLocationInfo):
+      isonim_dom.Element =
+    ui(r):
+      tdiv(class = "unknown-border"):
+        p:
+          text functionRowText(location)
+        if location.path.len > 0:
+          p:
+            text pathRowText(location)
+        if location.line >= 0:
+          p:
+            text lineRowText(location)
+
+  proc renderHistoryContextBorder(r: WebRenderer;
+                                  history: NoSourceHistoryInfo):
+      isonim_dom.Element =
+    ui(r):
+      tdiv(class = "unknown-border"):
+        p:
+          text historyContextText(history)
+
+  proc renderHistoryButtonBorder(r: WebRenderer; vm: NoSourceVM):
+      isonim_dom.Element =
+    ui(r):
+      tdiv(class = "unknown-border"):
+        tdiv(class = "unknown-location-buttons"):
+          p:
+            text "You can still use all of the actions or you can go back"
+          button(class = "jump-back-button",
+                 onclick = proc() = vm.jumpBack()):
+            text "Jump back"
+
+  proc renderAddressRow(r: WebRenderer; address: string):
+      isonim_dom.Element =
+    ui(r):
+      p(class = "unknown-location-address"):
+        text originatingAddressText(address)
+
+  proc renderSignalRow(r: WebRenderer; signalText: string):
+      isonim_dom.Element =
+    ui(r):
+      p(class = "unknown-location-signal"):
+        text stopSignalLineText(signalText)
+
   proc renderNoSourcePanel*(r: WebRenderer; vm: NoSourceVM): isonim_dom.Element =
     ## Render the panel for the real DOM.  The DOM ops mirror the
     ## Mock-renderer body so the resulting structure is identical
@@ -216,99 +267,34 @@ when defined(js):
         tdiv(ref = trailingNode):
           discard
 
-    proc clearChildren(node: isonim_dom.Element) =
-      let asNode = isonim_dom.Node(node)
-      while not isonim_dom.isNodeNil(asNode.firstChild):
-        discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-    proc createDiv(cssClass: string): isonim_dom.Element =
-      let n = isonim_dom.createElement(isonim_dom.document, cstring"div")
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-      n
-
-    proc createParagraph(text: string; cssClass: string = ""): isonim_dom.Element =
-      let n = isonim_dom.createElement(isonim_dom.document, cstring"p")
-      if cssClass.len > 0:
-        isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-      let textNode = isonim_dom.createTextNode(isonim_dom.document, cstring(text))
-      isonim_dom.appendChild(isonim_dom.Node(n), textNode)
-      n
-
     createRenderEffect proc() =
       let message = vm.message.val
       let location = vm.location.val
       let history = vm.history.val
-      clearChildren(contentNode)
+      # Stable host slot: conditional blocks are rebuilt as complete
+      # IsoNim DSL nodes whenever the VM snapshot changes.
+      r.clearChildren(contentNode)
 
       if message.len > 0:
-        let border = createDiv("unknown-border")
-        let msg = createParagraph(message, "unknown-location-message")
-        isonim_dom.appendChild(isonim_dom.Node(border), isonim_dom.Node(msg))
-        isonim_dom.appendChild(isonim_dom.Node(contentNode),
-                               isonim_dom.Node(border))
+        r.appendChild(contentNode, renderMessageBorder(r, message))
 
-      let locBorder = createDiv("unknown-border")
-      let funcRow = createParagraph(functionRowText(location))
-      isonim_dom.appendChild(isonim_dom.Node(locBorder),
-                             isonim_dom.Node(funcRow))
-      if location.path.len > 0:
-        let pathRow = createParagraph(pathRowText(location))
-        isonim_dom.appendChild(isonim_dom.Node(locBorder),
-                               isonim_dom.Node(pathRow))
-      if location.line >= 0:
-        let lineRow = createParagraph(lineRowText(location))
-        isonim_dom.appendChild(isonim_dom.Node(locBorder),
-                               isonim_dom.Node(lineRow))
-      isonim_dom.appendChild(isonim_dom.Node(contentNode),
-                             isonim_dom.Node(locBorder))
+      r.appendChild(contentNode, renderLocationBorder(r, location))
 
       if history.hasHistory and history.action.len > 0:
-        let contextBorder = createDiv("unknown-border")
-        let contextRow = createParagraph(historyContextText(history))
-        isonim_dom.appendChild(isonim_dom.Node(contextBorder),
-                               isonim_dom.Node(contextRow))
-        isonim_dom.appendChild(isonim_dom.Node(contentNode),
-                               isonim_dom.Node(contextBorder))
-
-        let buttonBorder = createDiv("unknown-border")
-        let buttons = createDiv("unknown-location-buttons")
-        let buttonsCopy = createParagraph(
-          "You can still use all of the actions or you can go back")
-        isonim_dom.appendChild(isonim_dom.Node(buttons),
-                               isonim_dom.Node(buttonsCopy))
-
-        let button = isonim_dom.createElement(
-          isonim_dom.document, cstring"button")
-        isonim_dom.setAttribute(button, cstring"class",
-                                cstring"jump-back-button")
-        let buttonText = isonim_dom.createTextNode(
-          isonim_dom.document, cstring"Jump back")
-        isonim_dom.appendChild(isonim_dom.Node(button), buttonText)
-        isonim_dom.addEventListener(isonim_dom.Node(button), cstring"click",
-                                    proc(ev: isonim_dom.Event) = vm.jumpBack())
-        isonim_dom.appendChild(isonim_dom.Node(buttons),
-                               isonim_dom.Node(button))
-
-        isonim_dom.appendChild(isonim_dom.Node(buttonBorder),
-                               isonim_dom.Node(buttons))
-        isonim_dom.appendChild(isonim_dom.Node(contentNode),
-                               isonim_dom.Node(buttonBorder))
+        r.appendChild(contentNode, renderHistoryContextBorder(r, history))
+        r.appendChild(contentNode, renderHistoryButtonBorder(r, vm))
 
     createRenderEffect proc() =
       let address = vm.originatingAddress.val
       let signalText = vm.stopSignalText.val
-      clearChildren(trailingNode)
+      # Trailing rows are outside `.unknown-location-content` for legacy
+      # DOM parity; this ref is the host boundary for those optional rows.
+      r.clearChildren(trailingNode)
 
       if address.len > 0:
-        let row = createParagraph(originatingAddressText(address),
-                                  "unknown-location-address")
-        isonim_dom.appendChild(isonim_dom.Node(trailingNode),
-                               isonim_dom.Node(row))
+        r.appendChild(trailingNode, renderAddressRow(r, address))
       if signalText.len > 0:
-        let row = createParagraph(stopSignalLineText(signalText),
-                                  "unknown-location-signal")
-        isonim_dom.appendChild(isonim_dom.Node(trailingNode),
-                               isonim_dom.Node(row))
+        r.appendChild(trailingNode, renderSignalRow(r, signalText))
 
     panel
 

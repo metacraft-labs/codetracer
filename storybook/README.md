@@ -7,6 +7,7 @@ building-block components, and default layouts.
 
 ```bash
 just build-storybook-components
+just storybook-check-styles
 just storybook
 just storybook-build
 ```
@@ -15,6 +16,10 @@ The Nim bundle exports Storybook mount functions from
 `src/frontend/storybook_components.nim` into `storybook/dist/components.js`.
 Stories load that bundle and mount real ViewModels through the production
 IsoNim views.
+
+Storybook loads CodeTracer styles by parsing the production
+`src/frontend/index.html`; do not copy app stylesheet lists or component visual
+CSS into stories. Keep Storybook CSS limited to harness sizing/layout.
 
 Fixtures may mock ViewModel/store state, but stories must not reimplement
 component DOM in JavaScript. The DOM under test should come from the real

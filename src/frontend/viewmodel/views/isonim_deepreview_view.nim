@@ -101,9 +101,53 @@ proc executionInfoText*(vm: DeepReviewVM): string =
 proc iterationInfoText*(vm: DeepReviewVM): string =
   fmt"{vm.selectedIteration.val + 1}/{vm.maxIterations.val}"
 
-proc renderFileRow(r: MockRenderer; vm: DeepReviewVM; index: int;
-                   file: DeepReviewFileEntry;
-                   callbacks: DeepReviewCallbacks): MockNode =
+proc hunkHeaderText*(hunk: DeepReviewHunkEntry): string =
+  "@@ -" & $hunk.oldStart & "," & $hunk.oldCount &
+    " +" & $hunk.newStart & "," & $hunk.newCount & " @@"
+
+proc callTraceIndentStyle*(depth: int): string =
+  "padding-left: " & $(depth * 16) & "px"
+
+proc trackDeepReviewRender(vm: DeepReviewVM) =
+  discard vm.hasData.val
+  discard vm.glEmbedded.val
+  discard vm.sessionTitle.val
+  discard vm.commitDisplay.val
+  discard vm.statsText.val
+  discard vm.traceContexts.val
+  discard vm.selectedTraceContextId.val
+  discard vm.viewMode.val
+  discard vm.files.val
+  discard vm.selectedFileIndex.val
+  discard vm.flowCount.val
+  discard vm.selectedExecutionIndex.val
+  discard vm.currentFunctionKey.val
+  discard vm.maxIterations.val
+  discard vm.selectedIteration.val
+  discard vm.unifiedFiles.val
+  discard vm.callNodes.val
+  discard vm.selectedHunks.val
+  discard vm.hunkToolbarVisible.val
+  discard vm.hunkCopyFeedback.val
+
+proc parseControlInt(value: string; fallback: int): int =
+  try:
+    parseInt(value)
+  except ValueError:
+    fallback
+
+proc readControlInt(r: MockRenderer; node: MockNode; fallback: int): int =
+  parseControlInt(r.inputValue(node), fallback)
+
+when defined(js):
+  proc readControlInt(r: WebRenderer; node: isonim_dom.Element;
+                      fallback: int): int =
+    var v: cstring
+    let asNode = isonim_dom.Node(node)
+    {.emit: "`v` = `asNode`.value || '';".}
+    parseControlInt($v, fallback)
+
+template renderFileRowImpl(r, vm, index, file, callbacks: untyped): untyped =
   let fileIdx = index
   ui(r):
     tdiv(class = fileItemClass(index == vm.selectedFileIndex.val),
@@ -129,8 +173,19 @@ proc renderFileRow(r: MockRenderer; vm: DeepReviewVM; index: int;
           span(class = "deepreview-coverage-badge"):
             text file.coverageText
 
-proc renderHeader(r: MockRenderer; vm: DeepReviewVM;
-                  callbacks: DeepReviewCallbacks): MockNode =
+proc renderFileRow(r: MockRenderer; vm: DeepReviewVM; index: int;
+                   file: DeepReviewFileEntry;
+                   callbacks: DeepReviewCallbacks): MockNode =
+  renderFileRowImpl(r, vm, index, file, callbacks)
+
+when defined(js):
+  proc renderFileRow(r: WebRenderer; vm: DeepReviewVM; index: int;
+                     file: DeepReviewFileEntry;
+                     callbacks: DeepReviewCallbacks): isonim_dom.Element =
+    renderFileRowImpl(r, vm, index, file, callbacks)
+
+template renderHeaderImpl(r, vm, callbacks: untyped): untyped =
+  var traceSelect: typeof(r.createElement("select"))
   ui(r):
     tdiv(class = DeepReviewHeaderClass):
       if vm.sessionTitle.val.len > 0:
@@ -139,10 +194,13 @@ proc renderHeader(r: MockRenderer; vm: DeepReviewVM;
       span(class = "deepreview-commit"):
         text "Commit: " & vm.commitDisplay.val
       if vm.traceContexts.val.len > 0:
-        select(class = "deepreview-trace-select",
+        select(ref = traceSelect,
+               class = "deepreview-trace-select",
                onchange = proc() =
+                 let selectedId = readControlInt(
+                   r, traceSelect, vm.selectedTraceContextId.val)
                  if callbacks.onSetTraceContext != nil:
-                   callbacks.onSetTraceContext(vm.selectedTraceContextId.val)):
+                   callbacks.onSetTraceContext(selectedId)):
           for ctx in vm.traceContexts.val:
             let ctxId = ctx.id
             let ctxLabel = ctx.label
@@ -169,8 +227,18 @@ proc renderHeader(r: MockRenderer; vm: DeepReviewVM;
       span(class = "deepreview-stats"):
         text vm.statsText.val
 
-proc renderSliders(r: MockRenderer; vm: DeepReviewVM;
-                   callbacks: DeepReviewCallbacks): MockNode =
+proc renderHeader(r: MockRenderer; vm: DeepReviewVM;
+                  callbacks: DeepReviewCallbacks): MockNode =
+  renderHeaderImpl(r, vm, callbacks)
+
+when defined(js):
+  proc renderHeader(r: WebRenderer; vm: DeepReviewVM;
+                    callbacks: DeepReviewCallbacks): isonim_dom.Element =
+    renderHeaderImpl(r, vm, callbacks)
+
+template renderSlidersImpl(r, vm, callbacks: untyped): untyped =
+  var executionInput: typeof(r.createElement("input"))
+  var iterationInput: typeof(r.createElement("input"))
   ui(r):
     tdiv:
       if vm.flowCount.val == 0:
@@ -181,23 +249,43 @@ proc renderSliders(r: MockRenderer; vm: DeepReviewVM;
         tdiv(class = "deepreview-slider"):
           span(class = "deepreview-slider-label"):
             text "Execution:"
-          input(class = "deepreview-slider-input", `type` = "range",
+          input(ref = executionInput,
+                class = "deepreview-slider-input", `type` = "range",
                 min = "0", max = $(vm.flowCount.val - 1),
-                value = $vm.selectedExecutionIndex.val)
+                value = $vm.selectedExecutionIndex.val,
+                oninput = proc() =
+                  let selected = readControlInt(
+                    r, executionInput, vm.selectedExecutionIndex.val)
+                  if callbacks.onSetExecution != nil:
+                    callbacks.onSetExecution(selected))
           span(class = "deepreview-slider-info"):
             text executionInfoText(vm)
       if vm.maxIterations.val > 0:
         tdiv(class = "deepreview-slider"):
           span(class = "deepreview-slider-label"):
             text "Iteration:"
-          input(class = "deepreview-slider-input", `type` = "range",
+          input(ref = iterationInput,
+                class = "deepreview-slider-input", `type` = "range",
                 min = "0", max = $(vm.maxIterations.val - 1),
-                value = $vm.selectedIteration.val)
+                value = $vm.selectedIteration.val,
+                oninput = proc() =
+                  let selected = readControlInt(
+                    r, iterationInput, vm.selectedIteration.val)
+                  if callbacks.onSetIteration != nil:
+                    callbacks.onSetIteration(selected))
           span(class = "deepreview-slider-info"):
             text iterationInfoText(vm)
 
-proc renderUnifiedDiff(r: MockRenderer; vm: DeepReviewVM;
-                       callbacks: DeepReviewCallbacks): MockNode =
+proc renderSliders(r: MockRenderer; vm: DeepReviewVM;
+                   callbacks: DeepReviewCallbacks): MockNode =
+  renderSlidersImpl(r, vm, callbacks)
+
+when defined(js):
+  proc renderSliders(r: WebRenderer; vm: DeepReviewVM;
+                     callbacks: DeepReviewCallbacks): isonim_dom.Element =
+    renderSlidersImpl(r, vm, callbacks)
+
+template renderUnifiedDiffImpl(r, vm, callbacks: untyped): untyped =
   let selected = vm.selectedHunks.val
   ui(r):
     tdiv(class = DeepReviewUnifiedDiffClass):
@@ -255,7 +343,7 @@ proc renderUnifiedDiff(r: MockRenderer; vm: DeepReviewVM;
                 if hunkSelected:
                   span(class = "hunk-selection-indicator"):
                     text "selected"
-                text fmt"@@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@"
+                text hunkHeaderText(hunk)
               for line in hunk.lines:
                 let lineTypeVal = line.lineType
                 let lineContentVal = line.content
@@ -283,7 +371,16 @@ proc renderUnifiedDiff(r: MockRenderer; vm: DeepReviewVM;
                           span(class = "flow-parallel-value-box flow-parallel-value-before-only"):
                             text valueVal & (if truncatedVal: "..." else: "")
 
-proc renderCallTrace(r: MockRenderer; vm: DeepReviewVM): MockNode =
+proc renderUnifiedDiff(r: MockRenderer; vm: DeepReviewVM;
+                       callbacks: DeepReviewCallbacks): MockNode =
+  renderUnifiedDiffImpl(r, vm, callbacks)
+
+when defined(js):
+  proc renderUnifiedDiff(r: WebRenderer; vm: DeepReviewVM;
+                         callbacks: DeepReviewCallbacks): isonim_dom.Element =
+    renderUnifiedDiffImpl(r, vm, callbacks)
+
+template renderCallTraceImpl(r, vm: untyped): untyped =
   ui(r):
     tdiv(class = DeepReviewCalltraceClass):
       tdiv(class = "deepreview-calltrace-header"):
@@ -299,421 +396,99 @@ proc renderCallTrace(r: MockRenderer; vm: DeepReviewVM): MockNode =
             let nodeDepth = node.depth
             tdiv(class = "deepreview-calltrace-node"):
               tdiv(class = "deepreview-calltrace-entry",
-                   style = fmt"padding-left: {nodeDepth * 16}px"):
+                   style = callTraceIndentStyle(nodeDepth)):
                 span(class = "deepreview-calltrace-name"):
                   text nodeName
                 span(class = "deepreview-calltrace-count"):
                   text " x" & $nodeCount
 
-proc renderDeepReviewPanel*(r: MockRenderer; vm: DeepReviewVM;
-    componentId: int; callbacks: DeepReviewCallbacks =
-      DeepReviewCallbacks()): MockNode =
-  var header: MockNode
-  var body: MockNode
+proc renderCallTrace(r: MockRenderer; vm: DeepReviewVM): MockNode =
+  renderCallTraceImpl(r, vm)
+
+when defined(js):
+  proc renderCallTrace(r: WebRenderer; vm: DeepReviewVM): isonim_dom.Element =
+    renderCallTraceImpl(r, vm)
+
+proc renderDeepReviewLoadedContent(r: MockRenderer; vm: DeepReviewVM;
+    componentId: int; callbacks: DeepReviewCallbacks): MockNode =
+  ui(r):
+    tdiv:
+      renderHeader(r, vm, callbacks)
+      if vm.glEmbedded.val:
+        tdiv(class = DeepReviewEditorAreaClass):
+          renderUnifiedDiff(r, vm, callbacks)
+      else:
+        tdiv(class = DeepReviewBodyClass):
+          tdiv(class = DeepReviewFileListClass):
+            for i, file in vm.files.val:
+              renderFileRow(r, vm, i, file, callbacks)
+          tdiv(class = DeepReviewEditorAreaClass):
+            if vm.viewMode.val == drpvmUnified:
+              renderUnifiedDiff(r, vm, callbacks)
+            else:
+              renderSliders(r, vm, callbacks)
+              tdiv(class = DeepReviewEditorClass, id = editorId(componentId))
+          renderCallTrace(r, vm)
+
+when defined(js):
+  proc renderDeepReviewLoadedContent(r: WebRenderer; vm: DeepReviewVM;
+      componentId: int; callbacks: DeepReviewCallbacks): isonim_dom.Element =
+    ui(r):
+      tdiv:
+        renderHeader(r, vm, callbacks)
+        if vm.glEmbedded.val:
+          tdiv(class = DeepReviewEditorAreaClass):
+            renderUnifiedDiff(r, vm, callbacks)
+        else:
+          tdiv(class = DeepReviewBodyClass):
+            tdiv(class = DeepReviewFileListClass):
+              for i, file in vm.files.val:
+                renderFileRow(r, vm, i, file, callbacks)
+            tdiv(class = DeepReviewEditorAreaClass):
+              if vm.viewMode.val == drpvmUnified:
+                renderUnifiedDiff(r, vm, callbacks)
+              else:
+                renderSliders(r, vm, callbacks)
+                tdiv(class = DeepReviewEditorClass, id = editorId(componentId))
+            renderCallTrace(r, vm)
+
+template renderDeepReviewPanelImpl(r, vm, componentId, callbacks: untyped):
+    untyped =
+  var rootBody: typeof(r.createElement("div"))
   let panel = ui(r):
     tdiv(class = DeepReviewContainerClass):
-      tdiv(ref = header):
-        discard
-      tdiv(ref = body):
+      tdiv(ref = rootBody):
         discard
 
   createRenderEffect proc() =
-    r.clearChildren(header)
-    r.clearChildren(body)
+    # IsoNim natural `for` loops materialize when their `ui` block is
+    # constructed, so collection/branch changes remount one DSL-built subtree.
+    trackDeepReviewRender(vm)
+    r.clearChildren(rootBody)
     if not vm.hasData.val:
       let errorNode = ui(r):
         tdiv(class = DeepReviewErrorClass):
           text DeepReviewNoDataText
-      r.appendChild(body, errorNode)
-      return
-    r.appendChild(header, renderHeader(r, vm, callbacks))
-    if vm.glEmbedded.val:
-      var embeddedArea: MockNode
-      let embeddedNode = ui(r):
-        tdiv(ref = embeddedArea, class = DeepReviewEditorAreaClass)
-      r.appendChild(embeddedArea, renderUnifiedDiff(r, vm, callbacks))
-      r.appendChild(body, embeddedNode)
+      r.appendChild(rootBody, errorNode)
     else:
-      var fileList: MockNode
-      var editorArea: MockNode
-      var calltraceArea: MockNode
-      let bodyNode = ui(r):
-        tdiv(class = DeepReviewBodyClass):
-          tdiv(ref = fileList, class = DeepReviewFileListClass)
-          tdiv(ref = editorArea, class = DeepReviewEditorAreaClass)
-          tdiv(ref = calltraceArea)
-      for i, file in vm.files.val:
-        r.appendChild(fileList, renderFileRow(r, vm, i, file, callbacks))
-      if vm.viewMode.val == drpvmUnified:
-        r.appendChild(editorArea, renderUnifiedDiff(r, vm, callbacks))
-      else:
-        r.appendChild(editorArea, renderSliders(r, vm, callbacks))
-        let editorNode = ui(r):
-          tdiv(class = DeepReviewEditorClass, id = editorId(componentId))
-        r.appendChild(editorArea, editorNode)
-      r.appendChild(calltraceArea, renderCallTrace(r, vm))
-      r.appendChild(body, bodyNode)
+      r.appendChild(rootBody,
+                    renderDeepReviewLoadedContent(
+                      r, vm, componentId, callbacks))
     if callbacks.afterDynamicRender != nil:
       callbacks.afterDynamicRender()
 
   panel
 
+proc renderDeepReviewPanel*(r: MockRenderer; vm: DeepReviewVM;
+    componentId: int; callbacks: DeepReviewCallbacks =
+      DeepReviewCallbacks()): MockNode =
+  renderDeepReviewPanelImpl(r, vm, componentId, callbacks)
+
 when defined(js):
   proc renderDeepReviewPanel*(r: WebRenderer; vm: DeepReviewVM;
       componentId: int; callbacks: DeepReviewCallbacks =
         DeepReviewCallbacks()): isonim_dom.Element =
-    var rootBody: isonim_dom.Element
-    let panel = ui(r):
-      tdiv(class = DeepReviewContainerClass):
-        tdiv(ref = rootBody):
-          discard
-
-    createRenderEffect proc() =
-      var componentIdValue = componentId
-      var hasData = vm.hasData.val
-      var embedded = vm.glEmbedded.val
-      var sessionTitle = cstring(vm.sessionTitle.val)
-      var commitDisplay = cstring(vm.commitDisplay.val)
-      var statsText = cstring(vm.statsText.val)
-      var showToggle = not vm.glEmbedded.val
-      var isUnified = vm.viewMode.val == drpvmUnified
-      var flowCount = vm.flowCount.val
-      var execIndex = vm.selectedExecutionIndex.val
-      var funcKey = cstring(vm.currentFunctionKey.val)
-      var maxIterations = vm.maxIterations.val
-      var iterIndex = vm.selectedIteration.val
-      {.emit: """
-        `rootBody`.innerHTML = '';
-        if (!`hasData`) {
-          const err = document.createElement('div');
-          err.className = 'deepreview-error';
-          err.textContent = 'No DeepReview data loaded. Use --deepreview <path> to load a file.';
-          `rootBody`.appendChild(err);
-          return;
-        }
-        const header = document.createElement('div');
-        header.className = 'deepreview-header';
-        if (`sessionTitle`.length > 0) {
-          const title = document.createElement('span');
-          title.className = 'deepreview-session-title';
-          title.textContent = `sessionTitle`;
-          header.appendChild(title);
-        }
-        const commit = document.createElement('span');
-        commit.className = 'deepreview-commit';
-        commit.textContent = 'Commit: ' + `commitDisplay`;
-        header.appendChild(commit);
-        if (`showToggle`) {
-          const toggle = document.createElement('div');
-          toggle.className = 'deepreview-mode-toggle';
-          const full = document.createElement('button');
-          full.className = `isUnified` ? 'deepreview-mode-btn' : 'deepreview-mode-btn deepreview-mode-btn-active';
-          full.textContent = 'Full Files';
-          full.addEventListener('click', () => {
-            if (`callbacks`.onSetViewMode) `callbacks`.onSetViewMode(0);
-          });
-          const unified = document.createElement('button');
-          unified.className = `isUnified` ? 'deepreview-mode-btn deepreview-mode-btn-active' : 'deepreview-mode-btn';
-          unified.textContent = 'Unified Diff';
-          unified.addEventListener('click', () => {
-            if (`callbacks`.onSetViewMode) `callbacks`.onSetViewMode(1);
-          });
-          toggle.appendChild(full);
-          toggle.appendChild(unified);
-          header.appendChild(toggle);
-        }
-        const stats = document.createElement('span');
-        stats.className = 'deepreview-stats';
-        stats.textContent = `statsText`;
-        header.appendChild(stats);
-        `rootBody`.appendChild(header);
-
-        const renderUnified = (parent) => {
-          const unified = document.createElement('div');
-          unified.className = 'deepreview-unified-diff';
-          parent.appendChild(unified);
-          return unified;
-        };
-
-        if (`embedded`) {
-          const area = document.createElement('div');
-          area.className = 'deepreview-editor-area';
-          renderUnified(area);
-          `rootBody`.appendChild(area);
-        } else {
-          const body = document.createElement('div');
-          body.className = 'deepreview-body';
-          const list = document.createElement('div');
-          list.className = 'deepreview-file-list';
-          body.appendChild(list);
-          const area = document.createElement('div');
-          area.className = 'deepreview-editor-area';
-          if (`isUnified`) {
-            renderUnified(area);
-          } else {
-            if (`flowCount` <= 0) {
-              const slider = document.createElement('div');
-              slider.className = 'deepreview-slider deepreview-slider-empty';
-              const label = document.createElement('span');
-              label.className = 'deepreview-slider-label';
-              label.textContent = 'No execution data';
-              slider.appendChild(label);
-              area.appendChild(slider);
-            } else {
-              const slider = document.createElement('div');
-              slider.className = 'deepreview-slider';
-              const label = document.createElement('span');
-              label.className = 'deepreview-slider-label';
-              label.textContent = 'Execution:';
-              const input = document.createElement('input');
-              input.className = 'deepreview-slider-input';
-              input.type = 'range';
-              input.min = '0';
-              input.max = String(`flowCount` - 1);
-              input.value = String(`execIndex`);
-              input.addEventListener('input', () => {
-                if (`callbacks`.onSetExecution) `callbacks`.onSetExecution(Number(input.value));
-              });
-              const info = document.createElement('span');
-              info.className = 'deepreview-slider-info';
-              info.textContent = String(`execIndex` + 1) + '/' + `flowCount` + ' (' + (`funcKey` || '?') + ')';
-              slider.appendChild(label);
-              slider.appendChild(input);
-              slider.appendChild(info);
-              area.appendChild(slider);
-            }
-            if (`maxIterations` > 0) {
-              const slider = document.createElement('div');
-              slider.className = 'deepreview-slider';
-              const label = document.createElement('span');
-              label.className = 'deepreview-slider-label';
-              label.textContent = 'Iteration:';
-              const input = document.createElement('input');
-              input.className = 'deepreview-slider-input';
-              input.type = 'range';
-              input.min = '0';
-              input.max = String(`maxIterations` - 1);
-              input.value = String(`iterIndex`);
-              input.addEventListener('input', () => {
-                if (`callbacks`.onSetIteration) `callbacks`.onSetIteration(Number(input.value));
-              });
-              const info = document.createElement('span');
-              info.className = 'deepreview-slider-info';
-              info.textContent = String(`iterIndex` + 1) + '/' + `maxIterations`;
-              slider.appendChild(label);
-              slider.appendChild(input);
-              slider.appendChild(info);
-              area.appendChild(slider);
-            }
-            const editor = document.createElement('div');
-            editor.className = 'deepreview-editor';
-            editor.id = 'deepreview-editor-' + `componentIdValue`;
-            area.appendChild(editor);
-          }
-          body.appendChild(area);
-          const ct = document.createElement('div');
-          ct.className = 'deepreview-calltrace';
-          ct.innerHTML = '<div class="deepreview-calltrace-header">Call Trace</div>';
-          body.appendChild(ct);
-          `rootBody`.appendChild(body);
-        }
-      """.}
-
-      for i, file in vm.files.val:
-        var fileIdx = i
-        var rowClass = cstring(fileItemClass(i == vm.selectedFileIndex.val))
-        var status = cstring(file.diffStatus)
-        var name = cstring(fileBasename(file.path))
-        var path = cstring(file.path)
-        var coverage = cstring(file.coverageText)
-        var hasCoverage = file.hasCoverage
-        var diffLines = cstring(diffLinesSummary(file.linesAdded, file.linesRemoved))
-        var hasDiffLines = file.linesAdded > 0 or file.linesRemoved > 0
-        var diffLinesClass = cstring("deepreview-diff-lines" &
-          diffStatusCssClass(file.diffStatus))
-        {.emit: """
-          const list = `rootBody`.querySelector('.deepreview-file-list');
-          if (list) {
-            const row = document.createElement('div');
-            row.className = `rowClass`;
-            row.addEventListener('click', () => {
-              if (`callbacks`.onSelectFile) `callbacks`.onSelectFile(`fileIdx`);
-            });
-            row.innerHTML = '<div class="deepreview-file-name-row"></div>' +
-              '<div class="deepreview-file-path-full"></div>' +
-              '<div class="deepreview-file-badges"></div>';
-            const nameRow = row.querySelector('.deepreview-file-name-row');
-            if (`status`.length > 0) {
-              const st = document.createElement('span');
-              st.className = 'deepreview-diff-status';
-              st.textContent = `status`;
-              nameRow.appendChild(st);
-            }
-            const nm = document.createElement('div');
-            nm.className = 'deepreview-file-name';
-            nm.textContent = `name`;
-            nameRow.appendChild(nm);
-            row.querySelector('.deepreview-file-path-full').textContent = `path`;
-            if (`hasDiffLines`) {
-              const diff = document.createElement('span');
-              diff.className = `diffLinesClass`;
-              diff.textContent = `diffLines`;
-              row.querySelector('.deepreview-file-badges').appendChild(diff);
-            }
-            if (`hasCoverage`) {
-              const badge = document.createElement('span');
-              badge.className = 'deepreview-coverage-badge';
-              badge.textContent = `coverage`;
-              row.querySelector('.deepreview-file-badges').appendChild(badge);
-            }
-            list.appendChild(row);
-          }
-        """.}
-
-      for ctx in vm.traceContexts.val:
-        var ctxId = ctx.id
-        var ctxLabel = cstring(ctx.label)
-        var selected = ctx.id == vm.selectedTraceContextId.val
-        {.emit: """
-          let select = `rootBody`.querySelector('.deepreview-trace-select');
-          if (!select) {
-            const header = `rootBody`.querySelector('.deepreview-header');
-            const stats = `rootBody`.querySelector('.deepreview-stats');
-            select = document.createElement('select');
-            select.className = 'deepreview-trace-select';
-            select.addEventListener('change', () => {
-              if (`callbacks`.onSetTraceContext) `callbacks`.onSetTraceContext(Number(select.value));
-            });
-            header.insertBefore(select, stats);
-          }
-          const option = document.createElement('option');
-          option.value = String(`ctxId`);
-          option.textContent = `ctxLabel`;
-          option.selected = `selected`;
-          select.appendChild(option);
-        """.}
-
-      for file in vm.unifiedFiles.val:
-        var fileIndex = file.fileIndex
-        var path = cstring(file.path)
-        var status = cstring(file.diffStatus)
-        var added = file.linesAdded
-        var removed = file.linesRemoved
-        {.emit: """
-          const unified = `rootBody`.querySelector('.deepreview-unified-diff');
-          if (unified) {
-            const fileEl = document.createElement('div');
-            fileEl.className = 'deepreview-unified-file';
-            fileEl.setAttribute('data-file-index', String(`fileIndex`));
-            const header = document.createElement('div');
-            header.className = 'deepreview-unified-file-header';
-            if (`status`.length > 0) {
-              const st = document.createElement('span');
-              st.className = 'deepreview-diff-status';
-              st.textContent = `status`;
-              header.appendChild(st);
-            }
-            const p = document.createElement('span');
-            p.className = 'deepreview-unified-file-path';
-            p.textContent = `path`;
-            header.appendChild(p);
-            if (`added` > 0 || `removed` > 0) {
-              const stats = document.createElement('span');
-              stats.className = 'deepreview-unified-file-stats';
-              stats.textContent = '+' + `added` + ' -' + `removed`;
-              header.appendChild(stats);
-            }
-            fileEl.appendChild(header);
-            unified.appendChild(fileEl);
-          }
-        """.}
-        for hunkIdx, hunk in file.hunks:
-          var hunkHeader = cstring(fmt"@@ -{hunk.oldStart},{hunk.oldCount} +{hunk.newStart},{hunk.newCount} @@")
-          var selected = isHunkSelected(vm.selectedHunks.val, file.fileIndex, hunkIdx)
-          var hunkCls = cstring(hunkClass(selected))
-          var hidx = hunkIdx
-          {.emit: """
-            const fileEl = `rootBody`.querySelector('.deepreview-unified-file[data-file-index="' + `fileIndex` + '"]');
-            if (fileEl) {
-              const hunk = document.createElement('div');
-              hunk.className = `hunkCls`;
-              const header = document.createElement('div');
-              header.className = 'deepreview-unified-hunk-header hunk-header-selectable';
-              header.textContent = `hunkHeader`;
-              header.addEventListener('click', () => {
-                if (`callbacks`.onSelectHunk) `callbacks`.onSelectHunk(`fileIndex`, `hidx`);
-              });
-              hunk.appendChild(header);
-              fileEl.appendChild(hunk);
-            }
-          """.}
-          for line in hunk.lines:
-            var cls = cstring(lineClass(line.lineType))
-            var content = cstring(line.content)
-            var oldLine = if line.lineType != "added" and line.oldLine > 0: cstring($line.oldLine) else: cstring""
-            var newLine = if line.lineType != "removed" and line.newLine > 0: cstring($line.newLine) else: cstring""
-            {.emit: """
-              const hunks = `rootBody`.querySelectorAll('.deepreview-unified-file[data-file-index="' + `fileIndex` + '"] .deepreview-unified-hunk');
-              const hunk = hunks[hunks.length - 1];
-              if (hunk) {
-                const row = document.createElement('div');
-                row.className = `cls`;
-                row.innerHTML = '<span class="deepreview-unified-gutter-old"></span>' +
-                  '<span class="deepreview-unified-gutter-new"></span>' +
-                  '<span class="deepreview-unified-line-content"></span>';
-                row.querySelector('.deepreview-unified-gutter-old').textContent = `oldLine`;
-                row.querySelector('.deepreview-unified-gutter-new').textContent = `newLine`;
-                row.querySelector('.deepreview-unified-line-content').textContent = `content`;
-                hunk.appendChild(row);
-              }
-            """.}
-
-      for node in vm.callNodes.val:
-        var name = cstring(node.name)
-        var count = node.executionCount
-        var padding = cstring(fmt"padding-left: {node.depth * 16}px")
-        {.emit: """
-          const ct = `rootBody`.querySelector('.deepreview-calltrace');
-          if (ct) {
-            let body = ct.querySelector('.deepreview-calltrace-body');
-            if (!body) {
-              body = document.createElement('div');
-              body.className = 'deepreview-calltrace-body';
-              ct.appendChild(body);
-            }
-            const node = document.createElement('div');
-            node.className = 'deepreview-calltrace-node';
-            const entry = document.createElement('div');
-            entry.className = 'deepreview-calltrace-entry';
-            entry.setAttribute('style', `padding`);
-            const nm = document.createElement('span');
-            nm.className = 'deepreview-calltrace-name';
-            nm.textContent = `name`;
-            const cnt = document.createElement('span');
-            cnt.className = 'deepreview-calltrace-count';
-            cnt.textContent = ' x' + `count`;
-            entry.appendChild(nm);
-            entry.appendChild(cnt);
-            node.appendChild(entry);
-            body.appendChild(node);
-          }
-        """.}
-
-      if vm.callNodes.val.len == 0:
-        {.emit: """
-          const ct = `rootBody`.querySelector('.deepreview-calltrace');
-          if (ct && !ct.querySelector('.deepreview-calltrace-empty')) {
-            const empty = document.createElement('div');
-            empty.className = 'deepreview-calltrace-empty';
-            empty.textContent = 'No call trace data';
-            ct.appendChild(empty);
-          }
-        """.}
-
-      if callbacks.afterDynamicRender != nil:
-        callbacks.afterDynamicRender()
-
-    panel
+    renderDeepReviewPanelImpl(r, vm, componentId, callbacks)
 
   proc mountIsoNimDeepReviewPanel*(container: isonim_dom.Element;
                                    vm: DeepReviewVM;
@@ -722,4 +497,6 @@ when defined(js):
                                      DeepReviewCallbacks()) =
     let r = WebRenderer()
     let panel = renderDeepReviewPanel(r, vm, componentId, callbacks)
+    # Host interop: the GoldenLayout-owned container is outside this view's
+    # DSL tree, so mounting the root element is an explicit DOM operation.
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

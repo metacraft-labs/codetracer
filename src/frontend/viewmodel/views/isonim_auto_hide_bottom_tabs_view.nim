@@ -55,10 +55,10 @@ proc renderAutoHideBottomTabsPanel*(
     tabs: seq[AutoHideBottomTabRecord];
     callbacks: AutoHideBottomTabsCallbacks =
       AutoHideBottomTabsCallbacks()): MockNode =
-  result = ui(r):
-    tdiv(class = AutoHideBottomTabsClass)
-  for i, tab in tabs:
-    r.appendChild(result, renderBottomTab(r, tab, i, callbacks))
+  ui(r):
+    tdiv(class = AutoHideBottomTabsClass):
+      for i, tab in tabs:
+        renderBottomTab(r, tab, i, callbacks)
 
 when defined(js):
   proc renderAutoHideBottomTabsPanel*(
@@ -66,10 +66,10 @@ when defined(js):
       tabs: seq[AutoHideBottomTabRecord];
       callbacks: AutoHideBottomTabsCallbacks =
         AutoHideBottomTabsCallbacks()): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = AutoHideBottomTabsClass)
-    for i, tab in tabs:
-      r.appendChild(result, renderBottomTab(r, tab, i, callbacks))
+    ui(r):
+      tdiv(class = AutoHideBottomTabsClass):
+        for i, tab in tabs:
+          renderBottomTab(r, tab, i, callbacks)
 
   proc renderAutoHideBottomTabsInto*(
       r: WebRenderer;
@@ -86,6 +86,8 @@ when defined(js):
       cstring"class",
       cstring AutoHideBottomTabsClass)
 
+    # This view is refreshed into a status-bar host owned by legacy chrome.
+    # Move the DSL-rendered children into that stable host.
     let panel = renderAutoHideBottomTabsPanel(r, tabs, callbacks)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):

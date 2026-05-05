@@ -70,11 +70,11 @@ proc renderAutoHideOverlayTabsPanel*(
     edgeClass: string;
     callbacks: AutoHideOverlayTabsCallbacks =
       AutoHideOverlayTabsCallbacks()): MockNode =
-  result = ui(r):
-    tdiv(class = overlayTabsClass(visible, edgeClass))
-  if visible:
-    for i, tab in tabs:
-      r.appendChild(result, renderOverlayTab(r, tab, i, callbacks))
+  ui(r):
+    tdiv(class = overlayTabsClass(visible, edgeClass)):
+      if visible:
+        for i, tab in tabs:
+          renderOverlayTab(r, tab, i, callbacks)
 
 when defined(js):
   proc renderAutoHideOverlayTabsPanel*(
@@ -84,11 +84,11 @@ when defined(js):
       edgeClass: string;
       callbacks: AutoHideOverlayTabsCallbacks =
         AutoHideOverlayTabsCallbacks()): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = overlayTabsClass(visible, edgeClass))
-    if visible:
-      for i, tab in tabs:
-        r.appendChild(result, renderOverlayTab(r, tab, i, callbacks))
+    ui(r):
+      tdiv(class = overlayTabsClass(visible, edgeClass)):
+        if visible:
+          for i, tab in tabs:
+            renderOverlayTab(r, tab, i, callbacks)
 
   proc renderAutoHideOverlayTabsInto*(
       r: WebRenderer;
@@ -102,6 +102,7 @@ when defined(js):
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
+    # This surface is refreshed into a static Golden Layout overlay host.
     let panel = renderAutoHideOverlayTabsPanel(
       r, tabs, visible, edgeClass, callbacks)
     discard isonim_dom.appendChild(containerNode, isonim_dom.Node(panel))

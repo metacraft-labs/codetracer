@@ -207,6 +207,15 @@ proc coverageBadgeText*(summary: AgentDeepReviewCoverageSummary): string =
     return ""
   formatPercent(summary.coveragePercent)
 
+proc headerBadgeText*(isExpanded: bool;
+                      summary: AgentDeepReviewCoverageSummary): string =
+  ## Header badge is present as a stable span; it carries text only
+  ## when collapsed and coverage data has arrived.
+  if isExpanded:
+    ""
+  else:
+    coverageBadgeText(summary)
+
 proc coverageDetailText*(summary: AgentDeepReviewCoverageSummary): string =
   ## "X covered / Y uncovered" detail row in the coverage card.
   ## Mirrors the legacy ``fmt"{summary.totalLinesCovered} covered /
@@ -231,6 +240,12 @@ proc testsDetailText*(results: AgentDeepReviewTestResults): string =
     $results.testsFailed & " failed"
   else:
     "all passing"
+
+proc testsDetailClass*(results: AgentDeepReviewTestResults): string =
+  if results.testsFailed > 0:
+    "activity-dr-card-detail activity-dr-card-warn"
+  else:
+    "activity-dr-card-detail"
 
 proc fileBasename*(path: string): string =
   ## Extract the basename from a path.  Mirrors the legacy
@@ -559,116 +574,65 @@ proc renderAgentActivityDeepReviewPanel*(r: MockRenderer;
 
 when defined(js):
 
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with optional class + id
-    ## attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = ""): isonim_dom.Element =
-    ## Helper: create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc setTextContent(node: isonim_dom.Element; value: string) =
-    ## Replace ``node``'s children with a single text node carrying
-    ## ``value``.  Used everywhere the render effect refreshes a
-    ## label / value cell without rebuilding the DOM tree.
-    clearWebChildren(node)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(value))
-    isonim_dom.appendChild(isonim_dom.Node(node), t)
-
-  proc renderWebFileRow(entry: AgentDeepReviewFileCoverage):
+  proc renderWebFileRow(r: WebRenderer; entry: AgentDeepReviewFileCoverage):
       isonim_dom.Element =
-    let row = createWebElement("div", AgentActivityDeepReviewFileRowClass)
-    let nameSpan = createWebTextElement("span", fileBasename(entry.path),
-                                        "activity-dr-files-col-name")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(nameSpan))
-    let coverageSpan = createWebTextElement("span",
-        fileRowCoverageText(entry), "activity-dr-files-col-coverage")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(coverageSpan))
-    let flowSpan = createWebTextElement("span",
-        fileRowFlowText(entry), "activity-dr-files-col-flow")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(flowSpan))
-    row
+    ui(r):
+      tdiv(class = AgentActivityDeepReviewFileRowClass):
+        span(class = "activity-dr-files-col-name"):
+          text fileBasename(entry.path)
+        span(class = "activity-dr-files-col-coverage"):
+          text fileRowCoverageText(entry)
+        span(class = "activity-dr-files-col-flow"):
+          text fileRowFlowText(entry)
 
-  proc renderWebTestRow(notif: AgentDeepReviewNotification):
+  proc renderWebTestRow(r: WebRenderer; notif: AgentDeepReviewNotification):
       isonim_dom.Element =
-    let row = createWebElement("div", testRowClass(notif.passed))
-    let t = isonim_dom.createTextNode(
-      isonim_dom.document, cstring(notif.label))
-    isonim_dom.appendChild(isonim_dom.Node(row), t)
-    row
+    ui(r):
+      tdiv(class = testRowClass(notif.passed)):
+        text notif.label
 
-  proc renderWebNotifRow(notif: AgentDeepReviewNotification):
+  proc renderWebNotifRow(r: WebRenderer; notif: AgentDeepReviewNotification):
       isonim_dom.Element =
-    let row = createWebElement("div", notificationRowClass(notif))
-    let t = isonim_dom.createTextNode(
-      isonim_dom.document, cstring(notif.label))
-    isonim_dom.appendChild(isonim_dom.Node(row), t)
-    row
+    ui(r):
+      tdiv(class = notificationRowClass(notif)):
+        text notif.label
 
   proc renderAgentActivityDeepReviewPanel*(r: WebRenderer;
       vm: AgentActivityDeepReviewVM): isonim_dom.Element =
     ## Render the Agent Activity DeepReview pane for the real DOM.
     ## Same dispatch shape as the Mock variant.
-    var outerContainer: isonim_dom.Element
-    var headerChevron: isonim_dom.Element
-    var headerBadge: isonim_dom.Element
-    var bodyContainer: isonim_dom.Element
-    var coverageValue: isonim_dom.Element
-    var coverageDetail: isonim_dom.Element
-    var testsValue: isonim_dom.Element
-    var testsDetail: isonim_dom.Element
     var filesContainer: isonim_dom.Element
     var testsContainer: isonim_dom.Element
     var notifsContainer: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(ref = outerContainer,
-           class = AgentActivityDeepReviewContainerClass):
+      tdiv(class = containerClass(vm.isExpanded.val)):
         tdiv(class = AgentActivityDeepReviewHeaderClass,
              onclick = proc() = vm.toggleExpanded()):
-          span(ref = headerChevron,
-               class = AgentActivityDeepReviewChevronClass):
-            text ">"
+          span(class = AgentActivityDeepReviewChevronClass):
+            text chevronChar(vm.isExpanded.val)
           span(class = AgentActivityDeepReviewHeaderLabelClass):
             text AgentActivityDeepReviewLabelText
-          span(ref = headerBadge,
-               class = AgentActivityDeepReviewHeaderBadgeClass):
-            text ""
-        tdiv(ref = bodyContainer,
-             class = AgentActivityDeepReviewBodyClass):
+          span(class = AgentActivityDeepReviewHeaderBadgeClass):
+            text headerBadgeText(vm.isExpanded.val, vm.coverageSummary.val)
+        tdiv(class = bodyClass(vm.isExpanded.val)):
           tdiv(class = AgentActivityDeepReviewSummaryClass):
             tdiv(class = AgentActivityDeepReviewCardClass &
                          " activity-dr-card-coverage"):
               tdiv(class = "activity-dr-card-label"):
                 text "Coverage"
-              tdiv(ref = coverageValue, class = "activity-dr-card-value"):
-                text ""
-              tdiv(ref = coverageDetail, class = "activity-dr-card-detail"):
-                text ""
+              tdiv(class = "activity-dr-card-value"):
+                text formatPercent(vm.coverageSummary.val.coveragePercent)
+              tdiv(class = "activity-dr-card-detail"):
+                text coverageDetailText(vm.coverageSummary.val)
             tdiv(class = AgentActivityDeepReviewCardClass &
                          " activity-dr-card-tests"):
               tdiv(class = "activity-dr-card-label"):
                 text "Tests"
-              tdiv(ref = testsValue, class = "activity-dr-card-value"):
-                text ""
-              tdiv(ref = testsDetail, class = "activity-dr-card-detail"):
-                text ""
+              tdiv(class = "activity-dr-card-value"):
+                text testsValueText(vm.testResults.val)
+              tdiv(class = testsDetailClass(vm.testResults.val)):
+                text testsDetailText(vm.testResults.val)
           tdiv(ref = filesContainer,
                class = AgentActivityDeepReviewFilesClass):
             discard
@@ -679,63 +643,29 @@ when defined(js):
                class = AgentActivityDeepReviewNotifsClass):
             discard
 
-    # ----- Outer collapsed/expanded toggle ---------------------------
-    createRenderEffect proc() =
-      let expanded = vm.isExpanded.val
-      isonim_dom.setAttribute(outerContainer, cstring"class",
-                              cstring(containerClass(expanded)))
-      isonim_dom.setAttribute(bodyContainer, cstring"class",
-                              cstring(bodyClass(expanded)))
-      setTextContent(headerChevron, chevronChar(expanded))
-      clearWebChildren(headerBadge)
-      if not expanded:
-        let badge = coverageBadgeText(vm.coverageSummary.val)
-        if badge.len > 0:
-          setTextContent(headerBadge, badge)
-
-    # ----- Coverage / tests cards ------------------------------------
-    createRenderEffect proc() =
-      let summary = vm.coverageSummary.val
-      let results = vm.testResults.val
-      setTextContent(coverageValue, formatPercent(summary.coveragePercent))
-      setTextContent(coverageDetail, coverageDetailText(summary))
-      setTextContent(testsValue, testsValueText(results))
-      setTextContent(testsDetail, testsDetailText(results))
-      if results.testsFailed > 0:
-        isonim_dom.setAttribute(testsDetail, cstring"class",
-            cstring"activity-dr-card-detail activity-dr-card-warn")
-      else:
-        isonim_dom.setAttribute(testsDetail, cstring"class",
-            cstring"activity-dr-card-detail")
-
     # ----- Per-file coverage table -----------------------------------
     createRenderEffect proc() =
       let entries = vm.fileCoverage.val
-      clearWebChildren(filesContainer)
-      let header = createWebElement("div",
-          AgentActivityDeepReviewFilesHeaderClass)
-      let h1 = createWebTextElement("span", "File",
-          "activity-dr-files-col-name")
-      let h2 = createWebTextElement("span", "Coverage",
-          "activity-dr-files-col-coverage")
-      let h3 = createWebTextElement("span", "Flow",
-          "activity-dr-files-col-flow")
-      isonim_dom.appendChild(isonim_dom.Node(header), isonim_dom.Node(h1))
-      isonim_dom.appendChild(isonim_dom.Node(header), isonim_dom.Node(h2))
-      isonim_dom.appendChild(isonim_dom.Node(header), isonim_dom.Node(h3))
-      isonim_dom.appendChild(isonim_dom.Node(filesContainer),
-                             isonim_dom.Node(header))
+      # Dynamic list host: clear the stable section and append DSL-built
+      # header/row branches for the latest VM snapshot.
+      r.clearChildren(filesContainer)
+      let header = ui(r):
+        tdiv(class = AgentActivityDeepReviewFilesHeaderClass):
+          span(class = "activity-dr-files-col-name"):
+            text "File"
+          span(class = "activity-dr-files-col-coverage"):
+            text "Coverage"
+          span(class = "activity-dr-files-col-flow"):
+            text "Flow"
+      r.appendChild(filesContainer, header)
       if entries.len == 0:
-        let empty = createWebTextElement("div",
-            AgentActivityDeepReviewFilesEmptyText,
-            AgentActivityDeepReviewFilesEmptyClass)
-        isonim_dom.appendChild(isonim_dom.Node(filesContainer),
-                               isonim_dom.Node(empty))
+        let empty = ui(r):
+          tdiv(class = AgentActivityDeepReviewFilesEmptyClass):
+            text AgentActivityDeepReviewFilesEmptyText
+        r.appendChild(filesContainer, empty)
       else:
         for entry in entries:
-          let row = renderWebFileRow(entry)
-          isonim_dom.appendChild(isonim_dom.Node(filesContainer),
-                                 isonim_dom.Node(row))
+          r.appendChild(filesContainer, renderWebFileRow(r, entry))
 
     # ----- Test results list -----------------------------------------
     createRenderEffect proc() =
@@ -744,43 +674,41 @@ when defined(js):
       for n in allNotifs:
         if n.kind == adrnkTestComplete:
           tests.add(n)
-      clearWebChildren(testsContainer)
-      let header = createWebTextElement("div", "Test Results",
-          AgentActivityDeepReviewTestsHeaderClass)
-      isonim_dom.appendChild(isonim_dom.Node(testsContainer),
-                             isonim_dom.Node(header))
+      # Dynamic list host; rows are rebuilt rather than patched because
+      # the legacy panel emitted these sections in one pass.
+      r.clearChildren(testsContainer)
+      let header = ui(r):
+        tdiv(class = AgentActivityDeepReviewTestsHeaderClass):
+          text "Test Results"
+      r.appendChild(testsContainer, header)
       if tests.len == 0:
-        let empty = createWebTextElement("div",
-            AgentActivityDeepReviewTestsEmptyText,
-            AgentActivityDeepReviewTestsEmptyClass)
-        isonim_dom.appendChild(isonim_dom.Node(testsContainer),
-                               isonim_dom.Node(empty))
+        let empty = ui(r):
+          tdiv(class = AgentActivityDeepReviewTestsEmptyClass):
+            text AgentActivityDeepReviewTestsEmptyText
+        r.appendChild(testsContainer, empty)
       else:
         for n in tests:
-          let row = renderWebTestRow(n)
-          isonim_dom.appendChild(isonim_dom.Node(testsContainer),
-                                 isonim_dom.Node(row))
+          r.appendChild(testsContainer, renderWebTestRow(r, n))
 
     # ----- Notifications feed ----------------------------------------
     createRenderEffect proc() =
       let notifs = vm.notifications.val
-      clearWebChildren(notifsContainer)
-      let header = createWebTextElement("div", "Recent Activity",
-          AgentActivityDeepReviewNotifsHeaderClass)
-      isonim_dom.appendChild(isonim_dom.Node(notifsContainer),
-                             isonim_dom.Node(header))
+      # Dynamic list host; most-recent-first ordering mirrors the legacy
+      # notification feed.
+      r.clearChildren(notifsContainer)
+      let header = ui(r):
+        tdiv(class = AgentActivityDeepReviewNotifsHeaderClass):
+          text "Recent Activity"
+      r.appendChild(notifsContainer, header)
       if notifs.len == 0:
-        let empty = createWebTextElement("div",
-            AgentActivityDeepReviewNotifsEmptyText,
-            AgentActivityDeepReviewNotifsEmptyClass)
-        isonim_dom.appendChild(isonim_dom.Node(notifsContainer),
-                               isonim_dom.Node(empty))
+        let empty = ui(r):
+          tdiv(class = AgentActivityDeepReviewNotifsEmptyClass):
+            text AgentActivityDeepReviewNotifsEmptyText
+        r.appendChild(notifsContainer, empty)
       else:
         var i = notifs.len - 1
         while i >= 0:
-          let row = renderWebNotifRow(notifs[i])
-          isonim_dom.appendChild(isonim_dom.Node(notifsContainer),
-                                 isonim_dom.Node(row))
+          r.appendChild(notifsContainer, renderWebNotifRow(r, notifs[i]))
           i -= 1
 
     panel

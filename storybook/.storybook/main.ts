@@ -9,6 +9,7 @@ const config: StorybookConfig = {
   },
   staticDirs: [
     { from: "../dist", to: "/dist" },
+    { from: "../../src/frontend/index.html", to: "/codetracer-app-index.html" },
     { from: "../../src/build-debug/frontend", to: "/frontend" },
     { from: "../../src/build-debug/public", to: "/public" },
   ],

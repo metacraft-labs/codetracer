@@ -65,10 +65,10 @@ proc renderAutoHideCollapsedIconsPanel*(
     icons: seq[AutoHideCollapsedIconRecord];
     callbacks: AutoHideCollapsedIconCallbacks =
       AutoHideCollapsedIconCallbacks()): MockNode =
-  result = ui(r):
-    tdiv(class = collapsedIconZoneClass(icons.len > 0))
-  for i, icon in icons:
-    r.appendChild(result, renderCollapsedIcon(r, icon, i, callbacks))
+  ui(r):
+    tdiv(class = collapsedIconZoneClass(icons.len > 0)):
+      for i, icon in icons:
+        renderCollapsedIcon(r, icon, i, callbacks)
 
 when defined(js):
   proc renderAutoHideCollapsedIconsPanel*(
@@ -76,10 +76,10 @@ when defined(js):
       icons: seq[AutoHideCollapsedIconRecord];
       callbacks: AutoHideCollapsedIconCallbacks =
         AutoHideCollapsedIconCallbacks()): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = collapsedIconZoneClass(icons.len > 0))
-    for i, icon in icons:
-      r.appendChild(result, renderCollapsedIcon(r, icon, i, callbacks))
+    ui(r):
+      tdiv(class = collapsedIconZoneClass(icons.len > 0)):
+        for i, icon in icons:
+          renderCollapsedIcon(r, icon, i, callbacks)
 
   proc renderAutoHideCollapsedIconsInto*(
       r: WebRenderer;
@@ -96,6 +96,8 @@ when defined(js):
       cstring"class",
       cstring collapsedIconZoneClass(icons.len > 0))
 
+    # This view is refreshed into a status-bar host owned by legacy chrome.
+    # Move the DSL-rendered children into that stable host.
     let panel = renderAutoHideCollapsedIconsPanel(r, icons, callbacks)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):

@@ -225,7 +225,24 @@ proc renderSearchResultsPanel*(r: MockRenderer;
 
 when defined(js):
 
-  proc createWebMatchRow(vm: SearchResultsVM;
+  proc matchParts(textValue, query: string):
+      tuple[matched: bool; before, hit, after: string] =
+    if query.len == 0 or textValue.len == 0:
+      return (false, "", "", "")
+    let lowerText = textValue.toLowerAscii()
+    let lowerQuery = query.toLowerAscii()
+    let idx = lowerText.find(lowerQuery)
+    if idx < 0:
+      return (false, "", "", "")
+    result.matched = true
+    result.before = if idx > 0: textValue[0 ..< idx] else: ""
+    result.hit = textValue[idx ..< idx + query.len]
+    let afterStart = idx + query.len
+    result.after =
+      if afterStart < textValue.len: textValue[afterStart .. ^1] else: ""
+
+  proc renderWebMatchRow(r: WebRenderer;
+                         vm: SearchResultsVM;
                          res: SearchResultLine;
                          query: string): isonim_dom.Element =
     ## Build a single match row in the real DOM.  The match text is
@@ -233,51 +250,41 @@ when defined(js):
     ## ``search-results-highlight`` span renders as the matched substring
     ## (same as the legacy ``highlightMatch`` proc).  Click handler
     ## dispatches a jump request via the VM.
-    let row = isonim_dom.createElement(isonim_dom.document, cstring"div")
-    isonim_dom.setAttribute(row, cstring"class", cstring"search-results-match-row")
+    let captured = res
+    let onClick = onResultClick(vm, captured)
+    let parts = matchParts(captured.text, query)
+    ui(r):
+      tdiv(class = "search-results-match-row",
+           onclick = onClick):
+        span(class = "search-results-line-number"):
+          text $captured.line
+        span(class = "search-results-match-text"):
+          if parts.matched:
+            if parts.before.len > 0:
+              span:
+                text parts.before
+            span(class = "search-results-highlight"):
+              text parts.hit
+            if parts.after.len > 0:
+              span:
+                text parts.after
+          else:
+            span:
+              text captured.text
 
-    let lineSpan = isonim_dom.createElement(isonim_dom.document, cstring"span")
-    isonim_dom.setAttribute(lineSpan, cstring"class", cstring"search-results-line-number")
-    lineSpan.textContent = cstring($res.line)
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(lineSpan))
-
-    let textSpan = isonim_dom.createElement(isonim_dom.document, cstring"span")
-    isonim_dom.setAttribute(textSpan, cstring"class", cstring"search-results-match-text")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(textSpan))
-
-    proc appendPlain(parent: isonim_dom.Node; s: string) =
-      let el = isonim_dom.createElement(isonim_dom.document, cstring"span")
-      el.textContent = cstring(s)
-      isonim_dom.appendChild(parent, isonim_dom.Node(el))
-
-    proc appendHighlight(parent: isonim_dom.Node; s: string) =
-      let el = isonim_dom.createElement(isonim_dom.document, cstring"span")
-      isonim_dom.setAttribute(el, cstring"class", cstring"search-results-highlight")
-      el.textContent = cstring(s)
-      isonim_dom.appendChild(parent, isonim_dom.Node(el))
-
-    if query.len > 0 and res.text.len > 0:
-      let lowerText = res.text.toLowerAscii()
-      let lowerQuery = query.toLowerAscii()
-      let idx = lowerText.find(lowerQuery)
-      if idx >= 0:
-        let before = res.text[0 ..< idx]
-        let matched = res.text[idx ..< idx + query.len]
-        let after = res.text[idx + query.len .. ^1]
-        if before.len > 0:
-          appendPlain(isonim_dom.Node(textSpan), before)
-        appendHighlight(isonim_dom.Node(textSpan), matched)
-        if after.len > 0:
-          appendPlain(isonim_dom.Node(textSpan), after)
-      else:
-        appendPlain(isonim_dom.Node(textSpan), res.text)
-    else:
-      appendPlain(isonim_dom.Node(textSpan), res.text)
-
-    let handler = onResultClick(vm, res)
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                proc(ev: isonim_dom.Event) = handler())
-    row
+  proc renderWebResultGroup(r: WebRenderer; vm: SearchResultsVM;
+                            path: string;
+                            rows: seq[SearchResultLine];
+                            query: string): isonim_dom.Element =
+    ui(r):
+      tdiv(class = "search-results-file-group"):
+        tdiv(class = "search-results-file-header"):
+          span(class = "search-results-file-path"):
+            text path
+          span(class = "search-results-file-count"):
+            text " (" & $rows.len & ")"
+        for res in rows:
+          renderWebMatchRow(r, vm, res, query)
 
   proc renderSearchResultsPanel*(r: WebRenderer;
                                  vm: SearchResultsVM): isonim_dom.Element =
@@ -300,47 +307,22 @@ when defined(js):
     createRenderEffect proc() =
       let visible = vm.visibleResults.val
       let query = vm.query.val
-      # Tear down the previous body.  IsoNim's reactive root cleans up
-      # the closures attached to the discarded row nodes.
-      let containerAsNode = isonim_dom.Node(bodyContainer)
-      while not isonim_dom.isNodeNil(containerAsNode.firstChild):
-        discard isonim_dom.removeChild(containerAsNode, containerAsNode.firstChild)
+      # Stable host slot for the result list; rebuilt from declarative
+      # IsoNim nodes so grouping and row event handlers stay simple.
+      r.clearChildren(bodyContainer)
 
       if visible.len == 0:
-        let empty = isonim_dom.createElement(isonim_dom.document, cstring"div")
-        isonim_dom.setAttribute(empty, cstring"class", cstring"search-results-empty")
-        empty.textContent = cstring"Run a search to see results here."
-        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
-                               isonim_dom.Node(empty))
+        let empty = ui(r):
+          tdiv(class = "search-results-empty"):
+            text "Run a search to see results here."
+        r.appendChild(bodyContainer, empty)
         return
 
       let grouping = groupByPath(visible)
       for path in grouping.order:
         let rows = grouping.groups[path]
-        let groupNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
-        isonim_dom.setAttribute(groupNode, cstring"class", cstring"search-results-file-group")
-
-        let header = isonim_dom.createElement(isonim_dom.document, cstring"div")
-        isonim_dom.setAttribute(header, cstring"class", cstring"search-results-file-header")
-
-        let pathSpan = isonim_dom.createElement(isonim_dom.document, cstring"span")
-        isonim_dom.setAttribute(pathSpan, cstring"class", cstring"search-results-file-path")
-        pathSpan.textContent = cstring(path)
-        isonim_dom.appendChild(isonim_dom.Node(header), isonim_dom.Node(pathSpan))
-
-        let countSpan = isonim_dom.createElement(isonim_dom.document, cstring"span")
-        isonim_dom.setAttribute(countSpan, cstring"class", cstring"search-results-file-count")
-        countSpan.textContent = cstring(" (" & $rows.len & ")")
-        isonim_dom.appendChild(isonim_dom.Node(header), isonim_dom.Node(countSpan))
-
-        isonim_dom.appendChild(isonim_dom.Node(groupNode), isonim_dom.Node(header))
-        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
-                               isonim_dom.Node(groupNode))
-
-        for res in rows:
-          let row = createWebMatchRow(vm, res, query)
-          isonim_dom.appendChild(isonim_dom.Node(groupNode),
-                                 isonim_dom.Node(row))
+        r.appendChild(bodyContainer,
+                      renderWebResultGroup(r, vm, path, rows, query))
 
     panel
 

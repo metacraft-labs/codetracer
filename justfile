@@ -38,6 +38,9 @@ storybook-build: build-storybook-components
   rm -rf storybook/storybook-static
   cd storybook && npm run build-storybook
 
+storybook-check-styles:
+  cd storybook && npm run check-styles
+
 serve-docs hostname="localhost" port="3000":
   #!/usr/bin/env bash
   cd docs/book/
