@@ -91,10 +91,6 @@ method render*(self: FlowComponent): VNode =
   let allIterations = if self.flow.isNil: 0 else: self.flow.loops[self.activeStep.loop].rrTicksForIterations.len - 1
   result = buildHtml(tdiv(class="flow-component-container")):
     makeLoopLine(self, self.activeStep, allIterations)
-    tdiv(
-      class = "flow-loop-slider-container",
-      id = fmt"flow-loop-slider-container-{self.position}"
-    )
 
 
 proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =
@@ -2437,8 +2433,10 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
   if step.position == self.flow.loops[step.loop].first:
     if not self.viewZones.hasKey(step.position - 1):
       self.createLoopViewZones(step.loop)
-    if not self.sliderWidgets.hasKey(step.position):
-      self.makeSlider(self.flow.loops[step.loop].first)
+    let loopFirst = self.flow.loops[step.loop].first
+    if self.flowLoops.hasKey(loopFirst) and
+        self.flowLoops[loopFirst].sliderDom.isNil:
+      self.makeSlider(loopFirst)
 
   # check if there is a register for loop step cells
   let stepLoopCells = self.flowLines[step.position].stepLoopCells
@@ -3140,6 +3138,14 @@ proc makeLoopLine(
       backLoopControlButton(self, step, bStyle)
       flowLoopValue(self, step, allIterations, style)
       nextLoopControlButton(self, step, bStyle)
+      tdiv(
+        class = "flow-loop-slider-container",
+        id = &"flow-loop-slider-container-{step.position}"
+      ):
+        tdiv(
+          class = "flow-loop-slider",
+          id = &"flow-loop-slider-{step.position}"
+        )
 
     # self.redraw()
 
@@ -3408,7 +3414,14 @@ proc varStyle(self: FlowComponent, fields: seq[cstring]): VStyle =
   style((StyleAttr.cssFloat, cstring"left"))
 
 proc makeSliderDom(self: FlowComponent, position: int): Node =
-  var dom = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
+  let parentDom = self.flowLoops[position].flowDom
+  var dom =
+    if parentDom.isNil:
+      cast[Node](nil)
+    else:
+      cast[Node](findNodeInElement(
+        parentDom,
+        cstring(&"#flow-loop-slider-container-{position}")))
   var style = if self.inExtension: style() else: loopSliderStyle(self, position)
   var leftStyle = if self.inExtension: style() else: flowLeftStyle(self, position, true)
   if dom.isNil:
@@ -3420,24 +3433,37 @@ proc makeSliderDom(self: FlowComponent, position: int): Node =
              style = style)
 
     dom = vnodeToDom(vNode, KaraxInstance())
-  let domCheck = cast[Node](jq(&"flow-loop-slider-{position}"))
-  if domCheck.isNil:
+
+  var sliderDom = cast[Node](findNodeInElement(
+    dom,
+    cstring(&"#flow-loop-slider-{position}")))
+  if sliderDom.isNil:
     let childVNode = buildHtml(tdiv(class = "flow-loop-slider",
       id = &"flow-loop-slider-{position}",
       style = style)): text ""
-    let childDom = vnodeToDom(childVNode, KaraxInstance())
 
-    dom.appendChild(childDom)
+    sliderDom = vnodeToDom(childVNode, KaraxInstance())
+    dom.appendChild(sliderDom)
 
-  self.flowLoops[position].sliderDom = dom.childNodes[0]
+  dom.applyStyle(leftStyle)
+  sliderDom.applyStyle(style)
+
+  if self.flowLines.hasKey(position):
+    self.flowLines[position].sliderDom = dom
+  self.flowLoops[position].sliderDom = sliderDom
 
   return dom
 
 proc addSliderWidget(self: FlowComponent, position:int) =
-  let id = &"flow-slider-widget-{position}"
   let dom = makeSliderDom(self, position)
+  let parentDom = self.flowLoops[position].flowDom
 
-  self.flowLoops[position].flowDom.appendChild(dom)
+  echo "#### THIS IS THE PARENTDOM and DOM"
+  kout dom
+  kout parentDom
+
+  if not parentDom.isNil and dom.parentNode != parentDom:
+    parentDom.appendChild(dom)
 
 proc resizeEditorHandler(self:FlowComponent, position: int) =
   # get new monaco editor config
@@ -3531,43 +3557,42 @@ proc makeSlider(self: FlowComponent, position: int) =
 
   if not element.toJs.noUiSlider.isNil:
     element.toJs.noUiSlider.destroy()
-  else:
-    noUiSlider.create(element, js{
+  noUiSlider.create(element, js{
       "start": step.iteration,
       "range": js{
         "min": FLOW_ITERATION_START,
         "max": loop.iteration
       },
       "behaviour": cstring"drag-tap",
-      "connect": [true, false],
+      "connect": @[true, false],
       "step": 1,
     })
 
-    var onUpdate = proc(values: seq[cstring], handle: int, unencoded: seq[float], tap: bool, positions: seq[float]) =
-      let newTimeInMs = now()
-      let loopIteration = Math.floor(unencoded[0])
-      let newStepCount = self.flow.loopIterationSteps[step.loop][loopIteration].table[step.position]
-      let activeStep = self.flow.steps[newStepCount]
+  var onUpdate = proc(values: seq[cstring], handle: int, unencoded: seq[float], tap: bool, positions: seq[float]) =
+    let newTimeInMs = now()
+    let loopIteration = Math.floor(unencoded[0])
+    let newStepCount = self.flow.loopIterationSteps[step.loop][loopIteration].table[step.position]
+    let activeStep = self.flow.steps[newStepCount]
 
-      # if self.data.ui.activeFocus != self:
-      #   self.data.ui.activeFocus = self
+    # if self.data.ui.activeFocus != self:
+    #   self.data.ui.activeFocus = self
 
-      self.flowLoops[position].loopStep = activeStep
-      self.activeStep = activeStep
-      # self.updateFlowOnMove(newStepCount + 1, activeStep.position)
-      self.redrawFlow()
-      # TODO?
-      # if self.lastSliderUpdateTimeInMs <= 0 or newTimeInMs - self.lastSliderUpdateTimeInMs >= 100:
-      self.lastSliderUpdateTimeInMs = newTimeInMs
-      self.jumpToLocalStep(newStepCount + 1)
-      # Affect the complete move to have a delay on the update
-      # Maybe later on add to all of the EventLog components?
-      cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
+    self.flowLoops[position].loopStep = activeStep
+    self.activeStep = activeStep
+    # self.updateFlowOnMove(newStepCount + 1, activeStep.position)
+    self.redrawFlow()
+    # TODO?
+    # if self.lastSliderUpdateTimeInMs <= 0 or newTimeInMs - self.lastSliderUpdateTimeInMs >= 100:
+    self.lastSliderUpdateTimeInMs = newTimeInMs
+    self.jumpToLocalStep(newStepCount + 1)
+    # Affect the complete move to have a delay on the update
+    # Maybe later on add to all of the EventLog components?
+    cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
 
-    let elementSlider = cast[JsObject](element).noUiSlider
-    elementSlider.on(cstring"slide", onUpdate)
-    if not self.inExtension:
-      setEditorResizeObserver(self, position)
+  let elementSlider = cast[JsObject](element).noUiSlider
+  elementSlider.on(cstring"slide", onUpdate)
+  if not self.inExtension:
+    setEditorResizeObserver(self, position)
 
 proc resizeLineSlider(self: FlowComponent, position: int) =
   let editor = self.editorUI.monacoEditor

@@ -853,7 +853,7 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
   let category = event
   let categoryName = ($event).toLowerAscii()
   let dropDownId = "category-image"
-  var dropDownClass = if event == Filter: "ct-button-image-md-secondary ct-mr-2 ct-button-no-border" else: "medium-control-button"
+  var dropDownClass = if event == Filter: "ct-button-image-md-secondary ct-button-no-border" else: "medium-control-button"
   let dropDownListId = dropDownId & "-list"
   var dropDownListClass = "dropdown-list"
   var dropDownContainerClass = "dropdown-container"
