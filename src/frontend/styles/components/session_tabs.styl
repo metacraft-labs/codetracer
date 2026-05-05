@@ -11,7 +11,7 @@
   top 0
   // Place tabs after the centered omnibox and before the window controls.
   right 120px
-  left calc(50vw + 19em)
+  left calc(2.25em + min(20em, 20vw) + 34em)
   height 38px
   padding 0 4px
   z-index 21  // Above #menu (z-index 20) so tabs are clickable
@@ -26,9 +26,20 @@
     .session-tab
       display none
 
+  &.has-overflow
+    .session-tab-overflow
+      display flex
+
+  &.overflow-open
+    overflow visible
+
+    .session-tab-overflow-menu
+      display flex
+
 .session-tab
   display flex
   align-items center
+  flex 0 0 auto
   padding 0 10px
   height 26px
   cursor pointer
@@ -79,6 +90,7 @@
   display flex
   align-items center
   justify-content center
+  flex 0 0 26px
   width 26px
   height 26px
   cursor pointer
@@ -88,6 +100,62 @@
   border-radius 4px
   -webkit-app-region no-drag
   transition color 150ms ease, background-color 150ms ease
+  &:hover
+    color PRIMARY_TEXT_COLOR
+    background-color ACTIVE_ROW
+
+.session-tab-overflow
+  display none
+  align-items center
+  justify-content center
+  flex 0 0 26px
+  width 26px
+  height 26px
+  margin-right 2px
+  cursor pointer
+  color #b0b0b0
+  font-size 12px
+  user-select none
+  border-radius 4px
+  -webkit-app-region no-drag
+  transition color 150ms ease, background-color 150ms ease
+  &:hover
+    color PRIMARY_TEXT_COLOR
+    background-color ACTIVE_ROW
+
+.session-tab-overflow-menu
+  display none
+  position absolute
+  right 4px
+  top 34px
+  min-width 220px
+  max-width 360px
+  max-height 70vh
+  overflow auto
+  flex-direction column
+  padding 4px
+  border-radius 6px
+  background-color colors-ui-surface-primary-default
+  border 1px solid colors-ui-border-primary
+  box-shadow 0 12px 30px rgba(0, 0, 0, 0.35)
+  z-index 120
+  -webkit-app-region no-drag
+
+.session-tab-overflow-item
+  min-height 28px
+  padding 0 10px
+  display flex
+  align-items center
+  color #b0b0b0
+  font-size 12px
+  cursor pointer
+  white-space nowrap
+  overflow hidden
+  text-overflow ellipsis
+  border-radius 4px
+  &.active
+    background-color #3c3c3c
+    color #ffffff
   &:hover
     color PRIMARY_TEXT_COLOR
     background-color ACTIVE_ROW

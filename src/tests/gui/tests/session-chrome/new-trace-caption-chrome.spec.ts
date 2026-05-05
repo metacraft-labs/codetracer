@@ -150,6 +150,7 @@ async function attachCaptionDump(page: Page, testInfo: TestInfo): Promise<void> 
         inspect("#isonim-debug-controls .isonim-debug-controls"),
         inspect("#session-tab-bar"),
         inspect(".session-tab"),
+        inspect(".session-tab-overflow"),
         inspect(".session-tab-add"),
         inspect("#welcomeScreen"),
         inspect(".welcome-screen-wrapper"),
@@ -235,7 +236,18 @@ async function expectCaptionChrome(page: Page): Promise<void> {
     expect(omniboxBox!.height).toBeGreaterThan(16);
     expect(toolbarBox!.x).toBeGreaterThanOrEqual(logoBox!.x + logoBox!.width - 2);
     expect(toolbarBox!.x).toBeLessThan(logoBox!.x + logoBox!.width + 260);
-    expect(omniboxBox!.x).toBeGreaterThan(toolbarBox!.x + toolbarBox!.width);
+    expect(omniboxBox!.x).toBeGreaterThanOrEqual(toolbarBox!.x + toolbarBox!.width + 6);
+    const horizontalOverlap = Math.max(
+      0,
+      Math.min(omniboxBox!.x + omniboxBox!.width, toolbarBox!.x + toolbarBox!.width) -
+        Math.max(omniboxBox!.x, toolbarBox!.x),
+    );
+    const verticalOverlap = Math.max(
+      0,
+      Math.min(omniboxBox!.y + omniboxBox!.height, toolbarBox!.y + toolbarBox!.height) -
+        Math.max(omniboxBox!.y, toolbarBox!.y),
+    );
+    expect(horizontalOverlap * verticalOverlap).toBe(0);
     expect(Math.abs(
       (omniboxBox!.x + omniboxBox!.width / 2) - (menuBox!.x + menuBox!.width / 2),
     )).toBeLessThan(menuBox!.width * 0.18);
@@ -275,9 +287,12 @@ async function expectMenuMouseInteraction(page: Page): Promise<void> {
   const menuNodes = page.locator("#menu-main .menu-node-container");
   expect(await menuNodes.count(), "menu dropdown should expose top-level nodes").toBeGreaterThan(3);
   const targetNode = menuNodes.nth(1);
+  const targetText = (await targetNode.textContent())?.trim() ?? "";
   const targetBox = await targetNode.boundingBox();
   expect(targetBox, "menu node should have layout").not.toBeNull();
   await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2);
+  await expect(targetNode, `hovered menu row '${targetText}' should become active`)
+    .toHaveClass(/menu-active-node/, { timeout: 1_000 });
 
   const hitTestMatchesHoveredNode = await targetNode.evaluate((node) => {
     const rect = node.getBoundingClientRect();
@@ -287,13 +302,13 @@ async function expectMenuMouseInteraction(page: Page): Promise<void> {
     );
     return hit === node || node.contains(hit);
   });
-  expect.soft(
+  expect(
     hitTestMatchesHoveredNode,
     "hit testing should target the hovered menu row",
   ).toBe(true);
 
   await page.mouse.click(box!.x + box!.width + 420, box!.y + box!.height + 420);
-  await expect.soft(menuMain).toBeHidden({ timeout: 5_000 });
+  await expect(menuMain).toBeHidden({ timeout: 5_000 });
 }
 
 async function expectOmniboxSearchIsInteractive(page: Page): Promise<void> {
@@ -335,26 +350,38 @@ async function createTabs(page: Page, count: number): Promise<void> {
 }
 
 async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
-  await createTabs(page, 4);
+  await createTabs(page, 8);
   const omnibox = page.locator("#debug .command-input-field");
+  const toolbar = page.locator("#isonim-debug-controls .isonim-debug-controls");
   const tabBar = page.locator("#session-tab-bar");
   const firstTab = page.locator(".session-tab").first();
+  const overflow = page.locator(".session-tab-overflow");
   const addTab = page.locator(".session-tab-add");
 
   await expect(tabBar).toBeVisible({ timeout: 10_000 });
   await expect(firstTab).toBeVisible({ timeout: 10_000 });
+  await expect(
+    overflow,
+    "overflowing session tabs should expose a chevron/list affordance",
+  ).toBeVisible({ timeout: 10_000 });
   await expect(addTab).toBeVisible({ timeout: 10_000 });
 
   await retryAction(async () => {
     const omniboxBox = await omnibox.boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
     const tabBox = await firstTab.boundingBox();
+    const overflowBox = await overflow.boundingBox();
     const addBox = await addTab.boundingBox();
     expect(omniboxBox, "omnibox should have layout").not.toBeNull();
+    expect(toolbarBox, "debug toolbar should have layout").not.toBeNull();
     expect(tabBox, "session tab should have layout").not.toBeNull();
+    expect(overflowBox, "session overflow affordance should have layout").not.toBeNull();
     expect(addBox, "new-tab button should have layout").not.toBeNull();
 
-    expect.soft(omniboxBox!.x + omniboxBox!.width).toBeLessThanOrEqual(tabBox!.x - 4);
-    expect.soft(omniboxBox!.x + omniboxBox!.width).toBeLessThanOrEqual(addBox!.x - 4);
+    expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(omniboxBox!.x - 6);
+    expect(omniboxBox!.x + omniboxBox!.width).toBeLessThanOrEqual(tabBox!.x - 4);
+    expect(omniboxBox!.x + omniboxBox!.width).toBeLessThanOrEqual(overflowBox!.x - 4);
+    expect(overflowBox!.x + overflowBox!.width).toBeLessThanOrEqual(addBox!.x - 2);
   }, { maxAttempts: 30, delayMs: 100 });
 }
 

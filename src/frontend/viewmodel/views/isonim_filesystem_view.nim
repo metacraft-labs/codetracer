@@ -264,6 +264,8 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
   createRenderEffect proc() =
     # -- Tree --
     let root = vm.rootEntry.val
+    let showEmpty = root.text.len == 0 and root.children.len == 0 and
+      vm.diffEntries.val.len == 0 and vm.deepReviewFiles.val.len == 0
     r.clearChildren(treeContainer)
     if root.text.len > 0 and root.text != "/":
       let node = renderMockEntry(r, vm, root)
@@ -279,7 +281,7 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
       r.appendChild(treeContainer, node)
 
     # -- Empty-state overlay --
-    if vm.isEmpty.val:
+    if showEmpty:
       r.setAttribute(emptyContainer, "class", "filesystem-empty-overlay")
     else:
       r.setAttribute(emptyContainer, "class",
@@ -474,6 +476,8 @@ when defined(js):
     createRenderEffect proc() =
       # -- Tree --
       let root = vm.rootEntry.val
+      let showEmpty = root.text.len == 0 and root.children.len == 0 and
+        vm.diffEntries.val.len == 0 and vm.deepReviewFiles.val.len == 0
       clearWebChildren(treeContainer)
       if root.text.len > 0 and root.text != "/":
         let node = renderWebEntry(vm, root, 1, true)
@@ -491,7 +495,7 @@ when defined(js):
                                isonim_dom.Node(node))
 
       # -- Empty-state overlay --
-      if vm.isEmpty.val:
+      if showEmpty:
         isonim_dom.setAttribute(emptyContainer, cstring"class",
                                 cstring"filesystem-empty-overlay")
       else:

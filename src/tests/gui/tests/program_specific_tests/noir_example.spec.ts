@@ -1,14 +1,22 @@
-import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
+import {
+  test,
+  expect,
+  readyOnEntryTest as readyOnEntry,
+  loadedEventLog,
+  testProgramsPath,
+} from "../../lib/fixtures";
 import { StatusBar, } from "../../page-objects/status_bar";
 import { StatePanel } from "../../page-objects/state";
+import { LayoutPage } from "../../page-objects/layout-page";
 
 const ENTRY_LINE = 17;
+const NOIR_EXAMPLE_SOURCE_PATH = `${testProgramsPath}/noir_example/`;
 
 // Each describe block gets its own fixture scope (each test records + launches independently).
 
 test.describe("noir example — basic layout", () => {
   test.setTimeout(90_000);
-  test.use({ sourcePath: "noir_example/", launchMode: "trace" });
+  test.use({ sourcePath: NOIR_EXAMPLE_SOURCE_PATH, launchMode: "trace" });
 
   test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
     const title = await ctPage.title();
@@ -26,11 +34,59 @@ test.describe("noir example — basic layout", () => {
     expect(simpleLocation.path.endsWith("main.nr")).toBeTruthy();
     expect(simpleLocation.line).toBe(ENTRY_LINE);
   });
+
+  test("Files panel is populated for a real Noir replay", async ({ ctPage }, testInfo) => {
+    await readyOnEntry(ctPage);
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForFilesystemLoaded();
+
+    const filesystem = (await layout.filesystemTabs(true))[0];
+    await filesystem.clickTab();
+
+    async function captureFilesystemDump() {
+      return ctPage.evaluate(() => {
+        const root = document.querySelector("div[id^='filesystemComponent']");
+        const tree = root?.querySelector(".filesystem");
+        const emptyOverlay = root?.querySelector(".filesystem-empty-overlay");
+        const nodes = Array.from(root?.querySelectorAll("li.jstree-node") ?? []);
+        const anchors = Array.from(root?.querySelectorAll(".jstree-anchor") ?? []);
+        return {
+          rootHtml: root?.outerHTML.slice(0, 4_000) ?? "",
+          rootClass: root?.getAttribute("class") ?? "",
+          treeClass: tree?.getAttribute("class") ?? "",
+          treeVisible: tree ? window.getComputedStyle(tree).display !== "none" : false,
+          nodeCount: nodes.length,
+          labels: anchors.map((node) => node.textContent?.trim() ?? "").slice(0, 20),
+          emptyOverlayText: emptyOverlay?.textContent?.trim() ?? "",
+          emptyOverlayVisible: emptyOverlay
+            ? window.getComputedStyle(emptyOverlay).display !== "none" &&
+              !emptyOverlay.classList.contains("hidden")
+            : false,
+        };
+      });
+    }
+
+    try {
+      await filesystem.waitForReady();
+    } finally {
+      const preAssertionDump = await captureFilesystemDump();
+      await testInfo.attach("noir-filesystem-dom.json", {
+        body: JSON.stringify(preAssertionDump, null, 2),
+        contentType: "application/json",
+      });
+    }
+
+    const dump = await captureFilesystemDump();
+
+    expect(dump.nodeCount, "Files panel should expose at least the source root").toBeGreaterThan(0);
+    expect(dump.labels.join("\n")).toMatch(/source folders|main\.nr|src|noir/i);
+    expect(dump.emptyOverlayVisible).toBe(false);
+  });
 });
 
 test.describe("noir example — state and navigation", () => {
   test.setTimeout(90_000);
-  test.use({ sourcePath: "noir_example/", launchMode: "trace" });
+  test.use({ sourcePath: NOIR_EXAMPLE_SOURCE_PATH, launchMode: "trace" });
 
   test("expected event count", async ({ ctPage }) => {
     await loadedEventLog(ctPage);

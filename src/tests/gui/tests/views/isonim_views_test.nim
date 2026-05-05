@@ -688,6 +688,31 @@ suite "IsoNim Session Tabs — structure":
     check tabClass(false) == SessionTabClass
     check tabClass(true) == SessionTabActiveClass
 
+  test "many sessions expose a tab-overflow list affordance":
+    ## Regression guard for the caption bar: once the fixed debugger controls
+    ## and centered omnibox reserve space, the session tabs need a compact
+    ## chevron/list affordance instead of drawing every tab into the caption
+    ## bar.  The visual GUI test verifies real overflow geometry; this headless
+    ## view test documents the DOM hook the renderer must provide.
+    let r = MockRenderer()
+    let panel = renderSessionTabsPanel(
+      r,
+      @[
+        SessionTabRecord(label: "Trace 1"),
+        SessionTabRecord(label: "Trace 2"),
+        SessionTabRecord(label: "Trace 3"),
+        SessionTabRecord(label: "Trace 4"),
+        SessionTabRecord(label: "Trace 5"),
+        SessionTabRecord(label: "Trace 6"),
+        SessionTabRecord(label: "Trace 7"),
+        SessionTabRecord(label: "Trace 8")
+      ],
+      activeIndex = 0)
+
+    let overflow = findByClass(panel, "session-tab-overflow")
+    check overflow != nil
+    check overflow.textContent in [">", "v", "⌄", "⋯"]
+
 proc findAllByTag*(node: MockNode; tag: string): seq[MockNode] =
   ## Find all descendants (including self) with the given tag name.
   if node.kind == mnkElement and node.tag == tag:

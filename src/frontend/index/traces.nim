@@ -154,6 +154,47 @@ proc sendFilesystemWithCategory(main: js, categoryName: cstring, paths: seq[cstr
   let folders = await loadFilesystemWithCategory(categoryName, paths, traceFilesPath, selfContained)
   main.webContents.send "CODETRACER::filesystem-category-loaded", js{ category: categoryName, folders: folders }
 
+proc isAbsoluteFilesystemPath(path: string): bool =
+  if path.len > 0 and (path[0] == '/' or path[0] == '\\'):
+    return true
+  path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/')
+
+proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
+  ## Materialized/self-contained traces can store source files under
+  ## ``trace/files`` using relative paths from ``trace_paths.json``.  In that
+  ## case the trace index's workspace source folder is not a valid root inside
+  ## the self-contained file store, so prefer the relative trace-path folders.
+  result = trace.sourceFolders
+  if not trace.imported:
+    return result
+
+  let (rawTracePaths, err) = await fsReadFileWithErr(
+    nodePath.join(trace.outputFolder, cstring"trace_paths.json"))
+  if not err.isNil:
+    return result
+
+  var folders: seq[cstring] = @[]
+  try:
+    let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
+    for rawPath in tracePaths:
+      let path = $rawPath
+      if path.len == 0 or path.isAbsoluteFilesystemPath:
+        continue
+      let folder = path.parentDir
+      let root =
+        if folder.len == 0 or folder == ".":
+          path
+        else:
+          folder
+      if root.len > 0 and cstring(root) notin folders:
+        folders.add(cstring(root))
+  except:
+    warnPrint "failed to derive filesystem folders from trace_paths.json: ",
+      getCurrentExceptionMsg()
+
+  if folders.len > 0:
+    result = folders
+
 proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
   try:
     let symbols = await loadSymbols(traceFolder)
@@ -204,13 +245,14 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
 
   let traceFilesPath = cstring($trace.outputFolder / "files")
   discard sendFilenames(main, trace.sourceFolders, trace.outputFolder, trace.imported)
+  let filesystemSourceFolders = await sourceFoldersFromTracePaths(trace)
 
   # Check if we have a workspace folder and if trace files are outside it
   if not data.workspaceFolder.isNil and data.workspaceFolder.len > 0:
     # Check if all trace source folders are inside the workspace
     var allInside = true
     var outsideFolders: seq[cstring] = @[]
-    for folder in trace.sourceFolders:
+    for folder in filesystemSourceFolders:
       if not isPathInside(folder, data.workspaceFolder):
         allInside = false
         outsideFolders.add(folder)
@@ -220,10 +262,10 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
       discard sendFilesystemWithCategory(main, cstring"Trace Files", outsideFolders, traceFilesPath, trace.imported)
     else:
       # All trace files are inside workspace, just update the existing tree
-      discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
+      discard sendFilesystem(main, filesystemSourceFolders, traceFilesPath, trace.imported)
   else:
     # No workspace folder set, use normal loading
-    discard sendFilesystem(main, trace.sourceFolders, traceFilesPath, trace.imported)
+    discard sendFilesystem(main, filesystemSourceFolders, traceFilesPath, trace.imported)
 
   discard sendSymbols(main, trace.outputFolder)
 

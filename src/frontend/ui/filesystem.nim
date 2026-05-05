@@ -404,13 +404,16 @@ when defined(js):
     if isoNimFilesystemMountedIds.hasKey(componentId):
       return
 
-    let key = cstring("filesystemComponent-" & $componentId)
+    let keyedId = cstring("filesystemComponent-" & $componentId)
+    let legacyId = cstring"filesystemComponent"
     var retryCount = 0
     proc doMount() =
       if isoNimFilesystemMountedIds.hasKey(componentId):
         return
       retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
+      var container = dom_api.getElementById(dom_api.document, keyedId)
+      if dom_api.isNodeNil(dom_api.Node(container)):
+        container = dom_api.getElementById(dom_api.document, legacyId)
       if dom_api.isNodeNil(dom_api.Node(container)):
         if retryCount > 200:
           cerror "tryMountIsoNimFilesystemPanel: not ready after 200 retries, giving up"
@@ -455,9 +458,8 @@ method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =
   ## the ViewModel layer is enabled.
   self.api = api
   initFilesystemVM()
-  if filesystemComponentRef.isNil:
-    filesystemComponentRef = self
-    tryMountIsoNimFilesystemPanel()
+  filesystemComponentRef = self
+  tryMountIsoNimFilesystemPanel()
 
 proc registerFilesystemComponent*(component: FilesystemComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =

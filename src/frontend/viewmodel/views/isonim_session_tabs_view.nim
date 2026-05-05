@@ -31,6 +31,9 @@ const
   SessionTabLabelClass* = "session-tab-label"
   SessionTabCloseClass* = "session-tab-close"
   SessionTabAddClass* = "session-tab-add"
+  SessionTabOverflowClass* = "session-tab-overflow"
+  SessionTabOverflowMenuClass* = "session-tab-overflow-menu"
+  SessionTabOverflowItemClass* = "session-tab-overflow-item"
   SessionTabIdPrefix* = "session-tab-"
 
 proc tabBarClass*(tabCount: int): string =
@@ -77,6 +80,29 @@ proc renderAddButton(
          onclick = proc() = callbacks.invokeAdd()):
       text "+"
 
+proc renderOverflowButton(r: MockRenderer): MockNode =
+  ui(r):
+    tdiv(class = SessionTabOverflowClass):
+      text "v"
+
+proc renderOverflowMenu(
+    r: MockRenderer;
+    tabs: seq[SessionTabRecord];
+    activeIndex: int;
+    callbacks: SessionTabsCallbacks): MockNode =
+  result = ui(r):
+    tdiv(class = SessionTabOverflowMenuClass):
+      discard
+  for i, tab in tabs:
+    let tabIndex = i
+    let itemClass = SessionTabOverflowItemClass &
+      (if i == activeIndex: " active" else: "")
+    let item = ui(r):
+      tdiv(class = itemClass,
+           onclick = proc() = callbacks.invokeSelect(tabIndex)):
+        text tab.label
+    r.appendChild(result, item)
+
 when defined(js):
   proc renderSessionTab(
       r: WebRenderer;
@@ -111,6 +137,35 @@ when defined(js):
            onclick = proc() = callbacks.invokeAdd()):
         text "+"
 
+  proc renderOverflowMenu(
+      r: WebRenderer;
+      tabs: seq[SessionTabRecord];
+      activeIndex: int;
+      callbacks: SessionTabsCallbacks): isonim_dom.Element =
+    result = ui(r):
+      tdiv(class = SessionTabOverflowMenuClass):
+        discard
+    for i, tab in tabs:
+      let tabIndex = i
+      let itemClass = SessionTabOverflowItemClass &
+        (if i == activeIndex: " active" else: "")
+      let item = ui(r):
+        tdiv(class = itemClass,
+             onclick = proc() = callbacks.invokeSelect(tabIndex)):
+          text tab.label
+      r.appendChild(result, item)
+
+  proc renderOverflowButton(
+      r: WebRenderer): isonim_dom.Element =
+    ui(r):
+      tdiv(class = SessionTabOverflowClass,
+           onclick = proc() =
+             {.emit: """
+               const bar = document.getElementById('session-tab-bar');
+               if (bar) bar.classList.toggle('overflow-open');
+             """.}):
+        text "v"
+
 proc renderSessionTabsPanel*(
     r: MockRenderer;
     tabs: seq[SessionTabRecord];
@@ -122,7 +177,9 @@ proc renderSessionTabsPanel*(
   for i, tab in tabs:
     r.appendChild(result,
       renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))
+  r.appendChild(result, renderOverflowButton(r))
   r.appendChild(result, renderAddButton(r, callbacks))
+  r.appendChild(result, renderOverflowMenu(r, tabs, activeIndex, callbacks))
 
 when defined(js):
   proc renderSessionTabsPanel*(
@@ -137,7 +194,9 @@ when defined(js):
     for i, tab in tabs:
       r.appendChild(result,
         renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))
+    r.appendChild(result, renderOverflowButton(r))
     r.appendChild(result, renderAddButton(r, callbacks))
+    r.appendChild(result, renderOverflowMenu(r, tabs, activeIndex, callbacks))
 
   proc renderSessionTabsInto*(
       r: WebRenderer;
@@ -154,3 +213,16 @@ when defined(js):
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):
       discard isonim_dom.appendChild(containerNode, panelNode.firstChild)
+
+    {.emit: """
+      requestAnimationFrame(() => {
+        const bar = `container`;
+        if (!bar) return;
+        const tabs = Array.from(bar.querySelectorAll('.session-tab'));
+        const add = bar.querySelector('.session-tab-add');
+        const needed = tabs.reduce((sum, el) => sum + el.getBoundingClientRect().width, 0) +
+          (add ? add.getBoundingClientRect().width : 0) + 34;
+        bar.classList.toggle('has-overflow', needed > bar.clientWidth);
+        if (needed <= bar.clientWidth) bar.classList.remove('overflow-open');
+      });
+    """.}

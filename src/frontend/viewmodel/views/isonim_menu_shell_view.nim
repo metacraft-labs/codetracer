@@ -102,6 +102,24 @@ proc invokeSearchResult(callbacks: MenuShellCallbacks; index: int) =
   if not callbacks.onSearchResultClick.isNil:
     callbacks.onSearchResultClick(index)
 
+proc nodeMouseOverHandler(
+    callbacks: MenuShellCallbacks;
+    path: seq[int]): proc() =
+  let capturedPath = path
+  result = proc() = callbacks.invokeNodeMouseOver(capturedPath)
+
+proc nodeClickHandler(
+    callbacks: MenuShellCallbacks;
+    path: seq[int]): proc() =
+  let capturedPath = path
+  result = proc() = callbacks.invokeNodeClick(capturedPath)
+
+proc searchResultClickHandler(
+    callbacks: MenuShellCallbacks;
+    index: int): proc() =
+  let capturedIndex = index
+  result = proc() = callbacks.invokeSearchResult(capturedIndex)
+
 proc invokeMinimize(callbacks: MenuShellCallbacks) =
   if not callbacks.onMinimizeWindow.isNil:
     callbacks.onMinimizeWindow()
@@ -155,8 +173,8 @@ template renderMenuShellImpl(
                       let currentSearchIndex = searchIndex
                       tdiv(
                           class = "menu-search-result",
-                          onclick = proc() =
-                            callbacks.invokeSearchResult(currentSearchIndex)):
+                          onclick = searchResultClickHandler(
+                            callbacks, currentSearchIndex)):
                         tdiv(class = "menu-node-icon"):
                           tdiv(class = "icon " & searchResult.iconClass):
                             discard
@@ -168,17 +186,16 @@ template renderMenuShellImpl(
                 if model.searchQuery.len == 0:
                   for rootIndex in 0 ..< model.rootNodes.len:
                     let node = model.rootNodes[rootIndex]
-                    let nodePath = node.path
                     tdiv(
                         class = "menu-node-container " & node.nodeClass,
-                        onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
+                        onmouseover = nodeMouseOverHandler(callbacks, node.path)):
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
                             class = "menu-element menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath),
-                            onclick = proc() = callbacks.invokeNodeClick(nodePath)):
+                            onmouseover = nodeMouseOverHandler(callbacks, node.path),
+                            onclick = nodeClickHandler(callbacks, node.path)):
                           span(class = "menu-node-icon"):
                             text ""
                           span(
@@ -192,7 +209,7 @@ template renderMenuShellImpl(
                         tdiv(
                             class = "menu-folder menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
+                            onmouseover = nodeMouseOverHandler(callbacks, node.path)):
                           span(class = "menu-node-icon"):
                             tdiv(class = "icon " & node.iconClass):
                               discard
@@ -214,17 +231,16 @@ template renderMenuShellImpl(
                     style = nested.style):
                   for nodeIndex in 0 ..< nested.nodes.len:
                     let node = nested.nodes[nodeIndex]
-                    let nodePath = node.path
                     tdiv(
                         class = "menu-node-container " & node.nodeClass,
-                        onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
+                        onmouseover = nodeMouseOverHandler(callbacks, node.path)):
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
                             class = "menu-element menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath),
-                            onclick = proc() = callbacks.invokeNodeClick(nodePath)):
+                            onmouseover = nodeMouseOverHandler(callbacks, node.path),
+                            onclick = nodeClickHandler(callbacks, node.path)):
                           span(class = "menu-node-icon"):
                             text ""
                           span(
@@ -238,7 +254,7 @@ template renderMenuShellImpl(
                         tdiv(
                             class = "menu-folder menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
+                            onmouseover = nodeMouseOverHandler(callbacks, node.path)):
                           span(class = "menu-node-icon"):
                             tdiv(class = "icon " & node.iconClass):
                               discard
