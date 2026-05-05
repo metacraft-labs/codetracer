@@ -2,6 +2,11 @@ from std / dom import Document
 import
   ui_imports, debug, command
 
+proc closeMenu(self: MenuComponent)
+
+when defined(js):
+  proc requestMenuRender*(self: MenuComponent)
+
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
@@ -12,6 +17,23 @@ when defined(js):
 
   proc isWindowMaximizedForMenu(): bool {.importjs: "(window.outerWidth == screen.availWidth) && (window.outerHeight == screen.availHeight)".} =
     false
+
+  var documentMenuDismissWired = false
+  var activeMenuComponentForDismiss: MenuComponent
+
+  proc handleDocumentMenuMouseDown(ev: dom_api.Event) =
+    var insideMenu = false
+    {.emit: """
+      const target = `ev`.target;
+      `insideMenu` = !!(target && target.closest &&
+        target.closest('#navigation-menu, #menu-main, .menu-nested-elements'));
+    """.}
+    if not insideMenu and not activeMenuComponentForDismiss.isNil and
+        activeMenuComponentForDismiss.active:
+      activeMenuComponentForDismiss.active = false
+      activeMenuComponentForDismiss.closeMenu()
+      activeMenuComponentForDismiss.data.redraw()
+      activeMenuComponentForDismiss.requestMenuRender()
 
 const FONT_UPPERCASE_WIDTH_FACTOR = 1.5
 
@@ -26,9 +48,6 @@ proc menuNodeChildren(node: MenuNode): seq[MenuNode] =
 proc enterElement*(self: MenuComponent, node: MenuNode)
 
 proc runAction*(self: MenuComponent, action: ClientActionHandler, actionData: JsObject = nil)
-
-when defined(js):
-  proc requestMenuRender*(self: MenuComponent)
 
 proc closeMenu(self: MenuComponent) =
   self.activePath = @[]
@@ -423,14 +442,14 @@ when defined(js):
 
     let depth = path.len - 1
     let index = path[^1]
+    self.keyNavigation = false
     if node.kind == MenuElement:
-      if not self.keyNavigation:
-        self.activeIndex = index
-        self.activePath.setLen(depth + 1)
-        if self.activePath[depth] != index:
-          self.activePath[depth] = index
+      self.activeIndex = index
+      self.activePath.setLen(depth + 1)
+      if self.activePath[depth] != index:
+        self.activePath[depth] = index
     else:
-      if node.enabled and not self.keyNavigation:
+      if node.enabled:
         let elements = menuNodeChildren(node)
         if elements.len > 0:
           self.activePath.setLen(depth + 1)
@@ -438,11 +457,6 @@ when defined(js):
           self.activeLength = elements.len
           if self.activePath[depth] != index:
             self.activePath[depth] = index
-
-    if self.keyNavigation and
-        (self.activeIndex != index or
-          (self.activePath.len() > 1 and self.activePath[^1] != index)):
-      self.keyNavigation = false
 
     self.requestMenuRender()
 
@@ -459,6 +473,15 @@ when defined(js):
       self.requestMenuRender()
 
   proc wireMenuKeyboard(container: dom_api.Element; self: MenuComponent) =
+    activeMenuComponentForDismiss = self
+    if not documentMenuDismissWired:
+      documentMenuDismissWired = true
+      {.emit: """
+        document.addEventListener('mousedown', function(ev) {
+          `handleDocumentMenuMouseDown`(ev);
+        }, true);
+      """.}
+
     let nav = dom_api.getElementById(dom_api.document, cstring NavigationMenuId)
     if dom_api.isNodeNil(dom_api.Node(nav)):
       return

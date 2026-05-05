@@ -68,6 +68,9 @@ const CommandPaletteSurfaceClass* = "command-view"
   ## target the active surface independently of the GoldenLayout
   ## container.
 
+const CommandPaletteSurfaceId* = "command-view"
+  ## Legacy id consumed by the global shortcut/mousedown integration.
+
 const CommandPaletteResultsClass* = "command-results"
   ## CSS class on the dropdown results container.  Mirrors the
   ## legacy ``command-results`` block the Karax view rendered for
@@ -97,6 +100,9 @@ const CommandPaletteInputFieldClass* = "command-input-field"
   ## ``command-input`` selector so styles can target the IsoNim
   ## variant separately if needed; both classes coexist in the
   ## stylesheet for the migration window.
+
+const CommandPaletteInputId* = "command-query-text"
+  ## Legacy id used by renderer shortcuts and the command palette bridge.
 
 const CommandPalettePlaceholderClass* = "command-input-placeholder"
   ## CSS class on the autocomplete hint span rendered behind the
@@ -217,9 +223,18 @@ proc renderCommandPalettePanel*(r: MockRenderer;
 
   let panel = ui(r):
     tdiv(ref = outerContainer, class = CommandPaletteContainerClass):
-      tdiv(class = CommandPaletteSurfaceClass):
+      tdiv(id = CommandPaletteSurfaceId, class = CommandPaletteSurfaceClass):
         tdiv(class = "command-input-row"):
-          input(ref = inputField, class = CommandPaletteInputFieldClass)
+          input(ref = inputField, `type` = "text",
+                id = CommandPaletteInputId,
+                name = "command-query",
+                placeholder = "Navigate to file or run a :command",
+                class = CommandPaletteInputFieldClass &
+                  " mousetrap ct-input-com-pal ct-input-search-image",
+                autocomplete = "off",
+                autocorrect = "off",
+                autocapitalize = "off",
+                spellcheck = "false")
           span(ref = placeholderSpan, class = CommandPalettePlaceholderClass):
             text ""
         tdiv(ref = resultsContainer, class = CommandPaletteResultsClass):
@@ -336,9 +351,18 @@ when defined(js):
 
     let panel = ui(r):
       tdiv(ref = outerContainer, class = CommandPaletteContainerClass):
-        tdiv(class = CommandPaletteSurfaceClass):
+        tdiv(id = CommandPaletteSurfaceId, class = CommandPaletteSurfaceClass):
           tdiv(class = "command-input-row"):
-            input(ref = inputField, class = CommandPaletteInputFieldClass)
+            input(ref = inputField, `type` = "text",
+                  id = CommandPaletteInputId,
+                  name = "command-query",
+                  placeholder = "Navigate to file or run a :command",
+                  class = CommandPaletteInputFieldClass &
+                    " mousetrap ct-input-com-pal ct-input-search-image",
+                  autocomplete = "off",
+                  autocorrect = "off",
+                  autocapitalize = "off",
+                  spellcheck = "false")
             span(ref = placeholderSpan, class = CommandPalettePlaceholderClass):
               text ""
           tdiv(ref = resultsContainer, class = CommandPaletteResultsClass):

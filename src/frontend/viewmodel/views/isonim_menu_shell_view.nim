@@ -168,14 +168,17 @@ template renderMenuShellImpl(
                 if model.searchQuery.len == 0:
                   for rootIndex in 0 ..< model.rootNodes.len:
                     let node = model.rootNodes[rootIndex]
-                    tdiv(class = "menu-node-container " & node.nodeClass):
+                    let nodePath = node.path
+                    tdiv(
+                        class = "menu-node-container " & node.nodeClass,
+                        onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
                             class = "menu-element menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(node.path),
-                            onclick = proc() = callbacks.invokeNodeClick(node.path)):
+                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath),
+                            onclick = proc() = callbacks.invokeNodeClick(nodePath)):
                           span(class = "menu-node-icon"):
                             text ""
                           span(
@@ -189,7 +192,7 @@ template renderMenuShellImpl(
                         tdiv(
                             class = "menu-folder menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(node.path)):
+                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
                           span(class = "menu-node-icon"):
                             tdiv(class = "icon " & node.iconClass):
                               discard
@@ -211,14 +214,17 @@ template renderMenuShellImpl(
                     style = nested.style):
                   for nodeIndex in 0 ..< nested.nodes.len:
                     let node = nested.nodes[nodeIndex]
-                    tdiv(class = "menu-node-container " & node.nodeClass):
+                    let nodePath = node.path
+                    tdiv(
+                        class = "menu-node-container " & node.nodeClass,
+                        onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
                             class = "menu-element menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(node.path),
-                            onclick = proc() = callbacks.invokeNodeClick(node.path)):
+                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath),
+                            onclick = proc() = callbacks.invokeNodeClick(nodePath)):
                           span(class = "menu-node-icon"):
                             text ""
                           span(
@@ -232,7 +238,7 @@ template renderMenuShellImpl(
                         tdiv(
                             class = "menu-folder menu-node " &
                               (if node.enabled: "menu-enabled" else: "menu-disabled"),
-                            onmouseover = proc() = callbacks.invokeNodeMouseOver(node.path)):
+                            onmouseover = proc() = callbacks.invokeNodeMouseOver(nodePath)):
                           span(class = "menu-node-icon"):
                             tdiv(class = "icon " & node.iconClass):
                               discard

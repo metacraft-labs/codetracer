@@ -9,10 +9,9 @@
   // It is a sibling element in the DOM but overlaps the #menu visually.
   position fixed
   top 0
-  // Place tabs after the debug controls and omnibox area.
-  // The window-menu (min/max/close) is absolutely positioned at right ~5px
-  // and takes about 110px.  Leave room for it.
+  // Place tabs after the centered omnibox and before the window controls.
   right 120px
+  left calc(50vw + 19em)
   height 38px
   padding 0 4px
   z-index 21  // Above #menu (z-index 20) so tabs are clickable

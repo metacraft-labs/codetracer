@@ -12,9 +12,13 @@
 
   #debug
     -webkit-app-region: no-drag
-    flex: 1 1 auto
+    position: absolute
+    left: 50%
+    transform: translateX(-50%)
+    flex: 0 0 auto
+    width: min(36em, 34vw)
     min-width: 0
-    max-width: calc(100vw - 30em)
+    max-width: 36em
     gap: 0.5em
     align-items: center
     justify-content: center
@@ -139,6 +143,10 @@
     // border: 1px solid NAVIGATION_MENU_BORDER_COLOR
     position: absolute
     top: 2.1rem
+    left: 0
+    z-index: 100
+    -webkit-app-region: no-drag
+    pointer-events: auto
     background-color: NAVIGATION_MENU_BACKGROUND_COLOR
     border-radius: 6px
 
@@ -311,6 +319,9 @@
     position: absolute
     float: left
     font-size: MENU_FONT_SIZE
+    z-index: 101
+    -webkit-app-region: no-drag
+    pointer-events: auto
     // border: 1px NAVIGATION_MENU_BORDER_COLOR solid
     border-radius: 6px
     background-color: NAVIGATION_MENU_BACKGROUND_COLOR

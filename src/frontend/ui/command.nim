@@ -56,7 +56,7 @@ from ../viewmodel/viewmodels/command_palette_vm import
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_command_palette_view import
-    mountIsoNimCommandPalettePanel
+    CommandPaletteInputId, mountIsoNimCommandPalettePanel
 
 proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent)
 
@@ -414,6 +414,46 @@ proc initCommandPaletteVM*() =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc wireLegacyCommandPaletteInput(self: CommandPaletteComponent) =
+    ## The IsoNim view owns the DOM, but the mature command/search/agent
+    ## behavior still lives in CommandPaletteComponent. Keep the real input
+    ## connected to those handlers until the interpreter itself is moved into
+    ## the ViewModel layer.
+    if self.isNil:
+      return
+
+    let input = kdom.document.getElementById(cstring CommandPaletteInputId)
+    if input.isNil:
+      return
+    if cast[bool](input.toJs["__ctCommandPaletteWired"]):
+      self.inputField = cast[dom.Node](input)
+      return
+
+    input.toJs["__ctCommandPaletteWired"] = true
+    self.inputField = cast[dom.Node](input)
+
+    input.addEventListener(cstring"mousedown", proc(ev: Event) =
+      {.emit: "`input`.focus();".}
+      self.data.search(SearchFileRealTime, "".cstring))
+
+    input.addEventListener(cstring"input", proc(ev: Event) =
+      let value = self.inputField.toJs.value.to(cstring)
+      self.onInput(value))
+
+    input.addEventListener(cstring"keydown", proc(ev: Event) =
+      let keyCode = cast[int](ev.toJs.keyCode)
+      if keyCode == DOWN_KEY_CODE:
+        commandSelectNext()
+      elif keyCode == UP_KEY_CODE:
+        commandSelectPrevious()
+      elif keyCode == ENTER_KEY_CODE:
+        self.runQuery()
+      elif keyCode == ESC_KEY_CODE:
+        self.resetCommandPalette()
+      elif keyCode == TAB_KEY_CODE:
+        ev.preventDefault()
+        self.onTab())
+
   proc tryMountIsoNimCommandPalettePanel*() =
     ## Mount the IsoNim Command Palette panel view into the
     ## GoldenLayout-managed container.  The container's id is
@@ -466,6 +506,7 @@ when defined(js):
       # Re-sync any state the legacy component already carries so
       # the freshly-mounted view reflects the latest state.
       if not commandPaletteComponentRef.isNil:
+        wireLegacyCommandPaletteInput(commandPaletteComponentRef)
         syncLegacyCommandPaletteIntoVM(commandPaletteComponentRef)
 
     doMount()
