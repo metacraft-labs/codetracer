@@ -17,13 +17,8 @@ when defined(js):
 
   proc isWindowMaximizedForMenu(): bool {.importjs: "(window.outerWidth == screen.availWidth) && (window.outerHeight == screen.availHeight)".} =
     false
-  proc targetClosestMatches(ev: dom_api.Event; selector: cstring): bool {.importjs: """
-(function(ev, selector) {
-  const target = ev.target;
-  return !!(target && target.closest &&
-    target.closest(selector));
-})(#, #)
-""".}
+  proc eventTarget(ev: dom_api.Event): dom_api.Element {.importjs: "#.target".}
+  proc closestElement(node: dom_api.Element; selector: cstring): dom_api.Element {.importjs: "#.closest(#)".}
   proc addDocumentMouseDownListener(handler: proc(ev: dom_api.Event) {.closure.}) {.importjs: "document.addEventListener('mousedown', #, true)".}
   proc eventKeyCode(ev: dom_api.Event): int {.importjs: "(#.keyCode || 0)".}
   proc stopPropagation(ev: dom_api.Event) {.importcpp: "#.stopPropagation()".}
@@ -33,9 +28,15 @@ when defined(js):
   var documentMenuDismissWired = false
   var activeMenuComponentForDismiss: MenuComponent
 
+  proc eventTargetInsideMenu(ev: dom_api.Event): bool =
+    let target = ev.eventTarget()
+    if dom_api.isNodeNil(dom_api.Node(target)):
+      return false
+    let closest = target.closestElement(cstring"#navigation-menu, #menu-main, .menu-nested-elements")
+    not dom_api.isNodeNil(dom_api.Node(closest))
+
   proc handleDocumentMenuMouseDown(ev: dom_api.Event) =
-    if not ev.targetClosestMatches(cstring"#navigation-menu, #menu-main, .menu-nested-elements") and
-        not activeMenuComponentForDismiss.isNil and
+    if not ev.eventTargetInsideMenu() and not activeMenuComponentForDismiss.isNil and
         activeMenuComponentForDismiss.active:
       activeMenuComponentForDismiss.active = false
       activeMenuComponentForDismiss.closeMenu()

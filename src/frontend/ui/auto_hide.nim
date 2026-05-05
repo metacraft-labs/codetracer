@@ -553,27 +553,30 @@ proc showOverlay*(panel: AutoHidePanel) =
 # Strip rendering (called from layout.nim or a dedicated Karax renderer)
 # ---------------------------------------------------------------------------
 
-proc contentIconJs(content: Content): cstring {.importjs: """
-  (function(c) {
-    switch(c) {
-      case 9:  return '\u{1F4C1}';  // FILES - FILE FOLDER
-      case 6:  return '\u{1F50D}';  // CALLTRACE - MAGNIFYING GLASS
-      case 8:  return '\u{1F4CB}';  // EVENT LOG - CLIPBOARD
-      case 4:  return '\u{1F522}';  // STATE - INPUT NUMBERS
-      case 11: return '\u2699';     // BUILD - GEAR
-      case 21: return '\u26A0';     // PROBLEMS - WARNING SIGN
-      case 20: return '\u{1F50E}';  // SEARCH RESULTS - MAG GLASS RIGHT
-      case 24: return '\u{1F5A5}';  // TERMINAL - DESKTOP COMPUTER
-      case 25: return '\u{1F4BB}';  // SHELL - LAPTOP
-      default: return '\u25A3';     // Generic - SQUARE WITH DOT
-    }
-  })(#)
-""".}
-
 proc contentIcon*(content: Content): cstring =
   ## Return a Unicode icon character for a Content type, used in the
   ## status bar icon zone when strips are in collapsed mode.
-  contentIconJs(content)
+  case content
+  of Content.Filesystem:
+    cstring"\xF0\x9F\x93\x81" # file folder
+  of Content.Calltrace:
+    cstring"\xF0\x9F\x94\x8D" # magnifying glass
+  of Content.EventLog:
+    cstring"\xF0\x9F\x93\x8B" # clipboard
+  of Content.State:
+    cstring"\xF0\x9F\x94\xA2" # input numbers
+  of Content.Build:
+    cstring"\xE2\x9A\x99" # gear
+  of Content.BuildErrors:
+    cstring"\xE2\x9A\xA0" # warning sign
+  of Content.SearchResults:
+    cstring"\xF0\x9F\x94\x8E" # magnifying glass right
+  of Content.TerminalOutput:
+    cstring"\xF0\x9F\x96\xA5" # desktop computer
+  of Content.Shell:
+    cstring"\xF0\x9F\x92\xBB" # laptop
+  else:
+    cstring"\xE2\x96\xA3" # square with dot
 
 
 proc sideAutoHideTabsModel*(edge: AutoHideEdge): tuple[
