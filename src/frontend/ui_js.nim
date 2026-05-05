@@ -8,7 +8,7 @@ import
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command],
   lib/[ jslib, logging ],
-  types, lang, utils, renderer, config, dap,
+  types, lang, utils, renderer, config, dap, edit_mode,
   ../common/ct_logging,
   property_test / test,
   event_helpers,
@@ -1829,13 +1829,12 @@ proc onNoTrace(
   # Open the file AFTER layout is initialized. Folder edit mode has no
   # explicit path, so seed the editor from the indexed project files instead
   # of leaving the workspace looking blank.
+  var filenameStrings: seq[string] = @[]
+  for filename in response.filenames:
+    filenameStrings.add($filename)
   let initialEditPath =
-    if response.path.len > 0:
-      response.path
-    elif data.startOptions.edit and response.filenames.len > 0:
-      cstring(response.filenames[0])
-    else:
-      cstring""
+    cstring(chooseInitialEditPath($response.path, filenameStrings,
+                                  data.startOptions.edit))
   if initialEditPath.len > 0:
     data.openTab(initialEditPath, ViewSource) # , response.lang)
   let ext = $toJsLang(response.lang)

@@ -224,6 +224,8 @@ interface CodetracerOptions {
   launchMode: LaunchMode;
   /** Folder path for edit mode. */
   editFolderPath: string;
+  /** Process cwd for edit mode launches. */
+  editWorkingDirectory: string;
   /** JSON path for deepreview mode. */
   deepreviewJsonPath: string;
 }
@@ -840,7 +842,10 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
   };
 }
 
-async function launchEditMode(folderPath: string): Promise<LaunchResult> {
+async function launchEditMode(
+  folderPath: string,
+  workingDirectory: string = codetracerInstallDir,
+): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
   console.log(`# launching edit mode for ${folderPath}`);
@@ -852,7 +857,7 @@ async function launchEditMode(folderPath: string): Promise<LaunchResult> {
 
   const app = await _electron.launch({
     executablePath: editExe,
-    cwd: codetracerInstallDir,
+    cwd: workingDirectory,
     args: editArgs,
     env: makeCleanEnv(),
   });
@@ -934,6 +939,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   sourcePath: ["", { option: true }],
   launchMode: ["trace" as LaunchMode, { option: true }],
   editFolderPath: ["", { option: true }],
+  editWorkingDirectory: [codetracerInstallDir, { option: true }],
   deepreviewJsonPath: ["", { option: true }],
 
   // Fixtures
@@ -962,7 +968,14 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
 
   ctPage: [
     async (
-      { deploymentMode, sourcePath, launchMode, editFolderPath, deepreviewJsonPath },
+      {
+        deploymentMode,
+        sourcePath,
+        launchMode,
+        editFolderPath,
+        editWorkingDirectory,
+        deepreviewJsonPath,
+      },
       use,
       testInfo,
     ) => {
@@ -1011,7 +1024,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
               "editFolderPath must be set via test.use() for edit launch mode",
             );
           }
-          result = await launchEditMode(editFolderPath);
+          result = await launchEditMode(editFolderPath, editWorkingDirectory);
           break;
         }
         case "deepreview": {

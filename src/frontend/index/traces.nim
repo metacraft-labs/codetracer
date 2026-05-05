@@ -612,6 +612,8 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
       js{error: cstring("No trace found at " & $traceDir &
          ". The .ct file may need to be imported first.")}
 
+proc initEditModeForFolder(sender: js; folder: cstring) {.async.}
+
 proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
   let selection = await selectDir(cstring"Select Folder to Open")
   if selection.len == 0:
@@ -621,18 +623,14 @@ proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
     discard await readProcessOutput(
       codetracerExe.cstring,
       @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($selection)])
-    # Load folder in edit mode
-    mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
-      js{folderPath: selection}
+    await initEditModeForFolder(sender, selection)
 
 proc onLoadRecentFolder*(sender: js, response: jsobject(folderPath=cstring)) {.async.} =
   # Track folder in recent folders (update timestamp)
   discard await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($response.folderPath)])
-  # Load folder in edit mode
-  mainWindow.webContents.send "CODETRACER::load-folder-edit-mode",
-    js{folderPath: response.folderPath}
+  await initEditModeForFolder(sender, response.folderPath)
 
 proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
   ## Show file dialog to select a trace folder/file
@@ -768,24 +766,26 @@ proc sendNotification*(kind: NotificationKind, message: string) =
   let notification = newNotification(kind, message)
   mainWindow.webContents.send "new-notification", notification
 
-proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
+proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   ## Initialize edit mode for a folder - called from welcome screen after folder selection
   # Set the startup options to edit mode
   data.startOptions.edit = true
   data.startOptions.welcomeScreen = false  # No longer in welcome screen mode
-  data.startOptions.folder = response.folder
+  data.startOptions.folder = folder
   data.startOptions.name = cstring""
-  data.workspaceFolder = response.folder
+  data.workspaceFolder = folder
 
   # Load filesystem and filenames for the folder
-  let filesystem = await loadFilesystem(@[response.folder], traceFilesPath=cstring"", selfContained=false)
-  let filenames = await loadFilenames(@[response.folder], traceFolder=cstring"", selfContained=false)
+  let filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
+  let filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
   var functions: seq[Function] = @[]
-  let save = await getSave(@[response.folder], data.config.test)
+  let save = await getSave(@[folder], data.config.test)
   data.save = save
 
-  # Load layout - use edit mode layout since we're opening a folder for editing
-  let layout = await loadLayoutConfig(mainWindow, fmt"{userLayoutDir}/default_edit_layout.json")
+  # Reuse the startup layout already validated by the index process. Loading
+  # a stale user default_edit_layout.json here can abort the welcome-screen
+  # handoff before the renderer receives the no-trace edit-mode payload.
+  let layout = data.layout
 
   # Send no-trace message to switch to edit mode
   mainWindow.webContents.send "CODETRACER::no-trace", js{
@@ -803,7 +803,7 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
   }
 
   # Also load and send launch configs for the workspace
-  let launchConfigs = getLaunchConfigsForWorkspace(response.folder)
+  let launchConfigs = getLaunchConfigsForWorkspace(folder)
   if launchConfigs.len > 0:
     var configsJs: seq[JsObject] = @[]
     for i, config in launchConfigs:
@@ -821,6 +821,9 @@ proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
         env: envJs
       })
     mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+
+proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
+  await initEditModeForFolder(sender, response.folder)
 
 proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject, projectOnly=bool)) {.async.}=
   infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly

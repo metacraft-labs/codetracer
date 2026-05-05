@@ -97,23 +97,29 @@ proc parseArgs* =
         data.startOptions.traceID = -1
       elif arg == cstring"edit":
         data.startOptions.edit = true
-        data.startOptions.name = argsExceptNoSandbox[i + 3]
-        let file = fs.lstatSync(data.startOptions.name)
-        var folder = cstring""
-        let nameStr = $data.startOptions.name
+        if i + 1 >= args.len:
+          errorPrint "expected edit <path>"
+          break
+        let rawEditPath = args[i + 1]
+        let nameStr = $rawEditPath
         # Check for absolute path: Unix (/) or Windows drive letter (e.g. D:\)
         let isAbsolute = nameStr.len > 0 and (nameStr[0] == '/' or
           (nameStr.len >= 3 and nameStr[1] == ':' and (nameStr[2] == '\\' or nameStr[2] == '/')))
-        if isAbsolute:
-          if cast[bool](file.isFile()):
-            folder = nodePath.dirname(data.startOptions.name) & cstring"/"
+        let absoluteEditPath =
+          if isAbsolute:
+            rawEditPath
           else:
-            folder = data.startOptions.name
-            data.startOptions.name = cstring""
-          if folder[folder.len - 1] != '/' and folder[folder.len - 1] != '\\':
-            folder = folder & cstring"/"
+            nodePath.join(electronprocess.cwd(), rawEditPath)
+        let file = fs.lstatSync(absoluteEditPath)
+        var folder = cstring""
+        if cast[bool](file.isFile()):
+          data.startOptions.name = absoluteEditPath
+          folder = nodePath.dirname(absoluteEditPath) & cstring"/"
         else:
-          folder = electronprocess.cwd() & cstring"/"
+          data.startOptions.name = cstring""
+          folder = absoluteEditPath
+        if folder[folder.len - 1] != '/' and folder[folder.len - 1] != '\\':
+          folder = folder & cstring"/"
         data.startOptions.folder = folder
         break
       elif arg == cstring"--shell-ui":
