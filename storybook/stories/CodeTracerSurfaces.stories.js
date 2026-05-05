@@ -1366,6 +1366,28 @@ export function story(kind, name, fixture = "populated", storyName = null) {
   };
 }
 
+export function frameViewerStory() {
+  return {
+    name: "Frame Viewer",
+    render: () => renderSurface("panel", "frame-viewer", "populated", "Frame Viewer"),
+    play: async ({ canvasElement }) => {
+      await ensureComponentsLoaded();
+      await tick();
+
+      const image = canvasElement.querySelector(".frame-viewer-image");
+      await expect(image).toBeTruthy();
+      await expect(image).toHaveAttribute("src", /data:image\/svg\+xml/);
+      await expect(canvasElement.querySelector(".frame-viewer-draw-call")).toBeTruthy();
+
+      const firstSrc = image.getAttribute("src");
+      const next = canvasElement.querySelector(".frame-viewer-next-frame");
+      next.click();
+      await tick();
+      await expect(image.getAttribute("src")).not.toBe(firstSrc);
+    },
+  };
+}
+
 const meta = {
   title: "CodeTracer/Panels",
   includeStories: /^[A-Z]/,
@@ -1395,6 +1417,7 @@ export const Errors = story("panel", "errors", "populated", "Errors");
 export const EventLog = story("panel", "event-log", "populated", "Event Log");
 export const Filesystem = story("panel", "filesystem", "populated", "Filesystem");
 export const Flow = story("panel", "flow", "populated", "Flow");
+export const FrameViewer = frameViewerStory();
 export const LowLevelCode = story("panel", "low-level-code", "populated", "Low Level Code");
 export const NoSource = story("panel", "no-source", "populated", "No Source");
 export const PointList = story("panel", "point-list", "populated", "Point List");

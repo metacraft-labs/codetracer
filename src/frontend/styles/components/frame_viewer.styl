@@ -1,0 +1,161 @@
+.frame-viewer-component
+  display: flex
+  flex-direction: column
+  height: 100%
+  width: 100%
+  min-height: 0
+  box-sizing: border-box
+  overflow: hidden
+  color: TEXT_CONTENT_COLOR
+  background: BACKGROUND_COLOR
+  font-family: "FiraCode"
+  font-size: 13px
+  line-height: 20px
+
+  .frame-viewer-toolbar
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 12px
+    padding: 6px 10px
+    flex: 0 0 auto
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    background: HEADER_PANEL_BACKGROUND_COLOR
+
+  .frame-viewer-player-url
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+    color: VALUE_TYPE_COLOR
+
+  .frame-viewer-frame-controls
+    display: inline-flex
+    align-items: center
+    gap: 6px
+    flex: 0 0 auto
+
+    button
+      width: 24px
+      height: 24px
+      border: 0
+      border-radius: 4px
+      background: HEADER_ELEMENT_BACKGROUND_COLOR
+      color: TEXT_CONTENT_COLOR
+      cursor: pointer
+      font: inherit
+
+  .frame-viewer-frame-label
+    min-width: 8em
+    text-align: center
+    color: TEXT_CONTENT_COLOR
+
+  .frame-viewer-scrubber
+    padding: 6px 10px
+    flex: 0 0 auto
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+
+  .frame-viewer-frame-range
+    width: 100%
+
+  .frame-viewer-body
+    display: grid
+    grid-template-columns: minmax(220px, 1fr) minmax(180px, 280px)
+    min-height: 0
+    flex: 1 1 auto
+
+  .frame-viewer-frame-stage
+    display: flex
+    align-items: center
+    justify-content: center
+    min-width: 0
+    min-height: 0
+    overflow: auto
+    padding: 12px
+    background: #101010
+
+  .frame-viewer-image
+    display: block
+    max-width: 100%
+    max-height: 100%
+    image-rendering: pixelated
+    border: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    background: #000
+    cursor: crosshair
+
+    &[display="none"]
+      display: none
+
+  .frame-viewer-empty,
+  .frame-viewer-loading,
+  .frame-viewer-error
+    color: VALUE_TYPE_COLOR
+    padding: 12px
+
+    &[display="none"]
+      display: none
+
+  .frame-viewer-error
+    color: NOTIFICATION_ERROR_COLOR
+
+  .frame-viewer-side-panel
+    display: flex
+    flex-direction: column
+    min-width: 0
+    min-height: 0
+    border-left: 1px solid ACTIVE_MENU_BACKGROUND
+    background: HEADER_PANEL_BACKGROUND_COLOR
+
+  .frame-viewer-selected-pixel
+    padding: 8px 10px
+    flex: 0 0 auto
+    color: VALUE_TYPE_COLOR
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+
+  .frame-viewer-draw-calls
+    min-height: 0
+    overflow: auto
+    flex: 1 1 auto
+
+  .frame-viewer-draw-calls-header
+    position: sticky
+    top: 0
+    z-index: 1
+    padding: 6px 10px
+    color: VALUE_TYPE_COLOR
+    background: HEADER_PANEL_BACKGROUND_COLOR
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+
+  .frame-viewer-draw-calls-empty
+    padding: 8px 10px
+    color: VALUE_TYPE_COLOR
+
+  .frame-viewer-draw-call
+    display: grid
+    grid-template-columns: 1fr
+    gap: 2px
+    width: 100%
+    min-height: 42px
+    padding: 6px 10px
+    border: 0
+    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    background: transparent
+    color: TEXT_CONTENT_COLOR
+    font: inherit
+    text-align: left
+    cursor: pointer
+
+    &:hover,
+    &.selected
+      background: ACTIVE_ROW
+
+  .frame-viewer-draw-call-name,
+  .frame-viewer-draw-call-pipeline
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .frame-viewer-draw-call-pipeline
+    color: VALUE_TYPE_COLOR
+    font-size: 12px

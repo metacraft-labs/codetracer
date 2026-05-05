@@ -8,6 +8,7 @@ when not defined(js):
 
 import std/[options, strutils, tables]
 
+import isonim/core/async_compat
 import isonim/rxcore
 import isonim/viewmodel
 import isonim/web/dom_api as isonim_dom
@@ -30,6 +31,7 @@ import viewmodel/viewmodels/[
   event_log_vm,
   filesystem_vm,
   flow_vm,
+  frame_viewer_vm,
   low_level_code_vm,
   no_source_vm,
   point_list_vm,
@@ -44,6 +46,7 @@ import viewmodel/viewmodels/[
   terminal_output_vm,
   timeline_vm,
   trace_log_vm,
+  visual_replay_client,
   vcs_vm,
   welcome_screen_vm,
 ]
@@ -67,6 +70,7 @@ import viewmodel/views/[
   isonim_event_log_view,
   isonim_filesystem_view,
   isonim_flow_view,
+  isonim_frame_viewer_view,
   isonim_low_level_code_view,
   isonim_menu_shell_view,
   isonim_no_source_view,
@@ -1064,6 +1068,84 @@ proc mountFlow(container: isonim_dom.Element; fixture: string): DisposeProc =
     mountIsoNimFlow(container, vm)
     return proc() = vm.dispose())
 
+proc storyFrameSvg(frame: int): string =
+  let fill = if frame mod 2 == 0: "%232c7be5" else: "%23d9730d"
+  let accent = if frame mod 2 == 0: "%23f4d35e" else: "%234ade80"
+  "data:image/svg+xml;charset=utf-8," &
+    "<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180' viewBox='0 0 320 180'>" &
+    "<rect width='320' height='180' fill='%230b1020'/>" &
+    "<rect x='24' y='22' width='272' height='136' fill='" & fill & "'/>" &
+    "<circle cx='" & $(92 + frame * 72) & "' cy='88' r='42' fill='" & accent & "'/>" &
+    "<rect x='44' y='132' width='" & $(96 + frame * 48) & "' height='10' fill='%23ffffff' opacity='0.85'/>" &
+    "</svg>"
+
+proc storyDrawCalls(): seq[VisualReplayDrawCall] =
+  @[
+    VisualReplayDrawCall(index: 0, geid: 120'u64,
+                         name: "glClear", pipeline: "Framebuffer clear"),
+    VisualReplayDrawCall(index: 1, geid: 180'u64,
+                         name: "glDrawElements", pipeline: "Mesh pass"),
+    VisualReplayDrawCall(index: 2, geid: 220'u64,
+                         name: "glDrawArrays", pipeline: "Overlay pass"),
+  ]
+
+proc storyFuture[T](value: T): VisualReplayFuture[T] =
+  when defined(js):
+    newPromise proc(resolve: proc(value: T)) =
+      resolve(value)
+  else:
+    newCompletedFuture(value)
+
+proc createStoryFrameViewerClient(): VisualReplayClient =
+  VisualReplayClient(
+    playerUrl: "http://127.0.0.1:56123",
+    getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
+      storyFuture(VisualReplayInfo(frameCount: 2, width: 320, height: 180)),
+    getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
+      let frame = if geid >= 200'u64: 1 else: 0
+      storyFuture(VisualReplayFrame(
+        imageSrc: storyFrameSvg(frame),
+        geid: some(geid),
+        frame: some(frame),
+        width: 320,
+        height: 180,
+      )),
+    getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
+      let normalizedFrame = max(0, min(frame, 1))
+      storyFuture(VisualReplayFrame(
+        imageSrc: storyFrameSvg(normalizedFrame),
+        geid: some(uint64(120 + normalizedFrame * 100)),
+        frame: some(normalizedFrame),
+        width: 320,
+        height: 180,
+      )),
+    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+      storyFuture(storyDrawCalls()),
+  )
+
+proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposeProc =
+  let client = createStoryFrameViewerClient()
+  var rootDisposer: proc()
+  var vm: FrameViewerVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createFrameViewerVM(client)
+    vm.frameCount.val = 2
+    vm.frameWidth.val = 320
+    vm.frameHeight.val = 180
+    vm.currentGeid.val = some(120'u64)
+    vm.currentFrame.val = 0
+    vm.frameImageSrc.val = storyFrameSvg(0)
+    vm.drawCalls.val = storyDrawCalls()
+    mountIsoNimFrameViewer(container, vm)
+    if fixture == "geid":
+      vm.loadFrameForGeid(220'u64)
+      drainCallbacks()
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
 proc mountTraceLog(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createTraceLogVM(store)
@@ -1421,6 +1503,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "event-log": mountEventLog(container, f)
     of "filesystem": mountFilesystem(container, f)
     of "flow": mountFlow(container, f)
+    of "frame-viewer": mountFrameViewer(container, f)
     of "low-level-code": mountLowLevelCode(container, f)
     of "no-source": mountNoSource(container, f)
     of "point-list": mountPointList(container, f)
