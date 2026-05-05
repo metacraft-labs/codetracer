@@ -177,6 +177,37 @@ suite "DebugControlsViewState":
 
       dispose()
 
+  test "toolbar step dispatch prefers legacy DAP bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      var bridgedAction = ""
+      vm.onDapStep = proc(action: cstring) =
+        bridgedAction = $action
+
+      vm.invokeToolbarStep("next")
+      drain()
+
+      check bridgedAction == "next"
+      check mock.receivedCommands.len == 0
+
+      dispose()
+
+  test "toolbar step dispatch falls back to backend with threadId":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createDebugControlsVM(store)
+
+      vm.invokeToolbarStep("next")
+      drain()
+
+      check mock.receivedCommands.len == 1
+      check mock.receivedCommands[0].command == "next"
+      check mock.receivedCommands[0].args["threadId"].getInt == 1
+
+      dispose()
+
 # ---------------------------------------------------------------------------
 # StateViewState — basic tab and loading
 # ---------------------------------------------------------------------------

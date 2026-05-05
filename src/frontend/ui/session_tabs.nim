@@ -25,6 +25,14 @@ when defined(js):
 
   proc toggleClass(el: isonim_dom.Element; className: cstring) {.
     importcpp: "#.classList.toggle(#)".}
+  proc addClass(el: isonim_dom.Element; className: cstring) {.
+    importcpp: "#.classList.add(#)".}
+  proc hasClass(el: isonim_dom.Element; className: cstring): bool {.
+    importcpp: "#.classList.contains(#)".}
+  proc clientWidth(el: isonim_dom.Element): int {.importcpp: "#.clientWidth".}
+
+  var resizeRenderInstalled = false
+  var resizeRenderPending = false
 
 # ---------------------------------------------------------------------------
 # Model derivation and direct rendering
@@ -62,6 +70,26 @@ proc sessionTabCallbacks(data: Data): SessionTabsCallbacks =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc visibleTabCapacity(container: isonim_dom.Element; tabCount: int): int =
+    ## Fit visible tabs from real caption space. Extra sessions stay reachable
+    ## through the overflow menu instead of forcing tabs below their min width.
+    if tabCount <= 0:
+      return 0
+
+    let width = container.clientWidth
+    if width <= 0:
+      return tabCount
+
+    let tabStride = SessionTabMinWidthPx + SessionTabGapPx
+    let capacityWithoutOverflow =
+      max(0, (width - SessionTabButtonWidthPx -
+        SessionTabHorizontalPaddingPx) div tabStride)
+    if tabCount <= capacityWithoutOverflow:
+      return tabCount
+
+    max(0, min(tabCount, (width - (SessionTabButtonWidthPx * 2) -
+      SessionTabHorizontalPaddingPx) div tabStride))
+
   proc ensureSessionTabBarHost(): isonim_dom.Element =
     ## Return the static tab-bar host, creating it if an older shell or test
     ## harness did not include the index.html node.
@@ -75,6 +103,11 @@ when defined(js):
     isonim_dom.setAttribute(result, cstring"id", cstring SessionTabBarId)
     isonim_dom.setAttribute(result, cstring"class", cstring SessionTabBarClass)
 
+    let menu = isonim_dom.getElementById(isonim_dom.document, cstring"menu")
+    if not isonim_dom.isNodeNil(isonim_dom.Node(menu)):
+      discard isonim_dom.appendChild(isonim_dom.Node(menu), isonim_dom.Node(result))
+      return
+
     let rootContainer = isonim_dom.getElementById(
       isonim_dom.document,
       cstring"root-container")
@@ -82,6 +115,21 @@ when defined(js):
       {.emit: "document.body.appendChild(`result`);".}
     else:
       {.emit: "`rootContainer`.parentNode.insertBefore(`result`, `rootContainer`);".}
+
+  proc installResizeRender(data: Data) =
+    if resizeRenderInstalled:
+      return
+    resizeRenderInstalled = true
+    {.emit: """
+      window.addEventListener('resize', function() {
+        if (`resizeRenderPending`) return;
+        `resizeRenderPending` = true;
+        window.setTimeout(function() {
+          `resizeRenderPending` = false;
+          `requestSessionTabsRender`(`data`);
+        }, 50);
+      });
+    """.}
 
   proc renderIsoNimSessionTabs*(data: Data) =
     ## Build the session tab bar DOM using IsoNim WebRenderer and
@@ -98,17 +146,23 @@ when defined(js):
       return
 
     let r = WebRenderer()
+    let records = sessionTabRecords(data)
+    let overflowWasOpen = container.hasClass(cstring"overflow-open")
     renderSessionTabsInto(
       r,
       container,
-      sessionTabRecords(data),
+      records,
       data.activeSessionIndex,
+      visibleTabCapacity(container, records.len),
       sessionTabCallbacks(data))
+    if overflowWasOpen:
+      container.addClass(cstring"overflow-open")
 
   proc requestSessionTabsRender*(data: Data) =
     ## Refresh the direct IsoNim tab-bar mount after explicit session state
     ## changes. This replaces the previous Karax host stub and global redraw
     ## callback path.
+    installResizeRender(data)
     renderIsoNimSessionTabs(data)
 else:
   proc requestSessionTabsRender*(data: Data) =

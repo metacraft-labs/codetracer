@@ -243,9 +243,9 @@ proc ensureSharedRenderers() =
   if not data.ui.menu.isNil:
     discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
   discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)
-  # Session tab bar: index.html owns the static host and ui/session_tabs.nim
-  # creates it defensively for older shells/tests; explicit session/trace
-  # mutation sites refresh the direct IsoNim mount.
+  # Session tab bar: the menu shell owns the flex-row host and
+  # ui/session_tabs.nim creates it defensively for older shells/tests;
+  # explicit session/trace mutation sites refresh the direct IsoNim mount.
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 
   if not data.ui.status.isNil:
@@ -1019,6 +1019,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     window.__ctCreateNewSession = function() {
       `createNewSessionHelper`();
     };
+    window.__ctRequestSessionTabsRender = function() {
+      `requestSessionTabsRender`(`data`);
+    };
     window.__ctForceCollapsedMode = function(enable) {
       `forceCollapsedMode`(enable);
     };
@@ -1137,7 +1140,7 @@ setInitLayoutProc(initLayout)
 proc ensureTabBarRenderer() =
   requestSessionTabsRender(data)
   # Use a short delay as a fallback for paths where the surrounding shell has
-  # just been mounted and the static host may not be available until the next
+  # just been mounted and the flex-row host may not be available until the next
   # tick.
   discard windowSetTimeout(proc() = requestSessionTabsRender(data), 50)
 setEnsureTabBarRendererProc(ensureTabBarRenderer)

@@ -27,6 +27,11 @@ const
   SessionTabBarId* = "session-tab-bar"
   SessionTabBarClass* = "session-tab-bar"
   SessionTabBarSingleClass* = "session-tab-bar single-session"
+  SessionTabBarOverflowClass* = "session-tab-bar has-overflow"
+  SessionTabMinWidthPx* = 96
+  SessionTabButtonWidthPx* = 28
+  SessionTabHorizontalPaddingPx* = 8
+  SessionTabGapPx* = 2
   SessionTabClass* = "session-tab"
   SessionTabActiveClass* = "session-tab active"
   SessionTabLabelClass* = "session-tab-label"
@@ -37,11 +42,22 @@ const
   SessionTabOverflowItemClass* = "session-tab-overflow-item"
   SessionTabIdPrefix* = "session-tab-"
 
-proc tabBarClass*(tabCount: int): string =
+proc normalizedVisibleTabCount*(tabCount, visibleTabCount: int): int =
+  if tabCount <= 0:
+    0
+  elif visibleTabCount < 0:
+    tabCount
+  else:
+    max(0, min(tabCount, visibleTabCount))
+
+proc hasTabOverflow*(tabCount, visibleTabCount: int): bool =
+  normalizedVisibleTabCount(tabCount, visibleTabCount) < tabCount
+
+proc tabBarClass*(tabCount: int; visibleTabCount: int = -1): string =
   if tabCount <= 1:
     SessionTabBarSingleClass
-  elif tabCount > 3:
-    SessionTabBarClass & " has-overflow"
+  elif hasTabOverflow(tabCount, visibleTabCount):
+    SessionTabBarOverflowClass
   else:
     SessionTabBarClass
 
@@ -191,11 +207,14 @@ proc renderSessionTabsPanel*(
     r: MockRenderer;
     tabs: seq[SessionTabRecord];
     activeIndex: int;
+    visibleTabCount: int = -1;
     callbacks: SessionTabsCallbacks = SessionTabsCallbacks()): MockNode =
   let multiSession = tabs.len > 1
+  let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
   ui(r):
-    tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len)):
-      for i, tab in tabs:
+    tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount)):
+      for i in 0 ..< visibleCount:
+        let tab = tabs[i]
         tdiv(class = tabClass(i == activeIndex),
              id = SessionTabIdPrefix & $i,
              onclick = tabSelectHandler(callbacks, i)):
@@ -224,12 +243,15 @@ when defined(js):
       r: WebRenderer;
       tabs: seq[SessionTabRecord];
       activeIndex: int;
+      visibleTabCount: int = -1;
       callbacks: SessionTabsCallbacks = SessionTabsCallbacks()):
       isonim_dom.Element =
     let multiSession = tabs.len > 1
+    let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
     result = ui(r):
-      tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len))
-    for i, tab in tabs:
+      tdiv(id = SessionTabBarId, class = tabBarClass(tabs.len, visibleCount))
+    for i in 0 ..< visibleCount:
+      let tab = tabs[i]
       r.appendChild(result,
         renderSessionTab(r, tab, i, i == activeIndex, multiSession, callbacks))
     r.appendChild(result, renderOverflowButton(r, callbacks))
@@ -241,13 +263,16 @@ when defined(js):
       container: isonim_dom.Element;
       tabs: seq[SessionTabRecord];
       activeIndex: int;
+      visibleTabCount: int = -1;
       callbacks: SessionTabsCallbacks = SessionTabsCallbacks()) =
     let containerNode = isonim_dom.Node(container)
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
-    r.setAttribute(container, "class", tabBarClass(tabs.len))
-    let panel = renderSessionTabsPanel(r, tabs, activeIndex, callbacks)
+    let visibleCount = normalizedVisibleTabCount(tabs.len, visibleTabCount)
+    r.setAttribute(container, "class", tabBarClass(tabs.len, visibleCount))
+    let panel = renderSessionTabsPanel(
+      r, tabs, activeIndex, visibleCount, callbacks)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):
       discard isonim_dom.appendChild(containerNode, panelNode.firstChild)

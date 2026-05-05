@@ -5,18 +5,19 @@
 .session-tab-bar
   display flex
   align-items center
-  // Position the tab bar inside the menu/caption bar area.
-  // It is a sibling element in the DOM but overlaps the #menu visually.
-  position fixed
-  top 0
-  // Place tabs after the centered omnibox and before the window controls.
-  right 120px
-  left calc(2.25em + 26em + min(20em, 20vw) + 0.5em)
-  height 38px
-  padding 0 4px
+  // Flex child of the caption bar: menu/debug controls/omnibox/tabs share
+  // one row, so the new-tab button cannot drift over the omnibox.
+  order 4
+  position relative
+  flex 1 1 auto
+  min-width 56px
+  max-width 100%
+  height 100%
+  padding 0 1px
   z-index 21  // Above #menu (z-index 20) so tabs are clickable
   -webkit-app-region no-drag
   overflow hidden
+  box-sizing border-box
 
   // When there is only a single session, keep the tab bar in the DOM but
   // hide the individual tab labels (the lone tab just shows the trace path
@@ -40,7 +41,8 @@
   display flex
   align-items center
   flex 0 1 160px
-  min-width 36px
+  min-width 96px
+  max-width 160px
   padding 0 10px
   height 26px
   cursor pointer
@@ -68,7 +70,6 @@
   white-space nowrap
   min-width 0
   flex 1 1 auto
-  max-width 160px
 
 .session-tab-close
   margin-left 8px

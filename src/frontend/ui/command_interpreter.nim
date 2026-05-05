@@ -72,6 +72,7 @@ func queryMatchesCommand(query: cstring, command: cstring): bool =
 proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
   let isProgramSearch = queryMatchesCommand(query, "grep")
   let isSymbolSearch = queryMatchesCommand(query, "sym")
+  let isAgentSearch = ($query).startsWith("/ai")
   let isCommand = (not isProgramSearch and not isSymbolSearch) and ($query).startsWith(commandPrefix)
 
   if isCommand and query.len > 1:
@@ -80,9 +81,10 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
     SearchQuery(kind: ProgramQuery, value: cstring(($query).substr(1)))
   elif isSymbolSearch and query.len > 1:
     SearchQuery(kind: SymbolQuery, value: cstring(($query).substr(1)))
-  else:
+  elif isAgentSearch:
     self.parseAgentQuery(cstring($query))
-    # self.parseFileQuery(cstring($query))
+  else:
+    self.parseFileQuery(cstring($query))
 
 proc searchProgram*(self: CommandInterpreter, query: cstring) =
   self.data.services.search.searchProgram(query)

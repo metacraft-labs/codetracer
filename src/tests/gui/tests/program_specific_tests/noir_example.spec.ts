@@ -98,6 +98,57 @@ test.describe("noir example — basic layout", () => {
     expect(dump.labels.join("\n")).toMatch(/main\.nr/i);
     expect(dump.emptyOverlayVisible).toBe(false);
   });
+
+  test("clicking a Files panel file opens it in the editor", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForFilesystemLoaded();
+
+    const filesystem = (await layout.filesystemTabs(true))[0];
+    await filesystem.clickTab();
+    await filesystem.waitForReady();
+
+    const mainNr = await filesystem.nodeByPath(
+      "source folders",
+      "src",
+      "main.nr",
+    );
+    await mainNr.leftClick();
+
+    await expect
+      .poll(async () => {
+        const editors = await layout.editorTabs(true);
+        return editors.some((editor) => editor.fileName === "main.nr");
+      })
+      .toBeTruthy();
+  });
+
+  test("debug toolbar next click reaches the DAP backend", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
+    const layout = new LayoutPage(ctPage);
+
+    await ctPage.evaluate(() => {
+      const appData = (window as any).data;
+      const original = appData.ipc.send.bind(appData.ipc);
+      (window as any).__debugToolbarRequests = [];
+      appData.ipc.send = (channel: unknown, payload: unknown) => {
+        if (String(channel) === "CODETRACER::dap-raw-message") {
+          (window as any).__debugToolbarRequests.push(
+            JSON.parse(JSON.stringify(payload ?? null)),
+          );
+        }
+        return original(channel, payload);
+      };
+    });
+
+    await layout.clickNextButton();
+
+    await expect
+      .poll(async () =>
+        ctPage.evaluate(() => (window as any).__debugToolbarRequests.length),
+      )
+      .toBeGreaterThan(0);
+  });
 });
 
 test.describe("noir example — state and navigation", () => {

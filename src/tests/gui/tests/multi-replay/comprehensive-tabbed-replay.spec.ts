@@ -13,9 +13,9 @@
  * ## Design note: switchSession and the tab bar
  *
  * `switchSession` performs a full GoldenLayout destroy/recreate cycle.
- * The `#session-tab-bar` element lives OUTSIDE `#ROOT` in `index.html`
- * so that `destroyCurrentLayout` (which clears `#ROOT` innerHTML) does
- * not destroy the tab bar DOM.  This allows tab clicks to survive
+ * The `#session-tab-bar` element lives in the caption chrome outside
+ * `#ROOT`, so `destroyCurrentLayout` (which clears `#ROOT` innerHTML)
+ * does not destroy the tab bar DOM. This allows tab clicks to survive
  * session switches.
  *
  * The test suite uses two strategies:

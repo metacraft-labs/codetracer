@@ -442,6 +442,9 @@ when defined(js):
 
     let depth = path.len - 1
     let index = path[^1]
+    let previousActivePath = self.activePath
+    let previousActiveIndex = self.activeIndex
+    let previousActiveLength = self.activeLength
     self.keyNavigation = false
     if node.kind == MenuElement:
       self.activeIndex = index
@@ -458,7 +461,10 @@ when defined(js):
           if self.activePath[depth] != index:
             self.activePath[depth] = index
 
-    self.requestMenuRender()
+    if self.activePath != previousActivePath or
+        self.activeIndex != previousActiveIndex or
+        self.activeLength != previousActiveLength:
+      self.requestMenuRender()
 
   proc handleNodeClick(self: MenuComponent; path: seq[int]) =
     let node = self.nodeAtPath(path)
@@ -552,6 +558,11 @@ when defined(js):
 
     let r = WebRenderer()
     renderMenuShellInto(r, container, model, callbacks)
+    {.emit: """
+      if (window.__ctRequestSessionTabsRender) {
+        window.setTimeout(window.__ctRequestSessionTabsRender, 0);
+      }
+    """.}
     if not self.data.startOptions.shellUi:
       self.debug.requestDebugShellRender()
       if not self.data.ui.commandPalette.isNil:

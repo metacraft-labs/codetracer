@@ -4,11 +4,14 @@
   flex-direction: row
   top: 0
   padding: 0.25em
+  padding-right: 6em
+  box-sizing: border-box
   -webkit-app-region: drag
   user-select: none
-  gap: 0.5em
+  gap: 0.375em
   height: 2.1em
   max-height: 2.1em
+  min-width: 0
 
   #debug
     -webkit-app-region: no-drag
@@ -177,6 +180,13 @@
     align-items: center
     border-radius: 4px
 
+  .menu-node-container
+    display: block
+    width: 100%
+    max-width: 100%
+    box-sizing: border-box
+    -webkit-app-region: no-drag
+    pointer-events: auto
 
   // .menu-node:hover
   //   background-color: NAVIGATION_MENU_ACTIVE_BACKGROUND_COLOR

@@ -170,6 +170,23 @@ suite "FilesystemVM setRoot / clearRoot":
 
       dispose()
 
+  test "openFile invokes the installed editor bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      var openedPath = ""
+      vm.onOpenFile = proc(path: string) =
+        openedPath = path
+
+      vm.openFile("/trace/files/Nargo.toml")
+      check openedPath == "/trace/files/Nargo.toml"
+
+      openedPath = ""
+      vm.openFile("")
+      check openedPath == ""
+
+      dispose()
+
   test "isEmpty stays true when only deep-review is empty":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()

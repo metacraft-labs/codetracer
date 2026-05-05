@@ -89,6 +89,7 @@ type
     results*: Signal[seq[CommandPaletteResultEntry]]
     selectedIndex*: Signal[int]
     activeCommandName*: Signal[string]
+    onResultRun*: proc(index: int)
 
     # -- Derived state --
     hasResults*: Memo[bool]
@@ -172,6 +173,13 @@ proc setSelected*(vm: CommandPaletteVM; index: int) =
   ## handlers (the legacy ``commandSelectNext`` / ``commandSelectPrevious``
   ## helpers).
   vm.selectedIndex.val = clampSelection(index, vm.results.val.len)
+
+proc runResult*(vm: CommandPaletteVM; index: int) =
+  ## Run the selected visible result through the legacy command interpreter
+  ## bridge. The VM still owns selection state; the interpreter owns effects.
+  vm.setSelected(index)
+  if not vm.onResultRun.isNil:
+    vm.onResultRun(vm.selectedIndex.val)
 
 proc setMode*(vm: CommandPaletteVM; mode: CommandPaletteMode) =
   ## Switch between normal and agent mode.  Mirrors the legacy

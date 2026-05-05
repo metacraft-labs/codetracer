@@ -68,6 +68,7 @@ type
 const
   MenuShellRootClass* = "menu-shell"
   NavigationMenuId* = "navigation-menu"
+  MenuShellSessionTabBarId* = "session-tab-bar"
   MenuRootId* = "menu-root"
   MenuMainId* = "menu-main"
   MenuElementsId* = "menu-elements"
@@ -188,7 +189,12 @@ template renderMenuShellImpl(
                     let node = model.rootNodes[rootIndex]
                     tdiv(
                         class = "menu-node-container " & node.nodeClass,
-                        onmouseover = nodeMouseOverHandler(callbacks, node.path)):
+                        onmouseover = nodeMouseOverHandler(callbacks, node.path),
+                        onclick =
+                          if node.kind == MenuRecordElement:
+                            nodeClickHandler(callbacks, node.path)
+                          else:
+                            nil):
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
@@ -233,7 +239,12 @@ template renderMenuShellImpl(
                     let node = nested.nodes[nodeIndex]
                     tdiv(
                         class = "menu-node-container " & node.nodeClass,
-                        onmouseover = nodeMouseOverHandler(callbacks, node.path)):
+                        onmouseover = nodeMouseOverHandler(callbacks, node.path),
+                        onclick =
+                          if node.kind == MenuRecordElement:
+                            nodeClickHandler(callbacks, node.path)
+                          else:
+                            nil):
                       if node.kind == MenuRecordElement:
                         tdiv(
                             id = "menu-element-" & $node.path.len & " " & $node.path[^1],
@@ -272,6 +283,9 @@ template renderMenuShellImpl(
       tdiv(id = "isonim-debug-controls"):
         discard
       tdiv(id = "debug", class = "ct-header"):
+        discard
+
+      tdiv(id = MenuShellSessionTabBarId, class = "session-tab-bar"):
         discard
 
       if model.showWindowMenu:

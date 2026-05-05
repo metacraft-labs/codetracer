@@ -206,7 +206,7 @@ proc openTab*(currentPath: cstring) =
   ## Dispatch a ``ViewSource`` open on ``currentPath`` through the
   ## legacy ``data.openTab`` plumbing.  Exported because the IsoNim
   ## view's bridge invokes it from row-click handlers.
-  data.openTab(data.trace.outputFolder & "files".cstring & currentPath, ViewSource)
+  data.openTab(currentPath, ViewSource)
 
 # ---------------------------------------------------------------------------
 # Module-level VM/store/component slots so the IsoNim mount and any
@@ -224,6 +224,12 @@ var isoNimFilesystemMountedIds {.used.}: JsAssoc[cstring, bool] =
   JsAssoc[cstring, bool]{}
 
 proc tryMountIsoNimFilesystemPanel*()
+
+proc wireFilesystemOpenBridge() =
+  if filesystemVMInstance.isNil:
+    return
+  filesystemVMInstance.onOpenFile = proc(path: string) =
+    openTab(cstring(path))
 
 # ---------------------------------------------------------------------------
 # Component extension (ctInExtension boiler-plate).
@@ -374,6 +380,7 @@ proc initFilesystemVMWithStore*(store: ReplayDataStore) =
     isoNimFilesystemMountedIds = JsAssoc[cstring, bool]{}
   filesystemVMStore = store
   filesystemVMInstance = createFilesystemVM(store)
+  wireFilesystemOpenBridge()
   clog "FilesystemVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimFilesystemPanel()
 
@@ -402,6 +409,7 @@ proc initFilesystemVM*() =
 
   filesystemVMStore = createReplayDataStore(stubBackend)
   filesystemVMInstance = createFilesystemVM(filesystemVMStore)
+  wireFilesystemOpenBridge()
   clog "FilesystemVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimFilesystemPanel()
 

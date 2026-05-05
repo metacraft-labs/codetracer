@@ -234,6 +234,24 @@ suite "WelcomeScreenVM — welcome_screen":
       check vm.activeStartOptions.val.len == 3
       dispose()
 
+  test "welcome start-option keys match legacy button actions":
+    # These keys are the contract between the IsoNim welcome view and
+    # ``WelcomeScreenComponent.triggerWelcomeStartOption``. A typo here makes
+    # the visible button click but miss the legacy IPC/action path.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      vm.setStartOptions(@[
+        makeOption("Record new trace"),
+        makeOption("Open local trace"),
+        makeOption("Open folder"),
+      ])
+
+      check vm.startOptions.val[0].key == "record-new-trace"
+      check vm.startOptions.val[1].key == "open-local-trace"
+      check vm.startOptions.val[2].key == "open-folder"
+      dispose()
+
   test "trace tooltip becomes visible on hover and clears on leave":
     # Spec: "trace tooltip appears on hover" — hover sets hoveredTrace
     # to the trace id; leave clears it back to NO_HOVERED_TRACE.

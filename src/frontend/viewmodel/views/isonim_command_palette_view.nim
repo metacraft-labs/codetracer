@@ -200,7 +200,7 @@ proc renderMockResultRow(r: MockRenderer; vm: CommandPaletteVM;
   let row = ui(r):
     tdiv(class = cls,
          onclick = proc() =
-           vm.setSelected(rowIndex)):
+           vm.runResult(rowIndex)):
       span(class = "command-result-value"):
         text value
       span(class = "command-result-suffix"):
@@ -325,7 +325,7 @@ when defined(js):
     let rowIndex = index
     isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
                                 proc(ev: isonim_dom.Event) =
-      vm.setSelected(rowIndex))
+      vm.runResult(rowIndex))
 
     let valueSpan = createWebTextElement("span", entry.value,
                                          "command-result-value")

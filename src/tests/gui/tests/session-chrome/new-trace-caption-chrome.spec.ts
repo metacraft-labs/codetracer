@@ -294,17 +294,30 @@ async function expectMenuMouseInteraction(page: Page): Promise<void> {
   await expect(targetNode, `hovered menu row '${targetText}' should become active`)
     .toHaveClass(/menu-active-node/, { timeout: 1_000 });
 
-  const hitTestMatchesHoveredNode = await targetNode.evaluate((node) => {
+  const hitTest = await targetNode.evaluate((node) => {
     const rect = node.getBoundingClientRect();
     const hit = document.elementFromPoint(
       rect.left + rect.width / 2,
       rect.top + rect.height / 2,
     );
-    return hit === node || node.contains(hit);
+    return {
+      matches: hit === node || node.contains(hit),
+      nodeText: node.textContent?.trim() ?? "",
+      nodeRect: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      },
+      hitTag: hit?.tagName ?? null,
+      hitId: (hit as HTMLElement | null)?.id ?? null,
+      hitClass: (hit as HTMLElement | null)?.className?.toString() ?? null,
+      hitText: hit?.textContent?.trim().slice(0, 120) ?? null,
+    };
   });
   expect(
-    hitTestMatchesHoveredNode,
-    "hit testing should target the hovered menu row",
+    hitTest.matches,
+    `hit testing should target the hovered menu row: ${JSON.stringify(hitTest)}`,
   ).toBe(true);
 
   await page.mouse.click(box!.x + box!.width + 420, box!.y + box!.height + 420);
@@ -350,7 +363,7 @@ async function createTabs(page: Page, count: number): Promise<void> {
 }
 
 async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
-  await createTabs(page, 8);
+  await createTabs(page, 12);
   const omnibox = page.locator("#debug .command-input-field");
   const toolbar = page.locator("#isonim-debug-controls .isonim-debug-controls");
   const tabBar = page.locator("#session-tab-bar");
@@ -388,16 +401,63 @@ async function expectOmniboxDoesNotOverlapTabs(page: Page): Promise<void> {
     expect(overflowBox!.x + overflowBox!.width).toBeLessThanOrEqual(addBox!.x - 2);
   }, { maxAttempts: 30, delayMs: 100 });
 
+  const overflowMetrics = await page.evaluate(() => {
+    const bar = document.querySelector("#session-tab-bar") as HTMLElement | null;
+    const tabs = Array.from(document.querySelectorAll(".session-tab")) as HTMLElement[];
+    const overflow = document.querySelector(".session-tab-overflow") as HTMLElement | null;
+    const add = document.querySelector(".session-tab-add") as HTMLElement | null;
+    const firstTab = tabs[0];
+    const tabStyle = firstTab ? window.getComputedStyle(firstTab) : null;
+    const barStyle = bar ? window.getComputedStyle(bar) : null;
+    const minWidth = tabStyle ? parseFloat(tabStyle.minWidth) : 0;
+    const padding =
+      barStyle ? parseFloat(barStyle.paddingLeft) + parseFloat(barStyle.paddingRight) : 0;
+    const controlsWidth = (overflow?.offsetWidth ?? 0) + (add?.offsetWidth ?? 0) + padding;
+    const barWidth = bar?.clientWidth ?? 0;
+    return {
+      sessionCount: (window as any).data?.sessions?.length ?? 0,
+      visibleTabCount: tabs.length,
+      barWidth,
+      minWidth,
+      controlsWidth,
+      tabWidths: tabs.map((tab) => tab.getBoundingClientRect().width),
+    };
+  });
+  expect(overflowMetrics.sessionCount).toBe(12);
+  expect(overflowMetrics.visibleTabCount).toBeLessThan(overflowMetrics.sessionCount);
+  expect(overflowMetrics.minWidth).toBeGreaterThanOrEqual(90);
+  expect(
+    overflowMetrics.visibleTabCount * overflowMetrics.minWidth +
+      overflowMetrics.controlsWidth,
+    "visible tabs and tab controls must fit within the caption tab slot at min width",
+  ).toBeLessThanOrEqual(overflowMetrics.barWidth + 2);
+  expect(
+    (overflowMetrics.visibleTabCount + 1) * overflowMetrics.minWidth +
+      overflowMetrics.controlsWidth,
+    "one more visible tab would fall below the required min-width budget",
+  ).toBeGreaterThan(overflowMetrics.barWidth - 2);
+  for (const width of overflowMetrics.tabWidths) {
+    expect(width).toBeGreaterThanOrEqual(overflowMetrics.minWidth - 1);
+  }
+
   await overflow.click();
   const overflowMenu = page.locator(".session-tab-overflow-menu");
   await expect(overflowMenu).toBeVisible({ timeout: 5_000 });
-  await expect(overflowMenu.locator(".session-tab-overflow-item")).toHaveCount(8, {
+  await expect(overflowMenu.locator(".session-tab-overflow-item")).toHaveCount(12, {
     timeout: 5_000,
   });
 
   await overflowMenu.locator(".session-tab-overflow-item").first().click();
   await retry(
     async () => (await getActiveSessionIndex(page)) === 0,
+    { maxAttempts: 30, delayMs: 500 },
+  );
+
+  await overflow.click();
+  await expect(overflowMenu).toBeVisible({ timeout: 5_000 });
+  await overflowMenu.locator(".session-tab-overflow-item").nth(11).click();
+  await retry(
+    async () => (await getActiveSessionIndex(page)) === 11,
     { maxAttempts: 30, delayMs: 500 },
   );
 }

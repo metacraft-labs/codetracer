@@ -120,14 +120,13 @@ proc renderDebugControlsPanel*(r: MockRenderer;
 when defined(js):
 
   template stepClick(vm: DebugControlsVM; actionId: string): proc() =
-    ## Build a click handler that delegates to `vm.onDapStep`. Step
-    ## actions reach the replay backend through the DAP event mediator;
-    ## bypassing the bridge would break stepping until the new
-    ## `ct/step` backend path is wired end-to-end.
+    ## Build a click handler that dispatches through the VM. The VM prefers
+    ## the legacy DAP bridge when installed and falls back to the shared
+    ## backend otherwise, so clicks do not silently disappear during VM
+    ## replacement/mount ordering.
     let action = cstring(actionId)
     proc() =
-      if not vm.onDapStep.isNil:
-        vm.onDapStep(action)
+      vm.invokeToolbarStep($action)
 
   template actionClick(vm: DebugControlsVM; actionId: string): proc() =
     ## Build a click handler for non-step actions (run-to-entry,

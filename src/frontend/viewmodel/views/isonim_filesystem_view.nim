@@ -214,7 +214,9 @@ proc renderMockEntry(r: MockRenderer; vm: FilesystemVM;
          id = (if entry.id.len > 0: "j" & entry.id else: ""),
          onclick = proc() =
            if entry.isFolder:
-             vm.toggleExpanded(path)):
+             vm.toggleExpanded(path)
+           else:
+             vm.openFile(path)):
       span(class = "filesystem-entry-twisty"):
         text twistyText(entry, expandedFlag)
       tdiv(class = iconClass(entry)):
@@ -295,20 +297,15 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     else:
       r.setAttribute(diffContainer, "class", "diff-files-list")
       for diff in diffs:
-        # Copy the row data into local non-lent vars so the inner
-        # closure (no-op today; future bridge wires ``data.openTab``)
-        # can capture them safely.  Without the copy the iterator's
+        # Copy the row data into local non-lent vars so the inner closure can
+        # capture them safely. Without the copy the iterator's
         # ``lent FilesystemDiffEntry`` cannot be captured.
         let rowClsLocal = diffEntryClass(diff)
         let rowLabelLocal = diffEntryLabel(diff)
+        let pathLocal = diff.path
         let row = ui(r):
           tdiv(class = rowClsLocal,
-               onclick = proc() =
-                 # The bridge wires ``vm.openTabHandler`` (if any)
-                 # through ``data.openTab``; on the headless path
-                 # there is nothing to do — clicking is a no-op so
-                 # tests can fire it without side effects.
-                 discard):
+               onclick = proc() = vm.openFile(pathLocal)):
             text rowLabelLocal
         r.appendChild(diffContainer, row)
 
@@ -341,8 +338,10 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
         let nameLocal = file.baseName
         let linesText = "+" & $file.linesAdded & "/-" & $file.linesRemoved
         let coverageText = $file.coverageExecuted & "/" & $file.coverageTotal
+        let pathLocal = file.path
         let row = ui(r):
-          tdiv(class = "deepreview-file-item-compact"):
+          tdiv(class = "deepreview-file-item-compact",
+               onclick = proc() = vm.openFile(pathLocal)):
             span(class = statusFull):
               text statusLocal
             span(class = "deepreview-file-name-compact"):
@@ -424,6 +423,14 @@ when defined(js):
                                   (if nodeId.len > 0: nodeId & "_anchor" else: ""))
     isonim_dom.setAttribute(anchor, cstring"href", cstring"#")
     isonim_dom.setAttribute(anchor, cstring"tabindex", cstring"-1")
+    isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
+                                proc(ev: isonim_dom.Event) =
+      {.emit: "`ev`.preventDefault();".}
+      {.emit: "`ev`.stopPropagation();".}
+      if isFolder:
+        vm.toggleExpanded(entryPath)
+      else:
+        vm.openFile(entryPath))
     let icon = createWebElement("i", jstreeIconClass(entry))
     isonim_dom.setAttribute(icon, cstring"role", cstring"presentation")
     isonim_dom.appendChild(isonim_dom.Node(anchor), isonim_dom.Node(icon))
@@ -514,6 +521,12 @@ when defined(js):
         for diff in diffs:
           let row = createWebTextElement("div", diffEntryLabel(diff),
                                          diffEntryClass(diff))
+          let path = diff.path
+          isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
+                                      proc(ev: isonim_dom.Event) =
+            {.emit: "`ev`.preventDefault();".}
+            {.emit: "`ev`.stopPropagation();".}
+            vm.openFile(path))
           isonim_dom.appendChild(isonim_dom.Node(diffContainer),
                                  isonim_dom.Node(row))
 
@@ -530,6 +543,12 @@ when defined(js):
         for file in drFiles:
           let statusCls = deepReviewStatusClass(file.status)
           let row = createWebElement("div", "deepreview-file-item-compact")
+          let path = file.path
+          isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
+                                      proc(ev: isonim_dom.Event) =
+            {.emit: "`ev`.preventDefault();".}
+            {.emit: "`ev`.stopPropagation();".}
+            vm.openFile(path))
           let statusFull =
             if statusCls.len > 0:
               "deepreview-diff-status-compact " & statusCls

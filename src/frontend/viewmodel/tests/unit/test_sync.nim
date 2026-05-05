@@ -627,6 +627,32 @@ suite "Action dispatch":
       check foundStep
       dispose()
 
+  test "reverse step actions dispatch through debug controls":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      var dbg = store.debugger.val
+      dbg.rrTicks = 10'u64
+      dbg.status = dsIdle
+      store.debugger.val = dbg
+
+      let session = FullSessionViewModel(
+        store: store,
+        debugControlsVM: createDebugControlsVM(store),
+        calltraceVM: createCalltraceVM(store),
+        stateVM: createStateVM(store),
+        eventLogVM: createEventLogVM(store),
+        searchVM: createSearchVM(store),
+      )
+
+      applyAction(session, serializeAction("debugControls", "reverseStepIn"))
+      drain()
+
+      check mock.receivedCommands.len >= 1
+      check mock.receivedCommands[^1].command == "ct/reverseStepIn"
+      check mock.receivedCommands[^1].args["threadId"].getInt == 1
+      dispose()
+
   test "calltrace scroll action updates scroll position":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)

@@ -135,6 +135,8 @@ proc applyAction*(session: FullSessionViewModel, msg: JsonNode) =
     of "stepOut": session.debugControlsVM.stepOut()
     of "continueExecution": session.debugControlsVM.continueExecution()
     of "reverseContinue": session.debugControlsVM.reverseContinue()
+    of "reverseStepIn": session.debugControlsVM.reverseStepIn()
+    of "reverseStepOut": session.debugControlsVM.reverseStepOut()
     else: discard
 
   of "eventLog":

@@ -117,6 +117,10 @@ type
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
     deepReviewActive*: Signal[bool]
     deepReviewFiles*: Signal[seq[FilesystemDeepReviewFile]]
+    onOpenFile*: proc(path: string)
+      ## Called by file-row click handlers. The legacy component wires this to
+      ## ``data.openTab(path, ViewSource)`` so CTFS-imported traces resolve
+      ## through the normal editor source-loading path.
 
     # -- Derived state --
     isEmpty*: Memo[bool]
@@ -238,6 +242,12 @@ proc setDeepReview*(vm: FilesystemVM; active: bool;
     vm.deepReviewFiles.val = @files
   else:
     vm.deepReviewFiles.val = @[]
+
+proc openFile*(vm: FilesystemVM; path: string) =
+  ## Open a file entry through the installed editor bridge.
+  if path.len == 0 or vm.onOpenFile.isNil:
+    return
+  vm.onOpenFile(path)
 
 # ---------------------------------------------------------------------------
 # Factory

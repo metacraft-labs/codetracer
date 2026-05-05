@@ -97,6 +97,37 @@ proc reverseContinue*(vm: DebugControlsVM) =
   if vm.canContinue.val:
     vm.store.requestStep(sdReverseContinue)
 
+proc reverseStepIn*(vm: DebugControlsVM) =
+  ## Issue a reverse step-in command if backward stepping is possible.
+  if vm.canStepBackward.val:
+    vm.store.requestStep(sdReverseStepIn)
+
+proc reverseStepOut*(vm: DebugControlsVM) =
+  ## Issue a reverse step-out command if backward stepping is possible.
+  if vm.canStepBackward.val:
+    vm.store.requestStep(sdReverseStepOut)
+
+proc invokeToolbarStep*(vm: DebugControlsVM; actionId: string) =
+  ## Dispatch a production toolbar step action.
+  ##
+  ## The legacy DAP bridge is still the preferred route because it also emits
+  ## operation-status events.  If the bridge is not installed yet, fall back to
+  ## the shared ReplayDataStore backend so the button still reaches DAP.
+  if not vm.onDapStep.isNil:
+    vm.onDapStep(cstring(actionId))
+    return
+
+  case actionId
+  of "next": vm.stepForward()
+  of "reverse-next": vm.stepBackward()
+  of "step-in": vm.stepIn()
+  of "step-out": vm.stepOut()
+  of "continue": vm.continueExecution()
+  of "reverse-continue": vm.reverseContinue()
+  of "reverse-step-in": vm.reverseStepIn()
+  of "reverse-step-out": vm.reverseStepOut()
+  else: discard
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------

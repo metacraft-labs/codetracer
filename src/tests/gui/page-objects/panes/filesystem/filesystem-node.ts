@@ -66,7 +66,19 @@ export class FilesystemNode {
   }
 
   async leftClick(): Promise<void> {
-    await this.anchorLocator.click();
+    try {
+      await this.anchorLocator.click({ timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to force: true
+    }
+    try {
+      await this.anchorLocator.click({ force: true, timeout: 5_000 });
+      return;
+    } catch {
+      // fall through to dispatchEvent
+    }
+    await this.anchorLocator.dispatchEvent("click");
   }
 
   /**

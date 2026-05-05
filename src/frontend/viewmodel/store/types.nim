@@ -37,6 +37,8 @@ type
     sdStepOut
     sdContinue
     sdReverseContinue
+    sdReverseStepIn
+    sdReverseStepOut
 
   Location* = object
     ## Source-code position.

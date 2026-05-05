@@ -575,6 +575,47 @@ suite "IsoNim Menu Shell — structure":
     check findByClass(panel, "restore") != nil
     check findByClass(panel, "maximize").isNil
 
+  test "clicking menu items and search results invokes callbacks":
+    let r = MockRenderer()
+    var clickedPath: seq[int] = @[]
+    var searchIndex = -1
+    let menuPanel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: true,
+        rootNodes: @[menuNode("Run", @[1], shortcut = "CTRL+R")]),
+      MenuShellCallbacks(
+        onNodeClick: proc(path: seq[int]) = clickedPath = path,
+        onSearchResultClick: proc(index: int) = searchIndex = index))
+
+    let item = findByClass(menuPanel, "menu-element")
+    check item != nil
+    item.fireEvent("click")
+    check clickedPath == @[1]
+
+    let searchPanel = renderMenuShell(
+      r,
+      MenuShellModel(
+        showNavigation: true,
+        active: true,
+        searchQuery: "run",
+        searchResults: @[
+          MenuSearchResultRecord(
+            label: "Run",
+            shortcut: "CTRL+R",
+            iconClass: "run",
+            active: true)
+        ]),
+      MenuShellCallbacks(
+        onNodeClick: proc(path: seq[int]) = clickedPath = path,
+        onSearchResultClick: proc(index: int) = searchIndex = index))
+
+    let result = findByClass(searchPanel, "menu-search-result")
+    check result != nil
+    result.fireEvent("click")
+    check searchIndex == 0
+
   test "shell UI model can render menu without window controls":
     let r = MockRenderer()
     let panel = renderMenuShell(
@@ -616,6 +657,7 @@ suite "IsoNim Menu Shell — structure":
     check debugHost != nil
     check debugHost.attributes["class"] == DebugShellClass
     check toolbarHost != nil
+    check findById(panel, SessionTabBarId) != nil
     check findByClass(panel, WindowMenuClass) != nil
 
 suite "IsoNim Session Tabs — structure":
@@ -688,7 +730,7 @@ suite "IsoNim Session Tabs — structure":
     check tabClass(false) == SessionTabClass
     check tabClass(true) == SessionTabActiveClass
 
-  test "many sessions expose a tab-overflow list affordance":
+  test "many sessions cap visible tabs and expose overflow menu items":
     ## Regression guard for the caption bar: once the fixed debugger controls
     ## and centered omnibox reserve space, the session tabs need a compact
     ## chevron/list affordance instead of drawing every tab into the caption
@@ -707,11 +749,41 @@ suite "IsoNim Session Tabs — structure":
         SessionTabRecord(label: "Trace 7"),
         SessionTabRecord(label: "Trace 8")
       ],
-      activeIndex = 0)
+      activeIndex = 6,
+      visibleTabCount = 3)
 
+    check panel.attributes["class"] == SessionTabBarOverflowClass
+    let tabs = findAllByClass(panel, SessionTabClass)
+    check tabs.len == 3
     let overflow = findByClass(panel, "session-tab-overflow")
     check overflow != nil
     check overflow.textContent in [">", "v", "⌄", "⋯"]
+    let overflowItems = findAllByClass(panel, SessionTabOverflowItemClass)
+    check overflowItems.len == 8
+    check overflowItems[6].attributes["class"].contains("active")
+
+  test "overflow menu items switch hidden tabs":
+    var selected: seq[int] = @[]
+    let callbacks = SessionTabsCallbacks(
+      onSelect: proc(index: int) = selected.add(index))
+    let r = MockRenderer()
+    let panel = renderSessionTabsPanel(
+      r,
+      @[
+        SessionTabRecord(label: "Trace 1"),
+        SessionTabRecord(label: "Trace 2"),
+        SessionTabRecord(label: "Trace 3"),
+        SessionTabRecord(label: "Trace 4")
+      ],
+      activeIndex = 0,
+      visibleTabCount = 2,
+      callbacks = callbacks)
+
+    let visibleTabs = findAllByClass(panel, SessionTabClass)
+    check visibleTabs.len == 2
+    let overflowItems = findAllByClass(panel, SessionTabOverflowItemClass)
+    overflowItems[3].fireEvent("click")
+    check selected == @[3]
 
 proc findAllByTag*(node: MockNode; tag: string): seq[MockNode] =
   ## Find all descendants (including self) with the given tag name.
@@ -8144,6 +8216,58 @@ suite "IsoNim Filesystem Panel — tree rendering":
 
       dispose()
 
+  test "clicking a file row invokes the open-file bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+      var openedPath = ""
+      vm.onOpenFile = proc(path: string) = openedPath = path
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setRoot(makeFsRoot(@[
+        makeFsEntry("foo.nim", path = "/trace/files/foo.nim"),
+      ]))
+
+      let row = findByClass(panel, "filesystem-entry")
+      row.fireEvent("click")
+      check openedPath == "/trace/files/foo.nim"
+
+      dispose()
+
+  test "clicking diff and deep-review file rows invoke the open-file bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+      var openedPaths: seq[string] = @[]
+      vm.onOpenFile = proc(path: string) = openedPaths.add(path)
+
+      let panel = renderFilesystemPanel(r, vm)
+      vm.setDiffEntries(@[
+        FilesystemDiffEntry(path: "/trace/files/changed.nim", zebra: false),
+      ])
+      vm.setDeepReview(true, @[
+        FilesystemDeepReviewFile(
+          path: "/trace/files/review.nim",
+          baseName: "review.nim",
+          status: "M",
+          linesAdded: 1,
+          linesRemoved: 0,
+          coverageExecuted: 1,
+          coverageTotal: 1),
+      ])
+
+      findByClass(panel, "diff-file-path").fireEvent("click")
+      findByClass(panel, "deepreview-file-item-compact").fireEvent("click")
+
+      check openedPaths == @[
+        "/trace/files/changed.nim",
+        "/trace/files/review.nim",
+      ]
+
+      dispose()
+
   test "diff-class modifiers thread through to the row":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -8684,6 +8808,27 @@ suite "IsoNim Command Palette Panel — interactions":
 
       rows[1].fireEvent("click")
       check vm.selectedIndex.val == 1
+
+      dispose()
+
+  test "clicking a row invokes the run-result bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCommandPaletteVM(store)
+      let r = MockRenderer()
+      var ranIndex = -1
+      vm.onResultRun = proc(index: int) = ranIndex = index
+
+      let panel = renderCommandPalettePanel(r, vm)
+      vm.setResults([
+        makeCpEntry("alpha"),
+        makeCpEntry("beta"),
+      ])
+
+      let rows = findAllByClass(panel, "command-result")
+      rows[1].fireEvent("click")
+      check vm.selectedIndex.val == 1
+      check ranIndex == 1
 
       dispose()
 
@@ -9569,7 +9714,7 @@ suite "IsoNim Welcome Screen — welcome mode":
 
       dispose()
 
-  test "click callbacks surface recent-trace, folder, and option actions":
+  test "click callbacks surface recent-trace, folder, and start-option actions":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
@@ -9577,25 +9722,35 @@ suite "IsoNim Welcome Screen — welcome mode":
 
       vm.setRecentTraces(@[makeWelcomeTrace(11, "/bin/python")])
       vm.setRecentFolders(@[makeWelcomeFolder(3, "demo", "/tmp/demo")])
-      vm.setStartOptions(@[makeWelcomeOption("Record new trace")])
+      vm.setStartOptions(@[
+        makeWelcomeOption("Record new trace"),
+        makeWelcomeOption("Open local trace"),
+        makeWelcomeOption("Open folder"),
+      ])
 
       var clickedTrace = -1
       var clickedFolder = ""
-      var clickedOption = ""
+      var clickedOptions: seq[string] = @[]
       let callbacks = WelcomeScreenCallbacks(
         onRecentTraceClick: proc(traceId: int) = clickedTrace = traceId,
         onRecentFolderClick: proc(folderPath: string) = clickedFolder = folderPath,
-        onStartOptionClick: proc(key: string) = clickedOption = key
+        onStartOptionClick: proc(key: string) = clickedOptions.add(key)
       )
 
       let panel = renderWelcomeScreenPanel(r, vm, callbacks)
       findByClass(panel, "recent-trace").fireEvent("click")
       findByClass(panel, "recent-folder").fireEvent("click")
-      findAllByClass(panel, "start-option")[0].fireEvent("click")
+      let options = findAllByClass(panel, "start-option")
+      for option in options:
+        option.fireEvent("click")
 
       check clickedTrace == 11
       check clickedFolder == "/tmp/demo"
-      check clickedOption == "record-new-trace"
+      check clickedOptions == @[
+        "record-new-trace",
+        "open-local-trace",
+        "open-folder",
+      ]
 
       dispose()
 

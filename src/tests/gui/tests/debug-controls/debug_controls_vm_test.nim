@@ -36,7 +36,8 @@ import viewmodels/debug_controls_vm
 
 
 const DAP_STEP_COMMANDS = ["next", "stepBack", "stepIn", "stepOut",
-                            "continue", "reverseContinue"].toHashSet
+                            "continue", "reverseContinue",
+                            "ct/reverseStepIn", "ct/reverseStepOut"].toHashSet
 
 proc isStepCommand(command: string): bool =
   ## Return true if the command is any of the DAP step/continue commands.
@@ -457,6 +458,49 @@ suite "DebugControlsVM step actions":
         let cmd = mock.receivedCommands[i]
         if cmd.command == "reverseContinue":
           check cmd.args["direction"].getStr == "sdReverseContinue"
+          found = true
+          break
+      check found
+
+      dispose()
+
+  test "toolbar click prefers DAP bridge callback when installed":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      var clickedAction = ""
+      vm.onDapStep = proc(action: cstring) = clickedAction = $action
+      drain()
+
+      store.setDebuggerStatus(dsIdle)
+      let cmdCountBefore = mock.receivedCommands.len
+
+      vm.invokeToolbarStep("next")
+      drain()
+
+      check clickedAction == "next"
+      check mock.receivedCommands.len == cmdCountBefore
+
+      dispose()
+
+  test "toolbar click falls back to store request when bridge is absent":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      drain()
+
+      store.setDebuggerStatus(dsIdle)
+      let cmdCountBefore = mock.receivedCommands.len
+
+      vm.invokeToolbarStep("next")
+      drain()
+
+      var found = false
+      for i in cmdCountBefore ..< mock.receivedCommands.len:
+        let cmd = mock.receivedCommands[i]
+        if cmd.command == "next":
+          check cmd.args["direction"].getStr == "sdForward"
+          check cmd.args["threadId"].getInt == 1
           found = true
           break
       check found

@@ -174,6 +174,31 @@ proc triggerFolderClick(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
   else:
     vm.enterEditMode(folderPath)
 
+proc folderClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
+                        folderPath: string): proc() =
+  let capturedPath = folderPath
+  result = proc() = triggerFolderClick(vm, callbacks, capturedPath)
+
+proc traceClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
+                       traceId: int): proc() =
+  let capturedTraceId = traceId
+  result = proc() = triggerTraceClick(vm, callbacks, capturedTraceId)
+
+proc traceMouseOverHandler(vm: WelcomeScreenVM; traceId: int): proc() =
+  let capturedTraceId = traceId
+  result = proc() = vm.hoverTrace(capturedTraceId)
+
+proc startOptionClickHandler(
+    vm: WelcomeScreenVM;
+    callbacks: WelcomeScreenCallbacks;
+    opt: WelcomeStartOptionRecord): proc() =
+  let capturedOpt = opt
+  result = proc() = triggerStartOption(vm, callbacks, capturedOpt)
+
+proc startOptionMouseOverHandler(vm: WelcomeScreenVM; key: string): proc() =
+  let capturedKey = key
+  result = proc() = vm.hoverOption(capturedKey)
+
 proc parseArgsInput*(value: string): seq[string] =
   if value.strip.len == 0:
     @[]
@@ -214,8 +239,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                     let path = folderCopy.path
                     tdiv(class = "recent-folder-container"):
                       tdiv(class = "recent-folder",
-                           onclick = proc() =
-                             triggerFolderClick(vm, callbacks, path)):
+                           onclick = folderClickHandler(vm, callbacks, path)):
                         tdiv(class = "recent-folder-name"):
                           text folderCopy.name
                 else:
@@ -239,10 +263,8 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                     let traceId = traceCopy.id
                     tdiv(class = "recent-trace-container"):
                       tdiv(class = "recent-trace",
-                           onclick = proc() =
-                             triggerTraceClick(vm, callbacks, traceId),
-                           onmouseover = proc() =
-                             vm.hoverTrace(traceId),
+                           onclick = traceClickHandler(vm, callbacks, traceId),
+                           onmouseover = traceMouseOverHandler(vm, traceId),
                            onmouseleave = proc() =
                              vm.clearHoveredTrace()):
                         tdiv(class = "recent-trace-title"):
@@ -265,10 +287,8 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
             let optCopy = opt
             button(class = "ct-button-sm-tertiary " &
                            startOptionClass(optCopy, hovered),
-                   onclick = proc() =
-                     triggerStartOption(vm, callbacks, optCopy),
-                   onmouseover = proc() =
-                     vm.hoverOption(optCopy.key),
+                   onclick = startOptionClickHandler(vm, callbacks, optCopy),
+                   onmouseover = startOptionMouseOverHandler(vm, optCopy.key),
                    onmouseleave = proc() =
                      vm.clearHoveredOption()):
               text optCopy.name
@@ -519,8 +539,7 @@ when defined(js):
                       let path = folderCopy.path
                       tdiv(class = "recent-folder-container"):
                         tdiv(class = "recent-folder",
-                             onclick = proc() =
-                               triggerFolderClick(vm, callbacks, path)):
+                             onclick = folderClickHandler(vm, callbacks, path)):
                           tdiv(class = "recent-folder-name"):
                             text folderCopy.name
                   else:
@@ -544,10 +563,8 @@ when defined(js):
                       let traceId = traceCopy.id
                       tdiv(class = "recent-trace-container"):
                         tdiv(class = "recent-trace",
-                             onclick = proc() =
-                               triggerTraceClick(vm, callbacks, traceId),
-                             onmouseover = proc() =
-                               vm.hoverTrace(traceId),
+                             onclick = traceClickHandler(vm, callbacks, traceId),
+                             onmouseover = traceMouseOverHandler(vm, traceId),
                              onmouseleave = proc() =
                                vm.clearHoveredTrace()):
                           tdiv(class = "recent-trace-title"):
@@ -570,10 +587,8 @@ when defined(js):
               let optCopy = opt
               button(class = "ct-button-sm-tertiary " &
                              startOptionClass(optCopy, hovered),
-                     onclick = proc() =
-                       triggerStartOption(vm, callbacks, optCopy),
-                     onmouseover = proc() =
-                       vm.hoverOption(optCopy.key),
+                     onclick = startOptionClickHandler(vm, callbacks, optCopy),
+                     onmouseover = startOptionMouseOverHandler(vm, optCopy.key),
                      onmouseleave = proc() =
                        vm.clearHoveredOption()):
                 text optCopy.name

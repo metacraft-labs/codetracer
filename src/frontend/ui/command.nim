@@ -344,8 +344,8 @@ proc syncLegacyCommandPaletteIntoVM*(self: CommandPaletteComponent) =
   if commandPaletteVMInstance.isNil or self.isNil:
     return
   commandPaletteVMInstance.setResults(legacyResultsToVm(self.results))
-  commandPaletteVMInstance.setSelected(self.selected)
   commandPaletteVMInstance.setQuery(safeStr(self.inputValue))
+  commandPaletteVMInstance.setSelected(self.selected)
   commandPaletteVMInstance.setInputPlaceholder(safeStr(self.inputPlaceholder))
   commandPaletteVMInstance.setActiveCommandName(safeStr(self.activeCommandName))
   commandPaletteVMInstance.setMode(legacyModeToVm(self))
@@ -360,6 +360,16 @@ proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent) =
   ## carrier, while the VM and direct mount own the visible DOM.
   self.syncLegacyCommandPaletteIntoVM()
   tryMountIsoNimCommandPalettePanel()
+
+proc wireCommandPaletteResultRunner(self: CommandPaletteComponent) =
+  if commandPaletteVMInstance.isNil or self.isNil:
+    return
+  commandPaletteVMInstance.onResultRun = proc(index: int) =
+    if index >= 0 and index < self.results.len:
+      self.selected = index
+      self.interpreter.runCommandPanelResult(self.results[index])
+      self.close()
+      self.resetCommandPalette()
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -378,6 +388,8 @@ proc initCommandPaletteVMWithStore*(store: ReplayDataStore) =
     isoNimCommandPaletteMountedIds = JsAssoc[int, bool]{}
   commandPaletteVMStore = store
   commandPaletteVMInstance = createCommandPaletteVM(store)
+  if not commandPaletteComponentRef.isNil:
+    commandPaletteComponentRef.wireCommandPaletteResultRunner()
   clog "CommandPaletteVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimCommandPalettePanel()
 
@@ -406,6 +418,8 @@ proc initCommandPaletteVM*() =
 
   commandPaletteVMStore = createReplayDataStore(stubBackend)
   commandPaletteVMInstance = createCommandPaletteVM(commandPaletteVMStore)
+  if not commandPaletteComponentRef.isNil:
+    commandPaletteComponentRef.wireCommandPaletteResultRunner()
   clog "CommandPaletteVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimCommandPalettePanel()
 
@@ -529,4 +543,5 @@ method register*(self: CommandPaletteComponent, api: MediatorWithSubscribers) =
   self.api = api
   initCommandPaletteVM()
   commandPaletteComponentRef = self
+  self.wireCommandPaletteResultRunner()
   tryMountIsoNimCommandPalettePanel()

@@ -412,6 +412,8 @@ proc stepDirectionToDapCommand*(direction: StepDirection): string =
   of sdStepOut:          "stepOut"
   of sdContinue:         "continue"
   of sdReverseContinue:  "reverseContinue"
+  of sdReverseStepIn:    "ct/reverseStepIn"
+  of sdReverseStepOut:   "ct/reverseStepOut"
 
 proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   ## Send a step command to the backend.
@@ -439,7 +441,12 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   )
 
   let command = stepDirectionToDapCommand(direction)
-  let args = %*{"direction": dirStr}
+  let threadId =
+    if current.threadId == 0'u32:
+      1
+    else:
+      current.threadId.int
+  let args = %*{"direction": dirStr, "threadId": threadId}
   let fut = store.backend.send(command, args)
 
   let s = store

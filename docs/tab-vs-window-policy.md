@@ -70,6 +70,18 @@ flag set last wins, but the launch code checks `--new-tab` first).
 6. The main process's `onLoadRecentTrace` handler starts the replay
    backend and loads the trace into the new session.
 
+### Caption tab layout
+
+Session tabs are part of the caption bar flex row with the menu,
+debug controls, omnibox, new-tab button, overflow chevron, and window
+controls. These controls must not overlap.
+
+The tab strip may only render as many visible tabs as can fit at the
+tab minimum width. When there is not enough caption space for another
+minimum-width tab, additional sessions remain available through the
+overflow chevron menu. Selecting a session from that menu must switch
+the active tab.
+
 ### Flow for `"window"` policy
 
 When the policy is `"window"`, or when no policy env var is set and the

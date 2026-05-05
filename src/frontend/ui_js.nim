@@ -804,9 +804,11 @@ proc menuNodeChildren(node: MenuNode): seq[MenuNode] =
     node.elements
 
 proc getCommand(node: MenuNode, names: var JsAssoc[cstring, Command], parent: Command = nil) =
-  # check if node has children and is enabled
+  if node.isNil or not node.enabled:
+    return
+
   let children = menuNodeChildren(node)
-  if children.len == 0 and node.enabled:
+  if children.len == 0:
 
     # add node as a subcommand to its parent if it  has one
     if not parent.isNil:
@@ -836,6 +838,31 @@ proc getCommands(node: MenuNode): JsAssoc[cstring, Command] =
   var names = JsAssoc[cstring, Command]{}
   node.getCommand(names)
   return names
+
+proc refreshCommandPaletteMenuIndex*(data: Data) =
+  if data.isNil or data.ui.isNil or data.ui.menuNode.isNil:
+    return
+  if data.ui.commandPalette.isNil or data.ui.commandPalette.interpreter.isNil:
+    return
+
+  data.ui.commandPalette.interpreter.commands = getCommands(data.ui.menuNode)
+  data.ui.commandPalette.interpreter.commandsPrepared = @[]
+  for key, command in data.ui.commandPalette.interpreter.commands:
+    data.ui.commandPalette.interpreter.commandsPrepared.add(
+      fuzzysort.prepare(key))
+
+proc refreshCommandPaletteFileIndex*(data: Data) =
+  if data.isNil or data.ui.isNil:
+    return
+  if data.ui.commandPalette.isNil or data.ui.commandPalette.interpreter.isNil:
+    return
+
+  data.ui.commandPalette.interpreter.files = JsAssoc[cstring, cstring]{}
+  data.ui.commandPalette.interpreter.filesPrepared = @[]
+  for path in data.services.debugger.paths:
+    data.ui.commandPalette.interpreter.files[path] = path
+    data.ui.commandPalette.interpreter.filesPrepared.add(
+      fuzzysort.prepare(path))
 
 proc followMouse(event: dom.Event) =
   # dont support ancient IE
@@ -1254,6 +1281,7 @@ proc onTraceLoaded(
   data.save = response.save
   data.save.fileMap = JsAssoc[cstring, int]{}
   data.ui.menuNode = data.webTechMenu(baseName(response.trace.program))
+  data.refreshCommandPaletteMenuIndex()
   if not data.ui.menu.isNil:
     data.ui.menu.requestMenuRender()
 
@@ -1261,15 +1289,6 @@ proc onTraceLoaded(
 
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
-
-  # create Command objects from main menuNode — guard against nil
-  # commandPalette which can happen in web mode when createUIComponents
-  # fails due to a layout config serialization issue.
-  if not data.ui.commandPalette.isNil and not data.ui.commandPalette.interpreter.isNil:
-    data.ui.commandPalette.interpreter.commands = getCommands(data.ui.menuNode)
-    # prepare command for fast search with fuzzysort
-    for key, command in data.ui.commandPalette.interpreter.commands:
-      data.ui.commandPalette.interpreter.commandsPrepared.add(fuzzysort.prepare(key))
 
   duration("traceLoaded")
 
@@ -1355,6 +1374,7 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
   data.startOptions.shellUi = true
   data.config = response.config
   data.ui.menuNode = data.webTechMenu(cstring"Shell")
+  data.refreshCommandPaletteMenuIndex()
   loadTheme(data.config.theme)
   var shellComponent = data.shellComponent(0)
 
@@ -1519,13 +1539,7 @@ proc onFilenamesLoaded(
 
   data.services.debugger.paths = response.filenames
 
-  # add file paths to command interpreter
-  for path in data.services.debugger.paths:
-    let fileName = baseName(path)
-    data.ui.commandPalette.interpreter.files[path] = path
-
-    # prepare file paths for fast srearch widh fuzzysort
-    data.ui.commandPalette.interpreter.filesPrepared.add(fuzzysort.prepare(path))
+  data.refreshCommandPaletteFileIndex()
 
   data.redraw()
 
@@ -1610,6 +1624,9 @@ proc onLaunchConfigsLoaded(
   data.ui.launchConfigs = response.configs
   # Reconstruct menu - webTechMenu now includes launch configs automatically
   data.ui.menuNode = data.webTechMenu(cstring"CodeTracer")
+  data.refreshCommandPaletteMenuIndex()
+  if not data.ui.menu.isNil:
+    data.ui.menu.requestMenuRender()
   data.redraw()
 
 proc onUpdatePathContent(
@@ -1735,6 +1752,8 @@ proc onNoTrace(
   # Create UI components if not already created (needed for menu, status bar, etc.)
   # This must happen before tryInitLayout since layout initialization uses these components
   data.createUIComponents()
+  data.refreshCommandPaletteMenuIndex()
+  data.refreshCommandPaletteFileIndex()
 
   # Check if coming from welcome screen (where layout was already initialized)
   let wasFromWelcomeScreen = not data.ui.layout.isNil
