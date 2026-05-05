@@ -10,6 +10,7 @@ import vm_test_helpers
 import isonim/core/computation
 import isonim/core/signals
 import app_vm
+import app_vm_bridge
 import backend/mock_backend
 import session_vm
 import store/types
@@ -102,3 +103,24 @@ suite "CodeTracerAppVM":
     drain()
     check h.mocks.items[0].findCommand("next").isNone
     check h.mocks.items[1].findCommand("next").isSome
+
+  test "runtime bridge exposes app operations to legacy adapters":
+    resetAppVMBridgeForTests()
+    let mock = newMockBackendService(autoRespond = true)
+    let session = createSessionVM(mock.toBackendService())
+    initAppVMBridge(session)
+
+    check activeAppVM.sessionCount == 1
+    let files = @["/workspace/project/src/main.nim"]
+    check noteFolderOpened("/workspace/project", files)
+    check activeAppVM.activeSession.kind.val == askEdit
+    check activeAppVM.activeSession.openFiles.val == files
+
+    check noteWelcomeTabCreated() == 1
+    check activeAppVM.activeSessionIndex.val == 1
+    check noteSessionSwitched(0)
+    check activeAppVM.activeSessionIndex.val == 0
+
+    check dispatchDebugAction("next")
+    drain()
+    check mock.findCommand("next").isSome

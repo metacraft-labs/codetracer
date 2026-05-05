@@ -10,7 +10,9 @@
 ## Electron, GoldenLayout and native file dialogs should be thin adapters
 ## around this API, not the source of application behavior.
 
-import std/[os, sequtils, strutils]
+import std/[sequtils, strutils]
+when not defined(js):
+  import std/os
 
 import isonim/core/[signals, owner]
 import isonim/viewmodel
@@ -50,27 +52,44 @@ type
 # Factory helpers
 # ---------------------------------------------------------------------------
 
-proc defaultSessionFactory(): SessionViewModel =
-  let mock = newMockBackendService(autoRespond = true)
-  createSessionVM(mock.toBackendService())
-
 proc defaultFolderIndexer(folderPath: string): seq[string] =
   ## Native fallback used by headless tests and non-Electron adapters.
   ## Production Electron can inject an indexer backed by the existing
   ## async Node/Git path if desired.
-  let root = folderPath.normalizedPath
-  if root.len == 0 or not dirExists(root):
+  when defined(js):
     return @[]
-  for path in walkDirRec(root):
-    let name = path.extractFilename
-    if name.len == 0:
-      continue
-    if path.splitPath.head.split(DirSep).anyIt(it in [
-      ".git", ".hg", ".svn", "node_modules", ".direnv", ".devenv",
-      "result", "dist", "build", ".next", ".cache"]):
-      continue
-    if fileExists(path):
-      result.add(path)
+  else:
+    let root = folderPath.normalizedPath
+    if root.len == 0 or not dirExists(root):
+      return @[]
+    for path in walkDirRec(root):
+      let name = path.extractFilename
+      if name.len == 0:
+        continue
+      if path.splitPath.head.split(DirSep).anyIt(it in [
+        ".git", ".hg", ".svn", "node_modules", ".direnv", ".devenv",
+        "result", "dist", "build", ".next", ".cache"]):
+        continue
+      if fileExists(path):
+        result.add(path)
+
+proc basename(path: string): string =
+  when defined(js):
+    let normalized = path.replace('\\', '/').strip(leading = false, chars = {'/'})
+    let parts = normalized.split('/')
+    if parts.len == 0: "" else: parts[^1]
+  else:
+    path.extractFilename
+
+proc defaultSessionFactory(): SessionViewModel =
+  let mock = newMockBackendService(autoRespond = true)
+  createSessionVM(mock.toBackendService())
+
+proc defaultSessionFactoryClosure(): SessionViewModel =
+  defaultSessionFactory()
+
+proc defaultFolderIndexerClosure(folderPath: string): seq[string] =
+  defaultFolderIndexer(folderPath)
 
 proc newAppSession(
     session: SessionViewModel;
@@ -86,19 +105,27 @@ proc newAppSession(
     openFiles: createSignal(newSeq[string]()),
   )
 
+proc normalizeFactory(createSession: SessionFactory): SessionFactory =
+  if createSession.isNil:
+    result = proc(): SessionViewModel = defaultSessionFactoryClosure()
+  else:
+    result = createSession
+
+proc normalizeIndexer(indexFolder: FolderIndexer): FolderIndexer =
+  if indexFolder.isNil:
+    result = proc(folderPath: string): seq[string] =
+      defaultFolderIndexerClosure(folderPath)
+  else:
+    result = indexFolder
+
 proc createCodeTracerAppVM*(
     createSession: SessionFactory = nil;
     indexFolder: FolderIndexer = nil): CodeTracerAppVM =
   ## Create the app-level ViewModel. By default it starts with one welcome
   ## session and uses in-memory/mock services so every operation is executable
   ## without Electron.
-  var sessionFactory: SessionFactory = createSession
-  if sessionFactory.isNil:
-    sessionFactory = proc(): SessionViewModel = defaultSessionFactory()
-  var folderIndexer: FolderIndexer = indexFolder
-  if folderIndexer.isNil:
-    folderIndexer = proc(folderPath: string): seq[string] =
-      defaultFolderIndexer(folderPath)
+  let sessionFactory = normalizeFactory(createSession)
+  let folderIndexer = normalizeIndexer(indexFolder)
 
   withViewModel proc(dispose: proc()): CodeTracerAppVM =
     let first = newAppSession(sessionFactory(), askWelcome, "Welcome")
@@ -106,6 +133,23 @@ proc createCodeTracerAppVM*(
       sessions: createSignal(@[first]),
       activeSessionIndex: createSignal(0),
       createSession: sessionFactory,
+      indexFolder: folderIndexer,
+      disposeProc: dispose,
+    )
+
+proc createCodeTracerAppVMWithInitialSession*(
+    initialSession: SessionViewModel;
+    indexFolder: FolderIndexer = nil): CodeTracerAppVM =
+  ## Production adapter constructor: wrap the already-real initial
+  ## SessionViewModel, while future tabs can still use the default/mock
+  ## session factory until their real per-session ViewModels are wired.
+  let folderIndexer = normalizeIndexer(indexFolder)
+  withViewModel proc(dispose: proc()): CodeTracerAppVM =
+    let first = newAppSession(initialSession, askWelcome, "Welcome")
+    CodeTracerAppVM(
+      sessions: createSignal(@[first]),
+      activeSessionIndex: createSignal(0),
+      createSession: proc(): SessionViewModel = defaultSessionFactoryClosure(),
       indexFolder: folderIndexer,
       disposeProc: dispose,
     )
@@ -171,7 +215,7 @@ proc openFolder*(vm: CodeTracerAppVM; folderPath: string): bool =
 
   let files = vm.indexFolder(folderPath)
   appSession.kind.val = askEdit
-  appSession.title.val = folderPath.extractFilename
+  appSession.title.val = basename(folderPath)
   appSession.editFolderPath.val = folderPath
   appSession.indexedFiles.val = files
   appSession.welcomeVM.enterEditMode(folderPath)

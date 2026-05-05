@@ -51,6 +51,7 @@ from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM, FilesystemDeepReviewFile,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
   setExpandedPaths, isExpanded, setDiffEntries, setDeepReview, emptyEntry
+import ../viewmodel/app_vm_bridge
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_filesystem_view import
@@ -206,6 +207,7 @@ proc openTab*(currentPath: cstring) =
   ## Dispatch a ``ViewSource`` open on ``currentPath`` through the
   ## legacy ``data.openTab`` plumbing.  Exported because the IsoNim
   ## view's bridge invokes it from row-click handlers.
+  discard app_vm_bridge.noteFileOpened($currentPath)
   data.openTab(currentPath, ViewSource)
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
+import ../viewmodel/app_vm_bridge
 from ../viewmodel/viewmodels/debug_controls_vm import
   DebugControlsVM, createDebugControlsVM, invokeToolbarStep
 from isonim/web/dom_api import nil
@@ -54,6 +55,8 @@ proc invokeDebugStepAction*(action: cstring): bool =
   ## Route keyboard/menu debug step actions through the same bridge used by the
   ## IsoNim toolbar buttons.  The older ``data.step`` path bypasses this bridge
   ## and can diverge from the button behaviour after the ViewModel migration.
+  if app_vm_bridge.dispatchDebugAction($action):
+    return true
   if not debugControlsVMInstance.isNil:
     debugControlsVMInstance.invokeToolbarStep($action)
     return true
