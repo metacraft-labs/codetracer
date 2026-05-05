@@ -454,9 +454,6 @@ when defined(js):
     if dom_api.isNodeNil(dom_api.Node(container)):
       return
 
-    if not self.data.startOptions.shellUi:
-      self.debug.requestDebugShellRender()
-
     proc focusNavigationSoon() =
       discard setTimeout(proc() =
         let nav = dom_api.getElementById(
@@ -498,4 +495,7 @@ when defined(js):
 
     let r = WebRenderer()
     renderMenuShellInto(r, container, model, callbacks)
+    if not self.data.startOptions.shellUi:
+      self.debug.requestDebugShellRender()
+      self.debug.requestDebugControlsRender()
     wireMenuKeyboard(container, self)

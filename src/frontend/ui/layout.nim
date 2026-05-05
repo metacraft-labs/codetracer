@@ -279,6 +279,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   # other panel.  File selection in the sidebar opens editor tabs via
   # data.openTab with diff decorations applied by the component.
 
+  # Shared chrome must be available even when this session mounts the welcome
+  # screen instead of GoldenLayout.
+  ensureSharedRenderers()
+
   if data.startOptions.welcomeScreen and data.trace.isNil:
     clog "initLayout: mounting IsoNim welcome screen"
     if not data.ui.welcomeScreen.isNil:
@@ -347,10 +351,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   data.ui.layout = layout
   data.ui.layoutConfig = cast[GoldenLayoutConfigClass](window.toJs.LayoutConfig)
   data.ui.contentItemConfig = cast[GoldenLayoutItemConfigClass](window.toJs.ItemConfig)
-
-  # Set up shared non-GL direct renderers once. These live outside the
-  # per-session GL container and survive session switches.
-  ensureSharedRenderers()
 
   layout.registerComponent(cstring"editorComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:

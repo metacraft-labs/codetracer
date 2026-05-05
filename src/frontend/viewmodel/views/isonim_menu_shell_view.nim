@@ -247,6 +247,11 @@ template renderMenuShellImpl(
                         hr(class = "menu-sub-group-separator"):
                           discard
 
+      tdiv(id = "debug", class = "ct-header"):
+        discard
+      tdiv(id = "isonim-debug-controls"):
+        discard
+
       if model.showWindowMenu:
         tdiv(class = WindowMenuClass):
           tdiv(

@@ -18,7 +18,7 @@ from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_debug_controls_view import
   mountIsoNimDebugControls
 from ../viewmodel/views/isonim_debug_shell_view import
-  DebugShellId, renderDebugChromeInto
+  DebugShellId, commandPaletteHostId, renderDebugChromeInto
 from isonim/web/web_renderer import WebRenderer
 
 # Module-level DebugControlsVM instance. Created once and fed data whenever
@@ -99,13 +99,16 @@ proc tryMountIsoNimDebugControls() =
 proc requestDebugShellRender*(self: DebugComponent) =
   ## Ensure the direct IsoNim debug shell exists.
   ##
-  ## The shell itself lives outside the direct ``#menu`` renderer. It is
-  ## mounted once into the static ``#debug`` host from ``index.html`` so menu
-  ## redraws cannot erase the command palette's IsoNim mount point.
+  ## The shell is hosted by the direct ``#menu`` renderer. Menu redraws replace
+  ## that host, so the cache must also verify that the expected DOM node still
+  ## exists before skipping a render.
   let commandPaletteId =
     if not data.ui.commandPalette.isNil: data.ui.commandPalette.id else: -1
+  let expectedHost = commandPaletteHostId(commandPaletteId)
   if debugShellMountedCommandPaletteId == commandPaletteId:
-    return
+    let host = dom_api.getElementById(dom_api.document, cstring expectedHost)
+    if not dom_api.isNodeNil(dom_api.Node(host)):
+      return
 
   let container = dom_api.getElementById(
     dom_api.document,
@@ -117,13 +120,24 @@ proc requestDebugShellRender*(self: DebugComponent) =
   renderDebugChromeInto(r, container, commandPaletteId)
   debugShellMountedCommandPaletteId = commandPaletteId
 
+proc requestDebugControlsRender*(self: DebugComponent) =
+  if self.isNil:
+    return
+  isoNimDebugMounted = false
+  let container = dom_api.getElementById(
+    dom_api.document,
+    cstring"isonim-debug-controls")
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    return
+  tryMountIsoNimDebugControls()
+
 proc requestDebugActionRefresh(self: DebugComponent) =
   ## Refresh the Debug-owned direct IsoNim surfaces after local action state
   ## changes. The run-tests loading flag no longer belongs to a broad app
   ## redraw path, but keeping this request local preserves the mounted Debug
   ## shell/control contract if the action fires before either host exists.
   self.requestDebugShellRender()
-  tryMountIsoNimDebugControls()
+  self.requestDebugControlsRender()
 
 proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel DebugControlsVM using an externally-provided

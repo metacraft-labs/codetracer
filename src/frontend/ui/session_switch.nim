@@ -15,6 +15,7 @@ import
   ../types,
   ../dap,
   ../renderer,
+  ../utils,
   ../lib/[logging, jslib]
 
 import kdom except Location
@@ -223,6 +224,7 @@ proc createNewSession*(data: Data) =
   session.startOptions = StartOptions(
     loading: false,
     screen: true,
+    welcomeScreen: true,
     inTest: false,
     record: false,
     edit: false,
@@ -246,6 +248,22 @@ proc createNewSession*(data: Data) =
     session.savedLayoutConfig = data.ui.resolvedConfig
 
   data.sessions.add(session)
+
+  # Empty tabs still need the shared chrome and welcome screen components.
+  # Component factory helpers write through Data's active-session forwarding,
+  # so initialise the new session while it is temporarily active.
+  let previousActiveSessionIndex = data.activeSessionIndex
+  data.activeSessionIndex = sessionId
+  discard data.makeDebugComponent()
+  discard data.makeMenuComponent()
+  discard data.makeBuildComponent()
+  discard data.makeErrorsComponent()
+  discard data.makeSearchResultsComponent()
+  discard data.makeStatusComponent(
+    data.buildComponent(0), data.errorsComponent(0), data.ui.searchResults)
+  discard data.makeCommandPaletteComponent()
+  discard data.makeWelcomeScreenComponent()
+  data.activeSessionIndex = previousActiveSessionIndex
 
   clog "session_switch: created new session " & $sessionId &
     " (total: " & $data.sessions.len & ")"
@@ -359,6 +377,13 @@ proc switchSession*(data: Data, targetIndex: int) =
         let ok = callInitLayoutSafe(data.ui.resolvedConfig, targetContainer)
         if not ok:
           cwarn "switchSession: initLayout failed for session " & $targetIndex
+      elif session.ui.layout.isNil and session.startOptions.welcomeScreen:
+        # Empty welcome session: mount the welcome surface and shared chrome
+        # without creating GoldenLayout.
+        let ok = callInitLayoutSafe(session.savedLayoutConfig, targetContainer)
+        if not ok:
+          cwarn "switchSession: welcome initLayout failed for session " &
+            $targetIndex
       elif session.ui.layout.isNil:
         # Empty session (no trace) — ensure the tab bar renderer is alive.
         refreshSessionTabBar()
@@ -369,9 +394,8 @@ proc switchSession*(data: Data, targetIndex: int) =
   # 4. Redraw.  If the target session has UI components (layout exists),
   #    ask the renderer owner to refresh mounted UI surfaces so component
   #    reads pick up the newly active session data.
-  #    If the target is an empty session (no layout/no trace), only
-  #    redraw the tab bar — shared renderers (menu, status) reference
-  #    per-session state that may not be initialised and would crash.
+  #    Empty welcome sessions also own the singleton shared components, so
+  #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
-  if not data.activeSession.ui.layout.isNil:
+  if not data.activeSession.ui.layout.isNil or data.activeSession.startOptions.welcomeScreen:
     redrawAfterSessionSwitch()
