@@ -27,11 +27,45 @@ test.describe("MCR visual replay real GUI layout", () => {
     await expect(ctPage.locator(".frame-viewer-player-url")).toContainText(
       "http://127.0.0.1:",
     );
-    await expect(ctPage.locator(".lm_tab", { hasText: /main\.(py|nr)/ })).toBeVisible();
+    await expect(ctPage.locator(".lm_tab", { hasText: /\.(py|rb|nr)\b/ })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "STATE" })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "CALLTRACE" })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "EVENT LOG" })).toBeVisible();
     await expect(ctPage.locator(".lm_tab", { hasText: "TERMINAL OUTPUT" })).toBeVisible();
+  });
+
+  test("e2e_step_updates_frame_viewer", async ({ ctPage }) => {
+    await expect(ctPage.locator(".frame-viewer-component")).toBeVisible();
+    await expect(ctPage.locator(".frame-viewer-connection-status")).toContainText(
+      "Visual replay connected",
+    );
+    await expect(ctPage.locator(".frame-viewer-player-url")).toContainText(
+      "http://127.0.0.1:",
+    );
+    await expect
+      .poll(async () =>
+        ctPage.evaluate(() => typeof (window as any).__CODETRACER_TEST__?.fakeMcrStepGeid),
+      )
+      .toBe("function");
+
+    const image = ctPage.locator(".frame-viewer-image");
+    const before = await image.getAttribute("src");
+
+    const frameResponse = ctPage.waitForResponse(
+      (response) => response.url().includes("/frame?geid=246") && response.ok(),
+    );
+    await ctPage.evaluate(() => (window as any).__CODETRACER_TEST__.fakeMcrStepGeid(246));
+    await frameResponse;
+
+    await expect(ctPage.locator(".frame-viewer-loading")).toBeHidden();
+    await expect(ctPage.locator(".frame-viewer-frame-label")).toContainText("GEID 246");
+    await expect(image).toBeVisible();
+    await expect
+      .poll(async () => {
+        const src = await image.getAttribute("src");
+        return !!src && src !== before && /GEID(%20| )246/.test(src);
+      })
+      .toBe(true);
   });
 });
 

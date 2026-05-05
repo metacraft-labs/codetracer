@@ -1,11 +1,12 @@
 import
   ui_imports,
   ../communication,
+  ../viewmodel/store/replay_data_store,
   ../viewmodel/viewmodels/[frame_viewer_vm, visual_replay_client],
   ../viewmodel/views/isonim_frame_viewer_view
 
 import std/[json, options]
-import isonim/core/async_compat
+import isonim/core/[async_compat, signals]
 import isonim/web/dom_api as dom_api
 
 when not defined(js):
@@ -22,6 +23,15 @@ when defined(js):
     })(#))
   """.}
 
+  proc installFrameViewerTestHooks(applyGeid: proc(geid: int)) {.importjs: """
+    (function(applyGeid) {
+      window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+      window.__CODETRACER_TEST__.fakeMcrStepGeid = function(geid) {
+        applyGeid(Number(geid || 0));
+      };
+    })(#);
+  """.}
+
 var frameViewerVMInstance: FrameViewerVM
 var frameViewerComponentRef: FrameViewerComponent
 var isoNimFrameViewerMounted*: bool = false
@@ -36,7 +46,7 @@ proc completedVisualFuture[T](value: T): VisualReplayFuture[T] =
 
 proc createInactiveVisualReplayClient(playerUrl: string): VisualReplayClient =
   VisualReplayClient(
-    playerUrl: playerUrl,
+    playerUrl: "",
     getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
       completedVisualFuture(VisualReplayInfo(frameCount: 0, width: 0, height: 0)),
     getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
@@ -51,6 +61,13 @@ proc createInactiveVisualReplayClient(playerUrl: string): VisualReplayClient =
         imageSrc: "",
         geid: none(uint64),
         frame: some(frame),
+        width: 0,
+        height: 0)),
+    getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+      completedVisualFuture(VisualReplayFrame(
+        imageSrc: "",
+        geid: none(uint64),
+        frame: none(int),
         width: 0,
         height: 0)),
     getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
@@ -93,9 +110,17 @@ proc syncVisualReplaySessionIntoVM*() =
     session.visualReplayAvailable,
     playerUrl,
     playerError)
+  if session.visualReplayAvailable and playerUrl.len > 0 and
+      not frameViewerVMInstance.store.isNil and
+      frameViewerVMInstance.store.currentGeid.val.isSome and
+      frameViewerVMInstance.frameImageSrc.val.len == 0 and
+      not frameViewerVMInstance.loading.val:
+    frameViewerVMInstance.loadFrameForGeid(
+      frameViewerVMInstance.store.currentGeid.val.get)
 
-proc initFrameViewerVM() =
+proc initFrameViewerVM(store: ReplayDataStore = nil) =
   if not frameViewerVMInstance.isNil:
+    frameViewerVMInstance.bindReplayStore(store)
     syncVisualReplaySessionIntoVM()
     return
   let session = data.activeSession
@@ -103,10 +128,23 @@ proc initFrameViewerVM() =
     if session.visualReplayPlayerUrl.isNil: ""
     else: $session.visualReplayPlayerUrl
   frameViewerVMInstance = createFrameViewerVM(
-    createInactiveVisualReplayClient(playerUrl))
+    createInactiveVisualReplayClient(playerUrl),
+    store)
   syncVisualReplaySessionIntoVM()
 
-proc tryMountIsoNimFrameViewerPanel*() =
+proc initFrameViewerVMWithStore*(store: ReplayDataStore) =
+  initFrameViewerVM(store)
+  when defined(js):
+    if data.startOptions.inTest:
+      installFrameViewerTestHooks(proc(geid: int) =
+        if geid > 0:
+          store.updateCurrentGeid(some(uint64(geid))))
+
+proc tryMountIsoNimFrameViewerPanel*(component: FrameViewerComponent = nil) =
+  if not component.isNil and frameViewerComponentRef.isNil:
+    frameViewerComponentRef = component
+  if frameViewerVMInstance.isNil:
+    initFrameViewerVM()
   if isoNimFrameViewerMounted or frameViewerVMInstance.isNil:
     return
   if frameViewerComponentRef.isNil:
@@ -142,6 +180,4 @@ proc tryMountIsoNimFrameViewerPanel*() =
 method register*(self: FrameViewerComponent, api: MediatorWithSubscribers) =
   self.api = api
   initFrameViewerVM()
-  if frameViewerComponentRef.isNil:
-    frameViewerComponentRef = self
-    tryMountIsoNimFrameViewerPanel()
+  tryMountIsoNimFrameViewerPanel(self)

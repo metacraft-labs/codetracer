@@ -33,6 +33,7 @@ type
     getInfoProc*: proc(): VisualReplayFuture[VisualReplayInfo]
     getFrameByGeidProc*: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame]
     getFrameByFrameProc*: proc(frame: int): VisualReplayFuture[VisualReplayFrame]
+    getFrameByDrawProc*: proc(draw: int): VisualReplayFuture[VisualReplayFrame]
     getDrawCallsProc*: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]]
 
 proc normalizedPlayerUrl*(playerUrl: string): string =
@@ -48,6 +49,9 @@ proc frameByGeidUrl*(playerUrl: string; geid: uint64): string =
 
 proc frameByFrameUrl*(playerUrl: string; frame: int): string =
   normalizedPlayerUrl(playerUrl) & "/frame?frame=" & $frame
+
+proc frameByDrawUrl*(playerUrl: string; draw: int): string =
+  normalizedPlayerUrl(playerUrl) & "/frame?draw=" & $draw
 
 proc drawCallsUrl*(playerUrl: string): string =
   normalizedPlayerUrl(playerUrl) & "/draw-calls"
@@ -93,6 +97,12 @@ proc getFrameByFrame*(client: VisualReplayClient;
   assert client.getFrameByFrameProc != nil,
     "VisualReplayClient.getFrameByFrameProc is not set"
   client.getFrameByFrameProc(frame)
+
+proc getFrameByDraw*(client: VisualReplayClient;
+                     draw: int): VisualReplayFuture[VisualReplayFrame] =
+  assert client.getFrameByDrawProc != nil,
+    "VisualReplayClient.getFrameByDrawProc is not set"
+  client.getFrameByDrawProc(draw)
 
 proc getDrawCalls*(client: VisualReplayClient):
     VisualReplayFuture[seq[VisualReplayDrawCall]] =
@@ -152,6 +162,22 @@ proc createJsonVisualReplayClient*(
               raise newException(CatchableError, msg))
       else:
         result = newFuture[VisualReplayFrame]("visual replay frame index")
+        let outFuture = result
+        async_compat.onComplete(fut,
+          onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),
+          onError = proc(msg: string) =
+            outFuture.fail(newException(CatchableError, msg)))
+    ,
+    getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+      let fut = getJson(frameByDrawUrl(baseUrl, draw))
+      when defined(js):
+        result = newPromise proc(resolve: proc(value: VisualReplayFrame)) =
+          async_compat.onComplete(fut,
+            onSuccess = proc(node: JsonNode) = resolve(frameFromJson(node)),
+            onError = proc(msg: string) =
+              raise newException(CatchableError, msg))
+      else:
+        result = newFuture[VisualReplayFrame]("visual replay frame draw")
         let outFuture = result
         async_compat.onComplete(fut,
           onSuccess = proc(node: JsonNode) = outFuture.complete(frameFromJson(node)),

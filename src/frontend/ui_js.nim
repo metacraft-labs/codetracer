@@ -1,5 +1,6 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
+  options,
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
       state, calltrace, menu, status,
       debug, flow, filesystem, vcs, value, repl,
@@ -9,6 +10,7 @@ import
       request_panel, session_switch, session_tabs, command, frame_viewer],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
+  viewmodel/store/replay_data_store,
   ../common/ct_logging,
   property_test / test,
   event_helpers,
@@ -21,6 +23,9 @@ from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
 proc configureIPC(data: Data)
+
+proc jsMissing(value: JsObject): bool {.
+  importjs: "((function(v) { return v === undefined || v === null; })(#))".}
 
 # IPC HANDLERS
 
@@ -1086,6 +1091,8 @@ when not defined(ctInExtension):
         filesystem.initFilesystemVMWithStore(activeSessionVM.store)
       initPanelVM("initCommandPaletteVMWithStore"):
         command.initCommandPaletteVMWithStore(activeSessionVM.store)
+      initPanelVM("initFrameViewerVMWithStore"):
+        frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityVMWithStore"):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityDeepReviewVMWithStore"):
@@ -1130,9 +1137,24 @@ when not defined(ctInExtension):
           let rrTicks = response.location.rrTicks
           let path = response.location.path
           let line = response.location.line
+          let rawResponse = response.toJs
+          let geidValue = rawResponse["geid"]
+          let currentGeidValue = rawResponse["currentGeid"]
+          let locationGeidValue = response.location.toJs["geid"]
+          let geid =
+            if not jsMissing(geidValue):
+              some(geidValue.to(int).uint64)
+            elif not jsMissing(currentGeidValue):
+              some(currentGeidValue.to(int).uint64)
+            elif not jsMissing(locationGeidValue):
+              some(locationGeidValue.to(int).uint64)
+            else:
+              none(uint64)
           isoBatch.batch proc() =
             calltrace.syncCalltraceDebuggerPosition(rrTicks, path, line)
             state.syncStoreDebuggerPosition(rrTicks, path, line)
+            if geid.isSome and not activeSessionVM.isNil:
+              activeSessionVM.store.updateCurrentGeid(geid)
 
           if not data.ui.status.isNil:
             cerror "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"

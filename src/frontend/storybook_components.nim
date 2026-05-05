@@ -1120,6 +1120,16 @@ proc createStoryFrameViewerClient(): VisualReplayClient =
         width: 320,
         height: 180,
       )),
+    getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+      let normalizedDraw = max(0, min(draw, 2))
+      let geid = uint64(120 + normalizedDraw * 50)
+      storyFuture(VisualReplayFrame(
+        imageSrc: storyFrameSvg(normalizedDraw mod 2),
+        geid: some(geid),
+        frame: some(normalizedDraw mod 2),
+        width: 320,
+        height: 180,
+      )),
     getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       storyFuture(storyDrawCalls()),
   )

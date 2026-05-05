@@ -1,9 +1,11 @@
 ## Headless tests for FrameViewerVM.
 
-import std/[options, unittest]
+import std/[json, options, unittest]
 
-import isonim/core/signals
+import isonim/core/[owner, signals]
 import isonim/viewmodel
+import backend/mock_backend
+import store/replay_data_store
 import vm_test_helpers
 import viewmodels/frame_viewer_vm
 import viewmodels/visual_replay_client
@@ -13,6 +15,7 @@ type
     client: VisualReplayClient
     geidRequests: seq[uint64]
     frameRequests: seq[int]
+    drawRequests: seq[int]
     drawCallRequests: int
     failFrames: bool
 
@@ -45,6 +48,17 @@ proc makeFakeClient(): FakeVisualReplayClient =
         width: 320,
         height: 200,
       )),
+    getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+      fake.drawRequests.add(draw)
+      if fake.failFrames:
+        return newFailedFuture[VisualReplayFrame]("draw failed")
+      newCompletedFuture(VisualReplayFrame(
+        imageSrc: "frame-draw-" & $draw,
+        geid: some(uint64(200 + draw)),
+        frame: some(draw),
+        width: 320,
+        height: 200,
+      )),
     getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       inc fake.drawCallRequests
       newCompletedFuture(@[
@@ -62,6 +76,8 @@ suite "VisualReplayClient URL construction":
       "http://localhost:9000/frame?geid=42"
     check frameByFrameUrl("http://localhost:9000/", 3) ==
       "http://localhost:9000/frame?frame=3"
+    check frameByDrawUrl("http://localhost:9000/", 7) ==
+      "http://localhost:9000/frame?draw=7"
     check drawCallsUrl("http://localhost:9000/") ==
       "http://localhost:9000/draw-calls"
 
@@ -85,6 +101,40 @@ suite "FrameViewerVM frame loading":
 
     vm.dispose()
 
+  test "test_geid_change_fetches_new_frame":
+    createRoot proc(dispose: proc()) =
+      let fake = makeFakeClient()
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createFrameViewerVM(fake.client, store)
+      vm.frameImageSrc.val = "stale-frame"
+
+      store.updateCurrentGeid(some(77'u64))
+
+      check fake.geidRequests == @[77'u64]
+      check vm.loading.val
+      check vm.frameImageSrc.val == ""
+      check vm.currentGeid.val == some(77'u64)
+
+      drain()
+      drain()
+
+      check vm.loading.val == false
+      check vm.frameImageSrc.val == "frame-geid-77"
+      check vm.currentFrame.val == 2
+      check vm.error.val == ""
+
+      store.updateCurrentGeid(some(88'u64))
+      check fake.geidRequests == @[77'u64, 88'u64]
+      check vm.loading.val
+      check vm.frameImageSrc.val == ""
+
+      drain()
+      check vm.frameImageSrc.val == "frame-geid-88"
+      check vm.loading.val == false
+
+      dispose()
+
   test "switches by frame index and clears GEID before response":
     let fake = makeFakeClient()
     let vm = createFrameViewerVM(fake.client)
@@ -102,6 +152,29 @@ suite "FrameViewerVM frame loading":
     check vm.loading.val == false
 
     vm.dispose()
+
+  test "draw-call scrubber fetches draw frame and routes GEID seek":
+    createRoot proc(dispose: proc()) =
+      let fake = makeFakeClient()
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createFrameViewerVM(fake.client, store)
+
+      vm.loadDrawCalls()
+      drain()
+      vm.scrubToDrawCall(1)
+      drain()
+      drain()
+
+      check fake.drawRequests == @[1]
+      check vm.selectedDrawCall.val == some(1)
+      check vm.frameImageSrc.val == "frame-draw-1"
+      check vm.currentGeid.val == some(201'u64)
+      check mock.receivedCommands.len == 1
+      check mock.receivedCommands[0].command == SeekToGeidCommand
+      check mock.receivedCommands[0].args["geid"].getBiggestInt == 101
+
+      dispose()
 
   test "handles player errors and clears stale frame data":
     let fake = makeFakeClient()

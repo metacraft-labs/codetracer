@@ -747,7 +747,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
         if state.content == Content.FrameViewer:
           frame_viewer.syncVisualReplaySessionIntoVM()
-          frame_viewer.tryMountIsoNimFrameViewerPanel()
+          frame_viewer.tryMountIsoNimFrameViewerPanel(
+            FrameViewerComponent(component))
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Progress and hover mutation paths refresh

@@ -25,7 +25,7 @@
 when defined(js):
   {.error: "headless_session.nim is native-only".}
 
-import std/[json, strutils, asyncdispatch, osproc, os, streams]
+import std/[json, options, strutils, asyncdispatch, osproc, os, streams]
 
 import isonim/core/[signals, computation]
 
@@ -79,6 +79,7 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   var rrTicks: uint64 = 0
   var file = ""
   var line = 0
+  var geid = none(uint64)
 
   # The location is nested under body.location (MoveState.location).
   if body.hasKey("location"):
@@ -87,8 +88,14 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
     line = loc.getOrDefault("line").getInt(0)
     if loc.hasKey("rrTicks"):
       rrTicks = loc["rrTicks"].getBiggestInt().uint64
+    if loc.hasKey("geid"):
+      geid = some(loc["geid"].getBiggestInt().uint64)
+  if body.hasKey("geid"):
+    geid = some(body["geid"].getBiggestInt().uint64)
+  elif body.hasKey("currentGeid"):
+    geid = some(body["currentGeid"].getBiggestInt().uint64)
 
-  session.session.store.updateDebuggerPosition(rrTicks, file, line)
+  session.session.store.updateDebuggerPosition(rrTicks, file, line, geid)
 
   # Update the debugger status back to idle after the step completes.
   var dbg = session.session.store.debugger.val
@@ -282,6 +289,10 @@ proc getCurrentLine*(s: HeadlessDebugSession): int =
 proc getCurrentRRTicks*(s: HeadlessDebugSession): uint64 =
   ## Get the current rrTicks position from the debugger state.
   s.session.store.debugger.val.rrTicks
+
+proc getCurrentGeid*(s: HeadlessDebugSession): Option[uint64] =
+  ## Get the current visual replay GEID, if the backend reported one.
+  s.session.store.currentGeid.val
 
 proc getDebuggerStatus*(s: HeadlessDebugSession): DebuggerStatus =
   ## Get the current debugger status (idle, stepping, running, etc.).

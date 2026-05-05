@@ -16,7 +16,7 @@
 ##   # issue a command — signals update asynchronously
 ##   store.requestStep(sdForward)
 
-import std/[json, tables]
+import std/[json, options, tables]
 when defined(js):
   import ../../lib/logging
 
@@ -30,6 +30,7 @@ const
   LiveMcrGetRecordingHeadCommand* = "ct/mcr-get-recording-head"
   LiveMcrRestoreAtCommand* = "ct/mcr-restore-at"
   LiveMcrStepCommand* = "ct/mcr-live-step"
+  SeekToGeidCommand* = "ct/seek-to-geid"
 
 # ---------------------------------------------------------------------------
 # Store identity tracking — unique ID per store instance for diagnostics
@@ -108,6 +109,7 @@ type
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
+    currentGeid*: Signal[Option[uint64]]
     timeline*: Signal[TimelineState]
     calltrace*: CalltraceStore
     locals*: LocalsStore
@@ -167,6 +169,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         status: dsIdle,
         threadId: 0'u32,
       )),
+      currentGeid: createSignal(none(uint64)),
       timeline: createSignal(TimelineState(
         minRRTicks: 0'u64,
         maxRRTicks: 0'u64,
@@ -321,7 +324,8 @@ proc requestCalltraceSection*(store: ReplayDataStore;
 proc updateDebuggerPosition*(store: ReplayDataStore;
                              rrTicks: uint64;
                              file: string = "";
-                             line: int = 0) =
+                             line: int = 0;
+                             geid: Option[uint64] = none(uint64)) =
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
   # Always construct and assign a new DebuggerState so the signal fires.
@@ -343,6 +347,14 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
     status: current.status,
     threadId: current.threadId,
   )
+  if geid.isSome:
+    store.currentGeid.val = geid
+
+proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
+  ## Update the current visual replay GEID independently of rrTicks. MCR
+  ## backends can report a graphics event id for the debugger stop even when
+  ## the source-level rrTicks position is unchanged or unavailable.
+  store.currentGeid.val = geid
 
 proc updateLocals*(store: ReplayDataStore;
                    variables: seq[Variable]) =
@@ -569,6 +581,11 @@ proc requestLiveToolbarAction*(store: ReplayDataStore; actionId: string) =
       dbg.status = dsError
       s.debugger.val = dbg,
   )
+
+proc requestSeekToGeid*(store: ReplayDataStore; geid: uint64) =
+  ## Ask the backend to move the source/debugger position to a graphics event.
+  ## The follow-up complete-move event is expected to refresh debugger state.
+  discard store.backend.send(SeekToGeidCommand, %*{"geid": geid})
 
 proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
                        jumpToLive: bool = false) =

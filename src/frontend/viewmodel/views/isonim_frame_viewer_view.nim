@@ -65,7 +65,7 @@ proc emptyDisplay(vm: FrameViewerVM): string =
     vm.error.val.len == 0)
 
 proc imageDisplay(vm: FrameViewerVM): string =
-  displayIf(vm.frameImageSrc.val.len > 0)
+  displayIf(vm.frameImageSrc.val.len > 0 and not vm.loading.val)
 
 proc loadingDisplay(vm: FrameViewerVM): string =
   displayIf(vm.loading.val)
@@ -81,7 +81,7 @@ proc maxFrameValue(vm: FrameViewerVM): string =
 
 proc onDrawCallClick(vm: FrameViewerVM; index: int): proc() =
   let captured = index
-  result = proc() = vm.selectDrawCall(captured)
+  result = proc() = vm.scrubToDrawCall(captured)
 
 template renderFrameViewerPanelImpl(r, vm, rootClass: untyped): untyped =
   ui(r):
