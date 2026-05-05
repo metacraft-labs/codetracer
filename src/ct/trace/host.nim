@@ -2,6 +2,7 @@ import
   std / [ options, strformat, strutils, osproc, os, json ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
+  ctfs_sources,
   ../online_sharing/mcr_enrichment
 
 
@@ -125,6 +126,10 @@ proc importCtFile(ctFilePath: string): int =
       "lang": "c"
     }
     writeFile(tempDir / "trace_db_metadata.json", $metaJson)
+
+  let ctfsSourcesExtracted = materializeCtfsSources(tempDir / "trace.ct", tempDir)
+  if ctfsSourcesExtracted:
+    echo "ct host: extracted CTFS source metadata"
 
   if not fileExists(tempDir / "trace_paths.json"):
     writeFile(tempDir / "trace_paths.json", "[]")
