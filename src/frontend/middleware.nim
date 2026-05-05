@@ -1,7 +1,7 @@
 import
   std/[jsffi, jsconsole],
   ../common/[ct_event, ct_logging],
-  lib/jslib,
+  lib/[jslib, logging],
   types,
   communication, dap,
   event_helpers,
@@ -153,7 +153,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedEvents, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtUpdatedEvents, value))
   dapApi.on(CtUpdatedEventsContent, proc(kind: CtEventKind, value: cstring) = viewsApi.emit(CtUpdatedEventsContent, value))
   dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-    {.emit: "console.error('[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=' + (`value`.location ? `value`.location.rrTicks : 'no-location') + ', emitting to viewsApi');".}
+    cerror "[PIPELINE] middleware.CtCompleteMove: received from dapApi, rrTicks=" &
+      $value.location.rrTicks &
+      ", emitting to viewsApi"
     # Wrap the entire CtCompleteMove fan-out in a single isonim batch.
     # Subscribers (the legacy CalltraceComponent / StateComponent
     # `onCompleteMove` methods, the viewsApi-level fallback that calls
@@ -179,6 +181,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedHistory, proc(kind: CtEventKind, value: HistoryUpdate) = viewsApi.emit(CtUpdatedHistory, value))
   dapApi.on(CtCalltraceSearchResponse, proc(kind: CtEventKind, value: seq[Call]) = viewsApi.emit(CtCalltraceSearchResponse, value))
   dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
+  dapApi.on(CtTracepointResults, proc(kind: CtEventKind, value: TracepointResultsAggregate) = viewsApi.emit(CtTracepointResults, value))
   dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
   dapApi.on(CtNotification, proc(kind: CtEventKind, value: Notification) = viewsApi.emit(CtNotification, value))
   dapApi.on(CtLoadAsmFunctionResponse, proc(kind: CtEventKind, value: Instructions) = viewsApi.emit(CtLoadAsmFunctionResponse, value.toJs))
@@ -246,7 +249,13 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(CtSetupTraceSession, proc(kind: CtEventKind, value: RunTracepointsArg, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(CtLoadAsmFunction, proc(kind: CtEventKind, value: FunctionLocation, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(InternalLastCompleteMove, proc(kind: CtEventKind, value: EmptyArg, sub: Subscriber) =
-    {.emit: "console.error('[PIPELINE] middleware.InternalLastCompleteMove: lastCompleteMove=' + (`lastCompleteMove` !== null && `lastCompleteMove` !== undefined ? 'SET (rrTicks=' + (`lastCompleteMove`.location ? `lastCompleteMove`.location.rrTicks : 'no-location') + ')' : 'NULL'));".}
+    let message =
+      if lastCompleteMove.isNil:
+        "[PIPELINE] middleware.InternalLastCompleteMove: lastCompleteMove=NULL"
+      else:
+        "[PIPELINE] middleware.InternalLastCompleteMove: lastCompleteMove=SET (rrTicks=" &
+          $lastCompleteMove.location.rrTicks & ")"
+    cerror message
     if not lastCompleteMove.isNil:
       viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
   )

@@ -2,7 +2,7 @@ import
   std/[asyncjs, jsffi, strutils, tables],
   types,
   lang,
-  lib/[monaco_lib, jslib],
+  lib/[monaco_lib, jslib, logging],
   lsp_js_bindings,
   lsp_paths
 
@@ -66,8 +66,9 @@ proc clientOnNotification(
 proc sendDiagnosticsRequest(
   client: JsObject;
   params: JsObject;
-  handler: proc(response: JsObject) {.closure.}
-) {.importjs: "(function(c,p,h){ var promise = c.sendRequest('textDocument/diagnostic', p); if (promise && typeof promise.then === 'function'){ promise.then(h, function(err){ console.error('[LSP diagnostics]', err); }); } })(#, #, #)".}
+  handler: proc(response: JsObject) {.closure.};
+  errorHandler: proc(error: JsObject) {.closure.}
+) {.importjs: "(function(c,p,h,e){ var promise = c.sendRequest('textDocument/diagnostic', p); if (promise && typeof promise.then === 'function'){ promise.then(h, e); } })(#, #, #, #)".}
 
 proc sendInitializePromise(client: JsObject): JsObject {.importjs: "#.onReady()".}
 proc sendNotification(client: JsObject; methodName: cstring; payload: JsObject) {.importjs: "#.sendNotification(#, #)".}
@@ -330,6 +331,8 @@ proc requestDiagnostics(entry: SyncedEntry) =
   setField(params, "identifier", toJs(diagnosticIdentifier))
   sendDiagnosticsRequest(client, params, proc(response: JsObject) =
     processDiagnosticResult(entry, response)
+  , proc(error: JsObject) =
+    cerror "[LSP diagnostics] " & $error
   )
 
 proc removeSyncedEntry(editorId: int) =

@@ -123,6 +123,8 @@ proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
 
 when defined(js):
   proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc shiftKey(ev: isonim_dom.Event): bool {.importjs: "!!#.shiftKey".}
+  proc ctrlOrMetaKey(ev: isonim_dom.Event): bool {.importjs: "(function(ev) { return !!(ev.ctrlKey || ev.metaKey); })(#)".}
 
   proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
     ## Stable dynamic hosts receive finished IsoNim row nodes.
@@ -140,10 +142,7 @@ when defined(js):
     ## WebRenderer's declarative handler only exposes proc().
     isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
       proc(ev: isonim_dom.Event) =
-        var shiftKey: bool
-        var ctrlKey: bool
-        {.emit: "`shiftKey` = !!`ev`.shiftKey; `ctrlKey` = !!(`ev`.ctrlKey || `ev`.metaKey);".}
-        callbacks.invokeSelectHunk(fileIdx, hunkIdx, shiftKey, ctrlKey)
+        callbacks.invokeSelectHunk(fileIdx, hunkIdx, ev.shiftKey(), ev.ctrlOrMetaKey())
         ev.preventDefault())
 
 proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =

@@ -17,6 +17,8 @@
 ##   store.requestStep(sdForward)
 
 import std/[json, tables]
+when defined(js):
+  import ../../lib/logging
 
 import isonim/core/[signals, owner, async_compat]
 import isonim/viewmodel
@@ -104,7 +106,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
     inc storeIdCounter
     let assignedId = storeIdCounter
     when defined(js):
-      {.emit: "console.error('[PIPELINE] createReplayDataStore: creating store id=' + `assignedId`);".}
+      cerror "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
     let store = ReplayDataStore(
       storeId: assignedId,
       # -- top-level state --
@@ -280,10 +282,10 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # ever triggering. Deduplication of redundant backend requests is
   # handled by RequestTracker, not here.
   let current = store.debugger.val
-  let diagOldTicks = current.rrTicks
-  let diagStoreId = store.storeId
   when defined(js):
-    {.emit: "console.error('[PIPELINE] updateDebuggerPosition: storeId=' + `diagStoreId` + ' setting rrTicks=' + `rrTicks` + ' (was ' + `diagOldTicks` + ') file=' + `file` + ' line=' + `line` + ' observers=' + (`store`.debugger.observers ? `store`.debugger.observers.length : 'N/A'));".}
+    cerror "[PIPELINE] updateDebuggerPosition: storeId=" &
+      $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
+      $current.rrTicks & ") file=" & file & " line=" & $line
   # Construct a NEW object — on JS backend, var = signal.val gets a
   # reference, so mutating and writing back the same object doesn't
   # trigger the signal's equality check (it compares to itself).
@@ -299,9 +301,8 @@ proc updateLocals*(store: ReplayDataStore;
   ## Replace the store's locals signal with a new variable list.
   ## Used by legacy UI code to mirror locals responses into the
   ## ViewModel layer.
-  let diagCount = variables.len
   when defined(js):
-    {.emit: "console.error('[PIPELINE] updateLocals: setting ' + `diagCount` + ' variables');".}
+    cerror "[PIPELINE] updateLocals: setting " & $variables.len & " variables"
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
 
@@ -318,9 +319,10 @@ proc updateCodeStateLine*(store: ReplayDataStore;
   let formatted =
     if sourceCode.len == 0: ""
     else: $line & " | " & sourceCode
-  let diagStoreId = store.storeId
   when defined(js):
-    {.emit: "console.error('[PIPELINE] updateCodeStateLine: storeId=' + `diagStoreId` + ' line=' + `line` + ' has_source=' + (`sourceCode`.length > 0));".}
+    cerror "[PIPELINE] updateCodeStateLine: storeId=" &
+      $store.storeId & " line=" & $line & " has_source=" &
+      $(sourceCode.len > 0)
   store.locals.codeStateLine.val = formatted
 
 proc makeVariable*(name, value, typeName: string;
@@ -351,11 +353,11 @@ proc updateCalltraceSection*(store: ReplayDataStore;
   ## know about lines (the legacy headless tests) still work; callers that
   ## carry args (notably ``syncCalltraceData`` in
   ## ``frontend/ui/calltrace.nim``) pass the parsed map alongside lines.
-  let diagOldCount = store.calltrace.lines.val.len
-  let diagNewCount = lines.len
-  let diagStoreId = store.storeId
   when defined(js):
-    {.emit: "console.error('[PIPELINE] updateCalltraceSection: storeId=' + `diagStoreId` + ' setting ' + `diagNewCount` + ' lines (was ' + `diagOldCount` + '), startIndex=' + `startIndex` + ' totalCount=' + `totalCount`);".}
+    cerror "[PIPELINE] updateCalltraceSection: storeId=" &
+      $store.storeId & " setting " & $lines.len & " lines (was " &
+      $store.calltrace.lines.val.len & "), startIndex=" & $startIndex &
+      " totalCount=" & $totalCount
   store.calltrace.lines.val = lines
   # Replace args atomically with the new section's args.  If the caller
   # didn't supply any (the VM tests that only know about lines), the

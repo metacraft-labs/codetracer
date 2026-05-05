@@ -428,6 +428,8 @@ proc initCommandPaletteVM*() =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc focusElement(input: kdom.Element) {.importcpp: "#.focus()".}
+
   proc wireLegacyCommandPaletteInput(self: CommandPaletteComponent) =
     ## The IsoNim view owns the DOM, but the mature command/search/agent
     ## behavior still lives in CommandPaletteComponent. Keep the real input
@@ -447,7 +449,7 @@ when defined(js):
     self.inputField = cast[dom.Node](input)
 
     input.addEventListener(cstring"mousedown", proc(ev: Event) =
-      {.emit: "`input`.focus();".}
+      input.focusElement()
       self.data.search(SearchFileRealTime, "".cstring))
 
     input.addEventListener(cstring"input", proc(ev: Event) =

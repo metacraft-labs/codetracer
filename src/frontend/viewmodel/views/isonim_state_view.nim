@@ -300,6 +300,10 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
 #   wired imperatively after capturing the input via `ref = var`.
 
 when defined(js):
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
 
   proc wireWatchInputForm(form, input: isonim_dom.Element; vm: StateVM) =
     ## Read the input value on submit, push it to the VM, then clear
@@ -308,13 +312,12 @@ when defined(js):
     let inputNode = isonim_dom.Node(input)
     isonim_dom.addEventListener(isonim_dom.Node(form), cstring"submit",
       proc(ev: isonim_dom.Event) =
-        {.emit: "`ev`.preventDefault();".}
-        {.emit: "`ev`.stopPropagation();".}
-        var expression: cstring
-        {.emit: "`expression` = `inputNode`.value || '';".}
+        ev.preventDefault()
+        ev.stopPropagation()
+        let expression = inputNode.inputValue()
         if expression.len > 0:
           vm.addWatch($expression)
-          {.emit: "`inputNode`.value = '';".})
+          inputNode.setInputValue(cstring""))
 
   proc renderStatePanel*(r: WebRenderer; vm: StateVM): isonim_dom.Element =
     ## Render the State panel using real DOM elements.

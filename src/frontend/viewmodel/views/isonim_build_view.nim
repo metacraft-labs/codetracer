@@ -175,6 +175,7 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc scrollToBottom(node: isonim_dom.Element) {.importjs: "(function(node) { if (node) { node.scrollTop = node.scrollHeight; } })(#)".}
 
   proc renderBuildPanel*(r: WebRenderer; vm: BuildVM): isonim_dom.Element =
     ## Render the panel for the real DOM.  Uses ``innerHTML`` for each
@@ -227,14 +228,8 @@ when defined(js):
         lineNode.innerHTML = cstring(line.htmlText)
         isonim_dom.appendChild(isonim_dom.Node(outputContainer),
                                isonim_dom.Node(lineNode))
-      # Auto-scroll: keep the latest line visible.  Mirrors the legacy
-      # ``scrollBuildToBottom`` behaviour when the auto-scroll button
-      # is on.  ``scrollHeight`` / ``scrollTop`` are not in IsoNim's
-      # narrow ``Element`` surface, so we touch them via JS emit on the
-      # element handle.
       if autoScrollOn:
-        let containerJs = outputContainer
-        {.emit: """if (`containerJs`) { `containerJs`.scrollTop = `containerJs`.scrollHeight; }""".}
+        outputContainer.scrollToBottom()
 
     panel
 

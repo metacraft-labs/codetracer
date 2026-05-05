@@ -484,6 +484,8 @@ proc renderWelcomeScreenPanel*(r: MockRenderer; vm: WelcomeScreenVM;
   panel
 
 when defined(js):
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setChecked(node: isonim_dom.Node; checked: bool) {.importjs: "#.checked = #".}
 
   proc createText(tag: string; value: string; cssClass: string = ""):
       isonim_dom.Element =
@@ -500,9 +502,7 @@ when defined(js):
       discard isonim_dom.removeChild(asNode, asNode.firstChild)
 
   proc readInputValue(node: isonim_dom.Node): string =
-    var v: cstring
-    {.emit: "`v` = `node`.value || '';".}
-    $v
+    $node.inputValue()
 
   proc renderWelcomeModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
                             callbacks: WelcomeScreenCallbacks):
@@ -681,7 +681,7 @@ when defined(js):
     let workDirNode = isonim_dom.Node(workDirInput)
     let outputNode = isonim_dom.Node(outputInput)
     let checkboxNode = isonim_dom.Node(checkbox)
-    {.emit: "`checkboxNode`.checked = `vm`.newRecord.val.defaultOutputFolder;".}
+    checkboxNode.setChecked(vm.newRecord.val.defaultOutputFolder)
     isonim_dom.addEventListener(execNode, cstring"input",
       proc(ev: isonim_dom.Event) =
         let v = readInputValue(execNode)

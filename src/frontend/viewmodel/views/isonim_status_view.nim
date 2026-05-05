@@ -275,18 +275,20 @@ proc renderStatusShell*(
   renderStatusShellImpl(r, model, callbacks)
 
 when defined(js):
+  proc inputValue(node: isonim_dom.Element): cstring {.importjs: "(#.value || '')".}
+  proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
+  proc isCtrlEnter(ev: isonim_dom.Event): bool {.importjs: "(function(ev) { return !!(ev.ctrlKey && ev.keyCode === 13); })(#)".}
+
   proc readInputValue(id: cstring): string =
     let node = isonim_dom.getElementById(isonim_dom.document, id)
     if isonim_dom.isNodeNil(isonim_dom.Node(node)):
       return ""
-    var value: cstring
-    {.emit: "`value` = `node`.value || '';".}
-    $value
+    $node.inputValue()
 
   proc clearInputValue(id: cstring) =
     let node = isonim_dom.getElementById(isonim_dom.document, id)
     if not isonim_dom.isNodeNil(isonim_dom.Node(node)):
-      {.emit: "`node`.value = '';".}
+      node.setInputValue(cstring"")
 
   proc sendBugReportFromDom(callbacks: StatusShellCallbacks) =
     callbacks.invokeSendBugReport(
@@ -302,9 +304,7 @@ when defined(js):
         continue
       isonim_dom.addEventListener(isonim_dom.Node(node), cstring"keydown",
         proc(ev: isonim_dom.Event) =
-          var shouldSubmit: bool
-          {.emit: "`shouldSubmit` = !!(`ev`.ctrlKey && `ev`.keyCode === 13);".}
-          if shouldSubmit:
+          if ev.isCtrlEnter():
             sendBugReportFromDom(callbacks))
 
   proc renderStatusShell*(

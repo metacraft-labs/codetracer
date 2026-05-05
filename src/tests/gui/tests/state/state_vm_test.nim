@@ -283,6 +283,22 @@ suite "StateVM selection":
 
       dispose()
 
+suite "StateVM value history":
+
+  test "toggleHistory delegates to the installed legacy bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      var expressions: seq[string] = @[]
+
+      vm.onToggleHistory = proc(expression: string) =
+        expressions.add(expression)
+
+      vm.toggleHistory("locals.counter")
+
+      check expressions == @["locals.counter"]
+      dispose()
+
 # ---------------------------------------------------------------------------
 # Watch expressions
 # ---------------------------------------------------------------------------

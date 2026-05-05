@@ -26,6 +26,8 @@
 ##   echo vm.visibleLines.val       # lines around index 100
 
 import std/[json, sets, options, strutils]
+when defined(js):
+  import ../../lib/logging
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -232,11 +234,11 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
   ## 2. Derived memos for visibleLines, hasMore*, highlightedMatches, isLoading
   ## 3. An auto-load effect that requests calltrace data when scroll/viewport changes
   when defined(js):
-    {.emit: "console.error('[PIPELINE] createCalltraceVM: using store id=' + `store`.storeId);".}
+    cerror "[PIPELINE] createCalltraceVM: using store id=" & $store.storeId
   withViewModel proc(dispose: proc()): CalltraceVM =
     let wrappedDispose = proc() =
       when defined(js):
-        {.emit: "console.error('[PIPELINE] CalltraceVM DISPOSED! This should only happen on cleanup.');".}
+        cerror "[PIPELINE] CalltraceVM DISPOSED! This should only happen on cleanup."
       dispose()
 
     let scrollPosition = createSignal(0'i64)
@@ -256,13 +258,15 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let scrollPos = scrollPosition.val
       let vpHeight = viewportHeight.val
 
-      let diagStoreIdVL = store.storeId
       when defined(js):
-        {.emit: "console.error('[PIPELINE] visibleLines memo: storeId=' + `diagStoreIdVL` + ' lines.len=' + `lines`.length + ' storeStart=' + `storeStart` + ' scrollPos=' + `scrollPos` + ' vpHeight=' + `vpHeight`);".}
+        cerror "[PIPELINE] visibleLines memo: storeId=" &
+          $store.storeId & " lines.len=" & $lines.len & " storeStart=" &
+          $storeStart & " scrollPos=" & $scrollPos & " vpHeight=" &
+          $vpHeight
 
       if lines.len == 0:
         when defined(js):
-          {.emit: "console.error('[PIPELINE] visibleLines memo: returning empty (no lines in store)');".}
+          cerror "[PIPELINE] visibleLines memo: returning empty (no lines in store)"
         return newSeq[CallLine]()
 
       # When viewport height is not yet known (e.g. before the resize
@@ -286,7 +290,9 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let sliceEnd = (viewEnd - storeStart).int
       result = lines[sliceStart .. sliceEnd]
       when defined(js):
-        {.emit: "console.error('[PIPELINE] visibleLines memo: returning ' + `result`.length + ' lines (slice ' + `sliceStart` + '..' + `sliceEnd` + ')');".}
+        cerror "[PIPELINE] visibleLines memo: returning " &
+          $result.len & " lines (slice " & $sliceStart & ".." &
+          $sliceEnd & ")"
 
     # Derived: whether there are entries above the current viewport.
     let hasMoreAbove = createMemo[bool] proc(): bool =
@@ -351,10 +357,10 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       let depth = viewportDepth.val
       let dbg = store.debugger.val
       let patterns = rawIgnorePatterns.val
-      let diagRrTicks = dbg.rrTicks
-      let diagStoreId = store.storeId
       when defined(js):
-        {.emit: "console.error('[PIPELINE] CalltraceVM.autoLoad: storeId=' + `diagStoreId` + ' rrTicks=' + `diagRrTicks` + ' vpHeight=' + `vpHeight` + ' scrollPos=' + `scrollPos` + ' depth=' + `depth`);".}
+        cerror "[PIPELINE] CalltraceVM.autoLoad: storeId=" &
+          $store.storeId & " rrTicks=" & $dbg.rrTicks & " vpHeight=" &
+          $vpHeight & " scrollPos=" & $scrollPos & " depth=" & $depth
       # No rrTicks guard — DB-based traces always have rrTicks=0.
       # RequestTracker deduplicates redundant backend requests.
       let effectiveHeight = if vpHeight > 0: vpHeight else: 50

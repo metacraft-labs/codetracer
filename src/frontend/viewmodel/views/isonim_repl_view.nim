@@ -189,6 +189,10 @@ proc renderReplPanel*(r: MockRenderer; vm: ReplVM): MockNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
 
   proc createWebElement(tag: string; cssClass: string = "";
                         elemId: string = ""): isonim_dom.Element =
@@ -270,13 +274,12 @@ when defined(js):
         # Karax form handler so the page does not refresh when the
         # user presses Enter.  The DSL's ``onclick = ...`` shape
         # cannot express the event arg, so we wire imperatively.
-        {.emit: "`ev`.preventDefault();".}
-        {.emit: "`ev`.stopPropagation();".}
-        var expression: cstring
-        {.emit: "`expression` = `inputNode`.value || '';".}
+        ev.preventDefault()
+        ev.stopPropagation()
+        let expression = inputNode.inputValue()
         if expression.len > 0:
           vm.submitInput($expression)
-          {.emit: "`inputNode`.value = '';".})
+          inputNode.setInputValue(cstring""))
 
     let historyEl = createWebElement("div", "", "repl-history")
     renderHistoryEntriesWeb(historyEl, vm.history.val)

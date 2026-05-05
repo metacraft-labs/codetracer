@@ -24,6 +24,7 @@ from ../viewmodel/views/isonim_state_view import
 # still reads from the legacy `self.locals` so behaviour is unchanged.
 var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
+var stateHistoryBridge: proc(expression: string)
 var isoNimStateMounted: bool = false
 
 # let MIN_NAME_WIDTH: float = 15 #%
@@ -152,7 +153,8 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
     isoNimStateMounted = false
   stateVMStore = store
   stateVMInstance = createStateVM(store)
-  {.emit: "console.error('[PIPELINE] initStateVMWithStore: storeId=' + `store`.storeId);".}
+  stateVMInstance.onToggleHistory = stateHistoryBridge
+  cerror "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
   clog "StateVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimStatePanel()
 
@@ -375,12 +377,13 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   # Initialize the parallel ViewModel instance (no-op if already created).
   initStateVM()
   let stateComponent = self
-  stateVMInstance.onToggleHistory = proc(expression: string) =
+  stateHistoryBridge = proc(expression: string) =
     if not stateComponent.api.isNil:
       stateComponent.api.emit(
         CtLoadHistory,
         LoadHistoryArg(expression: cstring(expression),
                        location: stateComponent.location))
+  stateVMInstance.onToggleHistory = stateHistoryBridge
 
   # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
     # discard self.onMove())

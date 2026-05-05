@@ -3532,8 +3532,8 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     self.recalculate = true
     self.redraw()
   except:
-    console.error lastJSError
-    console.error lastJSError.stack
+    cerror lastJSError
+    cerror lastJSError.stack
     cerror "flow: " & getCurrentExceptionMsg()
 
 

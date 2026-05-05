@@ -17,18 +17,25 @@ when defined(js):
 
   proc isWindowMaximizedForMenu(): bool {.importjs: "(window.outerWidth == screen.availWidth) && (window.outerHeight == screen.availHeight)".} =
     false
+  proc targetClosestMatches(ev: dom_api.Event; selector: cstring): bool {.importjs: """
+(function(ev, selector) {
+  const target = ev.target;
+  return !!(target && target.closest &&
+    target.closest(selector));
+})(#, #)
+""".}
+  proc addDocumentMouseDownListener(handler: proc(ev: dom_api.Event) {.closure.}) {.importjs: "document.addEventListener('mousedown', #, true)".}
+  proc eventKeyCode(ev: dom_api.Event): int {.importjs: "(#.keyCode || 0)".}
+  proc stopPropagation(ev: dom_api.Event) {.importcpp: "#.stopPropagation()".}
+  proc focusElement(node: dom_api.Element) {.importcpp: "#.focus()".}
+  proc requestSessionTabsRenderSoon() {.importjs: "if (window.__ctRequestSessionTabsRender) { window.setTimeout(window.__ctRequestSessionTabsRender, 0); }".}
 
   var documentMenuDismissWired = false
   var activeMenuComponentForDismiss: MenuComponent
 
   proc handleDocumentMenuMouseDown(ev: dom_api.Event) =
-    var insideMenu = false
-    {.emit: """
-      const target = `ev`.target;
-      `insideMenu` = !!(target && target.closest &&
-        target.closest('#navigation-menu, #menu-main, .menu-nested-elements'));
-    """.}
-    if not insideMenu and not activeMenuComponentForDismiss.isNil and
+    if not ev.targetClosestMatches(cstring"#navigation-menu, #menu-main, .menu-nested-elements") and
+        not activeMenuComponentForDismiss.isNil and
         activeMenuComponentForDismiss.active:
       activeMenuComponentForDismiss.active = false
       activeMenuComponentForDismiss.closeMenu()
@@ -482,20 +489,15 @@ when defined(js):
     activeMenuComponentForDismiss = self
     if not documentMenuDismissWired:
       documentMenuDismissWired = true
-      {.emit: """
-        document.addEventListener('mousedown', function(ev) {
-          `handleDocumentMenuMouseDown`(ev);
-        }, true);
-      """.}
+      addDocumentMouseDownListener(proc(ev: dom_api.Event) =
+        handleDocumentMenuMouseDown(ev))
 
     let nav = dom_api.getElementById(dom_api.document, cstring NavigationMenuId)
     if dom_api.isNodeNil(dom_api.Node(nav)):
       return
     dom_api.addEventListener(dom_api.Node(nav), cstring"keydown",
       proc(ev: dom_api.Event) =
-        var keyCode: int
-        {.emit: "`keyCode` = `ev`.keyCode || 0;".}
-        if keyCode == ESC_KEY_CODE:
+        if ev.eventKeyCode() == ESC_KEY_CODE:
           self.active = false
           self.closeMenu()
           self.data.redraw())
@@ -504,10 +506,10 @@ when defined(js):
     if not dom_api.isNodeNil(dom_api.Node(main)):
       dom_api.addEventListener(dom_api.Node(main), cstring"mousedown",
         proc(ev: dom_api.Event) =
-          {.emit: "`ev`.stopPropagation();".})
+          ev.stopPropagation())
       dom_api.addEventListener(dom_api.Node(main), cstring"mouseover",
         proc(ev: dom_api.Event) =
-          {.emit: "`ev`.stopPropagation();".})
+          ev.stopPropagation())
 
   proc requestMenuRender*(self: MenuComponent) =
     ## Refresh the global menu host directly through IsoNim.
@@ -526,7 +528,7 @@ when defined(js):
           dom_api.document,
           cstring NavigationMenuId)
         if not dom_api.isNodeNil(dom_api.Node(nav)):
-          {.emit: "`nav`.focus();".},
+          nav.focusElement(),
         10)
 
     let model = self.buildMenuShellModel()
@@ -558,11 +560,7 @@ when defined(js):
 
     let r = WebRenderer()
     renderMenuShellInto(r, container, model, callbacks)
-    {.emit: """
-      if (window.__ctRequestSessionTabsRender) {
-        window.setTimeout(window.__ctRequestSessionTabsRender, 0);
-      }
-    """.}
+    requestSessionTabsRenderSoon()
     if not self.data.startOptions.shellUi:
       self.debug.requestDebugShellRender()
       if not self.data.ui.commandPalette.isNil:

@@ -140,12 +140,12 @@ proc readControlInt(r: MockRenderer; node: MockNode; fallback: int): int =
   parseControlInt(r.inputValue(node), fallback)
 
 when defined(js):
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+
   proc readControlInt(r: WebRenderer; node: isonim_dom.Element;
                       fallback: int): int =
-    var v: cstring
     let asNode = isonim_dom.Node(node)
-    {.emit: "`v` = `asNode`.value || '';".}
-    parseControlInt($v, fallback)
+    parseControlInt($asNode.inputValue(), fallback)
 
 template renderFileRowImpl(r, vm, index, file, callbacks: untyped): untyped =
   let fileIdx = index

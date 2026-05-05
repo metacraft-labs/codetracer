@@ -44,6 +44,11 @@ type
 
 proc execFileSyncRaw(program: cstring, args: seq[cstring], opts: ExecSyncOptions): cstring
   {.importjs: "require('child_process').execFileSync(#, #, #).toString()".}
+proc fsWriteFileSync(path, content: cstring) {.importjs: "require('fs').writeFileSync(#, #)".}
+proc fsUnlinkSync(path: cstring) {.importjs: "require('fs').unlinkSync(#)".}
+proc osTmpdir(): cstring {.importjs: "require('os').tmpdir()".}
+proc pathJoin(a, b: cstring): cstring {.importjs: "require('path').join(#, #)".}
+proc dateNow(): int {.importjs: "Date.now()".}
 
 proc gitExec(args: seq[cstring], cwd: cstring): cstring =
   ## Run a git command in the given working directory.
@@ -57,6 +62,20 @@ proc gitExec(args: seq[cstring], cwd: cstring): cstring =
     return ($raw).strip().cstring
   except:
     return cstring""
+
+proc applyPatchToIndex(patch, cwd: cstring) =
+  let tmpFile = pathJoin(osTmpdir(), cstring("ct-hunk-stage-" & $dateNow() & ".patch"))
+  fsWriteFileSync(tmpFile, patch)
+  try:
+    let opts = ExecSyncOptions(cwd: cwd, encoding: cstring"utf8", timeout: 5000)
+    discard execFileSyncRaw(cstring"git", @[cstring"apply", cstring"--cached", tmpFile], opts)
+  except:
+    cerror "Failed to stage hunks: " & getCurrentExceptionMsg()
+  finally:
+    try:
+      fsUnlinkSync(tmpFile)
+    except:
+      discard
 
 proc isGitRepository(cwd: cstring): bool =
   ## Check whether `cwd` is inside a git working tree.
@@ -612,27 +631,7 @@ proc stageSelectedHunks(self: VCSComponent) =
   if patch.len == 0:
     return
   let cwd = self.getWorkingDirectory()
-  # Write patch to a temporary file and apply it to the index.
-  # Use Node.js fs and os modules (available in Electron renderer).
-  {.emit: """
-  var fs = require('fs');
-  var os = require('os');
-  var path = require('path');
-  var tmpDir = os.tmpdir();
-  var tmpFile = path.join(tmpDir, 'ct-hunk-stage-' + Date.now() + '.patch');
-  fs.writeFileSync(tmpFile, `patch`);
-  try {
-    require('child_process').execSync('git apply --cached ' + tmpFile, {
-      cwd: `cwd`,
-      encoding: 'utf8',
-      timeout: 5000
-    });
-  } catch(e) {
-    console.error('Failed to stage hunks:', e.message);
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch(e2) {}
-  }
-  """.}
+  applyPatchToIndex(cstring(patch), cwd)
   # Refresh data after staging.
   self.refreshVCSData()
   self.loadGitDiffForUnifiedView()

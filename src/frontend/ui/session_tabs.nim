@@ -22,6 +22,9 @@ import
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  from ../lib/jslib import windowSetTimeout
+
+  proc requestSessionTabsRender*(data: Data)
 
   proc toggleClass(el: isonim_dom.Element; className: cstring) {.
     importcpp: "#.classList.toggle(#)".}
@@ -30,6 +33,10 @@ when defined(js):
   proc hasClass(el: isonim_dom.Element; className: cstring): bool {.
     importcpp: "#.classList.contains(#)".}
   proc clientWidth(el: isonim_dom.Element): int {.importcpp: "#.clientWidth".}
+  proc appendToDocumentBody(node: isonim_dom.Element) {.importjs: "document.body.appendChild(#)".}
+  proc insertBeforeNode(parent, node, reference: isonim_dom.Element) {.importjs: "#.insertBefore(#, #)".}
+  proc parentElement(node: isonim_dom.Element): isonim_dom.Element {.importjs: "#.parentNode".}
+  proc addWindowResizeListener(handler: proc() {.closure.}) {.importjs: "window.addEventListener('resize', #)".}
 
   var resizeRenderInstalled = false
   var resizeRenderPending = false
@@ -112,24 +119,22 @@ when defined(js):
       isonim_dom.document,
       cstring"root-container")
     if isonim_dom.isNodeNil(isonim_dom.Node(rootContainer)):
-      {.emit: "document.body.appendChild(`result`);".}
+      appendToDocumentBody(result)
     else:
-      {.emit: "`rootContainer`.parentNode.insertBefore(`result`, `rootContainer`);".}
+      insertBeforeNode(rootContainer.parentElement(), result, rootContainer)
 
   proc installResizeRender(data: Data) =
     if resizeRenderInstalled:
       return
     resizeRenderInstalled = true
-    {.emit: """
-      window.addEventListener('resize', function() {
-        if (`resizeRenderPending`) return;
-        `resizeRenderPending` = true;
-        window.setTimeout(function() {
-          `resizeRenderPending` = false;
-          `requestSessionTabsRender`(`data`);
-        }, 50);
-      });
-    """.}
+    addWindowResizeListener(proc() =
+      if resizeRenderPending:
+        return
+      resizeRenderPending = true
+      discard windowSetTimeout(proc() =
+        resizeRenderPending = false
+        requestSessionTabsRender(data),
+        50))
 
   proc renderIsoNimSessionTabs*(data: Data) =
     ## Build the session tab bar DOM using IsoNim WebRenderer and

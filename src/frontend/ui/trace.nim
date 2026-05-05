@@ -538,6 +538,36 @@ method onUpdatedTrace*(traceComponent: TraceComponent, response: TraceUpdate) {.
 
     # let duration = timeInMs - tracepointStart
 
+method onTracepointResultsAggregate*(
+    traceComponent: TraceComponent,
+    response: TracepointResultsAggregate) {.async.} =
+  if response.isNil or response.sessionId < 0 or
+      response.sessionId >= data.services.trace.traceSessions.len:
+    return
+
+  let session = data.services.trace.traceSessions[response.sessionId]
+  session.results[response.sessionId] = response.results
+
+  if traceComponent.tracepoint.isNil:
+    return
+
+  var matching: seq[Stop] = @[]
+  for stop in response.results:
+    if stop.tracepointId == traceComponent.tracepoint.tracepointId:
+      matching.add(stop)
+
+  traceComponent.tracepoint.results = matching
+  traceComponent.isLoading = false
+  traceComponent.isReached = matching.len > 0
+  if response.errors.hasKey(traceComponent.tracepoint.tracepointId):
+    traceComponent.tracepoint.tracepointError =
+      response.errors[traceComponent.tracepoint.tracepointId]
+  traceComponent.refreshTrace()
+  if not traceComponent.dataTable.context.isNil:
+    traceComponent.dataTable.rowsCount = matching.len
+    traceComponent.dataTable.updateTableFooter()
+    traceComponent.dataTable.context.ajax.reload(nil, false)
+
 proc createContextMenuItems(self: TraceComponent, ev: js): seq[ContextMenuItem] =
   var addToScratchpad:     ContextMenuItem
   # var expandTraceValue:    ContextMenuItem
@@ -1664,6 +1694,9 @@ method register*(self: TraceComponent, api: MediatorWithSubscribers) =
   )
   api.subscribe(CtUpdatedTrace, proc(kind: CtEventKind, response: TraceUpdate, sub: Subscriber) =
     discard self.onUpdatedTrace(response)
+  )
+  api.subscribe(CtTracepointResults, proc(kind: CtEventKind, response: TracepointResultsAggregate, sub: Subscriber) =
+    discard self.onTracepointResultsAggregate(response)
   )
   api.subscribe(CtEventKind.TracepointLocals, proc(kind: CtEventKind, response: TraceValues, sub: Subscriber) =
     discard self.onTracepointLocals(response)

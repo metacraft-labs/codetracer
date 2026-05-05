@@ -330,7 +330,7 @@ proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   # request that was sent through the old stub backend.
   store.requestTracker.markComplete("load-calltrace")
   calltraceVMInstance = createCalltraceVM(store)
-  {.emit: "console.error('[PIPELINE] initCalltraceVMWithStore: storeId=' + `store`.storeId);".}
+  cerror "[PIPELINE] initCalltraceVMWithStore: storeId=" & $store.storeId
   clog "CalltraceVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimCalltrace()
 
@@ -361,7 +361,7 @@ proc initCalltraceVM() =
 
   calltraceVMStore = createReplayDataStore(stubBackend)
   calltraceVMInstance = createCalltraceVM(calltraceVMStore)
-  {.emit: "console.error('[PIPELINE] initCalltraceVM (stub): storeId=' + `calltraceVMStore`.storeId);".}
+  cerror "[PIPELINE] initCalltraceVM (stub): storeId=" & $calltraceVMStore.storeId
   clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimCalltrace()
 
@@ -369,8 +369,9 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   ## Mirror the legacy calltrace section data into the ViewModel store
   ## so the CalltraceVM's visibleLines memo sees the same data.
   let diagSyncStoreId = if calltraceVMStore.isNil: -1 else: calltraceVMStore.storeId
-  when defined(js):
-    {.emit: "console.error('[PIPELINE] syncCalltraceData: CALLED storeId=' + `diagSyncStoreId` + ' lines=' + `results`.callLines.length + ' totalCalls=' + `results`.totalCallsCount);".}
+  cerror "[PIPELINE] syncCalltraceData: CALLED storeId=" &
+    $diagSyncStoreId & " lines=" & $results.callLines.len &
+    " totalCalls=" & $results.totalCallsCount
   cerror fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={isoNimCalltraceMounted}"
   if calltraceVMStore.isNil:
     cerror "[PIPELINE] syncCalltraceData: store is nil, returning early"
@@ -967,11 +968,12 @@ proc renderRemoveButtonDom(
   key: cstring,
   row: Node
 ): Node =
+  proc removeFromParent(node: Node) {.importjs: "(function(node) { if (node.parentNode) node.parentNode.removeChild(node); })(#)".}
   result = calltraceNewElement(cstring"div", cstring"remove-expanded-value")
   result.setAttribute(cstring"id", cstring(fmt"expanded-value-remove-button-{key}"))
   result.addEventListener(cstring"click", proc(ev: Event) =
     discard jsDelete(self.values[key])
-    {.emit: "if (`row`.parentNode) `row`.parentNode.removeChild(`row`);".})
+    row.removeFromParent())
   result.appendChild(calltraceText(cstring"x"))
 
 proc renderExpandedValueDom(

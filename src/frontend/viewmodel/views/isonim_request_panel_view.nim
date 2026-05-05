@@ -266,6 +266,7 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
 
   proc createWebElement(tag: string; cssClass: string = "";
                         elemId: string = ""): isonim_dom.Element =
@@ -397,26 +398,18 @@ when defined(js):
                              isonim_dom.Node(createOption(opt.value, opt.label)))
 
     # Filter widget handlers.  Read the value off the live element
-    # via JS access ({.emit:.}) so HTMLInputElement / HTMLSelectElement
-    # ``.value`` works without going through the typed wrapper.
     let methodNode = isonim_dom.Node(methodSelectEl)
     let statusNode = isonim_dom.Node(statusSelectEl)
     let searchNode = isonim_dom.Node(searchInputEl)
     isonim_dom.addEventListener(methodNode, cstring"change",
       proc(ev: isonim_dom.Event) =
-        var v: cstring
-        {.emit: "`v` = `methodNode`.value || '';".}
-        vm.setFilterMethod($v))
+        vm.setFilterMethod($methodNode.inputValue()))
     isonim_dom.addEventListener(statusNode, cstring"change",
       proc(ev: isonim_dom.Event) =
-        var v: cstring
-        {.emit: "`v` = `statusNode`.value || '';".}
-        vm.setFilterStatus($v))
+        vm.setFilterStatus($statusNode.inputValue()))
     isonim_dom.addEventListener(searchNode, cstring"input",
       proc(ev: isonim_dom.Event) =
-        var v: cstring
-        {.emit: "`v` = `searchNode`.value || '';".}
-        vm.setSearchText($v))
+        vm.setSearchText($searchNode.inputValue()))
 
     # Count badge — the ``text countText(vm)`` call inside the static
     # ``ui()`` block above produces a reactive text node managed by

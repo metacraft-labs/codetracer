@@ -7,7 +7,7 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command],
-  lib/[ jslib ],
+  lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap,
   ../common/ct_logging,
   property_test / test,
@@ -979,7 +979,7 @@ when not defined(ctInExtension):
   import
     communication, middleware, dap
 
-  const logging = true # TODO: maybe overridable dynamically
+  const middlewareLoggingEnabled = true # TODO: maybe overridable dynamically
 
   # === LocalToViewTransport
 
@@ -1023,8 +1023,8 @@ when not defined(ctInExtension):
                 handler($kind, raw)),
       )
       activeSessionVM = createSessionVM(realBackend)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: SessionVM created');".}
-      {.emit: "console.error('[PIPELINE] configureMiddleware: RealBackendService created');".}
+      cerror "[PIPELINE] configureMiddleware: SessionVM created"
+      cerror "[PIPELINE] configureMiddleware: RealBackendService created"
       clog "SessionViewModel: created with real DapApi backend"
 
       # Pre-initialise (or upgrade) the panel VMs that have legacy bridge
@@ -1033,55 +1033,55 @@ when not defined(ctInExtension):
       # createUIComponents(), these calls replace them with real-backend
       # instances.  If register() hasn't run yet, the instances are
       # created fresh with the real backend.
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initStateVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initStateVMWithStore"
       state.initStateVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCalltraceVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initCalltraceVMWithStore"
       calltrace.initCalltraceVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initDebugControlsVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initDebugControlsVMWithStore"
       debug.initDebugControlsVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initEventLogVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initEventLogVMWithStore"
       event_log.initEventLogVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initFlowVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initFlowVMWithStore"
       flow.initFlowVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initEditorVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initEditorVMWithStore"
       editor.initEditorVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initTimelineVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initTimelineVMWithStore"
       trace.initTimelineVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initTerminalOutputVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initTerminalOutputVMWithStore"
       terminal_output.initTerminalOutputVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initBuildVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initBuildVMWithStore"
       build.initBuildVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initErrorsVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initErrorsVMWithStore"
       errors.initErrorsVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initSearchResultsVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initSearchResultsVMWithStore"
       search_results.initSearchResultsVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initNoSourceVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initNoSourceVMWithStore"
       no_source.initNoSourceVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initStepListVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initStepListVMWithStore"
       step_list.initStepListVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCalltraceEditorVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initCalltraceEditorVMWithStore"
       calltrace_editor.initCalltraceEditorVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initReplVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initReplVMWithStore"
       repl.initReplVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initLowLevelCodeVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initLowLevelCodeVMWithStore"
       low_level_code.initLowLevelCodeVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initRequestPanelVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initRequestPanelVMWithStore"
       request_panel.initRequestPanelVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initTraceLogVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initTraceLogVMWithStore"
       trace_log.initTraceLogVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initScratchpadVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initScratchpadVMWithStore"
       scratchpad.initScratchpadVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initFilesystemVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initFilesystemVMWithStore"
       filesystem.initFilesystemVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initCommandPaletteVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initCommandPaletteVMWithStore"
       command.initCommandPaletteVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentActivityVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initAgentActivityVMWithStore"
       agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentActivityDeepReviewVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initAgentActivityDeepReviewVMWithStore"
       agent_activity_deepreview.initAgentActivityDeepReviewVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initAgentWorkspaceVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initAgentWorkspaceVMWithStore"
       agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-      {.emit: "console.error('[PIPELINE] configureMiddleware: calling initDeepReviewVMWithStore');".}
+      cerror "[PIPELINE] configureMiddleware: calling initDeepReviewVMWithStore"
       deepreview.initDeepReviewVMWithStore(activeSessionVM.store)
 
       # -----------------------------------------------------------------
@@ -1091,20 +1091,25 @@ when not defined(ctInExtension):
       # routing between early-registered components and viewsApi is
       # order-dependent and can miss events).
       # -----------------------------------------------------------------
-      {.emit: "console.error('[PIPELINE] configureMiddleware: registering viewsApi subscriptions');".}
+      cerror "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
       data.viewsApi.subscribe(CtUpdatedCalltrace,
         proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
-          {.emit: "console.error('[PIPELINE] viewsApi.CtUpdatedCalltrace: received ' + `response`.callLines.length + ' lines, totalCalls=' + `response`.totalCallsCount);".}
+          cerror ("[PIPELINE] viewsApi.CtUpdatedCalltrace: received " &
+            $response.callLines.len & " lines, totalCalls=" &
+            $response.totalCallsCount)
           calltrace.syncCalltraceData(response))
 
       data.viewsApi.subscribe(CtLoadLocalsResponse,
         proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-          {.emit: "console.error('[PIPELINE] viewsApi.CtLoadLocalsResponse: received ' + `response`.locals.length + ' variables');".}
+          cerror ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
+            $response.locals.len & " variables")
           state.syncStoreLocals(response.locals))
 
       data.viewsApi.subscribe(CtCompleteMove,
         proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-          {.emit: "console.error('[PIPELINE] viewsApi.CtCompleteMove: rrTicks=' + `response`.location.rrTicks + ' file=' + `response`.location.path + ' line=' + `response`.location.line);".}
+          cerror ("[PIPELINE] viewsApi.CtCompleteMove: rrTicks=" &
+            $response.location.rrTicks & " file=" & $response.location.path &
+            " line=" & $response.location.line)
           # Batch the calltrace + state store writes so the parallel
           # ViewModels' autoLoad effects fire at most once per move.
           # Without batching each write schedules its own observer
@@ -1139,14 +1144,14 @@ when not defined(ctInExtension):
     if not activeSessionVM.isNil:
       # Immediate replay: catches the case where CtCompleteMove already
       # fired and lastCompleteMove is set in the middleware.
-      {.emit: "console.error('[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)');".}
+      cerror "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)"
       data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
       # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
       # typically arrives 1-5 seconds after configureMiddleware.  This
       # retry ensures VMs learn the position even when the backend
       # responds after the immediate replay above found nothing.
       discard windowSetTimeout(proc() =
-        {.emit: "console.error('[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)');".}
+        cerror "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
         data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
       , 3_000)
 

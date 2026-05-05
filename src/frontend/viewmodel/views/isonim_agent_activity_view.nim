@@ -96,6 +96,11 @@ proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
   r.appendChild(host, child)
 
 when defined(js):
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
+  proc eventKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
+  proc shiftKey(ev: isonim_dom.Event): bool {.importjs: "!!#.shiftKey".}
+
   proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
     ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
     ## snapshots. appendChild is the browser interop needed to attach a
@@ -103,13 +108,10 @@ when defined(js):
     r.appendChild(host, child)
 
   proc readInputValue(node: isonim_dom.Node): string =
-    var v: cstring
-    {.emit: "`v` = `node`.value || '';".}
-    $v
+    $node.inputValue()
 
   proc setInputElementValue(node: isonim_dom.Element; value: string) =
-    var currentInputValue = cstring(value)
-    {.emit: "`node`.value = `currentInputValue`;".}
+    node.setInputValue(cstring(value))
 
 proc syncInputValue(r: MockRenderer; input: MockNode; value: string) =
   r.setAttribute(input, "value", value)
@@ -141,10 +143,7 @@ when defined(js):
         vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
     isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
       proc(ev: isonim_dom.Event) =
-        var key: cstring
-        var shiftKey: bool
-        {.emit: "`key` = `ev`.key || ''; `shiftKey` = !!`ev`.shiftKey;".}
-        if key == cstring"Enter" and not shiftKey and not vm.isLoading.val:
+        if ev.eventKey() == cstring"Enter" and not ev.shiftKey() and not vm.isLoading.val:
           callbacks.invokeSubmit())
 
 proc renderMessage[R](r: R; componentId: int;

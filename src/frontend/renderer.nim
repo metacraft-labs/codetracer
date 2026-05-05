@@ -1402,11 +1402,34 @@ proc openTraceInNewTab*(data: Data) =
   ## This proc is a thin wrapper called from the action handler in ui_js.
   data.ipc.send("CODETRACER::open-trace-dialog", js{})
 
+proc newDefaultRecordFormForRenderer(): NewTraceRecord =
+  NewTraceRecord(
+    defaultOutputFolder: true,
+    status: RecordStatus(kind: RecordInit),
+    args: @[],
+    executable: cstring"",
+    formValidator: RecordScreenFormValidator(
+      validExecutable: true,
+      invalidExecutableMessage: cstring"",
+      validOutputFolder: true,
+      invalidOutputFolderMessage: cstring"",
+      validWorkDir: true,
+      invalidWorkDirMessage: cstring"",
+      requiredFields: JsAssoc[cstring, bool]{
+        "executable": true,
+        "workDir": false,
+        "outputFolder": false
+      }
+    )
+  )
+
 proc showRecordNewTraceDialog*(data: Data) =
   ## Show the new-record-screen from welcome_screen
   if not data.ui.welcomeScreen.isNil:
     data.ui.welcomeScreen.welcomeScreen = false
     data.ui.welcomeScreen.newRecordScreen = true
+    data.ui.welcomeScreen.openOnlineTrace = false
+    data.ui.welcomeScreen.newRecord = newDefaultRecordFormForRenderer()
     data.redraw()
   else:
     data.viewsApi.warnMessage(cstring"Welcome screen not available")

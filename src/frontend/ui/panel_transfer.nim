@@ -12,7 +12,7 @@ import
   std / [ jsffi, jsconsole, strformat, asyncjs ],
   kdom,
   ../types,
-  ../lib/[ jslib ]
+  ../lib/[ jslib, logging ]
 
 # ---------------------------------------------------------------------------
 # Electron IPC access (renderer side)
@@ -50,7 +50,7 @@ proc handlePanelAttach*(layout: GoldenLayout, config: JsObject) =
   ## Golden Layout instance.  The config is added to the first available
   ## stack, or as a new stack at the root if the layout is empty.
   if layout.isNil:
-    console.error cstring"panel_transfer: cannot attach — layout is nil"
+    cerror "panel_transfer: cannot attach - layout is nil"
     return
 
   # Try to add to the ground item's first content item (typically a stack/row/column).
@@ -75,7 +75,7 @@ proc detachAndSendPanel*(
   ## it to the target window via the main process.
   let ipc = ipcRenderer()
   if ipc.isNil or ipc.isUndefined:
-    console.error cstring"panel_transfer: ipcRenderer not available"
+    cerror "panel_transfer: ipcRenderer not available"
     return
 
   let config = serializePanelConfig(contentItem)
@@ -180,8 +180,8 @@ proc registerPanelAttachHandler*(layout: GoldenLayout) =
     # handler when a secondary window is created, or defaults to 0 for
     # the main window.
     if sid != currentSessionId:
-      console.error cstring"panel_transfer: rejecting panel from session ",
-        sid, cstring" — this window serves session ", currentSessionId
+      cerror "panel_transfer: rejecting panel from session " & $sid &
+        " - this window serves session " & $currentSessionId
       return
     console.log cstring"panel_transfer: attaching panel from session ", sid
     handlePanelAttach(layout, config))

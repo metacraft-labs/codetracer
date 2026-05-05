@@ -248,9 +248,12 @@ proc renderCalltracePanel*(r: MockRenderer; vm: CalltraceVM): MockNode =
 # a double click navigates to source.
 
 when defined(js):
-
-  proc createSvgElement(tag: cstring): isonim_dom.Element =
-    {.emit: "`result` = document.createElementNS('http://www.w3.org/2000/svg', `tag`);".}
+  proc createSvgElement(tag: cstring): isonim_dom.Element {.importjs: "document.createElementNS('http://www.w3.org/2000/svg', #)".}
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc eventKeyCode(ev: isonim_dom.Event): int {.importjs: "(#.keyCode || 0)".}
+  proc scrollTop(node: isonim_dom.Element): float {.importjs: "(#.scrollTop || 0)".}
 
   proc appendTraceLine(svg: isonim_dom.Element; x1, y1, x2, y2: float) =
     let line = createSvgElement(cstring"line")
@@ -412,20 +415,16 @@ when defined(js):
     let inputNode = isonim_dom.Node(input)
     isonim_dom.addEventListener(isonim_dom.Node(form), cstring"submit",
       proc(ev: isonim_dom.Event) =
-        {.emit: "`ev`.preventDefault();".}
-        {.emit: "`ev`.stopPropagation();".}
-        var query: cstring
-        {.emit: "`query` = `inputNode`.value || '';".}
+        ev.preventDefault()
+        ev.stopPropagation()
+        let query = inputNode.inputValue()
         vm.setSearchQuery($query))
     isonim_dom.addEventListener(inputNode, cstring"keydown",
       proc(ev: isonim_dom.Event) =
-        var keyCode: int
-        {.emit: "`keyCode` = `ev`.keyCode || 0;".}
-        if keyCode == 13:
-          {.emit: "`ev`.preventDefault();".}
-          {.emit: "`ev`.stopPropagation();".}
-          var query: cstring
-          {.emit: "`query` = `inputNode`.value || '';".}
+        if ev.eventKeyCode() == 13:
+          ev.preventDefault()
+          ev.stopPropagation()
+          let query = inputNode.inputValue()
           vm.setSearchQuery($query))
 
   proc wireScrollContainer(scrollContainer: isonim_dom.Element;
@@ -437,9 +436,7 @@ when defined(js):
     isonim_dom.addEventListener(isonim_dom.Node(scrollContainer),
       cstring"scroll",
       proc(ev: isonim_dom.Event) =
-        var scrollTop: float
-        {.emit: "`scrollTop` = `scrollContainer`.scrollTop || 0;".}
-        vm.scroll(int64(scrollTop / CALL_HEIGHT_PX)))
+        vm.scroll(int64(scrollContainer.scrollTop() / CALL_HEIGHT_PX)))
 
   proc renderTraceSvg(r: WebRenderer; svgContainer: isonim_dom.Element;
                       vm: CalltraceVM) =

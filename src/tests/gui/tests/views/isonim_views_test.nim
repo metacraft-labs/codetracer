@@ -997,6 +997,34 @@ suite "IsoNim State Panel — variables":
 
       dispose()
 
+  test "value-history button uses image-button markup and calls bridge":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+
+      var toggled: seq[string] = @[]
+      vm.onToggleHistory = proc(expression: string) =
+        toggled.add(expression)
+
+      store.updateLocals(@[
+        makeVariable("x", "42", "int"),
+      ])
+
+      let panel = renderStatePanel(r, vm)
+      let button = findById(panel, "value-history")
+      check button != nil
+      check button.tag == "button"
+      check "ct-button-image-sm-secondary" in button.attributes["class"]
+      check "ct-custom-button-size" in button.attributes["class"]
+      check findByClass(button, "custom-tooltip").textContent ==
+        "Toggle history value"
+
+      button.fireEvent("click")
+      check toggled == @["x"]
+
+      dispose()
+
   test "variables update reactively when store changes":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()

@@ -1,5 +1,7 @@
 import isonim/web/dom_api as isonim_dom
 
+proc resetStyle(node: isonim_dom.Element) {.importjs: "#.style = {}".}
+
 type
   StyleAttr* {.pure.} = enum
     backgroundSize
@@ -48,7 +50,7 @@ proc getAttr*(s: VStyle; attr: StyleAttr): cstring =
 proc applyStyle*[T](node: T; s: VStyle) =
   if s.isNil:
     return
-  {.emit: "`node`.style = {};".}
   let element = cast[isonim_dom.Element](node)
+  element.resetStyle()
   for (name, value) in s.attrs:
     isonim_dom.setStyleProperty(element, name, value)

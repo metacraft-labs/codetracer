@@ -359,6 +359,8 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
 # ---------------------------------------------------------------------------
 
 when defined(js):
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
 
   proc createWebElement(tag: string; cssClass: string = "";
                         elemId: string = ""): isonim_dom.Element =
@@ -425,8 +427,8 @@ when defined(js):
     isonim_dom.setAttribute(anchor, cstring"tabindex", cstring"-1")
     isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
                                 proc(ev: isonim_dom.Event) =
-      {.emit: "`ev`.preventDefault();".}
-      {.emit: "`ev`.stopPropagation();".}
+      ev.preventDefault()
+      ev.stopPropagation()
       if isFolder:
         vm.toggleExpanded(entryPath)
       else:
@@ -524,8 +526,8 @@ when defined(js):
           let path = diff.path
           isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
                                       proc(ev: isonim_dom.Event) =
-            {.emit: "`ev`.preventDefault();".}
-            {.emit: "`ev`.stopPropagation();".}
+            ev.preventDefault()
+            ev.stopPropagation()
             vm.openFile(path))
           isonim_dom.appendChild(isonim_dom.Node(diffContainer),
                                  isonim_dom.Node(row))
@@ -546,8 +548,8 @@ when defined(js):
           let path = file.path
           isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
                                       proc(ev: isonim_dom.Event) =
-            {.emit: "`ev`.preventDefault();".}
-            {.emit: "`ev`.stopPropagation();".}
+            ev.preventDefault()
+            ev.stopPropagation()
             vm.openFile(path))
           let statusFull =
             if statusCls.len > 0:

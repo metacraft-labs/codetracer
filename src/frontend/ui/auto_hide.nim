@@ -166,7 +166,7 @@ proc pinPanel*(
     initAutoHideState()
 
   if contentItem.isNil:
-    console.error cstring"auto_hide: pinPanel called with nil contentItem"
+    cerror "auto_hide: pinPanel called with nil contentItem"
     return
 
   # Capture the component state before detaching so we can rebuild
@@ -372,8 +372,7 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
           console.warn cstring"auto_hide: could not find new GL container to swap live DOM into"
       , 50)
   except:
-    console.error cstring"auto_hide: failed to re-add panel to GL: ",
-      cstring(getCurrentExceptionMsg())
+    cerror "auto_hide: failed to re-add panel to GL: " & getCurrentExceptionMsg()
 
   # Remove from state regardless of whether re-add succeeded, so the
   # strip tab is cleaned up and the user can retry by re-opening
@@ -459,7 +458,7 @@ proc showOverlay*(panel: AutoHidePanel) =
 
   let overlayEl = document.getElementById(cstring"auto-hide-overlay")
   if overlayEl.isNil:
-    console.error cstring"auto_hide: #auto-hide-overlay not found in DOM"
+    cerror "auto_hide: #auto-hide-overlay not found in DOM"
     return
 
   # Set the title.

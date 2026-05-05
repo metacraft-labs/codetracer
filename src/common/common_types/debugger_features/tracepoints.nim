@@ -38,6 +38,11 @@ type
     lastInSession*: bool
     firstUpdate*: bool
 
+  TracepointResultsAggregate* = ref object
+    sessionId*: int
+    results*: seq[Stop]
+    errors*: TableLike[int, langstring]
+
   TraceValues* = object
     id*: int
     locals*: seq[seq[(langstring, Value)]]
