@@ -669,23 +669,32 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
 
 proc initEditModeForFolder(sender: js; folder: cstring) {.async.}
 
+proc selectedOpenFolderForTest(): cstring =
+  let folder = nodeProcess.env[cstring"CODETRACER_TEST_OPEN_FOLDER_DIALOG_PATH"]
+  if folder.isNil:
+    return cstring""
+  folder
+
+proc rememberRecentFolder(folder: cstring) {.async.} =
+  let result = await readProcessOutput(
+    codetracerExe.cstring,
+    @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($folder)])
+  if result.isErr:
+    warnPrint "could not update recent folder metadata: ", result.error
+
 proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
-  let selection = await selectDir(cstring"Select Folder to Open")
+  var selection = selectedOpenFolderForTest()
+  if selection.len == 0:
+    selection = await selectDir(cstring"Select Folder to Open")
   if selection.len == 0:
     debugPrint "no folder selected"
   else:
-    # Track folder in recent folders
-    discard await readProcessOutput(
-      codetracerExe.cstring,
-      @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($selection)])
     await initEditModeForFolder(sender, selection)
+    discard rememberRecentFolder(selection)
 
 proc onLoadRecentFolder*(sender: js, response: jsobject(folderPath=cstring)) {.async.} =
-  # Track folder in recent folders (update timestamp)
-  discard await readProcessOutput(
-    codetracerExe.cstring,
-    @[cstring"trace-metadata", cstring"--add-recent-folder", cstring($response.folderPath)])
   await initEditModeForFolder(sender, response.folderPath)
+  discard rememberRecentFolder(response.folderPath)
 
 proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
   ## Show file dialog to select a trace folder/file

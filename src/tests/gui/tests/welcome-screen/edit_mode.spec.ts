@@ -229,6 +229,40 @@ test.describe("Welcome Open Folder", () => {
   });
 });
 
+test.describe("Welcome Open Folder through main-process dialog handler", () => {
+  test.use({
+    launchMode: "welcome",
+    testOpenFolderDialogPath: gitEditFixture,
+  });
+
+  test("open-folder-dialog initializes edit mode with populated workspace panels", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15000 });
+
+    await ctPage.locator(".start-option.open-folder").click();
+
+    await assertWorkspacePanelsPopulated(ctPage, /src|README|main\.nim/i);
+    await expect(ctPage.locator(".welcome-screen")).toBeHidden({ timeout: 10_000 });
+  });
+});
+
+test.describe("Welcome new-tab Open Folder through main-process dialog handler", () => {
+  test.use({
+    launchMode: "welcome",
+    testOpenFolderDialogPath: codetracerInstallDir,
+  });
+
+  test("new-tab open-folder-dialog populates the CodeTracer repository", async ({ ctPage }) => {
+    await ctPage.waitForSelector(".welcome-screen", { timeout: 15000 });
+    await ctPage.locator(".session-tab-add").click();
+    await expect(ctPage.locator(".welcome-screen")).toBeVisible({ timeout: 10_000 });
+
+    await ctPage.locator(".start-option.open-folder").click();
+
+    await assertWorkspacePanelsPopulated(ctPage, /src|README|Justfile|flake\.nix/i);
+    await expect(ctPage.locator(".welcome-screen")).toBeHidden({ timeout: 10_000 });
+  });
+});
+
 test.describe("Welcome Open Folder via second process", () => {
   test.use({ launchMode: "welcome", newTracePolicy: "tab" });
 

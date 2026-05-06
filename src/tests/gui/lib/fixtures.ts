@@ -225,6 +225,8 @@ interface CodetracerOptions {
   launchMode: LaunchMode;
   /** New trace/open policy used by the Electron process. */
   newTracePolicy: "window" | "tab";
+  /** Test-only folder returned by the native Open Folder dialog handler. */
+  testOpenFolderDialogPath: string;
   /** Folder path for edit mode. */
   editFolderPath: string;
   /** Process cwd for edit mode launches. */
@@ -935,7 +937,10 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
   };
 }
 
-async function launchWelcomeScreen(newTracePolicy: "window" | "tab" = "window"): Promise<LaunchResult> {
+async function launchWelcomeScreen(
+  newTracePolicy: "window" | "tab" = "window",
+  testOpenFolderDialogPath = "",
+): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
   console.log("# launching welcome screen");
@@ -947,7 +952,12 @@ async function launchWelcomeScreen(newTracePolicy: "window" | "tab" = "window"):
     executablePath: welcomeExe,
     cwd: codetracerInstallDir,
     args: welcomeArgs,
-    env: makeCleanEnv({ CODETRACER_NEW_TRACE_POLICY: newTracePolicy }),
+    env: makeCleanEnv({
+      CODETRACER_NEW_TRACE_POLICY: newTracePolicy,
+      ...(testOpenFolderDialogPath
+        ? { CODETRACER_TEST_OPEN_FOLDER_DIALOG_PATH: testOpenFolderDialogPath }
+        : {}),
+    }),
   });
 
   const consoleErrors: string[] = [];
@@ -1073,6 +1083,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   sourcePath: ["", { option: true }],
   launchMode: ["trace" as LaunchMode, { option: true }],
   newTracePolicy: ["window" as "window" | "tab", { option: true }],
+  testOpenFolderDialogPath: ["", { option: true }],
   editFolderPath: ["", { option: true }],
   editWorkingDirectory: [codetracerInstallDir, { option: true }],
   deepreviewJsonPath: ["", { option: true }],
@@ -1115,6 +1126,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         visualReplayTrace,
         visualReplayTracePath,
         newTracePolicy,
+        testOpenFolderDialogPath,
       },
       use,
       testInfo,
@@ -1162,7 +1174,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           break;
         }
         case "welcome": {
-          result = await launchWelcomeScreen(newTracePolicy);
+          result = await launchWelcomeScreen(newTracePolicy, testOpenFolderDialogPath);
           break;
         }
         case "edit": {
