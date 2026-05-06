@@ -148,6 +148,8 @@ pub enum Language {
     Aiken,
     /// Cadence: recorded by codetracer-flow-recorder
     Cadence,
+    /// Elixir/BEAM: recorded by codetracer-elixir-recorder
+    Elixir,
 }
 
 impl Language {
@@ -179,6 +181,7 @@ impl Language {
             Language::Tolk => "tolk",
             Language::Aiken => "ak",
             Language::Cadence => "cdc",
+            Language::Elixir => "ex",
         }
     }
 
@@ -206,6 +209,7 @@ impl Language {
                 | Language::Tolk
                 | Language::Aiken
                 | Language::Cadence
+                | Language::Elixir
         )
     }
 }
@@ -1325,6 +1329,95 @@ pub fn is_command_available(cmd: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+fn run_detect_siblings_for_var(var_name: &str) -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.parent()?.parent()?;
+    let detect_script = repo_root.join("scripts/detect-siblings.sh");
+    if !detect_script.exists() {
+        return None;
+    }
+
+    let script = format!(
+        "DETECT_SIBLINGS_QUIET=1; source {:?} {:?} >/dev/null; printf '%s' \"${{{}:-}}\"",
+        detect_script, repo_root, var_name
+    );
+    let output = Command::new("bash").arg("-lc").arg(script).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if value.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(value);
+    path.exists().then(|| safe_canonicalize(&path))
+}
+
+/// Find the codetracer-elixir-recorder repo.
+///
+/// Search order:
+/// 1. `CODETRACER_ELIXIR_RECORDER_PATH` env var (explicit repo override)
+/// 2. `scripts/detect-siblings.sh` workspace scan
+/// 3. Relative sibling fallback from `src/db-backend`
+pub fn find_elixir_recorder_repo() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_ELIXIR_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.is_dir() {
+            return Some(safe_canonicalize(&p));
+        }
+        eprintln!(
+            "WARNING: CODETRACER_ELIXIR_RECORDER_PATH='{}' but directory does not exist; falling back",
+            path
+        );
+    }
+
+    if let Some(path) = run_detect_siblings_for_var("CODETRACER_ELIXIR_RECORDER_PATH") {
+        return Some(path);
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir.join("../../../codetracer-elixir-recorder");
+    if path.join("test-programs/elixir").exists() {
+        Some(safe_canonicalize(&path))
+    } else {
+        None
+    }
+}
+
+/// Find the codetracer-elixir-recorder binary.
+///
+/// `CODETRACER_ELIXIR_RECORDER_BIN` can override the binary. Otherwise the
+/// binary is resolved under the detected recorder repo, preferring debug builds
+/// for local test speed and release builds for CI/prebuilt checkouts.
+pub fn find_elixir_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_ELIXIR_RECORDER_BIN") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return Some(safe_canonicalize(&p));
+        }
+        eprintln!(
+            "WARNING: CODETRACER_ELIXIR_RECORDER_BIN='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
+    if let Some(path) = find_on_path("codetracer-elixir-recorder") {
+        return Some(path);
+    }
+
+    let repo = find_elixir_recorder_repo()?;
+    for candidate in [
+        repo.join("target/debug/codetracer-elixir-recorder"),
+        repo.join("target/release/codetracer-elixir-recorder"),
+    ] {
+        if candidate.is_file() {
+            return Some(safe_canonicalize(&candidate));
+        }
+    }
+
+    None
 }
 /// Find the pure-Ruby recorder script.
 ///
@@ -2482,6 +2575,32 @@ pub fn find_cadence_flow_test() -> Option<PathBuf> {
     }
 }
 
+/// Locate the canonical Elixir flow Mix project from the sibling Elixir
+/// recorder repo.
+///
+/// Canonical path:
+/// `codetracer-elixir-recorder/test-programs/elixir/canonical_flow/`
+pub fn find_elixir_flow_test() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_ELIXIR_FLOW_TEST") {
+        let p = PathBuf::from(&path);
+        if p.join("mix.exs").exists() {
+            return Some(safe_canonicalize(&p));
+        }
+        eprintln!(
+            "WARNING: CODETRACER_ELIXIR_FLOW_TEST='{}' but Mix project does not exist; falling back",
+            path
+        );
+    }
+
+    let repo = find_elixir_recorder_repo()?;
+    let path = repo.join("test-programs/elixir/canonical_flow");
+    if path.join("mix.exs").exists() {
+        Some(safe_canonicalize(&path))
+    } else {
+        None
+    }
+}
+
 /// Record a Bash trace by running the shell recorder launcher.
 ///
 /// Uses `bash <launcher.sh> --out-dir <trace_dir> --format binary <source>`.
@@ -3358,6 +3477,149 @@ fn record_cadence_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Stri
     Ok(())
 }
 
+fn record_elixir_trace_with_format(source_path: &Path, trace_dir: &Path, trace_format: &str) -> Result<(), String> {
+    let recorder_repo = find_elixir_recorder_repo().ok_or_else(|| {
+        "Elixir recorder repo not found. Set CODETRACER_ELIXIR_RECORDER_PATH \
+         to the codetracer-elixir-recorder checkout."
+            .to_string()
+    })?;
+    let recorder = find_elixir_recorder().ok_or_else(|| {
+        "codetracer-elixir-recorder binary not found. Build the recorder repo \
+         or set CODETRACER_ELIXIR_RECORDER_BIN."
+            .to_string()
+    })?;
+
+    if !source_path.join("mix.exs").exists() {
+        return Err(format!("Elixir Mix project not found at {}", source_path.display()));
+    }
+
+    fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+    let temp_root = trace_dir
+        .parent()
+        .ok_or_else(|| format!("trace dir has no parent: {}", trace_dir.display()))?;
+    let build_dir = temp_root.join("codetracer-elixir-build");
+    let mix_build_root = temp_root.join("mix-build");
+    let task_ebin = temp_root.join("codetracer-elixir-task-ebin");
+    fs::create_dir_all(&task_ebin).map_err(|e| format!("failed to create Mix task ebin dir: {}", e))?;
+
+    let recorder_bin_dir = recorder
+        .parent()
+        .ok_or_else(|| format!("recorder binary has no parent directory: {}", recorder.display()))?
+        .to_path_buf();
+    let recorder_bin_dir_arg = recorder_bin_dir.display().to_string();
+    let mut path_entries = vec![recorder_bin_dir];
+    if let Some(existing_path) = env::var_os("PATH") {
+        path_entries.extend(env::split_paths(&existing_path));
+    }
+    let path_with_recorder =
+        env::join_paths(path_entries).map_err(|e| format!("failed to build recorder PATH: {}", e))?;
+
+    let run_in_recorder_shell = |program: &str, args: &[&str], cwd: &Path| -> Result<std::process::Output, String> {
+        let mut command = if recorder_repo.join(".envrc").exists() && is_command_available("direnv") {
+            let mut cmd = Command::new("direnv");
+            cmd.arg("exec")
+                .arg(&recorder_repo)
+                .arg("bash")
+                .arg("-lc")
+                .arg("export PATH=\"$1:$PATH\"; shift; exec \"$@\"")
+                .arg("codetracer-elixir-recorder-path")
+                .arg(&recorder_bin_dir_arg)
+                .arg(program);
+            cmd
+        } else {
+            Command::new(program)
+        };
+
+        command
+            .args(args)
+            .current_dir(cwd)
+            .env("MIX_ENV", "test")
+            .env("MIX_BUILD_ROOT", &mix_build_root)
+            .env("TMPDIR", temp_root)
+            .env("CODETRACER_ELIXIR_RECORDER_ROOT", &recorder_repo)
+            .env("CODETRACER_ELIXIR_RECORDER_BIN", &recorder)
+            .env("PATH", &path_with_recorder)
+            .output()
+            .map_err(|e| format!("failed to run {} in recorder dev shell: {}", program, e))
+    };
+
+    let task_sources = [
+        recorder_repo.join("lib/codetracer_elixir_recorder/elixir_source_map.ex"),
+        recorder_repo.join("lib/mix/tasks/compile.codetracer.ex"),
+        recorder_repo.join("lib/mix/tasks/codetracer.record.ex"),
+    ];
+    let mut elixirc_args = vec!["-o", task_ebin.to_str().unwrap()];
+    for source in &task_sources {
+        elixirc_args.push(source.to_str().unwrap());
+    }
+    let compile_tasks = run_in_recorder_shell("elixirc", &elixirc_args, &recorder_repo)?;
+    if !compile_tasks.status.success() {
+        return Err(format!(
+            "Elixir recorder Mix task compilation failed with status {:?}:\nstdout: {}\nstderr: {}",
+            compile_tasks.status.code(),
+            String::from_utf8_lossy(&compile_tasks.stdout),
+            String::from_utf8_lossy(&compile_tasks.stderr)
+        ));
+    }
+
+    let task_ebin_arg = format!("-pa {}", task_ebin.display());
+    let mix_args = [
+        "codetracer.record",
+        "--build-dir",
+        build_dir.to_str().unwrap(),
+        "--out-dir",
+        trace_dir.to_str().unwrap(),
+        "--format",
+        trace_format,
+        "--include-module",
+        "Elixir.CanonicalFlow",
+        "--eval",
+        "CanonicalFlow.main()",
+    ];
+
+    let output = {
+        let mut command = if recorder_repo.join(".envrc").exists() && is_command_available("direnv") {
+            let mut cmd = Command::new("direnv");
+            cmd.arg("exec")
+                .arg(&recorder_repo)
+                .arg("bash")
+                .arg("-lc")
+                .arg("export PATH=\"$1:$PATH\"; shift; exec \"$@\"")
+                .arg("codetracer-elixir-recorder-path")
+                .arg(&recorder_bin_dir_arg)
+                .arg("mix");
+            cmd
+        } else {
+            Command::new("mix")
+        };
+
+        command
+            .args(mix_args)
+            .current_dir(source_path)
+            .env("MIX_ENV", "test")
+            .env("MIX_BUILD_ROOT", &mix_build_root)
+            .env("TMPDIR", temp_root)
+            .env("CODETRACER_ELIXIR_RECORDER_ROOT", &recorder_repo)
+            .env("CODETRACER_ELIXIR_RECORDER_BIN", &recorder)
+            .env("PATH", &path_with_recorder)
+            .env("ERL_FLAGS", &task_ebin_arg)
+            .env("ELIXIR_ERL_OPTIONS", &task_ebin_arg)
+            .output()
+            .map_err(|e| format!("failed to run mix codetracer.record: {}", e))?
+    };
+
+    if !output.status.success() {
+        return Err(format!(
+            "Elixir recorder failed with status {:?}:\nstdout: {}\nstderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
 impl TestRecording {
     /// Create a new DB-based test recording (Python/Ruby/Noir) without rr or ct-native-replay.
     ///
@@ -3424,6 +3686,7 @@ impl TestRecording {
             Language::Tolk => record_tolk_trace(source_path, &trace_dir)?,
             Language::Aiken => record_aiken_trace(source_path, &trace_dir)?,
             Language::Cadence => record_cadence_trace(source_path, &trace_dir)?,
+            Language::Elixir => record_elixir_trace_with_format(source_path, &trace_dir, trace_format)?,
             _ => return Err(format!("{:?} is not a DB-based language", language)),
         }
 
@@ -3451,7 +3714,7 @@ impl TestRecording {
                 trace_dir.display()
             ));
         }
-        if !trace_metadata.exists() {
+        if !trace_metadata.exists() && !has_any_ct {
             return Err(format!(
                 "trace_metadata.json not produced at {}",
                 trace_metadata.display()

@@ -7,17 +7,16 @@ pub mod ctfs_container;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::Path;
+use std::io::BufRead;
+use std::path::{Path, PathBuf};
 
-use log::info;
+use log::{info, warn};
 
 use codetracer_trace_types::{
-    CallKey, FullValueRecord, FunctionId, FunctionRecord, PathId, Place, StepId, TraceLowLevelEvent, TypeId,
-    TypeRecord, ValueRecord, VariableId,
+    CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, Place, StepId,
+    TraceLowLevelEvent, TraceMetadata, TypeId, TypeRecord, ValueRecord, VariableId,
 };
-
-#[cfg(feature = "nim-reader")]
-use codetracer_trace_types::EventLogKind;
+use serde_json::Value;
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
 use crate::trace_processor::TraceProcessor;
@@ -108,12 +107,27 @@ impl CTFSTraceReader {
     pub fn open(path: &Path) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::open(path)?;
 
+        if let Some(reader) = Self::open_elixir_sidecar_format(&mut ctfs, path)? {
+            return Ok(reader);
+        }
+
         if is_new_format(&ctfs) {
             info!("CTFS new format detected — skipping postprocessing");
-            Self::open_new_format(&mut ctfs, path)
+            match Self::open_new_format(&mut ctfs, path) {
+                Ok(reader) => Ok(reader),
+                Err(error) if ctfs.has_file("events.log") => {
+                    warn!(
+                        "CTFS new-format reader failed for {}, falling back to legacy events.log postprocessing: {}",
+                        path.display(),
+                        error
+                    );
+                    Self::open_old_format(&mut ctfs, Some(path))
+                }
+                Err(error) => Err(error),
+            }
         } else {
             info!("CTFS old format detected — running postprocessing");
-            Self::open_old_format(&mut ctfs)
+            Self::open_old_format(&mut ctfs, Some(path))
         }
     }
 
@@ -136,7 +150,7 @@ impl CTFSTraceReader {
                 .into())
         } else {
             info!("CTFS from_bytes: old format detected — running postprocessing");
-            Self::open_old_format(&mut ctfs)
+            Self::open_old_format(&mut ctfs, None)
         }
     }
 
@@ -175,6 +189,295 @@ impl CTFSTraceReader {
         }
     }
 
+    fn open_elixir_sidecar_format(ctfs: &mut CtfsReader, ct_path: &Path) -> Result<Option<Self>, Box<dyn Error>> {
+        use codetracer_trace_types::{TypeKind, TypeSpecificInfo};
+
+        let Some(trace_dir) = ct_path.parent() else {
+            return Ok(None);
+        };
+        let trace_meta_path = trace_dir.join("trace_meta.json");
+        let runtime_path = trace_dir.join("runtime_session.jsonl");
+        if !trace_meta_path.is_file() || !runtime_path.is_file() {
+            return Ok(None);
+        }
+
+        let trace_meta_raw = std::fs::read_to_string(&trace_meta_path)?;
+        let trace_meta: Value = serde_json::from_str(&trace_meta_raw)?;
+        if trace_meta.get("recorder").and_then(Value::as_str) != Some("codetracer-elixir-recorder") {
+            return Ok(None);
+        }
+
+        let workdir = trace_meta
+            .pointer("/runtime_session/source_root")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let mut db = Db::new(&workdir);
+
+        db.types.push(TypeRecord {
+            kind: TypeKind::Int,
+            lang_type: "integer".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        });
+
+        let mut location_index: HashMap<u64, (PathBuf, i64)> = HashMap::new();
+        if let Some(manifests) = trace_meta.get("manifests").and_then(Value::as_array) {
+            for manifest in manifests {
+                let Some(copy_path) = manifest.get("trace_copy_path").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Ok(bytes) = ctfs.read_file(copy_path) else {
+                    continue;
+                };
+                let manifest_json: Value = serde_json::from_slice(&bytes)?;
+                let Some(locations) = manifest_json.get("locations").and_then(Value::as_array) else {
+                    continue;
+                };
+                for location in locations {
+                    let Some(id) = location.get("id").and_then(Value::as_u64) else {
+                        continue;
+                    };
+                    let Some(path) = location.get("build_path").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let Some(line) = location.get("line").and_then(Value::as_i64) else {
+                        continue;
+                    };
+                    location_index.insert(id, (PathBuf::from(path), line));
+                }
+            }
+        }
+
+        if let Some(sources) = trace_meta.get("sources").and_then(Value::as_array) {
+            for source in sources {
+                if let Some(path) = source.get("source_path").and_then(Value::as_str) {
+                    Self::ensure_db_path(&mut db, &PathBuf::from(path));
+                }
+            }
+        }
+        for (path, _) in location_index.values() {
+            Self::ensure_db_path(&mut db, path);
+        }
+
+        let file = std::fs::File::open(&runtime_path)?;
+        let reader = std::io::BufReader::new(file);
+        let mut function_ids: HashMap<String, FunctionId> = HashMap::new();
+        let mut variable_ids: HashMap<String, VariableId> = HashMap::new();
+        let mut frame_calls: HashMap<u64, CallKey> = HashMap::new();
+        let mut call_next_lines: HashMap<i64, (PathBuf, i64)> = HashMap::new();
+        let mut call_stack: Vec<CallKey> = Vec::new();
+        let mut active_values: HashMap<VariableId, FullValueRecord> = HashMap::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: Value = serde_json::from_str(&line)?;
+            match event.get("event").and_then(Value::as_str) {
+                Some("call") => {
+                    let function_key = event
+                        .get("function_key")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| {
+                            let module = event.get("module").and_then(Value::as_str).unwrap_or("<module>");
+                            let function = event.get("function").and_then(Value::as_str).unwrap_or("<function>");
+                            let arity = event.get("arity").and_then(Value::as_u64).unwrap_or(0);
+                            format!("{module}.{function}/{arity}")
+                        });
+                    let location = event
+                        .get("source_location")
+                        .and_then(|source| {
+                            let path = source.get("build_path")?.as_str()?;
+                            let line = source.get("line")?.as_i64()?;
+                            Some((PathBuf::from(path), line))
+                        })
+                        .or_else(|| {
+                            event
+                                .get("location_id")
+                                .and_then(Value::as_u64)
+                                .and_then(|id| location_index.get(&id).cloned())
+                        })
+                        .unwrap_or_else(|| (workdir.clone(), 0));
+                    let path_id = Self::ensure_db_path(&mut db, &location.0);
+                    let next_function_id = FunctionId(db.functions.len());
+                    let function_id = *function_ids.entry(function_key.clone()).or_insert_with(|| {
+                        db.functions.push(FunctionRecord {
+                            name: function_key.clone(),
+                            path_id,
+                            line: Line(location.1),
+                        });
+                        next_function_id
+                    });
+                    let parent_key = call_stack.last().copied().unwrap_or(CallKey(-1));
+                    let call_key = CallKey(db.calls.len() as i64);
+                    if parent_key.0 >= 0 {
+                        db.calls[parent_key].children_keys.push(call_key);
+                    }
+                    let step_id = StepId(db.steps.len() as i64);
+                    db.calls.push(DbCall {
+                        key: call_key,
+                        function_id,
+                        args: vec![],
+                        return_value: ValueRecord::None { type_id: TypeId(0) },
+                        step_id,
+                        depth: call_stack.len(),
+                        parent_key,
+                        children_keys: vec![],
+                    });
+                    if let Some(frame_id) = event.get("frame_id").and_then(Value::as_u64) {
+                        frame_calls.insert(frame_id, call_key);
+                    }
+                    call_next_lines.insert(call_key.0, (location.0, location.1 + 1));
+                    call_stack.push(call_key);
+                }
+                Some("step") => {
+                    let indexed_location = event
+                        .get("location_id")
+                        .and_then(Value::as_u64)
+                        .and_then(|location_id| location_index.get(&location_id).cloned());
+                    let inferred_location = call_stack.last().and_then(|call_key| {
+                        let (path, next_line) = call_next_lines.get_mut(&call_key.0)?;
+                        let line = *next_line;
+                        *next_line += 1;
+                        Some((path.clone(), line))
+                    });
+                    let Some((path, line)) = indexed_location.or(inferred_location) else {
+                        continue;
+                    };
+                    let path_id = Self::ensure_db_path(&mut db, &path);
+                    let step_id = StepId(db.steps.len() as i64);
+                    let call_key = call_stack.last().copied().unwrap_or(CallKey(-1));
+                    let db_step = DbStep {
+                        step_id,
+                        path_id,
+                        line: Line(line),
+                        call_key,
+                        global_call_key: call_key,
+                    };
+                    db.steps.push(db_step);
+                    db.variables.push(active_values.values().cloned().collect());
+                    db.instructions.push(vec![]);
+                    db.compound.push(HashMap::new());
+                    db.cells.push(HashMap::new());
+                    db.variable_cells.push(HashMap::new());
+                    db.local_variable_cells.push(HashMap::new());
+                    db.step_map[path_id].entry(line as usize).or_default().push(db_step);
+                }
+                Some("variable_bind") => {
+                    let raw_name = event.get("name").and_then(Value::as_str).unwrap_or("<var>");
+                    let name = Self::normalize_elixir_variable_name(raw_name);
+                    let target_call_key = event
+                        .get("frame_id")
+                        .and_then(Value::as_u64)
+                        .and_then(|frame_id| frame_calls.get(&frame_id).copied());
+                    let next_variable_id = VariableId(db.variable_names.len());
+                    let variable_id = *variable_ids.entry(name.clone()).or_insert_with(|| {
+                        db.variable_names.push(name);
+                        next_variable_id
+                    });
+                    let value = event
+                        .get("value")
+                        .and_then(Self::elixir_sidecar_value_record)
+                        .unwrap_or(ValueRecord::None { type_id: TypeId(0) });
+                    let full = FullValueRecord { variable_id, value };
+                    active_values.insert(variable_id, full.clone());
+                    if db
+                        .steps
+                        .items
+                        .last()
+                        .is_some_and(|step| target_call_key.is_none_or(|call_key| step.call_key == call_key))
+                    {
+                        if let Some(step_values) = db.variables.items.last_mut() {
+                            step_values.retain(|existing| existing.variable_id != variable_id);
+                            step_values.push(full);
+                        }
+                    }
+                }
+                Some("drop_variables") => {
+                    if let Some(variables) = event.get("variables").and_then(Value::as_array) {
+                        for variable in variables {
+                            if let Some(raw_name) = variable.get("name").and_then(Value::as_str) {
+                                let name = Self::normalize_elixir_variable_name(raw_name);
+                                if let Some(variable_id) = variable_ids.get(&name) {
+                                    active_values.remove(variable_id);
+                                }
+                            }
+                        }
+                    }
+                }
+                Some("return_from") => {
+                    if let Some(frame_id) = event.get("frame_id").and_then(Value::as_u64) {
+                        if let Some(call_key) = frame_calls.remove(&frame_id) {
+                            if let Some(value) = event.get("return_value").and_then(Self::elixir_sidecar_value_record) {
+                                db.calls[call_key].return_value = value;
+                            }
+                            while let Some(top) = call_stack.pop() {
+                                if top == call_key {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Some("message_send" | "message_receive") => {
+                    let content = event
+                        .get("message_repr")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    db.events.push(DbRecordEvent {
+                        kind: EventLogKind::Write,
+                        content,
+                        step_id: StepId(db.steps.len().saturating_sub(1) as i64),
+                        metadata: event.to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        db.end_of_program = EndOfProgram::Normal;
+        Ok(Some(CTFSTraceReader { db }))
+    }
+
+    fn ensure_db_path(db: &mut Db, path: &Path) -> PathId {
+        let path_string = path.display().to_string();
+        if let Some(path_id) = db.path_map.get(&path_string) {
+            return *path_id;
+        }
+        let path_id = PathId(db.paths.len());
+        db.paths.push(path_string.clone());
+        db.path_map.insert(path_string, path_id);
+        db.step_map.push(HashMap::new());
+        path_id
+    }
+
+    fn normalize_elixir_variable_name(name: &str) -> String {
+        name.trim_start_matches('_')
+            .split('@')
+            .next()
+            .unwrap_or(name)
+            .to_string()
+    }
+
+    fn elixir_sidecar_value_record(value: &Value) -> Option<ValueRecord> {
+        if let Some(int) = value.get("value").and_then(Value::as_i64) {
+            return Some(ValueRecord::Int {
+                i: int,
+                type_id: TypeId(0),
+            });
+        }
+        if let Some(text) = value.get("value").and_then(Value::as_str) {
+            return Some(ValueRecord::Raw {
+                r: text.to_string(),
+                type_id: TypeId(0),
+            });
+        }
+        None
+    }
+
     /// Nim-backed new-format reader implementation.
     ///
     /// Opens the `.ct` file via the Nim `NewTraceReader` FFI, reads metadata
@@ -189,8 +492,118 @@ impl CTFSTraceReader {
     #[cfg(feature = "nim-reader")]
     fn open_new_format_nim(_ctfs: &mut CtfsReader, ct_file_path: &Path) -> Result<Self, Box<dyn Error>> {
         use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
-        use num_traits::FromPrimitive;
         use std::path::PathBuf;
+
+        fn find_string_for_keys(value: &Value, keys: &[&str]) -> Option<String> {
+            match value {
+                Value::Object(map) => {
+                    for key in keys {
+                        if let Some(text) = map.get(*key).and_then(Value::as_str) {
+                            return Some(text.to_string());
+                        }
+                    }
+                    map.values().find_map(|nested| find_string_for_keys(nested, keys))
+                }
+                Value::Array(values) => values.iter().find_map(|nested| find_string_for_keys(nested, keys)),
+                _ => None,
+            }
+        }
+
+        fn find_u64_for_keys(value: &Value, keys: &[&str]) -> Option<u64> {
+            match value {
+                Value::Object(map) => {
+                    for key in keys {
+                        if let Some(id) = map.get(*key).and_then(Value::as_u64) {
+                            return Some(id);
+                        }
+                    }
+                    map.values().find_map(|nested| find_u64_for_keys(nested, keys))
+                }
+                Value::Array(values) => values.iter().find_map(|nested| find_u64_for_keys(nested, keys)),
+                _ => None,
+            }
+        }
+
+        fn find_i64_for_keys(value: &Value, keys: &[&str]) -> Option<i64> {
+            match value {
+                Value::Object(map) => {
+                    for key in keys {
+                        if let Some(id) = map.get(*key).and_then(Value::as_i64) {
+                            return Some(id);
+                        }
+                    }
+                    map.values().find_map(|nested| find_i64_for_keys(nested, keys))
+                }
+                Value::Array(values) => values.iter().find_map(|nested| find_i64_for_keys(nested, keys)),
+                _ => None,
+            }
+        }
+
+        fn value_record_from_json(value: &Value) -> Option<ValueRecord> {
+            match value {
+                Value::Number(number) => number.as_i64().map(|i| ValueRecord::Int { i, type_id: TypeId(0) }),
+                Value::String(text) => Some(ValueRecord::Raw {
+                    r: text.clone(),
+                    type_id: TypeId(0),
+                }),
+                Value::Object(map) => map
+                    .get("value")
+                    .and_then(value_record_from_json)
+                    .or_else(|| map.get("i").and_then(value_record_from_json))
+                    .or_else(|| map.get("Int").and_then(value_record_from_json))
+                    .or_else(|| {
+                        map.get("r").and_then(Value::as_str).map(|r| ValueRecord::Raw {
+                            r: r.to_string(),
+                            type_id: TypeId(0),
+                        })
+                    }),
+                Value::Array(values) => values.iter().find_map(value_record_from_json),
+                _ => None,
+            }
+        }
+
+        fn collect_step_values(value: &Value, out: &mut Vec<FullValueRecord>) {
+            match value {
+                Value::Object(map) => {
+                    let variable_id = map
+                        .get("variable_id")
+                        .or_else(|| map.get("variableId"))
+                        .and_then(Value::as_u64);
+                    let value_record = map.get("value").and_then(value_record_from_json);
+                    if let (Some(variable_id), Some(value)) = (variable_id, value_record) {
+                        out.push(FullValueRecord {
+                            variable_id: VariableId(variable_id as usize),
+                            value,
+                        });
+                    }
+                    for nested in map.values() {
+                        collect_step_values(nested, out);
+                    }
+                }
+                Value::Array(values) => {
+                    for nested in values {
+                        collect_step_values(nested, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn event_content_from_json(value: &Value) -> String {
+            if let Some(text) = find_string_for_keys(value, &["content", "text", "message"]) {
+                return text;
+            }
+            if let Some(bytes) = value.get("data").and_then(Value::as_array) {
+                let bytes = bytes
+                    .iter()
+                    .filter_map(|byte| byte.as_u64().and_then(|value| u8::try_from(value).ok()))
+                    .collect::<Vec<_>>();
+                if let Ok(text) = String::from_utf8(bytes) {
+                    return text;
+                }
+            }
+            value.to_string()
+        }
 
         let ct_path = ct_file_path.to_string_lossy().to_string();
 
@@ -267,16 +680,6 @@ impl CTFSTraceReader {
             db.variable_names.len(),
         );
 
-        // ── Calls ──────────────────────────────────────────────────────
-        //
-        // Load call records first. We need call entry/exit step ranges to
-        // compute the step→call_key mapping for DbStep.
-        //
-        // call_fields returns:
-        //   (function_id, parent_key, entry_step, exit_step, depth, children_count)
-        //
-        // We also store entry_step/exit_step per call so we can later
-        // assign call_key to each step.
         struct CallRange {
             entry_step: u64,
             exit_step: u64,
@@ -284,29 +687,41 @@ impl CTFSTraceReader {
         let mut call_ranges: Vec<CallRange> = Vec::with_capacity(call_count as usize);
 
         for key in 0..call_count {
-            let (function_id, parent_key, entry_step, exit_step, depth, children_count) =
-                reader.call_fields(key).map_err(|e| format!("call {key}: {e}"))?;
-
-            let mut children_keys = Vec::with_capacity(children_count as usize);
-            for c in 0..children_count {
-                let child_key = reader
-                    .call_child(key, c)
-                    .map_err(|e| format!("call {key} child {c}: {e}"))?;
-                children_keys.push(CallKey(child_key as i64));
-            }
+            let raw = reader.call_json(key).map_err(|e| format!("call {key}: {e}"))?;
+            let json: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+            let function_id = find_u64_for_keys(&json, &["function_id", "functionId", "functionID"]).unwrap_or(0);
+            let parent_key = find_i64_for_keys(&json, &["parent_key", "parentKey", "parent"]).unwrap_or(-1);
+            let entry_step = find_u64_for_keys(&json, &["entry_step", "entryStep", "step_id", "stepId"]).unwrap_or(0);
+            let exit_step =
+                find_u64_for_keys(&json, &["exit_step", "exitStep"]).unwrap_or_else(|| step_count.saturating_sub(1));
+            let depth = find_u64_for_keys(&json, &["depth"]).unwrap_or(0);
 
             db.calls.push(DbCall {
                 key: CallKey(key as i64),
                 function_id: FunctionId(function_id as usize),
-                args: vec![], // TODO: call args not yet exposed via structured FFI
-                return_value: ValueRecord::None { type_id: TypeId(0) }, // TODO: return values
+                args: vec![],
+                return_value: json
+                    .get("return_value")
+                    .or_else(|| json.get("returnValue"))
+                    .and_then(value_record_from_json)
+                    .unwrap_or(ValueRecord::None { type_id: TypeId(0) }),
                 step_id: StepId(entry_step as i64),
                 depth: depth as usize,
                 parent_key: CallKey(parent_key),
-                children_keys,
+                children_keys: vec![],
             });
 
             call_ranges.push(CallRange { entry_step, exit_step });
+        }
+        for key in 0..db.calls.len() {
+            let call_key = CallKey(key as i64);
+            let parent_key = db.calls[call_key].parent_key;
+            if parent_key.0 >= 0 {
+                let parent = parent_key.0 as usize;
+                if parent < db.calls.len() {
+                    db.calls[parent_key].children_keys.push(call_key);
+                }
+            }
         }
 
         info!("Nim reader: {} calls loaded", db.calls.len());
@@ -359,10 +774,18 @@ impl CTFSTraceReader {
         // Populate db.steps, db.step_map, and per-step scaffolding
         // (variables, instructions, compound, cells, variable_cells).
         for i in 0..step_count {
-            let (path_id_raw, line_raw) = reader.step_location(i).map_err(|e| format!("step {i}: {e}"))?;
+            let raw = reader.step_json(i).map_err(|e| format!("step {i}: {e}"))?;
+            let json: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
 
-            let path_id = PathId(path_id_raw as usize);
-            let line = Line(line_raw as i64);
+            let path_id = PathId(
+                find_u64_for_keys(&json, &["path_id", "pathId", "path"])
+                    .or_else(|| {
+                        find_string_for_keys(&json, &["path"])
+                            .and_then(|path| db.path_map.get(&path).map(|id| id.0 as u64))
+                    })
+                    .unwrap_or(0) as usize,
+            );
+            let line = Line(find_i64_for_keys(&json, &["line", "line_number", "lineNumber"]).unwrap_or(0));
             let step_id = StepId(i as i64);
             let call_key = step_to_call_key[i as usize];
             let global_call_key = step_to_global_call_key[i as usize];
@@ -396,48 +819,11 @@ impl CTFSTraceReader {
 
         info!("Nim reader: {} steps loaded", db.steps.len());
 
-        // ── Variables ──────────────────────────────────────────────────
-        //
-        // For each step, read variable values via the structured FFI.
-        // step_value returns (varname_id, type_id, cbor_data) where
-        // cbor_data is a CBOR-encoded ValueRecord (tagged with "kind").
         for step_idx in 0..step_count {
-            let val_count = reader.step_value_count(step_idx);
-            let mut step_values: Vec<FullValueRecord> = Vec::with_capacity(val_count as usize);
-
-            for v in 0..val_count {
-                match reader.step_value(step_idx, v) {
-                    Ok((varname_id, _type_id, data)) => {
-                        // Decode the CBOR-encoded ValueRecord. The Nim
-                        // writer produces CBOR maps with a "kind" tag
-                        // matching the serde(tag = "kind") layout of
-                        // ValueRecord.
-                        let value = if data.is_empty() {
-                            ValueRecord::None { type_id: TypeId(0) }
-                        } else {
-                            match cbor4ii::serde::from_reader::<ValueRecord, _>(data.as_slice()) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    log::warn!(
-                                        "step {step_idx} value {v}: CBOR decode failed: {e}, using Raw fallback"
-                                    );
-                                    ValueRecord::Raw {
-                                        r: format!("<cbor decode error: {e}>"),
-                                        type_id: TypeId(0),
-                                    }
-                                }
-                            }
-                        };
-                        step_values.push(FullValueRecord {
-                            variable_id: VariableId(varname_id as usize),
-                            value,
-                        });
-                    }
-                    Err(e) => {
-                        log::warn!("step {step_idx} value {v}: read failed: {e}");
-                        break;
-                    }
-                }
+            let mut step_values = Vec::new();
+            if let Ok(raw) = reader.values_json(step_idx) {
+                let json: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+                collect_step_values(&json, &mut step_values);
             }
 
             db.variables.push(step_values);
@@ -447,37 +833,22 @@ impl CTFSTraceReader {
 
         // ── Events ─────────────────────────────────────────────────────
         //
-        // event_fields returns (kind: u8, step_id: u64, data: Vec<u8>).
-        // Nim IOEventKind: 0=stdout, 1=stderr, 2=file_op, 3=error.
-        // Map to EventLogKind using num_traits::FromPrimitive for the
-        // standard values, with a fallback mapping for the Nim-specific
-        // kind codes.
         for idx in 0..event_count {
-            match reader.event_fields(idx) {
-                Ok((kind_byte, step_id_raw, data)) => {
-                    // Map Nim IOEventKind values to EventLogKind.
-                    // Nim: 0=ioStdout → Write, 1=ioStderr → WriteOther,
-                    //      2=ioFileOp → WriteFile, 3=ioError → Error.
-                    let kind = match kind_byte {
-                        0 => EventLogKind::Write,
-                        1 => EventLogKind::WriteOther,
-                        2 => EventLogKind::WriteFile,
-                        3 => EventLogKind::Error,
-                        other => {
-                            // Try the Rust enum's own discriminant values
-                            // for forward compatibility.
-                            EventLogKind::from_u8(other).unwrap_or(EventLogKind::Write)
-                        }
+            match reader.event_json(idx) {
+                Ok(raw) => {
+                    let json: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+                    let kind = match find_u64_for_keys(&json, &["kind", "event_kind", "eventKind"]) {
+                        Some(1) => EventLogKind::WriteOther,
+                        Some(2) => EventLogKind::WriteFile,
+                        Some(3) => EventLogKind::Error,
+                        _ => EventLogKind::Write,
                     };
-
-                    let step_id = StepId(step_id_raw as i64);
-                    let content = String::from_utf8_lossy(&data).to_string();
-
+                    let step_id = StepId(find_i64_for_keys(&json, &["step_id", "stepId", "step"]).unwrap_or(0));
                     db.events.push(DbRecordEvent {
                         kind,
-                        content,
+                        content: event_content_from_json(&json),
                         step_id,
-                        metadata: String::new(),
+                        metadata: json.get("metadata").map(Value::to_string).unwrap_or_default(),
                     });
                 }
                 Err(e) => {
@@ -525,10 +896,9 @@ impl CTFSTraceReader {
     /// This is the original loading path. It will remain available for
     /// backward compatibility with traces recorded before the seek-based
     /// writer was introduced.
-    fn open_old_format(ctfs: &mut CtfsReader) -> Result<Self, Box<dyn Error>> {
+    fn open_old_format(ctfs: &mut CtfsReader, ct_path: Option<&Path>) -> Result<Self, Box<dyn Error>> {
         // 1. Read and parse trace metadata
-        let meta_bytes = ctfs.read_file("meta.json")?;
-        let meta: codetracer_trace_types::TraceMetadata = serde_json::from_slice(&meta_bytes)?;
+        let meta = Self::load_old_format_metadata(ctfs, ct_path)?;
 
         let workdir = if meta.workdir.as_os_str().is_empty() {
             // Fall back to the parent directory of the program path
@@ -554,6 +924,64 @@ impl CTFSTraceReader {
         processor.postprocess(&events)?;
 
         Ok(CTFSTraceReader { db })
+    }
+
+    fn load_old_format_metadata(
+        ctfs: &mut CtfsReader,
+        ct_path: Option<&Path>,
+    ) -> Result<TraceMetadata, Box<dyn Error>> {
+        match ctfs.read_file("meta.json") {
+            Ok(meta_bytes) => return Ok(serde_json::from_slice(&meta_bytes)?),
+            Err(meta_error) => {
+                let Some(ct_path) = ct_path else {
+                    return Err(Box::new(meta_error));
+                };
+                let Some(trace_dir) = ct_path.parent() else {
+                    return Err(Box::new(meta_error));
+                };
+
+                let trace_metadata_path = trace_dir.join("trace_metadata.json");
+                if trace_metadata_path.is_file() {
+                    let raw = std::fs::read_to_string(&trace_metadata_path)?;
+                    return Ok(serde_json::from_str(&raw)?);
+                }
+
+                let trace_meta_path = trace_dir.join("trace_meta.json");
+                if trace_meta_path.is_file() {
+                    let raw = std::fs::read_to_string(&trace_meta_path)?;
+                    return Self::trace_meta_sidecar_to_metadata(&raw);
+                }
+
+                Err(Box::new(meta_error))
+            }
+        }
+    }
+
+    fn trace_meta_sidecar_to_metadata(raw: &str) -> Result<TraceMetadata, Box<dyn Error>> {
+        let value: Value = serde_json::from_str(raw)?;
+        let workdir = value
+            .pointer("/runtime_session/source_root")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let program = value
+            .pointer("/target/command")
+            .and_then(Value::as_str)
+            .unwrap_or("mix")
+            .to_string();
+        let args = value
+            .pointer("/target/args")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToString::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(TraceMetadata { workdir, program, args })
     }
 
     /// Extract `TraceLowLevelEvent` values from the CTFS container.
@@ -590,6 +1018,9 @@ impl CTFSTraceReader {
             return Ok(Vec::new());
         }
 
+        const TRACE_EVENTS_HEADER_V1: &[u8] = &[0xC0, 0xDE, 0x72, 0xAC, 0xE2, 0x01, 0x00, 0x00];
+        let event_payload = event_bytes.strip_prefix(TRACE_EVENTS_HEADER_V1).unwrap_or(&event_bytes);
+
         // Detect the serialization format. The presence of `events.fmt`
         // with the content `"split-binary"` indicates the new split-binary
         // encoding; otherwise we fall back to CBOR.
@@ -600,7 +1031,7 @@ impl CTFSTraceReader {
 
         // Try the chunked format first (new writer produces inline 16-byte
         // chunk headers followed by Zstd-compressed payloads).
-        if let Ok(decompressed) = codetracer_ctfs::ChunkedReader::decompress_all(&event_bytes) {
+        if let Ok(decompressed) = codetracer_ctfs::ChunkedReader::decompress_all(event_payload) {
             if is_split_binary {
                 return Ok(codetracer_trace_writer::split_binary::decode_events(&decompressed));
             } else {
@@ -611,7 +1042,7 @@ impl CTFSTraceReader {
 
         // Fallback: legacy CBOR streaming (zeekstd frames, no chunk headers).
         // This path handles older `.ct` files that pre-date the chunked format.
-        Self::deserialize_cbor_from_buffer(&event_bytes)
+        Self::deserialize_cbor_from_buffer(event_payload)
     }
 
     /// Deserialize a sequence of individually-encoded CBOR

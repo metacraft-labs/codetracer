@@ -656,8 +656,8 @@ impl Handler {
             // boundary data from the trace's Call/Function records.
             let mut location = arg.location;
             if self.trace_kind == TraceKind::Materialized
-                && location.function_first == 0
-                && location.function_last == 0
+                && location.function_first <= 0
+                && location.function_last <= 0
                 && location.rr_ticks.0 >= 0
             {
                 let step_id = StepId(location.rr_ticks.0);

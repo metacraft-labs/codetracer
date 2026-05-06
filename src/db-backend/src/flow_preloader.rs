@@ -216,42 +216,46 @@ impl<'a> CallFlowPreloader<'a> {
             // let function_first = self.db.functions[function_id].line;
             // info!("load {arg:?}");
 
-            let original_ticks = location.rr_ticks.clone();
-            let original_event = location.event;
-            self.location = self
-                .flow_preloader
-                .expr_loader
-                .find_function_location(&location, &Line(location.line));
-            // Preserve rr_ticks and event from the original location so
-            // that RR/TTD flow workers can seek to the correct trace
-            // position.  find_function_location only knows about source
-            // boundaries and defaults these to zero.
-            if self.location.rr_ticks.0 == 0 && original_ticks.0 != 0 {
-                self.location.rr_ticks = original_ticks;
-            }
-            if self.location.event == 0 && original_event != 0 {
-                self.location.event = original_event;
-            }
-            // When tree-sitter can't determine function boundaries (no grammar, parse
-            // failure, or the line doesn't fall inside any function in the AST), fall back
-            // to the boundaries from the incoming location.  The handler enriches the
-            // location with Db-derived boundaries before calling load(), so this should
-            // give valid boundaries even without tree-sitter.
-            if self.location.function_first == 0 && self.location.function_last == 0 {
-                info!(
-                    "  find_function_location returned (0,0) — using incoming location boundaries ({}, {})",
-                    location.function_first, location.function_last
-                );
-                self.location.function_first = location.function_first;
-                self.location.function_last = location.function_last;
-                self.location.function_name = location.function_name.clone();
-                self.location.high_level_function_name = location.high_level_function_name.clone();
+            if self.trace_kind == TraceKind::Materialized && self.lang == Lang::Elixir {
+                self.location = location.clone();
+            } else {
+                let original_ticks = location.rr_ticks.clone();
+                let original_event = location.event;
+                self.location = self
+                    .flow_preloader
+                    .expr_loader
+                    .find_function_location(&location, &Line(location.line));
+                // Preserve rr_ticks and event from the original location so
+                // that RR/TTD flow workers can seek to the correct trace
+                // position.  find_function_location only knows about source
+                // boundaries and defaults these to zero.
+                if self.location.rr_ticks.0 == 0 && original_ticks.0 != 0 {
+                    self.location.rr_ticks = original_ticks;
+                }
+                if self.location.event == 0 && original_event != 0 {
+                    self.location.event = original_event;
+                }
+                // When tree-sitter can't determine function boundaries (no grammar, parse
+                // failure, or the line doesn't fall inside any function in the AST), fall back
+                // to the boundaries from the incoming location.  The handler enriches the
+                // location with Db-derived boundaries before calling load(), so this should
+                // give valid boundaries even without tree-sitter.
+                if self.location.function_first == 0 && self.location.function_last == 0 {
+                    info!(
+                        "  find_function_location returned (0,0) — using incoming location boundaries ({}, {})",
+                        location.function_first, location.function_last
+                    );
+                    self.location.function_first = location.function_first;
+                    self.location.function_last = location.function_last;
+                    self.location.function_name = location.function_name.clone();
+                    self.location.high_level_function_name = location.high_level_function_name.clone();
+                }
             }
 
             // For DB traces, the flow should cover the entire function call,
             // not just from the breakpoint forward. Use jump_to_call to find
             // the call's first step, then step with StepIn to enter the body.
-            if self.trace_kind == TraceKind::Materialized && self.location.rr_ticks.0 > 0 {
+            if self.trace_kind == TraceKind::Materialized && self.lang != Lang::Elixir && self.location.rr_ticks.0 > 0 {
                 if let Ok(call_loc) = replay.jump_to_call(&self.location) {
                     // jump_to_call lands on the call entry step (the Call
                     // event itself). StepIn from there enters the call body.

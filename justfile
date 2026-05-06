@@ -652,6 +652,15 @@ test-ruby-flow:
   cd src/db-backend && cargo nextest run --no-capture test_ruby_flow
   echo "Ruby flow test passed!"
 
+# Elixir materialized trace DAP flow integration test (DB-based, no rr required)
+# Uses CODETRACER_ELIXIR_RECORDER_PATH for explicit sibling discovery.
+test-elixir-flow:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running Elixir materialized trace DAP flow integration test..."
+  ./ci/test/elixir-flow-cross-repo.sh e2e_cross_repo_ci_elixir_flow
+  echo "Elixir flow test passed!"
+
 # Noir flow/omniscience integration test (DB-based, no rr required)
 test-noir-flow:
   #!/usr/bin/env bash

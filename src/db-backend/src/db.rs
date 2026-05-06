@@ -159,8 +159,28 @@ impl Db {
                     //     function_record.line
                     // };
                     let (fn_start, fn_last) = expr_loader.get_first_last_fn_lines(&location);
-                    location.function_first = fn_start;
-                    location.function_last = fn_last;
+                    let lang = expr_loader.get_current_language(&PathBuf::from(path));
+                    if lang != Lang::Elixir && fn_start > 0 && fn_last >= fn_start {
+                        location.function_first = fn_start;
+                        location.function_last = fn_last;
+                    } else {
+                        let function_id = self.calls[CallKey(call_key_int)].function_id;
+                        let function_record = &self.functions[function_id];
+                        location.function_first = function_record.line.0;
+                        let mut last_line = function_record.line.0;
+                        let steps_len = self.steps.len() as i64;
+                        for i in step_id_int..steps_len {
+                            let step = self.steps[StepId(i)];
+                            if step.call_key == CallKey(call_key_int) {
+                                if step.line.0 > last_line {
+                                    last_line = step.line.0;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        location.function_last = last_line;
+                    }
                 }
                 Err(e) => {
                     // No tree-sitter grammar for this language (Cairo, Circom, etc.).
