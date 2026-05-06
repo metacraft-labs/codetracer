@@ -102,7 +102,9 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
     else:
       filename
 
-  var err: js
+  var
+    err: js
+    openedPath = readPath
   (source, err) = await fsReadFileWithErr(readPath)
   if not err.isNil:
     # source = cstring"<file missing>!"
@@ -113,6 +115,8 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       # try original filename if
       # it was first tried with a trace copy path
       (source, err) = await fsReadFileWithErr(filename)
+      if err.isNil:
+        openedPath = filename
 
       if not err.isNil:
         console.log "error reading file from trace ", filename, " ", err
@@ -127,7 +131,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   if err.isNil:
     if not data.tabs.hasKey(filename):
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
-      fs.watch(filename) do (e: cstring, filenameArg: cstring):
+      fs.watch(openedPath) do (e: cstring, filenameArg: cstring):
         if e == cstring"change":
           if not data.tabs.hasKey(filename):
             data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)

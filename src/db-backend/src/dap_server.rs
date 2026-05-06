@@ -33,7 +33,7 @@ use crate::transport_endpoint::unix_socket_path_for_pid;
 use crate::transport_endpoint::windows_named_pipe_path_for_pid;
 use crate::transport_endpoint::DapEndpoint;
 
-use crate::ctfs_trace_reader::CTFSTraceReader;
+use crate::ctfs_trace_reader::{ctfs_container::CtfsReader, CTFSTraceReader};
 use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use crate::trace_reader::TraceReader;
 
@@ -347,17 +347,18 @@ fn setup(
         .extension()
         .is_some_and(|ext| ext == std::ffi::OsStr::new("run"));
 
-    // Check whether the trace is a CTFS binary container (.ct file with valid
-    // CTFS magic bytes).  CTFS containers embed both metadata and events, so
-    // they bypass the separate meta.json + trace.bin loading pipeline.
+    // Check whether the trace is a CodeTracer DB CTFS container. Native MCR
+    // traces are also CTFS containers, but they carry recorder streams such as
+    // `t00000000000` instead of DB trace files and must fall through to the
+    // replay-worker path below.
     //
     // We try several candidate paths because different callers pass trace info
     // differently:
     //   - `trace_folder` itself may be a .ct file (ct-dap-client test runner)
     //   - `trace_path` (trace_folder / trace_file) may be the .ct file
-    let ctfs_candidate = if trace_folder.is_file() && is_ctfs_file(trace_folder) {
+    let ctfs_candidate = if trace_folder.is_file() && is_codetracer_ctfs_file(trace_folder) {
         Some(trace_folder.to_path_buf())
-    } else if trace_path.exists() && is_ctfs_file(&trace_path) {
+    } else if trace_path.exists() && is_codetracer_ctfs_file(&trace_path) {
         Some(trace_path.clone())
     } else {
         None
@@ -705,7 +706,7 @@ fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
 ///
 /// A trace is considered DB-based when the folder contains DB metadata files
 /// (`trace.bin` or `trace.json` + `trace_metadata.json`) or when the resolved
-/// trace file is a CTFS container (`.ct` file with valid magic bytes).
+/// trace file is a CodeTracer DB CTFS container.
 ///
 /// This check prevents `resolve_recreator_exe` from auto-discovering
 /// `ct-native-replay` on PATH for DB traces, which would cause the rr replay
@@ -721,32 +722,25 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
         }
     }
 
-    // CTFS containers (.ct files with valid magic) are also DB-based traces
-    // that embed events directly — no replay worker needed.
+    // CodeTracer DB CTFS containers embed events directly and do not need a
+    // replay worker. Native MCR traces also have CTFS magic, but their stream
+    // layout is handled by ct-native-replay.
     let trace_path = folder.join(trace_file);
-    if folder.is_file() && is_ctfs_file(folder) {
+    if folder.is_file() && is_codetracer_ctfs_file(folder) {
         return true;
     }
-    if trace_path.exists() && is_ctfs_file(&trace_path) {
+    if trace_path.exists() && is_codetracer_ctfs_file(&trace_path) {
         return true;
     }
 
     false
 }
 
-fn is_ctfs_file(path: &Path) -> bool {
-    use std::io::Read;
-
-    const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
-
-    let Ok(mut file) = std::fs::File::open(path) else {
+fn is_codetracer_ctfs_file(path: &Path) -> bool {
+    let Ok(reader) = CtfsReader::open(path) else {
         return false;
     };
-    let mut buf = [0u8; 5];
-    if file.read_exact(&mut buf).is_err() {
-        return false;
-    }
-    buf == CTFS_MAGIC
+    reader.has_file("steps.dat") || reader.has_file("events.log")
 }
 
 fn patch_message_seq(message: &DapMessage, seq: i64) -> DapMessage {

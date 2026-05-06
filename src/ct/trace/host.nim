@@ -3,6 +3,7 @@ import
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   ctfs_sources,
+  source_paths,
   ../online_sharing/mcr_enrichment
 
 
@@ -102,6 +103,79 @@ proc copyDirContents(srcDir, destDir: string) =
     of pcDir, pcLinkToDir:
       copyDirContents(entry.path, destPath)
 
+proc normalizedForCompare(path: string): string =
+  normalizedPath(path).replace('\\', '/')
+
+proc pathInside(path, root: string): bool =
+  let normalizedPath = normalizedForCompare(path)
+  let normalizedRoot = normalizedForCompare(root)
+  normalizedPath == normalizedRoot or normalizedPath.startsWith(normalizedRoot & "/")
+
+proc dropFilesPrefix(path: string): string =
+  let normalized = path.replace('\\', '/')
+  if normalized.startsWith("files/"):
+    normalized["files/".len .. ^1]
+  else:
+    normalized
+
+proc materializeImportedTracePath(tempDir, sourcePath, payloadPath: string): bool =
+  if payloadPath.len == 0 or payloadPath.startsWith(".."):
+    return false
+
+  let targetPath = tempDir / "files" / payloadPath
+  if fileExists(sourcePath) and normalizedForCompare(sourcePath) != normalizedForCompare(targetPath):
+    try:
+      createDir(targetPath.parentDir)
+      copyFile(sourcePath, targetPath)
+    except CatchableError as e:
+      echo fmt"WARNING: trying to copy trace path {sourcePath} error: ", e.msg
+      echo "  skipping copying that file"
+
+  fileExists(targetPath)
+
+proc normalizeImportedTracePaths(tempDir: string) =
+  ## Local manifest imports copy companion files into a transient trace folder.
+  ## Make trace_paths.json point at the self-contained files/ payload so the
+  ## imported trace remains browsable after the manifest temp directory is gone.
+  let tracePathsPath = tempDir / "trace_paths.json"
+  if not fileExists(tracePathsPath):
+    writeFile(tracePathsPath, "[]")
+    return
+
+  var rawPaths: seq[string] = @[]
+  try:
+    let tracePathsJson = parseJson(readFile(tracePathsPath))
+    if tracePathsJson.kind == JArray:
+      for pathNode in tracePathsJson:
+        if pathNode.kind == JString:
+          rawPaths.add(pathNode.getStr())
+  except CatchableError as e:
+    echo "WARNING: failed to parse trace_paths.json for local import: ", e.msg
+    return
+
+  var normalizedPaths: seq[string] = @[]
+  for rawPath in rawPaths:
+    if rawPath.len == 0:
+      continue
+
+    var sourcePath = rawPath
+    var payloadPath = rawPath
+    if isAbsoluteTracePath(rawPath):
+      if pathInside(rawPath, tempDir):
+        payloadPath = dropFilesPrefix(relativePath(rawPath, tempDir))
+      else:
+        payloadPath = tracePayloadRelativePath(rawPath, "")
+    else:
+      sourcePath = tempDir / rawPath
+      payloadPath = dropFilesPrefix(rawPath)
+
+    if materializeImportedTracePath(tempDir, sourcePath, payloadPath):
+      normalizedPaths.add(payloadPath.replace('\\', '/'))
+    else:
+      normalizedPaths.add(rawPath)
+
+  writeFile(tracePathsPath, $(%normalizedPaths))
+
 proc importCtFile(ctFilePath: string): int =
   ## Import a standalone .ct file by creating a minimal trace folder
   ## around it and importing into the database.
@@ -136,29 +210,16 @@ proc importCtFile(ctFilePath: string): int =
   if enriched:
     echo "ct host: MCR trace enriched with portable binaries/symbols"
 
-  let mcrVisualReplay = findCtFileInFolder(tempDir).len > 0
-
   # Create minimal trace_db_metadata.json so importTrace can read it
   # (only if enrichment or a prior recording step did not already produce one).
-  # MCR CTFS containers can be extracted into a gfx_stream by ct-mcr, so mark
-  # them as visual replay capable even before extraction has happened.
   if not fileExists(tempDir / "trace_db_metadata.json"):
     let metaJson = %*{
       "program": "imported",
       "args": newJArray(),
       "workdir": tempDir,
-      "lang": "c",
-      "visualReplay": mcrVisualReplay
+      "lang": "c"
     }
     writeFile(tempDir / "trace_db_metadata.json", $metaJson)
-  elif mcrVisualReplay:
-    try:
-      let metaPath = tempDir / "trace_db_metadata.json"
-      var metaJson = parseJson(readFile(metaPath))
-      metaJson["visualReplay"] = %true
-      writeFile(metaPath, $metaJson)
-    except CatchableError:
-      discard
 
   let ctfsSourcesExtracted = materializeCtfsSources(tempDir / "trace.ct", tempDir)
   if ctfsSourcesExtracted:
@@ -166,6 +227,8 @@ proc importCtFile(ctFilePath: string): int =
 
   if not fileExists(tempDir / "trace_paths.json"):
     writeFile(tempDir / "trace_paths.json", "[]")
+
+  normalizeImportedTracePaths(tempDir)
 
   # Copy source files into files/ subdirectory if not already present.
   # This mirrors the layout expected by the frontend for source display.
@@ -677,6 +740,7 @@ proc importLocalManifest(
     result = resolveRecordingManifest(fullPath, manifest, storageOptions)
   applyReplayStartEnv(result.start)
   echo "ct host: loaded local manifest: ", fullPath
+  flushFile(stdout)
 
 
 proc hostCommand*(
@@ -746,6 +810,7 @@ proc hostCommand*(
       let resolved = importLocalManifest(localManifestPath, storageOptions)
       traceId = resolved.traceId
       echo "ct host: imported manifest trace as trace id ", traceId
+      flushFile(stdout)
     except CatchableError as e:
       echo "ct host: error: failed to load local manifest: ", e.msg
       quit(1)
