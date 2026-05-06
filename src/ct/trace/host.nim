@@ -513,6 +513,7 @@ proc storageObjectUrl(obj: JsonNode, options: StorageProtocolOptions): string =
 proc fetchStorageObject(obj: JsonNode, options: StorageProtocolOptions, label: string): string =
   requireReadableObject(obj, label)
   let url = storageObjectUrl(obj, options)
+  echo "ct host: fetching ", label, " from storage: ", url
   var client = newHttpClient()
   defer: client.close()
   if options.token.len > 0:
@@ -530,6 +531,44 @@ proc writeStorageObjectToTemp(
     obj: JsonNode, options: StorageProtocolOptions, label, suffix: string): string =
   let tempDir = getTempDir() / "ct-host-storage-" & $getCurrentProcessId()
   createDir(tempDir)
+  result = tempDir / (label.replace(" ", "-") & suffix)
+  writeFile(result, fetchStorageObject(obj, options, label))
+
+proc checkedRelativeStoragePath(obj: JsonNode, label: string): string =
+  let raw = block:
+    let value = obj.jsonString(["relativePath", "relative_path", "payloadPath", "payload_path", "name"])
+    if value.len > 0: value else: obj.jsonString(["path"])
+  if raw.len == 0 or isAbsolute(raw):
+    raise newException(ValueError, label & " has invalid relative path")
+  result = raw.replace('\\', '/').strip(leading = true, trailing = false, chars = {'/'})
+  if result.len == 0 or result.startsWith("../") or result == ".." or result.contains("/../"):
+    raise newException(ValueError, label & " has invalid relative path")
+
+proc fetchStorageSupportFiles(
+    owner: JsonNode, options: StorageProtocolOptions, tempDir: string) =
+  let supportFiles = owner.jsonField(["supportFiles", "support_files", "companionFiles", "companion_files"])
+  if supportFiles.isNil:
+    return
+  if supportFiles.kind != JArray:
+    raise newException(ValueError, "storage support files must be an array")
+
+  for item in supportFiles:
+    if item.kind != JObject:
+      raise newException(ValueError, "storage support file entry must be an object")
+    let relative = checkedRelativeStoragePath(item, "storage support file")
+    let target = tempDir / relative
+    createDir(target.parentDir)
+    writeFile(target, fetchStorageObject(item, options, "storage support file " & relative))
+
+proc writeStorageObjectToTempWithSupport(
+    obj: JsonNode,
+    supportOwner: JsonNode,
+    options: StorageProtocolOptions,
+    label,
+    suffix: string): string =
+  let tempDir = getTempDir() / "ct-host-storage-" & $getCurrentProcessId()
+  createDir(tempDir)
+  fetchStorageSupportFiles(supportOwner, options, tempDir)
   result = tempDir / (label.replace(" ", "-") & suffix)
   writeFile(result, fetchStorageObject(obj, options, label))
 
@@ -589,6 +628,7 @@ proc importShardedSegment(
 
   let tempDir = getTempDir() / "ct-host-storage-" & $getCurrentProcessId()
   createDir(tempDir)
+  fetchStorageSupportFiles(segment, options, tempDir)
   let path = tempDir / "sharded-segment.ct"
   writeFile(path, bytes)
   importCtFile(path)
@@ -646,7 +686,7 @@ proc resolveSharedManifest(
       echo "ct host: selected split_ctfs segment: ", path
       result.traceId = importCtFile(path)
     else:
-      let storagePath = writeStorageObjectToTemp(fileNode, storageOptions, "split CTFS segment", ".ct")
+      let storagePath = writeStorageObjectToTempWithSupport(fileNode, selected, storageOptions, "split CTFS segment", ".ct")
       echo "ct host: selected split_ctfs segment: ", storagePath
       result.traceId = importCtFile(storagePath)
     result.start = start
