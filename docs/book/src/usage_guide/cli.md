@@ -26,3 +26,5 @@ through the CodeTracer CLI with commands like `ct run` or `ct record`(or through
 
 Think of debugging your application with CodeTracer as recording a video and then replaying it in order to find
 the information you need. This is why we use commands like `record` and `replay`.
+
+For native graphics programs, visual recordings are produced by the MCR recorder and opened in the GUI as `.ct` files. See [Visual recordings](./visual_recordings.md) for the `ct-mcr record --use-interpose` workflow and the Frame Viewer, Pixel History, and Shader Debugger panels.

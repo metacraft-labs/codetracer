@@ -39,6 +39,7 @@ result-lib
 result-man
 
 docs/book/book
+docs/book/src/generated/
 src/index.js
 src/common/paths.js
 src/common/paths_test

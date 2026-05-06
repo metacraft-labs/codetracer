@@ -99,6 +99,8 @@ ct record [options] <program> [-- <program-args>]
 
 > **Note:** Blockchain-specific languages (Circom, Cairo, Aiken, Cadence, Move, Sway, Miden, PolkaVM, Leo, Tolk) use their own recorder binaries. See the [Getting Started](../getting_started/overview.md) guides for each language.
 
+> **Note:** Visual recordings for native graphics programs are MCR `.ct` traces produced with `ct-mcr record --use-interpose`. CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See [Visual recordings](../usage_guide/visual_recordings.md).
+
 ### ct replay
 
 Opens a previously recorded trace in the CodeTracer GUI.
@@ -137,6 +139,9 @@ Accepts the same options as `ct record`.
 | `CODETRACER_RECORDING`          | Set to `1` during recording                                             |
 | `CODETRACER_CALLTRACE_MODE`     | Call trace mode: `FullRecord`, `RawRecordNoValues`, `NoInstrumentation` |
 | `CODETRACER_SHELL_ID`           | Shell session ID (for CodeTracer Shell)                                 |
+| `CODETRACER_CT_MCR_CMD`         | Override the MCR command used for visual replay graphics extraction      |
+| `CODETRACER_CT_GFX_PLAYER_CMD`  | Override the visual replay player binary                                |
+| `CODETRACER_CT_GFX_PLAYER_BACKEND` | Override the visual replay player backend, for example `software`     |
 
 ### Output Format
 

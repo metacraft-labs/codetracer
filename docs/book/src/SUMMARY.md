@@ -30,6 +30,7 @@
 - [Usage Guide](./usage_guide/overview.md)
   - [Command-line interface](./usage_guide/cli.md)
   - [Graphical interface](./usage_guide/gui.md)
+  - [Visual recordings](./usage_guide/visual_recordings.md)
   - [Tracepoints](./usage_guide/tracepoints.md)
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
 

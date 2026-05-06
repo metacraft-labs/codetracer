@@ -44,3 +44,9 @@ The state panel also gives quick access to a variable's value history.
 *   **Terminal Output Panel:** Shows the complete terminal output (stdout/stderr) of the traced program. Clicking on any part of the terminal output will result in a jump to the exact moment when the character has been printed.
 
 All the components are designed to let you move freely through your program's execution, making it easy to pinpoint the cause of bugs or understand complex behavior.
+
+## Visual Replay
+
+When you open an MCR `.ct` trace that contains captured graphics activity, CodeTracer starts the visual replay pipeline automatically. The GUI extracts the graphics stream from the trace, starts the replay player, and adds panels for the rendered frame, draw calls, pixel history, and shader debugging.
+
+See [Visual recordings](./visual_recordings.md) for the recording commands and the full GUI workflow.

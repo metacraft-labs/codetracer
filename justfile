@@ -9,6 +9,17 @@ build-docs:
   cd docs/book/
   mdbook build
 
+capture-docs-visual-screenshots:
+  bash scripts/docs/capture-visual-recording-screenshots.sh
+
+capture-docs-visual-page:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just capture-docs-visual-screenshots
+  just build-docs
+  cd src/tests/gui
+  node ../../../scripts/docs/capture-book-page-screenshot.mjs
+
 build-ui-js output:
   nim \
     -d:chronicles_enabled=off \
