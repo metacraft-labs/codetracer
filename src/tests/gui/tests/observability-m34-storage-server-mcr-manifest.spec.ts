@@ -36,6 +36,12 @@ const storageHarnessProject = path.join(
   "CrossRepo.ObservabilityDebugSessionHarness",
   "CrossRepo.ObservabilityDebugSessionHarness.csproj",
 );
+const replayAgentProject = path.join(
+  codetracerCiDir,
+  "apps",
+  "ReplayAgent",
+  "ReplayAgent.csproj",
+);
 const m25RealMcrArtifactDir = path.join(
   observabilityE2eDir,
   "artifacts",
@@ -108,6 +114,29 @@ type StorageHarnessReady = {
   manifestPath: string;
   serverIds: string[];
   selectedSegmentIndex: number;
+};
+
+type DebugSessionReplayReady = {
+  baseUrl: string;
+  tenantId: string;
+  callerToken: string;
+  replayToken: string;
+  authProbes: {
+    replayTokenSelectedObjectStatus: number;
+    replayTokenCrossTraceStatus: number;
+    replayTokenGeneralApiStatus: number;
+    userTokenStorageReadStatus: number;
+  };
+  manifestKey: string;
+  selectedSegmentIndex: number;
+  debugSession: {
+    status: string;
+    resolvedCoordinate: {
+      geid?: number;
+      sliceKey?: string;
+    };
+  };
+  replayPayload: any;
 };
 
 type CorruptedPrimaryReplicas = {
@@ -344,7 +373,7 @@ function prepareStorageHarnessInput(): PreparedSplitMcr {
     inputPath,
     JSON.stringify(
       {
-        traceId: "m25-real-mcr-request-001",
+        traceId: "00000000000000000000000000000025",
         spanId: "30000000000025cc",
         selectedGeid: selectedGeid.toString(),
         selectedSegmentIndex: selectedEntry.intervalId,
@@ -368,6 +397,16 @@ function prepareStorageHarnessInput(): PreparedSplitMcr {
           {
             relativePath: "binaries/inventory_smoke",
             filePath: fixtureBinaryPath,
+          },
+          {
+            relativePath: "expired-support-should-not-load.txt",
+            filePath: fixtureRequestDetailsPath,
+            retentionStatus: "expired",
+          },
+          {
+            relativePath: "incomplete-support-should-not-load.txt",
+            filePath: fixtureRequestDetailsPath,
+            uploadCompletionState: "uploading",
           },
         ],
       },
@@ -493,6 +532,112 @@ async function startStorageHarness(
   };
 }
 
+async function startDebugSessionHarness(
+  inputPath: string,
+): Promise<{ process: childProcess.ChildProcess; ready: DebugSessionReplayReady; output: string[] }> {
+  const output: string[] = [];
+  const harnessProcess = childProcess.spawn(
+    "direnv",
+    [
+      "exec",
+      codetracerCiDir,
+      "dotnet",
+      "run",
+      "--project",
+      storageHarnessProject,
+      "--",
+      "storage-server-debug-session",
+      inputPath,
+    ],
+    {
+      cwd: codetracerCiDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  harnessProcess.stdout?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+  harnessProcess.stderr?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+
+  const readyOutput = await waitForOutput(
+    output,
+    /CODETRACER_CI_DEBUG_SESSION_REPLAY_READY\s+({.+})/,
+    120_000,
+  );
+  const match = readyOutput.match(
+    /CODETRACER_CI_DEBUG_SESSION_REPLAY_READY\s+({.+})/,
+  );
+  if (!match) {
+    throw new Error(`debug-session replay ready payload missing:\n${readyOutput}`);
+  }
+
+  return {
+    process: harnessProcess,
+    ready: JSON.parse(match[1]) as DebugSessionReplayReady,
+    output,
+  };
+}
+
+function parseReplayAgentEnv(commandLine: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  const pattern = /-e '([^=']+)=([^']*)'/g;
+  for (const match of commandLine.matchAll(pattern)) {
+    env[match[1]] = match[2];
+  }
+  return env;
+}
+
+function generateReplayAgentCommand(payload: any, rootDir: string): string {
+  const payloadPath = path.join(rootDir, "replay-provisioning-requested.json");
+  fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2));
+  return childProcess.execFileSync(
+    "direnv",
+    [
+      "exec",
+      codetracerCiDir,
+      "dotnet",
+      "run",
+      "--project",
+      replayAgentProject,
+      "--",
+      "print-runner-command",
+      payloadPath,
+    ],
+    {
+      cwd: codetracerCiDir,
+      env: makeCleanEnv(),
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  ).trim();
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function createCtPathShim(rootDir: string): string {
+  const shimDir = path.join(rootDir, "bin");
+  fs.mkdirSync(shimDir, { recursive: true });
+  const shimPath = path.join(shimDir, "ct");
+  fs.writeFileSync(
+    shimPath,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      `exec ${shellQuote(codetracerPath)} "$@"`,
+      "",
+    ].join("\n"),
+  );
+  fs.chmodSync(shimPath, 0o755);
+  return shimDir;
+}
+
 async function connectToHost(
   page: Page,
   httpPort: number,
@@ -601,6 +746,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
   base("ct host --manifest falls back from missing primary shard replicas to secondary storage replicas", async ({}) => {
     expectRequiredFile("CodeTracer test binary", codetracerPath);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile("ReplayAgent project", replayAgentProject);
     expectRequiredFile("real MCR request trace fixture", portableTracePath);
     expectRequiredFile("MCR request source file", fixtureSourcePath);
     expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
@@ -765,6 +911,241 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         await browser.close().catch(() => undefined);
       }
       fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("debug-session provisioning reaches storage-server ct host through ReplayAgent entrypoint", async ({}) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+
+    const prepared = prepareStorageHarnessInput();
+    let debugHarness: Awaited<ReturnType<typeof startDebugSessionHarness>> | null = null;
+    let ctProcess: childProcess.ChildProcess | null = null;
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m34-replay-agent-entrypoint-"),
+    );
+
+    try {
+      debugHarness = await startDebugSessionHarness(prepared.inputPath);
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      expect(debugHarness.ready.debugSession.status).toBe("Provisioning");
+      expect(debugHarness.ready.selectedSegmentIndex).toBe(
+        prepared.selectedSegmentIndex,
+      );
+      expect(debugHarness.ready.replayPayload.traceSource.storageBaseUrl).toBe(
+        debugHarness.ready.baseUrl,
+      );
+      expect(debugHarness.ready.replayPayload.traceSource.storageReplayToken).toBe(
+        debugHarness.ready.replayToken,
+      );
+      expect(debugHarness.ready.replayPayload.traceSource.storageReplayToken).not.toBe(
+        debugHarness.ready.callerToken,
+      );
+      expect(debugHarness.ready.callerToken).not.toContain(":");
+      expect(debugHarness.ready.replayToken).toMatch(/^ct_replay_storage_/);
+      expect(debugHarness.ready.authProbes.replayTokenSelectedObjectStatus).toBe(200);
+      expect(debugHarness.ready.authProbes.replayTokenCrossTraceStatus).toBe(403);
+      expect(debugHarness.ready.authProbes.replayTokenGeneralApiStatus).toBe(401);
+      expect(debugHarness.ready.authProbes.userTokenStorageReadStatus).toBe(403);
+      expect(debugHarness.ready.replayPayload.traceSource.storageProtocol).toBe(
+        "local-storage",
+      );
+      const selectedReplaySegment =
+        debugHarness.ready.replayPayload.traceSource.shardedMcrSegments.find(
+          (segment: any) => segment.segmentIndex === prepared.selectedSegmentIndex,
+        );
+      expect(selectedReplaySegment).toBeTruthy();
+      const supportFileNames = (selectedReplaySegment.supportFiles ?? []).map(
+        (file: any) => file.relativePath,
+      );
+      expect(supportFileNames).toContain("inventory-response.json");
+      expect(supportFileNames).not.toContain("expired-support-should-not-load.txt");
+      expect(supportFileNames).not.toContain("incomplete-support-should-not-load.txt");
+      const responseSupportFile = selectedReplaySegment.supportFiles.find(
+        (file: any) => file.relativePath === "inventory-response.json",
+      );
+      expect(responseSupportFile.uploadCompletionState).toBe("complete");
+      expect(responseSupportFile.retentionStatus).toBe("available");
+      expect(
+        debugHarness.ready.replayPayload.traceSource.shardedMcrSegments.some(
+          (segment: any) =>
+            segment.segmentIndex === prepared.selectedSegmentIndex &&
+            segment.supportFiles?.some(
+              (file: any) => file.relativePath === "inventory-response.json",
+            ),
+        ),
+      ).toBe(true);
+      const replayAgentCommandLine = generateReplayAgentCommand(
+        debugHarness.ready.replayPayload,
+        runnerRoot,
+      );
+      expect(replayAgentCommandLine).toContain("docker run ");
+      expect(replayAgentCommandLine).toContain(
+        "CODETRACER_TRACE_SHARDED_MCR_SEGMENTS=",
+      );
+      expect(replayAgentCommandLine).toContain(
+        "CODETRACER_STORAGE_REPLAY_TOKEN=",
+      );
+
+      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      expect(replayEnv.CODETRACER_TRACE_MANIFEST_KEY).toBe(
+        debugHarness.ready.manifestKey,
+      );
+      expect(replayEnv.CODETRACER_STORAGE_BASE_URL).toBe(
+        debugHarness.ready.baseUrl,
+      );
+      expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toBe(
+        debugHarness.ready.replayToken,
+      );
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
+        "inventory-response.json",
+      );
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
+        "\"uploadCompletionState\":\"complete\"",
+      );
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
+        "\"retentionStatus\":\"available\"",
+      );
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).not.toContain(
+        "expired-support-should-not-load.txt",
+      );
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).not.toContain(
+        "incomplete-support-should-not-load.txt",
+      );
+
+      const httpPort = await getFreeTcpPort();
+      const backendPort = await getFreeTcpPort();
+      const hostOutput: string[] = [];
+      const shimDir = createCtPathShim(runnerRoot);
+      const entrypointPath = path.join(
+        codetracerCiDir,
+        "resources",
+        "docker",
+        "codetracer-runner",
+        "replay-entrypoint.sh",
+      );
+      ctProcess = childProcess.spawn(
+        "bash",
+        [
+          entrypointPath,
+          `--port=${httpPort}`,
+          `--backend-socket-port=${backendPort}`,
+          `--frontend-socket=${backendPort}`,
+        ],
+        {
+          cwd: codetracerInstallDir,
+          env: {
+            ...makeCleanEnv({
+              XDG_CONFIG_HOME: path.join(runnerRoot, "xdg-config"),
+            }),
+            ...replayEnv,
+            CODETRACER_WORK_DIR: path.join(runnerRoot, "work"),
+            PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
+      ctProcess.stdout?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      ctProcess.stderr?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+
+      browser = await chromium.launch({
+        executablePath: resolveChromiumPath(),
+        args: (process.env.CODETRACER_ELECTRON_ARGS ?? "")
+          .split(/\s+/)
+          .filter(Boolean),
+      });
+      const page = await browser.newPage();
+
+      const importOutput = await waitForOutput(
+        hostOutput,
+        /imported manifest trace as trace id\s+\d+/,
+      );
+      expect(importOutput).toContain("Starting host from generated replay manifest");
+      expect(importOutput).toContain("loaded local manifest:");
+      expect(importOutput).toContain("fetching CTFS shard replica from storage:");
+      expect(importOutput).toContain(debugHarness.ready.baseUrl);
+      expect(importOutput).toContain("fetching storage support file inventory_smoke.c from storage:");
+      expect(importOutput).toContain("fetching storage support file inventory-response.json from storage:");
+      expect(importOutput).not.toContain("expired-support-should-not-load.txt");
+      expect(importOutput).not.toContain("incomplete-support-should-not-load.txt");
+
+      await connectToHost(page, httpPort, hostOutput);
+      await expect(page.locator(".lm_content").first()).toBeVisible({
+        timeout: 30_000,
+      });
+
+      const sourceNode = page
+        .locator(".jstree-anchor")
+        .filter({ hasText: /^inventory_smoke\.c$/ })
+        .first();
+      await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+      await sourceNode.click();
+
+      const sourceText = await waitForEditorModelText(page, "handle_client");
+      await waitForEditorModelText(page, "reserve_from_primary_bin");
+
+      const requestDetailsNode = page
+        .locator(".jstree-anchor")
+        .filter({ hasText: /^inventory-response\.json$/ })
+        .first();
+      await expect(requestDetailsNode).toBeVisible({ timeout: 30_000 });
+      await requestDetailsNode.click();
+      const requestDetailsText = await waitForVisibleEditorText(
+        page,
+        `"requestId": "m25-real-mcr-request-001"`,
+      );
+      await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
+
+      const bodyText = await page.evaluate(() => document.body.innerText);
+      const traceMetadata = await page.evaluate(() => {
+        const d = (window as any).data;
+        const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
+        return {
+          id: Number(trace?.id ?? -1),
+          outputFolder: String(trace?.outputFolder ?? ""),
+        };
+      });
+
+      expect(bodyText).toContain("inventory_smoke.c");
+      expect(bodyText).toContain("inventory-response.json");
+      expect(sourceText).toContain("handle_client");
+      expect(sourceText).toContain("reserve_from_primary_bin");
+      expect(requestDetailsText).toContain(
+        `"requestId": "m25-real-mcr-request-001"`,
+      );
+      expect(requestDetailsText).toContain(
+        `"branch": "reserve_from_primary_bin"`,
+      );
+      expect(traceMetadata.id).toBeGreaterThan(0);
+      expect(traceMetadata.outputFolder).toContain("trace-");
+    } finally {
+      if (ctProcess?.pid) {
+        killProcessTree(ctProcess.pid);
+      }
+      if (debugHarness?.process.pid) {
+        killProcessTree(debugHarness.process.pid);
+      }
+      if (browser) {
+        await browser.close().catch(() => undefined);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
       await sleep(500);
     }
   });
