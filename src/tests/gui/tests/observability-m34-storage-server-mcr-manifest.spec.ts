@@ -107,6 +107,11 @@ type PreparedSplitMcr = {
   selectedSegmentIndex: number;
 };
 
+type McrMarkerCoordinates = {
+  traceId: string;
+  spanId: string;
+};
+
 type StorageHarnessReady = {
   baseUrl: string;
   tenantId: string;
@@ -334,6 +339,37 @@ function sha256File(filePath: string): string {
     .digest("hex");
 }
 
+function parseMcrMarkerCoordinates(filePath: string): McrMarkerCoordinates {
+  const text = fs.readFileSync(filePath).toString("utf-8");
+  const markerLine = text
+    .split(/[\0\r\n]+/)
+    .find((line) =>
+      line.includes("CT_TRACE_MARKER") &&
+      /trace_id=/i.test(line) &&
+      /span_id=/i.test(line),
+    );
+  if (!markerLine) {
+    throw new Error(`MCR marker with trace_id/span_id not found in ${filePath}`);
+  }
+
+  const values = new Map<string, string>();
+  for (const part of markerLine.split(/\s+/)) {
+    const equals = part.indexOf("=");
+    if (equals <= 0 || equals === part.length - 1) continue;
+    values.set(
+      part.slice(0, equals).toLowerCase(),
+      part.slice(equals + 1).replace(/[",]+$/g, ""),
+    );
+  }
+
+  const traceId = values.get("trace_id");
+  const spanId = values.get("span_id");
+  if (!traceId || !spanId) {
+    throw new Error(`MCR marker coordinates are incomplete in ${filePath}`);
+  }
+  return { traceId, spanId };
+}
+
 function prepareStorageHarnessInput(): PreparedSplitMcr {
   expectRequiredFile("ct-mcr slicer", ctMcrPath);
 
@@ -368,13 +404,14 @@ function prepareStorageHarnessInput(): PreparedSplitMcr {
 
   const selectedEntry = sliceEntries[sliceEntries.length - 1];
   const selectedGeid = segmentInteriorGeid(selectedEntry);
+  const marker = parseMcrMarkerCoordinates(localTracePath);
   const inputPath = path.join(rootDir, "storage-harness-input.json");
   fs.writeFileSync(
     inputPath,
     JSON.stringify(
       {
-        traceId: "00000000000000000000000000000025",
-        spanId: "30000000000025cc",
+        traceId: marker.traceId,
+        spanId: marker.spanId,
         selectedGeid: selectedGeid.toString(),
         selectedSegmentIndex: selectedEntry.intervalId,
         segments: sliceEntries.map((entry) => ({
