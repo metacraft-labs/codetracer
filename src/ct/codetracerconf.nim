@@ -433,10 +433,19 @@ type
       hostTracePath* {.
         name: "trace-path"
         defaultValue: ""
-        desc: "Path to a .ct file or " &
-          "trace folder to auto-import " &
-          "and host. Skips the need " &
-          "for a separate ct import."
+        desc: "Path to a .ct file, trace " &
+          "folder, or local trace-storage " &
+          "manifest to auto-import and " &
+          "host. Skips the need for a " &
+          "separate ct import."
+      .} : string
+
+      hostManifestPath* {.
+        name: "manifest"
+        defaultValue: ""
+        desc: "Path to a local shared " &
+          "trace-storage or recording " &
+          "manifest to host."
       .} : string
 
       hostTraceArg* {.

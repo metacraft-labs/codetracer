@@ -1,5 +1,5 @@
 import
-  std / [ options, strformat, strutils, osproc, os, json ],
+  std / [ options, strformat, strutils, osproc, os, json, uri ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   ctfs_sources,
@@ -24,6 +24,19 @@ type
     ok*: bool
     value*: int
     error*: string
+
+  HostStartCoordinates* = object
+    traceId*: string
+    spanId*: string
+    geid*: string
+    wallTimeUnixNs*: string
+    monotonicTimeNs*: string
+    materializedArtifactKey*: string
+    materializedMomentId*: string
+
+  HostResolvedTrace* = object
+    traceId*: int
+    start*: HostStartCoordinates
 
 proc okResult(value: int): IdleTimeoutResult =
   IdleTimeoutResult(ok: true, value: value, error: "")
@@ -233,6 +246,230 @@ proc importTraceFolder(traceFolderPath: string): int =
 
   result = trace.id
 
+proc jsonField(node: JsonNode, names: openArray[string]): JsonNode =
+  if node.isNil or node.kind != JObject:
+    return nil
+  for name in names:
+    if node.hasKey(name) and node[name].kind != JNull:
+      return node[name]
+  nil
+
+proc jsonString(node: JsonNode, names: openArray[string]): string =
+  let field = node.jsonField(names)
+  if field.isNil:
+    return ""
+  case field.kind
+  of JString:
+    field.getStr()
+  of JInt:
+    $field.getInt()
+  else:
+    ""
+
+proc firstObject(node: JsonNode, names: openArray[string]): JsonNode =
+  let field = node.jsonField(names)
+  if field.isNil or field.kind != JArray or field.len == 0 or field[0].kind != JObject:
+    return nil
+  field[0]
+
+proc fileUriToPath(value: string): string =
+  if value.startsWith("file://"):
+    try:
+      return decodeUrl(parseUri(value).path)
+    except CatchableError:
+      return value["file://".len .. ^1]
+  value
+
+proc inferStorageRoot(manifestPath: string, manifestKey: string): string =
+  let envRoot = getEnv("CODETRACER_LOCAL_STORAGE_ROOT", "")
+  if envRoot.len > 0:
+    return expandFilename(expandTilde(envRoot))
+  if manifestKey.len > 0:
+    let fullPath = expandFilename(expandTilde(manifestPath))
+    let normalizedFull = fullPath.replace('\\', '/')
+    let normalizedKey = manifestKey.replace('\\', '/')
+    if normalizedFull.endsWith(normalizedKey):
+      let rootLen = normalizedFull.len - normalizedKey.len
+      if rootLen > 0:
+        return normalizedFull[0 ..< rootLen]
+  manifestPath.parentDir
+
+proc resolveLocalReference(reference, manifestPath, manifestKey: string): string =
+  let local = fileUriToPath(reference)
+  if local.len == 0:
+    return ""
+  if isAbsolute(local):
+    return expandFilename(expandTilde(local))
+  let root = inferStorageRoot(manifestPath, manifestKey)
+  let rooted = root / local
+  if fileExists(rooted) or dirExists(rooted):
+    return rooted
+  manifestPath.parentDir / local
+
+proc findMaterializedTraceFolder(path: string): string =
+  let fullPath = expandFilename(expandTilde(path))
+  if dirExists(fullPath):
+    if fileExists(fullPath / "trace_metadata.json"):
+      return fullPath
+    for entry in walkDir(fullPath):
+      if entry.kind in {pcDir, pcLinkToDir} and fileExists(entry.path / "trace_metadata.json"):
+        return entry.path
+  elif fileExists(fullPath):
+    let parent = fullPath.parentDir
+    if fullPath.extractFilename in ["trace.json", "trace.bin"] and
+        fileExists(parent / "trace_metadata.json"):
+      return parent
+    if fullPath.endsWith(".ct"):
+      return fullPath
+  ""
+
+proc applyReplayStartEnv(start: HostStartCoordinates) =
+  if start.traceId.len > 0:
+    putEnv("CODETRACER_START_TRACE_ID", start.traceId)
+  if start.spanId.len > 0:
+    putEnv("CODETRACER_START_SPAN_ID", start.spanId)
+  if start.geid.len > 0:
+    putEnv("CODETRACER_START_GEID", start.geid)
+  if start.wallTimeUnixNs.len > 0:
+    putEnv("CODETRACER_START_WALL_TIME_UNIX_NS", start.wallTimeUnixNs)
+  if start.monotonicTimeNs.len > 0:
+    putEnv("CODETRACER_START_MONOTONIC_TIME_NS", start.monotonicTimeNs)
+  if start.materializedArtifactKey.len > 0:
+    putEnv("CODETRACER_START_MATERIALIZED_ARTIFACT_KEY", start.materializedArtifactKey)
+  if start.materializedMomentId.len > 0:
+    putEnv("CODETRACER_START_MATERIALIZED_MOMENT_ID", start.materializedMomentId)
+
+proc readReplayStart(node: JsonNode): HostStartCoordinates =
+  if node.isNil or node.kind != JObject:
+    return
+  result.traceId = node.jsonString(["trace_id", "traceId"])
+  result.spanId = node.jsonString(["span_id", "spanId"])
+  result.geid = node.jsonString(["geid", "startGeid"])
+  result.wallTimeUnixNs = node.jsonString(["wall_time_unix_ns", "wallTimeUnixNs", "timestamp_unix_nanos"])
+  result.monotonicTimeNs = node.jsonString(["monotonic_time_ns", "monotonicTimeNs"])
+  result.materializedMomentId = node.jsonString(["moment_id", "momentId", "materializedMomentId"])
+
+proc parseUintOrZero(value: string): uint64 =
+  if value.len == 0:
+    return 0'u64
+  try:
+    parseBiggestInt(value).uint64
+  except CatchableError:
+    0'u64
+
+proc resolveSharedManifest(manifestPath: string, manifest: JsonNode): HostResolvedTrace =
+  let source = manifest.jsonField(["source"])
+  if source.isNil or source.kind != JObject:
+    raise newException(ValueError, "shared manifest missing source")
+  let kind = source.jsonString(["kind"])
+  let manifestKey = manifest.jsonString(["manifestS3Key", "manifest_s3_key"])
+  let manifestStart = readReplayStart(manifest.jsonField(["replay_start", "replayStart"]))
+
+  case kind
+  of "single_ctfs":
+    let fileNode = source.jsonField(["file"])
+    if fileNode.isNil:
+      raise newException(ValueError, "single_ctfs manifest missing file")
+    let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
+    if path.len == 0 or not fileExists(path):
+      raise newException(ValueError, "single_ctfs local file not found: " & path)
+    result.traceId = importCtFile(path)
+    result.start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
+    if result.start.traceId.len == 0 and result.start.geid.len == 0:
+      result.start = manifestStart
+  of "split_ctfs":
+    let segments = source.jsonField(["segments"])
+    if segments.isNil or segments.kind != JArray or segments.len == 0:
+      raise newException(ValueError, "split_ctfs manifest missing segments")
+    var start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
+    if start.traceId.len == 0 and start.geid.len == 0:
+      start = manifestStart
+    let requestedGeid = parseUintOrZero(start.geid)
+    var selected: JsonNode = nil
+    for segment in segments:
+      if segment.kind != JObject:
+        continue
+      if requestedGeid > 0:
+        let geidStart = parseUintOrZero(segment.jsonString(["geid_start", "geidStart", "startGeid"]))
+        let geidEnd = parseUintOrZero(segment.jsonString(["geid_end", "geidEnd", "endGeid"]))
+        if requestedGeid >= geidStart and (geidEnd == 0'u64 or requestedGeid <= geidEnd):
+          selected = segment
+          break
+      elif selected.isNil:
+        selected = segment
+    if selected.isNil:
+      selected = segments[0]
+    let fileNode = selected.jsonField(["file"])
+    let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
+    if path.len == 0 or not fileExists(path):
+      raise newException(ValueError, "split_ctfs selected local file not found: " & path)
+    result.traceId = importCtFile(path)
+    result.start = start
+  of "materialized_artifact":
+    let artifactNode = source.jsonField(["artifact"])
+    if artifactNode.isNil:
+      raise newException(ValueError, "materialized_artifact manifest missing artifact")
+    let path = resolveLocalReference(artifactNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
+    let traceFolder = findMaterializedTraceFolder(path)
+    if traceFolder.len == 0:
+      raise newException(ValueError,
+        "materialized artifact is not a hostable CodeTracer trace folder yet: " & path)
+    if traceFolder.endsWith(".ct"):
+      result.traceId = importCtFile(traceFolder)
+    else:
+      result.traceId = importTraceFolder(traceFolder)
+    result.start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
+    if result.start.traceId.len == 0 and result.start.materializedMomentId.len == 0:
+      result.start = manifestStart
+    result.start.materializedArtifactKey = artifactNode.jsonString(["object_id", "uri", "path"])
+  of "sharded_split_ctfs":
+    raise newException(ValueError, "local sharded_split_ctfs manifests are not supported until storage protocol support")
+  else:
+    raise newException(ValueError, "unsupported shared manifest source kind: " & kind)
+
+proc resolveRecordingManifest(manifestPath: string, manifest: JsonNode): HostResolvedTrace =
+  let kind = manifest.jsonString(["kind"])
+  let manifestKey = manifest.jsonString(["manifestS3Key", "manifest_s3_key"])
+  case kind
+  of "mcr_slices":
+    let slice = manifest.firstObject(["mcrSlices", "mcr_slices"])
+    if slice.isNil:
+      raise newException(ValueError, "mcr_slices manifest has no retained local slices")
+    let path = resolveLocalReference(slice.jsonString(["sliceKey", "slice_key"]), manifestPath, manifestKey)
+    if path.len == 0 or not fileExists(path):
+      raise newException(ValueError, "local MCR slice not found: " & path)
+    result.traceId = importCtFile(path)
+    result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+  of "materialized_trace":
+    let artifact = manifest.firstObject(["materializedTraceArtifacts", "materialized_trace_artifacts"])
+    if artifact.isNil:
+      raise newException(ValueError, "materialized_trace manifest has no local artifacts")
+    let path = resolveLocalReference(artifact.jsonString(["artifactKey", "artifact_key"]), manifestPath, manifestKey)
+    let traceFolder = findMaterializedTraceFolder(path)
+    if traceFolder.len == 0:
+      raise newException(ValueError,
+        "materialized artifact is not a hostable CodeTracer trace folder yet: " & path)
+    if traceFolder.endsWith(".ct"):
+      result.traceId = importCtFile(traceFolder)
+    else:
+      result.traceId = importTraceFolder(traceFolder)
+    result.start = readReplayStart(artifact.jsonField(["replayStart", "replay_start"]))
+    if result.start.materializedMomentId.len == 0:
+      result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+    result.start.materializedArtifactKey = artifact.jsonString(["artifactKey", "artifact_key"])
+  else:
+    raise newException(ValueError, "unsupported recording manifest kind: " & kind)
+
+proc importLocalManifest(manifestPath: string): HostResolvedTrace =
+  let fullPath = expandFilename(expandTilde(manifestPath))
+  let manifest = parseJson(readFile(fullPath))
+  if manifest.jsonString(["schema"]) == "codetracer.trace-storage.v1":
+    result = resolveSharedManifest(fullPath, manifest)
+  else:
+    result = resolveRecordingManifest(fullPath, manifest)
+  applyReplayStartEnv(result.start)
+  echo "ct host: loaded local manifest: ", fullPath
+
 
 proc hostCommand*(
     port: int,
@@ -241,7 +478,8 @@ proc hostCommand*(
     frontendSocketParameters: string,
     traceArg: string,
     idleTimeoutRaw: string,
-    tracePath: string = "") =
+    tracePath: string = "",
+    manifestPath: string = "") =
 
   putEnv("NODE_PATH", nodeModulesPath)
   putEnv("CODETRACER_PREFIX", codetracerPrefix)
@@ -274,7 +512,25 @@ proc hostCommand*(
     echo "ct host: error: pass either both backend and frontend port or neither"
     quit(1)
 
-  if tracePath.len > 0:
+  let localManifestPath =
+    if manifestPath.len > 0:
+      manifestPath
+    elif tracePath.len > 0 and fileExists(tracePath) and tracePath.endsWith(".json"):
+      tracePath
+    elif getEnv("CODETRACER_LOCAL_MANIFEST_PATH", "").len > 0:
+      getEnv("CODETRACER_LOCAL_MANIFEST_PATH")
+    else:
+      ""
+
+  if localManifestPath.len > 0:
+    try:
+      let resolved = importLocalManifest(localManifestPath)
+      traceId = resolved.traceId
+      echo "ct host: imported manifest trace as trace id ", traceId
+    except CatchableError as e:
+      echo "ct host: error: failed to load local manifest: ", e.msg
+      quit(1)
+  elif tracePath.len > 0:
     # --trace-path provided: auto-import the trace before hosting.
     if fileExists(tracePath) and tracePath.endsWith(".ct"):
       echo "ct host: importing .ct file: ", tracePath
