@@ -999,6 +999,8 @@ type
 
   PixelHistoryComponent* = ref object of Component
 
+  ShaderDebugComponent* = ref object of Component
+
   AgentActivityDeepReviewComponent* = ref object of Component
     ## Enhanced agent activity pane that displays DeepReview data
     ## (coverage summary, test results, traced functions) alongside

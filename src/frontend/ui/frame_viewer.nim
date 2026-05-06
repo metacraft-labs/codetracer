@@ -5,6 +5,7 @@ import
   ../viewmodel/viewmodels/[frame_viewer_vm, visual_replay_client],
   ../viewmodel/views/isonim_frame_viewer_view,
   pixel_history,
+  shader_debug,
   visual_replay_client_factory
 
 import std/options
@@ -43,6 +44,7 @@ proc syncVisualReplaySessionIntoVM*() =
       else:
         createInactiveVisualReplayClient(playerUrl)
     pixel_history.setPixelHistoryVisualReplayClient(frameViewerVMInstance.client)
+    shader_debug.setShaderDebugVisualReplayClient(frameViewerVMInstance.client)
   frameViewerVMInstance.setVisualReplayConnection(
     session.visualReplayAvailable,
     playerUrl,
@@ -70,11 +72,13 @@ proc initFrameViewerVM(store: ReplayDataStore = nil) =
   frameViewerVMInstance.onPixelSelected =
     proc(x, y, frame: int; geid: Option[uint64]) =
       pixel_history.loadPixelHistoryFromFrameViewer(x, y, frame)
+      shader_debug.loadShaderDebugFromFrameViewer(x, y, frame, geid)
   syncVisualReplaySessionIntoVM()
 
 proc initFrameViewerVMWithStore*(store: ReplayDataStore) =
   initFrameViewerVM(store)
   pixel_history.initPixelHistoryVMWithStore(store)
+  shader_debug.initShaderDebugVMWithStore(store)
   when defined(js):
     if data.startOptions.inTest:
       installFrameViewerTestHooks(proc(geid: int) =

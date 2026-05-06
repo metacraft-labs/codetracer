@@ -9,8 +9,10 @@ import store/replay_data_store
 import vm_test_helpers
 import viewmodels/frame_viewer_vm
 import viewmodels/pixel_history_vm
+import viewmodels/shader_debug_vm
 import viewmodels/visual_replay_client
 import views/isonim_pixel_history_view
+import views/isonim_shader_debug_view
 import isonim/testing/mock_dom
 
 type
@@ -21,6 +23,7 @@ type
     drawRequests: seq[int]
     drawCallRequests: int
     pixelHistoryRequests: seq[PixelHistoryPixel]
+    shaderDebugRequests: seq[VisualReplayShaderDebugRequest]
     failFrames: bool
 
 proc makeFakeClient(): FakeVisualReplayClient =
@@ -99,6 +102,60 @@ proc makeFakeClient(): FakeVisualReplayClient =
           testStatus: VisualReplayPixelTestStatus(
             depth: "failed", stencil: "pass", blend: "unchanged", cull: "pass")),
       ]),
+    getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+        VisualReplayFuture[VisualReplayShaderDebugInfo] =
+      fake.shaderDebugRequests.add(request)
+      newCompletedFuture(VisualReplayShaderDebugInfo(
+        shaderStage: "fragment",
+        entryPoint: "main",
+        source: "",
+        sourceLines: @[
+          "#version 450",
+          "layout(location = 0) in vec2 v_uv;",
+          "layout(location = 0) out vec4 out_color;",
+          "void main() {",
+          "  vec4 base = vec4(v_uv, 0.25, 1.0);",
+          "  out_color = base;",
+          "}",
+        ],
+        steps: @[
+          VisualReplayShaderStep(
+            stepIndex: 0,
+            instruction: "OpLoad %v_uv",
+            sourceLine: 2,
+            variables: @[
+              VisualReplayShaderValue(
+                name: "v_uv", valueType: "vec2", value: "[0.25, 0.25]"),
+            ],
+            registers: @[
+              VisualReplayShaderValue(
+                name: "%12", valueType: "ptr", value: "input.v_uv"),
+            ]),
+          VisualReplayShaderStep(
+            stepIndex: 1,
+            instruction: "OpCompositeConstruct %base",
+            sourceLine: 5,
+            variables: @[
+              VisualReplayShaderValue(
+                name: "base", valueType: "vec4", value: "[0.25, 0.25, 0.25, 1.00]"),
+            ],
+            registers: @[
+              VisualReplayShaderValue(
+                name: "%18", valueType: "vec4", value: "base"),
+            ]),
+          VisualReplayShaderStep(
+            stepIndex: 2,
+            instruction: "OpStore %out_color",
+            sourceLine: 6,
+            variables: @[
+              VisualReplayShaderValue(
+                name: "out_color", valueType: "vec4", value: "[0.25, 0.25, 0.25, 1.00]"),
+            ],
+            registers: @[
+              VisualReplayShaderValue(
+                name: "%out", valueType: "vec4", value: "rgba"),
+            ]),
+        ])),
   )
 
 suite "VisualReplayClient URL construction":
@@ -114,6 +171,8 @@ suite "VisualReplayClient URL construction":
       "http://localhost:9000/draw-calls"
     check pixelHistoryUrl("http://localhost:9000/", 12, 34, 2) ==
       "http://localhost:9000/pixel-history?x=12&y=34&frame=2"
+    check shaderDebugUrl("http://localhost:9000/") ==
+      "http://localhost:9000/shader-debug"
 
 suite "FrameViewerVM frame loading":
   test "fetches frame for GEID and updates draw calls":
@@ -272,6 +331,49 @@ suite "FrameViewerVM selection":
     pixelVm.dispose()
     frameVm.dispose()
 
+  test "selected pixel and pixel history entry drive shader debug context":
+    let fake = makeFakeClient()
+    let frameVm = createFrameViewerVM(fake.client)
+    let pixelVm = createPixelHistoryVM(fake.client)
+    let shaderVm = createShaderDebugVM(fake.client)
+    frameVm.frameWidth.val = 320
+    frameVm.frameHeight.val = 200
+    frameVm.currentFrame.val = 3
+    frameVm.currentGeid.val = some(246'u64)
+    frameVm.onPixelSelected =
+      proc(x, y, frame: int; geid: Option[uint64]) =
+        pixelVm.loadPixelHistory(x, y, frame)
+        shaderVm.loadFromPixel(x, y, frame, geid)
+    pixelVm.onEntrySelected =
+      proc(entry: VisualReplayPixelHistoryEntry) =
+        let pixel = pixelVm.selectedPixel.val.get
+        shaderVm.loadFromPixelHistoryEntry(pixel.x, pixel.y, pixel.frame, entry)
+
+    frameVm.selectPixelFromRenderedPoint(40.0, 25.0, 160.0, 100.0)
+    drain()
+
+    check fake.shaderDebugRequests.len == 1
+    check fake.shaderDebugRequests[0].x == 80
+    check fake.shaderDebugRequests[0].y == 50
+    check fake.shaderDebugRequests[0].frame == some(3)
+    check fake.shaderDebugRequests[0].geid == some(246'u64)
+    check fake.shaderDebugRequests[0].drawCallIndex.isNone
+
+    pixelVm.selectEntry(1)
+    drain()
+
+    check fake.shaderDebugRequests.len == 2
+    check fake.shaderDebugRequests[1].x == 80
+    check fake.shaderDebugRequests[1].y == 50
+    check fake.shaderDebugRequests[1].frame == some(3)
+    check fake.shaderDebugRequests[1].geid == some(102'u64)
+    check fake.shaderDebugRequests[1].drawCallIndex == some(2)
+    check fake.shaderDebugRequests[1].primitiveId == some(8)
+
+    shaderVm.dispose()
+    pixelVm.dispose()
+    frameVm.dispose()
+
   test "selects and clears draw calls by index":
     let fake = makeFakeClient()
     let vm = createFrameViewerVM(fake.client)
@@ -333,3 +435,45 @@ suite "PixelHistoryVM":
       check mock.receivedCommands[0].args["geid"].getBiggestInt == 102
 
       dispose()
+
+suite "ShaderDebugVM":
+  test "test_shader_debug_vm_steps_interpreter_trace":
+    let fake = makeFakeClient()
+    let vm = createShaderDebugVM(fake.client)
+    let r = MockRenderer()
+
+    vm.loadFromPixel(12, 34, 1, some(210'u64))
+    drain()
+    let firstPanel = renderShaderDebugPanel(r, vm)
+
+    check fake.shaderDebugRequests.len == 1
+    check fake.shaderDebugRequests[0].x == 12
+    check fake.shaderDebugRequests[0].y == 34
+    check fake.shaderDebugRequests[0].frame == some(1)
+    check fake.shaderDebugRequests[0].geid == some(210'u64)
+    check vm.debugInfo.val.isSome
+    check vm.debugInfo.val.get.steps.len == 3
+    check vm.currentStepIndex.val == 0
+    check vm.currentSourceLine() == 2
+    check vm.currentStep().get.variables[0].name == "v_uv"
+    check vm.currentStep().get.registers[0].value == "input.v_uv"
+    check firstPanel.textContent.contains("OpLoad %v_uv")
+    check firstPanel.textContent.contains("v_uv")
+
+    vm.stepForward()
+    check vm.currentStepIndex.val == 1
+    check vm.currentSourceLine() == 5
+    check vm.currentStep().get.variables[0].name == "base"
+    check vm.currentStep().get.registers[0].name == "%18"
+
+    vm.stepForward()
+    check vm.currentStepIndex.val == 2
+    check vm.currentSourceLine() == 6
+    check vm.currentStep().get.variables[0].name == "out_color"
+    check vm.currentStep().get.registers[0].value == "rgba"
+
+    vm.stepBackward()
+    check vm.currentStepIndex.val == 1
+    check vm.currentStep().get.instruction == "OpCompositeConstruct %base"
+
+    vm.dispose()

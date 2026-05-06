@@ -1,0 +1,155 @@
+.shader-debug-component
+  display: flex
+  flex-direction: column
+  height: 100%
+  width: 100%
+  min-height: 0
+  box-sizing: border-box
+  overflow: hidden
+  color: TEXT_CONTENT_COLOR
+  background: BACKGROUND_COLOR
+  font-family: "FiraCode"
+  font-size: 13px
+  line-height: 20px
+
+  .shader-debug-header
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 10px
+    padding: 7px 10px
+    flex: 0 0 auto
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    background: HEADER_PANEL_BACKGROUND_COLOR
+
+  .shader-debug-title
+    font-weight: 600
+
+  .shader-debug-context
+    color: VALUE_TYPE_COLOR
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .shader-debug-loading,
+  .shader-debug-error,
+  .shader-debug-empty
+    padding: 10px
+    color: VALUE_TYPE_COLOR
+
+    &[display="none"]
+      display: none
+
+  .shader-debug-error
+    color: NOTIFICATION_ERROR_COLOR
+
+  .shader-debug-toolbar
+    display: flex
+    align-items: center
+    gap: 8px
+    padding: 7px 10px
+    flex: 0 0 auto
+    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+
+    button
+      min-width: 46px
+      height: 24px
+      border: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+      border-radius: 4px
+      background: HEADER_PANEL_BACKGROUND_COLOR
+      color: TEXT_CONTENT_COLOR
+      font: inherit
+      cursor: pointer
+
+      &:hover
+        background: ACTIVE_ROW
+
+  .shader-debug-stage,
+  .shader-debug-step-label
+    color: VALUE_TYPE_COLOR
+    white-space: nowrap
+
+  .shader-debug-body
+    display: grid
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr)
+    min-height: 0
+    flex: 1 1 auto
+
+  .shader-debug-source
+    min-height: 0
+    overflow: auto
+    border-right: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+
+  .shader-debug-source-line
+    display: grid
+    grid-template-columns: 42px minmax(0, 1fr)
+    min-height: 22px
+    align-items: baseline
+
+    &.current
+      background: ACTIVE_ROW
+      color: TEXT_CONTENT_COLOR
+
+  .shader-debug-line-number
+    padding: 0 8px
+    color: VALUE_TYPE_COLOR
+    text-align: right
+    user-select: none
+
+  .shader-debug-line-code
+    white-space: pre
+    overflow: hidden
+    text-overflow: ellipsis
+    font: inherit
+
+  .shader-debug-inspector
+    min-height: 0
+    overflow: auto
+    padding: 8px 10px
+
+  .shader-debug-instruction
+    display: grid
+    grid-template-columns: auto minmax(0, 1fr)
+    gap: 8px
+    margin-bottom: 10px
+
+  .shader-debug-instruction-label,
+  .shader-debug-values-title
+    color: VALUE_TYPE_COLOR
+    font-weight: 600
+
+  .shader-debug-instruction-value
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .shader-debug-values-section
+    margin-bottom: 12px
+
+  .shader-debug-values-table
+    display: grid
+    grid-template-columns: minmax(70px, auto) minmax(55px, auto) minmax(0, 1fr)
+    gap: 0
+    border-top: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+
+  .shader-debug-value-row
+    display: contents
+
+  .shader-debug-value-name,
+  .shader-debug-value-type,
+  .shader-debug-value-current
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+    padding: 4px 6px
+    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+
+  .shader-debug-value-type
+    color: VALUE_TYPE_COLOR
+
+  .shader-debug-values-empty
+    color: VALUE_TYPE_COLOR
+    padding: 4px 0

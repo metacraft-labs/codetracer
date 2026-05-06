@@ -54,6 +54,34 @@ type
     failureReason*: string
     testStatus*: VisualReplayPixelTestStatus
 
+  VisualReplayShaderDebugRequest* = object
+    x*: int
+    y*: int
+    frame*: Option[int]
+    geid*: Option[uint64]
+    drawCallIndex*: Option[int]
+    fragmentIndex*: Option[int]
+    primitiveId*: Option[int]
+
+  VisualReplayShaderValue* = object
+    name*: string
+    value*: string
+    valueType*: string
+
+  VisualReplayShaderStep* = object
+    stepIndex*: int
+    instruction*: string
+    sourceLine*: int
+    variables*: seq[VisualReplayShaderValue]
+    registers*: seq[VisualReplayShaderValue]
+
+  VisualReplayShaderDebugInfo* = object
+    shaderStage*: string
+    entryPoint*: string
+    source*: string
+    sourceLines*: seq[string]
+    steps*: seq[VisualReplayShaderStep]
+
   VisualReplayClient* = ref object
     playerUrl*: string
     getInfoProc*: proc(): VisualReplayFuture[VisualReplayInfo]
@@ -63,6 +91,8 @@ type
     getDrawCallsProc*: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]]
     getPixelHistoryProc*: proc(x, y, frame: int):
       VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]]
+    getShaderDebugProc*: proc(request: VisualReplayShaderDebugRequest):
+      VisualReplayFuture[VisualReplayShaderDebugInfo]
 
 proc normalizedPlayerUrl*(playerUrl: string): string =
   result = playerUrl.strip
@@ -87,6 +117,26 @@ proc drawCallsUrl*(playerUrl: string): string =
 proc pixelHistoryUrl*(playerUrl: string; x, y, frame: int): string =
   normalizedPlayerUrl(playerUrl) & "/pixel-history?x=" & $x &
     "&y=" & $y & "&frame=" & $frame
+
+proc shaderDebugUrl*(playerUrl: string): string =
+  normalizedPlayerUrl(playerUrl) & "/shader-debug"
+
+proc shaderDebugRequestToJson*(request: VisualReplayShaderDebugRequest): JsonNode =
+  result = %*{
+    "x": request.x,
+    "y": request.y,
+  }
+  if request.frame.isSome:
+    result["frame"] = %request.frame.get
+  if request.geid.isSome:
+    result["geid"] = %request.geid.get
+  if request.drawCallIndex.isSome:
+    result["draw"] = %request.drawCallIndex.get
+    result["draw_call_index"] = %request.drawCallIndex.get
+  if request.fragmentIndex.isSome:
+    result["fragment_index"] = %request.fragmentIndex.get
+  if request.primitiveId.isSome:
+    result["primitive_id"] = %request.primitiveId.get
 
 proc colorFromJson(node: JsonNode): VisualReplayPixelColor =
   if node.kind == JArray and node.len >= 4:
@@ -190,6 +240,70 @@ proc infoFromJson(node: JsonNode): VisualReplayInfo =
     height: node{"height"}.getInt(0),
   )
 
+proc stringValueFromJson(node: JsonNode): string =
+  if node.isNil:
+    return ""
+  case node.kind
+  of JString:
+    node.getStr("")
+  of JNull:
+    ""
+  else:
+    $node
+
+proc shaderValueFromJson(node: JsonNode): VisualReplayShaderValue =
+  VisualReplayShaderValue(
+    name: node{"name"}.getStr(node{"id"}.getStr("")),
+    value: stringValueFromJson(node{"value"}),
+    valueType: node{"type"}.getStr(node{"valueType"}.getStr("")),
+  )
+
+proc shaderValuesFromJson(node: JsonNode): seq[VisualReplayShaderValue] =
+  if node.kind == JArray:
+    for item in node.items:
+      result.add(shaderValueFromJson(item))
+  elif node.kind == JObject:
+    for name, value in node.pairs:
+      result.add(VisualReplayShaderValue(
+        name: name,
+        value: stringValueFromJson(value),
+        valueType: ""))
+
+proc shaderStepFromJson(node: JsonNode; fallbackIndex: int): VisualReplayShaderStep =
+  let line = node{"line"}.getInt(
+    node{"sourceLine"}.getInt(node{"source_line"}.getInt(0)))
+  VisualReplayShaderStep(
+    stepIndex: node{"step"}.getInt(node{"stepIndex"}.getInt(fallbackIndex)),
+    instruction: node{"instruction"}.getStr(node{"opcode"}.getStr("")),
+    sourceLine: line,
+    variables: shaderValuesFromJson(node{"variables"}),
+    registers: shaderValuesFromJson(node{"registers"}),
+  )
+
+proc shaderDebugInfoFromJson(node: JsonNode): VisualReplayShaderDebugInfo =
+  let source = node{"source"}.getStr(node{"shaderSource"}.getStr(""))
+  result = VisualReplayShaderDebugInfo(
+    shaderStage: node{"stage"}.getStr(node{"shaderStage"}.getStr("fragment")),
+    entryPoint: node{"entryPoint"}.getStr(node{"entry"}.getStr("main")),
+    source: source,
+    sourceLines: @[],
+    steps: @[],
+  )
+  if node{"sourceLines"}.kind == JArray:
+    for line in node{"sourceLines"}.items:
+      result.sourceLines.add(line.getStr(""))
+  elif source.len > 0:
+    result.sourceLines = source.splitLines()
+
+  let steps =
+    if node{"steps"}.kind == JArray: node{"steps"}
+    elif node{"trace"}.kind == JArray: node{"trace"}
+    else: newJArray()
+  var index = 0
+  for item in steps.items:
+    result.steps.add(shaderStepFromJson(item, index))
+    inc index
+
 proc getInfo*(client: VisualReplayClient): VisualReplayFuture[VisualReplayInfo] =
   assert client.getInfoProc != nil, "VisualReplayClient.getInfoProc is not set"
   client.getInfoProc()
@@ -224,9 +338,17 @@ proc getPixelHistory*(client: VisualReplayClient; x, y, frame: int):
     "VisualReplayClient.getPixelHistoryProc is not set"
   client.getPixelHistoryProc(x, y, frame)
 
+proc getShaderDebug*(client: VisualReplayClient;
+                     request: VisualReplayShaderDebugRequest):
+    VisualReplayFuture[VisualReplayShaderDebugInfo] =
+  assert client.getShaderDebugProc != nil,
+    "VisualReplayClient.getShaderDebugProc is not set"
+  client.getShaderDebugProc(request)
+
 proc createJsonVisualReplayClient*(
     playerUrl: string;
-    getJson: proc(url: string): VisualReplayFuture[JsonNode]
+    getJson: proc(url: string): VisualReplayFuture[JsonNode];
+    postJson: proc(url: string; body: JsonNode): VisualReplayFuture[JsonNode] = nil
   ): VisualReplayClient =
   ## Create a client from a JSON transport. This is the preferred production
   ## adapter shape because tests can assert exact endpoint URLs independently
@@ -355,6 +477,26 @@ proc createJsonVisualReplayClient*(
             for item in items.items:
               entries.add(pixelHistoryEntryFromJson(item))
             outFuture.complete(entries),
+          onError = proc(msg: string) =
+            outFuture.fail(newException(CatchableError, msg)))
+    ,
+    getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+        VisualReplayFuture[VisualReplayShaderDebugInfo] =
+      assert postJson != nil,
+        "VisualReplayClient shader debug transport requires JSON POST"
+      let fut = postJson(shaderDebugUrl(baseUrl), shaderDebugRequestToJson(request))
+      when defined(js):
+        result = newPromise proc(resolve: proc(value: VisualReplayShaderDebugInfo)) =
+          async_compat.onComplete(fut,
+            onSuccess = proc(node: JsonNode) = resolve(shaderDebugInfoFromJson(node)),
+            onError = proc(msg: string) =
+              raise newException(CatchableError, msg))
+      else:
+        result = newFuture[VisualReplayShaderDebugInfo]("visual replay shader debug")
+        let outFuture = result
+        async_compat.onComplete(fut,
+          onSuccess = proc(node: JsonNode) =
+            outFuture.complete(shaderDebugInfoFromJson(node)),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
     ,

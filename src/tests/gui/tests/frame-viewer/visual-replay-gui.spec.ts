@@ -118,6 +118,46 @@ test.describe("MCR visual replay real GUI layout", () => {
       )
       .toMatchObject({ command: "ct/seek-to-geid", args: { geid: 220 } });
   });
+
+  test("e2e_shader_debug_panel_shows_source_and_values", async ({ ctPage }) => {
+    await expect(ctPage.locator(".frame-viewer-component")).toBeVisible();
+    await expect
+      .poll(async () =>
+        ctPage.evaluate(() => typeof (window as any).__CODETRACER_TEST__?.fakeMcrStepGeid),
+      )
+      .toBe("function");
+
+    const frameResponse = ctPage.waitForResponse(
+      (response) => response.url().includes("/frame?geid=246") && response.ok(),
+    );
+    await ctPage.evaluate(() => (window as any).__CODETRACER_TEST__.fakeMcrStepGeid(246));
+    await frameResponse;
+
+    const image = ctPage.locator(".frame-viewer-image");
+    const imageBox = await image.boundingBox();
+    expect(imageBox).not.toBeNull();
+
+    const shaderResponsePromise = ctPage.waitForResponse(
+      (response) => response.url().includes("/shader-debug") && response.ok(),
+    );
+    await image.click({ position: { x: imageBox!.width / 2, y: imageBox!.height / 2 } });
+    await shaderResponsePromise;
+
+    await ctPage.locator(".lm_tab", { hasText: "SHADER DEBUG" }).click();
+    await expect(ctPage.locator(".shader-debug-component")).toBeVisible();
+    await expect(ctPage.locator(".shader-debug-source")).toContainText("out_color");
+    await expect(ctPage.locator(".shader-debug-source-line.current")).toContainText(
+      "v_uv",
+    );
+    await expect(ctPage.locator(".shader-debug-variables-table")).toContainText("v_uv");
+    await expect(ctPage.locator(".shader-debug-registers-table")).toContainText("%12");
+
+    await ctPage.locator(".shader-debug-step-forward").click();
+    await expect(ctPage.locator(".shader-debug-source-line.current")).toContainText(
+      "base",
+    );
+    await expect(ctPage.locator(".shader-debug-variables-table")).toContainText("base");
+  });
 });
 
 test.describe("MCR visual replay player failure", () => {

@@ -8,6 +8,7 @@ suite "MCR visual replay layout capability":
     let nonVisual = defaultLayoutForVisualReplayCapability(false)
     check not nonVisual.layoutContainsContentId(ord(Content.FrameViewer))
     check not nonVisual.layoutContainsContentId(ord(Content.PixelHistory))
+    check not nonVisual.layoutContainsContentId(ord(Content.ShaderDebug))
     check nonVisual.layoutContainsContentId(ord(Content.State))
     check nonVisual.layoutContainsContentId(ord(Content.Calltrace))
     check nonVisual.layoutContainsContentId(ord(Content.EventLog))
@@ -16,6 +17,7 @@ suite "MCR visual replay layout capability":
     let visual = defaultLayoutForVisualReplayCapability(true)
     check visual.layoutContainsContentId(ord(Content.FrameViewer))
     check visual.layoutContainsContentId(ord(Content.PixelHistory))
+    check visual.layoutContainsContentId(ord(Content.ShaderDebug))
     check visual.layoutContainsContentId(ord(Content.State))
     check visual.layoutContainsContentId(ord(Content.Calltrace))
     check visual.layoutContainsContentId(ord(Content.EventLog))
@@ -26,6 +28,8 @@ suite "MCR visual replay layout capability":
     check ids.count(ord(Content.FrameViewer)) == 1
     check ids.find(ord(Content.PixelHistory)) >= 0
     check ids.count(ord(Content.PixelHistory)) == 1
+    check ids.find(ord(Content.ShaderDebug)) >= 0
+    check ids.count(ord(Content.ShaderDebug)) == 1
 
   test "metadata and artifact detection distinguish visual sessions":
     check metadataAdvertisesVisualReplay("""{"capabilities":{"visualReplay":true}}""")

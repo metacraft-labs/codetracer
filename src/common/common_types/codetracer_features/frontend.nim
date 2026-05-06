@@ -266,7 +266,8 @@ type
     RequestPanel = 40,
     VCS = 41,
     FrameViewer = 42,
-    PixelHistory = 43
+    PixelHistory = 43,
+    ShaderDebug = 44
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

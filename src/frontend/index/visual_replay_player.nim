@@ -194,7 +194,7 @@ when defined(js):
       function corsHeaders(contentType) {
         return {
           "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET, OPTIONS",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
           "access-control-allow-headers": "content-type",
           "content-type": contentType,
         };
@@ -274,6 +274,71 @@ when defined(js):
                 testStatus: { depth: "failed", stencil: "pass", blend: "unchanged", cull: "pass" },
               },
             ],
+          });
+          return;
+        }
+        if (url.pathname === "/shader-debug") {
+          let raw = "";
+          req.on("data", (chunk) => { raw += chunk; });
+          req.on("end", () => {
+            let body = {};
+            try { body = raw ? JSON.parse(raw) : {}; } catch (_) { body = {}; }
+            const x = Number(body.x || 0);
+            const y = Number(body.y || 0);
+            const frame = Number(body.frame || 0);
+            const draw = Number(body.draw ?? body.draw_call_index ?? 1);
+            const geid = Number(body.geid || (200 + draw * 10));
+            sendJson(res, {
+              stage: "fragment",
+              entryPoint: "main",
+              sourceLines: [
+                String.fromCharCode(35) + "version 450",
+                "layout(location = 0) in vec2 v_uv;",
+                "layout(location = 0) out vec4 out_color;",
+                "void main() {",
+                "  vec4 base = vec4(v_uv, 0.25, 1.0);",
+                "  out_color = base + vec4(0.10, 0.20, 0.00, 0.00);",
+                "}",
+              ],
+              steps: [
+                {
+                  step: 0,
+                  instruction: "OpLoad %v_uv",
+                  line: 2,
+                  variables: [
+                    { name: "v_uv", type: "vec2", value: "[" + (x / 320).toFixed(3) + ", " + (y / 180).toFixed(3) + "]" },
+                  ],
+                  registers: [
+                    { name: "%12", type: "ptr", value: "input.v_uv" },
+                  ],
+                },
+                {
+                  step: 1,
+                  instruction: "OpCompositeConstruct %base",
+                  line: 5,
+                  variables: [
+                    { name: "v_uv", type: "vec2", value: "[" + (x / 320).toFixed(3) + ", " + (y / 180).toFixed(3) + "]" },
+                    { name: "base", type: "vec4", value: "[0.500, 0.500, 0.250, 1.000]" },
+                  ],
+                  registers: [
+                    { name: "%18", type: "vec4", value: "base" },
+                    { name: "%draw", type: "int", value: String(draw) },
+                  ],
+                },
+                {
+                  step: 2,
+                  instruction: "OpStore %out_color",
+                  line: 6,
+                  variables: [
+                    { name: "base", type: "vec4", value: "[0.500, 0.500, 0.250, 1.000]" },
+                    { name: "out_color", type: "vec4", value: "[0.600, 0.700, 0.250, 1.000]" },
+                  ],
+                  registers: [
+                    { name: "%out", type: "vec4", value: "rgba@GEID " + geid + " frame " + frame },
+                  ],
+                },
+              ],
+            });
           });
           return;
         }

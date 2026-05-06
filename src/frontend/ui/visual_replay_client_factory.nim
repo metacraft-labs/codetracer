@@ -18,6 +18,20 @@ when defined(js):
     })(#))
   """.}
 
+  proc postJsonText(url, body: cstring): VisualReplayFuture[cstring] {.importjs: """
+    ((async function(url, body) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body
+      });
+      if (!response.ok) {
+        throw new Error("visual replay request failed: " + response.status);
+      }
+      return await response.text();
+    })(#, #))
+  """.}
+
 proc completedVisualFuture*[T](value: T): VisualReplayFuture[T] =
   when defined(js):
     result = newPromise proc(resolve: proc(value: T)) =
@@ -57,6 +71,14 @@ proc createInactiveVisualReplayClient*(playerUrl: string): VisualReplayClient =
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
       completedVisualFuture(newSeq[VisualReplayPixelHistoryEntry]()),
+    getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+        VisualReplayFuture[VisualReplayShaderDebugInfo] =
+      completedVisualFuture(VisualReplayShaderDebugInfo(
+        shaderStage: "",
+        entryPoint: "",
+        source: "",
+        sourceLines: @[],
+        steps: @[])),
   )
 
 proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
@@ -65,6 +87,14 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
       playerUrl,
       proc(url: string): VisualReplayFuture[JsonNode] =
         let textFuture = fetchJsonText(cstring(url))
+        result = newPromise proc(resolve: proc(value: JsonNode)) =
+          async_compat.onComplete(textFuture,
+            onSuccess = proc(raw: cstring) =
+              resolve(parseJson($raw)),
+            onError = proc(message: string) =
+              raise newException(CatchableError, message)),
+      proc(url: string; body: JsonNode): VisualReplayFuture[JsonNode] =
+        let textFuture = postJsonText(cstring(url), cstring($body))
         result = newPromise proc(resolve: proc(value: JsonNode)) =
           async_compat.onComplete(textFuture,
             onSuccess = proc(raw: cstring) =

@@ -4,8 +4,11 @@ import
   ../viewmodel/store/replay_data_store,
   ../viewmodel/viewmodels/[pixel_history_vm, visual_replay_client],
   ../viewmodel/views/isonim_pixel_history_view,
+  shader_debug,
   visual_replay_client_factory
 
+import std/options
+import isonim/core/signals
 import isonim/web/dom_api as dom_api
 
 var pixelHistoryVMInstance: PixelHistoryVM
@@ -24,6 +27,12 @@ proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   pixelHistoryVMInstance.onHistoryLoaded =
     proc(entryCount: int; error: string; loading: bool) =
       refreshMountedPixelHistoryPanel()
+  pixelHistoryVMInstance.onEntrySelected =
+    proc(entry: VisualReplayPixelHistoryEntry) =
+      if pixelHistoryVMInstance.selectedPixel.val.isSome:
+        let pixel = pixelHistoryVMInstance.selectedPixel.val.get
+        shader_debug.loadShaderDebugFromPixelHistoryEntry(
+          pixel.x, pixel.y, pixel.frame, entry)
 
 proc initPixelHistoryVMWithStore*(store: ReplayDataStore) =
   initPixelHistoryVM(store)
@@ -32,6 +41,7 @@ proc setPixelHistoryVisualReplayClient*(client: VisualReplayClient) =
   initPixelHistoryVM()
   if not pixelHistoryVMInstance.isNil:
     pixelHistoryVMInstance.client = client
+  shader_debug.setShaderDebugVisualReplayClient(client)
 
 proc loadPixelHistoryFromFrameViewer*(x, y, frame: int) =
   initPixelHistoryVM()

@@ -8,7 +8,7 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
-      pixel_history],
+      pixel_history, shader_debug],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
   viewmodel/store/replay_data_store,
@@ -1109,6 +1109,8 @@ when not defined(ctInExtension):
         frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
       initPanelVM("initPixelHistoryVMWithStore"):
         pixel_history.initPixelHistoryVMWithStore(activeSessionVM.store)
+      initPanelVM("initShaderDebugVMWithStore"):
+        shader_debug.initShaderDebugVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityVMWithStore"):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityDeepReviewVMWithStore"):

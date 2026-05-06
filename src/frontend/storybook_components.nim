@@ -34,6 +34,7 @@ import viewmodel/viewmodels/[
   flow_vm,
   frame_viewer_vm,
   pixel_history_vm,
+  shader_debug_vm,
   low_level_code_vm,
   no_source_vm,
   point_list_vm,
@@ -74,6 +75,7 @@ import viewmodel/views/[
   isonim_flow_view,
   isonim_frame_viewer_view,
   isonim_pixel_history_view,
+  isonim_shader_debug_view,
   isonim_low_level_code_view,
   isonim_menu_shell_view,
   isonim_no_source_view,
@@ -1161,6 +1163,49 @@ proc createStoryFrameViewerClient(): VisualReplayClient =
           testStatus: VisualReplayPixelTestStatus(
             depth: "failed", stencil: "pass", blend: "unchanged", cull: "pass")),
       ]),
+    getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+        VisualReplayFuture[VisualReplayShaderDebugInfo] =
+      storyFuture(VisualReplayShaderDebugInfo(
+        shaderStage: "fragment",
+        entryPoint: "main",
+        source: "",
+        sourceLines: @[
+          "#version 450",
+          "layout(location = 0) in vec2 v_uv;",
+          "layout(location = 0) out vec4 out_color;",
+          "void main() {",
+          "  vec4 base = vec4(v_uv, 0.25, 1.0);",
+          "  out_color = base;",
+          "}",
+        ],
+        steps: @[
+          VisualReplayShaderStep(
+            stepIndex: 0,
+            instruction: "OpLoad %v_uv",
+            sourceLine: 2,
+            variables: @[
+              VisualReplayShaderValue(
+                name: "v_uv", valueType: "vec2", value: "[0.50, 0.50]"),
+            ],
+            registers: @[
+              VisualReplayShaderValue(
+                name: "%12", valueType: "ptr", value: "input.v_uv"),
+            ]),
+          VisualReplayShaderStep(
+            stepIndex: 1,
+            instruction: "OpStore %out_color",
+            sourceLine: 6,
+            variables: @[
+              VisualReplayShaderValue(
+                name: "base", valueType: "vec4", value: "[0.50, 0.50, 0.25, 1.00]"),
+              VisualReplayShaderValue(
+                name: "out_color", valueType: "vec4", value: "[0.50, 0.50, 0.25, 1.00]"),
+            ],
+            registers: @[
+              VisualReplayShaderValue(
+                name: "%out", valueType: "vec4", value: "story pixel"),
+            ]),
+        ])),
   )
 
 proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1197,6 +1242,22 @@ proc mountPixelHistory(container: isonim_dom.Element; fixture: string): DisposeP
     mountIsoNimPixelHistory(container, vm)
     if fixture != "empty":
       vm.loadPixelHistory(160, 90, 0)
+      drainCallbacks()
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
+proc mountShaderDebug(container: isonim_dom.Element; fixture: string): DisposeProc =
+  let client = createStoryFrameViewerClient()
+  var rootDisposer: proc()
+  var vm: ShaderDebugVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createShaderDebugVM(client)
+    mountIsoNimShaderDebug(container, vm)
+    if fixture != "empty":
+      vm.loadFromPixel(160, 90, 0, some(220'u64))
       drainCallbacks()
   return proc() =
     if vm != nil: vm.dispose()
@@ -1625,6 +1686,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "flow": mountFlow(container, f)
     of "frame-viewer": mountFrameViewer(container, f)
     of "pixel-history": mountPixelHistory(container, f)
+    of "shader-debug": mountShaderDebug(container, f)
     of "low-level-code": mountLowLevelCode(container, f)
     of "no-source": mountNoSource(container, f)
     of "point-list": mountPointList(container, f)

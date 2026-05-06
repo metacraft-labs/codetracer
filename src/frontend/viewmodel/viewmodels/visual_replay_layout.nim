@@ -80,6 +80,16 @@ const defaultVisualReplayLayoutJson* = """{
                   "content": 43
                 },
                 "title": "genericUiComponent"
+              },
+              {
+                "type": "component",
+                "componentType": "genericUiComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "shaderDebugComponent-0",
+                  "content": 44
+                },
+                "title": "genericUiComponent"
               }
             ]
           },
