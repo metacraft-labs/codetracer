@@ -1,8 +1,9 @@
 /**
  * Observability M29 acceptance: local materialized manifest hostability.
  *
- * Exercises the user-facing `ct host --manifest=<manifest.json>` path with a
- * real hostable Python materialized trace folder (`trace.bin` plus metadata).
+ * Exercises the user-facing `ct host --manifest=<manifest.json>` path with
+ * real hostable materialized trace folders (`trace.bin`/`trace.json` plus
+ * metadata).
  * The test intentionally launches `ct host` directly because the acceptance
  * target is manifest routing, import, and browser replay from that manifest.
  */
@@ -38,6 +39,76 @@ const pythonFlowSourceFixture = path.join(
   "programs",
   "python_flow_test.py",
 );
+const rubyFlowTraceFixture = path.join(
+  codetracerInstallDir,
+  "examples",
+  "recordings",
+  "ruby",
+  "flow_test",
+);
+const rubyFlowSourcePayload = path.join(
+  rubyFlowTraceFixture,
+  "files",
+  "tmp",
+  "ct-example-recordings-build",
+  "ruby_flow_test.rb",
+);
+
+type MaterializedFlowFixture = {
+  label: string;
+  objectName: string;
+  traceDir: string;
+  traceFileName: "trace.bin" | "trace.json";
+  sourcePath: string;
+  sourceFileName: string;
+  requiredSourceSnippets: string[];
+  calltraceFunction: string;
+  expectedCallArgs?: Record<string, string>;
+  eventText: string;
+  terminalText: string;
+  programFragment: string;
+  traceId: string;
+  spanId: string;
+  momentId: string;
+};
+
+const pythonFlowFixture: MaterializedFlowFixture = {
+  label: "Python",
+  objectName: "python-flow",
+  traceDir: pythonFlowTraceFixture,
+  traceFileName: "trace.bin",
+  sourcePath: pythonFlowSourceFixture,
+  sourceFileName: "python_flow_test.py",
+  requiredSourceSnippets: ["calculate_sum", "sum_with_while"],
+  calltraceFunction: "calculate_sum",
+  eventText: "Result: 94",
+  terminalText: "Result: 94",
+  programFragment: "python_flow_test.py",
+  traceId: "m29-python-materialized-flow",
+  spanId: "30000000000029aa",
+  momentId: "m29-python-flow-calculate-sum",
+};
+
+const rubyFlowFixture: MaterializedFlowFixture = {
+  label: "Ruby",
+  objectName: "ruby-flow",
+  traceDir: rubyFlowTraceFixture,
+  traceFileName: "trace.json",
+  sourcePath: rubyFlowSourcePayload,
+  sourceFileName: "ruby_flow_test.rb",
+  requiredSourceSnippets: ["def calculate_sum", "def sum_with_while"],
+  calltraceFunction: "calculate_sum",
+  expectedCallArgs: {
+    a: "10",
+    b: "32",
+  },
+  eventText: "sum with while 45",
+  terminalText: "Result: 94",
+  programFragment: "ruby_flow_test.rb",
+  traceId: "m29-ruby-materialized-flow",
+  spanId: "30000000000029bb",
+  momentId: "m29-ruby-flow-calculate-sum",
+};
 
 const maxConnectAttempts = 25;
 const retryDelayMs = 1_500;
@@ -169,15 +240,19 @@ function expectRequiredPath(label: string, filePath: string): void {
   ).toBe(true);
 }
 
-function prepareLocalMaterializedManifest(): {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function prepareLocalMaterializedManifest(fixture: MaterializedFlowFixture): {
   rootDir: string;
   manifestPath: string;
 } {
   const rootDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "ct-m29-materialized-manifest-"),
   );
-  const objectDir = path.join(rootDir, "objects", "python-flow");
-  copyDirectory(pythonFlowTraceFixture, objectDir);
+  const objectDir = path.join(rootDir, "objects", fixture.objectName);
+  copyDirectory(fixture.traceDir, objectDir);
 
   const manifestPath = path.join(rootDir, "manifest.json");
   const manifest = {
@@ -185,15 +260,15 @@ function prepareLocalMaterializedManifest(): {
     source: {
       kind: "materialized_artifact",
       artifact: {
-        uri: "objects/python-flow",
+        uri: `objects/${fixture.objectName}`,
         uploadCompletionState: "complete",
         retentionStatus: "available",
-        sizeBytes: fs.statSync(path.join(objectDir, "trace.bin")).size,
+        sizeBytes: fs.statSync(path.join(objectDir, fixture.traceFileName)).size,
       },
       replay_start: {
-        trace_id: "m29-python-materialized-flow",
-        span_id: "30000000000029aa",
-        moment_id: "m29-python-flow-calculate-sum",
+        trace_id: fixture.traceId,
+        span_id: fixture.spanId,
+        moment_id: fixture.momentId,
       },
     },
   };
@@ -295,130 +370,170 @@ async function waitForEditorModelText(
   }
 }
 
+async function verifyMaterializedTraceDetails(
+  page: Page,
+  fixture: MaterializedFlowFixture,
+): Promise<string> {
+  await expect(page.locator(".lm_content").first()).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const sourceNode = page
+    .locator(".jstree-anchor")
+    .filter({ hasText: new RegExp(`^${escapeRegExp(fixture.sourceFileName)}$`) })
+    .first();
+  await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+  await sourceNode.click();
+
+  const sourceText = await waitForEditorModelText(
+    page,
+    fixture.requiredSourceSnippets[0],
+  );
+  for (const snippet of fixture.requiredSourceSnippets.slice(1)) {
+    await waitForEditorModelText(page, snippet);
+  }
+
+  const layout = new LayoutPage(page);
+  await layout.waitForCallTraceReady();
+  const callTrace = (await layout.callTraceTabs())[0];
+  await callTrace.clickTab();
+  const callEntry = await callTrace.navigateToEntry(fixture.calltraceFunction);
+  expect((await callEntry.functionName()).toLowerCase()).toBe(
+    fixture.calltraceFunction.toLowerCase(),
+  );
+
+  if (fixture.expectedCallArgs) {
+    const args = await callEntry.arguments();
+    const observedArgs = new Map<string, string>();
+    for (const arg of args) {
+      observedArgs.set((await arg.name()).toLowerCase(), await arg.value());
+    }
+    for (const [name, value] of Object.entries(fixture.expectedCallArgs)) {
+      expect(
+        observedArgs.get(name.toLowerCase()),
+        `${fixture.label} calltrace argument ${name}`,
+      ).toBe(value);
+    }
+  }
+
+  await helpers.assertEventLogContainsText(page, fixture.eventText);
+  await helpers.assertTerminalOutputContains(page, fixture.terminalText);
+
+  return sourceText;
+}
+
 base.describe("Observability M29 local materialized manifest browser acceptance", () => {
   base.describe.configure({ mode: "serial", timeout: 180_000 });
 
-  base("ct host --manifest loads a local Python materialized trace folder", async ({}) => {
-    expectRequiredPath("CodeTracer test binary", codetracerPath);
-    expectRequiredPath("Python materialized trace fixture", pythonFlowTraceFixture);
-    expectRequiredPath(
-      "Python materialized trace.bin",
-      path.join(pythonFlowTraceFixture, "trace.bin"),
-    );
-    expectRequiredPath(
-      "Python materialized trace metadata",
-      path.join(pythonFlowTraceFixture, "trace_metadata.json"),
-    );
-    expectRequiredPath("Python flow source fixture", pythonFlowSourceFixture);
-
-    const { rootDir, manifestPath } = prepareLocalMaterializedManifest();
-    const httpPort = await getFreeTcpPort();
-    const backendPort = await getFreeTcpPort();
-    let ctProcess: childProcess.ChildProcess | null = null;
-    let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
-
-    try {
-      console.log(
-        `# launching ct host --manifest=${manifestPath} on port ${httpPort}`,
+  for (const fixture of [pythonFlowFixture, rubyFlowFixture]) {
+    base(`ct host --manifest loads a local ${fixture.label} materialized trace folder`, async ({}) => {
+      expectRequiredPath("CodeTracer test binary", codetracerPath);
+      expectRequiredPath(
+        `${fixture.label} materialized trace fixture`,
+        fixture.traceDir,
       );
-      ctProcess = childProcess.spawn(
-        codetracerPath,
-        [
-          "host",
-          `--manifest=${manifestPath}`,
-          `--port=${httpPort}`,
-          `--backend-socket-port=${backendPort}`,
-          `--frontend-socket=${backendPort}`,
-        ],
-        {
-          cwd: codetracerInstallDir,
-          env: makeCleanEnv({
-            XDG_CONFIG_HOME: path.join(rootDir, "xdg-config"),
-          }),
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        },
+      expectRequiredPath(
+        `${fixture.label} materialized ${fixture.traceFileName}`,
+        path.join(fixture.traceDir, fixture.traceFileName),
       );
-
-      const hostOutput: string[] = [];
-      ctProcess.stdout?.on("data", (chunk: Buffer) => {
-        hostOutput.push(chunk.toString());
-      });
-      ctProcess.stderr?.on("data", (chunk: Buffer) => {
-        hostOutput.push(chunk.toString());
-      });
-
-      browser = await chromium.launch({
-        executablePath: resolveChromiumPath(),
-        args: (process.env.CODETRACER_ELECTRON_ARGS ?? "")
-          .split(/\s+/)
-          .filter(Boolean),
-      });
-      const page = await browser.newPage();
-
-      await waitForHostOutput(hostOutput, /loaded local manifest:/);
-      const importOutput = await waitForHostOutput(
-        hostOutput,
-        /imported manifest trace as trace id\s+\d+/,
+      expectRequiredPath(
+        `${fixture.label} materialized trace metadata`,
+        path.join(fixture.traceDir, "trace_metadata.json"),
       );
-      expect(importOutput).toContain(manifestPath);
-
-      await connectToHost(page, httpPort, hostOutput);
-      await expect(page.locator(".lm_content").first()).toBeVisible({
-        timeout: 30_000,
-      });
-
-      const sourceNode = page
-        .locator(".jstree-anchor")
-        .filter({ hasText: /^python_flow_test\.py$/ })
-        .first();
-      await expect(sourceNode).toBeVisible({ timeout: 30_000 });
-      await sourceNode.click();
-      const sourceText = await waitForEditorModelText(page, "calculate_sum");
-      await waitForEditorModelText(page, "sum_with_while");
-      const layout = new LayoutPage(page);
-      await layout.waitForCallTraceReady();
-      const callTrace = (await layout.callTraceTabs())[0];
-      await callTrace.clickTab();
-      const calculateSumEntry = await callTrace.navigateToEntry("calculate_sum");
-      expect((await calculateSumEntry.functionName()).toLowerCase()).toBe(
-        "calculate_sum",
+      expectRequiredPath(
+        `${fixture.label} materialized trace paths`,
+        path.join(fixture.traceDir, "trace_paths.json"),
       );
-      await helpers.assertEventLogPopulated(page);
-      await helpers.assertTerminalOutputContains(page, "Result: 94");
+      expectRequiredPath(`${fixture.label} flow source fixture`, fixture.sourcePath);
 
-      const traceMetadata = await page.evaluate(() => {
-        const d = (window as any).data;
-        const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
-        return {
-          id: Number(trace?.id ?? -1),
-          program: String(trace?.program ?? ""),
-          outputFolder: String(trace?.outputFolder ?? ""),
-        };
-      });
-      console.log(
-        `# active trace metadata: ${JSON.stringify(traceMetadata, null, 2)}`,
-      );
-      console.log(`# source model sample:\n${sourceText.slice(0, 2000)}`);
+      const { rootDir, manifestPath } = prepareLocalMaterializedManifest(fixture);
+      const httpPort = await getFreeTcpPort();
+      const backendPort = await getFreeTcpPort();
+      let ctProcess: childProcess.ChildProcess | null = null;
+      let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
-      expect(sourceText).toContain("calculate_sum");
-      expect(sourceText).toContain("sum_with_while");
-      expect(traceMetadata.id).toBeGreaterThan(0);
-      expect(traceMetadata.program).toContain("python_flow_test.py");
-      expect(traceMetadata.outputFolder).toContain("trace-");
-    } finally {
-      if (ctProcess?.pid) {
-        killProcessTree(ctProcess.pid);
+      try {
+        console.log(
+          `# launching ct host --manifest=${manifestPath} on port ${httpPort}`,
+        );
+        ctProcess = childProcess.spawn(
+          codetracerPath,
+          [
+            "host",
+            `--manifest=${manifestPath}`,
+            `--port=${httpPort}`,
+            `--backend-socket-port=${backendPort}`,
+            `--frontend-socket=${backendPort}`,
+          ],
+          {
+            cwd: codetracerInstallDir,
+            env: makeCleanEnv({
+              XDG_CONFIG_HOME: path.join(rootDir, "xdg-config"),
+            }),
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+          },
+        );
+
+        const hostOutput: string[] = [];
+        ctProcess.stdout?.on("data", (chunk: Buffer) => {
+          hostOutput.push(chunk.toString());
+        });
+        ctProcess.stderr?.on("data", (chunk: Buffer) => {
+          hostOutput.push(chunk.toString());
+        });
+
+        browser = await chromium.launch({
+          executablePath: resolveChromiumPath(),
+          args: (process.env.CODETRACER_ELECTRON_ARGS ?? "")
+            .split(/\s+/)
+            .filter(Boolean),
+        });
+        const page = await browser.newPage();
+
+        await waitForHostOutput(hostOutput, /loaded local manifest:/);
+        const importOutput = await waitForHostOutput(
+          hostOutput,
+          /imported manifest trace as trace id\s+\d+/,
+        );
+        expect(importOutput).toContain(manifestPath);
+
+        await connectToHost(page, httpPort, hostOutput);
+        const sourceText = await verifyMaterializedTraceDetails(page, fixture);
+
+        const traceMetadata = await page.evaluate(() => {
+          const d = (window as any).data;
+          const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
+          return {
+            id: Number(trace?.id ?? -1),
+            program: String(trace?.program ?? ""),
+            outputFolder: String(trace?.outputFolder ?? ""),
+          };
+        });
+        console.log(
+          `# active trace metadata: ${JSON.stringify(traceMetadata, null, 2)}`,
+        );
+        console.log(`# source model sample:\n${sourceText.slice(0, 2000)}`);
+
+        expect(sourceText).toContain("calculate_sum");
+        expect(sourceText).toContain("sum_with_while");
+        expect(traceMetadata.id).toBeGreaterThan(0);
+        expect(traceMetadata.program).toContain(fixture.programFragment);
+        expect(traceMetadata.outputFolder).toContain("trace-");
+      } finally {
+        if (ctProcess?.pid) {
+          killProcessTree(ctProcess.pid);
+        }
+        await sleep(portReleaseDelayMs);
+        if (browser) {
+          await browser.close().catch(() => undefined);
+        }
+        fs.rmSync(rootDir, { recursive: true, force: true });
+        delete process.env.CODETRACER_TRACE_ID;
+        delete process.env.CODETRACER_CALLER_PID;
+        delete process.env.CODETRACER_IN_UI_TEST;
+        delete process.env.CODETRACER_TEST;
       }
-      await sleep(portReleaseDelayMs);
-      if (browser) {
-        await browser.close().catch(() => undefined);
-      }
-      fs.rmSync(rootDir, { recursive: true, force: true });
-      delete process.env.CODETRACER_TRACE_ID;
-      delete process.env.CODETRACER_CALLER_PID;
-      delete process.env.CODETRACER_IN_UI_TEST;
-      delete process.env.CODETRACER_TEST;
-    }
-  });
+    });
+  }
 });

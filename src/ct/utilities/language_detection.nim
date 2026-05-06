@@ -105,20 +105,18 @@ const WASM_LANGS = {
 }.toTable()
 
 proc detectLangFromPath*(path: string, isWasm: bool): Lang =
-  let filename = path.extractFilename
-  let tokens = rsplit(filename[1..^1], ".", 1)
-  if tokens.len > 1:
-    let extension = tokens[1].toLowerAscii()
-
-    if isWasm and WASM_LANGS.hasKey(extension):
-      return WASM_LANGS[extension]
-
-    if LANGS.hasKey(extension):
-      result = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
-      if result != LangUnknown:
-        return result
-  else:
+  let ext = path.splitFile.ext
+  if ext.len <= 1:
     return LangUnknown
+
+  let extension = ext[1..^1].toLowerAscii()
+  if isWasm and WASM_LANGS.hasKey(extension):
+    return WASM_LANGS[extension]
+
+  if LANGS.hasKey(extension):
+    result = LANGS[extension] # TODO detectLangFromTrace(traceId) ?
+    if result != LangUnknown:
+      return result
 
 
 proc detectLang*(program: string, lang: Lang, isWasm: bool = false): Lang =
