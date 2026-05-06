@@ -1,5 +1,5 @@
 import
-  std / [ options, strformat, strutils, osproc, os, json, uri ],
+  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   ctfs_sources,
@@ -18,6 +18,7 @@ const
   DEFAULT_SOCKET_PORT: int = 5_000
   DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1_000
   IDLE_TIMEOUT_DISABLED = -1
+  LOCAL_STORAGE_PROTOCOL = "local-storage"
 
 type
   IdleTimeoutResult* = object
@@ -37,6 +38,12 @@ type
   HostResolvedTrace* = object
     traceId*: int
     start*: HostStartCoordinates
+
+  StorageProtocolOptions* = object
+    baseUrl*: string
+    tenantId*: string
+    token*: string
+    protocol*: string
 
 proc okResult(value: int): IdleTimeoutResult =
   IdleTimeoutResult(ok: true, value: value, error: "")
@@ -357,7 +364,174 @@ proc parseUintOrZero(value: string): uint64 =
   except CatchableError:
     0'u64
 
-proc resolveSharedManifest(manifestPath: string, manifest: JsonNode): HostResolvedTrace =
+proc readStorageProtocolOptions(
+    baseUrl, tenantId, token, protocol: string): StorageProtocolOptions =
+  result.baseUrl =
+    if baseUrl.len > 0: baseUrl
+    else: getEnv("CODETRACER_STORAGE_BASE_URL", "")
+  result.tenantId =
+    if tenantId.len > 0: tenantId
+    else: getEnv("CODETRACER_STORAGE_TENANT_ID", "")
+  result.token =
+    if token.len > 0: token
+    else: getEnv("CODETRACER_STORAGE_REPLAY_TOKEN", "")
+  result.protocol =
+    if protocol.len > 0: protocol
+    else: getEnv("CODETRACER_STORAGE_PROTOCOL", LOCAL_STORAGE_PROTOCOL)
+  result.protocol = result.protocol.strip().toLowerAscii()
+  if result.protocol != LOCAL_STORAGE_PROTOCOL:
+    raise newException(ValueError,
+      "unsupported storage protocol: " & result.protocol &
+      " (supported: " & LOCAL_STORAGE_PROTOCOL & ")")
+  result.baseUrl = result.baseUrl.strip(leading = false, trailing = true, chars = {'/'})
+
+proc isRetainedObject(node: JsonNode): bool =
+  let dataState = node.jsonString(["data_state", "dataState", "retentionStatus", "retention_status"])
+  dataState.len == 0 or dataState in ["retained", "available"]
+
+proc isUploadedObject(node: JsonNode): bool =
+  let upload = node.jsonString(["upload", "uploadCompletionState", "upload_completion_state"])
+  upload.len == 0 or upload in ["uploaded", "complete"]
+
+proc requireReadableObject(node: JsonNode, label: string) =
+  if node.isNil or node.kind != JObject:
+    raise newException(ValueError, label & " is missing")
+  if not node.isUploadedObject():
+    raise newException(ValueError, label & " is not uploaded yet")
+  if not node.isRetainedObject():
+    raise newException(ValueError, label & " is expired or deleted")
+
+proc objectKeyFromReference(reference: string): string =
+  if reference.len == 0:
+    return ""
+  if reference.startsWith("http://") or reference.startsWith("https://"):
+    return reference
+  try:
+    let parsed = parseUri(reference)
+    if parsed.scheme.len > 0:
+      return parsed.path.strip(leading = true, trailing = false, chars = {'/'})
+  except CatchableError:
+    discard
+  reference.strip(leading = true, trailing = false, chars = {'/'})
+
+proc storageObjectUrl(obj: JsonNode, options: StorageProtocolOptions): string =
+  let uriValue = obj.jsonString(["uri"])
+  if uriValue.startsWith("http://") or uriValue.startsWith("https://"):
+    return uriValue
+
+  if options.baseUrl.len == 0:
+    raise newException(ValueError,
+      "storage object requires --storage-base-url or CODETRACER_STORAGE_BASE_URL")
+  if options.tenantId.len == 0:
+    raise newException(ValueError,
+      "storage object requires --storage-tenant-id or CODETRACER_STORAGE_TENANT_ID")
+
+  let objectKey = objectKeyFromReference(
+    if uriValue.len > 0: uriValue
+    else: obj.jsonString(["objectKey", "object_key", "object_id", "path"]))
+  if objectKey.len == 0:
+    raise newException(ValueError, "storage object has no object key or URI")
+
+  let serverId =
+    if obj.hasKey("storageServerId"): obj.jsonString(["storageServerId"])
+    elif obj.hasKey("storage_server_id"): obj.jsonString(["storage_server_id"])
+    elif obj.hasKey("placement") and obj["placement"].kind == JObject:
+      obj["placement"].jsonString(["server_id", "serverId"])
+    else:
+      ""
+  let encodedKey = encodeUrl(objectKey)
+  if serverId.len > 0:
+    fmt"{options.baseUrl}/api/v1/observability/storage-policy/tenants/{options.tenantId}/{options.protocol}/servers/{serverId}/objects/{encodedKey}"
+  else:
+    fmt"{options.baseUrl}/api/v1/observability/storage-policy/tenants/{options.tenantId}/{options.protocol}/objects/{encodedKey}"
+
+proc fetchStorageObject(obj: JsonNode, options: StorageProtocolOptions, label: string): string =
+  requireReadableObject(obj, label)
+  let url = storageObjectUrl(obj, options)
+  var client = newHttpClient()
+  defer: client.close()
+  if options.token.len > 0:
+    client.headers = newHttpHeaders({"Authorization": "Bearer " & options.token})
+  try:
+    let response = client.request(url, httpMethod = HttpGet)
+    if response.code != Http200:
+      raise newException(ValueError,
+        fmt"{label} storage read failed: HTTP {response.status} from {url}")
+    response.body
+  except CatchableError as e:
+    raise newException(ValueError, fmt"{label} storage protocol error: {e.msg}")
+
+proc writeStorageObjectToTemp(
+    obj: JsonNode, options: StorageProtocolOptions, label, suffix: string): string =
+  let tempDir = getTempDir() / "ct-host-storage-" & $getCurrentProcessId()
+  createDir(tempDir)
+  result = tempDir / (label.replace(" ", "-") & suffix)
+  writeFile(result, fetchStorageObject(obj, options, label))
+
+proc importMaterializedStorageObject(
+    obj: JsonNode, options: StorageProtocolOptions, label: string): int =
+  let reference = obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "uri", "path", "object_id"])
+  let suffix = if reference.endsWith(".ct"): ".ct" else: ".artifact"
+  let path = writeStorageObjectToTemp(obj, options, label, suffix)
+  let traceFolder = findMaterializedTraceFolder(path)
+  if traceFolder.len == 0:
+    raise newException(ValueError,
+      label & " is not a hostable CodeTracer trace folder or .ct artifact")
+  if traceFolder.endsWith(".ct"):
+    importCtFile(traceFolder)
+  else:
+    importTraceFolder(traceFolder)
+
+proc selectedSegment(segments: JsonNode, start: HostStartCoordinates): JsonNode =
+  let requestedGeid = parseUintOrZero(start.geid)
+  for segment in segments:
+    if segment.kind != JObject:
+      continue
+    if requestedGeid > 0:
+      let geidStart = parseUintOrZero(segment.jsonString(["geid_start", "geidStart", "startGeid"]))
+      let geidEnd = parseUintOrZero(segment.jsonString(["geid_end", "geidEnd", "endGeid"]))
+      if requestedGeid >= geidStart and (geidEnd == 0'u64 or requestedGeid <= geidEnd):
+        return segment
+    elif result.isNil:
+      result = segment
+  if result.isNil and segments.len > 0:
+    result = segments[0]
+
+proc importShardedSegment(
+    segment: JsonNode, options: StorageProtocolOptions): int =
+  if segment.isNil:
+    raise newException(ValueError, "sharded_split_ctfs manifest has no selected segment")
+  let shards = segment.jsonField(["shards"])
+  if shards.isNil or shards.kind != JArray or shards.len == 0:
+    raise newException(ValueError, "selected sharded_split_ctfs segment has no shards")
+
+  var bytes = ""
+  for shard in shards:
+    let replicas = shard.jsonField(["replicas"])
+    if replicas.isNil or replicas.kind != JArray or replicas.len == 0:
+      raise newException(ValueError, "selected sharded_split_ctfs shard has no replicas")
+    var lastError = ""
+    var read = false
+    for replica in replicas:
+      try:
+        bytes.add(fetchStorageObject(replica, options, "CTFS shard replica"))
+        read = true
+        break
+      except CatchableError as e:
+        lastError = e.msg
+    if not read:
+      raise newException(ValueError, "no readable CTFS shard replica: " & lastError)
+
+  let tempDir = getTempDir() / "ct-host-storage-" & $getCurrentProcessId()
+  createDir(tempDir)
+  let path = tempDir / "sharded-segment.ct"
+  writeFile(path, bytes)
+  importCtFile(path)
+
+proc resolveSharedManifest(
+    manifestPath: string,
+    manifest: JsonNode,
+    storageOptions: StorageProtocolOptions): HostResolvedTrace =
   let source = manifest.jsonField(["source"])
   if source.isNil or source.kind != JObject:
     raise newException(ValueError, "shared manifest missing source")
@@ -371,9 +545,11 @@ proc resolveSharedManifest(manifestPath: string, manifest: JsonNode): HostResolv
     if fileNode.isNil:
       raise newException(ValueError, "single_ctfs manifest missing file")
     let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
-    if path.len == 0 or not fileExists(path):
-      raise newException(ValueError, "single_ctfs local file not found: " & path)
-    result.traceId = importCtFile(path)
+    if path.len > 0 and fileExists(path):
+      result.traceId = importCtFile(path)
+    else:
+      let storagePath = writeStorageObjectToTemp(fileNode, storageOptions, "single CTFS file", ".ct")
+      result.traceId = importCtFile(storagePath)
     result.start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
     if result.start.traceId.len == 0 and result.start.geid.len == 0:
       result.start = manifestStart
@@ -401,9 +577,11 @@ proc resolveSharedManifest(manifestPath: string, manifest: JsonNode): HostResolv
       selected = segments[0]
     let fileNode = selected.jsonField(["file"])
     let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
-    if path.len == 0 or not fileExists(path):
-      raise newException(ValueError, "split_ctfs selected local file not found: " & path)
-    result.traceId = importCtFile(path)
+    if path.len > 0 and fileExists(path):
+      result.traceId = importCtFile(path)
+    else:
+      let storagePath = writeStorageObjectToTemp(fileNode, storageOptions, "split CTFS segment", ".ct")
+      result.traceId = importCtFile(storagePath)
     result.start = start
   of "materialized_artifact":
     let artifactNode = source.jsonField(["artifact"])
@@ -412,9 +590,8 @@ proc resolveSharedManifest(manifestPath: string, manifest: JsonNode): HostResolv
     let path = resolveLocalReference(artifactNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
     if traceFolder.len == 0:
-      raise newException(ValueError,
-        "materialized artifact is not a hostable CodeTracer trace folder yet: " & path)
-    if traceFolder.endsWith(".ct"):
+      result.traceId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact")
+    elif traceFolder.endsWith(".ct"):
       result.traceId = importCtFile(traceFolder)
     else:
       result.traceId = importTraceFolder(traceFolder)
@@ -423,22 +600,47 @@ proc resolveSharedManifest(manifestPath: string, manifest: JsonNode): HostResolv
       result.start = manifestStart
     result.start.materializedArtifactKey = artifactNode.jsonString(["object_id", "uri", "path"])
   of "sharded_split_ctfs":
-    raise newException(ValueError, "local sharded_split_ctfs manifests are not supported until storage protocol support")
+    let segments = source.jsonField(["segments"])
+    if segments.isNil or segments.kind != JArray or segments.len == 0:
+      raise newException(ValueError, "sharded_split_ctfs manifest missing segments")
+    var start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
+    if start.traceId.len == 0 and start.geid.len == 0:
+      start = manifestStart
+    result.traceId = importShardedSegment(selectedSegment(segments, start), storageOptions)
+    result.start = start
   else:
     raise newException(ValueError, "unsupported shared manifest source kind: " & kind)
 
-proc resolveRecordingManifest(manifestPath: string, manifest: JsonNode): HostResolvedTrace =
+proc resolveRecordingManifest(
+    manifestPath: string,
+    manifest: JsonNode,
+    storageOptions: StorageProtocolOptions): HostResolvedTrace =
   let kind = manifest.jsonString(["kind"])
   let manifestKey = manifest.jsonString(["manifestS3Key", "manifest_s3_key"])
+  if manifest.jsonString(["uploadCompletionState", "upload_completion_state"]) notin ["", "complete"]:
+    raise newException(ValueError, "recording manifest is not complete")
+  if manifest.jsonString(["retentionStatus", "retention_status"]) in ["missing", "expired"]:
+    raise newException(ValueError, "recording manifest is missing or expired")
   case kind
   of "mcr_slices":
-    let slice = manifest.firstObject(["mcrSlices", "mcr_slices"])
-    if slice.isNil:
-      raise newException(ValueError, "mcr_slices manifest has no retained local slices")
-    let path = resolveLocalReference(slice.jsonString(["sliceKey", "slice_key"]), manifestPath, manifestKey)
-    if path.len == 0 or not fileExists(path):
-      raise newException(ValueError, "local MCR slice not found: " & path)
-    result.traceId = importCtFile(path)
+    let shardedSegments = manifest.jsonField(["shardedMcrSegments", "sharded_mcr_segments"])
+    if not shardedSegments.isNil and shardedSegments.kind == JArray and shardedSegments.len > 0:
+      result.traceId = importShardedSegment(selectedSegment(shardedSegments, readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))), storageOptions)
+    else:
+      let slice = manifest.firstObject(["mcrSlices", "mcr_slices"])
+      if slice.isNil:
+        raise newException(ValueError, "mcr_slices manifest has no retained slices")
+      requireReadableObject(slice, "MCR slice")
+      let path = resolveLocalReference(slice.jsonString(["sliceKey", "slice_key"]), manifestPath, manifestKey)
+      if path.len > 0 and fileExists(path):
+        result.traceId = importCtFile(path)
+      else:
+        let obj = %*{
+          "objectKey": slice.jsonString(["sliceKey", "slice_key"]),
+          "uploadCompletionState": slice.jsonString(["uploadCompletionState", "upload_completion_state"]),
+          "retentionStatus": slice.jsonString(["retentionStatus", "retention_status"])
+        }
+        result.traceId = importCtFile(writeStorageObjectToTemp(obj, storageOptions, "MCR slice", ".ct"))
     result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
   of "materialized_trace":
     let artifact = manifest.firstObject(["materializedTraceArtifacts", "materialized_trace_artifacts"])
@@ -447,9 +649,13 @@ proc resolveRecordingManifest(manifestPath: string, manifest: JsonNode): HostRes
     let path = resolveLocalReference(artifact.jsonString(["artifactKey", "artifact_key"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
     if traceFolder.len == 0:
-      raise newException(ValueError,
-        "materialized artifact is not a hostable CodeTracer trace folder yet: " & path)
-    if traceFolder.endsWith(".ct"):
+      let obj = %*{
+        "objectKey": artifact.jsonString(["artifactKey", "artifact_key"]),
+        "uploadCompletionState": artifact.jsonString(["uploadCompletionState", "upload_completion_state"]),
+        "retentionStatus": artifact.jsonString(["retentionStatus", "retention_status"])
+      }
+      result.traceId = importMaterializedStorageObject(obj, storageOptions, "materialized trace artifact")
+    elif traceFolder.endsWith(".ct"):
       result.traceId = importCtFile(traceFolder)
     else:
       result.traceId = importTraceFolder(traceFolder)
@@ -460,13 +666,15 @@ proc resolveRecordingManifest(manifestPath: string, manifest: JsonNode): HostRes
   else:
     raise newException(ValueError, "unsupported recording manifest kind: " & kind)
 
-proc importLocalManifest(manifestPath: string): HostResolvedTrace =
+proc importLocalManifest(
+    manifestPath: string,
+    storageOptions: StorageProtocolOptions = StorageProtocolOptions()): HostResolvedTrace =
   let fullPath = expandFilename(expandTilde(manifestPath))
   let manifest = parseJson(readFile(fullPath))
   if manifest.jsonString(["schema"]) == "codetracer.trace-storage.v1":
-    result = resolveSharedManifest(fullPath, manifest)
+    result = resolveSharedManifest(fullPath, manifest, storageOptions)
   else:
-    result = resolveRecordingManifest(fullPath, manifest)
+    result = resolveRecordingManifest(fullPath, manifest, storageOptions)
   applyReplayStartEnv(result.start)
   echo "ct host: loaded local manifest: ", fullPath
 
@@ -479,7 +687,11 @@ proc hostCommand*(
     traceArg: string,
     idleTimeoutRaw: string,
     tracePath: string = "",
-    manifestPath: string = "") =
+    manifestPath: string = "",
+    storageBaseUrl: string = "",
+    storageTenantId: string = "",
+    storageToken: string = "",
+    storageProtocol: string = "") =
 
   putEnv("NODE_PATH", nodeModulesPath)
   putEnv("CODETRACER_PREFIX", codetracerPrefix)
@@ -502,6 +714,13 @@ proc hostCommand*(
     echo "ct host: error: ", parsedIdleTimeout.error
     quit(1)
   let idleTimeoutMs = parsedIdleTimeout.value
+  var storageOptions: StorageProtocolOptions
+  try:
+    storageOptions = readStorageProtocolOptions(
+      storageBaseUrl, storageTenantId, storageToken, storageProtocol)
+  except CatchableError as e:
+    echo "ct host: error: ", e.msg
+    quit(1)
 
   if port < 0:
     echo fmt"ct host: error: no valid port specified: {port}"
@@ -524,7 +743,7 @@ proc hostCommand*(
 
   if localManifestPath.len > 0:
     try:
-      let resolved = importLocalManifest(localManifestPath)
+      let resolved = importLocalManifest(localManifestPath, storageOptions)
       traceId = resolved.traceId
       echo "ct host: imported manifest trace as trace id ", traceId
     except CatchableError as e:

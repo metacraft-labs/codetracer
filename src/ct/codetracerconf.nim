@@ -448,6 +448,39 @@ type
           "manifest to host."
       .} : string
 
+      hostStorageBaseUrl* {.
+        name: "storage-base-url"
+        defaultValue: ""
+        desc: "Base URL for storage-server " &
+          "manifest object reads. Also " &
+          "honors CODETRACER_STORAGE_BASE_URL."
+      .} : string
+
+      hostStorageTenantId* {.
+        name: "storage-tenant-id"
+        defaultValue: ""
+        desc: "Tenant id for storage-server " &
+          "object reads. Also honors " &
+          "CODETRACER_STORAGE_TENANT_ID."
+      .} : string
+
+      hostStorageToken* {.
+        name: "storage-token"
+        defaultValue: ""
+        desc: "Replay credential bearer token " &
+          "for storage-server object reads. " &
+          "Also honors " &
+          "CODETRACER_STORAGE_REPLAY_TOKEN."
+      .} : string
+
+      hostStorageProtocol* {.
+        name: "storage-protocol"
+        defaultValue: ""
+        desc: "Storage protocol selector " &
+          "(default local-storage). Also " &
+          "honors CODETRACER_STORAGE_PROTOCOL."
+      .} : string
+
       hostTraceArg* {.
         argument
         defaultValue: ""

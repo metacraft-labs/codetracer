@@ -301,7 +301,11 @@ proc runInitial*(conf: CodetracerConf) =
         conf.hostFrontendSocketParameters, conf.hostTraceArg,
         conf.hostIdleTimeout,
         conf.hostTracePath,
-        conf.hostManifestPath)
+        conf.hostManifestPath,
+        conf.hostStorageBaseUrl,
+        conf.hostStorageTenantId,
+        conf.hostStorageToken,
+        conf.hostStorageProtocol)
     of StartupCommand.`import`:
       importCommand(
         conf.importTraceZipPath,
