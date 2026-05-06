@@ -379,6 +379,8 @@ proc resolveLocalReference(reference, manifestPath, manifestKey: string): string
   manifestPath.parentDir / local
 
 proc findMaterializedTraceFolder(path: string): string =
+  if path.len == 0:
+    return ""
   let fullPath = expandFilename(expandTilde(path))
   if dirExists(fullPath):
     if fileExists(fullPath / "trace_metadata.json"):
@@ -572,11 +574,41 @@ proc writeStorageObjectToTempWithSupport(
   result = tempDir / (label.replace(" ", "-") & suffix)
   writeFile(result, fetchStorageObject(obj, options, label))
 
+proc materializedPayloadFileName(obj: JsonNode): string =
+  let raw = block:
+    let relative = obj.jsonString(["relativePath", "relative_path", "payloadPath", "payload_path", "name"])
+    if relative.len > 0: relative
+    else: obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "uri", "path", "object_id"])
+  let fileName = raw.replace('\\', '/').splitFile.name & raw.replace('\\', '/').splitFile.ext
+  if fileName in ["trace.bin", "trace.json"]:
+    return fileName
+  if raw.endsWith(".ct"):
+    return "materialized.ct"
+  "trace.bin"
+
+proc writeMaterializedStorageArtifactToTemp(
+    obj: JsonNode,
+    supportOwner: JsonNode,
+    options: StorageProtocolOptions,
+    label: string): string =
+  let tempDir = getTempDir() / "ct-host-storage-" & $getCurrentProcessId()
+  createDir(tempDir)
+  fetchStorageSupportFiles(supportOwner, options, tempDir)
+  result = tempDir / materializedPayloadFileName(obj)
+  writeFile(result, fetchStorageObject(obj, options, label))
+
 proc importMaterializedStorageObject(
-    obj: JsonNode, options: StorageProtocolOptions, label: string): int =
+    obj: JsonNode,
+    options: StorageProtocolOptions,
+    label: string,
+    supportOwner: JsonNode = nil): int =
   let reference = obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "uri", "path", "object_id"])
-  let suffix = if reference.endsWith(".ct"): ".ct" else: ".artifact"
-  let path = writeStorageObjectToTemp(obj, options, label, suffix)
+  let owner = if supportOwner.isNil: obj else: supportOwner
+  let path =
+    if reference.endsWith(".ct"):
+      writeStorageObjectToTemp(obj, options, label, ".ct")
+    else:
+      writeMaterializedStorageArtifactToTemp(obj, owner, options, label)
   let traceFolder = findMaterializedTraceFolder(path)
   if traceFolder.len == 0:
     raise newException(ValueError,
@@ -697,7 +729,7 @@ proc resolveSharedManifest(
     let path = resolveLocalReference(artifactNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
     if traceFolder.len == 0:
-      result.traceId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact")
+      result.traceId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact", source)
     elif traceFolder.endsWith(".ct"):
       result.traceId = importCtFile(traceFolder)
     else:
