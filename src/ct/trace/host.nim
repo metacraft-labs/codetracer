@@ -276,6 +276,8 @@ proc importTraceFolder(traceFolderPath: string): int =
   if enriched:
     echo "ct host: MCR trace enriched with portable binaries/symbols"
 
+  normalizeImportedTracePaths(fullPath)
+
   let traceKind =
     if fileExists(fullPath / "trace_metadata.json"):
       "db"
@@ -641,9 +643,11 @@ proc resolveSharedManifest(
     let fileNode = selected.jsonField(["file"])
     let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     if path.len > 0 and fileExists(path):
+      echo "ct host: selected split_ctfs segment: ", path
       result.traceId = importCtFile(path)
     else:
       let storagePath = writeStorageObjectToTemp(fileNode, storageOptions, "split CTFS segment", ".ct")
+      echo "ct host: selected split_ctfs segment: ", storagePath
       result.traceId = importCtFile(storagePath)
     result.start = start
   of "materialized_artifact":

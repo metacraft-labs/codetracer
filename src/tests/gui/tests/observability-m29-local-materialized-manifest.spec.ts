@@ -151,6 +151,15 @@ const gotoTimeoutMs = 5_000;
 const portReleaseDelayMs = 500;
 const browserDetailTimeoutMs = 60_000;
 
+type FilesystemSourceState = {
+  matchedPath: string;
+  filesystemPaths: string[];
+  anchorLabels: string[];
+  renderedSourceLabel: string;
+  traceProgram: string;
+  traceOutputFolder: string;
+};
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -405,6 +414,84 @@ async function waitForEditorModelText(
   }
 }
 
+async function readFilesystemSourceState(
+  page: Page,
+  sourceFileName: string,
+): Promise<FilesystemSourceState> {
+  return await page.evaluate((expectedFileName) => {
+    const data = (window as any).data;
+    const filesystem = data?.services?.editor?.filesystem;
+    const paths: string[] = [];
+
+    const visit = (node: any): void => {
+      if (!node) return;
+      const path = String(node?.original?.path ?? node?.path ?? "");
+      if (path.length > 0) paths.push(path);
+      for (const child of node?.children ?? []) visit(child);
+    };
+    visit(filesystem);
+
+    const suffix = `/${expectedFileName}`;
+    const matchedPath =
+      paths.find((path) => path === expectedFileName || path.endsWith(suffix)) ??
+      "";
+
+    const anchorLabels = Array.from(document.querySelectorAll(".jstree-anchor"))
+      .map((anchor) => String(anchor.textContent ?? "").trim())
+      .filter((label) => label.length > 0)
+      .slice(0, 80);
+    const renderedSourceLabel =
+      anchorLabels.find((label) => label === expectedFileName) ?? "";
+
+    const trace = data?.sessions?.[data?.activeSessionIndex ?? 0]?.trace;
+    return {
+      matchedPath,
+      filesystemPaths: paths.slice(0, 80),
+      anchorLabels,
+      renderedSourceLabel,
+      traceProgram: String(trace?.program ?? ""),
+      traceOutputFolder: String(trace?.outputFolder ?? ""),
+    };
+  }, sourceFileName);
+}
+
+async function waitForFilesystemSourcePath(
+  page: Page,
+  fixture: MaterializedFlowFixture,
+  timeoutMs = browserDetailTimeoutMs,
+): Promise<string> {
+  const layout = new LayoutPage(page);
+  await layout.waitForFilesystemLoaded();
+
+  try {
+    await retry(
+      async () => {
+        const state = await readFilesystemSourceState(page, fixture.sourceFileName);
+        return (
+          state.matchedPath.length > 0 ||
+          state.renderedSourceLabel === fixture.sourceFileName
+        );
+      },
+      {
+        maxAttempts: Math.ceil(timeoutMs / 1_000),
+        delayMs: 1_000,
+      },
+    );
+    const state = await readFilesystemSourceState(page, fixture.sourceFileName);
+    return state.matchedPath || state.renderedSourceLabel;
+  } catch (error) {
+    const state = await readFilesystemSourceState(page, fixture.sourceFileName);
+    throw new Error(
+      `Timed out waiting for ${fixture.label} source ${fixture.sourceFileName} in the filesystem UI.\n` +
+        `Trace program: ${state.traceProgram}\n` +
+        `Trace output folder: ${state.traceOutputFolder}\n` +
+        `Filesystem paths:\n${state.filesystemPaths.join("\n")}\n` +
+        `Rendered filesystem labels:\n${state.anchorLabels.join("\n")}`,
+      { cause: error },
+    );
+  }
+}
+
 async function verifyMaterializedTraceDetails(
   page: Page,
   fixture: MaterializedFlowFixture,
@@ -413,11 +500,15 @@ async function verifyMaterializedTraceDetails(
     timeout: 30_000,
   });
 
+  const sourcePath = await waitForFilesystemSourcePath(page, fixture);
   const sourceNode = page
     .locator(".jstree-anchor")
     .filter({ hasText: new RegExp(`^${escapeRegExp(fixture.sourceFileName)}$`) })
     .first();
-  await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+  await expect(
+    sourceNode,
+    `${fixture.label} source node should be rendered for imported path ${sourcePath}`,
+  ).toBeVisible({ timeout: 30_000 });
   await sourceNode.click();
 
   const sourceText = await waitForEditorModelText(
@@ -553,6 +644,27 @@ base.describe("Observability M29 local materialized manifest browser acceptance"
           `# active trace metadata: ${JSON.stringify(traceMetadata, null, 2)}`,
         );
         console.log(`# source model sample:\n${sourceText.slice(0, 2000)}`);
+
+        const importedTracePaths = JSON.parse(
+          fs.readFileSync(
+            path.join(traceMetadata.outputFolder, "trace_paths.json"),
+            "utf-8",
+          ),
+        ) as string[];
+        const importedSourcePath = importedTracePaths.find((tracePath) =>
+          tracePath.endsWith(fixture.sourceFileName),
+        );
+        expect(importedSourcePath, `${fixture.label} imported source path`).toBeTruthy();
+        expect(
+          path.isAbsolute(importedSourcePath ?? ""),
+          `${fixture.label} imported source path should be self-contained`,
+        ).toBe(false);
+        expect(
+          fs.existsSync(
+            path.join(traceMetadata.outputFolder, "files", importedSourcePath ?? ""),
+          ),
+          `${fixture.label} imported source payload should exist`,
+        ).toBe(true);
 
         for (const snippet of fixture.requiredSourceSnippets) {
           expect(sourceText).toContain(snippet);

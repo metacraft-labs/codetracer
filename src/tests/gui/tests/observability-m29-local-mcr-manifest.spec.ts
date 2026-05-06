@@ -8,6 +8,7 @@
  */
 
 import * as childProcess from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -79,6 +80,28 @@ const retryDelayMs = 1_500;
 const gotoTimeoutMs = 5_000;
 const portReleaseDelayMs = 500;
 const browserDetailTimeoutMs = 60_000;
+
+type SliceManifestEntry = {
+  intervalId: number;
+  slicePath: string;
+  geidStart: bigint;
+  geidEnd: bigint;
+  tickStart: bigint;
+  tickEnd: bigint;
+  eventCount: number;
+};
+
+type SplitMcrManifest = {
+  rootDir: string;
+  manifestPath: string;
+  selectedSegmentPath: string;
+  otherSegmentPaths: string[];
+};
+
+type ExpectedImportedCtfsSegment = {
+  selectedSegmentPath: string;
+  otherSegmentPaths: string[];
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -230,6 +253,181 @@ function prepareLocalMcrManifest(): { rootDir: string; manifestPath: string } {
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   return { rootDir, manifestPath };
+}
+
+function sha256File(filePath: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(filePath))
+    .digest("hex");
+}
+
+function segmentInteriorGeid(entry: SliceManifestEntry): bigint {
+  if (entry.geidEnd > entry.geidStart) return entry.geidStart + 1n;
+  if (entry.geidStart > 0n) return entry.geidStart;
+  return entry.geidEnd;
+}
+
+function readVarString(
+  buffer: Buffer,
+  offset: number,
+): { value: string; nextOffset: number } {
+  if (offset + 4 > buffer.length) {
+    throw new Error("truncated SMNF string length");
+  }
+  const length = buffer.readUInt32LE(offset);
+  const valueStart = offset + 4;
+  const valueEnd = valueStart + length;
+  if (valueEnd > buffer.length) {
+    throw new Error("truncated SMNF string payload");
+  }
+  return {
+    value: buffer.subarray(valueStart, valueEnd).toString("utf-8"),
+    nextOffset: valueEnd,
+  };
+}
+
+function parseSliceManifest(manifestPath: string): SliceManifestEntry[] {
+  const buffer = fs.readFileSync(manifestPath);
+  if (buffer.length < 14 || buffer.subarray(0, 4).toString("ascii") !== "SMNF") {
+    throw new Error(`invalid split slice manifest: ${manifestPath}`);
+  }
+
+  let offset = 4;
+  const version = buffer.readUInt16LE(offset);
+  offset += 2;
+  if (version !== 1) {
+    throw new Error(`unsupported split slice manifest version ${version}`);
+  }
+
+  offset += 4; // totalIntervals
+  offset = readVarString(buffer, offset).nextOffset; // original trace path
+  const entryCount = buffer.readUInt32LE(offset);
+  offset += 4;
+
+  const entries: SliceManifestEntry[] = [];
+  for (let i = 0; i < entryCount; i++) {
+    const intervalId = buffer.readUInt32LE(offset);
+    offset += 4;
+    const slicePath = readVarString(buffer, offset);
+    offset = slicePath.nextOffset;
+    const geidStart = buffer.readBigUInt64LE(offset);
+    offset += 8;
+    const geidEnd = buffer.readBigUInt64LE(offset);
+    offset += 8;
+    const tickStart = buffer.readBigUInt64LE(offset);
+    offset += 8;
+    const tickEnd = buffer.readBigUInt64LE(offset);
+    offset += 8;
+    const eventCount = buffer.readUInt32LE(offset);
+    offset += 4;
+    entries.push({
+      intervalId,
+      slicePath: slicePath.value,
+      geidStart,
+      geidEnd,
+      tickStart,
+      tickEnd,
+      eventCount,
+    });
+  }
+
+  return entries;
+}
+
+function prepareLocalSplitMcrManifest(): SplitMcrManifest {
+  expectRequiredFile("ct-mcr slicer", ctMcrPath);
+
+  const rootDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ct-m29-split-mcr-manifest-"),
+  );
+  const objectDir = path.join(rootDir, "objects", "m25-inventory-split");
+  const segmentsDir = path.join(objectDir, "segments");
+  fs.mkdirSync(segmentsDir, { recursive: true });
+
+  const localTracePath = path.join(objectDir, "inventory.ct");
+  fs.copyFileSync(portableTracePath, localTracePath);
+
+  const sliceOutput = childProcess.execFileSync(
+    ctMcrPath,
+    ["slice", "--by-checkpoints", "-o", segmentsDir, localTracePath],
+    {
+      encoding: "utf-8",
+      stdio: "pipe",
+    },
+  );
+  console.log(`# ct-mcr slice output:\n${sliceOutput}`);
+
+  const sliceEntries = parseSliceManifest(path.join(segmentsDir, "manifest.smnf"));
+  expect(
+    sliceEntries.length,
+    "M29 split manifest acceptance requires the four retained split segments claimed by the milestone",
+  ).toBe(4);
+
+  const segmentPaths = sliceEntries.map((entry) =>
+    path.join(segmentsDir, entry.slicePath),
+  );
+  const segmentHashes = segmentPaths.map(sha256File);
+  expect(
+    new Set(segmentHashes).size,
+    "M29 split manifest segment identity check requires byte-distinct segment files",
+  ).toBe(segmentPaths.length);
+
+  const localSourcePath = path.join(segmentsDir, "inventory_smoke.c");
+  const localRequestDetailsPath = path.join(segmentsDir, "inventory-response.json");
+  fs.copyFileSync(fixtureSourcePath, localSourcePath);
+  fs.copyFileSync(fixtureRequestDetailsPath, localRequestDetailsPath);
+  fs.writeFileSync(
+    path.join(segmentsDir, "trace_paths.json"),
+    JSON.stringify([localSourcePath, localRequestDetailsPath], null, 2),
+  );
+
+  if (fs.existsSync(fixtureBinaryPath)) {
+    const binariesDir = path.join(segmentsDir, "binaries");
+    fs.mkdirSync(binariesDir, { recursive: true });
+    fs.copyFileSync(fixtureBinaryPath, path.join(binariesDir, "inventory_smoke"));
+  }
+
+  const selectedEntry = sliceEntries[sliceEntries.length - 1];
+  const selectedGeid = segmentInteriorGeid(selectedEntry);
+  const selectedSegmentPath = path.join(segmentsDir, selectedEntry.slicePath);
+
+  const manifestPath = path.join(rootDir, "manifest.json");
+  const manifest = {
+    schema: "codetracer.trace-storage.v1",
+    source: {
+      kind: "split_ctfs",
+      segments: sliceEntries.map((entry) => {
+        const segmentPath = path.join(segmentsDir, entry.slicePath);
+        return {
+          index: entry.intervalId,
+          geid_start: entry.geidStart.toString(),
+          geid_end: entry.geidEnd.toString(),
+          file: {
+            uri: `objects/m25-inventory-split/segments/${entry.slicePath}`,
+            uploadCompletionState: "complete",
+            retentionStatus: "available",
+            sizeBytes: fs.statSync(segmentPath).size,
+          },
+        };
+      }),
+      replay_start: {
+        trace_id: "m25-real-mcr-request-001",
+        span_id: "30000000000025cc",
+        geid: selectedGeid.toString(),
+      },
+    },
+  };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+  return {
+    rootDir,
+    manifestPath,
+    selectedSegmentPath,
+    otherSegmentPaths: segmentPaths.filter(
+      (segmentPath) => segmentPath !== selectedSegmentPath,
+    ),
+  };
 }
 
 function expectRequiredFile(label: string, filePath: string): void {
@@ -394,6 +592,145 @@ async function waitForVisibleEditorText(
   }
 }
 
+async function exerciseLocalMcrManifestBrowserAcceptance(
+  manifestPath: string,
+  rootDir: string,
+  expectedImportedSegment?: ExpectedImportedCtfsSegment,
+): Promise<void> {
+  const httpPort = await getFreeTcpPort();
+  const backendPort = await getFreeTcpPort();
+  let ctProcess: childProcess.ChildProcess | null = null;
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+
+  try {
+    console.log(
+      `# launching ct host --manifest=${manifestPath} on port ${httpPort}`,
+    );
+    ctProcess = childProcess.spawn(
+      codetracerPath,
+      [
+        "host",
+        `--manifest=${manifestPath}`,
+        `--port=${httpPort}`,
+        `--backend-socket-port=${backendPort}`,
+        `--frontend-socket=${backendPort}`,
+      ],
+      {
+        cwd: codetracerInstallDir,
+        env: makeCleanEnv({
+          XDG_CONFIG_HOME: path.join(rootDir, "xdg-config"),
+        }),
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+
+    const hostOutput: string[] = [];
+    ctProcess.stdout?.on("data", (chunk: Buffer) => {
+      hostOutput.push(chunk.toString());
+    });
+    ctProcess.stderr?.on("data", (chunk: Buffer) => {
+      hostOutput.push(chunk.toString());
+    });
+
+    browser = await chromium.launch({
+      executablePath: resolveChromiumPath(),
+      args: (process.env.CODETRACER_ELECTRON_ARGS ?? "")
+        .split(/\s+/)
+        .filter(Boolean),
+    });
+    const page = await browser.newPage();
+
+    await waitForHostOutput(hostOutput, /loaded local manifest:/);
+    const importOutput = await waitForHostOutput(
+      hostOutput,
+      /imported manifest trace as trace id\s+\d+/,
+    );
+    expect(importOutput).toContain(manifestPath);
+    if (expectedImportedSegment) {
+      expect(importOutput).toContain(
+        `ct host: selected split_ctfs segment: ${expectedImportedSegment.selectedSegmentPath}`,
+      );
+      for (const otherSegmentPath of expectedImportedSegment.otherSegmentPaths) {
+        expect(importOutput).not.toContain(
+          `ct host: selected split_ctfs segment: ${otherSegmentPath}`,
+        );
+      }
+    }
+
+    await connectToHost(page, httpPort, hostOutput);
+
+    await expect(page.locator(".lm_content").first()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const sourceNode = page
+      .locator(".jstree-anchor")
+      .filter({ hasText: /^inventory_smoke\.c$/ })
+      .first();
+    await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+    await sourceNode.click();
+
+    const sourceText = await waitForEditorModelText(page, "handle_client");
+    await waitForEditorModelText(page, "reserve_from_primary_bin");
+
+    const requestDetailsNode = page
+      .locator(".jstree-anchor")
+      .filter({ hasText: /^inventory-response\.json$/ })
+      .first();
+    await expect(requestDetailsNode).toBeVisible({ timeout: 30_000 });
+    await requestDetailsNode.click();
+    const requestDetailsText = await waitForVisibleEditorText(
+      page,
+      `"requestId": "m25-real-mcr-request-001"`,
+    );
+    await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    console.log(`# browser body sample:\n${bodyText.slice(0, 2000)}`);
+    console.log(`# source model sample:\n${sourceText.slice(0, 2000)}`);
+    console.log(
+      `# request details model sample:\n${requestDetailsText.slice(0, 2000)}`,
+    );
+    const traceMetadata = await page.evaluate(() => {
+      const d = (window as any).data;
+      const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
+      return {
+        id: Number(trace?.id ?? -1),
+        program: String(trace?.program ?? ""),
+        outputFolder: String(trace?.outputFolder ?? ""),
+      };
+    });
+    console.log(
+      `# active trace metadata: ${JSON.stringify(traceMetadata, null, 2)}`,
+    );
+    expect(bodyText).toContain("inventory_smoke.c");
+    expect(bodyText).toContain("inventory-response.json");
+    expect(sourceText).toContain("handle_client");
+    expect(sourceText).toContain("reserve_from_primary_bin");
+    expect(requestDetailsText).toContain(
+      `"requestId": "m25-real-mcr-request-001"`,
+    );
+    expect(requestDetailsText).toContain(
+      `"branch": "reserve_from_primary_bin"`,
+    );
+
+    expect(traceMetadata.id).toBeGreaterThan(0);
+    expect(traceMetadata.outputFolder).toContain("trace-");
+  } finally {
+    if (ctProcess?.pid) {
+      killProcessTree(ctProcess.pid);
+    }
+    await sleep(portReleaseDelayMs);
+    if (browser) {
+      await browser.close().catch(() => undefined);
+    }
+    delete process.env.CODETRACER_TRACE_ID;
+    delete process.env.CODETRACER_CALLER_PID;
+    delete process.env.CODETRACER_IN_UI_TEST;
+    delete process.env.CODETRACER_TEST;
+  }
+}
+
 base.describe("Observability M29 local MCR manifest browser acceptance", () => {
   base.describe.configure({ mode: "serial", timeout: 180_000 });
 
@@ -405,128 +742,38 @@ base.describe("Observability M29 local MCR manifest browser acceptance", () => {
     expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
 
     const { rootDir, manifestPath } = prepareLocalMcrManifest();
-    const httpPort = await getFreeTcpPort();
-    const backendPort = await getFreeTcpPort();
-    let ctProcess: childProcess.ChildProcess | null = null;
-    let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
     try {
-      console.log(
-        `# launching ct host --manifest=${manifestPath} on port ${httpPort}`,
-      );
-      ctProcess = childProcess.spawn(
-        codetracerPath,
-        [
-          "host",
-          `--manifest=${manifestPath}`,
-          `--port=${httpPort}`,
-          `--backend-socket-port=${backendPort}`,
-          `--frontend-socket=${backendPort}`,
-        ],
-        {
-          cwd: codetracerInstallDir,
-          env: makeCleanEnv({
-            XDG_CONFIG_HOME: path.join(rootDir, "xdg-config"),
-          }),
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        },
-      );
-
-      const hostOutput: string[] = [];
-      ctProcess.stdout?.on("data", (chunk: Buffer) => {
-        hostOutput.push(chunk.toString());
-      });
-      ctProcess.stderr?.on("data", (chunk: Buffer) => {
-        hostOutput.push(chunk.toString());
-      });
-
-      browser = await chromium.launch({
-        executablePath: resolveChromiumPath(),
-        args: (process.env.CODETRACER_ELECTRON_ARGS ?? "")
-          .split(/\s+/)
-          .filter(Boolean),
-      });
-      const page = await browser.newPage();
-
-      await waitForHostOutput(hostOutput, /loaded local manifest:/);
-      const importOutput = await waitForHostOutput(
-        hostOutput,
-        /imported manifest trace as trace id\s+\d+/,
-      );
-      expect(importOutput).toContain(manifestPath);
-
-      await connectToHost(page, httpPort, hostOutput);
-
-      await expect(page.locator(".lm_content").first()).toBeVisible({
-        timeout: 30_000,
-      });
-
-      const sourceNode = page
-        .locator(".jstree-anchor")
-        .filter({ hasText: /^inventory_smoke\.c$/ })
-        .first();
-      await expect(sourceNode).toBeVisible({ timeout: 30_000 });
-      await sourceNode.click();
-
-      const sourceText = await waitForEditorModelText(page, "handle_client");
-      await waitForEditorModelText(page, "reserve_from_primary_bin");
-
-      const requestDetailsNode = page
-        .locator(".jstree-anchor")
-        .filter({ hasText: /^inventory-response\.json$/ })
-        .first();
-      await expect(requestDetailsNode).toBeVisible({ timeout: 30_000 });
-      await requestDetailsNode.click();
-      const requestDetailsText = await waitForVisibleEditorText(
-        page,
-        `"requestId": "m25-real-mcr-request-001"`,
-      );
-      await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
-      const bodyText = await page.evaluate(() => document.body.innerText);
-      console.log(`# browser body sample:\n${bodyText.slice(0, 2000)}`);
-      console.log(`# source model sample:\n${sourceText.slice(0, 2000)}`);
-      console.log(
-        `# request details model sample:\n${requestDetailsText.slice(0, 2000)}`,
-      );
-      const traceMetadata = await page.evaluate(() => {
-        const d = (window as any).data;
-        const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
-        return {
-          id: Number(trace?.id ?? -1),
-          program: String(trace?.program ?? ""),
-          outputFolder: String(trace?.outputFolder ?? ""),
-        };
-      });
-      console.log(
-        `# active trace metadata: ${JSON.stringify(traceMetadata, null, 2)}`,
-      );
-      expect(bodyText).toContain("inventory_smoke.c");
-      expect(bodyText).toContain("inventory-response.json");
-      expect(sourceText).toContain("handle_client");
-      expect(sourceText).toContain("reserve_from_primary_bin");
-      expect(requestDetailsText).toContain(
-        `"requestId": "m25-real-mcr-request-001"`,
-      );
-      expect(requestDetailsText).toContain(
-        `"branch": "reserve_from_primary_bin"`,
-      );
-
-      expect(traceMetadata.id).toBeGreaterThan(0);
-      expect(traceMetadata.outputFolder).toContain("trace-");
+      await exerciseLocalMcrManifestBrowserAcceptance(manifestPath, rootDir);
     } finally {
-      if (ctProcess?.pid) {
-        killProcessTree(ctProcess.pid);
-      }
-      await sleep(portReleaseDelayMs);
-      if (browser) {
-        await browser.close().catch(() => undefined);
-      }
       fs.rmSync(rootDir, { recursive: true, force: true });
-      delete process.env.CODETRACER_TRACE_ID;
-      delete process.env.CODETRACER_CALLER_PID;
-      delete process.env.CODETRACER_IN_UI_TEST;
-      delete process.env.CODETRACER_TEST;
+    }
+  });
+
+  base("ct host --manifest loads a local split_ctfs MCR segment and opens replay details", async ({}) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+
+    const {
+      rootDir,
+      manifestPath,
+      selectedSegmentPath,
+      otherSegmentPaths,
+    } = prepareLocalSplitMcrManifest();
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    expect(manifest.source.kind).toBe("split_ctfs");
+    expect(manifest.source.segments.length).toBe(4);
+
+    try {
+      await exerciseLocalMcrManifestBrowserAcceptance(manifestPath, rootDir, {
+        selectedSegmentPath,
+        otherSegmentPaths,
+      });
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
     }
   });
 });
