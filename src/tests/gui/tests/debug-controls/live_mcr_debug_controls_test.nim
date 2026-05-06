@@ -50,7 +50,7 @@ suite "M3 Live MCR debug controls":
       check mock.receivedCommands.len == 1
       check mock.receivedCommands[0].command == "next"
       check mock.receivedCommands[0].args["direction"].getStr == "sdForward"
-      check vm.toolbarModeText.val == "Completed replay"
+      check vm.toolbarModeText.val == ""
       dispose()
 
   test "live MCR mode uses live backend routing for toolbar actions":

@@ -1814,9 +1814,10 @@ proc onNoTrace(
       save=Save)) {.async.} =
 
   data.trace = nil
-  requestSessionTabsRender(data)
   data.ui.readOnly = false
   data.startOptions = response.startOptions
+  if data.startOptions.edit and response.path.len > 0:
+    data.startOptions.folder = response.path
   data.homedir = response.home
   data.startOptions.app = response.home & cstring"/.local/share" & cstring"/codetracer"
   data.services.debugger.paths = response.filenames
@@ -1856,6 +1857,7 @@ proc onNoTrace(
   # data.tabManager.tabList = @[]
   data.startOptions.screen = false
   data.startOptions.loading = false
+  requestSessionTabsRender(data)
 
   data.ui.initEventReceived = true
 
@@ -1897,8 +1899,13 @@ proc onNoTrace(
   var filenameStrings: seq[string] = @[]
   for filename in response.filenames:
     filenameStrings.add($filename)
+  let requestedEditPath =
+    if data.startOptions.edit:
+      $data.startOptions.name
+    else:
+      $response.path
   let initialEditPath =
-    cstring(chooseInitialEditPath($response.path, filenameStrings,
+    cstring(chooseInitialEditPath(requestedEditPath, filenameStrings,
                                   data.startOptions.edit))
   if initialEditPath.len > 0:
     data.openTab(initialEditPath, ViewSource) # , response.lang)

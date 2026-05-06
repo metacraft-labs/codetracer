@@ -260,6 +260,26 @@ test.describe("Welcome new-tab Open Folder through main-process dialog handler",
 
     await assertWorkspacePanelsPopulated(ctPage, /src|README|Justfile|flake\.nix/i);
     await expect(ctPage.locator(".welcome-screen")).toBeHidden({ timeout: 10_000 });
+    await expect(ctPage.locator(".session-tab.active .session-tab-label")).toHaveText("codetracer", {
+      timeout: 10_000,
+    });
+    await expect.poll(async () => {
+      return await ctPage.evaluate(() => {
+        const d = (window as any).data;
+        const activeSession = d.sessions?.[d.activeSessionIndex];
+        return {
+          activeSessionIndex: d.activeSessionIndex,
+          folder: String(activeSession?.startOptions?.folder ?? ""),
+          mode: Number(d.ui?.mode),
+          fileCount: Array.isArray(d.services?.debugger?.paths)
+            ? d.services.debugger.paths.length
+            : -1,
+        };
+      });
+    }, { timeout: 10_000 }).toMatchObject({
+      activeSessionIndex: 1,
+      folder: codetracerInstallDir,
+    });
   });
 });
 

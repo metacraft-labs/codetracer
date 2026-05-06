@@ -854,7 +854,7 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
 
   # Send no-trace message to switch to edit mode
   mainWindow.webContents.send "CODETRACER::no-trace", js{
-    path: cstring"",
+    path: folder,
     lang: save.project.lang,
     home: paths.home.cstring,
     layout: layout,

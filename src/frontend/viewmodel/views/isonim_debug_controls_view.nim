@@ -105,8 +105,9 @@ proc renderDebugControlsPanel*(r: MockRenderer;
       button(ref = revContBtn, class = "reverse-continue",
              onclick = proc() = vm.reverseContinue()):
         text "⏪"
-      span(class = "debug-toolbar-mode"):
-        text vm.toolbarModeText.val
+      if vm.toolbarModeText.val.len > 0:
+        span(class = "debug-toolbar-mode"):
+          text vm.toolbarModeText.val
       span(ref = headIndicator, class = "recording-head-indicator"):
         text vm.recordingHeadText.val
       button(ref = jumpLiveBtn, class = "jump-to-live",
@@ -290,9 +291,10 @@ when defined(js):
             text "Record and replay tests in a new window"
         tdiv(class = "separate-bar"):
           discard
-        span(id = "debug-toolbar-mode",
-             class = "debug-toolbar-mode"):
-          text vm.toolbarModeText.val
+        if vm.toolbarModeText.val.len > 0:
+          span(id = "debug-toolbar-mode",
+               class = "debug-toolbar-mode"):
+            text vm.toolbarModeText.val
         span(ref = headIndicator,
              id = "recording-head-indicator",
              class = "recording-head-indicator"):

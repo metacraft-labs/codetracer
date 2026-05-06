@@ -206,7 +206,7 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
 
     let toolbarModeText = createMemo[string] proc(): string =
       case store.session.val.debugSessionMode
-      of completedReplay: "Completed replay"
+      of completedReplay: ""
       of liveMcr: "Live MCR"
       of historicalFromLive: "Historical replay"
 

@@ -270,14 +270,21 @@ proc parseLayoutJson(raw: cstring; context: string): js =
   warnPrint context, ": ", parsed["error"].to(cstring)
   return nil
 
-proc sanitizeEditLayoutConfig*(config: js; editorContent: int): js {.importjs:
-  """(function(config, editorContent) {
+proc sanitizeEditLayoutConfig*(config: js; editorContent: int;
+                               hiddenContents: seq[int]): js {.importjs:
+  """(function(config, editorContent, hiddenContents) {
     if (!config) return config;
+    const hidden = new Set(Array.isArray(hiddenContents)
+      ? hiddenContents.map(Number)
+      : []);
     const clone = JSON.parse(JSON.stringify(config));
     const walk = (node) => {
       if (!node) return null;
       const state = node.componentState || {};
       if (node.type === 'component' && Number(state.content) === editorContent) {
+        return null;
+      }
+      if (node.type === 'component' && hidden.has(Number(state.content))) {
         return null;
       }
       if (Array.isArray(node.content)) {
@@ -290,7 +297,27 @@ proc sanitizeEditLayoutConfig*(config: js; editorContent: int): js {.importjs:
     if (!sanitizedRoot) return config;
     if (clone.root) clone.root = sanitizedRoot;
     return clone.root ? clone : sanitizedRoot;
-  })(#, #)""".}
+  })(#, #, #)""".}
+
+proc editModeHiddenContentIds(): seq[int] =
+  @[
+    ord(Content.Trace),
+    ord(Content.State),
+    ord(Content.Scratchpad),
+    ord(Content.Repl),
+    ord(Content.EventLog),
+    ord(Content.TerminalOutput),
+    ord(Content.StepList),
+    ord(Content.Calltrace),
+    ord(Content.CalltraceEditor),
+    ord(Content.TraceLog),
+    ord(Content.AgentActivity),
+    ord(Content.AgentActivityDeepReview),
+    ord(Content.DeepReview),
+    ord(Content.FrameViewer),
+    ord(Content.PixelHistory),
+    ord(Content.ShaderDebug)
+  ]
 
 proc stringifyJson(value: js): cstring {.importjs: "JSON.stringify(#)".}
 
@@ -298,7 +325,8 @@ proc sanitizeEditLayoutJson*(raw: cstring): cstring =
   let config = parseLayoutJson(raw, "Edit layout config JSON parse error while saving")
   if config.isNil:
     return raw
-  let sanitized = sanitizeEditLayoutConfig(config, ord(Content.EditorView))
+  let sanitized = sanitizeEditLayoutConfig(
+    config, ord(Content.EditorView), editModeHiddenContentIds())
   return stringifyJson(sanitized)
 
 proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
@@ -386,7 +414,8 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
     if not isValidLayoutConfig(config):
       warnPrint "Edit layout config is invalid or incompatible: ", filename
       return await resetLayoutToDefault(filename)
-    return sanitizeEditLayoutConfig(config, ord(Content.EditorView))
+    return sanitizeEditLayoutConfig(
+      config, ord(Content.EditorView), editModeHiddenContentIds())
   else:
     # Edit mode layout file doesn't exist yet - use default debug layout as fallback
     let defaultLayoutFile = userLayoutDir / "default_layout.json"
@@ -399,7 +428,8 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
       if not isValidLayoutConfig(config):
         warnPrint "Default layout config is invalid: ", defaultLayoutFile
         return await resetLayoutToDefault(defaultLayoutFile)
-      return sanitizeEditLayoutConfig(config, ord(Content.EditorView))
+      return sanitizeEditLayoutConfig(
+        config, ord(Content.EditorView), editModeHiddenContentIds())
     else:
       # Fall back to the bundled default layout
       let errCopy = await fsCopyFileWithErr(

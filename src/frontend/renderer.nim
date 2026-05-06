@@ -154,6 +154,22 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
     layout: JSON.stringify(layoutConfig.toJs),
     isEditMode: isEditMode}
 
+proc saveCurrentLayoutConfig*(data: Data) =
+  ## Persist the latest GoldenLayout geometry at shutdown. Splitter drags do
+  ## not reliably toggle `saveLayout`, so the close path must snapshot the live
+  ## layout instead of relying only on prior stateChanged saves.
+  if data.ui.isNil or data.ui.layout.isNil or data.ui.layoutConfig.isNil:
+    return
+  try:
+    data.ui.resolvedConfig = data.ui.layout.saveLayout()
+    data.saveConfig(data.ui.layoutConfig.fromResolved(data.ui.resolvedConfig))
+  except:
+    cerror "saveCurrentLayoutConfig: failed to save active layout"
+
+when defined(js):
+  if inElectron:
+    window.addEventListener(cstring"beforeunload", proc(e: Event) =
+      data.saveCurrentLayoutConfig())
 
 proc redrawAll* =
   if not sharedDirectRedraw.isNil:

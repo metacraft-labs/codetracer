@@ -26,8 +26,11 @@ import std/[strutils, unittest]
 const
   SessionSwitchPath = "src/frontend/ui/session_switch.nim"
   LayoutPath = "src/frontend/ui/layout.nim"
+  RendererPath = "src/frontend/renderer.nim"
   DebugPath = "src/frontend/ui/debug.nim"
   IndexPath = "src/frontend/index.nim"
+  IndexTracesPath = "src/frontend/index/traces.nim"
+  IndexConfigPath = "src/frontend/index/config.nim"
   UiJsPath = "src/frontend/ui_js.nim"
 
 proc sectionBetween(source, startMarker, endMarker: string): string =
@@ -183,6 +186,50 @@ else:
       let openIndex = indexOfRequired(body, "data.openTab(initialEditPath, ViewSource)")
 
       check filenameFallbackIndex < openIndex
+      check body.contains("let requestedEditPath =")
+      check body.contains("$data.startOptions.name")
+
+    test "folder edit mode publishes the selected folder to renderer state":
+      let indexTracesSource = readFile(IndexTracesPath)
+      let initEditBody = sectionBetween(indexTracesSource,
+        "proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =",
+        "proc onInitEditMode*")
+
+      check initEditBody.contains("data.startOptions.folder = folder")
+      check initEditBody.contains("path: folder")
+
+      let uiSource = readFile(UiJsPath)
+      let noTraceBody = sectionBetween(uiSource,
+        "proc onNoTrace(",
+        "proc invalidPath(")
+      let startOptionsIndex =
+        indexOfRequired(noTraceBody, "data.startOptions = response.startOptions")
+      let tabRenderIndex =
+        indexOfRequired(noTraceBody, "requestSessionTabsRender(data)")
+      check startOptionsIndex < tabRenderIndex
+
+    test "edit layout sanitizer removes debugger-only panels":
+      let source = readFile(IndexConfigPath)
+      let hiddenBody = sectionBetween(source,
+        "proc editModeHiddenContentIds(): seq[int] =",
+        "proc stringifyJson")
+
+      for contentName in [
+        "Content.Trace",
+        "Content.State",
+        "Content.Calltrace",
+        "Content.CalltraceEditor",
+        "Content.TraceLog",
+        "Content.AgentActivity",
+        "Content.TerminalOutput"
+      ]:
+        check hiddenBody.contains(contentName)
+
+      let sanitizeBody = sectionBetween(source,
+        "proc sanitizeEditLayoutConfig*(config: js; editorContent: int;",
+        "proc editModeHiddenContentIds(): seq[int] =")
+      check sanitizeBody.contains("Number(state.content) === editorContent")
+      check sanitizeBody.contains("hidden.has(Number(state.content))")
 
     test "delegated ct edit opens a populated edit session":
       let indexSource = readFile(IndexPath)
@@ -225,6 +272,24 @@ else:
         "proc configureIPC(data: Data) =",
         "duration(\"configureIPCRun\")")
       check ipcBody.contains("\"open-edit-folder-in-tab-ready\"")
+
+    test "window close snapshots current splitter and panel sizes":
+      let source = readFile(RendererPath)
+      let body = sectionBetween(source,
+        "proc saveCurrentLayoutConfig*(data: Data) =",
+        "proc redrawAll*")
+
+      let guardIndex = indexOfRequired(body, "data.ui.layout.isNil")
+      let saveLayoutIndex =
+        indexOfRequired(body, "data.ui.resolvedConfig = data.ui.layout.saveLayout()")
+      let saveConfigIndex =
+        indexOfRequired(body, "data.saveConfig(data.ui.layoutConfig.fromResolved")
+      let beforeUnloadIndex =
+        indexOfRequired(body, "window.addEventListener(cstring\"beforeunload\"")
+
+      check guardIndex < saveLayoutIndex
+      check saveLayoutIndex < saveConfigIndex
+      check saveConfigIndex < beforeUnloadIndex
 
     test "initLayout installs shared chrome before welcome early return":
       let source = readFile(LayoutPath)

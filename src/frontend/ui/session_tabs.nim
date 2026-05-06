@@ -47,11 +47,13 @@ when defined(js):
 
 proc sessionLabel(session: ReplaySession, index: int): cstring =
   ## Derive a human-readable label for a session tab.
-  ## Prefer the trace program name; fall back to a generic "Trace N".
+  ## Edit sessions use the workspace directory; replay sessions use the trace
+  ## program; blank welcome sessions fall back to a generic tab label.
+  if session.startOptions.edit and session.startOptions.folder.len > 0:
+    return baseName(session.startOptions.folder)
   if not session.trace.isNil and session.trace.program.len > 0:
-    session.trace.program
-  else:
-    cstring(fmt"Trace {index + 1}")
+    return baseName(session.trace.program)
+  cstring(fmt"Trace {index + 1}")
 
 proc sessionTabRecords(data: Data): seq[SessionTabRecord] =
   for i in 0 ..< data.sessions.len:
