@@ -22,6 +22,7 @@ from ../viewmodel/viewmodels/calltrace_vm import
   setBackendSearchResults
 from isonim/web/dom_api import nil
 from isonim/core/batch as isoBatch import batch
+from isonim/core/signals import val
 from ../viewmodel/views/isonim_calltrace_view import
   mountIsoNimCalltrace
 
@@ -466,22 +467,27 @@ proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
   ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
   ##
   ## Updating `store.debugger` invalidates the CalltraceVM's auto-load
-  ## effect, which then issues a single `requestCalltraceSection` with
-  ## the up-to-date totalCallsCount-aware window.  Earlier revisions
-  ## also issued an explicit fallback `requestCalltraceSection` here
-  ## (start=0, height=90), but that fired in parallel with the legacy
-  ## `loadLines` path and the auto-load effect's own request.  The
-  ## three concurrent requests returned different-sized responses
-  ## (90 / 45 / 65 / 100 lines) which clobbered the store mid-render
-  ## and left Playwright's `findEntry` racing against an oscillating
-  ## DOM (the python/ruby sudoku navigation regression — see TODO 5.1(a)
-  ## in the migration handoff).  Trust the auto-load effect to fire on
-  ## debugger changes (it depends on `store.debugger.val`).
+  ## effect, which then issues a `requestCalltraceSection` with the
+  ## up-to-date totalCallsCount-aware window.  If the initial auto-load
+  ## was dropped before DAP launch completed, seed a first section from
+  ## this real complete-move position while the store is still empty.
   if calltraceVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
   let diagStoreId = calltraceVMStore.storeId
   calltraceVMStore.updateDebuggerPosition(ticks, $path, line)
+  if calltraceVMStore.calltrace.lines.val.len == 0:
+    # The VM can issue its first auto-load before DAP launch completes;
+    # replay-server drops that request, so seed the initial section once
+    # the complete-move location proves the handler is ready.
+    calltraceVMStore.requestCalltraceSection(
+      startIndex = 0'i64,
+      height = 90,
+      depth = 20,
+      rrTicks = ticks,
+      file = $path,
+      line = line,
+    )
   cerror fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
 
 method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
