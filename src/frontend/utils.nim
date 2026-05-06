@@ -832,6 +832,10 @@ proc makeFrameViewerComponent*(data: Data, id: int): FrameViewerComponent =
   result = FrameViewerComponent(id: id)
   data.registerComponent(result, Content.FrameViewer)
 
+proc makePixelHistoryComponent*(data: Data, id: int): PixelHistoryComponent =
+  result = PixelHistoryComponent(id: id)
+  data.registerComponent(result, Content.PixelHistory)
+
 proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
   ## Create a new AgentActivityDeepReviewComponent.
   ## Starts with empty DeepReview data and waits for notifications from
@@ -907,6 +911,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.AgentWorkspace:  data.makeAgentWorkspaceComponent(id)
   of Content.CaptionBarProgress: data.makeCaptionBarProgressComponent(id)
   of Content.FrameViewer:     data.makeFrameViewerComponent(id)
+  of Content.PixelHistory:    data.makePixelHistoryComponent(id)
   of Content.AgentActivityDeepReview: data.makeAgentActivityDeepReviewComponent(id)
   of Content.RequestPanel:    data.makeRequestPanelComponent(id)
   of Content.VCS:             data.makeVCSComponent(id)

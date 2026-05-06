@@ -70,6 +70,16 @@ const defaultVisualReplayLayoutJson* = """{
                   "content": 42
                 },
                 "title": "genericUiComponent"
+              },
+              {
+                "type": "component",
+                "componentType": "genericUiComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "pixelHistoryComponent-0",
+                  "content": 43
+                },
+                "title": "genericUiComponent"
               }
             ]
           },

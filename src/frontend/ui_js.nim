@@ -7,7 +7,8 @@ import
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
-      request_panel, session_switch, session_tabs, command, frame_viewer],
+      request_panel, session_switch, session_tabs, command, frame_viewer,
+      pixel_history],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
   viewmodel/store/replay_data_store,
@@ -986,6 +987,16 @@ when not defined(ctInExtension):
   import
     communication, middleware, dap
 
+  when defined(js):
+    proc recordVmBackendRequest(command: cstring; args: JsObject) {.importjs: """
+      (function(command, args) {
+        window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+        const requests = window.__CODETRACER_TEST__.vmBackendRequests || [];
+        requests.push({ command, args: JSON.parse(JSON.stringify(args || {})) });
+        window.__CODETRACER_TEST__.vmBackendRequests = requests;
+      })(#, #);
+    """.}
+
   const middlewareLoggingEnabled = true # TODO: maybe overridable dynamically
 
   # === LocalToViewTransport
@@ -1017,6 +1028,9 @@ when not defined(ctInExtension):
       let dapRef = data.dapApi
       let realBackend = newRealBackendService(
         sendCommand = proc(command: string, argsJs: JsObject) =
+          when defined(js):
+            if data.startOptions.inTest:
+              recordVmBackendRequest(cstring(command), argsJs)
           # Translate the BackendService string command to a CtEventKind
           # and forward it through the existing DapApi IPC channel.
           let kind = dapCommandToEventKind(cstring(command))
@@ -1093,6 +1107,8 @@ when not defined(ctInExtension):
         command.initCommandPaletteVMWithStore(activeSessionVM.store)
       initPanelVM("initFrameViewerVMWithStore"):
         frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
+      initPanelVM("initPixelHistoryVMWithStore"):
+        pixel_history.initPixelHistoryVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityVMWithStore"):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityDeepReviewVMWithStore"):

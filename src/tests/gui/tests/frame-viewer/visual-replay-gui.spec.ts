@@ -67,6 +67,57 @@ test.describe("MCR visual replay real GUI layout", () => {
       })
       .toBe(true);
   });
+
+  test("e2e_pixel_history_click_navigates_source", async ({ ctPage }) => {
+    await expect(ctPage.locator(".frame-viewer-component")).toBeVisible();
+    await expect
+      .poll(async () =>
+        ctPage.evaluate(() => typeof (window as any).__CODETRACER_TEST__?.fakeMcrStepGeid),
+      )
+      .toBe("function");
+
+    const frameResponse = ctPage.waitForResponse(
+      (response) => response.url().includes("/frame?geid=246") && response.ok(),
+    );
+    await ctPage.evaluate(() => (window as any).__CODETRACER_TEST__.fakeMcrStepGeid(246));
+    await frameResponse;
+
+    const image = ctPage.locator(".frame-viewer-image");
+    const imageBox = await image.boundingBox();
+    expect(imageBox).not.toBeNull();
+    const clickPosition = { x: imageBox!.width / 2, y: imageBox!.height / 2 };
+    const expectedX = 160;
+    const expectedY = 90;
+
+    const pixelHistoryResponsePromise = ctPage.waitForResponse(
+      (response) => response.url().includes("/pixel-history?x=") && response.ok(),
+    );
+    await image.click({ position: clickPosition });
+    const pixelHistoryResponse = await pixelHistoryResponsePromise;
+    const pixelHistoryUrl = new URL(pixelHistoryResponse.url());
+    const requestedX = Number(pixelHistoryUrl.searchParams.get("x"));
+    const requestedY = Number(pixelHistoryUrl.searchParams.get("y"));
+    expect(Math.abs(requestedX - expectedX)).toBeLessThanOrEqual(1);
+    expect(Math.abs(requestedY - expectedY)).toBeLessThanOrEqual(1);
+    expect(pixelHistoryUrl.searchParams.get("frame")).toBe("2");
+
+    await ctPage.locator(".lm_tab", { hasText: "PIXEL HISTORY" }).click();
+    await expect(ctPage.locator(".pixel-history-component")).toBeVisible();
+    await expect(ctPage.locator(".pixel-history-entry")).toHaveCount(2);
+    await expect(ctPage.locator(".pixel-history-entry").nth(1)).toContainText("GEID 220");
+
+    await ctPage.locator(".pixel-history-entry").nth(1).click();
+
+    await expect
+      .poll(async () =>
+        ctPage.evaluate(() => {
+          const requests = (window as any).__CODETRACER_TEST__?.vmBackendRequests ?? [];
+          return requests.findLast?.((request: any) => request.command === "ct/seek-to-geid")
+            ?? [...requests].reverse().find((request: any) => request.command === "ct/seek-to-geid");
+        }),
+      )
+      .toMatchObject({ command: "ct/seek-to-geid", args: { geid: 220 } });
+  });
 });
 
 test.describe("MCR visual replay player failure", () => {

@@ -13,6 +13,9 @@ type
     x*: int
     y*: int
 
+  FrameViewerPixelSelectionHandler* = proc(x, y, frame: int;
+                                           geid: Option[uint64])
+
   FrameViewerVM* = ref object of ViewModel
     client*: VisualReplayClient
     store*: ReplayDataStore
@@ -33,6 +36,7 @@ type
     selectedPixel*: Signal[Option[FrameViewerPixel]]
     drawCalls*: Signal[seq[VisualReplayDrawCall]]
     selectedDrawCall*: Signal[Option[int]]
+    onPixelSelected*: FrameViewerPixelSelectionHandler
 
 proc setFrame(vm: FrameViewerVM; frame: VisualReplayFrame) =
   vm.frameImageSrc.val = frame.imageSrc
@@ -145,6 +149,8 @@ proc selectPixel*(vm: FrameViewerVM; x, y: int) =
   let clampedX = max(0, min(x, max(vm.frameWidth.val - 1, 0)))
   let clampedY = max(0, min(y, max(vm.frameHeight.val - 1, 0)))
   vm.selectedPixel.val = some(FrameViewerPixel(x: clampedX, y: clampedY))
+  if not vm.onPixelSelected.isNil:
+    vm.onPixelSelected(clampedX, clampedY, vm.currentFrame.val, vm.currentGeid.val)
 
 proc selectPixelFromRenderedPoint*(vm: FrameViewerVM;
                                    renderedX, renderedY: float;

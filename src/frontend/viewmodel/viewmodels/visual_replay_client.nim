@@ -3,7 +3,7 @@
 ## Production code can provide an HTTP-backed client; tests and StoryBook pass a
 ## fake client at this same boundary.
 
-import std/[json, options, strutils]
+import std/[json, options, sequtils, strutils]
 
 import isonim/core/async_compat
 
@@ -28,6 +28,32 @@ type
     name*: string
     pipeline*: string
 
+  VisualReplayPixelColor* = object
+    r*: float
+    g*: float
+    b*: float
+    a*: float
+
+  VisualReplayPixelTestStatus* = object
+    depth*: string
+    stencil*: string
+    blend*: string
+    cull*: string
+
+  VisualReplayPixelHistoryEntry* = object
+    geid*: uint64
+    drawCallIndex*: int
+    fragmentIndex*: int
+    primitiveId*: int
+    preColor*: VisualReplayPixelColor
+    shaderOutput*: VisualReplayPixelColor
+    postColor*: VisualReplayPixelColor
+    preDepth*: float
+    postDepth*: float
+    passed*: bool
+    failureReason*: string
+    testStatus*: VisualReplayPixelTestStatus
+
   VisualReplayClient* = ref object
     playerUrl*: string
     getInfoProc*: proc(): VisualReplayFuture[VisualReplayInfo]
@@ -35,6 +61,8 @@ type
     getFrameByFrameProc*: proc(frame: int): VisualReplayFuture[VisualReplayFrame]
     getFrameByDrawProc*: proc(draw: int): VisualReplayFuture[VisualReplayFrame]
     getDrawCallsProc*: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]]
+    getPixelHistoryProc*: proc(x, y, frame: int):
+      VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]]
 
 proc normalizedPlayerUrl*(playerUrl: string): string =
   result = playerUrl.strip
@@ -55,6 +83,86 @@ proc frameByDrawUrl*(playerUrl: string; draw: int): string =
 
 proc drawCallsUrl*(playerUrl: string): string =
   normalizedPlayerUrl(playerUrl) & "/draw-calls"
+
+proc pixelHistoryUrl*(playerUrl: string; x, y, frame: int): string =
+  normalizedPlayerUrl(playerUrl) & "/pixel-history?x=" & $x &
+    "&y=" & $y & "&frame=" & $frame
+
+proc colorFromJson(node: JsonNode): VisualReplayPixelColor =
+  if node.kind == JArray and node.len >= 4:
+    VisualReplayPixelColor(
+      r: node[0].getFloat(0.0),
+      g: node[1].getFloat(0.0),
+      b: node[2].getFloat(0.0),
+      a: node[3].getFloat(1.0))
+  else:
+    VisualReplayPixelColor(
+      r: node{"r"}.getFloat(0.0),
+      g: node{"g"}.getFloat(0.0),
+      b: node{"b"}.getFloat(0.0),
+      a: node{"a"}.getFloat(1.0))
+
+proc hasReason(reason, name: string): bool =
+  reason.toLowerAscii.contains(name.toLowerAscii)
+
+proc testStatusFromJson(node: JsonNode; passed: bool;
+                        failureReason: string): VisualReplayPixelTestStatus =
+  let tests = node{"testStatus"}
+  if tests.kind == JObject:
+    return VisualReplayPixelTestStatus(
+      depth: tests{"depth"}.getStr("pass"),
+      stencil: tests{"stencil"}.getStr("pass"),
+      blend: tests{"blend"}.getStr(if passed: "applied" else: "skipped"),
+      cull: tests{"cull"}.getStr("pass"))
+
+  let failures = node{"failure_reason"}
+  proc status(flagName, reasonName: string): string =
+    if node{flagName}.getBool(false) or
+        failureReason.hasReason(reasonName) or
+        (failures.kind == JArray and failures.getElems.anyIt(
+          it.getStr("").hasReason(reasonName))):
+      "failed"
+    else:
+      "pass"
+
+  VisualReplayPixelTestStatus(
+    depth: status("depth_failed", "depth"),
+    stencil: status("stencil_failed", "stencil"),
+    blend: if node{"blend"}.getBool(false) or node{"blending"}.getBool(false):
+      "applied" else: "unchanged",
+    cull: if node{"backface_culled"}.getBool(false) or
+      node{"cull_failed"}.getBool(false) or failureReason.hasReason("cull"):
+        "failed" else: "pass")
+
+proc pixelHistoryEntryFromJson(node: JsonNode): VisualReplayPixelHistoryEntry =
+  let passed = node{"passed"}.getBool(false)
+  let failureReason =
+    if node{"failure_reason"}.kind == JArray:
+      node["failure_reason"].getElems.mapIt(it.getStr("")).join(", ")
+    else:
+      node{"failure_reason"}.getStr(node{"failureReason"}.getStr(""))
+  proc pickColor(names: openArray[string]; fallback: JsonNode): JsonNode =
+    for name in names:
+      if node.hasKey(name):
+        return node[name]
+    fallback
+  VisualReplayPixelHistoryEntry(
+    geid: uint64(node{"geid"}.getBiggestInt(node{"eventId"}.getBiggestInt(0))),
+    drawCallIndex: node{"draw_call_index"}.getInt(
+      node{"drawCallIndex"}.getInt(node{"draw"}.getInt(0))),
+    fragmentIndex: node{"fragment_index"}.getInt(node{"fragmentIndex"}.getInt(0)),
+    primitiveId: node{"primitive_id"}.getInt(node{"primitiveID"}.getInt(-1)),
+    preColor: colorFromJson(pickColor(["pre_color", "preColor", "preMod"],
+                                      %*[0, 0, 0, 1])),
+    shaderOutput: colorFromJson(pickColor(
+      ["shader_output", "shaderOutput", "shaderOut"], %*[0, 0, 0, 1])),
+    postColor: colorFromJson(pickColor(["post_color", "postColor", "postMod"],
+                                       %*[0, 0, 0, 1])),
+    preDepth: node{"pre_depth"}.getFloat(node{"preDepth"}.getFloat(0.0)),
+    postDepth: node{"post_depth"}.getFloat(node{"postDepth"}.getFloat(0.0)),
+    passed: passed,
+    failureReason: failureReason,
+    testStatus: testStatusFromJson(node, passed, failureReason))
 
 proc drawCallFromJson(node: JsonNode): VisualReplayDrawCall =
   VisualReplayDrawCall(
@@ -109,6 +217,12 @@ proc getDrawCalls*(client: VisualReplayClient):
   assert client.getDrawCallsProc != nil,
     "VisualReplayClient.getDrawCallsProc is not set"
   client.getDrawCallsProc()
+
+proc getPixelHistory*(client: VisualReplayClient; x, y, frame: int):
+    VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
+  assert client.getPixelHistoryProc != nil,
+    "VisualReplayClient.getPixelHistoryProc is not set"
+  client.getPixelHistoryProc(x, y, frame)
 
 proc createJsonVisualReplayClient*(
     playerUrl: string;
@@ -205,6 +319,42 @@ proc createJsonVisualReplayClient*(
             for item in node.items:
               calls.add(drawCallFromJson(item))
             outFuture.complete(calls),
+          onError = proc(msg: string) =
+            outFuture.fail(newException(CatchableError, msg)))
+    ,
+    getPixelHistoryProc: proc(x, y, frame: int):
+        VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
+      let fut = getJson(pixelHistoryUrl(baseUrl, x, y, frame))
+      when defined(js):
+        result = newPromise proc(resolve: proc(value: seq[VisualReplayPixelHistoryEntry])) =
+          async_compat.onComplete(fut,
+            onSuccess = proc(node: JsonNode) =
+              var entries: seq[VisualReplayPixelHistoryEntry] = @[]
+              let items =
+                if node.kind == JArray: node
+                elif node.hasKey("modifications"): node["modifications"]
+                elif node.hasKey("entries"): node["entries"]
+                else: newJArray()
+              for item in items.items:
+                entries.add(pixelHistoryEntryFromJson(item))
+              resolve(entries),
+            onError = proc(msg: string) =
+              raise newException(CatchableError, msg))
+      else:
+        result = newFuture[seq[VisualReplayPixelHistoryEntry]](
+          "visual replay pixel history")
+        let outFuture = result
+        async_compat.onComplete(fut,
+          onSuccess = proc(node: JsonNode) =
+            var entries: seq[VisualReplayPixelHistoryEntry] = @[]
+            let items =
+              if node.kind == JArray: node
+              elif node.hasKey("modifications"): node["modifications"]
+              elif node.hasKey("entries"): node["entries"]
+              else: newJArray()
+            for item in items.items:
+              entries.add(pixelHistoryEntryFromJson(item))
+            outFuture.complete(entries),
           onError = proc(msg: string) =
             outFuture.fail(newException(CatchableError, msg)))
     ,

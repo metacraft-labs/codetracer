@@ -997,6 +997,8 @@ type
 
   FrameViewerComponent* = ref object of Component
 
+  PixelHistoryComponent* = ref object of Component
+
   AgentActivityDeepReviewComponent* = ref object of Component
     ## Enhanced agent activity pane that displays DeepReview data
     ## (coverage summary, test results, traced functions) alongside

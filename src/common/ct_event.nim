@@ -81,6 +81,7 @@ type
     CtMcrGetRecordingHead,
     CtMcrRestoreAt,
     CtMcrLiveStep,
+    CtSeekToGeid,
 
 when defined(js):
   import std / jsffi

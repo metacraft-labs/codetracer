@@ -265,7 +265,8 @@ type
     AgentActivityDeepReview = 39,
     RequestPanel = 40,
     VCS = 41,
-    FrameViewer = 42
+    FrameViewer = 42,
+    PixelHistory = 43
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

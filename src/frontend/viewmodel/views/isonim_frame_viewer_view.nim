@@ -140,16 +140,23 @@ proc renderFrameViewerPanel*(r: MockRenderer; vm: FrameViewerVM): MockNode =
   renderFrameViewerPanelImpl(r, vm, "frame-viewer-component")
 
 when defined(js):
-  proc setImageClickHandler(image: isonim_dom.Element; vm: FrameViewerVM)
+  proc setImageClickHandler(
+      panel: isonim_dom.Element;
+      onImageClick: proc(renderedX, renderedY, renderedWidth, renderedHeight: float)
+          {.closure.})
       {.importjs: """
-        (function(image, vm) {
-          image.addEventListener("click", function(event) {
+        (function(panel, onImageClick) {
+          panel.addEventListener("click", function(event) {
+            const image = event.target && event.target.closest
+              ? event.target.closest(".frame-viewer-image")
+              : null;
+            if (!image) return;
             const rect = image.getBoundingClientRect();
-            vm.selectPixelFromRenderedPoint(
-            event.clientX - rect.left,
-            event.clientY - rect.top,
-            rect.width,
-            rect.height
+            onImageClick(
+              event.clientX - rect.left,
+              event.clientY - rect.top,
+              rect.width,
+              rect.height
             );
           });
         })(#, #);
@@ -177,9 +184,10 @@ when defined(js):
     let r = WebRenderer()
     let panel = renderFrameViewerPanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
-    let image = querySelector(panel, cstring".frame-viewer-image")
-    if not isNilElement(image):
-      setImageClickHandler(image, vm)
+    setImageClickHandler(panel,
+      proc(renderedX, renderedY, renderedWidth, renderedHeight: float) =
+        vm.selectPixelFromRenderedPoint(renderedX, renderedY, renderedWidth,
+          renderedHeight))
     let frameRange = querySelector(panel, cstring".frame-viewer-frame-range")
     if not isNilElement(frameRange):
       setFrameRangeInputHandler(frameRange, vm)

@@ -1,6 +1,6 @@
 ## Headless tests for FrameViewerVM.
 
-import std/[json, options, unittest]
+import std/[json, options, strutils, unittest]
 
 import isonim/core/[owner, signals]
 import isonim/viewmodel
@@ -8,7 +8,10 @@ import backend/mock_backend
 import store/replay_data_store
 import vm_test_helpers
 import viewmodels/frame_viewer_vm
+import viewmodels/pixel_history_vm
 import viewmodels/visual_replay_client
+import views/isonim_pixel_history_view
+import isonim/testing/mock_dom
 
 type
   FakeVisualReplayClient = ref object
@@ -17,6 +20,7 @@ type
     frameRequests: seq[int]
     drawRequests: seq[int]
     drawCallRequests: int
+    pixelHistoryRequests: seq[PixelHistoryPixel]
     failFrames: bool
 
 proc makeFakeClient(): FakeVisualReplayClient =
@@ -67,6 +71,34 @@ proc makeFakeClient(): FakeVisualReplayClient =
         VisualReplayDrawCall(index: 1, geid: 101'u64,
                              name: "glDrawElements", pipeline: "mesh"),
       ]),
+    getPixelHistoryProc: proc(x, y, frame: int):
+        VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
+      fake.pixelHistoryRequests.add(PixelHistoryPixel(x: x, y: y, frame: frame))
+      newCompletedFuture(@[
+        VisualReplayPixelHistoryEntry(
+          geid: 101'u64,
+          drawCallIndex: 1,
+          fragmentIndex: 0,
+          primitiveId: 7,
+          preColor: VisualReplayPixelColor(r: 0.0, g: 0.0, b: 0.0, a: 1.0),
+          shaderOutput: VisualReplayPixelColor(r: 1.0, g: 0.0, b: 0.0, a: 1.0),
+          postColor: VisualReplayPixelColor(r: 1.0, g: 0.0, b: 0.0, a: 1.0),
+          passed: true,
+          testStatus: VisualReplayPixelTestStatus(
+            depth: "pass", stencil: "pass", blend: "applied", cull: "pass")),
+        VisualReplayPixelHistoryEntry(
+          geid: 102'u64,
+          drawCallIndex: 2,
+          fragmentIndex: 0,
+          primitiveId: 8,
+          preColor: VisualReplayPixelColor(r: 1.0, g: 0.0, b: 0.0, a: 1.0),
+          shaderOutput: VisualReplayPixelColor(r: 0.0, g: 1.0, b: 0.0, a: 1.0),
+          postColor: VisualReplayPixelColor(r: 1.0, g: 0.0, b: 0.0, a: 1.0),
+          passed: false,
+          failureReason: "depth_failed",
+          testStatus: VisualReplayPixelTestStatus(
+            depth: "failed", stencil: "pass", blend: "unchanged", cull: "pass")),
+      ]),
   )
 
 suite "VisualReplayClient URL construction":
@@ -80,6 +112,8 @@ suite "VisualReplayClient URL construction":
       "http://localhost:9000/frame?draw=7"
     check drawCallsUrl("http://localhost:9000/") ==
       "http://localhost:9000/draw-calls"
+    check pixelHistoryUrl("http://localhost:9000/", 12, 34, 2) ==
+      "http://localhost:9000/pixel-history?x=12&y=34&frame=2"
 
 suite "FrameViewerVM frame loading":
   test "fetches frame for GEID and updates draw calls":
@@ -214,6 +248,30 @@ suite "FrameViewerVM selection":
 
     vm.dispose()
 
+  test "pixel click maps image coordinates and loads PixelHistoryVM":
+    let fake = makeFakeClient()
+    let frameVm = createFrameViewerVM(fake.client)
+    let pixelVm = createPixelHistoryVM(fake.client)
+    frameVm.frameWidth.val = 320
+    frameVm.frameHeight.val = 200
+    frameVm.currentFrame.val = 3
+    frameVm.onPixelSelected =
+      proc(x, y, frame: int; geid: Option[uint64]) =
+        pixelVm.loadPixelHistory(x, y, frame)
+
+    frameVm.selectPixelFromRenderedPoint(40.0, 25.0, 160.0, 100.0)
+    drain()
+
+    check frameVm.selectedPixel.val.isSome
+    check frameVm.selectedPixel.val.get.x == 80
+    check frameVm.selectedPixel.val.get.y == 50
+    check fake.pixelHistoryRequests == @[
+      PixelHistoryPixel(x: 80, y: 50, frame: 3)]
+    check pixelVm.entries.val.len == 2
+
+    pixelVm.dispose()
+    frameVm.dispose()
+
   test "selects and clears draw calls by index":
     let fake = makeFakeClient()
     let vm = createFrameViewerVM(fake.client)
@@ -227,3 +285,51 @@ suite "FrameViewerVM selection":
     check vm.selectedDrawCall.val.isNone
 
     vm.dispose()
+
+suite "PixelHistoryVM":
+  test "test_pixel_history_vm_loads_entries":
+    let fake = makeFakeClient()
+    let vm = createPixelHistoryVM(fake.client)
+    let r = MockRenderer()
+
+    vm.loadPixelHistory(12, 34, 1)
+    drain()
+    let panel = renderPixelHistoryPanel(r, vm)
+
+    check fake.pixelHistoryRequests == @[PixelHistoryPixel(x: 12, y: 34, frame: 1)]
+    check vm.entries.val.len == 2
+    check vm.entries.val[0].postColor.r == 1.0
+    check vm.entries.val[0].testStatus.depth == "pass"
+    check vm.entries.val[0].testStatus.blend == "applied"
+    check vm.entries.val[1].shaderOutput.g == 1.0
+    check vm.entries.val[1].testStatus.depth == "failed"
+    check vm.entries.val[1].testStatus.cull == "pass"
+    check panel.textContent.contains("Draw 1")
+    check panel.textContent.contains("GEID 101")
+    check panel.textContent.contains("Depth pass")
+    check panel.textContent.contains("Draw 2")
+    check panel.textContent.contains("GEID 102")
+    check panel.textContent.contains("Depth failed")
+
+    vm.dispose()
+
+  test "clicking a pixel history entry routes a GEID seek":
+    createRoot proc(dispose: proc()) =
+      let fake = makeFakeClient()
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createPixelHistoryVM(fake.client, store)
+      let r = MockRenderer()
+
+      vm.loadPixelHistory(10, 20, 0)
+      drain()
+      let panel = renderPixelHistoryPanel(r, vm)
+      let entries = panel.children[^1].children
+      entries[1].fireEvent("click")
+
+      check vm.selectedEntry.val == some(1)
+      check mock.receivedCommands.len == 1
+      check mock.receivedCommands[0].command == SeekToGeidCommand
+      check mock.receivedCommands[0].args["geid"].getBiggestInt == 102
+
+      dispose()

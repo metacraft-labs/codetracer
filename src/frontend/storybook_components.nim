@@ -33,6 +33,7 @@ import viewmodel/viewmodels/[
   filesystem_vm,
   flow_vm,
   frame_viewer_vm,
+  pixel_history_vm,
   low_level_code_vm,
   no_source_vm,
   point_list_vm,
@@ -72,6 +73,7 @@ import viewmodel/views/[
   isonim_filesystem_view,
   isonim_flow_view,
   isonim_frame_viewer_view,
+  isonim_pixel_history_view,
   isonim_low_level_code_view,
   isonim_menu_shell_view,
   isonim_no_source_view,
@@ -1132,6 +1134,33 @@ proc createStoryFrameViewerClient(): VisualReplayClient =
       )),
     getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       storyFuture(storyDrawCalls()),
+    getPixelHistoryProc: proc(x, y, frame: int):
+        VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
+      storyFuture(@[
+        VisualReplayPixelHistoryEntry(
+          geid: 210'u64,
+          drawCallIndex: 1,
+          fragmentIndex: 0,
+          primitiveId: 4,
+          preColor: VisualReplayPixelColor(r: 0.05, g: 0.07, b: 0.11, a: 1.0),
+          shaderOutput: VisualReplayPixelColor(r: 0.25, g: 0.48, b: 0.90, a: 1.0),
+          postColor: VisualReplayPixelColor(r: 0.25, g: 0.48, b: 0.90, a: 1.0),
+          passed: true,
+          testStatus: VisualReplayPixelTestStatus(
+            depth: "pass", stencil: "pass", blend: "applied", cull: "pass")),
+        VisualReplayPixelHistoryEntry(
+          geid: 220'u64,
+          drawCallIndex: 2,
+          fragmentIndex: 0,
+          primitiveId: 9,
+          preColor: VisualReplayPixelColor(r: 0.25, g: 0.48, b: 0.90, a: 1.0),
+          shaderOutput: VisualReplayPixelColor(r: 0.91, g: 0.45, b: 0.07, a: 1.0),
+          postColor: VisualReplayPixelColor(r: 0.25, g: 0.48, b: 0.90, a: 1.0),
+          passed: false,
+          failureReason: "depth_failed",
+          testStatus: VisualReplayPixelTestStatus(
+            depth: "failed", stencil: "pass", blend: "unchanged", cull: "pass")),
+      ]),
   )
 
 proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1152,6 +1181,22 @@ proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposePr
     mountIsoNimFrameViewer(container, vm)
     if fixture == "geid":
       vm.loadFrameForGeid(220'u64)
+      drainCallbacks()
+  return proc() =
+    if vm != nil: vm.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
+
+proc mountPixelHistory(container: isonim_dom.Element; fixture: string): DisposeProc =
+  let client = createStoryFrameViewerClient()
+  var rootDisposer: proc()
+  var vm: PixelHistoryVM
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    vm = createPixelHistoryVM(client)
+    mountIsoNimPixelHistory(container, vm)
+    if fixture != "empty":
+      vm.loadPixelHistory(160, 90, 0)
       drainCallbacks()
   return proc() =
     if vm != nil: vm.dispose()
@@ -1579,6 +1624,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "filesystem": mountFilesystem(container, f)
     of "flow": mountFlow(container, f)
     of "frame-viewer": mountFrameViewer(container, f)
+    of "pixel-history": mountPixelHistory(container, f)
     of "low-level-code": mountLowLevelCode(container, f)
     of "no-source": mountNoSource(container, f)
     of "point-list": mountPointList(container, f)

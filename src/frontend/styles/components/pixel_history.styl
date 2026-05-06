@@ -1,0 +1,115 @@
+.pixel-history-component
+  display: flex
+  flex-direction: column
+  height: 100%
+  width: 100%
+  min-height: 0
+  box-sizing: border-box
+  overflow: hidden
+  color: TEXT_CONTENT_COLOR
+  background: BACKGROUND_COLOR
+  font-family: "FiraCode"
+  font-size: 13px
+  line-height: 20px
+
+  .pixel-history-header
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 10px
+    padding: 7px 10px
+    flex: 0 0 auto
+    border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+    background: HEADER_PANEL_BACKGROUND_COLOR
+
+  .pixel-history-title
+    font-weight: 600
+
+  .pixel-history-pixel
+    color: VALUE_TYPE_COLOR
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  .pixel-history-loading,
+  .pixel-history-error,
+  .pixel-history-empty
+    padding: 10px
+    color: VALUE_TYPE_COLOR
+
+    &[display="none"]
+      display: none
+
+  .pixel-history-error
+    color: NOTIFICATION_ERROR_COLOR
+
+  .pixel-history-list
+    min-height: 0
+    overflow: auto
+    flex: 1 1 auto
+
+  .pixel-history-entry
+    display: grid
+    grid-template-columns: 1fr
+    gap: 6px
+    width: 100%
+    min-height: 84px
+    padding: 8px 10px
+    border: 0
+    border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    background: transparent
+    color: TEXT_CONTENT_COLOR
+    font: inherit
+    text-align: left
+    cursor: pointer
+
+    &:hover,
+    &.selected
+      background: ACTIVE_ROW
+
+  .pixel-history-entry-main
+    display: grid
+    grid-template-columns: auto auto 1fr
+    gap: 8px
+    align-items: center
+    min-width: 0
+
+  .pixel-history-draw,
+  .pixel-history-geid
+    color: TEXT_CONTENT_COLOR
+
+  .pixel-history-pass
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+    color: VALUE_TYPE_COLOR
+
+  .pixel-history-colors
+    display: grid
+    grid-template-columns: repeat(3, minmax(0, 1fr))
+    gap: 6px
+    min-width: 0
+
+  .pixel-history-color
+    display: flex
+    align-items: center
+    gap: 5px
+    min-width: 0
+
+  .pixel-history-swatch
+    flex: 0 0 auto
+    width: 14px
+    height: 14px
+    border: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
+    border-radius: 3px
+
+  .pixel-history-color-label,
+  .pixel-history-tests
+    min-width: 0
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+    color: VALUE_TYPE_COLOR
+    font-size: 12px

@@ -236,6 +236,47 @@ when defined(js):
           ]);
           return;
         }
+        if (url.pathname === "/pixel-history") {
+          const x = Number(url.searchParams.get("x") || 0);
+          const y = Number(url.searchParams.get("y") || 0);
+          const frame = Number(url.searchParams.get("frame") || 0);
+          sendJson(res, {
+            x,
+            y,
+            frame,
+            modifications: [
+              {
+                geid: 210,
+                draw_call_index: 1,
+                fragment_index: 0,
+                primitive_id: 12,
+                pre_color: [0.04, 0.06, 0.12, 1.0],
+                shader_output: [0.18, 0.48, 0.90, 1.0],
+                post_color: [0.18, 0.48, 0.90, 1.0],
+                pre_depth: 1.0,
+                post_depth: 0.4,
+                passed: true,
+                failure_reason: "",
+                testStatus: { depth: "pass", stencil: "pass", blend: "applied", cull: "pass" },
+              },
+              {
+                geid: 220,
+                draw_call_index: 2,
+                fragment_index: 0,
+                primitive_id: 18,
+                pre_color: [0.18, 0.48, 0.90, 1.0],
+                shader_output: [0.95, 0.36, 0.08, 1.0],
+                post_color: [0.18, 0.48, 0.90, 1.0],
+                pre_depth: 0.4,
+                post_depth: 0.4,
+                passed: false,
+                failure_reason: "depth_failed",
+                testStatus: { depth: "failed", stencil: "pass", blend: "unchanged", cull: "pass" },
+              },
+            ],
+          });
+          return;
+        }
         if (url.pathname === "/frame") {
           const hasDraw = url.searchParams.has("draw");
           const hasFrame = url.searchParams.has("frame");
