@@ -90,7 +90,10 @@ test.describe("MCR visual replay real GUI layout", () => {
     const expectedY = 90;
 
     const pixelHistoryResponsePromise = ctPage.waitForResponse(
-      (response) => response.url().includes("/pixel-history?x=") && response.ok(),
+      (response) =>
+        response.url().includes("/pixel-history?x=")
+        && response.request().method() === "POST"
+        && response.ok(),
     );
     await image.click({ position: clickPosition });
     const pixelHistoryResponse = await pixelHistoryResponsePromise;

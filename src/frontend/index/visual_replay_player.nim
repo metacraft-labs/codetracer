@@ -1,7 +1,8 @@
 ## Lifecycle orchestration for the MCR visual replay HTTP player.
 ##
 ## The production pipeline is:
-##   ct-mcr extract-gfx --stdout trace.ct | ct-gfx-player --http --port <port>
+##   ct-mcr extract-gfx -o <gfx_stream> trace.ct
+##   ct-gfx-player --gfx-stream <gfx_stream> --http --port <port>
 ##
 ## Tests inject the port allocator, process starter, readiness probe, and
 ## sleeper so they never depend on real MCR/player binaries.
@@ -69,14 +70,19 @@ proc infoUrl*(playerUrl: string): string =
 
 proc createVisualReplayPipelineCommand*(
     tracePath: string;
+    gfxStreamDir: string;
     port: int;
     ctMcr = "ct-mcr";
-    gfxPlayer = "ct-gfx-player"): VisualReplayPipelineCommand =
+    gfxPlayer = "ct-gfx-player";
+    gfxPlayerBackend = ""): VisualReplayPipelineCommand =
+  var gfxPlayerArgs = @["--gfx-stream", gfxStreamDir, "--http", "--port", $port]
+  if gfxPlayerBackend.strip.len > 0:
+    gfxPlayerArgs.add(@["--backend", gfxPlayerBackend.strip])
   VisualReplayPipelineCommand(
     ctMcr: ctMcr,
-    ctMcrArgs: @["extract-gfx", "--stdout", tracePath],
+    ctMcrArgs: @["extract-gfx", "-o", gfxStreamDir, tracePath],
     gfxPlayer: gfxPlayer,
-    gfxPlayerArgs: @["--http", "--port", $port])
+    gfxPlayerArgs: gfxPlayerArgs)
 
 proc terminate*(process: VisualReplayPlayerProcess) =
   if process.isNil or process.terminateProc.isNil:
@@ -378,26 +384,121 @@ when defined(js):
     }))
   """.}
 
-  proc spawnExtractorJs(command, tracePath: cstring): JsObject {.importjs: """
-    require("child_process").spawn(
-      #,
-      ["extract-gfx", "--stdout", #],
-      { stdio: ["ignore", "pipe", "ignore"], windowsHide: true })
-  """.}
+  proc startExtractedVisualReplayProcessJs(
+      ctMcr, gfxPlayer, tracePath, backend: cstring; port: int):
+      PlatformFuture[VisualReplayPlayerProcess] {.importjs: """
+    (new Promise((resolve) => {
+      const childProcess = require("child_process");
+      const fs = require("fs");
+      const os = require("os");
+      const path = require("path");
+      const ctMcrPath = String(#);
+      const gfxPlayerPath = String(#);
+      const tracePathString = String(#);
+      const backendName = String(# || "");
+      const portNumber = Number(#);
+      const gfxStreamDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "codetracer-visual-replay-")
+      );
+      let extractor = null;
+      let player = null;
+      let playerExited = false;
+      let settled = false;
 
-  proc spawnPlayerJs(command: cstring; port: int): JsObject {.importjs: """
-    require("child_process").spawn(
-      #,
-      ["--http", "--port", String(#)],
-      { stdio: ["pipe", "ignore", "ignore"], windowsHide: true })
-  """.}
-
-  proc pipeProcessOutputToInput(source, target: JsObject) {.importjs: """
-    (function(source, target) {
-      if (source && target && source.stdout && target.stdin) {
-        source.stdout.pipe(target.stdin);
+      function cleanupDir() {
+        try { fs.rmSync(gfxStreamDir, { recursive: true, force: true }); } catch (_) {}
       }
-    })(#, #);
+
+      function killBoth() {
+        try { if (extractor) extractor.kill(); } catch (_) {}
+        try { if (player) player.kill(); } catch (_) {}
+      }
+
+      function fail(reason) {
+        if (settled) return;
+        settled = true;
+        if (reason) {
+          console.error("visual replay player start failed: " + reason);
+        }
+        killBoth();
+        cleanupDir();
+        resolve(null);
+      }
+
+      try {
+        extractor = childProcess.spawn(
+          ctMcrPath,
+          ["extract-gfx", "-o", gfxStreamDir, tracePathString],
+          { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
+        );
+      } catch (error) {
+        fail(
+          "could not spawn extractor " + ctMcrPath +
+          " for trace " + tracePathString +
+          ": " + (error && error.message ? error.message : String(error))
+        );
+        return;
+      }
+
+      let extractorErr = { value: "" };
+      extractor.stderr && extractor.stderr.on("data", (chunk) => {
+        extractorErr.value += chunk.toString();
+      });
+      extractor.on("error", (error) => fail("extractor error: " + error.message));
+      extractor.on("exit", (code) => {
+        if (settled) return;
+        if (code !== 0) {
+          fail("extractor exit " + code + ": " + extractorErr.value);
+          return;
+        }
+        try {
+          const playerArgs = [
+            "--gfx-stream", gfxStreamDir,
+            "--http",
+            "--port", String(portNumber),
+          ];
+          if (backendName.trim().length > 0) {
+            playerArgs.push("--backend", backendName.trim());
+          }
+          player = childProcess.spawn(
+            gfxPlayerPath,
+            playerArgs,
+            { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
+          );
+        } catch (error) {
+          fail(
+            "could not spawn player " + gfxPlayerPath +
+            ": " + (error && error.message ? error.message : String(error))
+          );
+          return;
+        }
+        let playerErr = { value: "" };
+        player.stderr && player.stderr.on("data", (chunk) => {
+          playerErr.value += chunk.toString();
+        });
+        player.on("error", (error) => fail("player error: " + error.message));
+        player.on("exit", () => {
+          playerExited = true;
+          cleanupDir();
+          if (!settled) fail("player exited before spawn settled: " + playerErr.value);
+        });
+        player.on("spawn", () => {
+          if (settled) return;
+          settled = true;
+          const playerRef = player;
+          resolve({
+            pid: (playerRef && playerRef.pid) || 0,
+            terminateProc: function() {
+              killBoth();
+              cleanupDir();
+            },
+            runningProc: function() {
+              return !!playerRef && !playerExited && !playerRef.killed;
+            },
+          });
+        });
+      });
+    }))
   """.}
 
   proc jsOn(target: JsObject; eventName: cstring; handler: proc()) {.
@@ -420,14 +521,24 @@ when defined(js):
     if fs.existsSync(cstring(ctPath)):
       ctPath
     else:
+      let entries = fs.readdirSync(cstring(traceOutputFolder))
+      for entry in entries:
+        let candidateName = $entry
+        if candidateName.endsWith(".ct"):
+          let candidatePath = joinPath(traceOutputFolder, candidateName)
+          if fs.existsSync(cstring(candidatePath)):
+            return candidatePath
       traceOutputFolder
 
-  proc visualReplayPipelineCommand(tracePath: string; port: int):
+  proc visualReplayPipelineCommand(tracePath: string; gfxStreamDir: string; port: int):
       VisualReplayPipelineCommand =
     let ctMcr = $envOrDefault(cstring"CODETRACER_CT_MCR_CMD", cstring"ct-mcr")
     let gfxPlayer = $envOrDefault(
       cstring"CODETRACER_CT_GFX_PLAYER_CMD", cstring"ct-gfx-player")
-    createVisualReplayPipelineCommand(tracePath, port, ctMcr, gfxPlayer)
+    let gfxPlayerBackend = $envOrDefault(
+      cstring"CODETRACER_CT_GFX_PLAYER_BACKEND", cstring"")
+    createVisualReplayPipelineCommand(
+      tracePath, gfxStreamDir, port, ctMcr, gfxPlayer, gfxPlayerBackend)
 
   proc defaultSleep(ms: int): PlatformFuture[void] =
     newPromise proc(resolve: proc()) =
@@ -455,62 +566,13 @@ when defined(js):
     if mode == "ready":
       return startFakeVisualReplayHttpServer(port)
 
-    let command = visualReplayPipelineCommand(tracePath, port)
-    newPromise proc(resolve: proc(process: VisualReplayPlayerProcess)) =
-      var settled = false
-      var extractorSpawned = false
-      var playerSpawned = false
-      var playerExited = false
-      let extractor = spawnExtractorJs(
-        cstring(command.ctMcr), cstring(command.ctMcrArgs[2]))
-      let player = spawnPlayerJs(cstring(command.gfxPlayer), port)
-
-      proc killBoth() =
-        discard jsKill(extractor)
-        discard jsKill(player)
-
-      proc maybeResolveReady() =
-        if settled:
-          return
-        if not extractorSpawned or not playerSpawned:
-          return
-        settled = true
-        let extractorRef = extractor
-        let playerRef = player
-        resolve(VisualReplayPlayerProcess(
-          pid: jsPid(playerRef),
-          terminateProc: proc() =
-            discard jsKill(extractorRef)
-            discard jsKill(playerRef),
-          runningProc: proc(): bool =
-            not playerExited and not jsKilled(playerRef)))
-
-      pipeProcessOutputToInput(extractor, player)
-      jsOn(extractor, cstring"spawn", proc() =
-        extractorSpawned = true
-        maybeResolveReady())
-      jsOn(player, cstring"spawn", proc() =
-        playerSpawned = true
-        maybeResolveReady())
-      jsOn(extractor, cstring"error", proc() =
-        if settled:
-          return
-        settled = true
-        killBoth()
-        resolve(nil))
-      jsOn(player, cstring"error", proc() =
-        if settled:
-          return
-        settled = true
-        killBoth()
-        resolve(nil))
-      jsOn(player, cstring"exit", proc() =
-        playerExited = true
-        if settled:
-          return
-        settled = true
-        killBoth()
-        resolve(nil))
+    let command = visualReplayPipelineCommand(tracePath, "", port)
+    startExtractedVisualReplayProcessJs(
+      cstring(command.ctMcr),
+      cstring(command.gfxPlayer),
+      cstring(tracePath),
+      cstring($envOrDefault(cstring"CODETRACER_CT_GFX_PLAYER_BACKEND", cstring"")),
+      port)
 
   proc defaultVisualReplayPlayerDeps*(): VisualReplayPlayerDeps =
     VisualReplayPlayerDeps(

@@ -11,14 +11,29 @@ suite "Visual replay player lifecycle":
     let tracePath = "/tmp/trace dir/trace'; touch injected #.ct"
     let command = createVisualReplayPipelineCommand(
       tracePath,
+      "/tmp/gfx stream",
       41237,
       "/opt/tools/ct mcr",
       "/opt/tools/ct gfx player")
 
     check command.ctMcr == "/opt/tools/ct mcr"
-    check command.ctMcrArgs == @["extract-gfx", "--stdout", tracePath]
+    check command.ctMcrArgs == @["extract-gfx", "-o", "/tmp/gfx stream", tracePath]
     check command.gfxPlayer == "/opt/tools/ct gfx player"
-    check command.gfxPlayerArgs == @["--http", "--port", "41237"]
+    check command.gfxPlayerArgs == @[
+      "--gfx-stream", "/tmp/gfx stream", "--http", "--port", "41237"]
+
+  test "pipeline command can pin the player backend":
+    let command = createVisualReplayPipelineCommand(
+      "/tmp/trace.ct",
+      "/tmp/gfx",
+      41237,
+      "ct-mcr",
+      "ct-gfx-player",
+      "software")
+
+    check command.gfxPlayerArgs == @[
+      "--gfx-stream", "/tmp/gfx", "--http", "--port", "41237",
+      "--backend", "software"]
 
   test "test_visual_player_lifecycle_ready_and_shutdown":
     var allocatedPorts: seq[int] = @[]

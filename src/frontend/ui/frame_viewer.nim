@@ -26,6 +26,8 @@ var frameViewerVMInstance: FrameViewerVM
 var frameViewerComponentRef: FrameViewerComponent
 var isoNimFrameViewerMounted*: bool = false
 
+const initialVisualReplayIndexingDraw = 999
+
 proc syncVisualReplaySessionIntoVM*() =
   if frameViewerVMInstance.isNil:
     return
@@ -50,12 +52,10 @@ proc syncVisualReplaySessionIntoVM*() =
     playerUrl,
     playerError)
   if session.visualReplayAvailable and playerUrl.len > 0 and
-      not frameViewerVMInstance.store.isNil and
-      frameViewerVMInstance.store.currentGeid.val.isSome and
       frameViewerVMInstance.frameImageSrc.val.len == 0 and
       not frameViewerVMInstance.loading.val:
-    frameViewerVMInstance.loadFrameForGeid(
-      frameViewerVMInstance.store.currentGeid.val.get)
+    frameViewerVMInstance.loadFrameForDraw(
+      initialVisualReplayIndexingDraw, seekSource = false)
 
 proc initFrameViewerVM(store: ReplayDataStore = nil) =
   if not frameViewerVMInstance.isNil:

@@ -231,6 +231,8 @@ interface CodetracerOptions {
   deepreviewJsonPath: string;
   /** Mark the recorded trace as visual-capable before launching replay. */
   visualReplayTrace: boolean;
+  /** Existing .ct or trace folder to import via ct host --trace-path. */
+  visualReplayTracePath: string;
 }
 
 /**
@@ -828,6 +830,109 @@ async function launchTraceWeb(
   };
 }
 
+async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
+  setupLdLibraryPath();
+  clearElectronSingletonLocks();
+  const t0 = Date.now();
+
+  if (!fs.existsSync(tracePath)) {
+    throw new Error(`visualReplayTracePath does not exist: ${tracePath}`);
+  }
+
+  const httpPort = await getFreeTcpPort();
+  const backendPort = await getFreeTcpPort();
+
+  console.log(`# launching ct host for trace path ${tracePath} on port ${httpPort}`);
+
+  const ctProcess = childProcess.spawn(
+    codetracerPath,
+    [
+      "host",
+      `--trace-path=${tracePath}`,
+      `--port=${httpPort}`,
+      `--backend-socket-port=${backendPort}`,
+      `--frontend-socket=${backendPort}`,
+    ],
+    {
+      cwd: codetracerInstallDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+
+  const ctStderr: string[] = [];
+  const ctStdout: string[] = [];
+  ctProcess.stdout?.on("data", (chunk: Buffer) => {
+    ctStdout.push(chunk.toString());
+  });
+  ctProcess.stderr?.on("data", (chunk: Buffer) => {
+    ctStderr.push(chunk.toString());
+  });
+
+  const chromiumPath = resolveChromiumPath();
+  const extraArgs = (process.env.CODETRACER_ELECTRON_ARGS ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+  const browser = await chromium.launch({
+    executablePath: chromiumPath,
+    args: extraArgs,
+  });
+
+  const consoleErrors: string[] = [];
+  const page = await browser.newPage();
+  attachErrorCollectors(page, consoleErrors);
+
+  const tConnect0 = Date.now();
+  let connected = false;
+  for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
+    try {
+      await page.goto(`http://localhost:${httpPort}`, {
+        timeout: GOTO_TIMEOUT_MS,
+      });
+      connected = true;
+    } catch {
+      if (attempt < MAX_CONNECT_ATTEMPTS) {
+        console.log(`  attempt ${attempt}/${MAX_CONNECT_ATTEMPTS} failed, retrying...`);
+        await sleep(RETRY_DELAY_MS);
+      }
+    }
+  }
+  const connectMs = Date.now() - tConnect0;
+  if (!connected) {
+    console.error(`ct host stdout:\n${ctStdout.join("")}`);
+    console.error(`ct host stderr:\n${ctStderr.join("")}`);
+    ctProcess.kill();
+    await browser.close();
+    throw new Error(
+      `Failed to connect to ct host on port ${httpPort} after ${MAX_CONNECT_ATTEMPTS} attempts`,
+    );
+  }
+
+  const totalMs = Date.now() - t0;
+  console.log(`#   ct host connect: ${connectMs}ms  total trace-path setup: ${totalMs}ms`);
+
+  return {
+    page,
+    electronApp: null,
+    consoleErrors,
+    mainProcessOutput: ctStderr,
+    teardown: async () => {
+      const pid = ctProcess.pid;
+      if (pid) {
+        killProcessTree(pid);
+      }
+      await sleep(PORT_RELEASE_DELAY_MS);
+      try {
+        await browser.close();
+      } catch {
+        /* already closed */
+      }
+      cleanupCodetracerEnvVars();
+    },
+  };
+}
+
 async function launchWelcomeScreen(): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
@@ -968,6 +1073,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   editWorkingDirectory: [codetracerInstallDir, { option: true }],
   deepreviewJsonPath: ["", { option: true }],
   visualReplayTrace: [false, { option: true }],
+  visualReplayTracePath: ["", { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -1003,6 +1109,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         editWorkingDirectory,
         deepreviewJsonPath,
         visualReplayTrace,
+        visualReplayTracePath,
       },
       use,
       testInfo,
@@ -1030,6 +1137,13 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
 
       switch (launchMode) {
         case "trace": {
+          if (visualReplayTracePath) {
+            if (deploymentMode !== "web") {
+              throw new Error("visualReplayTracePath is currently supported only in web deploymentMode");
+            }
+            result = await launchTracePathWeb(visualReplayTracePath);
+            break;
+          }
           if (!sourcePath) {
             throw new Error(
               "sourcePath must be set via test.use() for trace launch mode",

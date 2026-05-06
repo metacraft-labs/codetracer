@@ -121,6 +121,13 @@ proc pixelHistoryUrl*(playerUrl: string; x, y, frame: int): string =
 proc shaderDebugUrl*(playerUrl: string): string =
   normalizedPlayerUrl(playerUrl) & "/shader-debug"
 
+proc pixelHistoryRequestToJson*(x, y, frame: int): JsonNode =
+  %*{
+    "x": x,
+    "y": y,
+    "frame": frame,
+  }
+
 proc shaderDebugRequestToJson*(request: VisualReplayShaderDebugRequest): JsonNode =
   result = %*{
     "x": request.x,
@@ -138,19 +145,29 @@ proc shaderDebugRequestToJson*(request: VisualReplayShaderDebugRequest): JsonNod
   if request.primitiveId.isSome:
     result["primitive_id"] = %request.primitiveId.get
 
+proc normalizeColor(color: VisualReplayPixelColor): VisualReplayPixelColor =
+  if color.r > 1.0 or color.g > 1.0 or color.b > 1.0 or color.a > 1.0:
+    VisualReplayPixelColor(
+      r: color.r / 255.0,
+      g: color.g / 255.0,
+      b: color.b / 255.0,
+      a: color.a / 255.0)
+  else:
+    color
+
 proc colorFromJson(node: JsonNode): VisualReplayPixelColor =
   if node.kind == JArray and node.len >= 4:
-    VisualReplayPixelColor(
+    return normalizeColor(VisualReplayPixelColor(
       r: node[0].getFloat(0.0),
       g: node[1].getFloat(0.0),
       b: node[2].getFloat(0.0),
-      a: node[3].getFloat(1.0))
+      a: node[3].getFloat(1.0)))
   else:
-    VisualReplayPixelColor(
+    return normalizeColor(VisualReplayPixelColor(
       r: node{"r"}.getFloat(0.0),
       g: node{"g"}.getFloat(0.0),
       b: node{"b"}.getFloat(0.0),
-      a: node{"a"}.getFloat(1.0))
+      a: node{"a"}.getFloat(1.0)))
 
 proc hasReason(reason, name: string): bool =
   reason.toLowerAscii.contains(name.toLowerAscii)
@@ -158,7 +175,7 @@ proc hasReason(reason, name: string): bool =
 proc testStatusFromJson(node: JsonNode; passed: bool;
                         failureReason: string): VisualReplayPixelTestStatus =
   let tests = node{"testStatus"}
-  if tests.kind == JObject:
+  if not tests.isNil and tests.kind == JObject:
     return VisualReplayPixelTestStatus(
       depth: tests{"depth"}.getStr("pass"),
       stencil: tests{"stencil"}.getStr("pass"),
@@ -169,7 +186,7 @@ proc testStatusFromJson(node: JsonNode; passed: bool;
   proc status(flagName, reasonName: string): string =
     if node{flagName}.getBool(false) or
         failureReason.hasReason(reasonName) or
-        (failures.kind == JArray and failures.getElems.anyIt(
+        (not failures.isNil and failures.kind == JArray and failures.getElems.anyIt(
           it.getStr("").hasReason(reasonName))):
       "failed"
     else:
@@ -184,10 +201,10 @@ proc testStatusFromJson(node: JsonNode; passed: bool;
       node{"cull_failed"}.getBool(false) or failureReason.hasReason("cull"):
         "failed" else: "pass")
 
-proc pixelHistoryEntryFromJson(node: JsonNode): VisualReplayPixelHistoryEntry =
+proc pixelHistoryEntryFromJson*(node: JsonNode): VisualReplayPixelHistoryEntry =
   let passed = node{"passed"}.getBool(false)
   let failureReason =
-    if node{"failure_reason"}.kind == JArray:
+    if not node{"failure_reason"}.isNil and node{"failure_reason"}.kind == JArray:
       node["failure_reason"].getElems.mapIt(it.getStr("")).join(", ")
     else:
       node{"failure_reason"}.getStr(node{"failureReason"}.getStr(""))
@@ -214,7 +231,7 @@ proc pixelHistoryEntryFromJson(node: JsonNode): VisualReplayPixelHistoryEntry =
     failureReason: failureReason,
     testStatus: testStatusFromJson(node, passed, failureReason))
 
-proc drawCallFromJson(node: JsonNode): VisualReplayDrawCall =
+proc drawCallFromJson*(node: JsonNode): VisualReplayDrawCall =
   VisualReplayDrawCall(
     index: node{"index"}.getInt(0),
     geid: uint64(node{"geid"}.getBiggestInt(0)),
@@ -222,7 +239,7 @@ proc drawCallFromJson(node: JsonNode): VisualReplayDrawCall =
     pipeline: node{"pipeline"}.getStr(""),
   )
 
-proc frameFromJson(node: JsonNode): VisualReplayFrame =
+proc frameFromJson*(node: JsonNode): VisualReplayFrame =
   result = VisualReplayFrame(
     imageSrc: node{"imageSrc"}.getStr(node{"url"}.getStr("")),
     width: node{"width"}.getInt(0),
@@ -233,7 +250,7 @@ proc frameFromJson(node: JsonNode): VisualReplayFrame =
   if node.hasKey("frame"):
     result.frame = some(node["frame"].getInt)
 
-proc infoFromJson(node: JsonNode): VisualReplayInfo =
+proc infoFromJson*(node: JsonNode): VisualReplayInfo =
   VisualReplayInfo(
     frameCount: node{"frameCount"}.getInt(node{"frames"}.getInt(0)),
     width: node{"width"}.getInt(0),
@@ -259,6 +276,8 @@ proc shaderValueFromJson(node: JsonNode): VisualReplayShaderValue =
   )
 
 proc shaderValuesFromJson(node: JsonNode): seq[VisualReplayShaderValue] =
+  if node.isNil:
+    return
   if node.kind == JArray:
     for item in node.items:
       result.add(shaderValueFromJson(item))
@@ -280,8 +299,9 @@ proc shaderStepFromJson(node: JsonNode; fallbackIndex: int): VisualReplayShaderS
     registers: shaderValuesFromJson(node{"registers"}),
   )
 
-proc shaderDebugInfoFromJson(node: JsonNode): VisualReplayShaderDebugInfo =
-  let source = node{"source"}.getStr(node{"shaderSource"}.getStr(""))
+proc shaderDebugInfoFromJson*(node: JsonNode): VisualReplayShaderDebugInfo =
+  let source = node{"source"}.getStr(
+    node{"shaderSource"}.getStr(node{"fragmentShaderSource"}.getStr("")))
   result = VisualReplayShaderDebugInfo(
     shaderStage: node{"stage"}.getStr(node{"shaderStage"}.getStr("fragment")),
     entryPoint: node{"entryPoint"}.getStr(node{"entry"}.getStr("main")),
@@ -289,15 +309,18 @@ proc shaderDebugInfoFromJson(node: JsonNode): VisualReplayShaderDebugInfo =
     sourceLines: @[],
     steps: @[],
   )
-  if node{"sourceLines"}.kind == JArray:
-    for line in node{"sourceLines"}.items:
+  let sourceLines = node{"sourceLines"}
+  if not sourceLines.isNil and sourceLines.kind == JArray:
+    for line in sourceLines.items:
       result.sourceLines.add(line.getStr(""))
   elif source.len > 0:
     result.sourceLines = source.splitLines()
 
+  let stepNodes = node{"steps"}
+  let traceNodes = node{"trace"}
   let steps =
-    if node{"steps"}.kind == JArray: node{"steps"}
-    elif node{"trace"}.kind == JArray: node{"trace"}
+    if not stepNodes.isNil and stepNodes.kind == JArray: stepNodes
+    elif not traceNodes.isNil and traceNodes.kind == JArray: traceNodes
     else: newJArray()
   var index = 0
   for item in steps.items:

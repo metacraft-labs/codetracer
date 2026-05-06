@@ -389,6 +389,33 @@ suite "FrameViewerVM selection":
     vm.dispose()
 
 suite "PixelHistoryVM":
+  test "parses real ct_gfx_player pixel history entries":
+    let payload = parseJson("""
+      [
+        {
+          "drawCallIndex": 4,
+          "geid": 15990,
+          "preColor": [0, 0, 0, 255],
+          "postColor": [32, 86, 221, 255],
+          "passed": true
+        }
+      ]
+    """)
+
+    let entry = pixelHistoryEntryFromJson(payload[0])
+
+    check entry.drawCallIndex == 4
+    check entry.geid == 15990'u64
+    check entry.preColor.a == 1.0
+    check entry.postColor.r > 0.12
+    check entry.postColor.r < 0.13
+    check entry.postColor.g > 0.33
+    check entry.postColor.g < 0.34
+    check entry.postColor.b > 0.86
+    check entry.postColor.b < 0.87
+    check entry.passed
+    check entry.testStatus.depth == "pass"
+
   test "test_pixel_history_vm_loads_entries":
     let fake = makeFakeClient()
     let vm = createPixelHistoryVM(fake.client)
@@ -437,6 +464,25 @@ suite "PixelHistoryVM":
       dispose()
 
 suite "ShaderDebugVM":
+  test "parses real ct_gfx_player shader debug response":
+    let payload = parseJson("""
+      {
+        "drawCallIndex": 236,
+        "geid": 16810,
+        "vertexShaderSource": "#version 300 es\nvoid main() {}\n",
+        "fragmentShaderSource": "#version 300 es\nprecision mediump float;\nout vec4 fragColor;\nvoid main() {\n  fragColor = vec4(1.0);\n}\n",
+        "outputColor": [184, 126, 69, 255]
+      }
+    """)
+
+    let info = shaderDebugInfoFromJson(payload)
+
+    check info.shaderStage == "fragment"
+    check info.entryPoint == "main"
+    check info.source.contains("fragColor")
+    check info.sourceLines.len > 0
+    check info.steps.len == 0
+
   test "test_shader_debug_vm_steps_interpreter_trace":
     let fake = makeFakeClient()
     let vm = createShaderDebugVM(fake.client)

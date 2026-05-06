@@ -116,16 +116,29 @@ proc importCtFile(ctFilePath: string): int =
   if enriched:
     echo "ct host: MCR trace enriched with portable binaries/symbols"
 
+  let mcrVisualReplay = findCtFileInFolder(tempDir).len > 0
+
   # Create minimal trace_db_metadata.json so importTrace can read it
   # (only if enrichment or a prior recording step did not already produce one).
+  # MCR CTFS containers can be extracted into a gfx_stream by ct-mcr, so mark
+  # them as visual replay capable even before extraction has happened.
   if not fileExists(tempDir / "trace_db_metadata.json"):
     let metaJson = %*{
       "program": "imported",
       "args": newJArray(),
       "workdir": tempDir,
-      "lang": "c"
+      "lang": "c",
+      "visualReplay": mcrVisualReplay
     }
     writeFile(tempDir / "trace_db_metadata.json", $metaJson)
+  elif mcrVisualReplay:
+    try:
+      let metaPath = tempDir / "trace_db_metadata.json"
+      var metaJson = parseJson(readFile(metaPath))
+      metaJson["visualReplay"] = %true
+      writeFile(metaPath, $metaJson)
+    except CatchableError:
+      discard
 
   let ctfsSourcesExtracted = materializeCtfsSources(tempDir / "trace.ct", tempDir)
   if ctfsSourcesExtracted:
@@ -154,6 +167,10 @@ proc importCtFile(ctFilePath: string): int =
   if trace.isNil:
     echo "ct host: error: failed to import trace from ", ctFilePath
     quit(1)
+
+  let importedCtPath = $trace.outputFolder / "trace.ct"
+  if fileExists(tempDir / "trace.ct") and not fileExists(importedCtPath):
+    copyFile(tempDir / "trace.ct", importedCtPath)
 
   result = trace.id
 
