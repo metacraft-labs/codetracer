@@ -223,6 +223,8 @@ interface CodetracerOptions {
   sourcePath: string;
   /** How to launch CodeTracer. */
   launchMode: LaunchMode;
+  /** New trace/open policy used by the Electron process. */
+  newTracePolicy: "window" | "tab";
   /** Folder path for edit mode. */
   editFolderPath: string;
   /** Process cwd for edit mode launches. */
@@ -933,7 +935,7 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
   };
 }
 
-async function launchWelcomeScreen(): Promise<LaunchResult> {
+async function launchWelcomeScreen(newTracePolicy: "window" | "tab" = "window"): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
   console.log("# launching welcome screen");
@@ -945,7 +947,7 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
     executablePath: welcomeExe,
     cwd: codetracerInstallDir,
     args: welcomeArgs,
-    env: makeCleanEnv(),
+    env: makeCleanEnv({ CODETRACER_NEW_TRACE_POLICY: newTracePolicy }),
   });
 
   const consoleErrors: string[] = [];
@@ -976,6 +978,7 @@ async function launchWelcomeScreen(): Promise<LaunchResult> {
 async function launchEditMode(
   folderPath: string,
   workingDirectory: string = codetracerInstallDir,
+  newTracePolicy: "window" | "tab" = "window",
 ): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
@@ -990,7 +993,7 @@ async function launchEditMode(
     executablePath: editExe,
     cwd: workingDirectory,
     args: editArgs,
-    env: makeCleanEnv(),
+    env: makeCleanEnv({ CODETRACER_NEW_TRACE_POLICY: newTracePolicy }),
   });
 
   const consoleErrors: string[] = [];
@@ -1069,6 +1072,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
   deploymentMode: ["electron", { option: true }],
   sourcePath: ["", { option: true }],
   launchMode: ["trace" as LaunchMode, { option: true }],
+  newTracePolicy: ["window" as "window" | "tab", { option: true }],
   editFolderPath: ["", { option: true }],
   editWorkingDirectory: [codetracerInstallDir, { option: true }],
   deepreviewJsonPath: ["", { option: true }],
@@ -1110,6 +1114,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         deepreviewJsonPath,
         visualReplayTrace,
         visualReplayTracePath,
+        newTracePolicy,
       },
       use,
       testInfo,
@@ -1157,7 +1162,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           break;
         }
         case "welcome": {
-          result = await launchWelcomeScreen();
+          result = await launchWelcomeScreen(newTracePolicy);
           break;
         }
         case "edit": {
@@ -1166,7 +1171,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
               "editFolderPath must be set via test.use() for edit launch mode",
             );
           }
-          result = await launchEditMode(editFolderPath, editWorkingDirectory);
+          result = await launchEditMode(editFolderPath, editWorkingDirectory, newTracePolicy);
           break;
         }
         case "deepreview": {

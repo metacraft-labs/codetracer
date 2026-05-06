@@ -35,6 +35,7 @@ when not defined(server):
       # Quit immediately — the first instance will open our trace.
       console.log cstring"index: single-instance lock not acquired — delegating to existing instance"
       electron_vars.app.quit(0)
+      nodeProcess.exit(0)
     else:
       # We are the first instance.  Listen for second-instance events.
       electron_vars.app.on("second-instance") do (event: js, argv: js, workingDirectory: js):
@@ -49,25 +50,54 @@ when not defined(server):
             mainWindow.restore()
           mainWindow.focus()
 
-        # Extract the trace ID from the second instance's argv.
-        # The format is: ct <traceId> [--test] [--diff ...]
-        # Electron argv: [electron, entryPoint, traceId, ...]
+        # Extract the command from the second instance's argv.
+        # Supported formats:
+        #   ct <traceId> [--test] [--diff ...]
+        #   ct edit <path>
+        # Electron can prepend runtime flags to argv, so scan for the first
+        # CodeTracer command instead of assuming a fixed argv[2] position.
         let argvLen = argv.length.to(int)
-        if argvLen > 2:
-          let traceIdStr = $argv[2].to(cstring)
-          try:
-            let traceId = parseInt(traceIdStr)
-            if traceId > 0 and not mainWindow.isNil:
-              console.log cstring"index: opening trace ", cstring($traceId), cstring" in new tab (second-instance)"
-              # Signal the renderer to create a new session tab and prepare
-              # the trace.  The renderer handles this by creating a new
-              # session, and the onOpenTraceInTab IPC handler starts the
-              # backend replay and sends the trace data.
-              mainWindow.webContents.send(
-                "CODETRACER::open-trace-in-tab-ready",
-                js{traceId: traceId})
-          except ValueError:
-            console.log cstring"index: second-instance argv[2] is not a trace ID: ", cstring(traceIdStr)
+        var handledSecondInstance = false
+        for i in 2 ..< argvLen:
+          if handledSecondInstance:
+            break
+
+          let argText = $argv[i].to(cstring)
+          if argText == "edit" and i + 1 < argvLen and not mainWindow.isNil:
+            let rawEditPath = argv[i + 1].to(cstring)
+            let editPathText = $rawEditPath
+            let isAbsolute = editPathText.len > 0 and
+              (editPathText[0] == '/' or
+               (editPathText.len >= 3 and editPathText[1] == ':' and
+                (editPathText[2] == '\\' or editPathText[2] == '/')))
+            let editPath =
+              if isAbsolute:
+                rawEditPath
+              else:
+                nodePath.join(workingDirectory.to(cstring), rawEditPath)
+            console.log cstring"index: opening edit folder ", editPath, cstring" in new tab (second-instance)"
+            mainWindow.webContents.send(
+              "CODETRACER::open-edit-folder-in-tab-ready",
+              js{folderPath: editPath})
+            handledSecondInstance = true
+          elif argText.len > 0 and argText[0] != '-':
+            try:
+              let traceId = parseInt(argText)
+              if traceId > 0 and not mainWindow.isNil:
+                console.log cstring"index: opening trace ", cstring($traceId), cstring" in new tab (second-instance)"
+                # Signal the renderer to create a new session tab and prepare
+                # the trace.  The renderer handles this by creating a new
+                # session, and the onOpenTraceInTab IPC handler starts the
+                # backend replay and sends the trace data.
+                mainWindow.webContents.send(
+                  "CODETRACER::open-trace-in-tab-ready",
+                  js{traceId: traceId})
+                handledSecondInstance = true
+            except ValueError:
+              discard
+
+        if not handledSecondInstance:
+          console.log cstring"index: second-instance argv did not contain an edit command or trace ID"
 
   electron_vars.app.on("window-all-closed") do ():
     stopBackendManager()

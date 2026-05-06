@@ -27,6 +27,7 @@ const
   SessionSwitchPath = "src/frontend/ui/session_switch.nim"
   LayoutPath = "src/frontend/ui/layout.nim"
   DebugPath = "src/frontend/ui/debug.nim"
+  IndexPath = "src/frontend/index.nim"
   UiJsPath = "src/frontend/ui_js.nim"
 
 proc sectionBetween(source, startMarker, endMarker: string): string =
@@ -178,11 +179,52 @@ else:
         "proc onNoTrace(",
         "configureShortcuts()")
 
-      let filenameFallbackIndex =
-        indexOfRequired(body, "elif data.startOptions.edit and response.filenames.len > 0:")
+      let filenameFallbackIndex = indexOfRequired(body, "chooseInitialEditPath(")
       let openIndex = indexOfRequired(body, "data.openTab(initialEditPath, ViewSource)")
 
       check filenameFallbackIndex < openIndex
+
+    test "delegated ct edit opens a populated edit session":
+      let indexSource = readFile(IndexPath)
+      let secondInstanceBody = sectionBetween(indexSource,
+        "electron_vars.app.on(\"second-instance\")",
+        "electron_vars.app.on(\"window-all-closed\")")
+
+      let editBranchIndex =
+        indexOfRequired(secondInstanceBody, "argText == \"edit\"")
+      let argvScanIndex =
+        indexOfRequired(secondInstanceBody, "for i in 2 ..< argvLen:")
+      let editEventIndex =
+        indexOfRequired(secondInstanceBody,
+          "\"CODETRACER::open-edit-folder-in-tab-ready\"")
+      let traceEventIndex =
+        indexOfRequired(secondInstanceBody,
+          "\"CODETRACER::open-trace-in-tab-ready\"")
+
+      check argvScanIndex < editBranchIndex
+      check editBranchIndex < editEventIndex
+      check editEventIndex < traceEventIndex
+
+      let uiSource = readFile(UiJsPath)
+      let handlerBody = sectionBetween(uiSource,
+        "proc onOpenEditFolderInTabReady*(",
+        "proc onTraceLoadError*")
+      check handlerBody.contains("createNewSession(data)")
+      check handlerBody.contains("CODETRACER::init-edit-mode")
+      check handlerBody.contains("response.folderPath")
+
+      let noTraceBody = sectionBetween(uiSource,
+        "proc onNoTrace(",
+        "proc invalidPath(")
+      check noTraceBody.contains("welcome_screen.clearIsoNimWelcomeScreen()")
+      check noTraceBody.contains("filesystem.refreshIsoNimFilesystemPanel()")
+      check noTraceBody.contains("vcs.resetAndRefreshVCS(")
+      check noTraceBody.contains("vcs.tryMountIsoNimVCSPanel(")
+
+      let ipcBody = sectionBetween(uiSource,
+        "proc configureIPC(data: Data) =",
+        "duration(\"configureIPCRun\")")
+      check ipcBody.contains("\"open-edit-folder-in-tab-ready\"")
 
     test "initLayout installs shared chrome before welcome early return":
       let source = readFile(LayoutPath)

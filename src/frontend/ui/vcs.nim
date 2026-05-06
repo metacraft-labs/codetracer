@@ -222,6 +222,14 @@ proc refreshVCSData*(self: VCSComponent) =
       self.selectedCommitIndex = 0
     self.loadChangedFiles(cwd, self.commits[self.selectedCommitIndex].hash)
 
+proc resetAndRefreshVCS*(self: VCSComponent) =
+  ## Force the panel to reload from the current workspace folder.
+  if self.isNil:
+    return
+  self.initialized = false
+  self.refreshVCSData()
+  self.syncLegacyVCSIntoVM()
+
 # ---------------------------------------------------------------------------
 # Git unified diff parsing (Task #69)
 # ---------------------------------------------------------------------------
@@ -833,8 +841,10 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
     let vm = ensureVCSVM(component)
     if vm.isNil:
       return
-    let container = document.getElementById(
+    var container = document.getElementById(
       cstring(fmt"vcsComponent-{componentId}"))
+    if container.isNil:
+      container = document.getElementById(cstring(fmt"vCSComponent-{componentId}"))
     if container.isNil:
       return
     component.syncLegacyVCSIntoVM()

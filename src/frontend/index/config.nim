@@ -248,6 +248,59 @@ proc isValidLayoutConfig(config: js): bool =
   # Basic structure looks valid
   return true
 
+proc tryParseJson(raw: cstring): js {.importjs:
+  """(function(raw) {
+    try {
+      return { ok: true, value: JSON.parse(raw) };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error && error.message ? String(error.message) : String(error)
+      };
+    }
+  })(#)""".}
+
+proc parseLayoutJson(raw: cstring; context: string): js =
+  ## JSON.parse raises a JavaScript SyntaxError that Nim's try/except does not
+  ## reliably catch in this backend. Keep the parse guard on the JavaScript
+  ## side so corrupt layout files can be reset instead of aborting startup.
+  let parsed = tryParseJson(raw)
+  if parsed["ok"].to(bool):
+    return parsed["value"]
+  warnPrint context, ": ", parsed["error"].to(cstring)
+  return nil
+
+proc sanitizeEditLayoutConfig*(config: js; editorContent: int): js {.importjs:
+  """(function(config, editorContent) {
+    if (!config) return config;
+    const clone = JSON.parse(JSON.stringify(config));
+    const walk = (node) => {
+      if (!node) return null;
+      const state = node.componentState || {};
+      if (node.type === 'component' && Number(state.content) === editorContent) {
+        return null;
+      }
+      if (Array.isArray(node.content)) {
+        node.content = node.content.map(walk).filter(Boolean);
+        if (node.content.length === 0) return null;
+      }
+      return node;
+    };
+    const sanitizedRoot = walk(clone.root || clone);
+    if (!sanitizedRoot) return config;
+    if (clone.root) clone.root = sanitizedRoot;
+    return clone.root ? clone : sanitizedRoot;
+  })(#, #)""".}
+
+proc stringifyJson(value: js): cstring {.importjs: "JSON.stringify(#)".}
+
+proc sanitizeEditLayoutJson*(raw: cstring): cstring =
+  let config = parseLayoutJson(raw, "Edit layout config JSON parse error while saving")
+  if config.isNil:
+    return raw
+  let sanitized = sanitizeEditLayoutConfig(config, ord(Content.EditorView))
+  return stringifyJson(sanitized)
+
 proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
   ## Delete the corrupt layout file and copy the bundled default.
   ## Returns the fresh default config.
@@ -276,13 +329,19 @@ proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
     # Read the fresh copy
     let (freshData, freshErr) = await fsreadFileWithErr(cstring(filename))
     if freshErr.isNil:
-      return JSON.parse(freshData)
+      let parsedFresh = parseLayoutJson(freshData,
+        "Layout config JSON parse error after reset")
+      if not parsedFresh.isNil:
+        return parsedFresh
 
   # Last resort: read directly from bundled default without saving
   warnPrint "Could not copy default layout, reading bundled default directly"
   let (bundledData, bundledErr) = await fsreadFileWithErr(cstring(fmt"{configDir / defaultLayoutPath}"))
   if bundledErr.isNil:
-    return JSON.parse(bundledData)
+    let parsedBundled = parseLayoutJson(bundledData,
+      "Bundled layout config JSON parse error")
+    if not parsedBundled.isNil:
+      return parsedBundled
 
   errorPrint "index: critical - cannot load any layout config"
   quit(1)
@@ -290,17 +349,14 @@ proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
 proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
-    try:
-      let config = JSON.parse(data)
-      # Validate the loaded config structure
-      if not isValidLayoutConfig(config):
-        warnPrint "Layout config is invalid or incompatible: ", filename
-        return await resetLayoutToDefault(filename)
-      return config
-    except CatchableError:
-      # JSON parse error - file is corrupt
-      warnPrint "Layout config JSON parse error: ", getCurrentExceptionMsg()
+    let config = parseLayoutJson(data, "Layout config JSON parse error")
+    if config.isNil:
       return await resetLayoutToDefault(filename)
+    # Validate the loaded config structure
+    if not isValidLayoutConfig(config):
+      warnPrint "Layout config is invalid or incompatible: ", filename
+      return await resetLayoutToDefault(filename)
+    return config
   else:
     let directory = filename.parentDir
     let errMkdir = await fsMkdirWithErr(cstring(directory), js{recursive: true})
@@ -323,31 +379,27 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
   ## Load edit mode layout configuration from file
   let (data, err) = await fsreadFileWithErr(cstring(filename))
   if err.isNil:
-    try:
-      let config = JSON.parse(data)
-      # Validate the loaded config structure
-      if not isValidLayoutConfig(config):
-        warnPrint "Edit layout config is invalid or incompatible: ", filename
-        return await resetLayoutToDefault(filename)
-      return config
-    except CatchableError:
-      # JSON parse error - file is corrupt
-      warnPrint "Edit layout config JSON parse error: ", getCurrentExceptionMsg()
+    let config = parseLayoutJson(data, "Edit layout config JSON parse error")
+    if config.isNil:
       return await resetLayoutToDefault(filename)
+    # Validate the loaded config structure
+    if not isValidLayoutConfig(config):
+      warnPrint "Edit layout config is invalid or incompatible: ", filename
+      return await resetLayoutToDefault(filename)
+    return sanitizeEditLayoutConfig(config, ord(Content.EditorView))
   else:
     # Edit mode layout file doesn't exist yet - use default debug layout as fallback
     let defaultLayoutFile = userLayoutDir / "default_layout.json"
     let (defaultData, defaultErr) = await fsreadFileWithErr(cstring(defaultLayoutFile))
     if defaultErr.isNil:
-      try:
-        let config = JSON.parse(defaultData)
-        if not isValidLayoutConfig(config):
-          warnPrint "Default layout config is invalid: ", defaultLayoutFile
-          return await resetLayoutToDefault(defaultLayoutFile)
-        return config
-      except CatchableError:
-        warnPrint "Default layout config JSON parse error: ", getCurrentExceptionMsg()
+      let config = parseLayoutJson(defaultData,
+        "Default layout config JSON parse error")
+      if config.isNil:
         return await resetLayoutToDefault(defaultLayoutFile)
+      if not isValidLayoutConfig(config):
+        warnPrint "Default layout config is invalid: ", defaultLayoutFile
+        return await resetLayoutToDefault(defaultLayoutFile)
+      return sanitizeEditLayoutConfig(config, ord(Content.EditorView))
     else:
       # Fall back to the bundled default layout
       let errCopy = await fsCopyFileWithErr(

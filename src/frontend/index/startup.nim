@@ -171,12 +171,14 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     var functions: seq[Function] = @[] # TODO load with rg or similar?
     var save = await getSave(@[folder], data.config.test)
     data.save = save
+    let editLayout = await mainWindow.loadEditLayoutConfig(
+      string(userLayoutDir / "default_edit_layout.json"))
 
     mainWindow.webContents.send "CODETRACER::no-trace", js{
       path: startOptionsSnapshot.name,
       lang: save.project.lang,
       home: paths.home.cstring,
-      layout: layout,
+      layout: editLayout,
       helpers: helpers,
       startOptions: startOptionsSnapshot,
       config: configSnapshot,

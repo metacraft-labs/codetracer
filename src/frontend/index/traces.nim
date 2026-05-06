@@ -837,10 +837,11 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   let save = await getSave(@[folder], data.config.test)
   data.save = save
 
-  # Reuse the startup layout already validated by the index process. Loading
-  # a stale user default_edit_layout.json here can abort the welcome-screen
-  # handoff before the renderer receives the no-trace edit-mode payload.
-  let layout = data.layout
+  # Open folders in the edit layout, not the debugger replay layout.  The
+  # loader validates and resets stale/corrupt user layout files before
+  # returning, so a broken default_edit_layout.json cannot blank the handoff.
+  let layout = await mainWindow.loadEditLayoutConfig(
+    string(userLayoutDir / "default_edit_layout.json"))
 
   # Send no-trace message to switch to edit mode
   mainWindow.webContents.send "CODETRACER::no-trace", js{

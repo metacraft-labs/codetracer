@@ -684,6 +684,8 @@ proc reopenAuxiliaryPanels(data: Data) =
 proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
   ## Keep Monaco editor options and context keys aligned with the requested read-only flag.
   if data.ui.readOnly == readOnly:
+    if data.ui.mode == EditMode and not readOnly:
+      data.closeAuxiliaryPanels()
     return
   data.ui.readOnly = readOnly
   if readOnly:
@@ -1824,6 +1826,7 @@ proc onNoTrace(
   # Hide welcome screen if it's currently displayed
   if not data.ui.welcomeScreen.isNil:
     data.ui.welcomeScreen.resetView()
+    welcome_screen.clearIsoNimWelcomeScreen()
 
   for path in data.services.debugger.paths:
     data.services.search.pathsPrepared.add(fuzzysort.prepare(path))
@@ -1874,13 +1877,19 @@ proc onNoTrace(
   else:
     data.tryInitLayout()
 
-  # Set mode to EditMode directly - don't call switchToEdit() if coming from welcome screen
-  # because we just loaded the layout fresh and don't want to re-load or access stale components
-  if wasFromWelcomeScreen:
-    data.ui.mode = EditMode
-    data.setEditorsReadOnlyState(false)
-  else:
-    data.switchToEdit()
+  # Edit-mode startup has already loaded the edit layout. Avoid the generic
+  # switchToEdit path here because it clears live layout components and is
+  # meant for toggling an already-running debug session into edit mode.
+  data.ui.mode = EditMode
+  data.setEditorsReadOnlyState(false)
+
+  # The welcome/new-tab handoff can reuse already-mounted panel instances.
+  # Resync the panels against the freshly loaded edit-mode services so the
+  # Files and VCS panes reflect the selected folder immediately.
+  filesystem.refreshIsoNimFilesystemPanel()
+  for _, component in data.ui.componentMapping[Content.VCS]:
+    vcs.resetAndRefreshVCS(VCSComponent(component))
+    vcs.tryMountIsoNimVCSPanel(component.id)
 
   # Open the file AFTER layout is initialized. Folder edit mode has no
   # explicit path, so seed the editor from the indexed project files instead
@@ -2148,6 +2157,18 @@ proc onOpenTraceInTabReady*(sender: js, response: jsobject(traceId=int)) =
   # main process starts the replay backend for the new trace.
   data.ipc.send cstring"CODETRACER::load-recent-trace", js{traceId: traceId}
 
+proc onOpenEditFolderInTabReady*(
+    sender: js,
+    response: jsobject(folderPath=cstring)) =
+  ## Handler for the "tab" newTracePolicy.  When a second `ct edit <path>`
+  ## invocation delegates to the existing window, open a new session tab and
+  ## initialize it with the requested workspace folder.
+  clog "open-edit-folder-in-tab-ready: creating new session and loading folder " &
+    $response.folderPath
+  createNewSession(data)
+  data.ipc.send cstring"CODETRACER::init-edit-mode",
+    js{folder: response.folderPath}
+
 proc onTraceLoadError*(sender: js, response: jsobject(error=cstring)) =
   ## Handler for trace loading errors (e.g. from the Trace Macro action).
   ## Displays the error message to the user via the views API.
@@ -2325,6 +2346,7 @@ proc configureIPC(data: Data) =
 
     # Tab-vs-window policy: open a trace as a new tab in the current window
     "open-trace-in-tab-ready"
+    "open-edit-folder-in-tab-ready"
 
     # Trace macro (M11): error loading a .ct file from the langserver
     "trace-load-error"

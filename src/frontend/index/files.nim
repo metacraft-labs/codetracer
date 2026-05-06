@@ -44,6 +44,18 @@ proc stripLastChar(text: cstring, c: cstring): cstring =
   else:
     return text
 
+proc shouldSkipIndexedDirectory(path: cstring): bool =
+  let name = $nodePath.basename(path)
+  name in [".git", ".hg", ".svn", "node_modules", ".direnv", ".devenv",
+           "result", "dist", "build", "build-debug", "src/build-debug",
+           "test-results", "test-diagnostics", ".next", ".cache", "nimcache"]
+
+proc editFilesystemDepthLimit(selfContained: bool): int =
+  if selfContained:
+    int.high
+  else:
+    2
+
 proc loadFile(
     path: cstring,
     depth: int,
@@ -87,14 +99,13 @@ proc loadFile(
   let name = subParts[^1]
 
   if cast[bool](data.isDirectory()):
+    if not selfContained and shouldSkipIndexedDirectory(realPath):
+      return res
+
     try:
       # returning just the filenames, not full paths!
       let files = await cast[Future[seq[cstring]]](fsAsync.readdir(realPath))
-      let depthLimit =
-        if selfContained:
-          int.high
-        else:
-          subParts.len() - 2
+      let depthLimit = editFilesystemDepthLimit(selfContained)
       res = CodetracerFile(
         text: name,
         children: @[],
@@ -391,11 +402,6 @@ proc onOpenTab*(sender: js, response: js) {.async.} =
       mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangUnknown}
 
 var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
-
-proc shouldSkipIndexedDirectory(path: cstring): bool =
-  let name = $nodePath.basename(path)
-  name in [".git", ".hg", ".svn", "node_modules", ".direnv", ".devenv",
-           "result", "dist", "build", ".next", ".cache"]
 
 proc collectDirectoryFilenames(
     path: cstring,
