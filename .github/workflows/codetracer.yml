@@ -1172,6 +1172,117 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  visual-replay-regression-gate:
+    runs-on: [self-hosted, nixos]
+    timeout-minutes: 180
+    steps:
+      - name: Checkout CodeTracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Resolve codetracer-visual-replay ref
+        id: visual-replay-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          PINS=".github/sibling-pins"
+          if [[ ! -f "$PINS" ]]; then
+            echo "Missing $PINS" >&2
+            exit 1
+          fi
+          REF="$(awk '$1 == "codetracer-visual-replay" { print $2; exit }' "$PINS")"
+          if [[ -z "$REF" ]]; then
+            echo "Missing codetracer-visual-replay pin in $PINS" >&2
+            exit 1
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved codetracer-visual-replay ref: $REF"
+
+      - name: Clone codetracer-visual-replay
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-visual-replay
+          ref: ${{ steps.visual-replay-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-visual-replay
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Restore codetracer-visual-replay sibling pins
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+        run: |
+          set -euo pipefail
+          PINS="${{ github.workspace }}/../codetracer-visual-replay/.github/sibling-pins"
+          if [[ ! -f "$PINS" ]]; then
+            echo "Missing visual replay sibling pins: $PINS" >&2
+            exit 1
+          fi
+
+          for required in \
+            codetracer-native-backend \
+            codetracer-native-recorder \
+            codetracer-native-test-programs \
+            codetracer-visual-replay-fixtures; do
+            if ! awk -v repo="$required" '$1 == repo { found = 1 } END { exit found ? 0 : 1 }' "$PINS"; then
+              echo "Missing required visual replay sibling pin: $required" >&2
+              exit 1
+            fi
+          done
+
+          while IFS=' ' read -r name sha branch; do
+            [[ -z "$name" ]] && continue
+            dest="${{ github.workspace }}/../${name}"
+            echo "Restoring ${name}@${sha}"
+            rm -rf "$dest"
+            git clone --no-checkout --filter=blob:none \
+              "https://x-access-token:${TOKEN}@github.com/metacraft-labs/${name}.git" \
+              "$dest"
+            git -C "$dest" fetch --depth 1 origin "$sha"
+            git -C "$dest" checkout --detach "$sha"
+            echo "${name}: $(git -C "$dest" rev-parse HEAD)"
+            if [[ "$(git -C "$dest" rev-parse HEAD)" != "$sha" ]]; then
+              echo "${name} did not restore to pinned SHA ${sha}" >&2
+              exit 1
+            fi
+          done < "$PINS"
+
+      - name: Run visual replay regression gate
+        env:
+          CODETRACER_VISUAL_REPLAY_REPO_PATH: ${{ github.workspace }}/../codetracer-visual-replay
+          PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
+
+      - name: Upload visual replay artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: visual-replay-regression-artifacts
+          path: |
+            src/tests/gui/test-results/
+            src/tests/gui/playwright-report/
+            src/tests/gui/test-stats/
+            storybook/storybook-static/
+            storybook/dist/
+            ../codetracer-visual-replay/tests/output/
+            ../codetracer-visual-replay/bench-results/
+            /tmp/*_diff.rgba
+            /tmp/*_sw.rgba
+            /tmp/*_hw.rgba
+          retention-days: 14
+          if-no-files-found: ignore
+
   publish-pypi:
     needs:
       - build-python-packages

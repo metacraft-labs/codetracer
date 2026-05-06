@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { defineConfig } from "@playwright/test";
+import { defineConfig, type ReporterDescription } from "@playwright/test";
 
 /**
  * Resolve the Chromium executable for Playwright's browser fixtures.
@@ -64,6 +64,17 @@ function resolveChromiumExecutable(): string | undefined {
 }
 
 const chromiumExecutable = resolveChromiumExecutable();
+const reporters: ReporterDescription[] = [
+  [process.env.CI ? "github" : "list"],
+  ["./lib/stats-reporter.ts"],
+];
+
+if (process.env.CODETRACER_VISUAL_REPLAY_GATE_JSON) {
+  reporters.push([
+    "json",
+    { outputFile: process.env.CODETRACER_VISUAL_REPLAY_GATE_JSON },
+  ]);
+}
 
 export default defineConfig({
   fullyParallel: false,
@@ -77,10 +88,7 @@ export default defineConfig({
   // Tests involving trace recording override via test.setTimeout().
   timeout: 90_000,
   expect: { timeout: 30_000 },
-  reporter: [
-    [process.env.CI ? "github" : "list"],
-    ["./lib/stats-reporter.ts"],
-  ],
+  reporter: reporters,
   use: {
     actionTimeout: 60_000,
     trace: "on-first-retry",

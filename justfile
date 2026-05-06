@@ -167,6 +167,10 @@ test-gui-visible *args:
   esac
   just test-e2e {{args}}
 
+# Run the MCR visual replay regression gate used by CI.
+test-visual-replay-gate:
+  bash ci/test/visual-replay-gate.sh
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!
