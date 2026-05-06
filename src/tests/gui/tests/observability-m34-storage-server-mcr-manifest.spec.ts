@@ -110,6 +110,13 @@ type StorageHarnessReady = {
   selectedSegmentIndex: number;
 };
 
+type CorruptedPrimaryReplicas = {
+  primaryServerId: string;
+  secondaryServerId: string;
+  missingObjectKeys: string[];
+  secondaryObjectKeys: string[];
+};
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -376,6 +383,46 @@ function prepareStorageHarnessInput(): PreparedSplitMcr {
   };
 }
 
+function forceSelectedSegmentPrimaryReplicaMiss(
+  manifestPath: string,
+  selectedSegmentIndex: number,
+): CorruptedPrimaryReplicas {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const selectedSegment = manifest.source.segments.find(
+    (segment: any) => segment.index === selectedSegmentIndex,
+  );
+  if (!selectedSegment) {
+    throw new Error(`selected segment ${selectedSegmentIndex} missing from ${manifestPath}`);
+  }
+
+  const missingObjectKeys: string[] = [];
+  const secondaryObjectKeys: string[] = [];
+  let primaryServerId = "";
+  let secondaryServerId = "";
+
+  for (const shard of selectedSegment.shards) {
+    const primary = shard.replicas?.[0];
+    const secondary = shard.replicas?.[1];
+    if (!primary?.objectKey || !secondary?.objectKey) {
+      throw new Error("replica fallback acceptance requires two object-key replicas per selected shard");
+    }
+
+    if (!primaryServerId) primaryServerId = primary.storageServerId;
+    if (!secondaryServerId) secondaryServerId = secondary.storageServerId;
+    primary.objectKey = `${primary.objectKey}.missing-primary-replica`;
+    missingObjectKeys.push(primary.objectKey);
+    secondaryObjectKeys.push(secondary.objectKey);
+  }
+
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return {
+    primaryServerId,
+    secondaryServerId,
+    missingObjectKeys,
+    secondaryObjectKeys,
+  };
+}
+
 async function waitForOutput(
   output: string[],
   pattern: RegExp,
@@ -551,7 +598,7 @@ async function waitForVisibleEditorText(
 base.describe("Observability M34 storage-server MCR manifest browser acceptance", () => {
   base.describe.configure({ mode: "serial", timeout: 300_000 });
 
-  base("ct host --manifest loads sharded split MCR bytes from codetracer-ci local-storage endpoints", async ({}) => {
+  base("ct host --manifest falls back from missing primary shard replicas to secondary storage replicas", async ({}) => {
     expectRequiredFile("CodeTracer test binary", codetracerPath);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
     expectRequiredFile("real MCR request trace fixture", portableTracePath);
@@ -584,6 +631,14 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         expect(shard.replicas.map((replica: any) => replica.storageServerId))
           .toEqual(storageHarness.ready.serverIds);
       }
+      const fallbackSetup = forceSelectedSegmentPrimaryReplicaMiss(
+        storageHarness.ready.manifestPath,
+        prepared.selectedSegmentIndex,
+      );
+      expect(fallbackSetup.primaryServerId).toBe(storageHarness.ready.serverIds[0]);
+      expect(fallbackSetup.secondaryServerId).toBe(storageHarness.ready.serverIds[1]);
+      expect(fallbackSetup.missingObjectKeys.length).toBe(selectedSegment.shards.length);
+      expect(fallbackSetup.secondaryObjectKeys.length).toBe(selectedSegment.shards.length);
 
       fs.rmSync(prepared.rootDir, { recursive: true, force: true });
 
@@ -633,10 +688,21 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       );
       expect(importOutput).toContain("loaded local manifest:");
       expect(importOutput).toContain("fetching CTFS shard replica from storage:");
+      expect(importOutput).toContain("CTFS shard replica read failed; trying next replica:");
+      expect(importOutput).toContain("HTTP 404");
       expect(importOutput).toContain(storageHarness.ready.baseUrl);
       expect(importOutput).toContain(
         `/servers/${storageHarness.ready.serverIds[0]}/objects/`,
       );
+      expect(importOutput).toContain(
+        `/servers/${storageHarness.ready.serverIds[1]}/objects/`,
+      );
+      for (const missingObjectKey of fallbackSetup.missingObjectKeys) {
+        expect(importOutput).toContain(encodeURIComponent(missingObjectKey));
+      }
+      for (const secondaryObjectKey of fallbackSetup.secondaryObjectKeys) {
+        expect(importOutput).toContain(encodeURIComponent(secondaryObjectKey));
+      }
       expect(importOutput).toContain("fetching storage support file inventory_smoke.c from storage:");
       expect(importOutput).toContain("fetching storage support file inventory-response.json from storage:");
 

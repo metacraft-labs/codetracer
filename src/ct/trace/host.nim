@@ -655,6 +655,7 @@ proc importShardedSegment(
         break
       except CatchableError as e:
         lastError = e.msg
+        echo "ct host: CTFS shard replica read failed; trying next replica: ", lastError
     if not read:
       raise newException(ValueError, "no readable CTFS shard replica: " & lastError)
 
