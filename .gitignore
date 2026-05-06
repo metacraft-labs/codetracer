@@ -19,6 +19,7 @@ gem_home/
 
 # wasm binaries
 *.wasm
+*.webp
 # object files
 *.o
 # MSVC build artifacts
