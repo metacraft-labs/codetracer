@@ -46,6 +46,20 @@ const rubyFlowTraceFixture = path.join(
   "ruby",
   "flow_test",
 );
+const javascriptFlowTraceFixture = path.join(
+  codetracerInstallDir,
+  "examples",
+  "recordings",
+  "javascript",
+  "flow_test",
+);
+const javascriptFlowSourceFixture = path.join(
+  javascriptFlowTraceFixture,
+  "files",
+  "tmp",
+  "ct-example-recordings-build",
+  "javascript_flow_test.js",
+);
 const rubyFlowSourcePayload = path.join(
   rubyFlowTraceFixture,
   "files",
@@ -108,6 +122,27 @@ const rubyFlowFixture: MaterializedFlowFixture = {
   traceId: "m29-ruby-materialized-flow",
   spanId: "30000000000029bb",
   momentId: "m29-ruby-flow-calculate-sum",
+};
+
+const javascriptFlowFixture: MaterializedFlowFixture = {
+  label: "JavaScript",
+  objectName: "javascript-flow",
+  traceDir: javascriptFlowTraceFixture,
+  traceFileName: "trace.json",
+  sourcePath: javascriptFlowSourceFixture,
+  sourceFileName: "javascript_flow_test.js",
+  requiredSourceSnippets: ["function calculate_sum", "var sum_val"],
+  calltraceFunction: "calculate_sum",
+  expectedCallArgs: {
+    a: "10",
+    b: "32",
+  },
+  eventText: "Result: 94",
+  terminalText: "Result: 94",
+  programFragment: "javascript_flow_test.js",
+  traceId: "m29-javascript-materialized-flow",
+  spanId: "30000000000029cc",
+  momentId: "m29-javascript-flow-calculate-sum",
 };
 
 const maxConnectAttempts = 25;
@@ -425,7 +460,11 @@ async function verifyMaterializedTraceDetails(
 base.describe("Observability M29 local materialized manifest browser acceptance", () => {
   base.describe.configure({ mode: "serial", timeout: 180_000 });
 
-  for (const fixture of [pythonFlowFixture, rubyFlowFixture]) {
+  for (const fixture of [
+    pythonFlowFixture,
+    rubyFlowFixture,
+    javascriptFlowFixture,
+  ]) {
     base(`ct host --manifest loads a local ${fixture.label} materialized trace folder`, async ({}) => {
       expectRequiredPath("CodeTracer test binary", codetracerPath);
       expectRequiredPath(
@@ -515,8 +554,9 @@ base.describe("Observability M29 local materialized manifest browser acceptance"
         );
         console.log(`# source model sample:\n${sourceText.slice(0, 2000)}`);
 
-        expect(sourceText).toContain("calculate_sum");
-        expect(sourceText).toContain("sum_with_while");
+        for (const snippet of fixture.requiredSourceSnippets) {
+          expect(sourceText).toContain(snippet);
+        }
         expect(traceMetadata.id).toBeGreaterThan(0);
         expect(traceMetadata.program).toContain(fixture.programFragment);
         expect(traceMetadata.outputFolder).toContain("trace-");

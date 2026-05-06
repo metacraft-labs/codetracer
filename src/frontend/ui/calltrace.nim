@@ -377,8 +377,16 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   if calltraceVMStore.isNil:
     cerror "[PIPELINE] syncCalltraceData: store is nil, returning early"
     return
+
+  proc hasRenderableCall(callLine: CallLine): bool =
+    not callLine.isNil and
+      not callLine.content.isNil and
+      not callLine.content.call.isNil
+
   var vmLines: seq[vm_types.CallLine] = @[]
   for i, callLine in results.callLines:
+    if not hasRenderableCall(callLine):
+      continue
     let call = callLine.content.call
     let loc = call.location
     # Determine children count and expand state matching the legacy call-line
@@ -431,20 +439,54 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   #
   # We collect both and feed the merged table into the store; rows
   # without args entries simply render no ``.call-arg`` children.
+  proc safeCallArgText(arg: CallArg): string =
+    if arg.isNil:
+      return ""
+    if ($arg.text).len > 0:
+      return $arg.text
+    if arg.value.isNil:
+      return ""
+    case arg.value.kind:
+    of Int:
+      $arg.value.i
+    of Float:
+      $arg.value.f
+    of String:
+      "\"" & $arg.value.text & "\""
+    of CString:
+      "\"" & $arg.value.cText & "\""
+    of Char:
+      "'" & $arg.value.c & "'"
+    of Bool:
+      $arg.value.b
+    of Raw:
+      $arg.value.r
+    of Error:
+      $arg.value.msg
+    of FunctionKind:
+      if ($arg.value.functionLabel).len > 0:
+        "function<" & $arg.value.functionLabel & ">"
+      else:
+        "function"
+    of TypeKind.None:
+      "nil"
+    else:
+      ""
+
   proc convertCallArgs(args: seq[CallArg]): seq[vm_types.CallArg] =
     result = @[]
     for arg in args:
-      # ``arg.value.textRepr`` mirrors the old call-argument text node.
-      # Pre-rendering the text
-      # here keeps the view layer pure and avoids re-evaluating the
-      # ``Value`` type tree on every reactive update.
-      let rendered = $arg.value.textRepr
+      # Pre-rendering the text here keeps the view layer pure and avoids
+      # re-evaluating recursive ``Value`` trees on every reactive update.
+      let rendered = safeCallArgText(arg)
       result.add(makeCallArg($arg.name, rendered))
 
   var vmArgs = initTable[string, seq[vm_types.CallArg]]()
   for key, callArgs in results.args:
     vmArgs[$key] = convertCallArgs(callArgs)
   for callLine in results.callLines:
+    if callLine.isNil or callLine.content.isNil:
+      continue
     let call = callLine.content.call
     if call.isNil:
       continue
