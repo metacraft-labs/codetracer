@@ -758,6 +758,22 @@ async function waitForOutput(
   }
 }
 
+async function waitForReplayProblem(
+  output: string[],
+  timeoutMs = 60_000,
+): Promise<any> {
+  const captured = await waitForOutput(
+    output,
+    /CODETRACER_REPLAY_AGENT_PROBLEM\s+({.+})/,
+    timeoutMs,
+  );
+  const match = captured.match(/CODETRACER_REPLAY_AGENT_PROBLEM\s+({.+})/);
+  if (!match) {
+    throw new Error(`replay problem payload missing:\n${captured}`);
+  }
+  return JSON.parse(match[1]).problem;
+}
+
 async function waitFor(
   label: string,
   action: () => Promise<unknown>,
@@ -844,6 +860,7 @@ async function startDebugSessionHarness(
       "run",
       "--project",
       storageHarnessProject,
+      "-p:NuGetAudit=false",
       "--",
       "storage-server-debug-session",
       inputPath,
@@ -1139,6 +1156,7 @@ function generateReplayAgentCommand(payload: any, rootDir: string): string {
       "run",
       "--project",
       replayAgentProject,
+      "-p:NuGetAudit=false",
       "--",
       "print-runner-command",
       payloadPath,
@@ -3117,6 +3135,81 @@ function startRetentionProblemBridge(options: {
   return server;
 }
 
+function startStorageFailureProblemBridge(options: {
+  ready: DebugSessionReplayReady;
+  runnerRoot: string;
+  port: number;
+  events: string[];
+  launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; problem: any }>;
+}): http.Server {
+  const server = http.createServer(async (request, response) => {
+    try {
+      const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host}`);
+      options.events.push(`request ${request.method ?? "GET"} ${requestUrl.pathname}${requestUrl.search}`);
+      if (requestUrl.pathname !== "/observability/v0/debug-session") {
+        response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        response.end("not found");
+        return;
+      }
+
+      const hostOutput: string[] = [];
+      const shimDir = createCtPathShim(options.runnerRoot);
+      const entrypointPath = path.join(
+        codetracerCiDir,
+        "resources",
+        "docker",
+        "codetracer-runner",
+        "replay-entrypoint.sh",
+      );
+      const payloadPath = path.join(options.runnerRoot, "replay-provisioning-requested.json");
+      fs.writeFileSync(payloadPath, JSON.stringify(options.ready.replayPayload, null, 2));
+      const ctProcess = childProcess.spawn(
+        "direnv",
+        [
+          "exec",
+          codetracerCiDir,
+          "dotnet",
+          "run",
+          "--project",
+          replayAgentProject,
+          "-p:NuGetAudit=false",
+          "--",
+          "run-host-entrypoint-problem",
+          payloadPath,
+          options.runnerRoot,
+          codetracerInstallDir,
+          entrypointPath,
+          shimDir,
+        ],
+        {
+          cwd: codetracerCiDir,
+          env: makeCleanEnv(),
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
+      ctProcess.stdout?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      ctProcess.stderr?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      const problem = await waitForReplayProblem(hostOutput, 120_000);
+      options.launches.push({ ctProcess, hostOutput, problem });
+      options.events.push(`problem ${problem.status ?? ""} ${problem.code ?? ""}`);
+      response.writeHead(Number(problem.status ?? 424), {
+        "content-type": "application/problem+json; charset=utf-8",
+      });
+      response.end(JSON.stringify(problem));
+    } catch (error) {
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      response.end(error instanceof Error ? error.stack : String(error));
+    }
+  });
+  server.listen(options.port, "127.0.0.1");
+  return server;
+}
+
 function retentionCaseAsPlatformReady(
   ready: RetentionGapReady,
   testcase: RetentionGapCase,
@@ -3780,6 +3873,180 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
     }
   });
 
+  base("M37 unrecoverable storage failure surfaces structured problem through ReplayAgent path", async ({ page }) => {
+    base.setTimeout(420_000);
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+
+    const prepared = prepareStorageHarnessInput();
+    let debugHarness: Awaited<ReturnType<typeof startDebugSessionHarness>> | null = null;
+    let bridge: http.Server | null = null;
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m37-storage-failure-problem-"),
+    );
+    const bridgeEvents: string[] = [];
+    const launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; problem: any }> = [];
+
+    try {
+      debugHarness = await startDebugSessionHarness(prepared.inputPath);
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      expect(debugHarness.ready.debugSession.status).toBe("Provisioning");
+      expect(debugHarness.ready.serverIds.length).toBe(2);
+      const primaryServerId = debugHarness.ready.serverIds[0];
+      const secondaryServerId = debugHarness.ready.serverIds[1];
+      const selectedReplaySegment =
+        debugHarness.ready.replayPayload.traceSource.shardedMcrSegments[0];
+      expect(selectedReplaySegment).toBeTruthy();
+      expect(selectedReplaySegment.shards.length).toBeGreaterThanOrEqual(2);
+
+      const replicaObjectKeysByServer = new Map<string, string[]>();
+      const firstShard = selectedReplaySegment.shards[0];
+      expect(firstShard.replicas.length).toBe(2);
+      for (const replica of firstShard.replicas) {
+        const keys = replicaObjectKeysByServer.get(replica.storageServerId) ?? [];
+        keys.push(replica.objectKey);
+        replicaObjectKeysByServer.set(replica.storageServerId, keys);
+      }
+      expect(replicaObjectKeysByServer.get(primaryServerId)?.length).toBe(
+        1,
+      );
+      expect(replicaObjectKeysByServer.get(secondaryServerId)?.length).toBe(
+        1,
+      );
+
+      await setStorageServerHealth(debugHarness.ready, primaryServerId, "unavailable");
+      await setStorageServerHealth(debugHarness.ready, secondaryServerId, "unavailable");
+
+      const bridgePort = await getFreeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      bridge = startStorageFailureProblemBridge({
+        ready: debugHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        events: bridgeEvents,
+        launches,
+      });
+
+      const debugParams = new URLSearchParams({
+        tenant_id: debugHarness.ready.tenantId,
+        "service.name": "inventory",
+        trace_id: debugHarness.ready.replayPayload.initialPosition.traceId,
+        span_id: debugHarness.ready.replayPayload.initialPosition.spanId,
+        "ct.mcr.wall_time_unix_ns": String(debugHarness.ready.replayPayload.initialPosition.wallTimeUnixNs),
+        "ct.mcr.monotonic_time_ns": String(debugHarness.ready.replayPayload.initialPosition.monotonicTimeNs),
+        time_window_ns: "1000000000",
+      });
+      const problemResponse = await page.goto(
+        `${bridgeBaseUrl}/observability/v0/debug-session?${debugParams.toString()}`,
+        {
+          waitUntil: "domcontentloaded",
+          timeout: 120_000,
+        },
+      );
+      expect(problemResponse?.status()).toBe(424);
+      expect(problemResponse?.headers()["content-type"] ?? "").toContain(
+        "application/problem+json",
+      );
+      expect(problemResponse?.headers()["location"] ?? "").toBe("");
+      const bodyText = await page.locator("body").innerText();
+      expect(bodyText).toContain("storage_failure");
+      expect(bodyText).toContain("Replay storage objects could not be read");
+
+      await waitFor(
+        "storage failure bridge to record structured problem",
+        async () => {
+          if (launches.length !== 1) {
+            throw new Error(`expected one failed launch, got ${launches.length}`);
+          }
+        },
+        120_000,
+      );
+      const failedLaunch = launches[0];
+      expect(failedLaunch.problem.code).toBe("storage_failure");
+      expect(failedLaunch.problem.status).toBe(424);
+      const hostOutputText = failedLaunch.hostOutput.join("");
+      expect(hostOutputText).toContain("Starting host from generated replay manifest");
+      expect(hostOutputText).toContain("CODETRACER_REPLAY_PROBLEM");
+      expect(hostOutputText).toContain("no readable CTFS shard replica");
+      expect(hostOutputText).not.toContain("imported manifest trace as trace id");
+      for (const [serverId, objectKeys] of replicaObjectKeysByServer) {
+        expect(hostOutputText).toContain(`/servers/${serverId}/objects/`);
+        for (const objectKey of objectKeys) {
+          expect(hostOutputText).toContain(encodeURIComponent(objectKey));
+        }
+      }
+
+      await waitFor(
+        "storage policy audit to record all failed replica reads",
+        async () => {
+          const audit = await fetchStoragePolicyAudit(debugHarness!.ready);
+          for (const serverId of [primaryServerId, secondaryServerId]) {
+            expect(
+              audit.some(
+                (event) =>
+                  event.eventType === "local_storage.server_health_updated" &&
+                  event.details?.serverId === serverId &&
+                  event.details?.healthStatus === "unavailable",
+              ),
+            ).toBe(true);
+            for (const objectKey of replicaObjectKeysByServer.get(serverId) ?? []) {
+              expect(
+                audit.some(
+                  (event) =>
+                    event.eventType === "local_storage.object_read_unavailable" &&
+                    event.details?.serverId === serverId &&
+                    event.details?.objectKey === objectKey,
+                ),
+              ).toBe(true);
+            }
+          }
+        },
+        30_000,
+      );
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-storage-failure-problem.json"),
+          JSON.stringify(failedLaunch.problem, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-storage-failure-host-output.log"),
+          hostOutputText,
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-storage-failure-bridge-events.log"),
+          bridgeEvents.join("\n"),
+        );
+      }
+    } finally {
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      if (debugHarness?.process.pid) {
+        killProcessTree(debugHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
   base("M37 first slice returns structured retention and missing-data problems for MCR and materialized traces", async ({ page }) => {
     base.setTimeout(420_000);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
@@ -4427,7 +4694,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await ingestJaegerSpan(jaegerOtlpPort, platformHarness.ready, debugUrl);
       await waitFor(
         "Jaeger trace ingestion",
-        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${platformHarness.ready.traceId}`),
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${platformHarness!.ready.traceId}`),
         60_000,
       );
 

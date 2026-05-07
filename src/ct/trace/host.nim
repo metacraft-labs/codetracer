@@ -20,6 +20,7 @@ const
   DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1_000
   IDLE_TIMEOUT_DISABLED = -1
   LOCAL_STORAGE_PROTOCOL = "local-storage"
+  REPLAY_PROBLEM_MARKER = "CODETRACER_REPLAY_PROBLEM"
 
 type
   IdleTimeoutResult* = object
@@ -51,6 +52,32 @@ proc okResult(value: int): IdleTimeoutResult =
 
 proc errResult(message: string): IdleTimeoutResult =
   IdleTimeoutResult(ok: false, value: 0, error: message)
+
+proc isStorageFailureMessage(message: string): bool =
+  ## Keep this classifier aligned with the local-storage CTFS read errors below.
+  ## ReplayAgent treats REPLAY_PROBLEM_MARKER as the stable bridge contract; this
+  ## text classifier is a narrow fallback until ct host carries typed failures.
+  let lower = message.toLowerAscii()
+  lower.contains("storage read failed") or
+    lower.contains("storage protocol error") or
+    lower.contains("no readable ctfs shard replica")
+
+proc replayProblemJson(code, title, detail: string): string =
+  $(%*{
+    "type": "about:blank",
+    "title": title,
+    "status": 424,
+    "detail": detail,
+    "code": code
+  })
+
+proc emitReplayProblemForHostFailure(message: string) =
+  if isStorageFailureMessage(message):
+    echo REPLAY_PROBLEM_MARKER, " ", replayProblemJson(
+      "storage_failure",
+      "Storage failure",
+      "Replay storage objects could not be read from any available replica.")
+    flushFile(stdout)
 
 proc parseIdleTimeoutMs*(raw: string): IdleTimeoutResult =
   ## Parse a human-friendly duration string into milliseconds.
@@ -957,6 +984,7 @@ proc hostCommand*(
       echo "ct host: imported manifest trace as trace id ", traceId
       flushFile(stdout)
     except CatchableError as e:
+      emitReplayProblemForHostFailure(e.msg)
       echo "ct host: error: failed to load local manifest: ", e.msg
       quit(1)
   elif tracePath.len > 0:
