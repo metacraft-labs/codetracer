@@ -257,6 +257,8 @@ type RetentionGapCase = {
   timeWindowNs: string;
   expectedStatus: number;
   expectedCode: "retention_gap" | "missing_data" | "policy_denied";
+  language?: string;
+  requestKey?: string;
   browserPath: string;
 };
 
@@ -2098,6 +2100,63 @@ async function runMaterializedCtObserveAgainstTempo(
   return row;
 }
 
+async function runMaterializedCtObserveAgainstGrafanaTempo(
+  rootDir: string,
+  grafanaBaseUrl: string,
+  ready: MaterializedPlatformLinkReady,
+  linkReady: MaterializedPlatformLink,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const fromSec = String((BigInt(linkReady.wallTimeUnixNs) - 60_000_000_000n) / 1_000_000_000n);
+  const toSec = String((BigInt(linkReady.wallTimeUnixNs) + 60_000_000_000n) / 1_000_000_000n);
+  const output = childProcess.execFileSync(
+    ctObserveBin(),
+    [
+      "extract",
+      "--backend=grafana-tempo",
+      `--grafana-url=${grafanaBaseUrl}`,
+      "--datasource-uid=codetracer-tempo",
+      "--grafana-basic-user=admin",
+      "--grafana-basic-password=admin",
+      `--from=${fromSec}`,
+      `--to=${toSec}`,
+      `--traceql={ trace:id = "${linkReady.traceId}" }`,
+      "--limit=10",
+      "--page-duration-sec=120",
+      "--request-key-attribute=request.id",
+      "--format=jsonl",
+    ],
+    {
+      cwd: rootDir,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  const rows = output
+    .split(/\n/)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+  const row = rows.find(
+    (candidate) =>
+      candidate.platform === "grafana-tempo" &&
+      candidate.request_key === linkReady.requestKey &&
+      debugSessionUrlMatchesMaterializedLink(
+        String(candidate.codetracer_debug_session_url ?? ""),
+        ready,
+        linkReady,
+      ),
+  );
+  if (!row) {
+    throw new Error(`ct-observe did not return M37 materialized Grafana Tempo row:\n${output}`);
+  }
+  fs.writeFileSync(
+    path.join(rootDir, `ct-observe-live-grafana-tempo-${linkReady.language}-rows.jsonl`),
+    output,
+  );
+  return row;
+}
+
 async function runMaterializedCtObserveLaunchAgainstTempo(
   rootDir: string,
   tempoBaseUrl: string,
@@ -2383,6 +2442,58 @@ async function runCtObserveDeniedLaunchAgainstJaeger(
   const launch = JSON.parse(output.stdout);
   expect(launch.http_status).toBe(403);
   expect(launch.problem?.code).toBe("policy_denied");
+  expect(launch.selected_row?.trace_id).toBe(ready.traceId);
+  expect(launch.selected_row?.span_id).toBe(ready.spanId);
+  expect(launch.redirect_url ?? "").toBe("");
+  return launch;
+}
+
+async function runCtObserveDeniedLaunchAgainstGrafanaTempo(
+  grafanaBaseUrl: string,
+  ready: PlatformLinkReady,
+  requestKey?: string,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const fromSec = String((BigInt(ready.wallTimeUnixNs) - 60_000_000_000n) / 1_000_000_000n);
+  const toSec = String((BigInt(ready.wallTimeUnixNs) + 60_000_000_000n) / 1_000_000_000n);
+  const output = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+    childProcess.execFile(
+      ctObserveBin(),
+      [
+        "launch",
+        "--backend=grafana-tempo",
+        `--grafana-url=${grafanaBaseUrl}`,
+        "--datasource-uid=codetracer-tempo",
+        "--grafana-basic-user=admin",
+        "--grafana-basic-password=admin",
+        `--from=${fromSec}`,
+        `--to=${toSec}`,
+        `--traceql={ trace:id = "${ready.traceId}" }`,
+        "--limit=10",
+        "--page-duration-sec=120",
+        "--request-key-attribute=request.id",
+        `--span-id=${ready.spanId}`,
+        ...(requestKey ? [`--request-key=${requestKey}`] : []),
+        "--launch-timeout-ms=300000",
+      ],
+      {
+        encoding: "utf-8",
+        windowsHide: true,
+      },
+      (error: any, stdout, stderr) => {
+        resolve({ stdout, stderr, code: error?.code ?? 0 });
+      },
+    );
+  });
+  expect(output.code, `ct-observe Grafana Tempo launch stderr:\n${output.stderr}`).not.toBe(0);
+  expect(
+    output.stdout.trim().length,
+    `ct-observe Grafana Tempo launch stdout was empty; stderr:\n${output.stderr}`,
+  ).toBeGreaterThan(0);
+  const launch = JSON.parse(output.stdout);
+  expect(launch.http_status).toBe(403);
+  expect(launch.problem?.code).toBe("policy_denied");
+  expect(launch.selected_row?.platform).toBe("grafana-tempo");
   expect(launch.selected_row?.trace_id).toBe(ready.traceId);
   expect(launch.selected_row?.span_id).toBe(ready.spanId);
   expect(launch.redirect_url ?? "").toBe("");
@@ -3021,6 +3132,27 @@ function retentionCaseAsPlatformReady(
     monotonicTimeNs: testcase.monotonicTimeNs,
     timeWindowNs: testcase.timeWindowNs,
     selectedSegmentIndex: 0,
+  };
+}
+
+function retentionCaseAsMaterializedLink(
+  testcase: RetentionGapCase,
+  fixture: MaterializedFlowFixture,
+): MaterializedPlatformLink {
+  return {
+    language: fixture.language,
+    label: fixture.label,
+    serviceName: testcase.serviceName,
+    operationName: fixture.operationName,
+    traceId: testcase.traceId,
+    spanId: testcase.spanId,
+    momentId: fixture.momentId,
+    requestKey: testcase.requestKey ?? fixture.requestKey,
+    wallTimeUnixNs: testcase.wallTimeUnixNs,
+    monotonicTimeNs: testcase.monotonicTimeNs,
+    timeWindowNs: testcase.timeWindowNs,
+    manifestPath: "",
+    materializedArtifactKey: "",
   };
 }
 
@@ -3818,12 +3950,13 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
     }
   });
 
-  base("M37 policy_denied is surfaced through Jaeger UI and ct-observe launch for MCR and materialized traces", async ({ page }) => {
+  base("M37 policy_denied is surfaced through Jaeger Grafana Tempo and ct-observe for MCR and materialized traces", async ({ page }) => {
     base.setTimeout(420_000);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
     expectRequiredFile("ct-observe binary", ctObserveBin());
     expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
-    for (const fixture of materializedFixtures.slice(0, 1)) {
+    expectRequiredFile("Grafana Tempo provisioning output", grafanaPluginOutPath());
+    for (const fixture of materializedFixtures) {
       expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
       expectRequiredFile(
         `${fixture.label} materialized ${fixture.traceFileName}`,
@@ -3842,6 +3975,8 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
     );
     let policyHarness: Awaited<ReturnType<typeof startPolicyDeniedHarness>> | null = null;
     let jaegerProcess: childProcess.ChildProcess | null = null;
+    let tempoProcess: childProcess.ChildProcess | null = null;
+    let grafanaProcess: childProcess.ChildProcess | null = null;
     let bridge: http.Server | null = null;
     const bridgeEvents: string[] = [];
 
@@ -3849,18 +3984,24 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       policyHarness = await startPolicyDeniedHarness(prepared.inputPath);
       fs.rmSync(prepared.rootDir, { recursive: true, force: true });
       expect(policyHarness.ready.replayProvisioningMessageCount).toBe(0);
-      expect(policyHarness.ready.cases.length).toBeGreaterThanOrEqual(2);
+      expect(policyHarness.ready.cases.length).toBeGreaterThanOrEqual(
+        1 + materializedFixtures.length,
+      );
 
       const policyCases = policyHarness.ready.cases.filter(
         (testcase) => testcase.expectedCode === "policy_denied",
       );
-      expect(policyCases.length).toBeGreaterThanOrEqual(2);
+      expect(policyCases.length).toBe(1 + materializedFixtures.length);
       const mcrCase = policyCases.find((testcase) => testcase.name === "mcr-policy-denied");
-      const materializedCase = policyCases.find((testcase) =>
-        testcase.name.endsWith("-materialized-policy-denied"),
-      );
+      const materializedCases = materializedFixtures.map((fixture) => {
+        const testcase = policyCases.find(
+          (candidate) => candidate.name === `${fixture.language}-materialized-policy-denied`,
+        );
+        expect(testcase, `${fixture.label} policy_denied case`).toBeTruthy();
+        expect(testcase?.requestKey).toBe(fixture.requestKey);
+        return { fixture, testcase: testcase! };
+      });
       expect(mcrCase).toBeTruthy();
-      expect(materializedCase).toBeTruthy();
 
       const bridgePort = await getFreeTcpPort();
       const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -3872,7 +4013,13 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
 
       const jaegerUiPort = await getFreeTcpPort();
       const jaegerOtlpPort = await getFreeTcpPort();
+      const tempoHttpPort = await freeTcpPort();
+      const tempoGrpcPort = await freeTcpPort();
+      const tempoOtlpPort = await freeTcpPort();
+      const grafanaPort = await freeTcpPort();
       const jaegerBaseUrl = `http://127.0.0.1:${jaegerUiPort}`;
+      const tempoBaseUrl = `http://127.0.0.1:${tempoHttpPort}`;
+      const grafanaBaseUrl = `http://127.0.0.1:${grafanaPort}`;
       const renderedJaegerUiConfigPath = renderJaegerUiConfigForDebugBase(
         runnerRoot,
         bridgeBaseUrl,
@@ -3888,42 +4035,162 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/services`),
         120_000,
       );
+      tempoProcess = await startTempoServer(
+        runnerRoot,
+        tempoHttpPort,
+        tempoGrpcPort,
+        tempoOtlpPort,
+        tempoBaseUrl,
+      );
+      const renderedGrafanaDir = renderGrafanaProvisioningForM36(
+        runnerRoot,
+        bridgeBaseUrl,
+        tempoBaseUrl,
+      );
+      grafanaProcess = await startGrafanaServer(
+        runnerRoot,
+        grafanaPort,
+        renderedGrafanaDir,
+        grafanaBaseUrl,
+      );
+      const correlations = await fetchJsonFromUrl(
+        `${grafanaBaseUrl}/api/datasources/correlations?sourceUID=codetracer-tempo`,
+      );
+      expect(correlations.totalCount).toBe(1);
+      expect(correlations.correlations[0].label).toBe("Debug in CodeTracer");
 
+      const materializedReady: MaterializedPlatformLinkReady = {
+        baseUrl: policyHarness.ready.baseUrl,
+        tenantId: policyHarness.ready.tenantId,
+        callerToken: policyHarness.ready.callerToken,
+        replayToken: "",
+        serverIds: policyHarness.ready.serverIds,
+        links: materializedCases.map(({ fixture, testcase }) =>
+          retentionCaseAsMaterializedLink(testcase, fixture),
+        ),
+      };
       const checkedLaunches: any[] = [];
-      for (const testcase of [mcrCase!, materializedCase!]) {
-        const ready = retentionCaseAsPlatformReady(policyHarness.ready, testcase);
-        const debugUrl = `${bridgeBaseUrl}${testcase.browserPath}`;
-        await ingestJaegerSpan(
-          jaegerOtlpPort,
-          ready,
-          debugUrl,
-          `m37-${testcase.name}`,
+      const checkedRows: any[] = [];
+      const checkedGrafanaRows: any[] = [];
+      const checkedGrafanaLaunches: any[] = [];
+      const mcrReady = retentionCaseAsPlatformReady(policyHarness.ready, mcrCase!);
+      const mcrDebugUrl = `${bridgeBaseUrl}${mcrCase!.browserPath}`;
+      await ingestJaegerSpan(
+        jaegerOtlpPort,
+        mcrReady,
+        mcrDebugUrl,
+        `m37-${mcrCase!.name}`,
+      );
+      await ingestTempoSpan(tempoOtlpPort, mcrReady, mcrDebugUrl);
+      for (const { fixture, testcase } of materializedCases) {
+        const linkReady = retentionCaseAsMaterializedLink(testcase, fixture);
+        const debugUrl = materializedDebugUrl(
+          bridgeBaseUrl,
+          materializedReady,
+          linkReady,
         );
+        expect(debugUrl).toBe(`${bridgeBaseUrl}${testcase.browserPath}`);
+        await ingestMaterializedJaegerSpan(
+          jaegerOtlpPort,
+          materializedReady,
+          linkReady,
+          debugUrl,
+        );
+        await ingestMaterializedTempoSpan(
+          tempoOtlpPort,
+          materializedReady,
+          linkReady,
+          debugUrl,
+        );
+      }
+
+      for (const testcase of policyCases) {
         await waitFor(
           `Jaeger ${testcase.name} policy_denied trace ingestion`,
           async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${testcase.traceId}`),
           60_000,
         );
+        await waitFor(
+          `Tempo ${testcase.name} policy_denied trace ingestion`,
+          async () => fetchJsonFromUrl(`${tempoBaseUrl}/api/traces/${testcase.traceId}`),
+          60_000,
+        );
+      }
 
-        const cliRow = await runCtObserveAgainstJaeger(jaegerBaseUrl, ready);
+      const mcrJaegerRow = await runCtObserveAgainstJaeger(jaegerBaseUrl, mcrReady);
+      expect(mcrJaegerRow.codetracer_debug_session_url).toBe(mcrDebugUrl);
+      expect(mcrJaegerRow.recording_available).toBe(true);
+      checkedRows.push(mcrJaegerRow);
+      const mcrGrafanaRow = await runCtObserveAgainstGrafanaTempo(
+        runnerRoot,
+        grafanaBaseUrl,
+        mcrReady,
+      );
+      expect(mcrGrafanaRow.codetracer_debug_session_url).toBe(mcrDebugUrl);
+      expect(mcrGrafanaRow.recording_available).toBe(true);
+      checkedGrafanaRows.push(mcrGrafanaRow);
+
+      const mcrJaegerLaunchJson = await runCtObserveDeniedLaunchAgainstJaeger(
+        jaegerBaseUrl,
+        mcrReady,
+      );
+      expect(mcrJaegerLaunchJson.debug_session_url).toBe(mcrDebugUrl);
+      checkedLaunches.push(mcrJaegerLaunchJson);
+      const mcrGrafanaLaunchJson = await runCtObserveDeniedLaunchAgainstGrafanaTempo(
+        grafanaBaseUrl,
+        mcrReady,
+        "m25-real-mcr-request-001",
+      );
+      expect(mcrGrafanaLaunchJson.debug_session_url).toBe(mcrDebugUrl);
+      checkedGrafanaLaunches.push(mcrGrafanaLaunchJson);
+
+      for (const { fixture, testcase } of materializedCases) {
+        const ready = retentionCaseAsPlatformReady(policyHarness.ready, testcase);
+        const linkReady = retentionCaseAsMaterializedLink(testcase, fixture);
+        const debugUrl = materializedDebugUrl(
+          bridgeBaseUrl,
+          materializedReady,
+          linkReady,
+        );
+
+        const cliRow = await runMaterializedCtObserveAgainstJaeger(
+          jaegerBaseUrl,
+          linkReady,
+        );
         expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
         expect(cliRow.recording_available).toBe(true);
-
-        const launchJson = await runCtObserveDeniedLaunchAgainstJaeger(
-          jaegerBaseUrl,
-          ready,
+        expect(cliRow.request_key).toBe(fixture.requestKey);
+        checkedRows.push(cliRow);
+        const grafanaCliRow = await runMaterializedCtObserveAgainstGrafanaTempo(
+          runnerRoot,
+          grafanaBaseUrl,
+          materializedReady,
+          linkReady,
         );
+        expect(grafanaCliRow.codetracer_debug_session_url).toBe(debugUrl);
+        expect(grafanaCliRow.recording_available).toBe(true);
+        expect(grafanaCliRow.request_key).toBe(fixture.requestKey);
+        checkedGrafanaRows.push(grafanaCliRow);
+
+        const launchJson = await runCtObserveDeniedLaunchAgainstJaeger(jaegerBaseUrl, ready);
         expect(launchJson.debug_session_url).toBe(debugUrl);
         checkedLaunches.push(launchJson);
+        const grafanaLaunchJson = await runCtObserveDeniedLaunchAgainstGrafanaTempo(
+          grafanaBaseUrl,
+          ready,
+          fixture.requestKey,
+        );
+        expect(grafanaLaunchJson.debug_session_url).toBe(debugUrl);
+        checkedGrafanaLaunches.push(grafanaLaunchJson);
 
         await page.goto(`${jaegerBaseUrl}/trace/${testcase.traceId}`, {
           waitUntil: "domcontentloaded",
           timeout: 60_000,
         });
-        await page.getByText("GET /reserve").first().waitFor({ timeout: 60_000 });
+        await page.getByText(linkReady.operationName).first().waitFor({ timeout: 60_000 });
         await page
           .getByRole("switch", {
-            name: new RegExp(`${escapeRegExp(testcase.serviceName)}.*GET /reserve`),
+            name: new RegExp(`${escapeRegExp(testcase.serviceName)}.*${escapeRegExp(linkReady.operationName)}`),
           })
           .click();
         await page.getByRole("switch", { name: /Tags/ }).click();
@@ -3946,6 +4213,91 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         }
       }
 
+      await page.goto(`${jaegerBaseUrl}/trace/${mcrCase!.traceId}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      await page.getByText("GET /reserve").first().waitFor({ timeout: 60_000 });
+      await page
+        .getByRole("switch", {
+          name: new RegExp(`${escapeRegExp(mcrCase!.serviceName)}.*GET /reserve`),
+        })
+        .click();
+      await page.getByRole("switch", { name: /Tags/ }).click();
+      const jaegerMcrLink = page.locator('a[title="Debug in CodeTracer"]').first();
+      await expect(jaegerMcrLink).toBeVisible({ timeout: 60_000 });
+      expect(await jaegerMcrLink.getAttribute("href")).toBe(mcrDebugUrl);
+      const jaegerMcrPopupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      await jaegerMcrLink.click();
+      const jaegerMcrProblemPage = (await jaegerMcrPopupPromise) ?? page;
+      await jaegerMcrProblemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
+        timeout: 60_000,
+      });
+      const jaegerMcrBodyText = await jaegerMcrProblemPage.locator("body").innerText();
+      expect(jaegerMcrBodyText, "mcr-policy-denied Jaeger browser body").toContain("policy_denied");
+      expect(jaegerMcrBodyText, "mcr-policy-denied Jaeger browser body").not.toContain(
+        "Replay.ProvisioningRequested",
+      );
+      if (jaegerMcrProblemPage !== page) {
+        await jaegerMcrProblemPage.close();
+      }
+
+      for (const testcase of [mcrCase!, ...materializedCases.map(({ testcase }) => testcase)]) {
+        const materializedFixture = materializedFixtures.find(
+          (fixture) => fixture.language === testcase.language,
+        );
+        const operationName = testcase.name === "mcr-policy-denied"
+          ? "GET /reserve"
+          : materializedFixture?.operationName ?? "GET /reserve";
+        await page.goto(
+          grafanaExploreTraceUrl(grafanaBaseUrl, retentionCaseAsPlatformReady(policyHarness.ready, testcase)),
+          {
+            waitUntil: "domcontentloaded",
+            timeout: 60_000,
+          },
+        );
+        await page.getByText(testcase.traceId).first().waitFor({ timeout: 60_000 });
+        if (!(await page.getByText(operationName).first().isVisible())) {
+          await page.getByText(testcase.traceId).first().click();
+        }
+        await page.getByText(operationName).first().waitFor({ timeout: 60_000 });
+        const spanRow = page.getByRole("switch", {
+          name: new RegExp(`${escapeRegExp(testcase.serviceName)}.*${escapeRegExp(operationName)}`),
+        });
+        await spanRow.hover();
+        await spanRow.click();
+        await page.getByText(operationName).first().click();
+        const link = page
+          .locator(`div[data-item-key*="${testcase.spanId}"] a[href]`)
+          .first();
+        await expect(link).toBeVisible({ timeout: 60_000 });
+        const debugUrl = `${bridgeBaseUrl}${testcase.browserPath}`;
+        const grafanaHref = await link.getAttribute("href");
+        if (materializedFixture) {
+          assertM36MaterializedDebugUrl(
+            grafanaHref ?? "",
+            materializedReady,
+            retentionCaseAsMaterializedLink(testcase, materializedFixture),
+          );
+        } else {
+          assertM36DebugUrl(grafanaHref ?? "", retentionCaseAsPlatformReady(policyHarness.ready, testcase));
+        }
+        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        await link.click();
+        const problemPage = (await popupPromise) ?? page;
+        await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
+          timeout: 60_000,
+        });
+        const bodyText = await problemPage.locator("body").innerText();
+        expect(bodyText, `${testcase.name} Grafana browser body`).toContain("policy_denied");
+        expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
+          "Replay.ProvisioningRequested",
+        );
+        if (problemPage !== page) {
+          await problemPage.close();
+        }
+      }
+
       const latestReplayProbe = await fetch(`${policyHarness.ready.baseUrl}/__tests/replay-provisioning/latest`);
       expect(latestReplayProbe.status).toBe(404);
 
@@ -3961,15 +4313,35 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           JSON.stringify(checkedLaunches, null, 2),
         );
         fs.writeFileSync(
+          path.join(artifactDir, "m37-policy-denied-ct-observe-rows.json"),
+          JSON.stringify(checkedRows, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-policy-denied-grafana-tempo-ct-observe-rows.json"),
+          JSON.stringify(checkedGrafanaRows, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-policy-denied-grafana-tempo-ct-observe-launches.json"),
+          JSON.stringify(checkedGrafanaLaunches, null, 2),
+        );
+        fs.writeFileSync(
           path.join(artifactDir, "m37-policy-denied-bridge-events.log"),
           bridgeEvents.join("\n"),
         );
+        for (const logFileName of ["grafana.log", "tempo.log"]) {
+          const logPath = path.join(runnerRoot, logFileName);
+          if (fs.existsSync(logPath)) {
+            fs.copyFileSync(logPath, path.join(artifactDir, logFileName));
+          }
+        }
       }
     } finally {
       if (bridge) {
         await new Promise<void>((resolve) => bridge?.close(() => resolve()));
       }
       await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      await stopChild(grafanaProcess);
+      await stopChild(tempoProcess);
       if (policyHarness?.process.pid) {
         killProcessTree(policyHarness.process.pid);
       }
