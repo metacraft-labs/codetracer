@@ -11,6 +11,7 @@
 import * as childProcess from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
@@ -142,6 +143,19 @@ type DebugSessionReplayReady = {
     };
   };
   replayPayload: any;
+};
+
+type PlatformLinkReady = {
+  baseUrl: string;
+  tenantId: string;
+  callerToken: string;
+  traceId: string;
+  spanId: string;
+  serviceName: string;
+  wallTimeUnixNs: string;
+  monotonicTimeNs: string;
+  timeWindowNs: string;
+  selectedSegmentIndex: number;
 };
 
 type CorruptedPrimaryReplicas = {
@@ -521,6 +535,31 @@ async function waitForOutput(
   }
 }
 
+async function waitFor(
+  label: string,
+  action: () => Promise<unknown>,
+  timeoutMs: number,
+): Promise<void> {
+  try {
+    await retry(
+      async () => {
+        try {
+          await action();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      {
+        maxAttempts: Math.ceil(timeoutMs / 1_000),
+        delayMs: 1_000,
+      },
+    );
+  } catch (error) {
+    throw new Error(`Timed out waiting for ${label}`, { cause: error });
+  }
+}
+
 async function startStorageHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: StorageHarnessReady; output: string[] }> {
@@ -615,6 +654,54 @@ async function startDebugSessionHarness(
   return {
     process: harnessProcess,
     ready: JSON.parse(match[1]) as DebugSessionReplayReady,
+    output,
+  };
+}
+
+async function startPlatformLinkHarness(
+  inputPath: string,
+): Promise<{ process: childProcess.ChildProcess; ready: PlatformLinkReady; output: string[] }> {
+  const output: string[] = [];
+  const harnessProcess = childProcess.spawn(
+    "direnv",
+    [
+      "exec",
+      codetracerCiDir,
+      "dotnet",
+      "run",
+      "--project",
+      storageHarnessProject,
+      "--",
+      "storage-server-platform-link",
+      inputPath,
+    ],
+    {
+      cwd: codetracerCiDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  harnessProcess.stdout?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+  harnessProcess.stderr?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+
+  const readyOutput = await waitForOutput(
+    output,
+    /CODETRACER_CI_PLATFORM_LINK_READY\s+({.+})/,
+    120_000,
+  );
+  const match = readyOutput.match(/CODETRACER_CI_PLATFORM_LINK_READY\s+({.+})/);
+  if (!match) {
+    throw new Error(`platform-link ready payload missing:\n${readyOutput}`);
+  }
+
+  return {
+    process: harnessProcess,
+    ready: JSON.parse(match[1]) as PlatformLinkReady,
     output,
   };
 }
@@ -775,6 +862,351 @@ async function waitForVisibleEditorText(
       { cause: error },
     );
   }
+}
+
+function dockerBin(): string {
+  return process.env.CODETRACER_M36_DOCKER_BIN || "docker";
+}
+
+function ctObserveBin(): string {
+  return process.env.CODETRACER_M36_CT_OBSERVE_BIN ||
+    path.join(workspaceRoot, "codetracer-observability-cli", "ct-observe");
+}
+
+function jaegerUiConfigPath(): string {
+  return process.env.CODETRACER_M36_JAEGER_UI_CONFIG ||
+    path.join(
+      workspaceRoot,
+      "codetracer-observability-jaeger",
+      "examples",
+      "jaeger-v1.76",
+      "ui-config.json",
+    );
+}
+
+function jaegerUiConfigRendererPath(): string {
+  return process.env.CODETRACER_M36_JAEGER_CONFIG_RENDERER ||
+    path.join(
+      workspaceRoot,
+      "codetracer-observability-jaeger",
+      "scripts",
+      "render-jaeger-config.sh",
+    );
+}
+
+function dockerImage(): string {
+  return process.env.CODETRACER_M36_JAEGER_IMAGE ||
+    "jaegertracing/all-in-one:1.76.0";
+}
+
+function m36ArtifactDir(): string | null {
+  return process.env.CODETRACER_M36_ARTIFACT_DIR || null;
+}
+
+async function fetchJsonFromUrl(url: string, init?: any): Promise<any> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    throw new Error(`${url} returned HTTP ${response.status}: ${await response.text()}`);
+  }
+  return await response.json();
+}
+
+function startJaegerAllInOne(
+  rootDir: string,
+  uiConfigPath: string,
+  uiPort: number,
+  otlpPort: number,
+): childProcess.ChildProcess {
+  const name = `ct-m36-jaeger-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(path.join(rootDir, "jaeger-container-name.txt"), name);
+  childProcess.spawnSync(dockerBin(), ["rm", "-f", name], {
+    encoding: "utf-8",
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const container = childProcess.spawn(
+    dockerBin(),
+    [
+      "run",
+      "--rm",
+      "--name",
+      name,
+      "-p",
+      `127.0.0.1:${uiPort}:16686`,
+      "-p",
+      `127.0.0.1:${otlpPort}:4318`,
+      "-v",
+      `${uiConfigPath}:/etc/jaeger/ui-config.json:ro`,
+      "-e",
+      "COLLECTOR_OTLP_ENABLED=true",
+      dockerImage(),
+      "--query.ui-config=/etc/jaeger/ui-config.json",
+    ],
+    {
+      cwd: rootDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  container.stdout?.on("data", (chunk: Buffer) =>
+    fs.appendFileSync(path.join(rootDir, "jaeger-docker.log"), chunk),
+  );
+  container.stderr?.on("data", (chunk: Buffer) =>
+    fs.appendFileSync(path.join(rootDir, "jaeger-docker.log"), chunk),
+  );
+  return container;
+}
+
+async function stopJaegerAllInOne(rootDir: string, processHandle: childProcess.ChildProcess | null): Promise<void> {
+  const namePath = path.join(rootDir, "jaeger-container-name.txt");
+  if (fs.existsSync(namePath)) {
+    childProcess.spawnSync(dockerBin(), ["rm", "-f", fs.readFileSync(namePath, "utf-8").trim()], {
+      encoding: "utf-8",
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  }
+  if (processHandle?.pid) {
+    killProcessTree(processHandle.pid);
+  }
+}
+
+async function ingestJaegerSpan(
+  otlpPort: number,
+  ready: PlatformLinkReady,
+  debugUrl: string,
+): Promise<void> {
+  const start = BigInt(ready.wallTimeUnixNs);
+  const end = start + 500_000_000n;
+  const payload = {
+    resourceSpans: [
+      {
+        resource: {
+          attributes: [
+            { key: "service.name", value: { stringValue: ready.serviceName } },
+          ],
+        },
+        scopeSpans: [
+          {
+            scope: { name: "codetracer-observability-m36" },
+            spans: [
+              {
+                traceId: ready.traceId,
+                spanId: ready.spanId,
+                name: "GET /reserve",
+                kind: 2,
+                startTimeUnixNano: ready.wallTimeUnixNs,
+                endTimeUnixNano: end.toString(),
+                attributes: [
+                  { key: "ct.recording_available", value: { boolValue: true } },
+                  { key: "ct.dive_in_url", value: { stringValue: debugUrl } },
+                  { key: "service.name", value: { stringValue: ready.serviceName } },
+                  { key: "tenant_id", value: { stringValue: ready.tenantId } },
+                  { key: "span_id", value: { stringValue: ready.spanId } },
+                  { key: "ct.mcr.wall_time_unix_ns", value: { intValue: ready.wallTimeUnixNs } },
+                  { key: "ct.mcr.monotonic_time_ns", value: { intValue: ready.monotonicTimeNs } },
+                  { key: "time_window_ns", value: { intValue: ready.timeWindowNs } },
+                  { key: "request.id", value: { stringValue: "m25-real-mcr-request-001" } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const response = await fetch(`http://127.0.0.1:${otlpPort}/v1/traces`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Jaeger OTLP ingest failed: HTTP ${response.status} ${await response.text()}`);
+  }
+}
+
+function renderJaegerUiConfigForDebugBase(rootDir: string, debugSessionBaseUrl: string): string {
+  expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+  const outputPath = path.join(rootDir, "jaeger-ui-config.json");
+  childProcess.execFileSync(jaegerUiConfigRendererPath(), [outputPath], {
+    encoding: "utf-8",
+    env: {
+      ...makeCleanEnv(),
+      CODETRACER_JAEGER_DEBUG_SESSION_BASE_URL: debugSessionBaseUrl,
+      CODETRACER_JAEGER_MENU_URL: debugSessionBaseUrl,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  expectRequiredFile("rendered Jaeger plugin UI config", outputPath);
+  return outputPath;
+}
+
+async function runCtObserveAgainstJaeger(
+  jaegerBaseUrl: string,
+  ready: PlatformLinkReady,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const cliTime = (unixNs: bigint): string =>
+    new Date(Number(unixNs / 1_000_000n))
+      .toISOString()
+      .replace(/\.\d{3}Z$/, "Z");
+  const fromIso = cliTime(BigInt(ready.wallTimeUnixNs) - 60_000_000_000n);
+  const toIso = cliTime(BigInt(ready.wallTimeUnixNs) + 60_000_000_000n);
+  const output = childProcess.execFileSync(
+    ctObserveBin(),
+    [
+      "extract",
+      "--backend=jaeger",
+      `--url=${jaegerBaseUrl}`,
+      `--from=${fromIso}`,
+      `--to=${toIso}`,
+      `--service=${ready.serviceName}`,
+      "--format=jsonl",
+    ],
+    {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  const rows = output
+    .split(/\n/)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+  const row = rows.find(
+    (candidate) =>
+      candidate.trace_id === ready.traceId && candidate.span_id === ready.spanId,
+  );
+  if (!row) {
+    throw new Error(`ct-observe did not return M36 Jaeger row:\n${output}`);
+  }
+  return row;
+}
+
+async function waitForRealReplayDetails(page: Page, hostOutput: string[]): Promise<void> {
+  await expect(page.locator(".lm_content").first()).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const sourceNode = page
+    .locator(".jstree-anchor")
+    .filter({ hasText: /^inventory_smoke\.c$/ })
+    .first();
+  await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+  await sourceNode.click();
+  const sourceText = await waitForEditorModelText(page, "handle_client");
+  await waitForEditorModelText(page, "reserve_from_primary_bin");
+
+  const requestDetailsNode = page
+    .locator(".jstree-anchor")
+    .filter({ hasText: /^inventory-response\.json$/ })
+    .first();
+  await expect(requestDetailsNode).toBeVisible({ timeout: 30_000 });
+  await requestDetailsNode.click();
+  const requestDetailsText = await waitForVisibleEditorText(
+    page,
+    `"requestId": "m25-real-mcr-request-001"`,
+  );
+  await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
+
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  expect(bodyText).toContain("inventory_smoke.c");
+  expect(bodyText).toContain("inventory-response.json");
+  expect(sourceText).toContain("handle_client");
+  expect(sourceText).toContain("reserve_from_primary_bin");
+  expect(requestDetailsText).toContain(`"requestId": "m25-real-mcr-request-001"`);
+  expect(requestDetailsText).toContain(`"branch": "reserve_from_primary_bin"`);
+  expect(hostOutput.join("")).toContain("fetching CTFS shard replica from storage:");
+}
+
+function startPlatformLaunchBridge(options: {
+  rootDir: string;
+  ready: PlatformLinkReady;
+  runnerRoot: string;
+  port: number;
+  launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; hostUrl: string }>;
+}): http.Server {
+  const server = http.createServer(async (request, response) => {
+    try {
+      const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host}`);
+      if (requestUrl.pathname !== "/observability/v0/debug-session") {
+        response.writeHead(404);
+        response.end("not found");
+        return;
+      }
+
+      const upstreamUrl = `${options.ready.baseUrl}${requestUrl.pathname}${requestUrl.search}`;
+      const upstreamResponse = await fetch(upstreamUrl, {
+        headers: { authorization: `Bearer ${options.ready.callerToken}` },
+        redirect: "manual",
+      });
+      if (upstreamResponse.status !== 302) {
+        throw new Error(
+          `codetracer-ci browser debug-session returned HTTP ${upstreamResponse.status}: ${await upstreamResponse.text()}`,
+        );
+      }
+
+      const replayPayload = await fetchJsonFromUrl(
+        `${options.ready.baseUrl}/__tests/replay-provisioning/latest`,
+      );
+      const replayAgentCommandLine = generateReplayAgentCommand(
+        replayPayload,
+        options.runnerRoot,
+      );
+      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      const httpPort = await getFreeTcpPort();
+      const backendPort = await getFreeTcpPort();
+      const hostOutput: string[] = [];
+      const shimDir = createCtPathShim(options.runnerRoot);
+      const entrypointPath = path.join(
+        codetracerCiDir,
+        "resources",
+        "docker",
+        "codetracer-runner",
+        "replay-entrypoint.sh",
+      );
+      const ctProcess = childProcess.spawn(
+        "bash",
+        [
+          entrypointPath,
+          `--port=${httpPort}`,
+          `--backend-socket-port=${backendPort}`,
+          `--frontend-socket=${backendPort}`,
+        ],
+        {
+          cwd: codetracerInstallDir,
+          env: {
+            ...makeCleanEnv({
+              XDG_CONFIG_HOME: path.join(options.runnerRoot, "xdg-config"),
+            }),
+            ...replayEnv,
+            CODETRACER_WORK_DIR: path.join(options.runnerRoot, "work"),
+            PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
+      ctProcess.stdout?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      ctProcess.stderr?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      await waitForOutput(hostOutput, /imported manifest trace as trace id\s+\d+/);
+      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      options.launches.push({ ctProcess, hostOutput, hostUrl });
+      response.writeHead(302, { location: hostUrl });
+      response.end();
+    } catch (error) {
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      response.end(error instanceof Error ? error.stack : String(error));
+    }
+  });
+  server.listen(options.port, "127.0.0.1");
+  return server;
 }
 
 base.describe("Observability M34 storage-server MCR manifest browser acceptance", () => {
@@ -1180,6 +1612,172 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       }
       if (browser) {
         await browser.close().catch(() => undefined);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M36 real Jaeger UI link launches routed-storage CodeTracer replay", async ({ page }) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("Jaeger plugin UI config", jaegerUiConfigPath());
+    expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+    childProcess.execFileSync(dockerBin(), ["version", "--format", "{{.Server.Version}}"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    const prepared = prepareStorageHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m36-jaeger-platform-link-"),
+    );
+    let platformHarness: Awaited<ReturnType<typeof startPlatformLinkHarness>> | null = null;
+    let jaegerProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; hostUrl: string }> = [];
+
+    try {
+      platformHarness = await startPlatformLinkHarness(prepared.inputPath);
+      expect(platformHarness.ready.selectedSegmentIndex).toBe(
+        prepared.selectedSegmentIndex,
+      );
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      const jaegerUiPort = await getFreeTcpPort();
+      const jaegerOtlpPort = await getFreeTcpPort();
+      const bridgePort = await getFreeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      const jaegerBaseUrl = `http://127.0.0.1:${jaegerUiPort}`;
+      const debugParams = new URLSearchParams({
+        tenant_id: platformHarness.ready.tenantId,
+        "service.name": platformHarness.ready.serviceName,
+        trace_id: platformHarness.ready.traceId,
+        span_id: platformHarness.ready.spanId,
+        "ct.mcr.wall_time_unix_ns": platformHarness.ready.wallTimeUnixNs,
+        "ct.mcr.monotonic_time_ns": platformHarness.ready.monotonicTimeNs,
+        time_window_ns: platformHarness.ready.timeWindowNs,
+      });
+      const debugUrl = `${bridgeBaseUrl}/observability/v0/debug-session?${debugParams.toString()}`;
+      const renderedJaegerUiConfigPath = renderJaegerUiConfigForDebugBase(
+        runnerRoot,
+        bridgeBaseUrl,
+      );
+
+      bridge = startPlatformLaunchBridge({
+        rootDir: runnerRoot,
+        ready: platformHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        launches,
+      });
+      jaegerProcess = startJaegerAllInOne(
+        runnerRoot,
+        renderedJaegerUiConfigPath,
+        jaegerUiPort,
+        jaegerOtlpPort,
+      );
+      await waitFor(
+        "Jaeger UI readiness",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/services`),
+        120_000,
+      );
+      await ingestJaegerSpan(jaegerOtlpPort, platformHarness.ready, debugUrl);
+      await waitFor(
+        "Jaeger trace ingestion",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${platformHarness.ready.traceId}`),
+        60_000,
+      );
+
+      const cliRow = await runCtObserveAgainstJaeger(
+        jaegerBaseUrl,
+        platformHarness.ready,
+      );
+      expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+      expect(cliRow.recording_available).toBe(true);
+      expect(cliRow.request_key).toBe("m25-real-mcr-request-001");
+
+      await page.goto(`${jaegerBaseUrl}/trace/${platformHarness.ready.traceId}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      await page.getByText("GET /reserve").first().waitFor({ timeout: 60_000 });
+      const spanRow = page.getByRole("switch", {
+        name: /inventory GET \/reserve/,
+      });
+      await spanRow.click();
+
+      await page.getByRole("switch", { name: /Tags/ }).click();
+      const link = page.locator('a[title="Debug in CodeTracer"]').first();
+      await expect(link).toBeVisible({ timeout: 60_000 });
+      expect(await link.getAttribute("href")).toBe(debugUrl);
+
+      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      await link.click();
+      const popup = await popupPromise;
+      const replayPage = popup ?? page;
+      await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
+        timeout: 120_000,
+      });
+
+      await waitFor(
+        "platform launch bridge started CodeTracer",
+        async () => {
+          if (launches.length !== 1) {
+            throw new Error(`expected one CodeTracer launch, got ${launches.length}`);
+          }
+        },
+        120_000,
+      );
+      const launch = launches[0];
+      await replayPage.waitForURL(`${launch.hostUrl}/`, { timeout: 120_000 });
+      await waitForRealReplayDetails(replayPage, launch.hostOutput);
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(path.join(artifactDir, "jaeger-debug-url.txt"), debugUrl);
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-jaeger-row.json"),
+          JSON.stringify(cliRow, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-host-output.log"),
+          launch.hostOutput.join(""),
+        );
+        const jaegerLog = path.join(runnerRoot, "jaeger-docker.log");
+        if (fs.existsSync(jaegerLog)) {
+          fs.copyFileSync(jaegerLog, path.join(artifactDir, "jaeger-docker.log"));
+        }
+      }
+      await replayPage.screenshot({
+        path: path.join(
+          m36ArtifactDir() ?? runnerRoot,
+          "m36-jaeger-real-codetracer-replay.png",
+        ),
+        fullPage: true,
+      });
+    } finally {
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      if (platformHarness?.process.pid) {
+        killProcessTree(platformHarness.process.pid);
       }
       fs.rmSync(prepared.rootDir, { recursive: true, force: true });
       fs.rmSync(runnerRoot, { recursive: true, force: true });
