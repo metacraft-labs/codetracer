@@ -254,10 +254,11 @@ fonts_out = "\n".join(fonts_lines).rstrip() + "\n"
 
 index_out = "\n".join([
     "// Auto-generated import index",
+    "// Note: fonts.styl is NOT included here to avoid duplicate @font-face rules.",
+    "// Fonts are imported once via components/font_family.styl in codetracer.styl.",
     '@import "brand.styl"',
     '@import "alias.styl"',
     '@import "mapped.styl"',
-    '@import "fonts.styl"',
     "",
 ])
 (OUT_DIR / "index.styl").write_text(index_out, encoding="utf-8")
