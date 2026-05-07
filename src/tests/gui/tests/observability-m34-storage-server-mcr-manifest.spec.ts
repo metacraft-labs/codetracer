@@ -256,7 +256,7 @@ type RetentionGapCase = {
   monotonicTimeNs: string;
   timeWindowNs: string;
   expectedStatus: number;
-  expectedCode: "retention_gap" | "missing_data";
+  expectedCode: "retention_gap" | "missing_data" | "policy_denied";
   browserPath: string;
 };
 
@@ -1059,6 +1059,54 @@ async function startRetentionGapHarness(
   const match = readyOutput.match(/CODETRACER_CI_RETENTION_GAP_READY\s+({.+})/);
   if (!match) {
     throw new Error(`retention-gap ready payload missing:\n${readyOutput}`);
+  }
+
+  return {
+    process: harnessProcess,
+    ready: JSON.parse(match[1]) as RetentionGapReady,
+    output,
+  };
+}
+
+async function startPolicyDeniedHarness(
+  inputPath: string,
+): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
+  const output: string[] = [];
+  const harnessProcess = childProcess.spawn(
+    "direnv",
+    [
+      "exec",
+      codetracerCiDir,
+      "dotnet",
+      "run",
+      "--project",
+      storageHarnessProject,
+      "--",
+      "storage-server-policy-denied",
+      inputPath,
+    ],
+    {
+      cwd: codetracerCiDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  harnessProcess.stdout?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+  harnessProcess.stderr?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+
+  const readyOutput = await waitForOutput(
+    output,
+    /CODETRACER_CI_POLICY_DENIED_READY\s+({.+})/,
+    120_000,
+  );
+  const match = readyOutput.match(/CODETRACER_CI_POLICY_DENIED_READY\s+({.+})/);
+  if (!match) {
+    throw new Error(`policy-denied ready payload missing:\n${readyOutput}`);
   }
 
   return {
@@ -2299,6 +2347,45 @@ async function runCtObserveLaunchAgainstJaeger(
   expect(launch.selected_row?.trace_id).toBe(ready.traceId);
   expect(launch.selected_row?.span_id).toBe(ready.spanId);
   expect(launch.selected_row?.request_key).toBe("m25-real-mcr-request-001");
+  return launch;
+}
+
+async function runCtObserveDeniedLaunchAgainstJaeger(
+  jaegerBaseUrl: string,
+  ready: PlatformLinkReady,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const output = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+    childProcess.execFile(
+      ctObserveBin(),
+      [
+        "launch",
+        "--backend=jaeger",
+        `--url=${jaegerBaseUrl}`,
+        `--trace-id=${ready.traceId}`,
+        `--span-id=${ready.spanId}`,
+        "--launch-timeout-ms=300000",
+      ],
+      {
+        encoding: "utf-8",
+        windowsHide: true,
+      },
+      (error: any, stdout, stderr) => {
+        resolve({ stdout, stderr, code: error?.code ?? 0 });
+      },
+    );
+  });
+  expect(output.code, `ct-observe launch stderr:\n${output.stderr}`).not.toBe(0);
+  expect(
+    output.stdout.trim().length,
+    `ct-observe launch stdout was empty; stderr:\n${output.stderr}`,
+  ).toBeGreaterThan(0);
+  const launch = JSON.parse(output.stdout);
+  expect(launch.http_status).toBe(403);
+  expect(launch.problem?.code).toBe("policy_denied");
+  expect(launch.selected_row?.trace_id).toBe(ready.traceId);
+  expect(launch.selected_row?.span_id).toBe(ready.spanId);
+  expect(launch.redirect_url ?? "").toBe("");
   return launch;
 }
 
@@ -3724,6 +3811,167 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await stopJaegerAllInOne(runnerRoot, jaegerProcess);
       if (retentionHarness?.process.pid) {
         killProcessTree(retentionHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M37 policy_denied is surfaced through Jaeger UI and ct-observe launch for MCR and materialized traces", async ({ page }) => {
+    base.setTimeout(420_000);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile("ct-observe binary", ctObserveBin());
+    expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+    for (const fixture of materializedFixtures.slice(0, 1)) {
+      expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
+      expectRequiredFile(
+        `${fixture.label} materialized ${fixture.traceFileName}`,
+        path.join(fixture.traceDir, fixture.traceFileName),
+      );
+    }
+    childProcess.execFileSync(dockerBin(), ["version", "--format", "{{.Server.Version}}"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    const prepared = prepareMaterializedPlatformHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m37-policy-denied-"),
+    );
+    let policyHarness: Awaited<ReturnType<typeof startPolicyDeniedHarness>> | null = null;
+    let jaegerProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const bridgeEvents: string[] = [];
+
+    try {
+      policyHarness = await startPolicyDeniedHarness(prepared.inputPath);
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      expect(policyHarness.ready.replayProvisioningMessageCount).toBe(0);
+      expect(policyHarness.ready.cases.length).toBeGreaterThanOrEqual(2);
+
+      const policyCases = policyHarness.ready.cases.filter(
+        (testcase) => testcase.expectedCode === "policy_denied",
+      );
+      expect(policyCases.length).toBeGreaterThanOrEqual(2);
+      const mcrCase = policyCases.find((testcase) => testcase.name === "mcr-policy-denied");
+      const materializedCase = policyCases.find((testcase) =>
+        testcase.name.endsWith("-materialized-policy-denied"),
+      );
+      expect(mcrCase).toBeTruthy();
+      expect(materializedCase).toBeTruthy();
+
+      const bridgePort = await getFreeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      bridge = startRetentionProblemBridge({
+        ready: policyHarness.ready,
+        port: bridgePort,
+        events: bridgeEvents,
+      });
+
+      const jaegerUiPort = await getFreeTcpPort();
+      const jaegerOtlpPort = await getFreeTcpPort();
+      const jaegerBaseUrl = `http://127.0.0.1:${jaegerUiPort}`;
+      const renderedJaegerUiConfigPath = renderJaegerUiConfigForDebugBase(
+        runnerRoot,
+        bridgeBaseUrl,
+      );
+      jaegerProcess = startJaegerAllInOne(
+        runnerRoot,
+        renderedJaegerUiConfigPath,
+        jaegerUiPort,
+        jaegerOtlpPort,
+      );
+      await waitFor(
+        "Jaeger UI readiness",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/services`),
+        120_000,
+      );
+
+      const checkedLaunches: any[] = [];
+      for (const testcase of [mcrCase!, materializedCase!]) {
+        const ready = retentionCaseAsPlatformReady(policyHarness.ready, testcase);
+        const debugUrl = `${bridgeBaseUrl}${testcase.browserPath}`;
+        await ingestJaegerSpan(
+          jaegerOtlpPort,
+          ready,
+          debugUrl,
+          `m37-${testcase.name}`,
+        );
+        await waitFor(
+          `Jaeger ${testcase.name} policy_denied trace ingestion`,
+          async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${testcase.traceId}`),
+          60_000,
+        );
+
+        const cliRow = await runCtObserveAgainstJaeger(jaegerBaseUrl, ready);
+        expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+        expect(cliRow.recording_available).toBe(true);
+
+        const launchJson = await runCtObserveDeniedLaunchAgainstJaeger(
+          jaegerBaseUrl,
+          ready,
+        );
+        expect(launchJson.debug_session_url).toBe(debugUrl);
+        checkedLaunches.push(launchJson);
+
+        await page.goto(`${jaegerBaseUrl}/trace/${testcase.traceId}`, {
+          waitUntil: "domcontentloaded",
+          timeout: 60_000,
+        });
+        await page.getByText("GET /reserve").first().waitFor({ timeout: 60_000 });
+        await page
+          .getByRole("switch", {
+            name: new RegExp(`${escapeRegExp(testcase.serviceName)}.*GET /reserve`),
+          })
+          .click();
+        await page.getByRole("switch", { name: /Tags/ }).click();
+        const link = page.locator('a[title="Debug in CodeTracer"]').first();
+        await expect(link).toBeVisible({ timeout: 60_000 });
+        expect(await link.getAttribute("href")).toBe(debugUrl);
+        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        await link.click();
+        const problemPage = (await popupPromise) ?? page;
+        await problemPage.waitForURL(new RegExp(escapeRegExp(debugUrl)), {
+          timeout: 60_000,
+        });
+        const bodyText = await problemPage.locator("body").innerText();
+        expect(bodyText, `${testcase.name} browser body`).toContain("policy_denied");
+        expect(bodyText, `${testcase.name} browser body`).not.toContain(
+          "Replay.ProvisioningRequested",
+        );
+        if (problemPage !== page) {
+          await problemPage.close();
+        }
+      }
+
+      const latestReplayProbe = await fetch(`${policyHarness.ready.baseUrl}/__tests/replay-provisioning/latest`);
+      expect(latestReplayProbe.status).toBe(404);
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-policy-denied-cases.json"),
+          JSON.stringify(policyHarness.ready.cases, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-policy-denied-ct-observe-launches.json"),
+          JSON.stringify(checkedLaunches, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-policy-denied-bridge-events.log"),
+          bridgeEvents.join("\n"),
+        );
+      }
+    } finally {
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      if (policyHarness?.process.pid) {
+        killProcessTree(policyHarness.process.pid);
       }
       fs.rmSync(prepared.rootDir, { recursive: true, force: true });
       fs.rmSync(runnerRoot, { recursive: true, force: true });
