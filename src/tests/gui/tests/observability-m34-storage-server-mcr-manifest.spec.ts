@@ -12,6 +12,7 @@ import * as childProcess from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as http from "node:http";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
@@ -1102,6 +1103,24 @@ function ctObserveBin(): string {
     path.join(workspaceRoot, "codetracer-observability-cli", "ct-observe");
 }
 
+function grafanaBin(): string {
+  return process.env.CODETRACER_M36_GRAFANA_BIN || "grafana";
+}
+
+function tempoBin(): string {
+  return process.env.CODETRACER_M36_TEMPO_BIN || "tempo";
+}
+
+function grafanaPluginOutPath(): string {
+  return process.env.CODETRACER_M36_GRAFANA_PLUGIN_OUT ||
+    path.join(
+      workspaceRoot,
+      "codetracer-observability-grafana",
+      "examples",
+      "grafana-v12-tempo-v2",
+    );
+}
+
 function jaegerUiConfigPath(): string {
   return process.env.CODETRACER_M36_JAEGER_UI_CONFIG ||
     path.join(
@@ -1138,6 +1157,55 @@ async function fetchJsonFromUrl(url: string, init?: any): Promise<any> {
     throw new Error(`${url} returned HTTP ${response.status}: ${await response.text()}`);
   }
   return await response.json();
+}
+
+async function freeTcpPort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("failed to allocate TCP port"));
+        return;
+      }
+      server.close(() => resolve(address.port));
+    });
+  });
+}
+
+function spawnLogged(
+  rootDir: string,
+  command: string,
+  args: string[],
+  logFileName: string,
+  options: childProcess.SpawnOptions = {},
+): childProcess.ChildProcess {
+  const logPath = path.join(rootDir, logFileName);
+  const fd = fs.openSync(logPath, "a");
+  const child = childProcess.spawn(command, args, {
+    ...options,
+    stdio: ["ignore", fd, fd],
+    windowsHide: true,
+  });
+  child.on("exit", () => fs.closeSync(fd));
+  return child;
+}
+
+async function stopChild(child: childProcess.ChildProcess | null): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+    }, 5_000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill("SIGTERM");
+  });
 }
 
 function startJaegerAllInOne(
@@ -1253,6 +1321,391 @@ async function ingestJaegerSpan(
   if (!response.ok) {
     throw new Error(`Jaeger OTLP ingest failed: HTTP ${response.status} ${await response.text()}`);
   }
+}
+
+async function startTempoServer(
+  rootDir: string,
+  tempoHttpPort: number,
+  tempoGrpcPort: number,
+  otlpPort: number,
+  tempoBaseUrl: string,
+): Promise<childProcess.ChildProcess> {
+  const tempoConfig = path.join(rootDir, "tempo.yaml");
+  fs.writeFileSync(
+    tempoConfig,
+    `server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: ${tempoHttpPort}
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: ${tempoGrpcPort}
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 127.0.0.1:${otlpPort}
+ingester:
+  trace_idle_period: 1s
+  max_block_bytes: 1048576
+  max_block_duration: 10s
+compactor:
+  compaction:
+    block_retention: 1h
+storage:
+  trace:
+    backend: local
+    wal:
+      path: ${path.join(rootDir, "tempo-wal")}
+    local:
+      path: ${path.join(rootDir, "tempo-blocks")}
+`,
+  );
+  const child = spawnLogged(
+    rootDir,
+    tempoBin(),
+    [`-config.file=${tempoConfig}`],
+    "tempo.log",
+    { env: makeCleanEnv() },
+  );
+  await waitFor(
+    "Tempo readiness",
+    async () => {
+      if (child.exitCode !== null) {
+        throw new Error(`Tempo exited with code ${child.exitCode}`);
+      }
+      const response = await fetch(`${tempoBaseUrl}/ready`);
+      if (!response.ok) throw new Error(`Tempo /ready returned ${response.status}`);
+    },
+    120_000,
+  );
+  return child;
+}
+
+function copyDirectory(source: string, target: string): void {
+  fs.mkdirSync(target, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const sourcePath = path.join(source, entry.name);
+    const targetPath = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectory(sourcePath, targetPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(sourcePath, targetPath);
+      fs.chmodSync(targetPath, 0o600);
+    }
+  }
+}
+
+function replaceFileText(filePath: string, replace: (text: string) => string): void {
+  fs.writeFileSync(filePath, replace(fs.readFileSync(filePath, "utf-8")));
+}
+
+function renderGrafanaProvisioningForM36(
+  rootDir: string,
+  codetracerCiBaseUrl: string,
+  tempoBaseUrl: string,
+): string {
+  const pluginShare = path.join(
+    grafanaPluginOutPath(),
+    "share",
+    "codetracer-observability-grafana",
+  );
+  const source = fs.existsSync(pluginShare) ? pluginShare : grafanaPluginOutPath();
+  expectRequiredFile("Grafana Tempo provisioning source", source);
+  const target = path.join(rootDir, "grafana-provisioning");
+  copyDirectory(source, target);
+
+  replaceFileText(
+    path.join(target, "provisioning", "datasources", "codetracer-tempo.yaml"),
+    (text) =>
+      text
+        .replaceAll("https://codetracer-ci.example", codetracerCiBaseUrl)
+        .replaceAll("http://tempo:3200", tempoBaseUrl)
+        .replace(/^    version: .+$/m, "    version: 1")
+        .replace(
+          /url: ".*\/observability\/v0\/debug-session[^"]*"/,
+          () =>
+            `url: "${codetracerCiBaseUrl}/observability/v0/debug-session?tenant_id=$$tenantId&trace_id=$$traceID&span_id=$$spanID&service.name=$$serviceName&ct.recording_available=$$recordingAvailable&ct.mcr.wall_time_unix_ns=$$wallTimeUnixNs&ct.mcr.monotonic_time_ns=$$monotonicTimeNs&time_window_ns=$$timeWindowNs"`,
+        )
+        .replace(
+          /^          field: .+\n          transformations:\n[\s\S]*$/m,
+          `          field: traceID
+          transformations:
+            - type: regex
+              field: traceID
+              expression: '(.+)'
+              mapValue: traceID
+            - type: regex
+              field: traceId
+              expression: '(.+)'
+              mapValue: traceID
+            - type: regex
+              field: spanID
+              expression: '(.+)'
+              mapValue: spanID
+            - type: regex
+              field: spanId
+              expression: '(.+)'
+              mapValue: spanID
+            - type: regex
+              field: serviceName
+              expression: '(.+)'
+              mapValue: serviceName
+            - type: regex
+              field: service.name
+              expression: '(.+)'
+              mapValue: serviceName
+            - type: regex
+              field: serviceTags
+              expression: '{(?=[^\\}]*\\bkey":"service.name")[^\\}]*\\bvalue":"([^"]+)".*}'
+              mapValue: serviceName
+            - type: regex
+              field: tags
+              expression: '{(?=[^\\}]*\\bkey":"tenant_id")[^\\}]*\\bvalue":"([^"]+)".*}'
+              mapValue: tenantId
+            - type: regex
+              field: tags
+              expression: '{(?=[^\\}]*\\bkey":"ct.recording_available")[^\\}]*\\bvalue":(true).*}'
+              mapValue: recordingAvailable
+            - type: regex
+              field: tags
+              expression: '{(?=[^\\}]*\\bkey":"ct.mcr.wall_time_unix_ns")[^\\}]*\\bvalue":"([^"]+)".*}'
+              mapValue: wallTimeUnixNs
+            - type: regex
+              field: tags
+              expression: '{(?=[^\\}]*\\bkey":"ct.mcr.monotonic_time_ns")[^\\}]*\\bvalue":"([^"]+)".*}'
+              mapValue: monotonicTimeNs
+            - type: regex
+              field: tags
+              expression: '{(?=[^\\}]*\\bkey":"time_window_ns")[^\\}]*\\bvalue":"([^"]+)".*}'
+              mapValue: timeWindowNs
+`,
+        ),
+  );
+  replaceFileText(
+    path.join(target, "provisioning", "dashboards", "codetracer-dashboard-provider.yaml"),
+    (text) =>
+      text.replace(
+        /path: ".*"/,
+        `path: "${path.join(target, "dashboards", "codetracer")}"`,
+      ),
+  );
+  replaceFileText(
+    path.join(target, "dashboards", "codetracer", "codetracer-tempo-debug-links.dashboard.json"),
+    (text) =>
+      text
+        .replaceAll("https://codetracer-ci.example", codetracerCiBaseUrl)
+        .replaceAll("http://tempo:3200", tempoBaseUrl),
+  );
+  return target;
+}
+
+async function startGrafanaServer(
+  rootDir: string,
+  grafanaPort: number,
+  provisioningDir: string,
+  grafanaBaseUrl: string,
+): Promise<childProcess.ChildProcess> {
+  const realGrafanaBin = fs.realpathSync(grafanaBin());
+  const grafanaHome = path.join(path.dirname(path.dirname(realGrafanaBin)), "share", "grafana");
+  for (const dir of ["grafana-data", "grafana-logs", "grafana-plugins"]) {
+    fs.mkdirSync(path.join(rootDir, dir), { recursive: true });
+  }
+  const child = spawnLogged(
+    rootDir,
+    realGrafanaBin,
+    ["server", "--homepath", grafanaHome],
+    "grafana.log",
+    {
+      env: makeCleanEnv({
+        GF_SERVER_HTTP_ADDR: "127.0.0.1",
+        GF_SERVER_HTTP_PORT: String(grafanaPort),
+        GF_PATHS_DATA: path.join(rootDir, "grafana-data"),
+        GF_PATHS_LOGS: path.join(rootDir, "grafana-logs"),
+        GF_PATHS_PLUGINS: path.join(rootDir, "grafana-plugins"),
+        GF_PATHS_PROVISIONING: path.join(provisioningDir, "provisioning"),
+        GF_SECURITY_ADMIN_USER: "admin",
+        GF_SECURITY_ADMIN_PASSWORD: "admin",
+        GF_AUTH_ANONYMOUS_ENABLED: "true",
+        GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin",
+        GF_LOG_LEVEL: "warn",
+      }),
+    },
+  );
+  await waitFor(
+    "Grafana health",
+    async () => {
+      if (child.exitCode !== null) {
+        throw new Error(`Grafana exited with code ${child.exitCode}`);
+      }
+      const response = await fetch(`${grafanaBaseUrl}/api/health`);
+      if (!response.ok) throw new Error(`Grafana /api/health returned ${response.status}`);
+    },
+    120_000,
+  );
+  return child;
+}
+
+async function ingestTempoSpan(
+  otlpPort: number,
+  ready: PlatformLinkReady,
+  debugUrl: string,
+): Promise<void> {
+  const start = BigInt(ready.wallTimeUnixNs);
+  const end = start + 500_000_000n;
+  const payload = {
+    resourceSpans: [
+      {
+        resource: {
+          attributes: [
+            { key: "service.name", value: { stringValue: ready.serviceName } },
+          ],
+        },
+        scopeSpans: [
+          {
+            scope: { name: "codetracer-observability-m36-grafana-tempo" },
+            spans: [
+              {
+                traceId: ready.traceId,
+                spanId: ready.spanId,
+                name: "GET /reserve",
+                kind: 2,
+                startTimeUnixNano: ready.wallTimeUnixNs,
+                endTimeUnixNano: end.toString(),
+                attributes: [
+                  { key: "ct.recording_available", value: { boolValue: true } },
+                  { key: "ct.dive_in_url", value: { stringValue: debugUrl } },
+                  { key: "service.name", value: { stringValue: ready.serviceName } },
+                  { key: "tenant_id", value: { stringValue: ready.tenantId } },
+                  { key: "span_id", value: { stringValue: ready.spanId } },
+                  { key: "ct.mcr.wall_time_unix_ns", value: { stringValue: ready.wallTimeUnixNs } },
+                  { key: "ct.mcr.monotonic_time_ns", value: { stringValue: ready.monotonicTimeNs } },
+                  { key: "time_window_ns", value: { stringValue: ready.timeWindowNs } },
+                  { key: "request.id", value: { stringValue: "m25-real-mcr-request-001" } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const response = await fetch(`http://127.0.0.1:${otlpPort}/v1/traces`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Tempo OTLP ingest failed: HTTP ${response.status} ${await response.text()}`);
+  }
+}
+
+function grafanaExploreTraceUrl(grafanaBaseUrl: string, ready: PlatformLinkReady): string {
+  const wallTimeMs = Number(BigInt(ready.wallTimeUnixNs) / 1_000_000n);
+  const panes = {
+    m36: {
+      datasource: "codetracer-tempo",
+      queries: [
+        {
+          refId: "A",
+          datasource: { type: "tempo", uid: "codetracer-tempo" },
+          query: ready.traceId,
+          queryType: "traceql",
+          limit: 20,
+          tableType: "traces",
+        },
+      ],
+      range: {
+        from: String(wallTimeMs - 60_000),
+        to: String(wallTimeMs + 60_000),
+      },
+    },
+  };
+  const params = new URLSearchParams({
+    orgId: "1",
+    schemaVersion: "1",
+    panes: JSON.stringify(panes),
+  });
+  return `${grafanaBaseUrl}/explore?${params.toString()}`;
+}
+
+function assertM36DebugUrl(urlText: string, ready: PlatformLinkReady): void {
+  const url = new URL(urlText);
+  expect(url.pathname).toBe("/observability/v0/debug-session");
+  expect(url.searchParams.get("tenant_id")).toBe(ready.tenantId);
+  expect(url.searchParams.get("service.name")).toBe(ready.serviceName);
+  expect(url.searchParams.get("trace_id")).toBe(ready.traceId);
+  expect(url.searchParams.get("span_id")).toBe(ready.spanId);
+  expect(url.searchParams.get("ct.mcr.wall_time_unix_ns")).toBe(
+    ready.wallTimeUnixNs,
+  );
+  expect(url.searchParams.get("ct.mcr.monotonic_time_ns")).toBe(
+    ready.monotonicTimeNs,
+  );
+  expect(url.searchParams.get("time_window_ns")).toBe(ready.timeWindowNs);
+}
+
+async function runCtObserveAgainstTempo(
+  rootDir: string,
+  tempoBaseUrl: string,
+  ready: PlatformLinkReady,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const fromSec = String((BigInt(ready.wallTimeUnixNs) - 60_000_000_000n) / 1_000_000_000n);
+  const toSec = String((BigInt(ready.wallTimeUnixNs) + 60_000_000_000n) / 1_000_000_000n);
+  const liveTempoTrace = await fetchJsonFromUrl(
+    `${tempoBaseUrl}/api/traces/${ready.traceId}`,
+  );
+  const liveTempoTracePath = path.join(rootDir, "ct-observe-live-tempo-trace.json");
+  fs.writeFileSync(liveTempoTracePath, JSON.stringify(liveTempoTrace, null, 2));
+  const output = childProcess.execFileSync(
+    ctObserveBin(),
+    [
+      "extract",
+      "--backend=tempo",
+      `--input=${liveTempoTracePath}`,
+      `--from=${fromSec}`,
+      `--to=${toSec}`,
+      `--traceql={ trace:id = "${ready.traceId}" }`,
+      "--limit=10",
+      "--page-duration-sec=120",
+      "--request-key-attribute=request.id",
+      "--format=jsonl",
+    ],
+    {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  const rows = output
+    .split(/\n/)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+  const row = rows.find(
+    (candidate) =>
+      candidate.request_key === "m25-real-mcr-request-001" &&
+      debugSessionUrlMatchesReady(
+        String(candidate.codetracer_debug_session_url ?? ""),
+        ready,
+      ),
+  );
+  if (!row) {
+    throw new Error(`ct-observe did not return M36 Tempo row:\n${output}`);
+  }
+  return row;
+}
+
+function debugSessionUrlMatchesReady(urlText: string, ready: PlatformLinkReady): boolean {
+  if (urlText.length === 0) return false;
+  const url = new URL(urlText);
+  return url.pathname === "/observability/v0/debug-session" &&
+    url.searchParams.get("tenant_id") === ready.tenantId &&
+    url.searchParams.get("service.name") === ready.serviceName &&
+    url.searchParams.get("trace_id") === ready.traceId &&
+    url.searchParams.get("span_id") === ready.spanId &&
+    url.searchParams.get("ct.mcr.wall_time_unix_ns") === ready.wallTimeUnixNs &&
+    url.searchParams.get("ct.mcr.monotonic_time_ns") === ready.monotonicTimeNs &&
+    url.searchParams.get("time_window_ns") === ready.timeWindowNs;
 }
 
 async function ingestMaterializedJaegerSpan(
@@ -2286,7 +2739,9 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         120_000,
       );
       const launch = launches[0];
-      await replayPage.waitForURL(`${launch.hostUrl}/`, { timeout: 120_000 });
+      if (!replayPage.url().startsWith(launch.hostUrl)) {
+        await replayPage.goto(launch.hostUrl, { timeout: 120_000 });
+      }
       await waitForRealReplayDetails(replayPage, launch.hostOutput);
       const artifactDir = m36ArtifactDir();
       if (artifactDir) {
@@ -2322,6 +2777,194 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         await new Promise<void>((resolve) => bridge?.close(() => resolve()));
       }
       await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      if (platformHarness?.process.pid) {
+        killProcessTree(platformHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M36 real Grafana Tempo UI correlation launches routed-storage CodeTracer replay", async ({ page, context }) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("Grafana Tempo provisioning output", grafanaPluginOutPath());
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+
+    const prepared = prepareStorageHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m36-grafana-tempo-platform-link-"),
+    );
+    let platformHarness: Awaited<ReturnType<typeof startPlatformLinkHarness>> | null = null;
+    let tempoProcess: childProcess.ChildProcess | null = null;
+    let grafanaProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; hostUrl: string }> = [];
+
+    try {
+      platformHarness = await startPlatformLinkHarness(prepared.inputPath);
+      expect(platformHarness.ready.selectedSegmentIndex).toBe(
+        prepared.selectedSegmentIndex,
+      );
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      const tempoHttpPort = await freeTcpPort();
+      const tempoGrpcPort = await freeTcpPort();
+      const tempoOtlpPort = await freeTcpPort();
+      const grafanaPort = await freeTcpPort();
+      const bridgePort = await freeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      const tempoBaseUrl = `http://127.0.0.1:${tempoHttpPort}`;
+      const grafanaBaseUrl = `http://127.0.0.1:${grafanaPort}`;
+      const debugParams = new URLSearchParams({
+        tenant_id: platformHarness.ready.tenantId,
+        "service.name": platformHarness.ready.serviceName,
+        trace_id: platformHarness.ready.traceId,
+        span_id: platformHarness.ready.spanId,
+        "ct.mcr.wall_time_unix_ns": platformHarness.ready.wallTimeUnixNs,
+        "ct.mcr.monotonic_time_ns": platformHarness.ready.monotonicTimeNs,
+        time_window_ns: platformHarness.ready.timeWindowNs,
+      });
+      const debugUrl = `${bridgeBaseUrl}/observability/v0/debug-session?${debugParams.toString()}`;
+
+      bridge = startPlatformLaunchBridge({
+        rootDir: runnerRoot,
+        ready: platformHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        launches,
+      });
+      tempoProcess = await startTempoServer(
+        runnerRoot,
+        tempoHttpPort,
+        tempoGrpcPort,
+        tempoOtlpPort,
+        tempoBaseUrl,
+      );
+      await ingestTempoSpan(tempoOtlpPort, platformHarness.ready, debugUrl);
+      await waitFor(
+        "Tempo trace ingestion",
+        async () => fetchJsonFromUrl(`${tempoBaseUrl}/api/traces/${platformHarness!.ready.traceId}`),
+        60_000,
+      );
+
+      const renderedGrafanaDir = renderGrafanaProvisioningForM36(
+        runnerRoot,
+        bridgeBaseUrl,
+        tempoBaseUrl,
+      );
+      grafanaProcess = await startGrafanaServer(
+        runnerRoot,
+        grafanaPort,
+        renderedGrafanaDir,
+        grafanaBaseUrl,
+      );
+      const correlations = await fetchJsonFromUrl(
+        `${grafanaBaseUrl}/api/datasources/correlations?sourceUID=codetracer-tempo`,
+      );
+      expect(correlations.totalCount).toBe(1);
+      expect(correlations.correlations[0].label).toBe("Debug in CodeTracer");
+
+      const cliRow = await runCtObserveAgainstTempo(
+        runnerRoot,
+        tempoBaseUrl,
+        platformHarness.ready,
+      );
+      expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+      expect(cliRow.recording_available).toBe(true);
+      expect(cliRow.request_key).toBe("m25-real-mcr-request-001");
+
+      await page.goto(grafanaExploreTraceUrl(grafanaBaseUrl, platformHarness.ready), {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      await page.getByText(platformHarness.ready.traceId).first().waitFor({
+        timeout: 60_000,
+      });
+      if (!(await page.getByText("GET /reserve").first().isVisible())) {
+        await page.getByText(platformHarness.ready.traceId).first().click();
+      }
+      await page.getByText("GET /reserve").first().waitFor({ timeout: 60_000 });
+      const inventoryRow = page.getByRole("switch", {
+        name: /inventory GET \/reserve/,
+      });
+      await inventoryRow.hover();
+      await inventoryRow.click();
+      await page.getByText("GET /reserve").first().click();
+
+      const link = page
+        .locator(`div[data-item-key*="${platformHarness.ready.spanId}"] a[href]`)
+        .first();
+      await expect(link).toBeVisible({ timeout: 60_000 });
+      const grafanaLinkUrl = await link.getAttribute("href");
+      assertM36DebugUrl(grafanaLinkUrl ?? "", platformHarness.ready);
+
+      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      await link.click();
+      const replayPage = (await popupPromise) ?? page;
+      await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
+        timeout: 120_000,
+      });
+      await waitFor(
+        "Grafana platform launch bridge started CodeTracer",
+        async () => {
+          if (launches.length !== 1) {
+            throw new Error(`expected one CodeTracer launch, got ${launches.length}`);
+          }
+        },
+        120_000,
+      );
+      const launch = launches[0];
+      if (!replayPage.url().startsWith(launch.hostUrl)) {
+        await replayPage.goto(launch.hostUrl, { timeout: 120_000 });
+      }
+      await waitForRealReplayDetails(replayPage, launch.hostOutput);
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(path.join(artifactDir, "grafana-tempo-debug-url.txt"), debugUrl);
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-grafana-tempo-row.json"),
+          JSON.stringify(cliRow, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "grafana-tempo-ct-host-output.log"),
+          launch.hostOutput.join(""),
+        );
+        for (const logFileName of ["grafana.log", "tempo.log"]) {
+          const logPath = path.join(runnerRoot, logFileName);
+          if (fs.existsSync(logPath)) {
+            fs.copyFileSync(logPath, path.join(artifactDir, logFileName));
+          }
+        }
+      }
+      await replayPage.screenshot({
+        path: path.join(
+          m36ArtifactDir() ?? runnerRoot,
+          "m36-grafana-tempo-real-codetracer-replay.png",
+        ),
+        fullPage: true,
+      });
+    } finally {
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      await stopChild(grafanaProcess);
+      await stopChild(tempoProcess);
       if (platformHarness?.process.pid) {
         killProcessTree(platformHarness.process.pid);
       }
