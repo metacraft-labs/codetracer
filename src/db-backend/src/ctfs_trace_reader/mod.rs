@@ -931,7 +931,7 @@ impl CTFSTraceReader {
         ct_path: Option<&Path>,
     ) -> Result<TraceMetadata, Box<dyn Error>> {
         match ctfs.read_file("meta.json") {
-            Ok(meta_bytes) => return Ok(serde_json::from_slice(&meta_bytes)?),
+            Ok(meta_bytes) => Ok(serde_json::from_slice(&meta_bytes)?),
             Err(meta_error) => {
                 let Some(ct_path) = ct_path else {
                     return Err(Box::new(meta_error));
