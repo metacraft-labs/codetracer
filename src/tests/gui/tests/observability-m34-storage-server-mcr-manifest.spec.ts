@@ -2002,6 +2002,52 @@ async function runCtObserveAgainstJaeger(
   return row;
 }
 
+async function runCtObserveLaunchAgainstJaeger(
+  jaegerBaseUrl: string,
+  ready: PlatformLinkReady,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const cliTime = (unixNs: bigint): string =>
+    new Date(Number(unixNs / 1_000_000n))
+      .toISOString()
+      .replace(/\.\d{3}Z$/, "Z");
+  const fromIso = cliTime(BigInt(ready.wallTimeUnixNs) - 60_000_000_000n);
+  const toIso = cliTime(BigInt(ready.wallTimeUnixNs) + 60_000_000_000n);
+  const output = await new Promise<string>((resolve, reject) => {
+    childProcess.execFile(
+      ctObserveBin(),
+      [
+        "launch",
+        "--backend=jaeger",
+        `--url=${jaegerBaseUrl}`,
+        `--from=${fromIso}`,
+        `--to=${toIso}`,
+        `--service=${ready.serviceName}`,
+        "--request-key=m25-real-mcr-request-001",
+        `--span-id=${ready.spanId}`,
+        "--launch-timeout-ms=300000",
+      ],
+      {
+        encoding: "utf-8",
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`${error.message}\n${stderr}`));
+        } else {
+          resolve(stdout);
+        }
+      },
+    );
+  });
+  const launch = JSON.parse(output);
+  expect(launch.http_status).toBe(302);
+  expect(launch.selected_row?.trace_id).toBe(ready.traceId);
+  expect(launch.selected_row?.span_id).toBe(ready.spanId);
+  expect(launch.selected_row?.request_key).toBe("m25-real-mcr-request-001");
+  return launch;
+}
+
 async function runMaterializedCtObserveAgainstJaeger(
   jaegerBaseUrl: string,
   linkReady: MaterializedPlatformLink,
@@ -3136,6 +3182,144 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         path: path.join(
           m36ArtifactDir() ?? runnerRoot,
           "m36-jaeger-real-codetracer-replay.png",
+        ),
+        fullPage: true,
+      });
+    } finally {
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      if (platformHarness?.process.pid) {
+        killProcessTree(platformHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M36 ct-observe launch reaches real Jaeger routed-storage CodeTracer replay", async ({ page }) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("ct-observe binary", ctObserveBin());
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+    childProcess.execFileSync(dockerBin(), ["version", "--format", "{{.Server.Version}}"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    const prepared = prepareStorageHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m36-ct-observe-launch-jaeger-"),
+    );
+    let platformHarness: Awaited<ReturnType<typeof startPlatformLinkHarness>> | null = null;
+    let jaegerProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; hostUrl: string }> = [];
+
+    try {
+      platformHarness = await startPlatformLinkHarness(prepared.inputPath);
+      expect(platformHarness.ready.selectedSegmentIndex).toBe(
+        prepared.selectedSegmentIndex,
+      );
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      const jaegerUiPort = await getFreeTcpPort();
+      const jaegerOtlpPort = await getFreeTcpPort();
+      const bridgePort = await getFreeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      const jaegerBaseUrl = `http://127.0.0.1:${jaegerUiPort}`;
+      const debugParams = new URLSearchParams({
+        tenant_id: platformHarness.ready.tenantId,
+        "service.name": platformHarness.ready.serviceName,
+        trace_id: platformHarness.ready.traceId,
+        span_id: platformHarness.ready.spanId,
+        "ct.mcr.wall_time_unix_ns": platformHarness.ready.wallTimeUnixNs,
+        "ct.mcr.monotonic_time_ns": platformHarness.ready.monotonicTimeNs,
+        time_window_ns: platformHarness.ready.timeWindowNs,
+      });
+      const debugUrl = `${bridgeBaseUrl}/observability/v0/debug-session?${debugParams.toString()}`;
+      const renderedJaegerUiConfigPath = renderJaegerUiConfigForDebugBase(
+        runnerRoot,
+        bridgeBaseUrl,
+      );
+
+      bridge = startPlatformLaunchBridge({
+        rootDir: runnerRoot,
+        ready: platformHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        launches,
+      });
+      jaegerProcess = startJaegerAllInOne(
+        runnerRoot,
+        renderedJaegerUiConfigPath,
+        jaegerUiPort,
+        jaegerOtlpPort,
+      );
+      await waitFor(
+        "Jaeger UI readiness",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/services`),
+        120_000,
+      );
+      await ingestJaegerSpan(jaegerOtlpPort, platformHarness.ready, debugUrl);
+      await waitFor(
+        "Jaeger trace ingestion",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${platformHarness!.ready.traceId}`),
+        60_000,
+      );
+
+      const launchJson = await runCtObserveLaunchAgainstJaeger(
+        jaegerBaseUrl,
+        platformHarness.ready,
+      );
+      expect(launchJson.debug_session_url).toBe(debugUrl);
+
+      await waitFor(
+        "ct-observe launch bridge started CodeTracer",
+        async () => {
+          if (launches.length !== 1) {
+            throw new Error(`expected one CodeTracer launch, got ${launches.length}`);
+          }
+        },
+        120_000,
+      );
+      const launch = launches[0];
+      expect(launchJson.redirect_url).toBe(launch.hostUrl);
+      await page.goto(launchJson.redirect_url, { timeout: 120_000 });
+      await waitForRealReplayDetails(page, launch.hostOutput);
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-launch-jaeger.json"),
+          JSON.stringify(launchJson, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-launch-ct-host-output.log"),
+          launch.hostOutput.join(""),
+        );
+      }
+      await page.screenshot({
+        path: path.join(
+          m36ArtifactDir() ?? runnerRoot,
+          "m36-ct-observe-launch-jaeger-real-codetracer-replay.png",
         ),
         fullPage: true,
       });
