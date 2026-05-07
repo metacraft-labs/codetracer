@@ -211,7 +211,7 @@ const PORT_RELEASE_DELAY_MS = 500;
 // ---------------------------------------------------------------------------
 
 export type DeploymentMode = "electron" | "web";
-export type LaunchMode = "trace" | "welcome" | "edit" | "deepreview";
+export type LaunchMode = "trace" | "trace-folder" | "welcome" | "edit" | "deepreview";
 
 /**
  * Configurable options set via `test.use({ ... })`.
@@ -713,6 +713,121 @@ async function launchTraceElectron(
   };
 }
 
+/**
+ * Import a pre-recorded trace folder into CodeTracer's database via the
+ * `ct host` CLI.  Returns the assigned trace id which the Electron launcher
+ * then opens via CODETRACER_TRACE_ID.
+ *
+ * Used by `launchTraceFolderElectron` to support the BEAM (and other
+ * recorder-bundle) tests that want to drive the GUI against a CTFS trace
+ * produced offline rather than recording on demand.
+ */
+function importTraceFolder(traceFolder: string): number {
+  const ctProcess = childProcess.spawnSync(
+    codetracerPath,
+    ["host", "--trace-path", traceFolder, "0", "--port=0", "--idle-timeout=1ms"],
+    {
+      cwd: codetracerInstallDir,
+      stdio: "pipe",
+      encoding: "utf-8",
+      env: makeCleanEnv({
+        CODETRACER_IN_UI_TEST: "1",
+      }),
+      timeout: 15_000,
+      windowsHide: true,
+    },
+  );
+
+  const output = `${ctProcess.stdout ?? ""}\n${ctProcess.stderr ?? ""}`;
+  const match = output.match(/imported as trace id\s+(\d+)/);
+  if (!match) {
+    throw new Error(
+      `ct host did not import trace folder: error=${ctProcess.error}; status=${ctProcess.status}; signal=${ctProcess.signal}\n` +
+      `stderr: ${ctProcess.stderr}\nstdout: ${ctProcess.stdout}`,
+    );
+  }
+
+  const traceId = Number(match[1]);
+  if (isNaN(traceId)) {
+    throw new Error(`Could not parse imported trace id from: ${match[1]}`);
+  }
+  console.log(`# imported trace folder ${traceFolder} with id ${traceId}`);
+  return traceId;
+}
+
+/**
+ * Launch Electron against a pre-existing CTFS trace folder rather than
+ * recording on demand.  Used by the BEAM (Elixir/Erlang) UI smoke specs that
+ * receive bundles from `prepare-beam-fixtures.sh` in the recorder repo.
+ *
+ * The trace folder must contain `trace_metadata.json`. The folder is imported
+ * via `ct host` to obtain a stable trace id, then Electron is launched with
+ * `CODETRACER_TRACE_ID` so the GUI opens that specific trace.
+ */
+async function launchTraceFolderElectron(traceFolderPath: string): Promise<LaunchResult> {
+  setupLdLibraryPath();
+  clearElectronSingletonLocks();
+  const t0 = Date.now();
+  const traceFolder = path.resolve(traceFolderPath);
+  if (!fs.existsSync(path.join(traceFolder, "trace_metadata.json"))) {
+    throw new Error(`trace folder is missing trace_metadata.json: ${traceFolder}`);
+  }
+
+  const { result: traceId, durationMs: importMs } = await timed(
+    "import trace folder",
+    LIMIT_SMALL_RECORDING_MS,
+    async () => importTraceFolder(traceFolder),
+  );
+
+  const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const launchArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
+
+  const { result: app, durationMs: launchMs } = await timed(
+    "electron launch trace folder",
+    LIMIT_ELECTRON_LAUNCH_MS,
+    async () =>
+      _electron.launch({
+        executablePath: launchExe,
+        cwd: codetracerInstallDir,
+        args: launchArgs,
+        env: makeCleanEnv({
+          CODETRACER_CALLER_PID: process.pid.toString(),
+          CODETRACER_TRACE_ID: traceId.toString(),
+        }),
+      }),
+  );
+
+  const consoleErrors: string[] = [];
+  const mainProcessOutput: string[] = [];
+  attachMainProcessCapture(app, mainProcessOutput);
+  const { result: page, durationMs: windowMs } = await timed(
+    "first window",
+    LIMIT_FIRST_WINDOW_MS,
+    async () => getEditorWindow(app),
+  );
+  attachErrorCollectors(page, consoleErrors);
+  const totalMs = Date.now() - t0;
+  console.log(`# launched Electron for trace folder ${traceFolder} (trace ${traceId}; import: ${importMs}ms electron: ${launchMs}ms window: ${windowMs}ms total: ${totalMs}ms)`);
+
+  return {
+    page,
+    electronApp: app,
+    consoleErrors,
+    mainProcessOutput,
+    teardown: async () => {
+      try {
+        const pid = app.process().pid;
+        if (pid) {
+          killProcessTree(pid);
+        }
+      } catch (_e) {
+        /* already closed */
+      }
+      cleanupCodetracerEnvVars();
+    },
+  };
+}
+
 async function launchTraceWeb(
   sourcePath: string,
   recordingLimit = LIMIT_SMALL_RECORDING_MS,
@@ -1171,6 +1286,18 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           } else {
             result = await launchTraceElectron(sourcePath, recordingLimit, visualReplayTrace);
           }
+          break;
+        }
+        case "trace-folder": {
+          if (!sourcePath) {
+            throw new Error(
+              "sourcePath must be set to a trace folder via test.use() for trace-folder launch mode",
+            );
+          }
+          if (deploymentMode === "web") {
+            throw new Error("trace-folder launch mode is only implemented for Electron");
+          }
+          result = await launchTraceFolderElectron(sourcePath);
           break;
         }
         case "welcome": {
