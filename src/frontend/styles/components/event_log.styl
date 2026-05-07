@@ -298,8 +298,8 @@
   /* thanks to https://stackoverflow.com/a/52977310 */
 
   .eventLog-index
-    min-width: 8%
-    max-width: 8%
+    min-width: 5ch
+    max-width: 5ch
     padding-left: 0.5em
     text-align: center
 
@@ -435,9 +435,9 @@ label
   padding-bottom: 0 !important
 
 .eventLog-text
-  padding-top: 0.25em !important
-  line-height: 1.25em !important
-  padding-bottom: 0 !important
+  padding-top: 0.1em !important
+  line-height: 1.1em !important
+  padding-bottom: 0.1em !important
   max-height: 1.5em
   overflow: visible
 
@@ -492,6 +492,26 @@ label
 
   .paging-active-page
     background-color: yellow
+
+// Event-log-specific DataTable overrides.
+// The HTML structure is: .eventLog > .eventLog-dense-table.data-table > (DataTables) > table > tr
+// So overrides must be scoped as .eventLog .data-table, NOT .data-table .eventLog.
+.eventLog
+  .data-table
+    tr
+      border-top: none !important
+      align-items: center !important
+
+    .direct-location-rr-ticks
+      overflow: visible !important
+      max-height: none !important
+      transform: none !important
+      padding-left: 0.5em !important
+      padding-right: 0.75em !important
+
+    // Combined selector beats .eventLog-cell alone so overflow: visible wins
+    .eventLog-cell.direct-location-rr-ticks
+      overflow: visible !important
 
 .paging-content
   display: flex
