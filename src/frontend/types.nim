@@ -1565,6 +1565,7 @@ type
     folderArrowCharWidth*: int
     search*: bool
     keyNavigation*: bool
+    skipNextBlur*: bool
 
   TraceLogComponent* = ref object of Component
     table*: DataTableComponent
