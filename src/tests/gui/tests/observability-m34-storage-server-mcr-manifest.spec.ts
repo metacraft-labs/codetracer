@@ -1817,6 +1817,61 @@ async function runCtObserveAgainstTempo(
   return row;
 }
 
+async function runCtObserveAgainstGrafanaTempo(
+  rootDir: string,
+  grafanaBaseUrl: string,
+  ready: PlatformLinkReady,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const fromSec = String((BigInt(ready.wallTimeUnixNs) - 60_000_000_000n) / 1_000_000_000n);
+  const toSec = String((BigInt(ready.wallTimeUnixNs) + 60_000_000_000n) / 1_000_000_000n);
+  const output = childProcess.execFileSync(
+    ctObserveBin(),
+    [
+      "extract",
+      "--backend=grafana-tempo",
+      `--grafana-url=${grafanaBaseUrl}`,
+      "--datasource-uid=codetracer-tempo",
+      "--grafana-basic-user=admin",
+      "--grafana-basic-password=admin",
+      `--from=${fromSec}`,
+      `--to=${toSec}`,
+      `--traceql={ trace:id = "${ready.traceId}" }`,
+      "--limit=10",
+      "--page-duration-sec=120",
+      "--request-key-attribute=request.id",
+      "--format=jsonl",
+    ],
+    {
+      cwd: rootDir,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  const rows = output
+    .split(/\n/)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+  const row = rows.find(
+    (candidate) =>
+      candidate.platform === "grafana-tempo" &&
+      candidate.request_key === "m25-real-mcr-request-001" &&
+      debugSessionUrlMatchesReady(
+        String(candidate.codetracer_debug_session_url ?? ""),
+        ready,
+      ),
+  );
+  if (!row) {
+    throw new Error(`ct-observe did not return M36 Grafana Tempo row:\n${output}`);
+  }
+  fs.writeFileSync(
+    path.join(rootDir, "ct-observe-live-grafana-tempo-rows.jsonl"),
+    output,
+  );
+  return row;
+}
+
 async function runMaterializedCtObserveAgainstTempo(
   rootDir: string,
   tempoBaseUrl: string,
@@ -3790,12 +3845,13 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       expect(correlations.totalCount).toBe(1);
       expect(correlations.correlations[0].label).toBe("Debug in CodeTracer");
 
-      const cliRow = await runCtObserveAgainstTempo(
+      const cliRow = await runCtObserveAgainstGrafanaTempo(
         runnerRoot,
-        tempoBaseUrl,
+        grafanaBaseUrl,
         platformHarness.ready,
       );
       expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+      expect(cliRow.platform).toBe("grafana-tempo");
       expect(cliRow.recording_available).toBe(true);
       expect(cliRow.request_key).toBe("m25-real-mcr-request-001");
 
@@ -3823,6 +3879,12 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await expect(link).toBeVisible({ timeout: 60_000 });
       const grafanaLinkUrl = await link.getAttribute("href");
       assertM36DebugUrl(grafanaLinkUrl ?? "", platformHarness.ready);
+      expect(
+        debugSessionUrlMatchesReady(
+          String(cliRow.codetracer_debug_session_url ?? ""),
+          platformHarness.ready,
+        ),
+      ).toBe(true);
 
       const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
       await link.click();
