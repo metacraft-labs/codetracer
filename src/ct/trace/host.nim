@@ -60,7 +60,11 @@ proc isStorageFailureMessage(message: string): bool =
   let lower = message.toLowerAscii()
   lower.contains("storage read failed") or
     lower.contains("storage protocol error") or
-    lower.contains("no readable ctfs shard replica")
+    lower.contains("no readable ctfs shard replica") or
+    (lower.contains("failed to load local manifest") and
+      lower.contains("/trace-storage")) or
+    (lower.contains("no such file or directory") and
+      lower.contains("/trace-storage"))
 
 proc replayProblemJson(code, title, detail: string): string =
   $(%*{

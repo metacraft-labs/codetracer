@@ -218,6 +218,7 @@ type MaterializedFlowFixture = {
 type MaterializedPlatformLinkReady = {
   baseUrl: string;
   tenantId: string;
+  adminToken: string;
   callerToken: string;
   replayToken: string;
   serverIds: string[];
@@ -1012,6 +1013,7 @@ async function startMaterializedPlatformLinkHarness(
       "run",
       "--project",
       storageHarnessProject,
+      "-p:NuGetAudit=false",
       "--",
       "storage-server-materialized-platform-link",
       inputPath,
@@ -2523,11 +2525,74 @@ async function runCtObserveDeniedLaunchAgainstGrafanaTempo(
     `ct-observe Grafana Tempo launch stdout was empty; stderr:\n${output.stderr}`,
   ).toBeGreaterThan(0);
   const launch = JSON.parse(output.stdout);
-  expect(launch.http_status).toBe(expectedProblem.status);
+  expect(
+    launch.http_status,
+    `ct-observe materialized Grafana Tempo launch JSON:\n${JSON.stringify(launch, null, 2)}\nstderr:\n${output.stderr}`,
+  ).toBe(expectedProblem.status);
   expect(launch.problem?.code).toBe(expectedProblem.code);
   expect(launch.selected_row?.platform).toBe("grafana-tempo");
   expect(launch.selected_row?.trace_id).toBe(ready.traceId);
   expect(launch.selected_row?.span_id).toBe(ready.spanId);
+  expect(launch.redirect_url ?? "").toBe("");
+  return launch;
+}
+
+async function runMaterializedCtObserveProblemLaunchAgainstGrafanaTempo(
+  grafanaBaseUrl: string,
+  ready: MaterializedPlatformLinkReady,
+  linkReady: MaterializedPlatformLink,
+  expectedProblem: { status: number; code: string },
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const fromSec = String((BigInt(linkReady.wallTimeUnixNs) - 60_000_000_000n) / 1_000_000_000n);
+  const toSec = String((BigInt(linkReady.wallTimeUnixNs) + 60_000_000_000n) / 1_000_000_000n);
+  const output = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+    childProcess.execFile(
+      ctObserveBin(),
+      [
+        "launch",
+        "--backend=grafana-tempo",
+        `--grafana-url=${grafanaBaseUrl}`,
+        "--datasource-uid=codetracer-tempo",
+        "--grafana-basic-user=admin",
+        "--grafana-basic-password=admin",
+        `--from=${fromSec}`,
+        `--to=${toSec}`,
+        `--traceql={ trace:id = "${linkReady.traceId}" }`,
+        "--limit=10",
+        "--page-duration-sec=120",
+        "--request-key-attribute=request.id",
+        `--span-id=${linkReady.spanId}`,
+        `--request-key=${linkReady.requestKey}`,
+        "--launch-timeout-ms=300000",
+      ],
+      {
+        encoding: "utf-8",
+        windowsHide: true,
+      },
+      (error: any, stdout, stderr) => {
+        resolve({ stdout, stderr, code: error?.code ?? 0 });
+      },
+    );
+  });
+  expect(output.code, `ct-observe materialized Grafana Tempo launch stderr:\n${output.stderr}`).not.toBe(0);
+  expect(
+    output.stdout.trim().length,
+    `ct-observe materialized Grafana Tempo launch stdout was empty; stderr:\n${output.stderr}`,
+  ).toBeGreaterThan(0);
+  const launch = JSON.parse(output.stdout);
+  expect(
+    launch.http_status,
+    `ct-observe materialized Grafana Tempo launch JSON:\n${JSON.stringify(launch, null, 2)}\nstderr:\n${output.stderr}`,
+  ).toBe(expectedProblem.status);
+  expect(launch.problem?.code).toBe(expectedProblem.code);
+  expect(launch.selected_row?.platform).toBe("grafana-tempo");
+  expect(launch.selected_row?.trace_id).toBe(linkReady.traceId);
+  expect(launch.selected_row?.span_id).toBe(linkReady.spanId);
+  expect(launch.selected_row?.request_key).toBe(linkReady.requestKey);
+  expect(launch.debug_session_url).toBe(
+    materializedDebugUrl(new URL(String(launch.debug_session_url)).origin, ready, linkReady),
+  );
   expect(launch.redirect_url ?? "").toBe("");
   return launch;
 }
@@ -2799,6 +2864,9 @@ function startPlatformLaunchBridge(options: {
       response.writeHead(302, { location: hostUrl });
       response.end();
     } catch (error) {
+      options.events.push(
+        `error ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+      );
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       response.end(error instanceof Error ? error.stack : String(error));
     }
@@ -3271,10 +3339,11 @@ async function persistReplayProblemAndFetchStatus(options: {
 }
 
 function startPersistedStorageFailureBridge(options: {
-  ready: PlatformLinkReady;
+  ready: { baseUrl: string; tenantId: string; callerToken: string; adminToken?: string };
   runnerRoot: string;
   port: number;
   events: string[];
+  unavailableDuringHostServerIds?: string[];
   launches: Array<{
     ctProcess: childProcess.ChildProcess;
     hostOutput: string[];
@@ -3314,6 +3383,21 @@ function startPersistedStorageFailureBridge(options: {
       const replayPayload = await fetchJsonFromUrl(
         `${options.ready.baseUrl}/__tests/replay-provisioning/latest`,
       );
+      for (const serverId of options.unavailableDuringHostServerIds ?? []) {
+        if (!options.ready.adminToken) {
+          throw new Error("storage failure bridge needs an admin token to toggle materialized storage health");
+        }
+        await setStorageServerHealth(
+          {
+            baseUrl: options.ready.baseUrl,
+            tenantId: options.ready.tenantId,
+            adminToken: options.ready.adminToken,
+          },
+          serverId,
+          "unavailable",
+        );
+        options.events.push(`server-unavailable ${serverId}`);
+      }
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -3362,6 +3446,18 @@ function startPersistedStorageFailureBridge(options: {
         ready: options.ready,
         problemEvent,
       });
+      for (const serverId of options.unavailableDuringHostServerIds ?? []) {
+        await setStorageServerHealth(
+          {
+            baseUrl: options.ready.baseUrl,
+            tenantId: options.ready.tenantId,
+            adminToken: options.ready.adminToken ?? "",
+          },
+          serverId,
+          "healthy",
+        );
+        options.events.push(`server-healthy ${serverId}`);
+      }
       options.launches.push({
         ctProcess,
         hostOutput,
@@ -3426,6 +3522,26 @@ function retentionCaseAsMaterializedLink(
     timeWindowNs: testcase.timeWindowNs,
     manifestPath: "",
     materializedArtifactKey: "",
+  };
+}
+
+function materializedLinkAsPlatformReady(
+  ready: MaterializedPlatformLinkReady,
+  linkReady: MaterializedPlatformLink,
+): PlatformLinkReady {
+  return {
+    baseUrl: ready.baseUrl,
+    tenantId: ready.tenantId,
+    adminToken: ready.adminToken,
+    callerToken: ready.callerToken,
+    serverIds: ready.serverIds,
+    traceId: linkReady.traceId,
+    spanId: linkReady.spanId,
+    serviceName: linkReady.serviceName,
+    wallTimeUnixNs: linkReady.wallTimeUnixNs,
+    monotonicTimeNs: linkReady.monotonicTimeNs,
+    timeWindowNs: linkReady.timeWindowNs,
+    selectedSegmentIndex: 0,
   };
 }
 
@@ -4465,6 +4581,268 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
     }
   });
 
+  base("M37 Grafana Tempo and ct-observe surface persisted storage_failure for materialized Python Ruby and JavaScript", async ({ page, context }) => {
+    base.setTimeout(600_000);
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("ct-observe binary", ctObserveBin());
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("Grafana Tempo provisioning output", grafanaPluginOutPath());
+    for (const fixture of materializedFixtures) {
+      expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
+    }
+
+    const prepared = prepareMaterializedPlatformHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m37-materialized-storage-failure-"),
+    );
+    let platformHarness: Awaited<ReturnType<typeof startMaterializedPlatformLinkHarness>> | null = null;
+    let tempoProcess: childProcess.ChildProcess | null = null;
+    let grafanaProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const bridgeEvents: string[] = [];
+    const launches: Array<{
+      ctProcess: childProcess.ChildProcess;
+      hostOutput: string[];
+      problemEvent: any;
+      replayStatus: any;
+      replayList: any;
+    }> = [];
+    const cliRows: any[] = [];
+    const cliLaunches: any[] = [];
+    const browserProblems: any[] = [];
+
+    try {
+      platformHarness = await startMaterializedPlatformLinkHarness(prepared.inputPath);
+      expect(platformHarness.ready.links.length).toBe(materializedFixtures.length);
+      expect(platformHarness.ready.serverIds.length).toBeGreaterThanOrEqual(1);
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      const tempoHttpPort = await freeTcpPort();
+      const tempoGrpcPort = await freeTcpPort();
+      const tempoOtlpPort = await freeTcpPort();
+      const grafanaPort = await freeTcpPort();
+      const bridgePort = await freeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      const tempoBaseUrl = `http://127.0.0.1:${tempoHttpPort}`;
+      const grafanaBaseUrl = `http://127.0.0.1:${grafanaPort}`;
+
+      bridge = startPersistedStorageFailureBridge({
+        ready: platformHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        events: bridgeEvents,
+        unavailableDuringHostServerIds: platformHarness.ready.serverIds,
+        launches,
+      });
+      tempoProcess = await startTempoServer(
+        runnerRoot,
+        tempoHttpPort,
+        tempoGrpcPort,
+        tempoOtlpPort,
+        tempoBaseUrl,
+      );
+      for (const linkReady of platformHarness.ready.links) {
+        await ingestMaterializedTempoSpan(
+          tempoOtlpPort,
+          platformHarness.ready,
+          linkReady,
+          materializedDebugUrl(bridgeBaseUrl, platformHarness.ready, linkReady),
+        );
+        await waitFor(
+          `Tempo M37 materialized ${linkReady.language} storage failure trace ingestion`,
+          async () => fetchJsonFromUrl(`${tempoBaseUrl}/api/traces/${linkReady.traceId}`),
+          60_000,
+        );
+      }
+
+      const renderedGrafanaDir = renderGrafanaProvisioningForM36(
+        runnerRoot,
+        bridgeBaseUrl,
+        tempoBaseUrl,
+      );
+      grafanaProcess = await startGrafanaServer(
+        runnerRoot,
+        grafanaPort,
+        renderedGrafanaDir,
+        grafanaBaseUrl,
+      );
+      const correlations = await fetchJsonFromUrl(
+        `${grafanaBaseUrl}/api/datasources/correlations?sourceUID=codetracer-tempo`,
+      );
+      expect(correlations.totalCount).toBe(1);
+
+      for (const linkReady of platformHarness.ready.links) {
+        const expectedDebugUrl = materializedDebugUrl(
+          bridgeBaseUrl,
+          platformHarness.ready,
+          linkReady,
+        );
+        const cliRow = await runMaterializedCtObserveAgainstGrafanaTempo(
+          runnerRoot,
+          grafanaBaseUrl,
+          platformHarness.ready,
+          linkReady,
+        );
+        expect(cliRow.codetracer_debug_session_url).toBe(expectedDebugUrl);
+        expect(cliRow.recording_available).toBe(true);
+        cliRows.push(cliRow);
+
+        const cliLaunch = await runMaterializedCtObserveProblemLaunchAgainstGrafanaTempo(
+          grafanaBaseUrl,
+          platformHarness.ready,
+          linkReady,
+          { status: 424, code: "storage_failure" },
+        );
+        expect(cliLaunch.debug_session_url).toBe(expectedDebugUrl);
+        expect(cliLaunch.redirect_url ?? "").toBe("");
+        expect(cliLaunch.problem?.detail).toContain("could not be read");
+        cliLaunches.push(cliLaunch);
+      }
+
+      await waitFor(
+        "ct-observe materialized storage_failure launches persisted replay problems",
+        async () => {
+          if (launches.length < platformHarness!.ready.links.length) {
+            throw new Error(`expected ${platformHarness!.ready.links.length} failed CLI launches, got ${launches.length}`);
+          }
+        },
+        180_000,
+      );
+
+      for (const linkReady of platformHarness.ready.links) {
+        await page.goto(
+          grafanaExploreTraceUrl(
+            grafanaBaseUrl,
+            materializedLinkAsPlatformReady(platformHarness.ready, linkReady),
+          ),
+          {
+            waitUntil: "domcontentloaded",
+            timeout: 60_000,
+          },
+        );
+        await page.getByText(linkReady.traceId).first().waitFor({
+          timeout: 60_000,
+        });
+        if (!(await page.getByText(linkReady.operationName).first().isVisible())) {
+          await page.getByText(linkReady.traceId).first().click();
+        }
+        await page.getByText(linkReady.operationName).first().waitFor({ timeout: 60_000 });
+        const spanRow = page.getByRole("switch", {
+          name: new RegExp(escapeRegExp(`${linkReady.serviceName} ${linkReady.operationName}`)),
+        });
+        await spanRow.hover();
+        await spanRow.click();
+        await page.getByText(linkReady.operationName).first().click();
+
+        const link = page
+          .locator(`div[data-item-key*="${linkReady.spanId}"] a[href]`)
+          .first();
+        await expect(link).toBeVisible({ timeout: 60_000 });
+        expect(
+          debugSessionUrlMatchesMaterializedLink(
+            String(await link.getAttribute("href") ?? ""),
+            platformHarness.ready,
+            linkReady,
+          ),
+        ).toBe(true);
+
+        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        await link.click();
+        const problemPage = (await popupPromise) ?? page;
+        await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
+          timeout: 120_000,
+        });
+        const bodyText = await problemPage.locator("body").innerText();
+        expect(bodyText, `${linkReady.language} Grafana browser body`).toContain("storage_failure");
+        expect(bodyText, `${linkReady.language} Grafana browser body`).toContain("Replay storage objects could not be read");
+        expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("/replay/ready/");
+        expect(bodyText, `${linkReady.language} Grafana browser body`).not.toContain("codetracer-replay");
+        browserProblems.push({ language: linkReady.language, bodyText });
+        if (problemPage !== page) {
+          await problemPage.close();
+        }
+      }
+
+      await waitFor(
+        "Grafana materialized storage_failure launches persisted replay problems",
+        async () => {
+          const expectedLaunches = platformHarness!.ready.links.length * 2;
+          if (launches.length < expectedLaunches) {
+            throw new Error(`expected ${expectedLaunches} failed launches, got ${launches.length}`);
+          }
+        },
+        180_000,
+      );
+      for (const launch of launches) {
+        expect(launch.problemEvent.replayId).toBeTruthy();
+        expect(launch.problemEvent.tenantId).toBe(platformHarness.ready.tenantId);
+        expect(launch.problemEvent.problem.code).toBe("storage_failure");
+        expect(launch.replayStatus.status).toBe("Failed");
+        expect(launch.replayStatus.isReady).toBe(false);
+        expect(launch.replayStatus.problem.code).toBe("storage_failure");
+        expect(launch.hostOutput.join("")).toContain("CODETRACER_REPLAY_AGENT_PROBLEM");
+        expect(launch.hostOutput.join("")).toContain("CODETRACER_REPLAY_PROBLEM");
+        expect(launch.hostOutput.join("")).not.toContain("imported manifest trace as trace id");
+      }
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-materialized-storage-failure-grafana-tempo-ct-observe-rows.json"),
+          JSON.stringify(cliRows, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-materialized-storage-failure-grafana-tempo-ct-observe-launches.json"),
+          JSON.stringify(cliLaunches, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-materialized-storage-failure-grafana-tempo-browser-problems.json"),
+          JSON.stringify(browserProblems, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-materialized-storage-failure-grafana-tempo-replay-statuses.json"),
+          JSON.stringify(launches.map((launch) => launch.replayStatus), null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-materialized-storage-failure-grafana-tempo-replay-lists.json"),
+          JSON.stringify(launches.map((launch) => launch.replayList), null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-materialized-storage-failure-grafana-tempo-bridge-events.log"),
+          bridgeEvents.join("\n"),
+        );
+        for (const logFileName of ["grafana.log", "tempo.log"]) {
+          const logPath = path.join(runnerRoot, logFileName);
+          if (fs.existsSync(logPath)) {
+            fs.copyFileSync(logPath, path.join(artifactDir, logFileName));
+          }
+        }
+      }
+    } finally {
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      await stopChild(grafanaProcess);
+      await stopChild(tempoProcess);
+      if (platformHarness?.process.pid) {
+        killProcessTree(platformHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
   base("M37 first slice returns structured retention and missing-data problems for MCR and materialized traces", async ({ page }) => {
     base.setTimeout(420_000);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
@@ -4747,6 +5125,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const materializedReady: MaterializedPlatformLinkReady = {
         baseUrl: policyHarness.ready.baseUrl,
         tenantId: policyHarness.ready.tenantId,
+        adminToken: "",
         callerToken: policyHarness.ready.callerToken,
         replayToken: "",
         serverIds: policyHarness.ready.serverIds,
