@@ -170,6 +170,28 @@ proc pinActiveContentItem(layout: js, stack: js, edge: AutoHideEdge) =
     return
   pinPanel(cast[GoldenLayout](layout), cast[GoldenContentItem](activeItem), edge)
 
+proc injectPinButton(tabElement: JsObject, onPin: proc()) =
+  ## Insert a pin button to the left of the GL close button inside a tab element.
+  ## Clicking it calls `onPin`, which sends the panel to the auto-hide sidebar.
+  if tabElement.isNil or tabElement.isUndefined:
+    return
+  {.emit: """
+    var _pinBtn = document.createElement('div');
+    _pinBtn.className = 'lm_pin_tab';
+    var _closeEl = `tabElement`.querySelector('.lm_close_tab');
+    if (_closeEl) {
+      `tabElement`.insertBefore(_pinBtn, _closeEl);
+    } else {
+      `tabElement`.appendChild(_pinBtn);
+    }
+    var _onPin = `onPin`;
+    _pinBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      _onPin();
+    });
+  """.}
+
+
 proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   ## Build the GoldenLayout stack-header dropdown directly.
   ##
@@ -480,6 +502,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
+      let editorContentItem = cast[GoldenContentItem](tab.contentItem)
+      injectPinButton(tab.element, proc() =
+        pinPanel(cast[GoldenLayout](layout), editorContentItem, AutoHideEdge.Left))
 
     var containerId: cstring
     containerId = cstring(fmt"editorComponent-{state.id}")
@@ -529,6 +554,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
+      let genericContentItem = cast[GoldenContentItem](tab.contentItem)
+      injectPinButton(tab.element, proc() =
+        pinPanel(cast[GoldenLayout](layout), genericContentItem, AutoHideEdge.Left))
 
     # Components that still enter the generic GoldenLayout route mount
     # directly into the GoldenLayout container. Editor tabs use the separate
