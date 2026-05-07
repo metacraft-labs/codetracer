@@ -104,7 +104,7 @@ proc copyDirContents(srcDir, destDir: string) =
       copyDirContents(entry.path, destPath)
 
 proc normalizedForCompare(path: string): string =
-  normalizedPath(path).replace('\\', '/')
+  path.replace('\\', '/').strip(leading = false, trailing = true, chars = {'/'})
 
 proc pathInside(path, root: string): bool =
   let normalizedPath = normalizedForCompare(path)
@@ -118,20 +118,37 @@ proc dropFilesPrefix(path: string): string =
   else:
     normalized
 
+proc safeFileExists(path: string): bool =
+  try:
+    fileExists(path)
+  except OSError:
+    false
+
 proc materializeImportedTracePath(tempDir, sourcePath, payloadPath: string): bool =
   if payloadPath.len == 0 or payloadPath.startsWith(".."):
     return false
 
   let targetPath = tempDir / "files" / payloadPath
-  if fileExists(sourcePath) and normalizedForCompare(sourcePath) != normalizedForCompare(targetPath):
+  let payloadFileName = sourcePath.extractFilename
+  let effectiveSourcePath =
+    if safeFileExists(sourcePath):
+      sourcePath
+    elif payloadFileName in ["trace.bin", "trace.json"] and
+        safeFileExists(tempDir / payloadFileName):
+      tempDir / payloadFileName
+    else:
+      sourcePath
+
+  if safeFileExists(effectiveSourcePath) and
+      normalizedForCompare(effectiveSourcePath) != normalizedForCompare(targetPath):
     try:
       createDir(targetPath.parentDir)
-      copyFile(sourcePath, targetPath)
+      copyFile(effectiveSourcePath, targetPath)
     except CatchableError as e:
-      echo fmt"WARNING: trying to copy trace path {sourcePath} error: ", e.msg
+      echo fmt"WARNING: trying to copy trace path {effectiveSourcePath} error: ", e.msg
       echo "  skipping copying that file"
 
-  fileExists(targetPath)
+  safeFileExists(targetPath)
 
 proc normalizeImportedTracePaths(tempDir: string) =
   ## Local manifest imports copy companion files into a transient trace folder.
@@ -156,6 +173,11 @@ proc normalizeImportedTracePaths(tempDir: string) =
   var normalizedPaths: seq[string] = @[]
   for rawPath in rawPaths:
     if rawPath.len == 0:
+      continue
+
+    let rawFileName = rawPath.replace('\\', '/').extractFilename
+    if rawFileName in ["trace.bin", "trace.json"] and safeFileExists(tempDir / rawFileName):
+      normalizedPaths.add(rawFileName)
       continue
 
     var sourcePath = rawPath
@@ -381,14 +403,25 @@ proc resolveLocalReference(reference, manifestPath, manifestKey: string): string
 proc findMaterializedTraceFolder(path: string): string =
   if path.len == 0:
     return ""
-  let fullPath = expandFilename(expandTilde(path))
-  if dirExists(fullPath):
+  let fullPath = try:
+      expandFilename(expandTilde(path))
+    except OSError:
+      expandTilde(path)
+  let isDir = try:
+      dirExists(fullPath)
+    except OSError:
+      false
+  let isFile = try:
+      fileExists(fullPath)
+    except OSError:
+      false
+  if isDir:
     if fileExists(fullPath / "trace_metadata.json"):
       return fullPath
     for entry in walkDir(fullPath):
       if entry.kind in {pcDir, pcLinkToDir} and fileExists(entry.path / "trace_metadata.json"):
         return entry.path
-  elif fileExists(fullPath):
+  elif isFile:
     let parent = fullPath.parentDir
     if fullPath.extractFilename in ["trace.json", "trace.bin"] and
         fileExists(parent / "trace_metadata.json"):
@@ -495,7 +528,7 @@ proc storageObjectUrl(obj: JsonNode, options: StorageProtocolOptions): string =
 
   let objectKey = objectKeyFromReference(
     if uriValue.len > 0: uriValue
-    else: obj.jsonString(["objectKey", "object_key", "object_id", "path"]))
+    else: obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "object_id", "path"]))
   if objectKey.len == 0:
     raise newException(ValueError, "storage object has no object key or URI")
 
@@ -586,6 +619,45 @@ proc materializedPayloadFileName(obj: JsonNode): string =
     return "materialized.ct"
   "trace.bin"
 
+proc materializePayloadTracePathAliases(tempDir, payloadPath: string) =
+  let tracePathsPath = tempDir / "trace_paths.json"
+  if not fileExists(tracePathsPath):
+    return
+
+  let payloadFileName = payloadPath.extractFilename
+  var tracePaths: JsonNode
+  try:
+    tracePaths = parseJson(readFile(tracePathsPath))
+  except CatchableError as e:
+    echo "WARNING: failed to parse trace_paths.json for materialized payload aliases: ", e.msg
+    return
+
+  if tracePaths.kind != JArray:
+    return
+
+  for pathNode in tracePaths:
+    if pathNode.kind != JString:
+      continue
+    let rawPath = pathNode.getStr()
+    if rawPath.len == 0:
+      continue
+
+    let normalized = rawPath.replace('\\', '/')
+    if normalized.extractFilename != payloadFileName:
+      continue
+
+    let targetPath =
+      if isAbsoluteTracePath(normalized): normalized
+      else: tempDir / normalized
+    if fileExists(targetPath):
+      continue
+
+    try:
+      createDir(targetPath.parentDir)
+      copyFile(payloadPath, targetPath)
+    except CatchableError as e:
+      echo fmt"WARNING: failed to materialize payload trace path alias {normalized}: ", e.msg
+
 proc writeMaterializedStorageArtifactToTemp(
     obj: JsonNode,
     supportOwner: JsonNode,
@@ -596,6 +668,7 @@ proc writeMaterializedStorageArtifactToTemp(
   fetchStorageSupportFiles(supportOwner, options, tempDir)
   result = tempDir / materializedPayloadFileName(obj)
   writeFile(result, fetchStorageObject(obj, options, label))
+  materializePayloadTracePathAliases(tempDir, result)
 
 proc importMaterializedStorageObject(
     obj: JsonNode,
@@ -789,12 +862,7 @@ proc resolveRecordingManifest(
     let path = resolveLocalReference(artifact.jsonString(["artifactKey", "artifact_key"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
     if traceFolder.len == 0:
-      let obj = %*{
-        "objectKey": artifact.jsonString(["artifactKey", "artifact_key"]),
-        "uploadCompletionState": artifact.jsonString(["uploadCompletionState", "upload_completion_state"]),
-        "retentionStatus": artifact.jsonString(["retentionStatus", "retention_status"])
-      }
-      result.traceId = importMaterializedStorageObject(obj, storageOptions, "materialized trace artifact")
+      result.traceId = importMaterializedStorageObject(artifact, storageOptions, "materialized artifact")
     elif traceFolder.endsWith(".ct"):
       result.traceId = importCtFile(traceFolder)
     else:

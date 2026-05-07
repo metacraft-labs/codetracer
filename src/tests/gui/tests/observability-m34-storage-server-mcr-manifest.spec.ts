@@ -1541,6 +1541,7 @@ function startPlatformLaunchBridge(options: {
       const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
+      const hostUrl = `http://127.0.0.1:${httpPort}`;
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -1578,8 +1579,11 @@ function startPlatformLaunchBridge(options: {
       ctProcess.stderr?.on("data", (chunk: Buffer) => {
         hostOutput.push(chunk.toString());
       });
-      await waitForOutput(hostOutput, /imported manifest trace as trace id\s+\d+/);
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const importOutput = await waitForOutput(
+        hostOutput,
+        /imported manifest trace as trace id\s+\d+/,
+      );
+      expect(importOutput).toContain("Starting host from generated replay manifest");
       options.launches.push({ ctProcess, hostOutput, hostUrl });
       response.writeHead(302, { location: hostUrl });
       response.end();
@@ -1596,6 +1600,8 @@ function startMaterializedPlatformLaunchBridge(options: {
   ready: MaterializedPlatformLinkReady;
   runnerRoot: string;
   port: number;
+  bridgeErrors: string[];
+  bridgeEvents: string[];
   launches: Array<{
     ctProcess: childProcess.ChildProcess;
     hostOutput: string[];
@@ -1607,7 +1613,9 @@ function startMaterializedPlatformLaunchBridge(options: {
   const server = http.createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host}`);
+      options.bridgeEvents.push(`request ${request.method ?? "GET"} ${requestUrl.pathname}${requestUrl.search}`);
       if (requestUrl.pathname !== "/observability/v0/debug-session") {
+        options.bridgeEvents.push(`not-found ${requestUrl.pathname}`);
         response.writeHead(404);
         response.end("not found");
         return;
@@ -1623,10 +1631,12 @@ function startMaterializedPlatformLaunchBridge(options: {
       }
 
       const upstreamUrl = `${options.ready.baseUrl}${requestUrl.pathname}${requestUrl.search}`;
+      options.bridgeEvents.push(`upstream ${upstreamUrl}`);
       const upstreamResponse = await fetch(upstreamUrl, {
         headers: { authorization: `Bearer ${options.ready.callerToken}` },
         redirect: "manual",
       });
+      options.bridgeEvents.push(`upstream-status ${upstreamResponse.status}`);
       if (upstreamResponse.status !== 302) {
         throw new Error(
           `codetracer-ci materialized debug-session returned HTTP ${upstreamResponse.status}: ${await upstreamResponse.text()}`,
@@ -1636,9 +1646,18 @@ function startMaterializedPlatformLaunchBridge(options: {
       const replayPayload = await fetchJsonFromUrl(
         `${options.ready.baseUrl}/__tests/replay-provisioning/latest`,
       );
+      options.bridgeEvents.push(`replay-payload ${replayPayload.traceSource?.kind ?? "missing-kind"}`);
       expect(replayPayload.traceSource.kind).toBe("materialized_trace");
       expect(replayPayload.traceSource.artifacts[0].artifactKey).toBe(
         linkReady.materializedArtifactKey,
+      );
+      const materializedSupportFiles =
+        replayPayload.traceSource.artifacts[0].supportFiles ?? [];
+      expect(materializedSupportFiles.map((file: any) => file.relativePath)).toContain(
+        "trace_metadata.json",
+      );
+      expect(materializedSupportFiles.map((file: any) => file.relativePath)).toContain(
+        "trace_paths.json",
       );
       expect(replayPayload.initialPosition.materializedMomentId).toBe(
         linkReady.momentId,
@@ -1646,47 +1665,88 @@ function startMaterializedPlatformLaunchBridge(options: {
       expect(replayPayload.initialPosition.materializedArtifactKey).toBe(
         linkReady.materializedArtifactKey,
       );
+      options.bridgeEvents.push("generating-runner-command");
+      const replayAgentCommandLine = generateReplayAgentCommand(
+        replayPayload,
+        options.runnerRoot,
+      );
+      options.bridgeEvents.push("generated-runner-command");
+      expect(replayAgentCommandLine).toContain("docker run ");
+      expect(replayAgentCommandLine).toContain(
+        "CODETRACER_TRACE_MATERIALIZED_ARTIFACTS=",
+      );
+      expect(replayAgentCommandLine).toContain("trace_metadata.json");
+      expect(replayAgentCommandLine).toContain("trace_paths.json");
+      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      expect(replayEnv.CODETRACER_TRACE_MANIFEST_KEY).toBeTruthy();
+      expect(replayEnv.CODETRACER_STORAGE_BASE_URL).toBe(options.ready.baseUrl);
+      expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toBe(
+        replayPayload.traceSource.storageReplayToken,
+      );
+      expect(replayEnv.CODETRACER_STORAGE_REPLAY_TOKEN).toMatch(
+        /^ct_replay_storage_/,
+      );
 
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
+      const hostUrl = `http://127.0.0.1:${httpPort}`;
       const hostOutput: string[] = [];
+      const shimDir = createCtPathShim(options.runnerRoot);
+      const entrypointPath = path.join(
+        codetracerCiDir,
+        "resources",
+        "docker",
+        "codetracer-runner",
+        "replay-entrypoint.sh",
+      );
       const ctProcess = childProcess.spawn(
-        codetracerPath,
+        "bash",
         [
-          "host",
-          `--manifest=${linkReady.manifestPath}`,
-          `--storage-base-url=${options.ready.baseUrl}`,
-          `--storage-tenant-id=${options.ready.tenantId}`,
-          `--storage-token=${options.ready.replayToken}`,
-          "--storage-protocol=local-storage",
+          entrypointPath,
           `--port=${httpPort}`,
           `--backend-socket-port=${backendPort}`,
           `--frontend-socket=${backendPort}`,
         ],
         {
           cwd: codetracerInstallDir,
-          env: makeCleanEnv({
-            XDG_CONFIG_HOME: path.join(
+          env: {
+            ...makeCleanEnv({
+              XDG_CONFIG_HOME: path.join(
+                options.runnerRoot,
+                `xdg-config-${linkReady.language}`,
+              ),
+            }),
+            ...replayEnv,
+            CODETRACER_LOCAL_STORAGE_ROOT: "",
+            CODETRACER_LOCAL_MANIFEST_PATH: "",
+            CODETRACER_WORK_DIR: path.join(
               options.runnerRoot,
-              `xdg-config-${linkReady.language}`,
+              `work-${linkReady.language}`,
             ),
-          }),
+            PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         },
       );
+      options.bridgeEvents.push(`spawned ${linkReady.language} ${hostUrl}`);
       ctProcess.stdout?.on("data", (chunk: Buffer) => {
         hostOutput.push(chunk.toString());
       });
       ctProcess.stderr?.on("data", (chunk: Buffer) => {
         hostOutput.push(chunk.toString());
       });
-      await waitForOutput(hostOutput, /imported manifest trace as trace id\s+\d+/);
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
       options.launches.push({ ctProcess, hostOutput, hostUrl, linkReady, replayPayload });
+      const importOutput = await waitForOutput(
+        hostOutput,
+        /imported manifest trace as trace id\s+\d+/,
+      );
+      options.bridgeEvents.push(`imported ${linkReady.language}`);
+      expect(importOutput).toContain("Starting host from generated replay manifest");
       response.writeHead(302, { location: hostUrl });
       response.end();
     } catch (error) {
+      options.bridgeErrors.push(error instanceof Error ? error.stack ?? error.message : String(error));
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       response.end(error instanceof Error ? error.stack : String(error));
     }
@@ -2274,6 +2334,10 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
   base("M36 real Jaeger UI links launch materialized Python Ruby and JavaScript CodeTracer replays", async ({ page }) => {
     expectRequiredFile("CodeTracer test binary", codetracerPath);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
     expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
     for (const fixture of materializedFixtures) {
       expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
@@ -2310,6 +2374,8 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       linkReady: MaterializedPlatformLink;
       replayPayload: any;
     }> = [];
+    const bridgeErrors: string[] = [];
+    const bridgeEvents: string[] = [];
     const cliRows: Record<string, any> = {};
 
     try {
@@ -2332,6 +2398,8 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ready: platformHarness.ready,
         runnerRoot,
         port: bridgePort,
+        bridgeErrors,
+        bridgeEvents,
         launches,
       });
       jaegerProcess = startJaegerAllInOne(
@@ -2398,25 +2466,29 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           .click();
 
         await page.getByRole("switch", { name: /Tags/ }).click();
-        const link = page.locator('a[title="Debug in CodeTracer"]').first();
+        const debugHref = cliRows[fixture.language].codetracer_debug_session_url;
+        const link = page.locator("a").filter({ hasText: debugHref }).first();
         await expect(link).toBeVisible({ timeout: 60_000 });
-        expect(await link.getAttribute("href")).toBe(
-          cliRows[fixture.language].codetracer_debug_session_url,
-        );
+        expect(await link.getAttribute("href")).toBe(debugHref);
 
         const previousLaunches = launches.length;
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
-        await link.click();
-        const popup = await popupPromise;
-        const replayPage = popup ?? page;
-        await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
-          timeout: 120_000,
-        });
+        const navigationResponse = await page.goto(debugHref, { waitUntil: "domcontentloaded", timeout: 120_000 });
+        expect(
+          navigationResponse?.status(),
+          `${fixture.label} debug-session navigation status; bridge events:\n${bridgeEvents.join("\n")}\nBridge errors:\n${bridgeErrors.join("\n\n")}`,
+        ).toBeLessThan(400);
+        const replayPage = page;
         await waitFor(
           `${fixture.label} platform launch bridge started CodeTracer`,
           async () => {
+            if (bridgeErrors.length > 0) {
+              throw new Error(bridgeErrors.join("\n\n"));
+            }
             if (launches.length !== previousLaunches + 1) {
-              throw new Error(`expected ${previousLaunches + 1} CodeTracer launches, got ${launches.length}`);
+              throw new Error(
+                `expected ${previousLaunches + 1} CodeTracer launches, got ${launches.length}\n` +
+                  `Bridge events:\n${bridgeEvents.join("\n")}`,
+              );
             }
           },
           120_000,
