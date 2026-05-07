@@ -432,6 +432,12 @@ input:checked ~ .checkmark:after
 //   outline: 4px solid PRIMARY_BASE
 
 .layout-buttons-container
+  // Always render last in the .lm_tabs flex container, pinned to the right.
+  // GL2's tryUpdateTabSizes re-appends tab elements via appendChild (moving
+  // them after our button in the DOM); the CSS order overrides DOM order so
+  // the button stays visually at the far right after collapse/expand.
+  order: 9999
+  margin-left: auto
   width: 1.7em !important
   height: 1.7em !important
   background-color: SECONDARY_BASE
