@@ -892,8 +892,18 @@ async function launchTraceWeb(
     args: extraArgs,
   });
 
+  const context = await browser.newContext({
+    ...(process.env.RECORD_VIDEO === "1" && {
+      recordVideo: {
+        dir: path.join(codetracerInstallDir, "test-results", "videos"),
+        size: { width: 1920, height: 1080 },
+      },
+      viewport: { width: 1920, height: 1080 },
+    }),
+  });
+
   const consoleErrors: string[] = [];
-  const page = await browser.newPage();
+  const page = await context.newPage();
   attachErrorCollectors(page, consoleErrors);
 
   // Wait for ct host to become ready with retry-based navigation.
@@ -998,8 +1008,18 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
     args: extraArgs,
   });
 
+  const context = await browser.newContext({
+    ...(process.env.RECORD_VIDEO === "1" && {
+      recordVideo: {
+        dir: path.join(codetracerInstallDir, "test-results", "videos"),
+        size: { width: 1920, height: 1080 },
+      },
+      viewport: { width: 1920, height: 1080 },
+    }),
+  });
+
   const consoleErrors: string[] = [];
-  const page = await browser.newPage();
+  const page = await context.newPage();
   attachErrorCollectors(page, consoleErrors);
 
   const tConnect0 = Date.now();

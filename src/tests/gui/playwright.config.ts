@@ -93,10 +93,20 @@ export default defineConfig({
     actionTimeout: 60_000,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
-    ...(chromiumExecutable && {
-      launchOptions: { executablePath: chromiumExecutable },
-    }),
+    video: "on",
+    viewport: { width: 1920, height: 1080 },
   },
+
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...(chromiumExecutable && {
+          launchOptions: { executablePath: chromiumExecutable },
+        }),
+      },
+    },
+  ],
   // Deployment mode (electron vs web) is controlled per-test via
   // test.use({ deploymentMode: "web" }) or defaults to "electron".
   // To run all tests in web mode, set CODETRACER_TEST_IN_BROWSER=1.

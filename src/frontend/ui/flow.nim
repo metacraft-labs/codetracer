@@ -21,6 +21,8 @@ from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_flow_view import
   mountIsoNimFlow
 
+proc appendToDocumentBody(node: dom_api.Node) {.importjs: "document.body.appendChild(#)".}
+
 # Module-level FlowVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
 # data so behaviour is unchanged.
