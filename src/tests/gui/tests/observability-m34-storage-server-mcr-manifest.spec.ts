@@ -231,6 +231,28 @@ type MaterializedPlatformLink = {
   materializedArtifactKey: string;
 };
 
+type RetentionGapReady = {
+  baseUrl: string;
+  tenantId: string;
+  callerToken: string;
+  serverIds: string[];
+  replayProvisioningMessageCount: number;
+  cases: RetentionGapCase[];
+};
+
+type RetentionGapCase = {
+  name: string;
+  serviceName: string;
+  traceId: string;
+  spanId: string;
+  wallTimeUnixNs: string;
+  monotonicTimeNs: string;
+  timeWindowNs: string;
+  expectedStatus: number;
+  expectedCode: "retention_gap" | "missing_data";
+  browserPath: string;
+};
+
 type CorruptedPrimaryReplicas = {
   primaryServerId: string;
   secondaryServerId: string;
@@ -628,6 +650,7 @@ function prepareStorageHarnessInput(): PreparedSplitMcr {
 function prepareMaterializedPlatformHarnessInput(options?: {
   traceId?: string;
   requestKey?: string;
+  mcrSliceFilePath?: string;
 }): { rootDir: string; inputPath: string } {
   const rootDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "ct-m36-storage-materialized-platform-link-"),
@@ -637,6 +660,7 @@ function prepareMaterializedPlatformHarnessInput(options?: {
     inputPath,
     JSON.stringify(
       {
+        mcrSliceFilePath: options?.mcrSliceFilePath,
         artifacts: materializedFixtures.map((fixture) => ({
           label: fixture.label,
           language: fixture.language,
@@ -942,6 +966,54 @@ async function startMaterializedPlatformLinkHarness(
   return {
     process: harnessProcess,
     ready: JSON.parse(match[1]) as MaterializedPlatformLinkReady,
+    output,
+  };
+}
+
+async function startRetentionGapHarness(
+  inputPath: string,
+): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
+  const output: string[] = [];
+  const harnessProcess = childProcess.spawn(
+    "direnv",
+    [
+      "exec",
+      codetracerCiDir,
+      "dotnet",
+      "run",
+      "--project",
+      storageHarnessProject,
+      "--",
+      "storage-server-retention-gap",
+      inputPath,
+    ],
+    {
+      cwd: codetracerCiDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  harnessProcess.stdout?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+  harnessProcess.stderr?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+
+  const readyOutput = await waitForOutput(
+    output,
+    /CODETRACER_CI_RETENTION_GAP_READY\s+({.+})/,
+    120_000,
+  );
+  const match = readyOutput.match(/CODETRACER_CI_RETENTION_GAP_READY\s+({.+})/);
+  if (!match) {
+    throw new Error(`retention-gap ready payload missing:\n${readyOutput}`);
+  }
+
+  return {
+    process: harnessProcess,
+    ready: JSON.parse(match[1]) as RetentionGapReady,
     output,
   };
 }
@@ -2758,6 +2830,63 @@ function startMixedPlatformLaunchBridge(options: {
   return server;
 }
 
+function startRetentionProblemBridge(options: {
+  ready: RetentionGapReady;
+  port: number;
+  events: string[];
+}): http.Server {
+  const server = http.createServer(async (request, response) => {
+    try {
+      const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host}`);
+      options.events.push(`request ${request.method ?? "GET"} ${requestUrl.pathname}${requestUrl.search}`);
+      if (requestUrl.pathname !== "/observability/v0/debug-session") {
+        response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        response.end("not found");
+        return;
+      }
+
+      const upstreamResponse = await fetch(
+        `${options.ready.baseUrl}${requestUrl.pathname}${requestUrl.search}`,
+        {
+          headers: { authorization: `Bearer ${options.ready.callerToken}` },
+          redirect: "manual",
+        },
+      );
+      const body = await upstreamResponse.text();
+      options.events.push(`upstream ${upstreamResponse.status} ${body}`);
+      response.writeHead(upstreamResponse.status, {
+        "content-type":
+          upstreamResponse.headers.get("content-type") ??
+          "application/problem+json; charset=utf-8",
+      });
+      response.end(body);
+    } catch (error) {
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      response.end(error instanceof Error ? error.stack : String(error));
+    }
+  });
+  server.listen(options.port, "127.0.0.1");
+  return server;
+}
+
+function retentionCaseAsPlatformReady(
+  ready: RetentionGapReady,
+  testcase: RetentionGapCase,
+): PlatformLinkReady {
+  return {
+    baseUrl: ready.baseUrl,
+    tenantId: ready.tenantId,
+    callerToken: ready.callerToken,
+    traceId: testcase.traceId,
+    spanId: testcase.spanId,
+    serviceName: testcase.serviceName,
+    wallTimeUnixNs: testcase.wallTimeUnixNs,
+    monotonicTimeNs: testcase.monotonicTimeNs,
+    timeWindowNs: testcase.timeWindowNs,
+    selectedSegmentIndex: 0,
+  };
+}
+
 base.describe("Observability M34 storage-server MCR manifest browser acceptance", () => {
   base.describe.configure({ mode: "serial", timeout: 300_000 });
 
@@ -3161,6 +3290,176 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       }
       if (browser) {
         await browser.close().catch(() => undefined);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M37 first slice returns structured retention and missing-data problems for MCR and materialized traces", async ({ page }) => {
+    base.setTimeout(420_000);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile("ct-observe binary", ctObserveBin());
+    expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    for (const fixture of materializedFixtures) {
+      expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
+      expectRequiredFile(
+        `${fixture.label} materialized ${fixture.traceFileName}`,
+        path.join(fixture.traceDir, fixture.traceFileName),
+      );
+    }
+    childProcess.execFileSync(dockerBin(), ["version", "--format", "{{.Server.Version}}"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    const prepared = prepareMaterializedPlatformHarnessInput({
+      mcrSliceFilePath: portableTracePath,
+    });
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m37-retention-gap-"),
+    );
+    let retentionHarness: Awaited<ReturnType<typeof startRetentionGapHarness>> | null = null;
+    let jaegerProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const bridgeEvents: string[] = [];
+
+    try {
+      retentionHarness = await startRetentionGapHarness(prepared.inputPath);
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      expect(retentionHarness.ready.replayProvisioningMessageCount).toBe(0);
+      expect(retentionHarness.ready.cases.length).toBeGreaterThanOrEqual(8);
+
+      const byName = new Map(
+        retentionHarness.ready.cases.map((testcase) => [testcase.name, testcase]),
+      );
+      const mcrExpired = byName.get("mcr-expired");
+      const mcrMissing = byName.get("mcr-missing");
+      expect(mcrExpired).toBeTruthy();
+      expect(mcrExpired!.expectedStatus).toBe(410);
+      expect(mcrExpired!.expectedCode).toBe("retention_gap");
+      expect(mcrMissing).toBeTruthy();
+      expect(mcrMissing!.expectedStatus).toBe(404);
+      expect(mcrMissing!.expectedCode).toBe("missing_data");
+      for (const fixture of materializedFixtures) {
+        expect(byName.get(`${fixture.language}-materialized-expired`)?.expectedCode)
+          .toBe("retention_gap");
+        expect(byName.get(`${fixture.language}-materialized-missing`)?.expectedCode)
+          .toBe("missing_data");
+      }
+
+      const bridgePort = await getFreeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      bridge = startRetentionProblemBridge({
+        ready: retentionHarness.ready,
+        port: bridgePort,
+        events: bridgeEvents,
+      });
+
+      for (const testcase of retentionHarness.ready.cases) {
+        const problemUrl = `${bridgeBaseUrl}${testcase.browserPath}`;
+        const response = await page.goto(problemUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 60_000,
+        });
+        expect(response?.status(), `${testcase.name} browser status`).toBe(
+          testcase.expectedStatus,
+        );
+        const bodyText = await page.locator("body").innerText();
+        expect(bodyText, `${testcase.name} browser body`).toContain(
+          testcase.expectedCode,
+        );
+        expect(bodyText, `${testcase.name} browser body`).not.toContain(
+          "Replay.ProvisioningRequested",
+        );
+      }
+
+      const jaegerUiPort = await getFreeTcpPort();
+      const jaegerOtlpPort = await getFreeTcpPort();
+      const jaegerBaseUrl = `http://127.0.0.1:${jaegerUiPort}`;
+      const renderedJaegerUiConfigPath = renderJaegerUiConfigForDebugBase(
+        runnerRoot,
+        bridgeBaseUrl,
+      );
+      jaegerProcess = startJaegerAllInOne(
+        runnerRoot,
+        renderedJaegerUiConfigPath,
+        jaegerUiPort,
+        jaegerOtlpPort,
+      );
+      await waitFor(
+        "Jaeger UI readiness",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/services`),
+        120_000,
+      );
+
+      const mcrExpiredReady = retentionCaseAsPlatformReady(
+        retentionHarness.ready,
+        mcrExpired!,
+      );
+      const mcrDebugUrl = `${bridgeBaseUrl}${mcrExpired!.browserPath}`;
+      await ingestJaegerSpan(jaegerOtlpPort, mcrExpiredReady, mcrDebugUrl, "m37-retention-gap");
+      await waitFor(
+        "Jaeger M37 retention trace ingestion",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${mcrExpired!.traceId}`),
+        60_000,
+      );
+
+      const cliRow = await runCtObserveAgainstJaeger(jaegerBaseUrl, mcrExpiredReady);
+      expect(cliRow.codetracer_debug_session_url).toBe(mcrDebugUrl);
+      expect(cliRow.recording_available).toBe(true);
+
+      await page.goto(`${jaegerBaseUrl}/trace/${mcrExpired!.traceId}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      await page.getByText("GET /reserve").first().waitFor({ timeout: 60_000 });
+      await page
+        .getByRole("switch", {
+          name: new RegExp(`${escapeRegExp(mcrExpired!.serviceName)}.*GET /reserve`),
+        })
+        .click();
+      await page.getByRole("switch", { name: /Tags/ }).click();
+      const link = page.locator('a[title="Debug in CodeTracer"]').first();
+      await expect(link).toBeVisible({ timeout: 60_000 });
+      expect(await link.getAttribute("href")).toBe(mcrDebugUrl);
+      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      await link.click();
+      const problemPage = (await popupPromise) ?? page;
+      await problemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
+        timeout: 60_000,
+      });
+      expect(await problemPage.locator("body").innerText()).toContain("retention_gap");
+
+      const latestReplayProbe = await fetch(`${retentionHarness.ready.baseUrl}/__tests/replay-provisioning/latest`);
+      expect(latestReplayProbe.status).toBe(404);
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-retention-gap-cases.json"),
+          JSON.stringify(retentionHarness.ready.cases, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-retention-gap-ct-observe-row.json"),
+          JSON.stringify(cliRow, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-retention-gap-bridge-events.log"),
+          bridgeEvents.join("\n"),
+        );
+      }
+    } finally {
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      if (retentionHarness?.process.pid) {
+        killProcessTree(retentionHarness.process.pid);
       }
       fs.rmSync(prepared.rootDir, { recursive: true, force: true });
       fs.rmSync(runnerRoot, { recursive: true, force: true });
