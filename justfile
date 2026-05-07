@@ -1029,3 +1029,7 @@ sync-design-tokens:
 #   just developer-setup --without-bpf
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
+
+# Capture automated screenshots for the README in WebP format.
+capture-readme-screenshots:
+  bash scripts/docs/capture-readme-screenshots.sh
