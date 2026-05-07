@@ -63,6 +63,56 @@ proc storeTraceFiles(paths: seq[string], traceFolder: string, lang: Lang) =
         echo "  skipping copying that file"
 
 
+proc findTraceEventsFile(traceFolder: string): tuple[name: string, path: string] =
+  for fileName in ["trace.bin", "trace.json"]:
+    let tracePath = traceFolder / fileName
+    if fileExists(tracePath):
+      return (fileName, tracePath)
+
+  var ctFiles: seq[string] = @[]
+  for ctPath in walkFiles(traceFolder / "*.ct"):
+    ctFiles.add(ctPath)
+  ctFiles.sort()
+  if ctFiles.len > 0:
+    return (ctFiles[0].extractFilename, ctFiles[0])
+
+  return ("trace.json", traceFolder / "trace.json")
+
+
+proc copyIfExists(sourcePath: string, destinationPath: string) =
+  try:
+    if fileExists(sourcePath):
+      createDir(destinationPath.parentDir)
+      copyFile(sourcePath, destinationPath)
+    elif dirExists(sourcePath):
+      if dirExists(destinationPath):
+        removeDir(destinationPath)
+      copyDir(sourcePath, destinationPath)
+  except CatchableError as e:
+    echo fmt"WARNING: trying to copy recorder metadata {sourcePath} error: ", e.msg
+    echo "  skipping recorder metadata artifact"
+
+proc copyRecorderMetadata(traceFolder: string, outputFolder: string) =
+  if traceFolder == outputFolder:
+    return
+
+  for fileName in [
+    "trace_meta.json",
+    "runtime_session.jsonl",
+    "codetracer_erlang_session.json",
+    "M15-FIXTURE.md",
+  ]:
+    copyIfExists(traceFolder / fileName, outputFolder / fileName)
+
+  for dirName in [
+    "recorder_metadata",
+    "module_manifests",
+    "source_map",
+    "source_maps",
+  ]:
+    copyIfExists(traceFolder / dirName, outputFolder / dirName)
+
+
 proc processSourceFoldersList*(folderSet: HashSet[string], programDir: string = ""): seq[string] =
   var folders: seq[string] = @[]
   let gitRootResult = getGitTopLevel(programDir)
@@ -176,11 +226,9 @@ proc importTrace*(
 
   let traceFolder = traceMetadataPath.parentDir
   let tracePathsPath = traceFolder / "trace_paths.json"
-  var traceFileName = "trace.bin"
-  var tracePath = traceFolder / traceFileName
-  if not fileExists(tracePath):
-    traceFileName = "trace.json"
-    tracePath = traceFolder / traceFileName
+  let traceEventsFile = findTraceEventsFile(traceFolder)
+  let traceFileName = traceEventsFile.name
+  let tracePath = traceEventsFile.path
 
   let outputFolder = if traceIdArg == NO_TRACE_ID:
       fmt"{codetracerTraceDir}/trace-{traceID}/"
@@ -201,6 +249,7 @@ proc importTrace*(
       echo "  skipping trace_paths file"
     if fileExists(tracePath):
       copyFile(tracePath, outputFolder / traceFileName)
+    copyRecorderMetadata(traceFolder, outputFolder)
 
   var rawPaths: string
   try:

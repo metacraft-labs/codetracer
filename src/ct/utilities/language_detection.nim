@@ -96,6 +96,8 @@ const LANGS = {
   "js": LangJavascript,
   "mjs": LangJavascript,
   "ts": LangJavascript,
+  "ex": LangElixir,
+  "exs": LangElixir,
 }.toTable()
 
 const WASM_LANGS = {

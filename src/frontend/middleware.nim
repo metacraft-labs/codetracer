@@ -68,7 +68,6 @@ when not defined(ctInExtension):
     if data.lastRestartKind == RestartSubsystem:
       data.services.debugger.dapSetBreakpoints()
 
-    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
     # in db-backend/rust: interpret as Some(Location..) in the first case
     #   and None: in the second case
     let restoreLocation = if data.lastRestartKind == RestartSubsystem:
@@ -82,6 +81,7 @@ when not defined(ctInExtension):
       ctRRWorkerExe: data.config.rrBackend.path,
       restoreLocation: restoreLocation
     })
+    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
 
   proc newOperationHandler*(viewsApi: MediatorWithSubscribers, operation: NewOperation) =
     data.status.currentOperation = operation.name

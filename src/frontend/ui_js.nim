@@ -1132,12 +1132,12 @@ proc onTraceLoaded(
         # Store the Backend Manager's replayId so we can stop it on close.
         data.activeSession.replayId = response["replayId"].to(int)
         infoPrint "ui: reinitializing dap for trace ", $trace.id
-        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
           rawDiffIndex: data.startOptions.rawDiffIndex,
           ctRRWorkerExe: data.config.rrBackend.path,
         })
+        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
       dapReplayHandlerRegistered = true
 
   when not defined(ctInExtension):
@@ -1154,12 +1154,12 @@ proc onTraceLoaded(
         data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
           clientName: "codetracer"
         )))
-        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
           rawDiffIndex: data.startOptions.rawDiffIndex,
           ctRRWorkerExe: data.config.rrBackend.path,
         })
+        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
       dapReplayHandlerRegistered = true
 
   data.switchToDebug()

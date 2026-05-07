@@ -54,6 +54,9 @@ proc toLang*(lang: string): Lang =
     "cdc": LangCadence,
     "cadence": LangCadence,
     "solana": LangSolana,
+    "ex": LangElixir,
+    "exs": LangElixir,
+    "elixir": LangElixir,
   }.toTable()
   if langs.hasKey(lang.toLowerAscii):
     result = langs[lang.toLowerAscii]
@@ -69,7 +72,7 @@ let SUPPORTED_LANGS* = @[
   LangRubyDb, LangNoir, LangSmall,
   LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
   LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
-  LangSolana
+  LangSolana, LangElixir
 ]
 
 proc getExtension*(lang: Lang): string =
@@ -111,7 +114,8 @@ proc getExtension*(lang: Lang): string =
     "tolk",   # LangTolk
     "ak",     # LangAiken
     "cdc",    # LangCadence
-    ""        # LangSolana (folder-based)
+    "",       # LangSolana (folder-based)
+    "ex"      # LangElixir
   ]
   result = extensions[lang]
 

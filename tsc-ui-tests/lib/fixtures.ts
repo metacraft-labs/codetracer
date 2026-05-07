@@ -15,6 +15,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
@@ -201,12 +202,51 @@ const RETRY_DELAY_MS = 1_500;
 const GOTO_TIMEOUT_MS = 3_000;
 const PORT_RELEASE_DELAY_MS = 500;
 
+const e2eStateRoot = path.join(
+  process.env.CODETRACER_E2E_STATE_DIR
+    ?? process.env.TMPDIR
+    ?? os.tmpdir(),
+  "codetracer-e2e-state",
+);
+const e2eHome = path.join(e2eStateRoot, "home");
+const e2eConfigHome = path.join(e2eStateRoot, "config");
+const e2eDataHome = path.join(e2eStateRoot, "data");
+const e2eCodetracerConfigDir = path.join(e2eConfigHome, "codetracer");
+const e2eDefaultLayoutPath = path.join(e2eCodetracerConfigDir, "default_layout.json");
+
+function removeAgentActivityPanels(node: any): any | null {
+  if (!node || typeof node !== "object") {
+    return node;
+  }
+
+  if (node.componentState?.content === 35) {
+    return null;
+  }
+
+  if (Array.isArray(node.content)) {
+    node.content = node.content
+      .map((child: any) => removeAgentActivityPanels(child))
+      .filter((child: any) => child !== null);
+  }
+
+  return node;
+}
+
+function ensureE2eDefaultLayout(): void {
+  const bundledLayoutPath = path.join(codetracerPrefix, "config", "default_layout.json");
+  const layout = JSON.parse(fs.readFileSync(bundledLayoutPath, "utf-8"));
+  removeAgentActivityPanels(layout.root);
+
+  fs.mkdirSync(e2eCodetracerConfigDir, { recursive: true });
+  fs.writeFileSync(e2eDefaultLayoutPath, JSON.stringify(layout, null, 2));
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type DeploymentMode = "electron" | "web";
-export type LaunchMode = "trace" | "welcome" | "edit" | "deepreview";
+export type LaunchMode = "trace" | "trace-folder" | "welcome" | "edit" | "deepreview";
 
 /**
  * Configurable options set via `test.use({ ... })`.
@@ -232,6 +272,9 @@ interface CodetracerFixtures {
   ctPage: Page;
   /** The Electron app handle (null in web mode). */
   electronApp: ElectronApplication | null;
+}
+
+interface CodetracerWorkerFixtures {
   /** Internal: forces worker exit to avoid teardown timeout. */
   _workerCleanup: void;
 }
@@ -334,6 +377,27 @@ function cleanupCodetracerEnvVars(): void {
   delete process.env.CODETRACER_TEST;
 }
 
+function codetracerProcessEnv(
+  extra?: Record<string, string>,
+): Record<string, string> {
+  fs.mkdirSync(e2eConfigHome, { recursive: true });
+  fs.mkdirSync(e2eDataHome, { recursive: true });
+  fs.mkdirSync(e2eHome, { recursive: true });
+  ensureE2eDefaultLayout();
+
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
+  env.HOME = e2eHome;
+  env.XDG_CONFIG_HOME = e2eConfigHome;
+  env.XDG_DATA_HOME = e2eDataHome;
+  if (extra) {
+    Object.assign(env, extra);
+  }
+  return env;
+}
+
 // Cache trace IDs by source path so multiple tests for the same program
 // don't re-record. This dramatically speeds up RR test suites where each
 // language has 5 tests sharing the same sourcePath.
@@ -355,6 +419,9 @@ function recordTestProgram(recordArg: string): number {
       cwd: codetracerInstallDir,
       stdio: "pipe",
       encoding: "utf-8",
+      env: codetracerProcessEnv({
+        CODETRACER_IN_UI_TEST: "1",
+      }),
       timeout: LIMIT_RR_RECORDING_MS,
       windowsHide: true,
     },
@@ -378,6 +445,39 @@ function recordTestProgram(recordArg: string): number {
   }
   console.log(`# recorded trace for ${recordArg} with id ${traceId}`);
   recordingCache.set(recordArg, traceId);
+  return traceId;
+}
+
+function importTraceFolder(traceFolder: string): number {
+  const ctProcess = childProcess.spawnSync(
+    codetracerPath,
+    ["host", "--trace-path", traceFolder, "0", "--port=0", "--idle-timeout=1ms"],
+    {
+      cwd: codetracerInstallDir,
+      stdio: "pipe",
+      encoding: "utf-8",
+      env: codetracerProcessEnv({
+        CODETRACER_IN_UI_TEST: "1",
+      }),
+      timeout: 15_000,
+      windowsHide: true,
+    },
+  );
+
+  const output = `${ctProcess.stdout ?? ""}\n${ctProcess.stderr ?? ""}`;
+  const match = output.match(/imported as trace id\s+(\d+)/);
+  if (!match) {
+    throw new Error(
+      `ct host did not import trace folder: error=${ctProcess.error}; status=${ctProcess.status}; signal=${ctProcess.signal}\n` +
+      `stderr: ${ctProcess.stderr}\nstdout: ${ctProcess.stdout}`,
+    );
+  }
+
+  const traceId = Number(match[1]);
+  if (isNaN(traceId)) {
+    throw new Error(`Could not parse imported trace id from: ${match[1]}`);
+  }
+  console.log(`# imported trace folder ${traceFolder} with id ${traceId}`);
   return traceId;
 }
 
@@ -407,10 +507,7 @@ async function getEditorWindow(app: ElectronApplication): Promise<Page> {
 function makeCleanEnv(
   extra?: Record<string, string>,
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined) env[k] = v;
-  }
+  const env = codetracerProcessEnv();
   delete env.CODETRACER_TRACE_ID;
   delete env.CODETRACER_CALLER_PID;
   // On Windows with direct Electron launch, we MUST set CODETRACER_PREFIX
@@ -527,6 +624,8 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
   page.on("console", (msg) => {
     if (msg.type() === "error") {
       bucket.push(`[console.error] ${msg.text()}`);
+    } else if (process.env.CODETRACER_E2E_CAPTURE_CONSOLE === "1") {
+      bucket.push(`[console.${msg.type()}] ${msg.text()}`);
     }
   });
   page.on("pageerror", (error) => {
@@ -610,6 +709,71 @@ async function launchTraceElectron(sourcePath: string, recordingLimit = LIMIT_SM
   if (totalMs > LIMIT_TOTAL_SETUP_MS) {
     console.warn(`# WARNING: total setup ${totalMs}ms exceeds limit ${LIMIT_TOTAL_SETUP_MS}ms`);
   }
+
+  return {
+    page,
+    electronApp: app,
+    consoleErrors,
+    mainProcessOutput,
+    teardown: async () => {
+      try {
+        const pid = app.process().pid;
+        if (pid) {
+          killProcessTree(pid);
+        }
+      } catch (_e) {
+        /* already closed */
+      }
+      cleanupCodetracerEnvVars();
+    },
+  };
+}
+
+async function launchTraceFolderElectron(traceFolderPath: string): Promise<LaunchResult> {
+  setupLdLibraryPath();
+  const t0 = Date.now();
+  const traceFolder = path.resolve(traceFolderPath);
+  if (!fs.existsSync(path.join(traceFolder, "trace_metadata.json"))) {
+    throw new Error(`trace folder is missing trace_metadata.json: ${traceFolder}`);
+  }
+
+  const { result: traceId, durationMs: importMs } = await timed(
+    "import trace folder",
+    LIMIT_SMALL_RECORDING_MS,
+    async () => importTraceFolder(traceFolder),
+  );
+
+  const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+  const launchArgs = (isWindows && electronExePath)
+    ? [codetracerPrefix]
+    : [];
+
+  const { result: app, durationMs: launchMs } = await timed(
+    "electron launch trace folder",
+    LIMIT_ELECTRON_LAUNCH_MS,
+    async () =>
+      _electron.launch({
+        executablePath: launchExe,
+        cwd: codetracerInstallDir,
+        args: launchArgs,
+        env: makeCleanEnv({
+          CODETRACER_CALLER_PID: process.pid.toString(),
+          CODETRACER_TRACE_ID: traceId.toString(),
+        }),
+      }),
+  );
+
+  const consoleErrors: string[] = [];
+  const mainProcessOutput: string[] = [];
+  attachMainProcessCapture(app, mainProcessOutput);
+  const { result: page, durationMs: windowMs } = await timed(
+    "first window",
+    LIMIT_FIRST_WINDOW_MS,
+    async () => getEditorWindow(app),
+  );
+  attachErrorCollectors(page, consoleErrors);
+  const totalMs = Date.now() - t0;
+  console.log(`# launched Electron for trace folder ${traceFolder} (trace ${traceId}; import: ${importMs}ms electron: ${launchMs}ms window: ${windowMs}ms total: ${totalMs}ms)`);
 
   return {
     page,
@@ -870,7 +1034,7 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
 // Fixture definition
 // ---------------------------------------------------------------------------
 
-export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
+export const test = base.extend<CodetracerFixtures & CodetracerOptions, CodetracerWorkerFixtures>({
   // Options (set via test.use)
   deploymentMode: ["electron", { option: true }],
   sourcePath: ["", { option: true }],
@@ -910,7 +1074,7 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
     ) => {
       let result: LaunchResult;
 
-      const needsRR = sourcePath ? requiresRR(sourcePath) : false;
+      const needsRR = launchMode === "trace" && sourcePath ? requiresRR(sourcePath) : false;
       const recordingLimit = needsRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
 
       if (needsRR && !process.env.CODETRACER_RR_BACKEND_PATH && !process.env.CODETRACER_RR_BACKEND_PRESENT) {
@@ -941,6 +1105,18 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           } else {
             result = await launchTraceElectron(sourcePath, recordingLimit);
           }
+          break;
+        }
+        case "trace-folder": {
+          if (!sourcePath) {
+            throw new Error(
+              "sourcePath must be set to a trace folder via test.use() for trace-folder launch mode",
+            );
+          }
+          if (deploymentMode === "web") {
+            throw new Error("trace-folder launch mode is only implemented for Electron");
+          }
+          result = await launchTraceFolderElectron(sourcePath);
           break;
         }
         case "welcome": {
@@ -991,7 +1167,15 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
         // Report collected JS errors from the renderer
         if (result.consoleErrors.length > 0) {
           console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
-          for (const err of result.consoleErrors.slice(0, 50)) {
+          const interestingConsole = result.consoleErrors.filter((line) =>
+            /dap|Sending ct request|received:|complete-move|run-to-entry|launch|configurationDone|initialize/i
+              .test(line),
+          );
+          const linesToPrint =
+            process.env.CODETRACER_E2E_CAPTURE_CONSOLE === "1" && interestingConsole.length > 0
+              ? interestingConsole.slice(0, 200)
+              : result.consoleErrors.slice(0, 50);
+          for (const err of linesToPrint) {
             console.log(`    ${err}`);
           }
         }
