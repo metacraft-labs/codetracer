@@ -1873,6 +1873,83 @@ async function runMaterializedCtObserveAgainstTempo(
   return row;
 }
 
+async function runMaterializedCtObserveLaunchAgainstTempo(
+  rootDir: string,
+  tempoBaseUrl: string,
+  linkReady: MaterializedPlatformLink,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const liveTempoTrace = await fetchJsonFromUrl(
+    `${tempoBaseUrl}/api/traces/${linkReady.traceId}`,
+  );
+  const liveTempoTracePath = path.join(
+    rootDir,
+    `ct-observe-launch-live-tempo-${linkReady.language}-trace.json`,
+  );
+  fs.writeFileSync(liveTempoTracePath, JSON.stringify(liveTempoTrace, null, 2));
+  const artifactDir = m36ArtifactDir();
+  if (artifactDir) {
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.copyFileSync(
+      liveTempoTracePath,
+      path.join(artifactDir, `ct-observe-launch-live-tempo-${linkReady.language}-trace.json`),
+    );
+  }
+  const traceOutput = childProcess.execFileSync(
+    ctObserveBin(),
+    [
+      "trace",
+      "--backend=tempo",
+      `--input=${liveTempoTracePath}`,
+      `--trace-id=${linkReady.traceId}`,
+      "--format=jsonl",
+    ],
+    {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  if (artifactDir) {
+    fs.writeFileSync(
+      path.join(artifactDir, `ct-observe-launch-live-tempo-${linkReady.language}-trace-rows.jsonl`),
+      traceOutput,
+    );
+  }
+  const output = await new Promise<string>((resolve, reject) => {
+    childProcess.execFile(
+      ctObserveBin(),
+      [
+        "launch",
+        "--backend=tempo",
+        `--input=${liveTempoTracePath}`,
+        `--trace-id=${linkReady.traceId}`,
+        `--request-key=${linkReady.requestKey}`,
+        `--span-id=${linkReady.spanId}`,
+        "--launch-timeout-ms=300000",
+      ],
+      {
+        encoding: "utf-8",
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`${error.message}\n${stderr}\ntrace rows:\n${traceOutput}`));
+        } else {
+          resolve(stdout);
+        }
+      },
+    );
+  });
+  const launch = JSON.parse(output);
+  expect(launch.http_status).toBe(302);
+  expect(launch.selected_row?.platform).toBe("tempo");
+  expect(launch.selected_row?.trace_id).toBe(linkReady.traceId);
+  expect(launch.selected_row?.span_id).toBe(linkReady.spanId);
+  expect(launch.selected_row?.request_key).toBe(linkReady.requestKey);
+  return launch;
+}
+
 function debugSessionUrlMatchesReady(urlText: string, ready: PlatformLinkReady): boolean {
   if (urlText.length === 0) return false;
   const url = new URL(urlText);
@@ -4061,6 +4138,173 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         await new Promise<void>((resolve) => bridge?.close(() => resolve()));
       }
       await stopChild(grafanaProcess);
+      await stopChild(tempoProcess);
+      if (platformHarness?.process.pid) {
+        killProcessTree(platformHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M36 ct-observe launch reaches real Tempo materialized Python CodeTracer replay", async ({ page }) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("ct-observe binary", ctObserveBin());
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    const pythonFixture = materializedFixtures.find((fixture) =>
+      fixture.language === "python"
+    );
+    expect(pythonFixture, "Python materialized fixture").toBeTruthy();
+    expectRequiredFile("Python materialized trace fixture", pythonFixture!.traceDir);
+    expectRequiredFile(
+      "Python materialized trace file",
+      path.join(pythonFixture!.traceDir, pythonFixture!.traceFileName),
+    );
+    expectRequiredFile(
+      "Python materialized trace metadata",
+      path.join(pythonFixture!.traceDir, "trace_metadata.json"),
+    );
+    expectRequiredFile(
+      "Python materialized trace paths",
+      path.join(pythonFixture!.traceDir, "trace_paths.json"),
+    );
+
+    const prepared = prepareMaterializedPlatformHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m36-ct-observe-launch-tempo-materialized-"),
+    );
+    let platformHarness: Awaited<ReturnType<typeof startMaterializedPlatformLinkHarness>> | null = null;
+    let tempoProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const launches: Array<{
+      ctProcess: childProcess.ChildProcess;
+      hostOutput: string[];
+      hostUrl: string;
+      linkReady: MaterializedPlatformLink;
+      replayPayload: any;
+    }> = [];
+    const bridgeErrors: string[] = [];
+    const bridgeEvents: string[] = [];
+
+    try {
+      platformHarness = await startMaterializedPlatformLinkHarness(prepared.inputPath);
+      const linkReady = platformHarness.ready.links.find((link) =>
+        link.language === "python"
+      );
+      expect(linkReady, "Python materialized platform link").toBeTruthy();
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      const tempoHttpPort = await freeTcpPort();
+      const tempoGrpcPort = await freeTcpPort();
+      const tempoOtlpPort = await freeTcpPort();
+      const bridgePort = await freeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      const tempoBaseUrl = `http://127.0.0.1:${tempoHttpPort}`;
+      const debugUrl = materializedDebugUrl(
+        bridgeBaseUrl,
+        platformHarness.ready,
+        linkReady!,
+      );
+
+      bridge = startMaterializedPlatformLaunchBridge({
+        ready: platformHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        bridgeErrors,
+        bridgeEvents,
+        launches,
+      });
+      tempoProcess = await startTempoServer(
+        runnerRoot,
+        tempoHttpPort,
+        tempoGrpcPort,
+        tempoOtlpPort,
+        tempoBaseUrl,
+      );
+      await ingestMaterializedTempoSpan(
+        tempoOtlpPort,
+        platformHarness.ready,
+        linkReady!,
+        debugUrl,
+      );
+      await waitFor(
+        "Python materialized Tempo trace ingestion",
+        async () => fetchJsonFromUrl(`${tempoBaseUrl}/api/traces/${linkReady!.traceId}`),
+        60_000,
+      );
+
+      const launchJson = await runMaterializedCtObserveLaunchAgainstTempo(
+        runnerRoot,
+        tempoBaseUrl,
+        linkReady!,
+      );
+      expect(launchJson.debug_session_url).toBe(debugUrl);
+
+      await waitFor(
+        "ct-observe Tempo materialized launch bridge started CodeTracer",
+        async () => {
+          if (bridgeErrors.length > 0) {
+            throw new Error(bridgeErrors.join("\n\n"));
+          }
+          if (launches.length !== 1) {
+            throw new Error(
+              `expected one CodeTracer launch, got ${launches.length}\n` +
+                `Bridge events:\n${bridgeEvents.join("\n")}`,
+            );
+          }
+        },
+        120_000,
+      );
+      const launch = launches[0];
+      expect(launchJson.redirect_url).toBe(launch.hostUrl);
+      await page.goto(launchJson.redirect_url, { timeout: 120_000 });
+      await waitForMaterializedReplayDetails(
+        page,
+        pythonFixture!,
+        launch.hostOutput,
+      );
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-launch-tempo-python-materialized.json"),
+          JSON.stringify(launchJson, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-launch-tempo-python-materialized-ct-host-output.log"),
+          launch.hostOutput.join(""),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-launch-tempo-python-materialized-bridge-events.log"),
+          bridgeEvents.join("\n"),
+        );
+        const tempoLogPath = path.join(runnerRoot, "tempo.log");
+        if (fs.existsSync(tempoLogPath)) {
+          fs.copyFileSync(tempoLogPath, path.join(artifactDir, "tempo.log"));
+        }
+      }
+      await page.screenshot({
+        path: path.join(
+          m36ArtifactDir() ?? runnerRoot,
+          "m36-ct-observe-launch-tempo-python-materialized-replay.png",
+        ),
+        fullPage: true,
+      });
+    } finally {
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
       await stopChild(tempoProcess);
       if (platformHarness?.process.pid) {
         killProcessTree(platformHarness.process.pid);
