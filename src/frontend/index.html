@@ -12,6 +12,9 @@
         <!--
           don't remove this: placeholder and default,
           later we use `loadTheme` in ui_js.nim to load the configured theme -->
+        <!-- Preload SpaceMono so the font is ready before Monaco editor initializes -->
+        <link rel="preload" href="../../libs/codetracer-design-system/SpaceGrotesk_Complete/Fonts/Space_Mono/SpaceMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
+        <link rel="preload" href="../../libs/codetracer-design-system/SpaceGrotesk_Complete/Fonts/Space_Mono/SpaceMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
         <link id='theme' rel='stylesheet' href='frontend/styles/default_dark_theme_electron.css'>
 
         <link rel='stylesheet' href='frontend/styles/loader.css'>
