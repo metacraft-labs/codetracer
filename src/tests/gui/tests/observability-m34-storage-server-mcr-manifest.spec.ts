@@ -22,8 +22,10 @@ import {
   codetracerInstallDir,
   codetracerPath,
 } from "../lib/fixtures";
+import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
 import { retry } from "../lib/retry-helpers";
+import { LayoutPage } from "../page-objects/layout-page";
 
 const workspaceRoot = path.dirname(codetracerInstallDir);
 const observabilityE2eDir = path.join(
@@ -68,6 +70,27 @@ const fixtureRequestDetailsPath = path.join(
   m25RealMcrArtifactDir,
   "requests",
   "inventory-response.json",
+);
+const pythonFlowTraceFixture = path.join(
+  codetracerInstallDir,
+  "examples",
+  "recordings",
+  "python",
+  "flow_test",
+);
+const rubyFlowTraceFixture = path.join(
+  codetracerInstallDir,
+  "examples",
+  "recordings",
+  "ruby",
+  "flow_test",
+);
+const javascriptFlowTraceFixture = path.join(
+  codetracerInstallDir,
+  "examples",
+  "recordings",
+  "javascript",
+  "flow_test",
 );
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
 const ctMcrCandidates = [
@@ -158,12 +181,112 @@ type PlatformLinkReady = {
   selectedSegmentIndex: number;
 };
 
+type MaterializedFlowFixture = {
+  label: string;
+  language: string;
+  serviceName: string;
+  operationName: string;
+  traceDir: string;
+  traceFileName: "trace.bin" | "trace.json";
+  sourceFileName: string;
+  requiredSourceSnippets: string[];
+  calltraceFunction: string;
+  expectedCallArgs?: Record<string, string>;
+  eventText: string;
+  terminalText: string;
+  traceId: string;
+  spanId: string;
+  momentId: string;
+  requestKey: string;
+};
+
+type MaterializedPlatformLinkReady = {
+  baseUrl: string;
+  tenantId: string;
+  callerToken: string;
+  replayToken: string;
+  serverIds: string[];
+  links: MaterializedPlatformLink[];
+};
+
+type MaterializedPlatformLink = {
+  language: string;
+  label: string;
+  serviceName: string;
+  operationName: string;
+  traceId: string;
+  spanId: string;
+  momentId: string;
+  requestKey: string;
+  wallTimeUnixNs: string;
+  monotonicTimeNs: string;
+  timeWindowNs: string;
+  manifestPath: string;
+  materializedArtifactKey: string;
+};
+
 type CorruptedPrimaryReplicas = {
   primaryServerId: string;
   secondaryServerId: string;
   missingObjectKeys: string[];
   secondaryObjectKeys: string[];
 };
+
+const materializedFixtures: MaterializedFlowFixture[] = [
+  {
+    label: "Python",
+    language: "python",
+    serviceName: "python-flow-materialized",
+    operationName: "POST /python/flow",
+    traceDir: pythonFlowTraceFixture,
+    traceFileName: "trace.bin",
+    sourceFileName: "python_flow_test.py",
+    requiredSourceSnippets: ["calculate_sum", "sum_with_while"],
+    calltraceFunction: "calculate_sum",
+    eventText: "Result: 94",
+    terminalText: "Result: 94",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e3601",
+    spanId: "36000000000000aa",
+    momentId: "m36-python-flow-calculate-sum",
+    requestKey: "m36-python-materialized-request-001",
+  },
+  {
+    label: "Ruby",
+    language: "ruby",
+    serviceName: "ruby-flow-materialized",
+    operationName: "POST /ruby/flow",
+    traceDir: rubyFlowTraceFixture,
+    traceFileName: "trace.json",
+    sourceFileName: "ruby_flow_test.rb",
+    requiredSourceSnippets: ["def calculate_sum", "def sum_with_while"],
+    calltraceFunction: "calculate_sum",
+    expectedCallArgs: { a: "10", b: "32" },
+    eventText: "sum with while 45",
+    terminalText: "Result: 94",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e3602",
+    spanId: "36000000000000bb",
+    momentId: "m36-ruby-flow-calculate-sum",
+    requestKey: "m36-ruby-materialized-request-001",
+  },
+  {
+    label: "JavaScript",
+    language: "javascript",
+    serviceName: "javascript-flow-materialized",
+    operationName: "POST /javascript/flow",
+    traceDir: javascriptFlowTraceFixture,
+    traceFileName: "trace.json",
+    sourceFileName: "javascript_flow_test.js",
+    requiredSourceSnippets: ["function calculate_sum", "var sum_val"],
+    calltraceFunction: "calculate_sum",
+    expectedCallArgs: { a: "10", b: "32" },
+    eventText: "Result: 94",
+    terminalText: "Result: 94",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e3603",
+    spanId: "36000000000000cc",
+    momentId: "m36-javascript-flow-calculate-sum",
+    requestKey: "m36-javascript-materialized-request-001",
+  },
+];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -277,6 +400,27 @@ function expectRequiredFile(label: string, filePath: string): void {
     fs.existsSync(filePath),
     `${label} is required for M34 storage manifest acceptance: ${filePath}`,
   ).toBe(true);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function walkFiles(rootDir: string): string[] {
+  const result: string[] = [];
+  for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    const fullPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      result.push(...walkFiles(fullPath));
+    } else if (entry.isFile()) {
+      result.push(fullPath);
+    }
+  }
+  return result;
+}
+
+function toStorageRelativePath(rootDir: string, filePath: string): string {
+  return path.relative(rootDir, filePath).split(path.sep).join("/");
 }
 
 function readVarString(
@@ -471,6 +615,41 @@ function prepareStorageHarnessInput(): PreparedSplitMcr {
     inputPath,
     selectedSegmentIndex: selectedEntry.intervalId,
   };
+}
+
+function prepareMaterializedPlatformHarnessInput(): { rootDir: string; inputPath: string } {
+  const rootDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ct-m36-storage-materialized-platform-link-"),
+  );
+  const inputPath = path.join(rootDir, "storage-materialized-platform-input.json");
+  fs.writeFileSync(
+    inputPath,
+    JSON.stringify(
+      {
+        artifacts: materializedFixtures.map((fixture) => ({
+          label: fixture.label,
+          language: fixture.language,
+          serviceName: fixture.serviceName,
+          operationName: fixture.operationName,
+          traceId: fixture.traceId,
+          spanId: fixture.spanId,
+          momentId: fixture.momentId,
+          requestKey: fixture.requestKey,
+          files: walkFiles(fixture.traceDir).map((filePath) => {
+            const relativePath = toStorageRelativePath(fixture.traceDir, filePath);
+            return {
+              relativePath,
+              filePath,
+              isTracePayload: relativePath === fixture.traceFileName,
+            };
+          }),
+        })),
+      },
+      null,
+      2,
+    ),
+  );
+  return { rootDir, inputPath };
 }
 
 function forceSelectedSegmentPrimaryReplicaMiss(
@@ -702,6 +881,56 @@ async function startPlatformLinkHarness(
   return {
     process: harnessProcess,
     ready: JSON.parse(match[1]) as PlatformLinkReady,
+    output,
+  };
+}
+
+async function startMaterializedPlatformLinkHarness(
+  inputPath: string,
+): Promise<{ process: childProcess.ChildProcess; ready: MaterializedPlatformLinkReady; output: string[] }> {
+  const output: string[] = [];
+  const harnessProcess = childProcess.spawn(
+    "direnv",
+    [
+      "exec",
+      codetracerCiDir,
+      "dotnet",
+      "run",
+      "--project",
+      storageHarnessProject,
+      "--",
+      "storage-server-materialized-platform-link",
+      inputPath,
+    ],
+    {
+      cwd: codetracerCiDir,
+      env: makeCleanEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  harnessProcess.stdout?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+  harnessProcess.stderr?.on("data", (chunk: Buffer) => {
+    output.push(chunk.toString());
+  });
+
+  const readyOutput = await waitForOutput(
+    output,
+    /CODETRACER_CI_MATERIALIZED_PLATFORM_LINK_READY\s+({.+})/,
+    120_000,
+  );
+  const match = readyOutput.match(
+    /CODETRACER_CI_MATERIALIZED_PLATFORM_LINK_READY\s+({.+})/,
+  );
+  if (!match) {
+    throw new Error(`materialized platform-link ready payload missing:\n${readyOutput}`);
+  }
+
+  return {
+    process: harnessProcess,
+    ready: JSON.parse(match[1]) as MaterializedPlatformLinkReady,
     output,
   };
 }
@@ -1026,6 +1255,63 @@ async function ingestJaegerSpan(
   }
 }
 
+async function ingestMaterializedJaegerSpan(
+  otlpPort: number,
+  ready: MaterializedPlatformLinkReady,
+  linkReady: MaterializedPlatformLink,
+  debugUrl: string,
+): Promise<void> {
+  const start = BigInt(linkReady.wallTimeUnixNs);
+  const end = start + 500_000_000n;
+  const payload = {
+    resourceSpans: [
+      {
+        resource: {
+          attributes: [
+            { key: "service.name", value: { stringValue: linkReady.serviceName } },
+          ],
+        },
+        scopeSpans: [
+          {
+            scope: { name: "codetracer-observability-m36-materialized" },
+            spans: [
+              {
+                traceId: linkReady.traceId,
+                spanId: linkReady.spanId,
+                name: linkReady.operationName,
+                kind: 2,
+                startTimeUnixNano: linkReady.wallTimeUnixNs,
+                endTimeUnixNano: end.toString(),
+                attributes: [
+                  { key: "ct.recording_available", value: { boolValue: true } },
+                  { key: "ct.dive_in_url", value: { stringValue: debugUrl } },
+                  { key: "service.name", value: { stringValue: linkReady.serviceName } },
+                  { key: "tenant_id", value: { stringValue: ready.tenantId } },
+                  { key: "span_id", value: { stringValue: linkReady.spanId } },
+                  { key: "ct.mcr.wall_time_unix_ns", value: { intValue: linkReady.wallTimeUnixNs } },
+                  { key: "ct.mcr.monotonic_time_ns", value: { intValue: linkReady.monotonicTimeNs } },
+                  { key: "time_window_ns", value: { intValue: linkReady.timeWindowNs } },
+                  { key: "request.id", value: { stringValue: linkReady.requestKey } },
+                  { key: "code.namespace", value: { stringValue: linkReady.language } },
+                  { key: "code.function", value: { stringValue: linkReady.momentId } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const response = await fetch(`http://127.0.0.1:${otlpPort}/v1/traces`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Jaeger materialized OTLP ingest failed: HTTP ${response.status} ${await response.text()}`);
+  }
+}
+
 function renderJaegerUiConfigForDebugBase(rootDir: string, debugSessionBaseUrl: string): string {
   expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
   const outputPath = path.join(rootDir, "jaeger-ui-config.json");
@@ -1085,6 +1371,48 @@ async function runCtObserveAgainstJaeger(
   return row;
 }
 
+async function runMaterializedCtObserveAgainstJaeger(
+  jaegerBaseUrl: string,
+  linkReady: MaterializedPlatformLink,
+): Promise<any> {
+  expectRequiredFile("ct-observe binary", ctObserveBin());
+  const cliTime = (unixNs: bigint): string =>
+    new Date(Number(unixNs / 1_000_000n))
+      .toISOString()
+      .replace(/\.\d{3}Z$/, "Z");
+  const fromIso = cliTime(BigInt(linkReady.wallTimeUnixNs) - 60_000_000_000n);
+  const toIso = cliTime(BigInt(linkReady.wallTimeUnixNs) + 60_000_000_000n);
+  const output = childProcess.execFileSync(
+    ctObserveBin(),
+    [
+      "extract",
+      "--backend=jaeger",
+      `--url=${jaegerBaseUrl}`,
+      `--from=${fromIso}`,
+      `--to=${toIso}`,
+      `--service=${linkReady.serviceName}`,
+      "--format=jsonl",
+    ],
+    {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  const rows = output
+    .split(/\n/)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+  const row = rows.find(
+    (candidate) =>
+      candidate.trace_id === linkReady.traceId && candidate.span_id === linkReady.spanId,
+  );
+  if (!row) {
+    throw new Error(`ct-observe did not return M36 materialized Jaeger row:\n${output}`);
+  }
+  return row;
+}
+
 async function waitForRealReplayDetails(page: Page, hostOutput: string[]): Promise<void> {
   await expect(page.locator(".lm_content").first()).toBeVisible({
     timeout: 30_000,
@@ -1119,6 +1447,61 @@ async function waitForRealReplayDetails(page: Page, hostOutput: string[]): Promi
   expect(requestDetailsText).toContain(`"requestId": "m25-real-mcr-request-001"`);
   expect(requestDetailsText).toContain(`"branch": "reserve_from_primary_bin"`);
   expect(hostOutput.join("")).toContain("fetching CTFS shard replica from storage:");
+}
+
+async function waitForMaterializedReplayDetails(
+  page: Page,
+  fixture: MaterializedFlowFixture,
+  hostOutput: string[],
+): Promise<void> {
+  await expect(page.locator(".lm_content").first()).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const layout = new LayoutPage(page);
+  await layout.waitForFilesystemLoaded();
+  const sourceNode = page
+    .locator(".jstree-anchor")
+    .filter({ hasText: new RegExp(`^${escapeRegExp(fixture.sourceFileName)}$`) })
+    .first();
+  await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+  await sourceNode.click();
+
+  const sourceText = await waitForEditorModelText(
+    page,
+    fixture.requiredSourceSnippets[0],
+  );
+  for (const snippet of fixture.requiredSourceSnippets.slice(1)) {
+    await waitForEditorModelText(page, snippet);
+  }
+
+  await layout.waitForCallTraceReady();
+  const callTrace = (await layout.callTraceTabs())[0];
+  await callTrace.clickTab();
+  const callEntry = await callTrace.navigateToEntry(fixture.calltraceFunction);
+  expect((await callEntry.functionName()).toLowerCase()).toBe(
+    fixture.calltraceFunction.toLowerCase(),
+  );
+  if (fixture.expectedCallArgs) {
+    const args = await callEntry.arguments();
+    const observedArgs = new Map<string, string>();
+    for (const arg of args) {
+      observedArgs.set((await arg.name()).toLowerCase(), await arg.value());
+    }
+    for (const [name, value] of Object.entries(fixture.expectedCallArgs)) {
+      expect(
+        observedArgs.get(name.toLowerCase()),
+        `${fixture.label} calltrace argument ${name}`,
+      ).toBe(value);
+    }
+  }
+
+  await helpers.assertEventLogContainsText(page, fixture.eventText);
+  await helpers.assertTerminalOutputContains(page, fixture.terminalText);
+  expect(sourceText).toContain(fixture.requiredSourceSnippets[0]);
+  expect(hostOutput.join("")).toContain("fetching materialized artifact from storage:");
+  expect(hostOutput.join("")).toContain("fetching storage support file trace_metadata.json from storage:");
+  expect(hostOutput.join("")).toContain("fetching storage support file trace_paths.json from storage:");
 }
 
 function startPlatformLaunchBridge(options: {
@@ -1198,6 +1581,109 @@ function startPlatformLaunchBridge(options: {
       await waitForOutput(hostOutput, /imported manifest trace as trace id\s+\d+/);
       const hostUrl = `http://127.0.0.1:${httpPort}`;
       options.launches.push({ ctProcess, hostOutput, hostUrl });
+      response.writeHead(302, { location: hostUrl });
+      response.end();
+    } catch (error) {
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      response.end(error instanceof Error ? error.stack : String(error));
+    }
+  });
+  server.listen(options.port, "127.0.0.1");
+  return server;
+}
+
+function startMaterializedPlatformLaunchBridge(options: {
+  ready: MaterializedPlatformLinkReady;
+  runnerRoot: string;
+  port: number;
+  launches: Array<{
+    ctProcess: childProcess.ChildProcess;
+    hostOutput: string[];
+    hostUrl: string;
+    linkReady: MaterializedPlatformLink;
+    replayPayload: any;
+  }>;
+}): http.Server {
+  const server = http.createServer(async (request, response) => {
+    try {
+      const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host}`);
+      if (requestUrl.pathname !== "/observability/v0/debug-session") {
+        response.writeHead(404);
+        response.end("not found");
+        return;
+      }
+
+      const traceId = requestUrl.searchParams.get("trace_id") ?? "";
+      const spanId = requestUrl.searchParams.get("span_id") ?? "";
+      const linkReady = options.ready.links.find(
+        (candidate) => candidate.traceId === traceId && candidate.spanId === spanId,
+      );
+      if (!linkReady) {
+        throw new Error(`unexpected materialized debug-session link ${requestUrl.toString()}`);
+      }
+
+      const upstreamUrl = `${options.ready.baseUrl}${requestUrl.pathname}${requestUrl.search}`;
+      const upstreamResponse = await fetch(upstreamUrl, {
+        headers: { authorization: `Bearer ${options.ready.callerToken}` },
+        redirect: "manual",
+      });
+      if (upstreamResponse.status !== 302) {
+        throw new Error(
+          `codetracer-ci materialized debug-session returned HTTP ${upstreamResponse.status}: ${await upstreamResponse.text()}`,
+        );
+      }
+
+      const replayPayload = await fetchJsonFromUrl(
+        `${options.ready.baseUrl}/__tests/replay-provisioning/latest`,
+      );
+      expect(replayPayload.traceSource.kind).toBe("materialized_trace");
+      expect(replayPayload.traceSource.artifacts[0].artifactKey).toBe(
+        linkReady.materializedArtifactKey,
+      );
+      expect(replayPayload.initialPosition.materializedMomentId).toBe(
+        linkReady.momentId,
+      );
+      expect(replayPayload.initialPosition.materializedArtifactKey).toBe(
+        linkReady.materializedArtifactKey,
+      );
+
+      const httpPort = await getFreeTcpPort();
+      const backendPort = await getFreeTcpPort();
+      const hostOutput: string[] = [];
+      const ctProcess = childProcess.spawn(
+        codetracerPath,
+        [
+          "host",
+          `--manifest=${linkReady.manifestPath}`,
+          `--storage-base-url=${options.ready.baseUrl}`,
+          `--storage-tenant-id=${options.ready.tenantId}`,
+          `--storage-token=${options.ready.replayToken}`,
+          "--storage-protocol=local-storage",
+          `--port=${httpPort}`,
+          `--backend-socket-port=${backendPort}`,
+          `--frontend-socket=${backendPort}`,
+        ],
+        {
+          cwd: codetracerInstallDir,
+          env: makeCleanEnv({
+            XDG_CONFIG_HOME: path.join(
+              options.runnerRoot,
+              `xdg-config-${linkReady.language}`,
+            ),
+          }),
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
+      ctProcess.stdout?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      ctProcess.stderr?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      await waitForOutput(hostOutput, /imported manifest trace as trace id\s+\d+/);
+      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      options.launches.push({ ctProcess, hostOutput, hostUrl, linkReady, replayPayload });
       response.writeHead(302, { location: hostUrl });
       response.end();
     } catch (error) {
@@ -1766,6 +2252,210 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
         fullPage: true,
       });
+    } finally {
+      for (const launch of launches) {
+        if (launch.ctProcess.pid) {
+          killProcessTree(launch.ctProcess.pid);
+        }
+      }
+      if (bridge) {
+        await new Promise<void>((resolve) => bridge?.close(() => resolve()));
+      }
+      await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      if (platformHarness?.process.pid) {
+        killProcessTree(platformHarness.process.pid);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M36 real Jaeger UI links launch materialized Python Ruby and JavaScript CodeTracer replays", async ({ page }) => {
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+    for (const fixture of materializedFixtures) {
+      expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
+      expectRequiredFile(
+        `${fixture.label} materialized ${fixture.traceFileName}`,
+        path.join(fixture.traceDir, fixture.traceFileName),
+      );
+      expectRequiredFile(
+        `${fixture.label} materialized trace metadata`,
+        path.join(fixture.traceDir, "trace_metadata.json"),
+      );
+      expectRequiredFile(
+        `${fixture.label} materialized trace paths`,
+        path.join(fixture.traceDir, "trace_paths.json"),
+      );
+    }
+    childProcess.execFileSync(dockerBin(), ["version", "--format", "{{.Server.Version}}"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    const prepared = prepareMaterializedPlatformHarnessInput();
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m36-jaeger-materialized-platform-link-"),
+    );
+    let platformHarness: Awaited<ReturnType<typeof startMaterializedPlatformLinkHarness>> | null = null;
+    let jaegerProcess: childProcess.ChildProcess | null = null;
+    let bridge: http.Server | null = null;
+    const launches: Array<{
+      ctProcess: childProcess.ChildProcess;
+      hostOutput: string[];
+      hostUrl: string;
+      linkReady: MaterializedPlatformLink;
+      replayPayload: any;
+    }> = [];
+    const cliRows: Record<string, any> = {};
+
+    try {
+      platformHarness = await startMaterializedPlatformLinkHarness(prepared.inputPath);
+      expect(platformHarness.ready.links.map((link) => link.language).sort())
+        .toEqual(materializedFixtures.map((fixture) => fixture.language).sort());
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      const jaegerUiPort = await getFreeTcpPort();
+      const jaegerOtlpPort = await getFreeTcpPort();
+      const bridgePort = await getFreeTcpPort();
+      const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
+      const jaegerBaseUrl = `http://127.0.0.1:${jaegerUiPort}`;
+      const renderedJaegerUiConfigPath = renderJaegerUiConfigForDebugBase(
+        runnerRoot,
+        bridgeBaseUrl,
+      );
+
+      bridge = startMaterializedPlatformLaunchBridge({
+        ready: platformHarness.ready,
+        runnerRoot,
+        port: bridgePort,
+        launches,
+      });
+      jaegerProcess = startJaegerAllInOne(
+        runnerRoot,
+        renderedJaegerUiConfigPath,
+        jaegerUiPort,
+        jaegerOtlpPort,
+      );
+      await waitFor(
+        "Jaeger UI readiness",
+        async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/services`),
+        120_000,
+      );
+
+      for (const linkReady of platformHarness.ready.links) {
+        const debugParams = new URLSearchParams({
+          tenant_id: platformHarness.ready.tenantId,
+          "service.name": linkReady.serviceName,
+          trace_id: linkReady.traceId,
+          span_id: linkReady.spanId,
+          "ct.mcr.wall_time_unix_ns": linkReady.wallTimeUnixNs,
+          "ct.mcr.monotonic_time_ns": linkReady.monotonicTimeNs,
+          time_window_ns: linkReady.timeWindowNs,
+        });
+        const debugUrl = `${bridgeBaseUrl}/observability/v0/debug-session?${debugParams.toString()}`;
+        await ingestMaterializedJaegerSpan(
+          jaegerOtlpPort,
+          platformHarness.ready,
+          linkReady,
+          debugUrl,
+        );
+        await waitFor(
+          `${linkReady.label} Jaeger trace ingestion`,
+          async () => fetchJsonFromUrl(`${jaegerBaseUrl}/api/traces/${linkReady.traceId}`),
+          60_000,
+        );
+
+        const cliRow = await runMaterializedCtObserveAgainstJaeger(
+          jaegerBaseUrl,
+          linkReady,
+        );
+        expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+        expect(cliRow.recording_available).toBe(true);
+        expect(cliRow.request_key).toBe(linkReady.requestKey);
+        cliRows[linkReady.language] = cliRow;
+      }
+
+      for (const fixture of materializedFixtures) {
+        const linkReady = platformHarness.ready.links.find(
+          (candidate) => candidate.language === fixture.language,
+        );
+        expect(linkReady, `${fixture.label} platform link ready`).toBeTruthy();
+        await page.goto(`${jaegerBaseUrl}/trace/${linkReady!.traceId}`, {
+          waitUntil: "domcontentloaded",
+          timeout: 60_000,
+        });
+        await page.getByText(linkReady!.operationName).first().waitFor({
+          timeout: 60_000,
+        });
+        await page
+          .getByRole("switch", {
+            name: new RegExp(`${escapeRegExp(linkReady!.serviceName)}.*${escapeRegExp(linkReady!.operationName)}`),
+          })
+          .click();
+
+        await page.getByRole("switch", { name: /Tags/ }).click();
+        const link = page.locator('a[title="Debug in CodeTracer"]').first();
+        await expect(link).toBeVisible({ timeout: 60_000 });
+        expect(await link.getAttribute("href")).toBe(
+          cliRows[fixture.language].codetracer_debug_session_url,
+        );
+
+        const previousLaunches = launches.length;
+        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        await link.click();
+        const popup = await popupPromise;
+        const replayPage = popup ?? page;
+        await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
+          timeout: 120_000,
+        });
+        await waitFor(
+          `${fixture.label} platform launch bridge started CodeTracer`,
+          async () => {
+            if (launches.length !== previousLaunches + 1) {
+              throw new Error(`expected ${previousLaunches + 1} CodeTracer launches, got ${launches.length}`);
+            }
+          },
+          120_000,
+        );
+        const launch = launches[launches.length - 1];
+        await replayPage.waitForURL(`${launch.hostUrl}/`, { timeout: 120_000 });
+        await waitForMaterializedReplayDetails(
+          replayPage,
+          fixture,
+          launch.hostOutput,
+        );
+        await replayPage.screenshot({
+          path: path.join(
+            m36ArtifactDir() ?? runnerRoot,
+            `m36-jaeger-${fixture.language}-materialized-replay.png`,
+          ),
+          fullPage: true,
+        });
+      }
+
+      const artifactDir = m36ArtifactDir();
+      if (artifactDir) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(artifactDir, "ct-observe-jaeger-materialized-rows.json"),
+          JSON.stringify(cliRows, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "materialized-replay-payloads.json"),
+          JSON.stringify(
+            launches.map((launch) => ({
+              language: launch.linkReady.language,
+              replayPayload: launch.replayPayload,
+            })),
+            null,
+            2,
+          ),
+        );
+      }
     } finally {
       for (const launch of launches) {
         if (launch.ctProcess.pid) {
