@@ -149,6 +149,7 @@ type StorageHarnessReady = {
 type DebugSessionReplayReady = {
   baseUrl: string;
   tenantId: string;
+  adminToken: string;
   callerToken: string;
   replayToken: string;
   authProbes: {
@@ -158,6 +159,7 @@ type DebugSessionReplayReady = {
     userTokenStorageReadStatus: number;
   };
   manifestKey: string;
+  serverIds: string[];
   selectedSegmentIndex: number;
   debugSession: {
     status: string;
@@ -167,6 +169,11 @@ type DebugSessionReplayReady = {
     };
   };
   replayPayload: any;
+};
+
+type StoragePolicyAuditEvent = {
+  eventType: string;
+  details?: Record<string, string>;
 };
 
 type PlatformLinkReady = {
@@ -870,6 +877,49 @@ async function startDebugSessionHarness(
     ready: JSON.parse(match[1]) as DebugSessionReplayReady,
     output,
   };
+}
+
+async function setStorageServerHealth(
+  ready: DebugSessionReplayReady,
+  serverId: string,
+  healthStatus: "healthy" | "unavailable" | "failed",
+): Promise<void> {
+  const response = await fetch(
+    `${ready.baseUrl}/api/v1/observability/storage-policy/tenants/${ready.tenantId}/local-storage/servers/${serverId}/health`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${ready.adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ healthStatus }),
+    },
+  );
+  if (response.status !== 204) {
+    throw new Error(
+      `storage server health update failed: ${response.status} ${await response.text()}`,
+    );
+  }
+}
+
+async function fetchStoragePolicyAudit(
+  ready: DebugSessionReplayReady,
+): Promise<StoragePolicyAuditEvent[]> {
+  const response = await fetch(
+    `${ready.baseUrl}/api/v1/observability/storage-policy/tenants/${ready.tenantId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${ready.adminToken}`,
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `storage policy audit fetch failed: ${response.status} ${await response.text()}`,
+    );
+  }
+  const payload = await response.json();
+  return payload.auditHistory ?? [];
 }
 
 async function startPlatformLinkHarness(
@@ -3281,6 +3331,220 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       );
       expect(traceMetadata.id).toBeGreaterThan(0);
       expect(traceMetadata.outputFolder).toContain("trace-");
+    } finally {
+      if (ctProcess?.pid) {
+        killProcessTree(ctProcess.pid);
+      }
+      if (debugHarness?.process.pid) {
+        killProcessTree(debugHarness.process.pid);
+      }
+      if (browser) {
+        await browser.close().catch(() => undefined);
+      }
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+      fs.rmSync(runnerRoot, { recursive: true, force: true });
+      await sleep(500);
+    }
+  });
+
+  base("M37 replica failover preserves replay session through debug-session ReplayAgent path", async ({}) => {
+    base.setTimeout(420_000);
+    expectRequiredFile("CodeTracer test binary", codetracerPath);
+    expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
+    expectRequiredFile(
+      "ReplayAgent runner entrypoint",
+      path.join(codetracerCiDir, "resources", "docker", "codetracer-runner", "replay-entrypoint.sh"),
+    );
+    expectRequiredFile("real MCR request trace fixture", portableTracePath);
+    expectRequiredFile("MCR request source file", fixtureSourcePath);
+    expectRequiredFile("MCR request binary fixture", fixtureBinaryPath);
+    expectRequiredFile("MCR request details fixture", fixtureRequestDetailsPath);
+
+    const prepared = prepareStorageHarnessInput();
+    let debugHarness: Awaited<ReturnType<typeof startDebugSessionHarness>> | null = null;
+    let ctProcess: childProcess.ChildProcess | null = null;
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+    const runnerRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ct-m37-replay-agent-replica-failover-"),
+    );
+
+    try {
+      debugHarness = await startDebugSessionHarness(prepared.inputPath);
+      fs.rmSync(prepared.rootDir, { recursive: true, force: true });
+
+      expect(debugHarness.ready.debugSession.status).toBe("Provisioning");
+      expect(debugHarness.ready.serverIds.length).toBe(2);
+      const primaryServerId = debugHarness.ready.serverIds[0];
+      const secondaryServerId = debugHarness.ready.serverIds[1];
+      const selectedReplaySegment =
+        debugHarness.ready.replayPayload.traceSource.shardedMcrSegments[0];
+      expect(selectedReplaySegment).toBeTruthy();
+      expect(selectedReplaySegment.shards.length).toBeGreaterThanOrEqual(2);
+      const primaryObjectKeys: string[] = [];
+      const secondaryObjectKeys: string[] = [];
+      for (const shard of selectedReplaySegment.shards) {
+        expect(shard.replicas.length).toBe(2);
+        expect(shard.replicas[0].storageServerId).toBe(primaryServerId);
+        expect(shard.replicas[1].storageServerId).toBe(secondaryServerId);
+        primaryObjectKeys.push(shard.replicas[0].objectKey);
+        secondaryObjectKeys.push(shard.replicas[1].objectKey);
+      }
+      const supportFileServers = (selectedReplaySegment.supportFiles ?? []).map(
+        (file: any) => file.storageServerId,
+      );
+      expect(supportFileServers).toContain(secondaryServerId);
+
+      const replayAgentCommandLine = generateReplayAgentCommand(
+        debugHarness.ready.replayPayload,
+        runnerRoot,
+      );
+      const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
+        primaryServerId,
+      );
+      expect(replayEnv.CODETRACER_TRACE_SHARDED_MCR_SEGMENTS).toContain(
+        secondaryServerId,
+      );
+
+      await setStorageServerHealth(debugHarness.ready, primaryServerId, "unavailable");
+
+      const httpPort = await getFreeTcpPort();
+      const backendPort = await getFreeTcpPort();
+      const hostOutput: string[] = [];
+      const shimDir = createCtPathShim(runnerRoot);
+      const entrypointPath = path.join(
+        codetracerCiDir,
+        "resources",
+        "docker",
+        "codetracer-runner",
+        "replay-entrypoint.sh",
+      );
+      ctProcess = childProcess.spawn(
+        "bash",
+        [
+          entrypointPath,
+          `--port=${httpPort}`,
+          `--backend-socket-port=${backendPort}`,
+          `--frontend-socket=${backendPort}`,
+        ],
+        {
+          cwd: codetracerInstallDir,
+          env: {
+            ...makeCleanEnv({
+              XDG_CONFIG_HOME: path.join(runnerRoot, "xdg-config"),
+            }),
+            ...replayEnv,
+            CODETRACER_WORK_DIR: path.join(runnerRoot, "work"),
+            PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
+      ctProcess.stdout?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+      ctProcess.stderr?.on("data", (chunk: Buffer) => {
+        hostOutput.push(chunk.toString());
+      });
+
+      browser = await chromium.launch({
+        executablePath: resolveChromiumPath(),
+        args: (process.env.CODETRACER_ELECTRON_ARGS ?? "")
+          .split(/\s+/)
+          .filter(Boolean),
+      });
+      const page = await browser.newPage();
+
+      const importOutput = await waitForOutput(
+        hostOutput,
+        /imported manifest trace as trace id\s+\d+/,
+      );
+      expect(importOutput).toContain("Starting host from generated replay manifest");
+      expect(importOutput).toContain("CTFS shard replica read failed; trying next replica:");
+      expect(importOutput).toContain("HTTP 503");
+      expect(importOutput).toContain(`/servers/${primaryServerId}/objects/`);
+      expect(importOutput).toContain(`/servers/${secondaryServerId}/objects/`);
+      for (const objectKey of primaryObjectKeys) {
+        expect(importOutput).toContain(encodeURIComponent(objectKey));
+      }
+      for (const objectKey of secondaryObjectKeys) {
+        expect(importOutput).toContain(encodeURIComponent(objectKey));
+      }
+
+      await connectToHost(page, httpPort, hostOutput);
+      await expect(page.locator(".lm_content").first()).toBeVisible({
+        timeout: 30_000,
+      });
+
+      const sourceNode = page
+        .locator(".jstree-anchor")
+        .filter({ hasText: /^inventory_smoke\.c$/ })
+        .first();
+      await expect(sourceNode).toBeVisible({ timeout: 30_000 });
+      await sourceNode.click();
+      const sourceText = await waitForEditorModelText(page, "handle_client");
+      await waitForEditorModelText(page, "reserve_from_primary_bin");
+
+      const requestDetailsNode = page
+        .locator(".jstree-anchor")
+        .filter({ hasText: /^inventory-response\.json$/ })
+        .first();
+      await expect(requestDetailsNode).toBeVisible({ timeout: 30_000 });
+      await requestDetailsNode.click();
+      const requestDetailsText = await waitForVisibleEditorText(
+        page,
+        `"requestId": "m25-real-mcr-request-001"`,
+      );
+      await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
+
+      await waitFor(
+        "storage policy audit to record replica failover",
+        async () => {
+          const audit = await fetchStoragePolicyAudit(debugHarness!.ready);
+          expect(
+            audit.some(
+              (event) =>
+                event.eventType === "local_storage.server_health_updated" &&
+                event.details?.serverId === primaryServerId &&
+                event.details?.healthStatus === "unavailable",
+            ),
+          ).toBe(true);
+          expect(
+            primaryObjectKeys.every((objectKey) =>
+              audit.some(
+                (event) =>
+                  event.eventType === "local_storage.object_read_unavailable" &&
+                  event.details?.serverId === primaryServerId &&
+                  event.details?.objectKey === objectKey,
+              ),
+            ),
+          ).toBe(true);
+          expect(
+            secondaryObjectKeys.every((objectKey) =>
+              audit.some(
+                (event) =>
+                  event.eventType === "local_storage.object_read" &&
+                  event.details?.serverId === secondaryServerId &&
+                  event.details?.objectKey === objectKey,
+              ),
+            ),
+          ).toBe(true);
+        },
+        30_000,
+      );
+
+      const bodyText = await page.evaluate(() => document.body.innerText);
+      expect(bodyText).toContain("inventory_smoke.c");
+      expect(bodyText).toContain("inventory-response.json");
+      expect(sourceText).toContain("handle_client");
+      expect(sourceText).toContain("reserve_from_primary_bin");
+      expect(requestDetailsText).toContain(
+        `"requestId": "m25-real-mcr-request-001"`,
+      );
+      expect(requestDetailsText).toContain(
+        `"branch": "reserve_from_primary_bin"`,
+      );
     } finally {
       if (ctProcess?.pid) {
         killProcessTree(ctProcess.pid);
