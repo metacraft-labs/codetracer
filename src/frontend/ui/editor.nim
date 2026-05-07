@@ -1573,7 +1573,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
           automaticLayout: true,
           folding: true,
           fontSize: self.data.ui.fontSize,
-          fontFamily: cstring"JetBrains Mono, FiraMono, monospace",
+          fontFamily: cstring"SpaceMono, monospace",
           fontLigatures: true,
           minimap: js{ enabled: false },
           renderIndentGuides: true,

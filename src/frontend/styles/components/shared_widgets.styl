@@ -20,8 +20,6 @@ if !IS_EXTENSION
   ::-webkit-scrollbar-thumb:horizontal:active
     background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
 
-@import "../generated/fonts"
-
 if IS_EXTENSION
   .component-container-html
     height: -webkit-fill-available !important
@@ -99,7 +97,9 @@ html, body
     overflow: hidden
 
 body
-  font-family: -apple-system, 'Helvetica Neue', Helvetica, sans-serif !important
+  font-family: "SpaceMono", monospace !important
+  -webkit-font-smoothing: antialiased
+  -moz-osx-font-smoothing: grayscale
   background-color: colors-ui-surface-primary-default !important
 
 [data-tippy-root]
@@ -143,7 +143,7 @@ body
 //     margin-left: 0 !important
 
 // input
-//   font-family: "SpaceGrotesk" !important
+//   font-family: "SpaceMono" !important
 //   font-size: 14px !important
 //   font-style: normal !important
 //   font-weight: 400 !important
@@ -236,7 +236,7 @@ body
 
 // TODO: Fix it?
 .component-container
-  font-family: "FiraMono" !important
+  font-family: "SpaceMono" !important
   font-size: inherit !important
   line-height: 1.5em !important
   font-weight: 400 !important
@@ -343,7 +343,7 @@ input:checked ~ .checkmark:after
   position: absolute
   background-color: PRIMARY_BASE
   z-index: 3
-  font-family: "FiraMono"
+  font-family: "SpaceMono"
   margin-bottom: 0
   list-style-type: none
   opacity: 0
@@ -456,7 +456,7 @@ input:checked ~ .checkmark:after
     right: 0px;
     background-color: DROPDOWN_BASE
     border-radius: 6px
-    font-family: "SpaceGrotesk"
+    font-family: "SpaceMono"
     line-height: normal
     color: PRIMARY_TEXT_COLOR
     font-weight: 400
@@ -498,7 +498,7 @@ input:checked ~ .checkmark:after
   height: inherit
   justify-content: center
   align-items: center
-  font-family: 'FiraMono'
+  font-family: "SpaceMono"
   // font-size: 14px
   // padding-left: 12px
   // padding-right: 12px
