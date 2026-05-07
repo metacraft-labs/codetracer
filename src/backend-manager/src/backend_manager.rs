@@ -5964,7 +5964,7 @@ impl BackendManager {
         // time to parse and post-process.  Use a generous per-step timeout
         // so that `setup()` in replay-server has time to complete.
         let dap_timeout = Duration::from_secs(120);
-        match dap_init::run_dap_init(
+        let dap_init_result = match dap_init::run_dap_init(
             &sender,
             &mut receiver,
             &trace_path,
@@ -5973,11 +5973,12 @@ impl BackendManager {
         )
         .await
         {
-            Ok(_init_result) => {
+            Ok(init_result) => {
                 info!(
                     "DAP init completed for trace {} (backend_id={backend_id})",
                     trace_path.display()
                 );
+                init_result
             }
             Err(e) => {
                 warn!("DAP init failed for trace {}: {e}", trace_path.display());
@@ -5993,12 +5994,19 @@ impl BackendManager {
                 self.send_response_for_seq(seq, response);
                 return Ok(());
             }
-        }
+        };
+        let initial_move_state = dap_init_result
+            .startup_events
+            .iter()
+            .find(|event| event.get("type").and_then(Value::as_str) == Some("event")
+                && event.get("event").and_then(Value::as_str) == Some("ct/complete-move"))
+            .and_then(|event| event.get("body").cloned())
+            .unwrap_or(Value::Null);
 
         // After DAP init, query the initial location via stackTrace.
         // This provides the Python client with the starting position
         // without requiring a separate navigation call.
-        let initial_location = {
+        let (initial_location, mut deferred_startup_messages) = {
             let st_request = json!({
                 "type": "request",
                 "command": "stackTrace",
@@ -6010,6 +6018,7 @@ impl BackendManager {
             // Wait for the stackTrace response with a short timeout.
             let mut location =
                 json!({"path": "", "line": 0, "column": 0, "ticks": 0, "endOfTrace": false});
+            let mut deferred_messages = Vec::new();
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
             loop {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -6027,7 +6036,10 @@ impl BackendManager {
                                 location = python_bridge::extract_location_from_stack_trace(&msg);
                                 break;
                             }
-                            // Not the stackTrace response; discard and keep waiting.
+                            // Preserve startup events such as ct/complete-move
+                            // so the frontend receives the entry location after
+                            // normal replay routing is installed.
+                            deferred_messages.push(msg);
                         } else {
                             warn!("Channel closed while waiting for initial stackTrace");
                             break;
@@ -6039,11 +6051,15 @@ impl BackendManager {
                     }
                 }
             }
-            location
+            (location, deferred_messages)
         };
+        deferred_startup_messages.extend(dap_init_result.startup_events);
 
         // Install channels for normal routing.
         self.install_replay_channels(backend_id, sender, receiver);
+        for msg in deferred_startup_messages {
+            self.route_daemon_message(Some(backend_id), &msg);
+        }
 
         // Register session with metadata.
         if let Some(ds) = self.daemon_state.as_mut()
@@ -6080,6 +6096,7 @@ impl BackendManager {
                 "workdir": metadata.workdir,
                 "cached": false,
                 "initialLocation": initial_location,
+                "initialMoveState": initial_move_state,
             }
         });
         self.send_response_for_seq(seq, response);

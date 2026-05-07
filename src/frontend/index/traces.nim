@@ -20,6 +20,7 @@ var
   selectedReplayId = -1
   pendingReplayStart: Future[int] = nil
   replayStartResolver: proc(replayId: int) = nil
+  pendingReplayStartMoveState: JsObject = nil
   prefetchedTrace*: Trace = nil
 
 proc asyncSleep(ms: int): Future[void] =
@@ -46,6 +47,10 @@ proc handleReplayStartResponse(body: JsObject) =
     let bodyNode = body["body"]
     if jsHasKey(bodyNode, cstring"replayId"):
       replayId = bodyNode["replayId"].to(int)
+    if jsHasKey(bodyNode, cstring"initialMoveState"):
+      pendingReplayStartMoveState = bodyNode["initialMoveState"]
+    else:
+      pendingReplayStartMoveState = nil
 
   if replayId >= 0:
     debugPrint("index: session-manager reported replayId ", $replayId)
@@ -769,6 +774,11 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
   mainWindow.webContents.send(
     "CODETRACER::dap-replay-selected",
     js{trace: data.trace, replayId: replayId})
+  if not pendingReplayStartMoveState.isNil:
+    mainWindow.webContents.send(
+      "CODETRACER::complete-move",
+      pendingReplayStartMoveState)
+    pendingReplayStartMoveState = nil
 
 proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
   ## IPC handler: renderer requests that a session's replay be stopped.
