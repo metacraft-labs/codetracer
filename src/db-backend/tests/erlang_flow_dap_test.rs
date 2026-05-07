@@ -1,8 +1,14 @@
-//! Headless DAP flow test for Elixir materialized traces.
+//! Headless DAP flow test for Erlang materialized traces.
 //!
-//! Records the canonical Mix fixture from codetracer-beam-recorder, launches
+//! Records the canonical Erlang fixture from codetracer-beam-recorder, launches
 //! the real db-backend DAP stack, and verifies flow values through
-//! ct-dap-client's FlowTestRunner.
+//! ct-dap-client's FlowTestRunner. Companion to `elixir_flow_dap_test.rs`.
+//!
+//! The fixture lives at
+//! `codetracer-beam-recorder/test-programs/erlang/canonical_flow/src/canonical_flow.erl`
+//! and uses Erlang variable conventions (capitalized names: `A`, `B`,
+//! `SumVal`, `Doubled`, `FinalResult`, `Result`) — the BEAM recorder's
+//! manifest carries the language so the trace reader sees these correctly.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,7 +21,7 @@ use ct_dap_client::{
 };
 
 mod test_harness;
-use test_harness::{find_beam_recorder, find_elixir_flow_test, Language, TestRecording};
+use test_harness::{find_beam_recorder, find_erlang_flow_test, Language, TestRecording};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
@@ -29,17 +35,17 @@ fn expected_values(values: &[(&str, i64)]) -> HashMap<String, i64> {
 }
 
 #[test]
-fn e2e_codetracer_elixir_run_to_entry_stack_dap() {
+fn e2e_codetracer_erlang_run_to_entry_stack_dap() {
     assert!(
         find_beam_recorder().is_some(),
         "codetracer-beam-recorder binary not found; run `just test-beam-flow` or set CODETRACER_BEAM_RECORDER_BIN"
     );
 
-    let project_path = find_elixir_flow_test()
-        .expect("canonical Elixir fixture not found; set CODETRACER_BEAM_RECORDER_PATH or CODETRACER_ELIXIR_FLOW_TEST");
-    let source_file = project_path.join("lib/canonical_flow.ex");
-    let recording = TestRecording::create_db_trace_with_format(&project_path, Language::Elixir, "elixir-entry", "ctfs")
-        .expect("Elixir recording failed");
+    let project_path = find_erlang_flow_test()
+        .expect("canonical Erlang fixture not found; set CODETRACER_BEAM_RECORDER_PATH or CODETRACER_ERLANG_FLOW_TEST");
+    let source_file = project_path.join("src/canonical_flow.erl");
+    let recording = TestRecording::create_db_trace_with_format(&project_path, Language::Erlang, "erlang-entry", "ctfs")
+        .expect("Erlang recording failed");
 
     let mut client = DapStdioClient::spawn(&find_db_backend()).expect("DAP spawn failed");
     client.initialize().expect("initialize failed");
@@ -67,52 +73,60 @@ fn e2e_codetracer_elixir_run_to_entry_stack_dap() {
     assert_eq!(path, source_file.to_str().unwrap());
     assert!(
         top.line > 0,
-        "run-to-entry should land on a real Elixir source line, got {:?}",
+        "run-to-entry should land on a real Erlang source line, got {:?}",
         top
     );
     client.disconnect().expect("disconnect failed");
 }
 
 #[test]
-fn e2e_codetracer_elixir_flow_dap() {
+fn e2e_codetracer_erlang_flow_dap() {
     assert!(
         find_beam_recorder().is_some(),
         "codetracer-beam-recorder binary not found; run `just test-beam-flow` or set CODETRACER_BEAM_RECORDER_BIN"
     );
 
-    let project_path = find_elixir_flow_test()
-        .expect("canonical Elixir fixture not found; set CODETRACER_BEAM_RECORDER_PATH or CODETRACER_ELIXIR_FLOW_TEST");
-    let source_file = project_path.join("lib/canonical_flow.ex");
+    let project_path = find_erlang_flow_test()
+        .expect("canonical Erlang fixture not found; set CODETRACER_BEAM_RECORDER_PATH or CODETRACER_ERLANG_FLOW_TEST");
+    let source_file = project_path.join("src/canonical_flow.erl");
     assert!(
         source_file.exists(),
-        "Elixir canonical source not found at {}",
+        "Erlang canonical source not found at {}",
         source_file.display()
     );
 
-    let recording = TestRecording::create_db_trace_with_format(&project_path, Language::Elixir, "elixir-flow", "ctfs")
-        .expect("Elixir recording failed");
+    let recording = TestRecording::create_db_trace_with_format(&project_path, Language::Erlang, "erlang-flow", "ctfs")
+        .expect("Erlang recording failed");
 
+    // The Erlang fixture mirrors the Elixir canonical_flow exactly, but
+    // capitalized: A=10, B=32, SumVal=42, Doubled=84, FinalResult=94 inside
+    // compute/0 (line 9 is the FinalResult assignment). In main/0, line 14
+    // binds Result via `Result = compute()`, line 15 asserts it, line 16
+    // formats it via `io:format("~p~n", [Result])`. The BEAM recorder emits
+    // the most observable Result-bearing flow step at line 16 (the io:format
+    // call), so we anchor the second breakpoint there — the equivalent of
+    // the Elixir test's IO.puts/result inspection point.
     let config = MultiBreakpointTestConfig {
         source_file: source_file.to_str().unwrap().to_string(),
         breakpoints: vec![
             BreakpointCheck {
                 line: 9,
-                expected_variables: vec!["a", "b", "sum_val", "doubled", "final_result"]
+                expected_variables: vec!["A", "B", "SumVal", "Doubled", "FinalResult"]
                     .into_iter()
                     .map(String::from)
                     .collect(),
                 expected_values: expected_values(&[
-                    ("a", 10),
-                    ("b", 32),
-                    ("sum_val", 42),
-                    ("doubled", 84),
-                    ("final_result", 94),
+                    ("A", 10),
+                    ("B", 32),
+                    ("SumVal", 42),
+                    ("Doubled", 84),
+                    ("FinalResult", 94),
                 ]),
             },
             BreakpointCheck {
                 line: 16,
-                expected_variables: vec!["result"].into_iter().map(String::from).collect(),
-                expected_values: expected_values(&[("result", 94)]),
+                expected_variables: vec!["Result"].into_iter().map(String::from).collect(),
+                expected_values: expected_values(&[("Result", 94)]),
             },
         ],
     };
@@ -120,9 +134,9 @@ fn e2e_codetracer_elixir_flow_dap() {
     let db_backend = find_db_backend();
     let mut runner =
         FlowTestRunner::new_db_trace_with_timeout(&db_backend, &recording.trace_dir, Duration::from_secs(60))
-            .expect("DAP init failed for Elixir trace");
+            .expect("DAP init failed for Erlang trace");
     runner
         .run_multi_breakpoint(&config)
-        .expect("Elixir flow DAP test failed");
+        .expect("Erlang flow DAP test failed");
     runner.finish().expect("disconnect failed");
 }

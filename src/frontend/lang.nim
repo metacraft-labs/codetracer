@@ -43,6 +43,9 @@ proc toLang*(lang: cstring): Lang =
     ex: LangElixir,
     exs: LangElixir,
     elixir: LangElixir,
+    erl: LangErlang,
+    hrl: LangErlang,
+    erlang: LangErlang,
   }
   if langs.hasKey(lang):
     result = langs[lang]
@@ -88,7 +91,8 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"aiken",
     cstring"cadence",
     cstring"solana",
-    cstring"elixir"
+    cstring"elixir",
+    cstring"erlang"
   ]
   result = langs[lang]
 
@@ -103,7 +107,7 @@ let SUPPORTED_LANGS* = @[
   LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall,
   LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
   LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
-  LangSolana, LangElixir
+  LangSolana, LangElixir, LangErlang
 ]
 
 let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
@@ -151,7 +155,8 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[]),  # LangAiken
   toSet(@[]),  # LangCadence
   toSet(@[]),  # LangSolana
-  toSet(@[])   # LangElixir
+  toSet(@[]),  # LangElixir
+  toSet(@[])   # LangErlang
 ]
 
 proc getExtension*(lang: Lang): cstring =
@@ -194,7 +199,8 @@ proc getExtension*(lang: Lang): cstring =
     "ak",     # LangAiken
     "cdc",    # LangCadence
     "",       # LangSolana (folder-based)
-    "ex"      # LangElixir
+    "ex",     # LangElixir
+    "erl"     # LangErlang
   ]
   result = cstring(extensions[lang])
 
@@ -240,6 +246,8 @@ proc fromPath*(path: cstring): Lang =
     "cdc": LangCadence,
     "ex": LangElixir,
     "exs": LangElixir,
+    "erl": LangErlang,
+    "hrl": LangErlang,
   };
   if not extensions.hasKey(ext):
     LangUnknown

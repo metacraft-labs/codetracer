@@ -160,7 +160,10 @@ impl Db {
                     // };
                     let (fn_start, fn_last) = expr_loader.get_first_last_fn_lines(&location);
                     let lang = expr_loader.get_current_language(&PathBuf::from(path));
-                    if lang != Lang::Elixir && fn_start > 0 && fn_last >= fn_start {
+                    // BEAM languages (Elixir + Erlang) carry their function ranges
+                    // through manifests, not tree-sitter — skip the expr-loader
+                    // override for both.
+                    if lang != Lang::Elixir && lang != Lang::Erlang && fn_start > 0 && fn_last >= fn_start {
                         location.function_first = fn_start;
                         location.function_last = fn_last;
                     } else {

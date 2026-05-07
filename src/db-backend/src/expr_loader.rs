@@ -616,6 +616,8 @@ impl ExprLoader {
                 Lang::Solidity
             } else if extension == "ex" || extension == "exs" {
                 Lang::Elixir
+            } else if extension == "erl" || extension == "hrl" {
+                Lang::Erlang
             } else {
                 Lang::Unknown
             }

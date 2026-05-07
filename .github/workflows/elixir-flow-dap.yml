@@ -1,29 +1,14 @@
-name: Elixir Materialized Trace DAP Flow
+# DEPRECATED: kept as a redirect during the BEAM rename migration window.
+# The BEAM (Elixir + Erlang) cross-repo CI is now in `beam-flow.yml`.
+# This workflow is left in place so the workflow ID stays stable for any
+# external CI hooks that reference it.
+name: Elixir Materialized Trace DAP Flow (DEPRECATED, use BEAM workflow)
 
 on:
-  pull_request:
-    paths:
-      - 'src/db-backend/**'
-      - 'libs/ct-dap-client/**'
-      - 'ci/test/elixir-flow-cross-repo.sh'
-      - 'scripts/detect-siblings.sh'
-      - 'justfile'
-      - '.github/sibling-pins'
-      - '.github/workflows/elixir-flow-dap.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'src/db-backend/**'
-      - 'libs/ct-dap-client/**'
-      - 'ci/test/elixir-flow-cross-repo.sh'
-      - 'scripts/detect-siblings.sh'
-      - 'justfile'
-      - '.github/sibling-pins'
-      - '.github/workflows/elixir-flow-dap.yml'
   workflow_dispatch:
     inputs:
-      elixir_recorder_ref:
-        description: 'codetracer-elixir-recorder ref (default: .github/sibling-pins)'
+      beam_recorder_ref:
+        description: 'codetracer-beam-recorder ref (default: .github/sibling-pins)'
         required: false
         default: ''
       trace_format_ref:
@@ -36,93 +21,10 @@ permissions:
   id-token: write
 
 jobs:
-  elixir-flow-dap:
-    runs-on: [self-hosted, nixos]
-
+  redirect-notice:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout codetracer
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Generate CI token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
-        with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ steps.app-token.outputs.token }}
-
-      - name: Resolve sibling refs
-        id: refs
+      - name: Notify and redirect
         run: |
-          set -euo pipefail
-          ELIXIR_REF="${{ github.event.inputs.elixir_recorder_ref }}"
-          TRACE_FORMAT_REF="${{ github.event.inputs.trace_format_ref }}"
-          if [[ -z "$ELIXIR_REF" ]]; then
-            ELIXIR_REF="$(grep '^codetracer-elixir-recorder ' .github/sibling-pins | cut -d' ' -f2)"
-          fi
-          if [[ -z "$TRACE_FORMAT_REF" ]]; then
-            TRACE_FORMAT_REF="$(grep '^codetracer-trace-format ' .github/sibling-pins | cut -d' ' -f2)"
-          fi
-          [[ "$ELIXIR_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-elixir-recorder ref must be a 40-char SHA: $ELIXIR_REF" >&2; exit 1; }
-          [[ "$TRACE_FORMAT_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-trace-format ref must be a 40-char SHA: $TRACE_FORMAT_REF" >&2; exit 1; }
-          echo "elixir-ref=$ELIXIR_REF" >> "$GITHUB_OUTPUT"
-          echo "trace-format-ref=$TRACE_FORMAT_REF" >> "$GITHUB_OUTPUT"
-          echo "codetracer-elixir-recorder ref: $ELIXIR_REF"
-          echo "codetracer-trace-format ref: $TRACE_FORMAT_REF"
-
-      - name: Clone codetracer-elixir-recorder
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-elixir-recorder
-          ref: ${{ steps.refs.outputs.elixir-ref }}
-          path: ${{ github.workspace }}/../codetracer-elixir-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
-
-      - name: Replace trace-format with pinned sibling clone
-        run: rm -rf libs/codetracer-trace-format
-
-      - name: Clone codetracer-trace-format
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          ref: ${{ steps.refs.outputs.trace-format-ref }}
-          path: ${{ github.workspace }}/libs/codetracer-trace-format
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
-
-      - name: Run zero-test guard verification
-        run: |
-          set -euo pipefail
-          export TMPDIR="${{ github.workspace }}/../tmp"
-          mkdir -p "$TMPDIR"
-          nix develop '.?submodules=1' --command \
-            bash -lc './ci/test/elixir-flow-cross-repo.sh verify_elixir_flow_zero_test_guard'
-
-      - name: Run Elixir DAP flow integration
-        run: |
-          set -euo pipefail
-          export TMPDIR="${{ github.workspace }}/../tmp"
-          mkdir -p "$TMPDIR"
-          export CODETRACER_ELIXIR_RECORDER_PATH="${{ github.workspace }}/../codetracer-elixir-recorder"
-          nix develop '.?submodules=1' --command \
-            bash -lc 'just test-elixir-flow'
-
-      - name: Upload full Elixir flow logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: elixir-flow-dap-logs
-          path: target/elixir-flow-ci-logs/
-          retention-days: 14
-          if-no-files-found: ignore
+          echo "::warning::elixir-flow-dap.yml is deprecated; the BEAM (Elixir + Erlang) cross-repo CI lives in beam-flow.yml."
+          echo "Manually trigger the 'BEAM Materialized Trace DAP Flow' workflow instead."

@@ -437,7 +437,10 @@ pub trait TraceReader: std::fmt::Debug + Send {
                 Ok(_) => {
                     let (fn_start, fn_last) = expr_loader.get_first_last_fn_lines(&location);
                     let lang = expr_loader.get_current_language(&PathBuf::from(raw_path));
-                    if lang != Lang::Elixir && fn_start > 0 && fn_last >= fn_start {
+                    // BEAM languages (Elixir + Erlang) ship their function ranges
+                    // in manifests, not tree-sitter — defer to the trace's own
+                    // function boundaries for both.
+                    if lang != Lang::Elixir && lang != Lang::Erlang && fn_start > 0 && fn_last >= fn_start {
                         location.function_first = fn_start;
                         location.function_last = fn_last;
                     } else {

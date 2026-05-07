@@ -216,7 +216,12 @@ impl<'a> CallFlowPreloader<'a> {
             // let function_first = self.db.functions[function_id].line;
             // info!("load {arg:?}");
 
-            if self.trace_kind == TraceKind::Materialized && self.lang == Lang::Elixir {
+            // BEAM languages (Elixir + Erlang) share the codetracer-beam-recorder
+            // CTFS layout where the trace already encodes per-line steps inside
+            // the active call frame and the location passed in already points at
+            // the right step. Skip the tree-sitter `find_function_location` /
+            // `jump_to_call` dance that the other materialized languages need.
+            if self.trace_kind == TraceKind::Materialized && (self.lang == Lang::Elixir || self.lang == Lang::Erlang) {
                 self.location = location.clone();
             } else {
                 let original_ticks = location.rr_ticks.clone();
@@ -255,7 +260,11 @@ impl<'a> CallFlowPreloader<'a> {
             // For DB traces, the flow should cover the entire function call,
             // not just from the breakpoint forward. Use jump_to_call to find
             // the call's first step, then step with StepIn to enter the body.
-            if self.trace_kind == TraceKind::Materialized && self.lang != Lang::Elixir && self.location.rr_ticks.0 > 0 {
+            if self.trace_kind == TraceKind::Materialized
+                && self.lang != Lang::Elixir
+                && self.lang != Lang::Erlang
+                && self.location.rr_ticks.0 > 0
+            {
                 if let Ok(call_loc) = replay.jump_to_call(&self.location) {
                     // jump_to_call lands on the call entry step (the Call
                     // event itself). StepIn from there enters the call body.

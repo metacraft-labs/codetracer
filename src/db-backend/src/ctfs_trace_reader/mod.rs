@@ -203,8 +203,12 @@ impl CTFSTraceReader {
 
         let trace_meta_raw = std::fs::read_to_string(&trace_meta_path)?;
         let trace_meta: Value = serde_json::from_str(&trace_meta_raw)?;
-        if trace_meta.get("recorder").and_then(Value::as_str) != Some("codetracer-elixir-recorder") {
-            return Ok(None);
+        // Accept both the current `codetracer-beam-recorder` brand and the
+        // legacy `codetracer-elixir-recorder` brand for one release cycle, so
+        // bundles produced before the BEAM-recorder rename keep loading.
+        match trace_meta.get("recorder").and_then(Value::as_str) {
+            Some("codetracer-beam-recorder") | Some("codetracer-elixir-recorder") => {}
+            _ => return Ok(None),
         }
 
         let workdir = trace_meta

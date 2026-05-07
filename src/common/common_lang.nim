@@ -48,7 +48,8 @@ type
     LangAiken,    # 35
     LangCadence,  # 36
     LangSolana,   # 37
-    LangElixir    # 38
+    LangElixir,   # 38
+    LangErlang    # 39
 
 var CURRENT_LANG*: Lang = LangUnknown ## The current lang in the codetraces session
 
@@ -61,8 +62,8 @@ var USES_MATERIALIZED_TRACES*: array[Lang, bool] = [
   false, false, false, false, false, false, false, false, false, false, false, false,
   #Py    Ruby   RubyDb JS     Lua    Asm    Noir   RsWasm CppWsm Small  PyDb   Unknwn
   false, false, false, false, false, false, false, false, false, false, false, false,
-  #Bash  Zsh    Sol    Masm   Sway   Move   Polka  Cairo  Circom Leo    Tolk   Aiken  Cadnce Solana Elixir
-  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
+  #Bash  Zsh    Sol    Masm   Sway   Move   Polka  Cairo  Circom Leo    Tolk   Aiken  Cadnce Solana Elixir Erlang
+  false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
 ]
 
 USES_MATERIALIZED_TRACES[LangRubyDb] = true
@@ -88,6 +89,7 @@ USES_MATERIALIZED_TRACES[LangBash] = true
 USES_MATERIALIZED_TRACES[LangZsh] = true
 USES_MATERIALIZED_TRACES[LangJavascript] = true
 USES_MATERIALIZED_TRACES[LangElixir] = true
+USES_MATERIALIZED_TRACES[LangErlang] = true
 
 proc usesMaterializedTraces*(lang: Lang): bool =
   ## Return true if ``lang`` produces materialized (self-contained) traces
@@ -103,7 +105,7 @@ proc toCLang*(lang: Lang): string =
     "rust", "c++", "small", "python", "unknown",
     "bash", "zsh", "solidity", "masm", "sway", "move",
     "polkavm", "cairo", "circom", "leo", "tolk", "aiken", "cadence",
-    "solana", "elixir"
+    "solana", "elixir", "erlang"
   ]
   result = langs[lang]
 
@@ -117,7 +119,7 @@ proc toName*(lang: Lang): string =
        "Small", "Python(db)", "unknown",
        "Bash", "Zsh", "Solidity", "MASM/Miden", "Sway", "Move",
        "PolkaVM", "Cairo", "Circom", "Leo", "Tolk", "Aiken", "Cadence",
-       "Solana", "Elixir"
+       "Solana", "Elixir", "Erlang"
   ]
   result = langs[lang]
 
