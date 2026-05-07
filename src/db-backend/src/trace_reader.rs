@@ -11,6 +11,7 @@ use codetracer_trace_types::{
 
 use crate::db::{CellChange, DbCall, DbRecordEvent, DbStep, EndOfProgram, NEXT_INTERNAL_STEP_OVERS_LIMIT};
 use crate::expr_loader::ExprLoader;
+use crate::lang::Lang;
 use crate::task::{Call, CallArg, Location, RRTicks};
 use crate::value::{Type, Value};
 
@@ -407,39 +408,50 @@ pub trait TraceReader: std::fmt::Debug + Send {
         );
         if function_name != "<top-level>" {
             let raw_path = self.path(step_record.path_id).unwrap_or("");
+            let use_trace_function_boundaries = |location: &mut Location| {
+                if call_key != NO_KEY {
+                    let call = self
+                        .call(CallKey(call_key_int))
+                        .expect("load_location: invalid call_key (fallback)");
+                    let function_record = self
+                        .function(call.function_id)
+                        .expect("load_location: invalid function_id (fallback)");
+                    location.function_first = function_record.line.0;
+
+                    let mut last_line = function_record.line.0;
+                    let steps_len = self.step_count() as i64;
+                    for i in step_id_int..steps_len {
+                        let step = self.step(StepId(i)).expect("load_location: invalid step in range");
+                        if step.call_key == CallKey(call_key_int) {
+                            if step.line.0 > last_line {
+                                last_line = step.line.0;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    location.function_last = last_line;
+                }
+            };
             match expr_loader.load_file(&PathBuf::from(raw_path)) {
                 Ok(_) => {
                     let (fn_start, fn_last) = expr_loader.get_first_last_fn_lines(&location);
-                    location.function_first = fn_start;
-                    location.function_last = fn_last;
+                    let lang = expr_loader.get_current_language(&PathBuf::from(raw_path));
+                    // BEAM languages (Elixir + Erlang) ship their function ranges
+                    // in manifests, not tree-sitter — defer to the trace's own
+                    // function boundaries for both.
+                    if lang != Lang::Elixir && lang != Lang::Erlang && fn_start > 0 && fn_last >= fn_start {
+                        location.function_first = fn_start;
+                        location.function_last = fn_last;
+                    } else {
+                        use_trace_function_boundaries(&mut location);
+                    }
                 }
                 Err(e) => {
                     // No tree-sitter grammar for this language (Cairo, Circom, etc.).
                     // Fall back to the trace's own function line data.
                     warn!("expr loader load file error: {e:?} — using trace function boundaries");
-                    if call_key != NO_KEY {
-                        let call = self
-                            .call(CallKey(call_key_int))
-                            .expect("load_location: invalid call_key (fallback)");
-                        let function_record = self
-                            .function(call.function_id)
-                            .expect("load_location: invalid function_id (fallback)");
-                        location.function_first = function_record.line.0;
-                        // Estimate function_last from the last step in this call.
-                        let mut last_line = function_record.line.0;
-                        let steps_len = self.step_count() as i64;
-                        for i in step_id_int..steps_len {
-                            let step = self.step(StepId(i)).expect("load_location: invalid step in range");
-                            if step.call_key == CallKey(call_key_int) {
-                                if step.line.0 > last_line {
-                                    last_line = step.line.0;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                        location.function_last = last_line;
-                    }
+                    use_trace_function_boundaries(&mut location);
                 }
             }
         }

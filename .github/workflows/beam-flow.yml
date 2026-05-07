@@ -1,0 +1,162 @@
+name: BEAM Materialized Trace DAP Flow
+
+# Cross-repo CI for the BEAM (Elixir + Erlang) materialized trace flow.
+# Runs the public DAP flow tests against pinned sibling SHAs of
+# codetracer-beam-recorder and codetracer-trace-format using real clones,
+# real recorder builds, real db-backend, and real DAP. No mocks, no skips.
+#
+# Replaces the legacy `elixir-flow-dap.yml` workflow during the BEAM rename
+# migration window.
+
+on:
+  pull_request:
+    paths:
+      - 'src/db-backend/**'
+      - 'libs/ct-dap-client/**'
+      - 'ci/test/beam-flow-cross-repo.sh'
+      - 'ci/test/elixir-flow-cross-repo.sh'
+      - 'scripts/detect-siblings.sh'
+      - 'justfile'
+      - '.github/sibling-pins'
+      - '.github/sibling-pins.json'
+      - '.github/workflows/beam-flow.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/db-backend/**'
+      - 'libs/ct-dap-client/**'
+      - 'ci/test/beam-flow-cross-repo.sh'
+      - 'ci/test/elixir-flow-cross-repo.sh'
+      - 'scripts/detect-siblings.sh'
+      - 'justfile'
+      - '.github/sibling-pins'
+      - '.github/sibling-pins.json'
+      - '.github/workflows/beam-flow.yml'
+  workflow_dispatch:
+    inputs:
+      beam_recorder_ref:
+        description: 'codetracer-beam-recorder ref (default: .github/sibling-pins)'
+        required: false
+        default: ''
+      trace_format_ref:
+        description: 'codetracer-trace-format ref (default: .github/sibling-pins)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  beam-flow-dap:
+    runs-on: [self-hosted, nixos]
+
+    steps:
+      - name: Checkout codetracer
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve sibling refs
+        id: refs
+        run: |
+          set -euo pipefail
+          BEAM_REF="${{ github.event.inputs.beam_recorder_ref }}"
+          TRACE_FORMAT_REF="${{ github.event.inputs.trace_format_ref }}"
+          if [[ -z "$BEAM_REF" ]]; then
+            BEAM_REF="$(grep '^codetracer-beam-recorder ' .github/sibling-pins | cut -d' ' -f2)"
+          fi
+          if [[ -z "$TRACE_FORMAT_REF" ]]; then
+            TRACE_FORMAT_REF="$(grep '^codetracer-trace-format ' .github/sibling-pins | cut -d' ' -f2)"
+          fi
+          [[ "$BEAM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-beam-recorder ref must be a 40-char SHA: $BEAM_REF" >&2; exit 1; }
+          [[ "$TRACE_FORMAT_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-trace-format ref must be a 40-char SHA: $TRACE_FORMAT_REF" >&2; exit 1; }
+          echo "beam-ref=$BEAM_REF" >> "$GITHUB_OUTPUT"
+          echo "trace-format-ref=$TRACE_FORMAT_REF" >> "$GITHUB_OUTPUT"
+          echo "codetracer-beam-recorder ref: $BEAM_REF"
+          echo "codetracer-trace-format ref: $TRACE_FORMAT_REF"
+
+      - name: Clone codetracer-beam-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-beam-recorder
+          ref: ${{ steps.refs.outputs.beam-ref }}
+          path: ${{ github.workspace }}/../codetracer-beam-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Replace trace-format with pinned sibling clone
+        run: rm -rf libs/codetracer-trace-format
+
+      - name: Clone codetracer-trace-format
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.refs.outputs.trace-format-ref }}
+          path: ${{ github.workspace }}/libs/codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'true'
+
+      # Zero-test guard verification: prove that a non-existent test name
+      # produces a "0 tests" cargo output and that the guard rejects it.
+      # Runs first so a vacuous-pass regression in the harness is caught
+      # before the real tests run.
+      - name: Run zero-test guard verification
+        run: |
+          set -euo pipefail
+          export TMPDIR="${{ github.workspace }}/../tmp"
+          mkdir -p "$TMPDIR"
+          export CODETRACER_BEAM_RECORDER_PATH="${{ github.workspace }}/../codetracer-beam-recorder"
+          nix develop '.?submodules=1' --command \
+            bash -lc './ci/test/beam-flow-cross-repo.sh verify_beam_flow_zero_test_guard'
+
+      - name: Run BEAM (Elixir + Erlang) DAP flow integration
+        run: |
+          set -euo pipefail
+          export TMPDIR="${{ github.workspace }}/../tmp"
+          mkdir -p "$TMPDIR"
+          export CODETRACER_BEAM_RECORDER_PATH="${{ github.workspace }}/../codetracer-beam-recorder"
+          nix develop '.?submodules=1' --command \
+            bash -lc 'just test-beam-flow'
+
+      - name: Verify recorder binary discovery (sanity)
+        if: always()
+        run: |
+          set -euo pipefail
+          export CODETRACER_BEAM_RECORDER_PATH="${{ github.workspace }}/../codetracer-beam-recorder"
+          for profile in debug release; do
+            for binary_name in codetracer-beam-recorder codetracer-elixir-recorder; do
+              candidate="$CODETRACER_BEAM_RECORDER_PATH/target/$profile/$binary_name"
+              if [[ -x $candidate ]]; then
+                echo "found recorder binary: $candidate"
+                exit 0
+              fi
+            done
+          done
+          echo "ERROR: no codetracer-beam-recorder binary found under target/{debug,release}" >&2
+          exit 1
+
+      - name: Upload full BEAM flow logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beam-flow-dap-logs
+          path: target/beam-flow-ci-logs/
+          retention-days: 14
+          if-no-files-found: ignore

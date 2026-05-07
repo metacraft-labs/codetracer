@@ -72,7 +72,9 @@ const AFTER_INITIAL_READS_EVENT_INDEX: array[Lang, int] = [
   0, # Tolk
   0, # Aiken
   0, # Cadence
-  0  # Solana
+  0, # Solana
+  0, # Elixir
+  0  # Erlang
 ]
 
 proc jumpToAllEventsOnce*(filePath: cstring, fileName: cstring, lang: Lang): Future[void] {.async.} =

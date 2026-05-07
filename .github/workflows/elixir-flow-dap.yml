@@ -1,0 +1,30 @@
+# DEPRECATED: kept as a redirect during the BEAM rename migration window.
+# The BEAM (Elixir + Erlang) cross-repo CI is now in `beam-flow.yml`.
+# This workflow is left in place so the workflow ID stays stable for any
+# external CI hooks that reference it.
+name: Elixir Materialized Trace DAP Flow (DEPRECATED, use BEAM workflow)
+
+on:
+  workflow_dispatch:
+    inputs:
+      beam_recorder_ref:
+        description: 'codetracer-beam-recorder ref (default: .github/sibling-pins)'
+        required: false
+        default: ''
+      trace_format_ref:
+        description: 'codetracer-trace-format ref (default: .github/sibling-pins)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  redirect-notice:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify and redirect
+        run: |
+          echo "::warning::elixir-flow-dap.yml is deprecated; the BEAM (Elixir + Erlang) cross-repo CI lives in beam-flow.yml."
+          echo "Manually trigger the 'BEAM Materialized Trace DAP Flow' workflow instead."

@@ -300,8 +300,19 @@ impl<'a> TraceProcessor<'a> {
             TraceLowLevelEvent::Assignment(_record) => {
                 unimplemented!() // experimental, not ready
             }
-            TraceLowLevelEvent::DropVariables(_record) => {
-                unimplemented!() // experimental, not ready
+            TraceLowLevelEvent::DropVariables(variable_ids) => {
+                if self.depth > 0 {
+                    let current_call_variable_cells = &mut self.db.local_variable_cells[self.depth - 1];
+                    for variable_id in variable_ids {
+                        let _ = current_call_variable_cells.remove(variable_id);
+                    }
+                }
+                if !self.db.variable_cells.is_empty() {
+                    let step_variable_cells = &mut self.db.variable_cells[self.current_step_id];
+                    for variable_id in variable_ids {
+                        let _ = step_variable_cells.remove(variable_id);
+                    }
+                }
             }
 
             TraceLowLevelEvent::CompoundValue(record) => {
@@ -382,8 +393,14 @@ impl<'a> TraceProcessor<'a> {
                 // self.depth should be >= 1 always,
                 // as a top-level-code `Call` event should be before all steps
                 // and that call should continue to end, still a bit worrying maybe
-                let current_call_variable_cells = &mut self.db.local_variable_cells[self.depth - 1];
-                let _ = current_call_variable_cells.remove(variable_id);
+                if self.depth > 0 {
+                    let current_call_variable_cells = &mut self.db.local_variable_cells[self.depth - 1];
+                    let _ = current_call_variable_cells.remove(variable_id);
+                }
+                if !self.db.variable_cells.is_empty() {
+                    let step_variable_cells = &mut self.db.variable_cells[self.current_step_id];
+                    let _ = step_variable_cells.remove(variable_id);
+                }
 
                 // let name = self.db.variable_name(*variable_id);
                 // info!("drop current call variable {:?}({})", *variable_id, name);

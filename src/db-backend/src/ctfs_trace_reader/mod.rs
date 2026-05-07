@@ -7,17 +7,16 @@ pub mod ctfs_container;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::Path;
+use std::io::BufRead;
+use std::path::{Path, PathBuf};
 
 use log::info;
+use serde_json::Value;
 
 use codetracer_trace_types::{
-    CallKey, FullValueRecord, FunctionId, FunctionRecord, PathId, Place, StepId, TraceLowLevelEvent, TypeId,
-    TypeRecord, ValueRecord, VariableId,
+    CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, Place, StepId,
+    TraceLowLevelEvent, TypeId, TypeRecord, ValueRecord, VariableId,
 };
-
-#[cfg(feature = "nim-reader")]
-use codetracer_trace_types::EventLogKind;
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
 use crate::trace_processor::TraceProcessor;
@@ -108,6 +107,14 @@ impl CTFSTraceReader {
     pub fn open(path: &Path) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::open(path)?;
 
+        // BEAM-recorder traces ship a sidecar layout (`trace_meta.json` +
+        // `runtime_session.jsonl`) that the Nim seek-based reader cannot
+        // parse. Detect those first so we route them through the dedicated
+        // sidecar path rather than the new-format CTFS code.
+        if let Some(reader) = Self::open_elixir_sidecar_format(&mut ctfs, path)? {
+            return Ok(reader);
+        }
+
         if is_new_format(&ctfs) {
             info!("CTFS new format detected — skipping postprocessing");
             Self::open_new_format(&mut ctfs, path)
@@ -138,6 +145,311 @@ impl CTFSTraceReader {
             info!("CTFS from_bytes: old format detected — running postprocessing");
             Self::open_old_format(&mut ctfs)
         }
+    }
+
+    /// Detect and load Elixir/Erlang sidecar-format CTFS bundles produced
+    /// by `codetracer-beam-recorder` (and the legacy `codetracer-elixir-
+    /// recorder` brand).
+    ///
+    /// The BEAM recorder writes a `trace_meta.json` describing the run plus
+    /// a `runtime_session.jsonl` event log alongside the `.ct` container,
+    /// rather than encoding the full trace into the Nim seek-based binary
+    /// format. This helper streams that log into a `Db` so the rest of
+    /// db-backend can serve it through the normal `TraceReader` interface.
+    ///
+    /// Returns `Ok(None)` when the bundle does not look like a BEAM-recorder
+    /// trace, so the caller can fall through to the regular CTFS readers.
+    fn open_elixir_sidecar_format(ctfs: &mut CtfsReader, ct_path: &Path) -> Result<Option<Self>, Box<dyn Error>> {
+        use codetracer_trace_types::{TypeKind, TypeSpecificInfo};
+
+        let Some(trace_dir) = ct_path.parent() else {
+            return Ok(None);
+        };
+        let trace_meta_path = trace_dir.join("trace_meta.json");
+        let runtime_path = trace_dir.join("runtime_session.jsonl");
+        if !trace_meta_path.is_file() || !runtime_path.is_file() {
+            return Ok(None);
+        }
+
+        let trace_meta_raw = std::fs::read_to_string(&trace_meta_path)?;
+        let trace_meta: Value = serde_json::from_str(&trace_meta_raw)?;
+        // Accept both the current `codetracer-beam-recorder` brand and the
+        // legacy `codetracer-elixir-recorder` brand for one release cycle, so
+        // bundles produced before the BEAM-recorder rename keep loading.
+        match trace_meta.get("recorder").and_then(Value::as_str) {
+            Some("codetracer-beam-recorder") | Some("codetracer-elixir-recorder") => {}
+            _ => return Ok(None),
+        }
+
+        let workdir = trace_meta
+            .pointer("/runtime_session/source_root")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let mut db = Db::new(&workdir);
+
+        db.types.push(TypeRecord {
+            kind: TypeKind::Int,
+            lang_type: "integer".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        });
+
+        let mut location_index: HashMap<u64, (PathBuf, i64)> = HashMap::new();
+        if let Some(manifests) = trace_meta.get("manifests").and_then(Value::as_array) {
+            for manifest in manifests {
+                let Some(copy_path) = manifest.get("trace_copy_path").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Ok(bytes) = ctfs.read_file(copy_path) else {
+                    continue;
+                };
+                let manifest_json: Value = serde_json::from_slice(&bytes)?;
+                let Some(locations) = manifest_json.get("locations").and_then(Value::as_array) else {
+                    continue;
+                };
+                for location in locations {
+                    let Some(id) = location.get("id").and_then(Value::as_u64) else {
+                        continue;
+                    };
+                    let Some(path) = location.get("build_path").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let Some(line) = location.get("line").and_then(Value::as_i64) else {
+                        continue;
+                    };
+                    location_index.insert(id, (PathBuf::from(path), line));
+                }
+            }
+        }
+
+        if let Some(sources) = trace_meta.get("sources").and_then(Value::as_array) {
+            for source in sources {
+                if let Some(path) = source.get("source_path").and_then(Value::as_str) {
+                    Self::ensure_db_path(&mut db, &PathBuf::from(path));
+                }
+            }
+        }
+        for (path, _) in location_index.values() {
+            Self::ensure_db_path(&mut db, path);
+        }
+
+        let file = std::fs::File::open(&runtime_path)?;
+        let reader = std::io::BufReader::new(file);
+        let mut function_ids: HashMap<String, FunctionId> = HashMap::new();
+        let mut variable_ids: HashMap<String, VariableId> = HashMap::new();
+        let mut frame_calls: HashMap<u64, CallKey> = HashMap::new();
+        let mut call_next_lines: HashMap<i64, (PathBuf, i64)> = HashMap::new();
+        let mut call_stack: Vec<CallKey> = Vec::new();
+        let mut active_values: HashMap<VariableId, FullValueRecord> = HashMap::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: Value = serde_json::from_str(&line)?;
+            match event.get("event").and_then(Value::as_str) {
+                Some("call") => {
+                    let function_key = event
+                        .get("function_key")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| {
+                            let module = event.get("module").and_then(Value::as_str).unwrap_or("<module>");
+                            let function = event.get("function").and_then(Value::as_str).unwrap_or("<function>");
+                            let arity = event.get("arity").and_then(Value::as_u64).unwrap_or(0);
+                            format!("{module}.{function}/{arity}")
+                        });
+                    let location = event
+                        .get("source_location")
+                        .and_then(|source| {
+                            let path = source.get("build_path")?.as_str()?;
+                            let line = source.get("line")?.as_i64()?;
+                            Some((PathBuf::from(path), line))
+                        })
+                        .or_else(|| {
+                            event
+                                .get("location_id")
+                                .and_then(Value::as_u64)
+                                .and_then(|id| location_index.get(&id).cloned())
+                        })
+                        .unwrap_or_else(|| (workdir.clone(), 0));
+                    let path_id = Self::ensure_db_path(&mut db, &location.0);
+                    let next_function_id = FunctionId(db.functions.len());
+                    let function_id = *function_ids.entry(function_key.clone()).or_insert_with(|| {
+                        db.functions.push(FunctionRecord {
+                            name: function_key.clone(),
+                            path_id,
+                            line: Line(location.1),
+                        });
+                        next_function_id
+                    });
+                    let parent_key = call_stack.last().copied().unwrap_or(CallKey(-1));
+                    let call_key = CallKey(db.calls.len() as i64);
+                    if parent_key.0 >= 0 {
+                        db.calls[parent_key].children_keys.push(call_key);
+                    }
+                    let step_id = StepId(db.steps.len() as i64);
+                    db.calls.push(DbCall {
+                        key: call_key,
+                        function_id,
+                        args: vec![],
+                        return_value: ValueRecord::None { type_id: TypeId(0) },
+                        step_id,
+                        depth: call_stack.len(),
+                        parent_key,
+                        children_keys: vec![],
+                    });
+                    if let Some(frame_id) = event.get("frame_id").and_then(Value::as_u64) {
+                        frame_calls.insert(frame_id, call_key);
+                    }
+                    call_next_lines.insert(call_key.0, (location.0, location.1 + 1));
+                    call_stack.push(call_key);
+                }
+                Some("step") => {
+                    let indexed_location = event
+                        .get("location_id")
+                        .and_then(Value::as_u64)
+                        .and_then(|location_id| location_index.get(&location_id).cloned());
+                    let inferred_location = call_stack.last().and_then(|call_key| {
+                        let (path, next_line) = call_next_lines.get_mut(&call_key.0)?;
+                        let line = *next_line;
+                        *next_line += 1;
+                        Some((path.clone(), line))
+                    });
+                    let Some((path, line)) = indexed_location.or(inferred_location) else {
+                        continue;
+                    };
+                    let path_id = Self::ensure_db_path(&mut db, &path);
+                    let step_id = StepId(db.steps.len() as i64);
+                    let call_key = call_stack.last().copied().unwrap_or(CallKey(-1));
+                    let db_step = DbStep {
+                        step_id,
+                        path_id,
+                        line: Line(line),
+                        call_key,
+                        global_call_key: call_key,
+                    };
+                    db.steps.push(db_step);
+                    db.variables.push(active_values.values().cloned().collect());
+                    db.instructions.push(vec![]);
+                    db.compound.push(HashMap::new());
+                    db.cells.push(HashMap::new());
+                    db.variable_cells.push(HashMap::new());
+                    db.local_variable_cells.push(HashMap::new());
+                    db.step_map[path_id].entry(line as usize).or_default().push(db_step);
+                }
+                Some("variable_bind") => {
+                    let raw_name = event.get("name").and_then(Value::as_str).unwrap_or("<var>");
+                    let name = Self::normalize_elixir_variable_name(raw_name);
+                    let target_call_key = event
+                        .get("frame_id")
+                        .and_then(Value::as_u64)
+                        .and_then(|frame_id| frame_calls.get(&frame_id).copied());
+                    let next_variable_id = VariableId(db.variable_names.len());
+                    let variable_id = *variable_ids.entry(name.clone()).or_insert_with(|| {
+                        db.variable_names.push(name);
+                        next_variable_id
+                    });
+                    let value = event
+                        .get("value")
+                        .and_then(Self::elixir_sidecar_value_record)
+                        .unwrap_or(ValueRecord::None { type_id: TypeId(0) });
+                    let full = FullValueRecord { variable_id, value };
+                    active_values.insert(variable_id, full.clone());
+                    if db
+                        .steps
+                        .items
+                        .last()
+                        .is_some_and(|step| target_call_key.is_none_or(|call_key| step.call_key == call_key))
+                    {
+                        if let Some(step_values) = db.variables.items.last_mut() {
+                            step_values.retain(|existing| existing.variable_id != variable_id);
+                            step_values.push(full);
+                        }
+                    }
+                }
+                Some("drop_variables") => {
+                    if let Some(variables) = event.get("variables").and_then(Value::as_array) {
+                        for variable in variables {
+                            if let Some(raw_name) = variable.get("name").and_then(Value::as_str) {
+                                let name = Self::normalize_elixir_variable_name(raw_name);
+                                if let Some(variable_id) = variable_ids.get(&name) {
+                                    active_values.remove(variable_id);
+                                }
+                            }
+                        }
+                    }
+                }
+                Some("return_from") => {
+                    if let Some(frame_id) = event.get("frame_id").and_then(Value::as_u64) {
+                        if let Some(call_key) = frame_calls.remove(&frame_id) {
+                            if let Some(value) = event.get("return_value").and_then(Self::elixir_sidecar_value_record) {
+                                db.calls[call_key].return_value = value;
+                            }
+                            while let Some(top) = call_stack.pop() {
+                                if top == call_key {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Some("message_send" | "message_receive") => {
+                    let content = event
+                        .get("message_repr")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    db.events.push(DbRecordEvent {
+                        kind: EventLogKind::Write,
+                        content,
+                        step_id: StepId(db.steps.len().saturating_sub(1) as i64),
+                        metadata: event.to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        db.end_of_program = EndOfProgram::Normal;
+        Ok(Some(CTFSTraceReader { db }))
+    }
+
+    fn ensure_db_path(db: &mut Db, path: &Path) -> PathId {
+        let path_string = path.display().to_string();
+        if let Some(path_id) = db.path_map.get(&path_string) {
+            return *path_id;
+        }
+        let path_id = PathId(db.paths.len());
+        db.paths.push(path_string.clone());
+        db.path_map.insert(path_string, path_id);
+        db.step_map.push(HashMap::new());
+        path_id
+    }
+
+    fn normalize_elixir_variable_name(name: &str) -> String {
+        name.trim_start_matches('_')
+            .split('@')
+            .next()
+            .unwrap_or(name)
+            .to_string()
+    }
+
+    fn elixir_sidecar_value_record(value: &Value) -> Option<ValueRecord> {
+        if let Some(int) = value.get("value").and_then(Value::as_i64) {
+            return Some(ValueRecord::Int {
+                i: int,
+                type_id: TypeId(0),
+            });
+        }
+        if let Some(text) = value.get("value").and_then(Value::as_str) {
+            return Some(ValueRecord::Raw {
+                r: text.to_string(),
+                type_id: TypeId(0),
+            });
+        }
+        None
     }
 
     /// Open a new-format CTFS container by loading pre-processed data

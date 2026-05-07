@@ -688,6 +688,37 @@ test-ruby-flow:
   cd src/db-backend && cargo nextest run --no-capture test_ruby_flow
   echo "Ruby flow test passed!"
 
+# Elixir materialized trace DAP flow integration test (DB-based, no rr required).
+# Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
+# (legacy CODETRACER_ELIXIR_RECORDER_PATH still honored during the BEAM rename
+# migration window).
+test-elixir-flow:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running Elixir materialized trace DAP flow integration test..."
+  ./ci/test/beam-flow-cross-repo.sh e2e_cross_repo_ci_elixir_flow
+  echo "Elixir flow test passed!"
+
+# Erlang materialized trace DAP flow integration test (DB-based, no rr required).
+# Uses the same codetracer-beam-recorder binary as the Elixir test.
+test-erlang-flow:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running Erlang materialized trace DAP flow integration test..."
+  ./ci/test/beam-flow-cross-repo.sh e2e_cross_repo_ci_erlang_flow
+  echo "Erlang flow test passed!"
+
+# Combined BEAM (Elixir + Erlang) DAP flow integration test umbrella.
+# Runs both language flows against the canonical fixtures from the
+# codetracer-beam-recorder sibling and asserts the zero-test guard.
+test-beam-flow:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running BEAM materialized trace DAP flow integration tests..."
+  ./ci/test/beam-flow-cross-repo.sh e2e_cross_repo_ci_beam_flow
+  ./ci/test/beam-flow-cross-repo.sh verify_beam_flow_zero_test_guard
+  echo "BEAM flow tests passed!"
+
 # Noir flow/omniscience integration test (DB-based, no rr required)
 test-noir-flow:
   #!/usr/bin/env bash
@@ -1140,3 +1171,7 @@ test-vm: test-vm-native test-vm-js
 
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
+
+# Capture automated screenshots for the README in animated WebP format.
+capture-readme-screenshots:
+  bash scripts/docs/capture-readme-screenshots.sh

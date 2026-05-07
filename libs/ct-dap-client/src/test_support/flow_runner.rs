@@ -242,6 +242,18 @@ impl FlowTestRunner {
     /// are self-contained: the trace folder has trace.json/trace.bin +
     /// trace_metadata.json and db-backend auto-detects the format.
     pub fn new_db_trace(db_backend_bin: &Path, trace_dir: &Path) -> Result<Self, BoxError> {
+        Self::new_db_trace_with_timeout(db_backend_bin, trace_dir, Duration::from_secs(10))
+    }
+
+    /// Spawn db-backend for a DB trace and wait up to `startup_timeout` for
+    /// the initial stopped event.  Used by recorders whose first launch is
+    /// noticeably slower (e.g. BEAM bundles need to materialize manifests
+    /// and compile fixtures inside the recorder dev shell).
+    pub fn new_db_trace_with_timeout(
+        db_backend_bin: &Path,
+        trace_dir: &Path,
+        startup_timeout: Duration,
+    ) -> Result<Self, BoxError> {
         let mut client = DapStdioClient::spawn(db_backend_bin)?;
 
         let _caps = client.initialize()?;
@@ -252,7 +264,7 @@ impl FlowTestRunner {
         })?;
 
         client.configuration_done()?;
-        client.wait_for_stopped(Duration::from_secs(10))?;
+        client.wait_for_stopped(startup_timeout)?;
 
         Ok(FlowTestRunner {
             client,
@@ -316,8 +328,13 @@ impl FlowTestRunner {
 
             let move_state = self.client.dap_continue()?;
             println!(
-                "  Stopped at {}:{}",
-                move_state.location.path, move_state.location.line
+                "  Stopped at {}:{} key={} ticks={} fn={}..{}",
+                move_state.location.path,
+                move_state.location.line,
+                move_state.location.key,
+                move_state.location.rr_ticks.0,
+                move_state.location.function_first,
+                move_state.location.function_last
             );
 
             // Load flow and verify variables at this breakpoint.

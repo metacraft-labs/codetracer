@@ -26,6 +26,8 @@ pub enum Lang {
     Small,
     PythonDb,
     Unknown,
+    Elixir,
+    Erlang,
 }
 
 /// Kinds of I/O or log events (repr(u8), matching codetracer_trace_types).

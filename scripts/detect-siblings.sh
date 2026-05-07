@@ -55,6 +55,8 @@ _ct_try_workspace_root() {
 		[ -d "$candidate/codetracer-python-recorder" ] ||
 		[ -d "$candidate/codetracer-ruby-recorder" ] ||
 		[ -d "$candidate/codetracer-js-recorder" ] ||
+		[ -d "$candidate/codetracer-beam-recorder" ] ||
+		[ -d "$candidate/codetracer-elixir-recorder" ] ||
 		[ -d "$candidate/codetracer-shell-recorders" ] ||
 		[ -d "$candidate/codetracer-wasm-recorder" ] ||
 		[ -d "$candidate/codetracer-native-test-programs" ] ||
@@ -155,6 +157,43 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-js-recor
 	fi
 	_ct_detect_summary "codetracer-js-recorder"
 fi
+
+# --- codetracer-beam-recorder (Erlang + Elixir; legacy alias: codetracer-elixir-recorder) ---
+# Resolve the BEAM recorder repo. Prefer the explicit BEAM env var, then the
+# legacy ELIXIR alias, then a workspace sibling scan that prefers
+# codetracer-beam-recorder when both directories exist.
+_ct_beam_recorder_path="${CODETRACER_BEAM_RECORDER_PATH:-${CODETRACER_ELIXIR_RECORDER_PATH:-}}"
+if [ -z "$_ct_beam_recorder_path" ] && [ -n "$_CT_WORKSPACE_ROOT" ]; then
+	if [ -d "$_CT_WORKSPACE_ROOT/codetracer-beam-recorder" ]; then
+		_ct_beam_recorder_path="$_CT_WORKSPACE_ROOT/codetracer-beam-recorder"
+	elif [ -d "$_CT_WORKSPACE_ROOT/codetracer-elixir-recorder" ]; then
+		_ct_beam_recorder_path="$_CT_WORKSPACE_ROOT/codetracer-elixir-recorder"
+	fi
+fi
+if [ -n "$_ct_beam_recorder_path" ] && [ -d "$_ct_beam_recorder_path" ]; then
+	export CODETRACER_BEAM_RECORDER_PATH="$_ct_beam_recorder_path"
+	# Keep the legacy alias populated for one release while downstream tooling
+	# migrates to the BEAM-prefixed names.
+	export CODETRACER_ELIXIR_RECORDER_PATH="$_ct_beam_recorder_path"
+	for _ct_beam_profile in debug release; do
+		# Prefer the BEAM binary name; fall back to the legacy elixir name.
+		for _ct_beam_binary_name in codetracer-beam-recorder codetracer-elixir-recorder; do
+			_ct_beam_bin="$_ct_beam_recorder_path/target/$_ct_beam_profile/$_ct_beam_binary_name"
+			if [ -x "$_ct_beam_bin" ]; then
+				export CODETRACER_BEAM_RECORDER_BIN="$_ct_beam_bin"
+				export CODETRACER_ELIXIR_RECORDER_BIN="$_ct_beam_bin"
+				export PATH="$_ct_beam_recorder_path/target/$_ct_beam_profile:$PATH"
+				_ct_detect_summary "codetracer-beam-recorder ($_ct_beam_profile build, $_ct_beam_binary_name)"
+				break 2
+			fi
+		done
+	done
+	if [ -z "${CODETRACER_BEAM_RECORDER_BIN:-}" ]; then
+		_ct_detect_summary "codetracer-beam-recorder (repo present, binary not built)"
+	fi
+	unset _ct_beam_profile _ct_beam_bin _ct_beam_binary_name
+fi
+unset _ct_beam_recorder_path
 
 # --- codetracer-shell-recorders ---
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-shell-recorders/bash-recorder" ]; then

@@ -75,6 +75,10 @@ pub enum Lang {
     Cadence,
     /// Solana (Solana programs/smart contracts)
     Solana,
+    /// Elixir/BEAM materialized traces
+    Elixir,
+    /// Erlang/BEAM materialized traces
+    Erlang,
 }
 
 pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
@@ -114,6 +118,8 @@ pub fn lang_from_context(path: &Path, trace_kind: TraceKind) -> Lang {
         "tolk" => Lang::Tolk,
         "ak" => Lang::Aiken,
         "cdc" => Lang::Cadence,
+        "ex" | "exs" => Lang::Elixir,
+        "erl" | "hrl" => Lang::Erlang,
         _ => Lang::Unknown,
     }
 }

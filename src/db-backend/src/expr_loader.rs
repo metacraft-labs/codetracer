@@ -614,6 +614,10 @@ impl ExprLoader {
                 Lang::D
             } else if extension == "sol" {
                 Lang::Solidity
+            } else if extension == "ex" || extension == "exs" {
+                Lang::Elixir
+            } else if extension == "erl" || extension == "hrl" {
+                Lang::Erlang
             } else {
                 Lang::Unknown
             }
