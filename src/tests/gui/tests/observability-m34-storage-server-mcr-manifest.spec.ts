@@ -1064,6 +1064,7 @@ async function startRetentionGapHarness(
       "run",
       "--project",
       storageHarnessProject,
+      "-p:NuGetAudit=false",
       "--",
       "storage-server-retention-gap",
       inputPath,
@@ -1112,6 +1113,7 @@ async function startPolicyDeniedHarness(
       "run",
       "--project",
       storageHarnessProject,
+      "-p:NuGetAudit=false",
       "--",
       "storage-server-policy-denied",
       inputPath,
@@ -4843,11 +4845,12 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
     }
   });
 
-  base("M37 first slice returns structured retention and missing-data problems for MCR and materialized traces", async ({ page }) => {
-    base.setTimeout(420_000);
+  base("M37 first slice returns structured retention and missing-data problems for MCR and materialized traces", async ({ page, context }) => {
+    base.setTimeout(600_000);
     expectRequiredFile("codetracer-ci storage harness project", storageHarnessProject);
     expectRequiredFile("ct-observe binary", ctObserveBin());
     expectRequiredFile("Jaeger plugin UI config renderer", jaegerUiConfigRendererPath());
+    expectRequiredFile("Grafana Tempo provisioning output", grafanaPluginOutPath());
     expectRequiredFile("real MCR request trace fixture", portableTracePath);
     for (const fixture of materializedFixtures) {
       expectRequiredFile(`${fixture.label} materialized trace fixture`, fixture.traceDir);
@@ -4870,8 +4873,13 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
     );
     let retentionHarness: Awaited<ReturnType<typeof startRetentionGapHarness>> | null = null;
     let jaegerProcess: childProcess.ChildProcess | null = null;
+    let tempoProcess: childProcess.ChildProcess | null = null;
+    let grafanaProcess: childProcess.ChildProcess | null = null;
     let bridge: http.Server | null = null;
     const bridgeEvents: string[] = [];
+    const grafanaRows: any[] = [];
+    const grafanaLaunches: any[] = [];
+    const grafanaBrowserProblems: any[] = [];
 
     try {
       retentionHarness = await startRetentionGapHarness(prepared.inputPath);
@@ -4896,6 +4904,13 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         expect(byName.get(`${fixture.language}-materialized-missing`)?.expectedCode)
           .toBe("missing_data");
       }
+      const materializedCases = materializedFixtures.flatMap((fixture) =>
+        ["expired", "missing"].map((kind) => {
+          const testcase = byName.get(`${fixture.language}-materialized-${kind}`);
+          expect(testcase, `${fixture.label} materialized ${kind} retention case`).toBeTruthy();
+          return { fixture, testcase: testcase! };
+        }),
+      );
 
       const bridgePort = await getFreeTcpPort();
       const bridgeBaseUrl = `http://127.0.0.1:${bridgePort}`;
@@ -4921,6 +4936,209 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         expect(bodyText, `${testcase.name} browser body`).not.toContain(
           "Replay.ProvisioningRequested",
         );
+        expect(bodyText, `${testcase.name} browser body`).not.toContain(
+          "/replay/ready/",
+        );
+      }
+
+      const tempoHttpPort = await freeTcpPort();
+      const tempoGrpcPort = await freeTcpPort();
+      const tempoOtlpPort = await freeTcpPort();
+      const grafanaPort = await freeTcpPort();
+      const tempoBaseUrl = `http://127.0.0.1:${tempoHttpPort}`;
+      const grafanaBaseUrl = `http://127.0.0.1:${grafanaPort}`;
+      tempoProcess = await startTempoServer(
+        runnerRoot,
+        tempoHttpPort,
+        tempoGrpcPort,
+        tempoOtlpPort,
+        tempoBaseUrl,
+      );
+
+      const grafanaRetentionCases = [mcrExpired!, mcrMissing!, ...materializedCases.map(({ testcase }) => testcase)];
+      const grafanaBrowserCases = [
+        { testcase: mcrExpired!, fixture: undefined },
+        { testcase: mcrMissing!, fixture: undefined },
+        ...materializedCases,
+      ];
+      const materializedReady: MaterializedPlatformLinkReady = {
+        baseUrl: retentionHarness.ready.baseUrl,
+        tenantId: retentionHarness.ready.tenantId,
+        adminToken: "",
+        callerToken: retentionHarness.ready.callerToken,
+        replayToken: "",
+        serverIds: retentionHarness.ready.serverIds,
+        links: materializedCases.map(({ fixture, testcase }) =>
+          retentionCaseAsMaterializedLink(testcase, fixture),
+        ),
+      };
+
+      await ingestTempoSpan(
+        tempoOtlpPort,
+        retentionCaseAsPlatformReady(retentionHarness.ready, mcrExpired!),
+        `${bridgeBaseUrl}${mcrExpired!.browserPath}`,
+      );
+      await ingestTempoSpan(
+        tempoOtlpPort,
+        retentionCaseAsPlatformReady(retentionHarness.ready, mcrMissing!),
+        `${bridgeBaseUrl}${mcrMissing!.browserPath}`,
+      );
+      for (const { fixture, testcase } of materializedCases) {
+        const linkReady = retentionCaseAsMaterializedLink(testcase, fixture);
+        await ingestMaterializedTempoSpan(
+          tempoOtlpPort,
+          materializedReady,
+          linkReady,
+          materializedDebugUrl(bridgeBaseUrl, materializedReady, linkReady),
+        );
+      }
+      for (const testcase of grafanaRetentionCases) {
+        await waitFor(
+          `Tempo ${testcase.name} retention trace ingestion`,
+          async () => fetchJsonFromUrl(`${tempoBaseUrl}/api/traces/${testcase.traceId}`),
+          60_000,
+        );
+      }
+
+      const renderedGrafanaDir = renderGrafanaProvisioningForM36(
+        runnerRoot,
+        bridgeBaseUrl,
+        tempoBaseUrl,
+      );
+      grafanaProcess = await startGrafanaServer(
+        runnerRoot,
+        grafanaPort,
+        renderedGrafanaDir,
+        grafanaBaseUrl,
+      );
+      const correlations = await fetchJsonFromUrl(
+        `${grafanaBaseUrl}/api/datasources/correlations?sourceUID=codetracer-tempo`,
+      );
+      expect(correlations.totalCount).toBe(1);
+      expect(correlations.correlations[0].label).toBe("Debug in CodeTracer");
+
+      for (const testcase of [mcrExpired!, mcrMissing!]) {
+        const ready = retentionCaseAsPlatformReady(retentionHarness.ready, testcase);
+        const debugUrl = `${bridgeBaseUrl}${testcase.browserPath}`;
+        const cliRow = await runCtObserveAgainstGrafanaTempo(
+          runnerRoot,
+          grafanaBaseUrl,
+          ready,
+        );
+        expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+        expect(cliRow.recording_available).toBe(true);
+        grafanaRows.push(cliRow);
+
+        const launchJson = await runCtObserveDeniedLaunchAgainstGrafanaTempo(
+          grafanaBaseUrl,
+          ready,
+          "m25-real-mcr-request-001",
+          { status: testcase.expectedStatus, code: testcase.expectedCode },
+        );
+        expect(launchJson.debug_session_url).toBe(debugUrl);
+        expect(launchJson.redirect_url ?? "").toBe("");
+        grafanaLaunches.push(launchJson);
+      }
+
+      for (const { fixture, testcase } of materializedCases) {
+        const linkReady = retentionCaseAsMaterializedLink(testcase, fixture);
+        const debugUrl = materializedDebugUrl(
+          bridgeBaseUrl,
+          materializedReady,
+          linkReady,
+        );
+        expect(debugUrl).toBe(`${bridgeBaseUrl}${testcase.browserPath}`);
+        const cliRow = await runMaterializedCtObserveAgainstGrafanaTempo(
+          runnerRoot,
+          grafanaBaseUrl,
+          materializedReady,
+          linkReady,
+        );
+        expect(cliRow.codetracer_debug_session_url).toBe(debugUrl);
+        expect(cliRow.recording_available).toBe(true);
+        expect(cliRow.request_key).toBe(fixture.requestKey);
+        grafanaRows.push(cliRow);
+
+        const launchJson = await runMaterializedCtObserveProblemLaunchAgainstGrafanaTempo(
+          grafanaBaseUrl,
+          materializedReady,
+          linkReady,
+          { status: testcase.expectedStatus, code: testcase.expectedCode },
+        );
+        expect(launchJson.debug_session_url).toBe(debugUrl);
+        expect(launchJson.redirect_url ?? "").toBe("");
+        grafanaLaunches.push(launchJson);
+      }
+
+      for (const { testcase, fixture: materializedFixture } of grafanaBrowserCases) {
+        const operationName = materializedFixture?.operationName ?? "GET /reserve";
+        await page.goto(
+          grafanaExploreTraceUrl(
+            grafanaBaseUrl,
+            retentionCaseAsPlatformReady(retentionHarness.ready, testcase),
+          ),
+          {
+            waitUntil: "domcontentloaded",
+            timeout: 60_000,
+          },
+        );
+        await page.getByText(testcase.traceId).first().waitFor({
+          timeout: 60_000,
+        });
+        if (!(await page.getByText(operationName).first().isVisible())) {
+          await page.getByText(testcase.traceId).first().click();
+        }
+        await page.getByText(operationName).first().waitFor({ timeout: 60_000 });
+        const spanRow = page.getByRole("switch", {
+          name: new RegExp(`${escapeRegExp(testcase.serviceName)}.*${escapeRegExp(operationName)}`),
+        });
+        await spanRow.hover();
+        await spanRow.click();
+        await page.getByText(operationName).first().click();
+
+        const link = page
+          .locator(`div[data-item-key*="${testcase.spanId}"] a[href]`)
+          .first();
+        await expect(link).toBeVisible({ timeout: 60_000 });
+        const grafanaHref = String(await link.getAttribute("href") ?? "");
+        if (materializedFixture) {
+          assertM36MaterializedDebugUrl(
+            grafanaHref,
+            materializedReady,
+            retentionCaseAsMaterializedLink(testcase, materializedFixture),
+          );
+        } else {
+          assertM36DebugUrl(
+            grafanaHref,
+            retentionCaseAsPlatformReady(retentionHarness.ready, testcase),
+          );
+        }
+
+        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        await link.click();
+        const problemPage = (await popupPromise) ?? page;
+        await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
+          timeout: 60_000,
+        });
+        const bodyText = await problemPage.locator("body").innerText();
+        expect(bodyText, `${testcase.name} Grafana browser body`).toContain(
+          testcase.expectedCode,
+        );
+        expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
+          "Replay.ProvisioningRequested",
+        );
+        expect(bodyText, `${testcase.name} Grafana browser body`).not.toContain(
+          "/replay/ready/",
+        );
+        grafanaBrowserProblems.push({
+          name: testcase.name,
+          expectedStatus: testcase.expectedStatus,
+          expectedCode: testcase.expectedCode,
+          bodyText,
+        });
+        if (problemPage !== page) {
+          await problemPage.close();
+        }
       }
 
       const jaegerUiPort = await getFreeTcpPort();
@@ -4995,15 +5213,35 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           JSON.stringify(cliRow, null, 2),
         );
         fs.writeFileSync(
+          path.join(artifactDir, "m37-retention-gap-grafana-tempo-ct-observe-rows.json"),
+          JSON.stringify(grafanaRows, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-retention-gap-grafana-tempo-ct-observe-launches.json"),
+          JSON.stringify(grafanaLaunches, null, 2),
+        );
+        fs.writeFileSync(
+          path.join(artifactDir, "m37-retention-gap-grafana-tempo-browser-problems.json"),
+          JSON.stringify(grafanaBrowserProblems, null, 2),
+        );
+        fs.writeFileSync(
           path.join(artifactDir, "m37-retention-gap-bridge-events.log"),
           bridgeEvents.join("\n"),
         );
+        for (const logFileName of ["grafana.log", "tempo.log"]) {
+          const logPath = path.join(runnerRoot, logFileName);
+          if (fs.existsSync(logPath)) {
+            fs.copyFileSync(logPath, path.join(artifactDir, logFileName));
+          }
+        }
       }
     } finally {
       if (bridge) {
         await new Promise<void>((resolve) => bridge?.close(() => resolve()));
       }
       await stopJaegerAllInOne(runnerRoot, jaegerProcess);
+      await stopChild(grafanaProcess);
+      await stopChild(tempoProcess);
       if (retentionHarness?.process.pid) {
         killProcessTree(retentionHarness.process.pid);
       }
