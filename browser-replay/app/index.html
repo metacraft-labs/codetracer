@@ -9,78 +9,56 @@
     .pass { color: #4ec9b0; }
     .fail { color: #f44747; }
     .info { color: #569cd6; }
+    .pending { color: #dcdcaa; }
+    #status { padding: 0.5em 1em; margin: 0.5em 0; border-left: 4px solid #888; }
+    #status.ok { border-color: #4ec9b0; color: #4ec9b0; }
+    #status.error { border-color: #f44747; color: #f44747; }
+    #status.pending { border-color: #dcdcaa; color: #dcdcaa; }
   </style>
 </head>
 <body>
-  <h1>CodeTracer Browser Replay Test</h1>
+  <h1>CodeTracer Browser Replay</h1>
+  <p>
+    The page loads the replay-server WASM in a WebWorker, then either streams a
+    pre-staged trace from a static URL (legacy mode) or fetches the recording
+    manifest + payload bytes from a CodeTracer-CI gateway with an authenticated
+    bearer token (M40 mode). Both paths push bytes into the WASM in-memory VFS
+    and drive the Debug Adapter Protocol entirely client-side.
+  </p>
+  <p>
+    <strong>Configuration via URL query parameters:</strong>
+  </p>
+  <ul>
+    <li><code>gatewayBaseUrl</code> &mdash; root URL of the codetracer-ci gateway, e.g.
+      <code>http://127.0.0.1:5000</code>. The client appends
+      <code>/api/v1/observability/gateway/...</code> when it issues fetches.</li>
+    <li><code>traceId</code> &mdash; trace UUID used for both the manifest and range fetches.</li>
+    <li><code>authToken</code> &mdash; bearer token sent with every gateway request (URL-encoded).</li>
+    <li><code>traceFolder</code> &mdash; VFS folder name (defaults to <code>trace</code>).</li>
+    <li><code>mode</code> &mdash; <code>basic</code> (DAP init only) or
+      <code>comprehensive</code> (full panel verification). Defaults to <code>basic</code>.</li>
+  </ul>
+
+  <div id="status" class="pending">Initializing...</div>
+
   <div>
-    <button onclick="sendInitialize()">Send DAP Initialize</button>
+    <button id="manualInitBtn" onclick="sendInitialize()" disabled>Send DAP Initialize (manual)</button>
     <button onclick="clearLog()">Clear Log</button>
   </div>
-  <div id="log"></div>
+  <pre id="log"></pre>
 
+  <script type="module" src="./gateway-client.js"></script>
   <script>
-    const logEl = document.getElementById('log');
-    function log(msg, cls) {
-      const line = document.createElement('div');
-      line.className = cls || '';
-      line.textContent = msg;
-      logEl.appendChild(line);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    let worker = null;
-    let seq = 1;
-
-    function startWorker() {
-      log('[info] Creating WebWorker...', 'info');
-      worker = new Worker('worker.js', { type: 'module' });
-
-      worker.onmessage = (e) => {
-        if (e.data === 'ready') {
-          log('[pass] WebWorker ready — WASM loaded', 'pass');
-        } else if (e.data && e.data.error) {
-          log('[fail] Worker error: ' + e.data.error, 'fail');
-        } else {
-          // DAP response/event from the WASM module
-          const msg = typeof e.data === 'string' ? e.data : JSON.stringify(e.data);
-          log('[recv] ' + msg, 'info');
-        }
-      };
-
-      worker.onerror = (e) => {
-        log('[fail] Worker error: ' + e.message, 'fail');
-      };
-    }
-
+    // Manual-mode helpers retained for ad-hoc DAP testing without a gateway
+    // configured (e.g. when the page is opened directly without query params).
     function sendInitialize() {
-      if (!worker) {
-        log('[fail] Worker not started', 'fail');
-        return;
-      }
-      const req = {
-        seq: seq++,
-        type: 'request',
-        command: 'initialize',
-        arguments: {
-          clientID: 'codetracer-browser',
-          clientName: 'CodeTracer Browser',
-          adapterID: 'codetracer',
-          linesStartAt1: true,
-          columnsStartAt1: true,
-          pathFormat: 'path'
-        }
-      };
-      log('[send] ' + JSON.stringify(req));
-      worker.postMessage(JSON.stringify(req));
+      const ev = new CustomEvent('manual-dap-initialize');
+      window.dispatchEvent(ev);
     }
-
     function clearLog() {
-      logEl.innerHTML = '';
+      const el = document.getElementById('log');
+      if (el) { el.textContent = ''; }
     }
-
-    // Auto-start the worker on page load
-    startWorker();
   </script>
 </body>
 </html>
