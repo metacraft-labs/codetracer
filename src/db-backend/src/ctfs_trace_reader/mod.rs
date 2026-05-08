@@ -972,6 +972,15 @@ impl CTFSTraceReader {
     /// returned so that the reader can still be constructed (useful for
     /// metadata-only traces or tests).
     fn load_events(ctfs: &mut CtfsReader) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
+        // The 8-byte CodeTracer events.log magic prefix written by the
+        // streaming `CtfsTraceWriter` (and by the legacy CBOR+Zstd writer).
+        // Mirrors `codetracer_trace_format_cbor_zstd::HEADERV1` — duplicated
+        // here to avoid an extra workspace dependency.  Layout:
+        //   [0..5] : "C0DE72ACE2"   magic / l33t-spelling of "CodeTracer"
+        //   [5]    : 0x01           file format version 1
+        //   [6..8] : 0x00 0x00      reserved
+        const EVENTS_HEADER_V1: [u8; 8] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2, 0x01, 0x00, 0x00];
+
         let event_bytes = match ctfs.read_file("events.log") {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -985,6 +994,19 @@ impl CTFSTraceReader {
             return Ok(Vec::new());
         }
 
+        // Strip the optional 8-byte `HEADERV1` magic prefix.  The current
+        // streaming writer always emits it; older test fixtures and the
+        // legacy in-memory `NonStreamingTraceWriter` do not.  The chunked
+        // and CBOR readers below both expect chunk/CBOR data starting at
+        // byte zero, so we skip the magic when present.
+        let payload: &[u8] = if event_bytes.len() >= EVENTS_HEADER_V1.len()
+            && event_bytes[..EVENTS_HEADER_V1.len()] == EVENTS_HEADER_V1
+        {
+            &event_bytes[EVENTS_HEADER_V1.len()..]
+        } else {
+            &event_bytes
+        };
+
         // Detect the serialization format. The presence of `events.fmt`
         // with the content `"split-binary"` indicates the new split-binary
         // encoding; otherwise we fall back to CBOR.
@@ -995,7 +1017,7 @@ impl CTFSTraceReader {
 
         // Try the chunked format first (new writer produces inline 16-byte
         // chunk headers followed by Zstd-compressed payloads).
-        if let Ok(decompressed) = codetracer_ctfs::ChunkedReader::decompress_all(&event_bytes) {
+        if let Ok(decompressed) = codetracer_ctfs::ChunkedReader::decompress_all(payload) {
             if is_split_binary {
                 return Ok(codetracer_trace_writer::split_binary::decode_events(&decompressed));
             } else {
@@ -1006,7 +1028,7 @@ impl CTFSTraceReader {
 
         // Fallback: legacy CBOR streaming (zeekstd frames, no chunk headers).
         // This path handles older `.ct` files that pre-date the chunked format.
-        Self::deserialize_cbor_from_buffer(&event_bytes)
+        Self::deserialize_cbor_from_buffer(payload)
     }
 
     /// Deserialize a sequence of individually-encoded CBOR

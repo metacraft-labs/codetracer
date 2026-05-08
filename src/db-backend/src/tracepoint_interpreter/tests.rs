@@ -309,11 +309,21 @@ fn record_trace(program_dir: &Path, target_dir: &Path, lang: Lang) -> Result<(),
 
 /// Load (or record) a test trace for the given program and language.
 ///
-/// Each invocation records into a per-process temporary directory under
-/// `test-traces/`. This avoids the race condition that occurs with
-/// `cargo nextest`, which runs each test in a separate process — in-process
-/// `Mutex`/`Once` guards cannot synchronize across processes, so two tests
-/// that share a trace name would stomp on each other's output.
+/// Each invocation records into a per-process **and per-thread** temporary
+/// directory under `test-traces/`.  Two layers of isolation are needed:
+///
+/// * **PID** — `cargo nextest` runs each test in its own process and the
+///   in-process `Mutex`/`Once` guards cannot synchronize across processes,
+///   so two tests sharing a trace name would stomp on each other's output.
+/// * **Thread name** — under plain `cargo test --lib`, multiple tests run
+///   concurrently as threads of a single process.  The PID is therefore the
+///   same for both `log_array` and `array_indexing`, and they race on the
+///   shared `array/noir` trace directory (one test's `remove_dir_all` would
+///   delete another test's `noir.ct`, producing the misleading
+///   "meta.json not found" CTFS error).  Including the thread name
+///   (cargo names each test thread after the test fn, e.g.
+///   `tracepoint_interpreter::tests::log_array`) gives every test a unique
+///   path even when they share a process.
 fn load_test_trace(name: &str, lang: Lang) -> Result<Db, Box<dyn Error>> {
     let cwd = env::current_dir()?;
 
@@ -323,13 +333,17 @@ fn load_test_trace(name: &str, lang: Lang) -> Result<Db, Box<dyn Error>> {
         return Err("Can't find test programs. Please run 'cargo test' in src/db-backend.".into());
     }
 
-    // Use the PID to isolate each nextest worker process so parallel
-    // test invocations never share (and therefore never clobber) trace
-    // directories.
     let pid = std::process::id();
+    // Thread names contain `::` separators which would create accidental
+    // subdirectories on disk — flatten them to a single identifier so the
+    // trace_dir stays a single leaf path component.
+    let thread_id = std::thread::current()
+        .name()
+        .map(|n| n.replace("::", "__"))
+        .unwrap_or_else(|| format!("thread-{:?}", std::thread::current().id()));
     let trace_dir = cwd
         .join("test-traces")
-        .join(format!("pid-{pid}"))
+        .join(format!("pid-{pid}-{thread_id}"))
         .join(name)
         .join(&lang_string);
 
