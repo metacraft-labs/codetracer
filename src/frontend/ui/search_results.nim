@@ -107,7 +107,18 @@ proc renderFileGroup(self: SearchResultsComponent, filePath: cstring, results: s
 method render*(self: SearchResultsComponent): VNode =
   let results = self.service.results[SearchFixed]
   let resultCount = results.len
-  let query = if self.service.query.query.isNil: cstring"" else: self.service.query.query
+  # SearchResults is part of the shared chrome and can render before the
+  # user has run a search, so the query object is legitimately nil at boot.
+  let searchQuery =
+    if self.service.query.isNil:
+      nil
+    else:
+      self.service.query
+  let query =
+    if searchQuery.isNil or searchQuery.query.isNil:
+      cstring""
+    else:
+      searchQuery.query
 
   if resultCount > 0:
     kxiMap[cstring"search-results"].afterRedraws.add(proc =

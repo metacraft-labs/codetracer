@@ -20,16 +20,6 @@ if !IS_EXTENSION
   ::-webkit-scrollbar-thumb:horizontal:active
     background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
 
-@font-face {
-  font-family: 'SpaceGrotesk';
-  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: "FiraCode";
-  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
-}
-
 if IS_EXTENSION
   .component-container-html
     height: -webkit-fill-available !important
@@ -107,7 +97,9 @@ html, body
     overflow: hidden
 
 body
-  font-family: -apple-system, 'Helvetica Neue', Helvetica, sans-serif !important
+  font-family: "SpaceMono", monospace !important
+  -webkit-font-smoothing: antialiased
+  -moz-osx-font-smoothing: grayscale
   background-color: colors-ui-surface-primary-default !important
 
 [data-tippy-root]
@@ -144,14 +136,14 @@ body
   width: 0px
   height: 1em
   margin-top: 0.4em
-  border-left: 0.12em solid colors-ui-separator-default
+  border-left: 0.12em solid color-ui-divider-primary
 
 // .wrapper
 //   input
 //     margin-left: 0 !important
 
 // input
-//   font-family: "SpaceGrotesk" !important
+//   font-family: "SpaceMono" !important
 //   font-size: 14px !important
 //   font-style: normal !important
 //   font-weight: 400 !important
@@ -188,20 +180,31 @@ body
 //     white-space: nowrap !important
 
 #root-container
-  // padding 0.25em
   position: fixed
   height: calc(100vh - 2.27em - 2em)
   top: 2.27em
+  left: 0
+  right: 0
   z-index: 0
   padding-left: 0
   padding-right: 0
+  display: flex
+  flex-direction: column
+  min-height: 0
 
 #ROOT
+  // The auto-hide row and GoldenLayout both rely on #ROOT staying flexible.
+  // A fixed viewport width here collapses the height chain and only tab
+  // headers remain visible after layout restore.
   background-color: colors-ui-surface-primary-default !important
   color: TEXT_CONTENT_COLOR
   height: 100%
-  width: calc(100vw - 0.5em)
+  flex: 1
+  min-width: 0
+  min-height: 0
   position: relative
+  overflow: hidden
+  box-sizing: border-box
   padding-right: 0.25em
   padding-left: 0.25em
 
@@ -233,7 +236,7 @@ body
 
 // TODO: Fix it?
 .component-container
-  font-family: "FiraCode" !important
+  font-family: "SpaceMono" !important
   font-size: inherit !important
   line-height: 1.5em !important
   font-weight: 400 !important
@@ -340,7 +343,7 @@ input:checked ~ .checkmark:after
   position: absolute
   background-color: PRIMARY_BASE
   z-index: 3
-  font-family: "FiraCode"
+  font-family: "SpaceMono"
   margin-bottom: 0
   list-style-type: none
   opacity: 0
@@ -429,6 +432,12 @@ input:checked ~ .checkmark:after
 //   outline: 4px solid PRIMARY_BASE
 
 .layout-buttons-container
+  // Always render last in the .lm_tabs flex container, pinned to the right.
+  // GL2's tryUpdateTabSizes re-appends tab elements via appendChild (moving
+  // them after our button in the DOM); the CSS order overrides DOM order so
+  // the button stays visually at the far right after collapse/expand.
+  order: 9999
+  margin-left: auto
   width: 1.7em !important
   height: 1.7em !important
   background-color: SECONDARY_BASE
@@ -453,7 +462,7 @@ input:checked ~ .checkmark:after
     right: 0px;
     background-color: DROPDOWN_BASE
     border-radius: 6px
-    font-family: "SpaceGrotesk"
+    font-family: "SpaceMono"
     line-height: normal
     color: PRIMARY_TEXT_COLOR
     font-weight: 400
@@ -495,7 +504,7 @@ input:checked ~ .checkmark:after
   height: inherit
   justify-content: center
   align-items: center
-  font-family: 'FiraCode'
+  font-family: "SpaceMono"
   // font-size: 14px
   // padding-left: 12px
   // padding-right: 12px

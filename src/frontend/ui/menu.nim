@@ -339,6 +339,10 @@ proc navigationMenuView*(self: MenuComponent): VNode =
       tabindex = "0",
       onblur = proc =
         if not self.search:
+          if self.skipNextBlur:
+            # User clicked the logo button while menu was open — let onclick handle toggle
+            self.skipNextBlur = false
+            return
           self.active = false
           self.closeMenu()
           redrawAll(),
@@ -353,8 +357,12 @@ proc navigationMenuView*(self: MenuComponent): VNode =
   ):
     tdiv(
       id = "menu-root",
-      onclick = proc (ev: Event, tg: VNode) =
-        ev.stopPropagation()
+      onmousedown = proc =
+        # If the menu is open, mark that we're closing via the logo so the
+        # blur handler does not close-then-reopen (toggle bug).
+        if self.active:
+          self.skipNextBlur = true,
+      onclick = proc =
         toggle(self)
         discard setTimeout(proc() = jq("#navigation-menu").focus(), 10)):
       tdiv(id="menu-logo-img")

@@ -596,6 +596,7 @@ type
     service*:       EventLogService
     dropDowns*: array[EventDropDownBox, bool]
     focusedDropDowns*: array[EventDropDownBox, bool]
+    dropdownOutsideHandlerInstalled*: bool
     selectedKinds*: array[EventLogKind, bool]
     isOptionalColumnsMenuOpen*: bool
     resizeObserver*: ResizeObserver
@@ -1564,6 +1565,7 @@ type
     folderArrowCharWidth*: int
     search*: bool
     keyNavigation*: bool
+    skipNextBlur*: bool
 
   TraceLogComponent* = ref object of Component
     table*: DataTableComponent
@@ -2072,13 +2074,22 @@ when defined(ctRenderer):
         loadingArgs: initJsSet[cstring]()),
       history: HistoryService(),
       flow: FlowService(),
-      trace: TraceService(),
-      search: SearchService(
-        paths: JsAssoc[cstring, bool]{},
-        pluginCommands: JsAssoc[cstring, SearchSource]{},
-        activeCommandName: cstring"",
-        selected: 0),
-      shell: ShellService())
+    trace: TraceService(),
+    search: SearchService(
+      paths: JsAssoc[cstring, bool]{},
+      pluginCommands: JsAssoc[cstring, SearchSource]{},
+      activeCommandName: cstring"",
+      # Shared chrome renderers read SearchService.query during startup.
+      query: SearchQuery(
+        kind: TextSearchQuery,
+        value: cstring"",
+        expectArgs: false,
+        query: cstring"",
+        includePattern: cstring"",
+        excludePattern: cstring"",
+        searchMode: SearchFixed),
+      selected: 0),
+    shell: ShellService())
     session.ui = Components(
       focusHistory: @[],
       editModeHiddenPanels: @[],

@@ -56,6 +56,33 @@ proc configureFind =
 
 var document {.importc.}: js
 
+proc enforceMinStackWidth*(layout: GoldenLayout) =
+  ## Walk every stack in the layout tree and distribute the desired constant
+  ## minimum width evenly across its component items so GL's per-component sum
+  ## always equals MIN_STACK_PX regardless of how many tabs are open.
+  ## SizeUnitEnum.Pixel is the string "px" in GL 2.x.
+  {.emit: """
+    const MIN_STACK_PX = 150;
+    const MIN_STACK_PX_H = 50;
+    function visit(item) {
+      if (!item || !item.contentItems) return;
+      if (item.isStack) {
+        const n = item.contentItems.length;
+        if (n > 0) {
+          const perW = Math.ceil(MIN_STACK_PX / n);
+          const perH = Math.ceil(MIN_STACK_PX_H / n);
+          for (const ci of item.contentItems) {
+            ci.minSize     = `layout`.isColumn ? perH : perW;
+            ci.minSizeUnit = "px";
+          }
+        }
+      } else {
+        for (const ci of item.contentItems) visit(ci);
+      }
+    }
+    if (`layout`.groundItem) visit(`layout`.groundItem);
+  """.}
+
 proc newGoldenLayout*(
   root: JsObject,
   bindComponentCallback: proc,
@@ -125,12 +152,17 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
         int(data.activeSessionIndex)
       else:
         0
+    let x = event.clientX.to(int)
+    let y = event.clientY.to(int)
 
-    discard requestWindowList().then(proc(response: JsObject) =
+    # Use an async wrapper so we can await the window list without relying on
+    # Future.then, which is only available on Nim >= 1.5.1.
+    proc showWindowMenu() {.async.} =
+      let response = await requestWindowList()
       let items = buildSendToWindowMenuItems(contentItem, sessionId, response)
-      let x = event.clientX.to(int)
-      let y = event.clientY.to(int)
-      showContextMenu(items, x, y)))
+      showContextMenu(items, x, y)
+
+    discard showWindowMenu())
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
@@ -171,6 +203,27 @@ proc pinActiveContentItem(layout: js, stack: js, edge: AutoHideEdge) =
     cwarn "auto_hide: no active content item in stack"
     return
   pinPanel(cast[GoldenLayout](layout), cast[GoldenContentItem](activeItem), edge)
+
+proc injectPinButton(tabElement: JsObject, onPin: proc()) =
+  ## Insert a pin button to the left of the GL close button inside a tab element.
+  ## Clicking it calls `onPin`, which sends the panel to the auto-hide sidebar.
+  if tabElement.isNil or tabElement.isUndefined:
+    return
+  {.emit: """
+    var _pinBtn = document.createElement('div');
+    _pinBtn.className = 'lm_pin_tab';
+    var _closeEl = `tabElement`.querySelector('.lm_close_tab');
+    if (_closeEl) {
+      `tabElement`.insertBefore(_pinBtn, _closeEl);
+    } else {
+      `tabElement`.appendChild(_pinBtn);
+    }
+    var _onPin = `onPin`;
+    _pinBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      _onPin();
+    });
+  """.}
 
 proc makeNestedButton(layout: js, ev: Event): VNode =
   buildHtml(
@@ -459,6 +512,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
+      let editorContentItem = cast[GoldenContentItem](tab.contentItem)
+      injectPinButton(tab.element, proc() =
+        pinPanel(cast[GoldenLayout](layout), editorContentItem, AutoHideEdge.Left))
 
     var containerId: cstring
     containerId = cstring(fmt"editorComponent-{state.id}")
@@ -514,6 +570,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
+      let genericContentItem = cast[GoldenContentItem](tab.contentItem)
+      injectPinButton(tab.element, proc() =
+        pinPanel(cast[GoldenLayout](layout), genericContentItem, AutoHideEdge.Left))
 
     # When a background tab becomes visible, force Karax to redraw into the
     # now-visible DOM element.  Without this, panels like BUILD, PROBLEMS and
@@ -545,7 +604,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         discard component.afterInit()
       discard windowSetTimeout((proc = redrawAll()), 200)), 200)
 
+  # Widen the splitter grab zone so it is easier to grab with the mouse.
+  # The per-stack minimum width is enforced dynamically by enforceMinStackWidth
+  # (called after loadLayout and on every stateChanged) so it stays constant
+  # regardless of how many tabs are open in the stack.
+  {.emit: """
+    if (!`initialLayout`.dimensions) `initialLayout`.dimensions = {};
+    `initialLayout`.dimensions.borderGrabWidth = 8;
+  """.}
   layout.loadLayout(initialLayout)
+  enforceMinStackWidth(layout)
 
   # M21: Register IPC handler for receiving panels from other windows.
   registerPanelAttachHandler(layout)
@@ -833,6 +901,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   layout.on(cstring"stateChanged") do (event: js):
     cdebug "layout event: stateChanged"
+    enforceMinStackWidth(layout)
 
     # check if only one tab is left and prevent user from close/drag it
     let mainContainer = data.ui.layout.groundItem.contentItems[0]

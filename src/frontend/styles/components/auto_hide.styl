@@ -93,8 +93,10 @@
   display: flex
   flex-direction: row
   align-items: center
-  gap: 2px
-  margin-left: 8px
+  gap: 0.125em
+  margin-left: 0.5em
+  min-width: 0
+  height: 100%
 
   // Hide when empty so it doesn't affect status bar layout.
   &:empty
@@ -105,7 +107,7 @@
 // ---------------------------------------------------------------------------
 
 .auto-hide-strip-tab
-  font-family: "SpaceGrotesk"
+  font-family: "SpaceMono"
   font-size: 12px
   font-weight: 600
   color: HEADER_PANEL_COLOR
@@ -142,15 +144,32 @@
   text-orientation: mixed
   max-height: 120px
 
-// Bottom tabs in the status bar: horizontal, compact style matching status items.
-.auto-hide-bottom-tabs .auto-hide-strip-tab
-  max-width: 160px
-  padding: 2px 8px
-  font-size: 12px
-  line-height: 18px
-  height: 22px
-  margin: 0 1px
-  border-radius: 3px
+// Bottom tabs in the status bar use the shared button primitives instead of
+// the legacy strip-tab div styling. Keep the sizing relative to the inherited
+// font size so the bar scales cleanly with zoom.
+.auto-hide-bottom-tab
+  flex: 0 1 auto !important
+  min-width: 0
+  max-width: 14em
+  height: 1.833em
+  margin: 0
+  padding-left: 0.833em
+  padding-right: 0.833em
+  border-radius: 0.333em !important
+  align-self: center
+  box-sizing: border-box
+  font-size: 0.6em
+  font-weight: 600
+  line-height: 1.2
+  letter-spacing: 0
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+  &:hover
+  &.active
+    color: colors-ui-text-primary-body
+    background-color: colors-ui-surface-primary-tertiary-hover !important
 
 // ---------------------------------------------------------------------------
 // Backdrop — semi-transparent overlay behind the slide-in panel.
@@ -236,7 +255,7 @@
   flex-shrink: 0
 
 #auto-hide-overlay-title
-  font-family: "SpaceGrotesk"
+  font-family: "SpaceMono"
   font-size: 13px
   font-weight: 600
   color: HEADER_PANEL_COLOR
@@ -379,7 +398,7 @@
   writing-mode: vertical-lr
   text-orientation: mixed
   transform: rotate(180deg)
-  font-family: "SpaceGrotesk"
+  font-family: "SpaceMono"
   font-size: 12px
   font-weight: 600
   color: HEADER_PANEL_COLOR

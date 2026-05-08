@@ -155,6 +155,7 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
     tags: JsAssoc[EventTag, bool]{},
     traceRenderedLength: 0,
     dropDowns: dropDownsInit,
+    dropdownOutsideHandlerInstalled: false,
     selectedKinds: selectedKinds,
     denseTable: DataTableComponent(rowHeight: 35, autoScroll: true),
     detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
