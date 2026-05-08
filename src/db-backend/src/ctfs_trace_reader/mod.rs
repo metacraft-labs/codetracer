@@ -76,6 +76,17 @@ pub struct CTFSTraceReader {
     db: Db,
 }
 
+impl CTFSTraceReader {
+    /// Borrow the in-memory `Db` populated when the trace was opened.
+    ///
+    /// Useful for tests that need to inspect or rebuild auxiliary state
+    /// (e.g. drive `FlowPreloader` directly) using the same `Db` that the
+    /// reader serves through its `TraceReader` interface.
+    pub fn db(&self) -> &Db {
+        &self.db
+    }
+}
+
 /// Returns `true` if the CTFS container uses the new pre-processed format
 /// (detected by the presence of `steps.dat`), meaning postprocessing can
 /// be skipped entirely.

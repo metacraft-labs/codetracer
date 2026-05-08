@@ -30,7 +30,7 @@ const wasmUrl = new URL('./pkg/db_backend_bg.wasm', import.meta.url);
  * Fetch a file from an HTTP URL and write it into the in-memory VFS.
  *
  * @param {string} url        — HTTP(S) URL to fetch.
- * @param {string} vfsPath    — Virtual path inside the VFS (e.g. "trace/trace.json").
+ * @param {string} vfsPath    — Virtual path inside the VFS (e.g. "trace/trace.ct").
  * @returns {Promise<number>} — The number of bytes written.
  */
 async function fetchIntoVfs(url, vfsPath) {
@@ -87,11 +87,12 @@ async function fetchIntoVfs(url, vfsPath) {
     // Message shape:
     //   {
     //     type: "load-trace",
-    //     // Required: array of { url, vfsPath } objects.
+    //     // Required: array of { url, vfsPath } objects.  CTFS is the only
+    //     // supported materialized-trace format (see
+    //     // Trace-Files/CTFS-Migration-Guide.md §3e), so the canonical
+    //     // shape is a single `.ct` container per trace folder.
     //     files: [
-    //       { url: "/traces/trace.json",          vfsPath: "trace/trace.json" },
-    //       { url: "/traces/trace_metadata.json",  vfsPath: "trace/trace_metadata.json" },
-    //       { url: "/traces/trace_paths.json",     vfsPath: "trace/trace_paths.json" },
+    //       { url: "/traces/trace.ct", vfsPath: "trace/trace.ct" },
     //     ],
     //   }
     // -----------------------------------------------------------------------

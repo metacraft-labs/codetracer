@@ -1241,28 +1241,28 @@ fn accept_with_timeout(
     }
 }
 
-/// Find the pure-Python recorder script (`trace.py`).
+/// Sentinel value returned by [`find_python_recorder`] when the Rust-backed
+/// `codetracer_python_recorder` module is importable from the active Python
+/// interpreter. The downstream invocation site checks for this sentinel and
+/// switches to `python -m codetracer_python_recorder`, which always emits a
+/// CTFS `.ct` container — the only supported materialized-trace format.
+pub const RUST_PYTHON_RECORDER_MODULE_SENTINEL: &str = "<rust-python-recorder-module>";
+
+/// Locate the legacy pure-Python recorder script (`trace.py`).
 ///
-/// Search order:
-/// 1. `CODETRACER_PYTHON_RECORDER_PATH` env var (explicit override)
-/// 2. System PATH lookup for `trace.py` (for pip-installed recorder)
-/// 3. Sibling repo: `../../../codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
-/// 4. Legacy submodule: `../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py`
-///
-/// Returns `None` if the recorder is not found.
-pub fn find_python_recorder() -> Option<PathBuf> {
-    if let Ok(path) = env::var("CODETRACER_PYTHON_RECORDER_PATH") {
+/// This is kept as a separate API for test programs that depend on the
+/// pure-Python recorder's specific stepping / value-capture behaviour
+/// (e.g. `python_hcr_ctfs_integration.rs`).  New tests should use
+/// [`find_python_recorder`] instead, which prefers the Rust-backed
+/// recorder and emits CTFS by default.
+pub fn find_pure_python_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_PURE_PYTHON_RECORDER_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() {
             return Some(p);
         }
-        eprintln!(
-            "WARNING: CODETRACER_PYTHON_RECORDER_PATH='{}' but file does not exist; falling back",
-            path
-        );
     }
 
-    // Check PATH (for pip-installed recorder)
     if let Some(path) = find_on_path("trace.py") {
         return Some(path);
     }
@@ -1279,6 +1279,56 @@ pub fn find_python_recorder() -> Option<PathBuf> {
         let path = manifest_dir.join(loc);
         if path.exists() {
             return Some(safe_canonicalize(&path));
+        }
+    }
+
+    None
+}
+
+/// Locate a Python recorder that produces CTFS output.
+///
+/// Per the CTFS migration directive (see Trace-Files/CTFS-Migration-Guide.md
+/// §3e) the only supported materialized-trace format is the `.ct` CTFS
+/// container. The Rust-backed `codetracer_python_recorder` writes CTFS by
+/// default; the legacy pure-Python recorder (`trace.py`) only emits the
+/// legacy `trace.json` + `trace_metadata.json` + `trace_paths.json`
+/// triplet and is therefore no longer accepted here.
+///
+/// Search order:
+/// 1. `CODETRACER_PYTHON_RECORDER_PATH` env var (explicit override; only
+///    accepted if it points at a valid file — the legacy `trace.py` script
+///    is not auto-detected anymore, but an explicit override still works
+///    so out-of-tree experiments aren't blocked).
+/// 2. The Rust-backed `codetracer_python_recorder` Python module if it is
+///    importable from the active interpreter; in that case the sentinel
+///    [`RUST_PYTHON_RECORDER_MODULE_SENTINEL`] is returned and the caller
+///    invokes the recorder via `python -m codetracer_python_recorder`.
+/// 3. `None` if neither is available.
+pub fn find_python_recorder() -> Option<PathBuf> {
+    if let Ok(path) = env::var("CODETRACER_PYTHON_RECORDER_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+        eprintln!(
+            "WARNING: CODETRACER_PYTHON_RECORDER_PATH='{}' but file does not exist; falling back",
+            path
+        );
+    }
+
+    // Probe whether the Rust-backed recorder is importable. We rely on the
+    // module's presence rather than a wheel path so the same logic works in
+    // the nix dev shell (where the module lives next to the recorder repo)
+    // and in CI containers (where it's installed into site-packages).
+    let python = find_suitable_python()
+        .map(|(cmd, _)| cmd)
+        .unwrap_or_else(|| "python3".into());
+    let probe = Command::new(&python)
+        .args(["-c", "import codetracer_python_recorder"])
+        .output();
+    if let Ok(out) = probe {
+        if out.status.success() {
+            return Some(PathBuf::from(RUST_PYTHON_RECORDER_MODULE_SENTINEL));
         }
     }
 
@@ -1471,10 +1521,16 @@ pub fn find_elixir_recorder() -> Option<PathBuf> {
 /// Search order:
 /// 1. `CODETRACER_RUBY_RECORDER_PATH` env var (explicit override)
 /// 2. System PATH lookup for `codetracer-pure-ruby-recorder` (for gem-installed recorder)
-/// 3. Sibling repo: `../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
-/// 4. Legacy submodule: `../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder`
+/// 3. Sibling repo (native): `../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`
+/// 4. Legacy submodule (native): `../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`
 ///
-/// Returns `None` if the recorder is not found.
+/// The native Ruby recorder writes the `.ct` CTFS container — the only
+/// supported materialized-trace format.  The legacy pure-Ruby recorder
+/// (`codetracer-pure-ruby-recorder`) only emits the legacy 3-file JSON
+/// shape, so it is no longer auto-detected here; an explicit override via
+/// `CODETRACER_RUBY_RECORDER_PATH` still works for out-of-tree experiments.
+///
+/// Returns `None` if a CTFS-capable recorder is not found.
 pub fn find_ruby_recorder() -> Option<PathBuf> {
     if let Ok(path) = env::var("CODETRACER_RUBY_RECORDER_PATH") {
         let p = PathBuf::from(&path);
@@ -1487,17 +1543,17 @@ pub fn find_ruby_recorder() -> Option<PathBuf> {
         );
     }
 
-    // Check PATH (for gem-installed recorder)
-    if let Some(path) = find_on_path("codetracer-pure-ruby-recorder") {
+    // Check PATH (for gem-installed native recorder)
+    if let Some(path) = find_on_path("codetracer-ruby-recorder") {
         return Some(path);
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let locations = [
-        // Sibling repo (workspace layout)
-        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
-        // Legacy submodule
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        // Sibling repo (workspace layout) — native recorder
+        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
+        // Legacy submodule — native recorder
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
     ];
 
     for loc in locations {
@@ -1668,13 +1724,24 @@ fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
 
 /// Record a Python trace with the specified trace format.
 ///
-/// Delegates to the pure-Python recorder, passing `CODETRACER_TRACE_FORMAT`
-/// as an environment variable so the recorder can select the output format
-/// (e.g. `"binary"` for CBOR+Zstd, `"ctfs"` for the `.ct` CTFS container).
+/// Per the CTFS migration directive the only supported materialized-trace
+/// format is the `.ct` CTFS container, so `trace_format` is accepted but
+/// only `"ctfs"` is meaningful — anything else is logged as a warning and
+/// the recorder falls back to its CTFS-only output. The Rust-backed
+/// `codetracer_python_recorder` always emits CTFS; the legacy pure-Python
+/// recorder is no longer used because it cannot produce a `.ct` bundle.
 fn record_python_trace_with_format(source_path: &Path, trace_dir: &Path, trace_format: &str) -> Result<(), String> {
     let recorder = find_python_recorder()
-        .ok_or("Python recorder not found. Set CODETRACER_PYTHON_RECORDER_PATH or check out the sibling/submodule")?;
+        .ok_or("Python recorder not found. Install the Rust-backed `codetracer_python_recorder` Python module (sibling repo `codetracer-python-recorder`) or set CODETRACER_PYTHON_RECORDER_PATH")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
+
+    if trace_format != "ctfs" && trace_format != "binary" {
+        eprintln!(
+            "NOTE: Python recorder always emits CTFS; ignoring trace_format={} (\
+             legacy non-CTFS formats are no longer supported)",
+            trace_format
+        );
+    }
 
     // Pick a Python 3.10+ interpreter. Prefer CODETRACER_PYTHON_CMD (set by
     // detect-siblings.sh or the user), then try versioned brew binaries
@@ -1696,10 +1763,30 @@ fn record_python_trace_with_format(source_path: &Path, trace_dir: &Path, trace_f
                 .unwrap_or("python3")
                 .to_string()
         });
-    let output = Command::new(python)
-        .args([recorder.to_str().unwrap(), source_path.to_str().unwrap()])
+    // Two invocation styles:
+    //   - Module sentinel: invoke as `python -m codetracer_python_recorder`,
+    //     which is the canonical way to drive the Rust-backed recorder.
+    //   - Filesystem path: legacy explicit override via
+    //     CODETRACER_PYTHON_RECORDER_PATH.  The override path is invoked
+    //     directly as a script, just like the historical layout.
+    let mut cmd = Command::new(&python);
+    if recorder.to_str() == Some(RUST_PYTHON_RECORDER_MODULE_SENTINEL) {
+        // The Rust-backed recorder writes into `--out-dir`; we point it at
+        // `trace_dir` directly so the resulting `.ct` lands where the rest
+        // of the harness expects it.
+        cmd.args([
+            "-m",
+            "codetracer_python_recorder",
+            "--out-dir",
+            trace_dir.to_str().unwrap(),
+            source_path.to_str().unwrap(),
+        ]);
+    } else {
+        cmd.args([recorder.to_str().unwrap(), source_path.to_str().unwrap()]);
+    }
+    let output = cmd
         .current_dir(trace_dir)
-        .env("CODETRACER_TRACE_FORMAT", trace_format)
+        .env("CODETRACER_TRACE_FORMAT", "ctfs")
         .output()
         .map_err(|e| format!("failed to run Python recorder: {}", e))?;
 
@@ -1724,24 +1811,32 @@ fn record_python_trace_with_format(source_path: &Path, trace_dir: &Path, trace_f
     Ok(())
 }
 
-/// Record a Ruby trace by running the pure-Ruby recorder.
+/// Record a Ruby trace by running the native Ruby recorder.
 ///
-/// Uses the same invocation pattern as `tracepoint_interpreter/tests.rs`:
-/// `ruby <recorder> --out-dir <trace_dir> <source>` with `CODETRACER_DB_TRACE_PATH`.
+/// The recorder writes a `.ct` CTFS container — the only supported
+/// materialized-trace format.  Invocation pattern:
+/// `ruby <recorder> --out-dir <trace_dir> <source>`.
 fn record_ruby_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    record_ruby_trace_with_format(source_path, trace_dir, "binary")
+    record_ruby_trace_with_format(source_path, trace_dir, "ctfs")
 }
 
-/// Record a Ruby trace with the specified trace format.
-///
-/// Delegates to the pure-Ruby recorder, passing `CODETRACER_TRACE_FORMAT`
-/// as an environment variable so the recorder can select the output format.
+/// Record a Ruby trace.  The `trace_format` parameter is preserved for
+/// API compatibility with [`create_db_trace_with_format`] but the only
+/// materialized format the harness accepts is CTFS — anything else is
+/// logged and ignored.
 fn record_ruby_trace_with_format(source_path: &Path, trace_dir: &Path, trace_format: &str) -> Result<(), String> {
     let recorder = find_ruby_recorder()
         .ok_or("Ruby recorder not found. Set CODETRACER_RUBY_RECORDER_PATH or check out the sibling/submodule")?;
     fs::create_dir_all(trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
 
-    let trace_path = trace_dir.join("trace.json");
+    if trace_format != "ctfs" && trace_format != "binary" {
+        eprintln!(
+            "NOTE: Ruby recorder always emits CTFS; ignoring trace_format={} (\
+             legacy non-CTFS formats are no longer supported)",
+            trace_format
+        );
+    }
+
     let output = Command::new("ruby")
         .args([
             recorder.to_str().unwrap(),
@@ -1749,8 +1844,7 @@ fn record_ruby_trace_with_format(source_path: &Path, trace_dir: &Path, trace_for
             trace_dir.to_str().unwrap(),
             source_path.to_str().unwrap(),
         ])
-        .env("CODETRACER_DB_TRACE_PATH", trace_path.to_str().unwrap())
-        .env("CODETRACER_TRACE_FORMAT", trace_format)
+        .env("CODETRACER_TRACE_FORMAT", "ctfs")
         .output()
         .map_err(|e| format!("failed to run Ruby recorder: {}", e))?;
 
@@ -3970,35 +4064,61 @@ impl TestRecording {
         }
 
         // Verify the essential trace files were produced.
-        // Different formats produce different files:
-        //   - JSON format: trace.json
-        //   - Binary (CBOR+Zstd): trace.bin
-        //   - CTFS: trace.ct or <program_name>.ct (the shell recorder names
-        //     the .ct file after the recorded script, not as "trace.ct")
-        let trace_json = trace_dir.join("trace.json");
-        let trace_bin = trace_dir.join("trace.bin");
-        let trace_ct = trace_dir.join("trace.ct");
-        let has_any_ct = trace_ct.exists()
-            || fs::read_dir(&trace_dir)
-                .map(|entries| {
-                    entries
-                        .filter_map(|e| e.ok())
-                        .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
-                })
-                .unwrap_or(false);
-        // Per the CTFS migration guide (Trace-Files/CTFS-Migration-Guide.md
-        // §3e), a `.ct` container is self-contained: metadata that used to
-        // live in a sidecar `trace_metadata.json` is now baked into the
-        // container's `meta.dat` block and read via `ct-print --json` or
-        // the CTFS reader library. We therefore only require *some* trace
-        // file (trace.json, trace.bin, or any *.ct) — the historical
-        // existence check on trace_metadata.json is dropped because modern
-        // CTFS-only bundles legitimately omit that sidecar.
-        if !trace_json.exists() && !trace_bin.exists() && !has_any_ct {
-            return Err(format!(
-                "no trace file (trace.json, trace.bin, or *.ct) produced in {}",
-                trace_dir.display()
-            ));
+        //
+        // Per Trace-Files/CTFS-Migration-Guide.md §3e, CTFS is the only
+        // supported materialized-trace format and a `.ct` container is
+        // self-contained — there is no sidecar `trace_metadata.json`,
+        // `trace.json`, or `trace.bin`.  Recorders that have already
+        // migrated (Python via the Rust-backed recorder, Ruby native, JS,
+        // BEAM/Elixir/Erlang, shell) MUST emit exactly one `*.ct`.  A
+        // small set of recorders (Noir/nargo, wazero) still emit the
+        // legacy 3-file shape; for those, we accept either layout while
+        // their migration is in flight, so the broader test suite stays
+        // green.
+        let recorder_emits_ctfs = matches!(
+            language,
+            Language::Python
+                | Language::Ruby
+                | Language::JavaScript
+                | Language::Bash
+                | Language::Zsh
+                | Language::Elixir
+                | Language::Erlang
+        );
+        let ct_count = fs::read_dir(&trace_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+                    .count()
+            })
+            .unwrap_or(0);
+        if recorder_emits_ctfs {
+            if ct_count == 0 {
+                return Err(format!(
+                    "no *.ct container produced in {} (CTFS is the only \
+                     supported materialized-trace format; legacy trace.json / \
+                     trace.bin / trace_metadata.json are no longer accepted)",
+                    trace_dir.display()
+                ));
+            }
+            if ct_count > 1 {
+                return Err(format!(
+                    "expected exactly one *.ct container in {}, found {}",
+                    trace_dir.display(),
+                    ct_count
+                ));
+            }
+        } else {
+            // Tolerant fallback for recorders still mid-migration.
+            let trace_json = trace_dir.join("trace.json");
+            let trace_bin = trace_dir.join("trace.bin");
+            if ct_count == 0 && !trace_json.exists() && !trace_bin.exists() {
+                return Err(format!(
+                    "no trace file (*.ct, trace.json, or trace.bin) produced in {}",
+                    trace_dir.display()
+                ));
+            }
         }
 
         Ok(TestRecording {

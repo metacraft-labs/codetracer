@@ -24,12 +24,13 @@
     <!--
       Trace configuration is passed via query parameters:
         ?traceFolder=trace            — VFS folder name
-        &files=trace.json,trace_metadata.json,trace_paths.json
-                                      — comma-separated file names (relative to /traces/ on the server)
-        &mode=comprehensive           — "basic" (DAP init only) or "comprehensive" (full panel verification)
-
-      Or for a CTFS container:
-        ?traceFolder=trace&files=trace.ct
+        &files=trace.ct               — comma-separated file names
+                                        (relative to /traces/ on the server).
+                                        CTFS is the only supported materialized
+                                        trace format — see
+                                        Trace-Files/CTFS-Migration-Guide.md §3e.
+        &mode=comprehensive           — "basic" (DAP init only) or
+                                        "comprehensive" (full panel verification)
 
       The test harness (Playwright) sets these when navigating to this page.
     -->

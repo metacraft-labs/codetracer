@@ -48,8 +48,13 @@ const params = new URLSearchParams(window.location.search);
 const traceFolder = params.get('traceFolder') || 'trace';
 
 // Comma-separated list of file names to fetch from the server.
-// Default: the standard DB trace layout.
-const fileNames = (params.get('files') || 'trace.json,trace_metadata.json,trace_paths.json')
+//
+// Default: the canonical CTFS bundle layout — a single `trace.ct` file
+// containing all metadata + events.  Per the CTFS migration directive
+// (Trace-Files/CTFS-Migration-Guide.md §3e), `.ct` is the only supported
+// materialized-trace format; the legacy `trace.json` /
+// `trace_metadata.json` / `trace_paths.json` triplet is no longer used.
+const fileNames = (params.get('files') || 'trace.ct')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);

@@ -121,7 +121,10 @@ fn record_hcr_trace(
         std::fs::copy(index_js, &dest).map_err(|e| format!("failed to copy index.js to trace dir: {}", e))?;
     }
 
-    // Verify trace files were produced
+    // Verify a CTFS container was produced.  Per the CTFS migration guide
+    // (Trace-Files/CTFS-Migration-Guide.md §3e), `.ct` is the only
+    // supported materialized-trace format; legacy `trace.json` /
+    // `trace.bin` / `trace_metadata.json` sidecars are no longer produced.
     let has_ct = std::fs::read_dir(&trace_dir)
         .map(|entries| {
             entries
@@ -129,17 +132,9 @@ fn record_hcr_trace(
                 .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
         })
         .unwrap_or(false);
-    let trace_json = trace_dir.join("trace.json");
-    let trace_bin = trace_dir.join("trace.bin");
-    if !trace_json.exists() && !trace_bin.exists() && !has_ct {
-        return Err(format!("no trace file produced in {}", trace_dir.display()));
+    if !has_ct {
+        return Err(format!("no *.ct container produced in {}", trace_dir.display()));
     }
-
-    // Per the CTFS migration guide (Trace-Files/CTFS-Migration-Guide.md
-    // §3e), a `.ct` container is self-contained and `trace_metadata.json`
-    // is legacy.  CTFS-only bundles intentionally omit the sidecar; the
-    // `.ct`/`trace.bin`/`trace.json` check above already guarantees that
-    // some trace was recorded.
 
     Ok(TestRecording {
         trace_dir,

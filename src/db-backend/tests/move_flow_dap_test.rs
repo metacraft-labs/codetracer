@@ -124,50 +124,32 @@ fn setup_move_trace(test_fn_name: &str) -> (PathBuf, TestRecording, PathBuf) {
 /// recorder currently lacks source map support (all steps at line 1,
 /// variable names are bytecode indices).
 fn run_move_dap_lifecycle_test(test_fn_name: &str) {
-    let (db_backend, recording, source_path) = setup_move_trace(test_fn_name);
+    let (db_backend, recording, _source_path) = setup_move_trace(test_fn_name);
 
     // Verify trace files were produced.  Per the CTFS migration guide
-    // (Trace-Files/CTFS-Migration-Guide.md §3e) `trace_metadata.json` is
-    // legacy: modern CTFS bundles bake metadata into the `.ct` container's
-    // `meta.dat` block.  Accept either layout so the test works for both
-    // legacy and CTFS-only recorders.
+    // (Trace-Files/CTFS-Migration-Guide.md §3e) the `.ct` container is
+    // self-contained — metadata that used to live in sidecar
+    // `trace_metadata.json` / `trace_paths.json` is now baked into the
+    // container's `meta.dat` (or `meta.json`) block.  CTFS is the only
+    // supported materialized-trace format; legacy sidecars are no longer
+    // accepted.
     let trace_dir = &recording.trace_dir;
-    let has_ct = trace_dir.join("trace.ct").exists()
-        || std::fs::read_dir(trace_dir)
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
-            })
-            .unwrap_or(false);
-    let trace_metadata = trace_dir.join("trace_metadata.json");
-    assert!(
-        has_ct || trace_metadata.exists(),
-        "neither *.ct nor trace_metadata.json found in {}",
-        trace_dir.display()
-    );
+    let has_ct = std::fs::read_dir(trace_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+        })
+        .unwrap_or(false);
+    assert!(has_ct, "no *.ct container found in {}", trace_dir.display());
 
     // Launch DAP server and verify initialization.
     let runner =
         FlowTestRunner::new_db_trace(&db_backend, &recording.trace_dir).expect("DAP init failed for Move trace");
 
-    // Verify the source file is referenced in the trace.
-    let trace_paths_file = recording.trace_dir.join("trace_paths.json");
-    if trace_paths_file.exists() {
-        let paths_content = std::fs::read_to_string(&trace_paths_file).expect("failed to read trace_paths.json");
-        let source_filename = source_path
-            .file_name()
-            .expect("source path has no filename")
-            .to_str()
-            .unwrap();
-        assert!(
-            paths_content.contains(source_filename),
-            "trace_paths.json does not reference the source file '{}': {}",
-            source_filename,
-            paths_content
-        );
-        println!("Source file '{}' found in trace_paths.json", source_filename);
-    }
+    // Source path verification has moved into the CTFS container's
+    // `meta.dat` paths list (read by the DAP server during launch); we no
+    // longer inspect a sidecar `trace_paths.json`.
 
     // Clean disconnect.
     runner.finish().expect("disconnect failed");

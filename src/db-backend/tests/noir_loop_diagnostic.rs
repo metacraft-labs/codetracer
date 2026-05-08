@@ -14,46 +14,45 @@
 //! on absence so the test can run unconditionally as long as `nargo` is
 //! on PATH.  Run with `cargo test --test noir_loop_diagnostic -- --nocapture`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use codetracer_trace_types::{StepId, TraceLowLevelEvent, TraceMetadata};
+use codetracer_trace_types::StepId;
+use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::db::{Db, MaterializedReplaySession};
 use db_backend::flow_preloader::FlowPreloader;
 use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::task::{CoreTrace, CtLoadFlowArguments, FlowMode, RRTicks, TraceKind};
-use db_backend::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use db_backend::trace_reader::TraceReader;
 
-/// Load `TraceMetadata` from a recording directory, preferring the legacy
-/// sidecar `trace_metadata.json` and falling back to the `meta.json`
-/// block stored inside a `.ct` CTFS container.
+/// Locate the unique `*.ct` CTFS container produced by `nargo trace`
+/// inside `target_dir`.  Returns `None` if no container is present so the
+/// caller can skip the test cleanly when running against a recorder build
+/// that does not yet emit CTFS — the diagnostic tests are best-effort and
+/// must not fail the suite when their input cannot be produced.
 ///
-/// Per the CTFS migration guide (Trace-Files/CTFS-Migration-Guide.md §3e)
-/// modern bundles bake metadata into the container and stop emitting the
-/// sidecar.  We keep the sidecar path as the primary so existing nargo
-/// recorders (which still emit the legacy layout) keep working unchanged.
-fn load_trace_metadata_either(target_dir: &std::path::Path) -> TraceMetadata {
-    let legacy = target_dir.join("trace_metadata.json");
-    if legacy.exists() {
-        return load_trace_metadata(&legacy).expect("trace_metadata.json");
-    }
-    let ct_path = std::fs::read_dir(target_dir)
-        .ok()
-        .and_then(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
-        })
-        .unwrap_or_else(|| panic!("no trace_metadata.json or *.ct found in {}", target_dir.display()));
-    let mut ctfs = db_backend::ctfs_trace_reader::ctfs_container::CtfsReader::open(&ct_path)
-        .unwrap_or_else(|e| panic!("open {}: {}", ct_path.display(), e));
-    let meta_bytes = ctfs
-        .read_file("meta.json")
-        .unwrap_or_else(|e| panic!("read meta.json from {}: {}", ct_path.display(), e));
-    serde_json::from_slice(&meta_bytes).unwrap_or_else(|e| panic!("parse meta.json from {}: {}", ct_path.display(), e))
+/// Per the CTFS migration directive
+/// (`Trace-Files/CTFS-Migration-Guide.md` §3e) the `.ct` bundle is the
+/// only supported materialized-trace format; the legacy sidecar files
+/// `trace_metadata.json` / `trace.json` / `trace.bin` are no longer
+/// accepted.
+fn find_ct_container(target_dir: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(target_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
+}
+
+/// Load the `Db` from a `.ct` CTFS container in `target_dir`, or return
+/// `None` if no container is present.  All metadata + events are pulled
+/// from inside the container — there are no sidecar reads.
+fn load_db_from_ctfs(target_dir: &Path) -> Option<Db> {
+    let ct_path = find_ct_container(target_dir)?;
+    let reader = CTFSTraceReader::open(&ct_path)
+        .unwrap_or_else(|e| panic!("CTFSTraceReader::open({}): {}", ct_path.display(), e));
+    Some(reader.db().clone())
 }
 
 fn find_nargo() -> bool {
@@ -93,29 +92,26 @@ fn dump_noir_loop_trace_steps() {
     let _ = std::fs::remove_dir_all(&target_dir);
     record_loop_trace(&target_dir).expect("nargo trace");
 
-    let trace_file = target_dir.join("trace.bin");
-    let format = if trace_file.exists() {
-        codetracer_trace_reader::TraceEventsFileFormat::Binary
-    } else {
-        codetracer_trace_reader::TraceEventsFileFormat::Json
+    let Some(db) = load_db_from_ctfs(&target_dir) else {
+        eprintln!(
+            "SKIPPED: nargo did not produce a *.ct CTFS container in {} — \
+             the Noir recorder still emits the legacy layout, which is no \
+             longer supported by this diagnostic.",
+            target_dir.display()
+        );
+        return;
     };
-    let trace_path = if trace_file.exists() {
-        trace_file
-    } else {
-        target_dir.join("trace.json")
-    };
-    let events = load_trace_data(&trace_path, format).expect("load_trace_data");
+    let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
 
     let mut step_lines: Vec<i64> = Vec::new();
     let mut path_strings: Vec<String> = Vec::new();
-    for ev in &events {
-        match ev {
-            TraceLowLevelEvent::Path(p) => path_strings.push(p.display().to_string()),
-            TraceLowLevelEvent::Step(s) => {
-                step_lines.push(s.line.0);
+    for step in db.step_from(StepId(0), true) {
+        if let Some(p) = reader.path(step.path_id) {
+            if !path_strings.iter().any(|existing| existing == p) {
+                path_strings.push(p.to_string());
             }
-            _ => {}
         }
+        step_lines.push(step.line.0);
     }
 
     println!("Paths registered: {path_strings:?}");
@@ -157,25 +153,16 @@ fn dump_noir_loop_flow_update() {
     let _ = std::fs::remove_dir_all(&target_dir);
     record_loop_trace(&target_dir).expect("nargo trace");
 
-    // Auto-detect format and decode the trace.
-    let (trace_file, format) = if target_dir.join("trace.bin").exists() {
-        (
-            target_dir.join("trace.bin"),
-            codetracer_trace_reader::TraceEventsFileFormat::Binary,
-        )
-    } else {
-        (
-            target_dir.join("trace.json"),
-            codetracer_trace_reader::TraceEventsFileFormat::Json,
-        )
+    // CTFS-only: pull the materialised `Db` directly from the `.ct`
+    // container.  The reader runs `TraceProcessor::postprocess` for us, so
+    // there is no need to drive event decode + postprocess by hand.
+    let Some(db) = load_db_from_ctfs(&target_dir) else {
+        eprintln!(
+            "SKIPPED: nargo did not produce a *.ct CTFS container in {}",
+            target_dir.display()
+        );
+        return;
     };
-    let metadata = load_trace_metadata_either(&target_dir);
-    let events = load_trace_data(&trace_file, format).expect("load_trace_data");
-
-    // Materialise the events into a Db.
-    let mut db = Db::new(&metadata.workdir);
-    let mut tp = TraceProcessor::new(&mut db);
-    tp.postprocess(&events).expect("postprocess events");
 
     // Find the first step inside the loop body (line 12 or 13).
     let target_step_id = {
@@ -282,23 +269,13 @@ fn dump_noir_space_ship_flow_update() {
         String::from_utf8_lossy(&result.stderr)
     );
 
-    let (trace_file, format) = if target_dir.join("trace.bin").exists() {
-        (
-            target_dir.join("trace.bin"),
-            codetracer_trace_reader::TraceEventsFileFormat::Binary,
-        )
-    } else {
-        (
-            target_dir.join("trace.json"),
-            codetracer_trace_reader::TraceEventsFileFormat::Json,
-        )
+    let Some(db) = load_db_from_ctfs(&target_dir) else {
+        eprintln!(
+            "SKIPPED: nargo did not produce a *.ct CTFS container in {}",
+            target_dir.display()
+        );
+        return;
     };
-    let metadata = load_trace_metadata_either(&target_dir);
-    let events = load_trace_data(&trace_file, format).expect("load_trace_data");
-
-    let mut db = Db::new(&metadata.workdir);
-    let mut tp = TraceProcessor::new(&mut db);
-    tp.postprocess(&events).expect("postprocess events");
 
     // Dump line steps for shield.nr only.
     let shield_path = "src/shield.nr";
@@ -405,22 +382,13 @@ fn dump_noir_space_ship_flow_from_call_entry() {
         .expect("nargo trace");
     assert!(result.status.success());
 
-    let (trace_file, format) = if target_dir.join("trace.bin").exists() {
-        (
-            target_dir.join("trace.bin"),
-            codetracer_trace_reader::TraceEventsFileFormat::Binary,
-        )
-    } else {
-        (
-            target_dir.join("trace.json"),
-            codetracer_trace_reader::TraceEventsFileFormat::Json,
-        )
+    let Some(db) = load_db_from_ctfs(&target_dir) else {
+        eprintln!(
+            "SKIPPED: nargo did not produce a *.ct CTFS container in {}",
+            target_dir.display()
+        );
+        return;
     };
-    let metadata = load_trace_metadata_either(&target_dir);
-    let events = load_trace_data(&trace_file, format).expect("events");
-    let mut db = Db::new(&metadata.workdir);
-    let mut tp = TraceProcessor::new(&mut db);
-    tp.postprocess(&events).expect("postprocess events");
 
     let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
 

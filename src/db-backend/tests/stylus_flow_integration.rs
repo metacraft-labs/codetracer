@@ -286,28 +286,25 @@ fn record_stylus_trace(project_path: &Path) -> Result<(PathBuf, PathBuf, PathBuf
     Ok((wasm_path, trace_dir, temp_dir))
 }
 
-/// Load `TraceMetadata` from a recording directory, preferring the
-/// legacy sidecar `trace_metadata.json` and falling back to the
-/// `meta.json` block embedded in a `.ct` CTFS container.
+/// Load `TraceMetadata` from a `.ct` CTFS container in `trace_dir`.
 ///
-/// See `Trace-Files/CTFS-Migration-Guide.md` §3e for the rationale: a
-/// modern `.ct` container is self-contained and ships its metadata in
-/// `meta.json` / `meta.dat` rather than as a sidecar.
+/// Per `Trace-Files/CTFS-Migration-Guide.md` §3e, the `.ct` container is
+/// the only supported materialized-trace format: metadata lives in
+/// `meta.dat` (or the older `meta.json` block written by recorders that
+/// have not yet migrated to the binary metadata format) inside the
+/// container.  The `meta.json` path is read here for compatibility with
+/// the in-tree Rust writer, which still emits it inside the container
+/// alongside event data.  Sidecar `trace_metadata.json` is no longer
+/// accepted.
 fn load_stylus_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, String> {
-    let legacy = trace_dir.join("trace_metadata.json");
-    if legacy.exists() {
-        let content = std::fs::read_to_string(&legacy).map_err(|e| format!("read {}: {}", legacy.display(), e))?;
-        return serde_json::from_str(&content).map_err(|e| format!("parse {}: {}", legacy.display(), e));
-    }
-
-    // Fall back to the CTFS container.  Pick the first `*.ct` file in
-    // `trace_dir` (recorders may name it `trace.ct` or `<program>.ct`).
+    // Pick the first `*.ct` file in `trace_dir` (recorders may name it
+    // `trace.ct` or `<program>.ct`).
     let ct_path = std::fs::read_dir(trace_dir)
         .map_err(|e| format!("read_dir {}: {}", trace_dir.display(), e))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
-        .ok_or_else(|| format!("no trace_metadata.json or *.ct in {}", trace_dir.display()))?;
+        .ok_or_else(|| format!("no *.ct CTFS container in {}", trace_dir.display()))?;
 
     let mut ctfs = db_backend::ctfs_trace_reader::ctfs_container::CtfsReader::open(&ct_path)
         .map_err(|e| format!("open {}: {}", ct_path.display(), e))?;
@@ -375,29 +372,18 @@ fn test_stylus_flow_integration() {
         Err(e) => panic!("Stylus recording failed: {}", e),
     };
 
-    // Verify trace files were produced. Per CTFS-Migration-Guide.md §3e a
-    // self-contained `.ct` container is allowed in place of the legacy
-    // `trace.json` + `trace_metadata.json` pair.
-    let trace_json = trace_dir.join("trace.json");
-    let trace_metadata = trace_dir.join("trace_metadata.json");
-    let has_ct = trace_dir.join("trace.ct").exists()
-        || std::fs::read_dir(&trace_dir)
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
-            })
-            .unwrap_or(false);
-    assert!(
-        trace_json.exists() || has_ct,
-        "neither trace.json nor *.ct produced at {}",
-        trace_dir.display()
-    );
-    assert!(
-        trace_metadata.exists() || has_ct,
-        "neither trace_metadata.json nor *.ct produced at {}",
-        trace_dir.display()
-    );
+    // Verify a CTFS container was produced.  Per
+    // `Trace-Files/CTFS-Migration-Guide.md` §3e, `.ct` is the only
+    // supported materialized-trace format; legacy sidecars
+    // (`trace.json` / `trace_metadata.json`) are no longer accepted.
+    let has_ct = std::fs::read_dir(&trace_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+        })
+        .unwrap_or(false);
+    assert!(has_ct, "no *.ct CTFS container produced at {}", trace_dir.display());
 
     println!("Stylus flow integration test passed!");
     println!("  Trace files verified at: {}", trace_dir.display());

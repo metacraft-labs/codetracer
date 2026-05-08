@@ -49,40 +49,33 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use codetracer_trace_types::{StepId, TraceMetadata};
+use codetracer_trace_types::StepId;
+use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::db::{Db, MaterializedReplaySession};
 use db_backend::flow_preloader::FlowPreloader;
 use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::task::{FlowMode, Location, RRTicks, TraceKind};
-use db_backend::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use db_backend::trace_reader::TraceReader;
 
-/// Load `TraceMetadata` from a recording directory, preferring the legacy
-/// sidecar `trace_metadata.json` and falling back to the `meta.json`
-/// block stored inside a `.ct` CTFS container.
+/// Load the in-memory `Db` from the unique `*.ct` CTFS container in
+/// `target_dir`.
 ///
-/// See `Trace-Files/CTFS-Migration-Guide.md` §3e: modern CTFS bundles are
-/// self-contained and stop emitting the sidecar; we accept both layouts.
-fn load_trace_metadata_either(target_dir: &std::path::Path) -> TraceMetadata {
-    let legacy = target_dir.join("trace_metadata.json");
-    if legacy.exists() {
-        return load_trace_metadata(&legacy).expect("trace_metadata.json");
-    }
+/// Returns `None` if `target_dir` does not contain a `.ct` file so the
+/// caller can skip cleanly when the recorder hasn't yet migrated to
+/// CTFS — the diagnostic test must not fail the suite when its input
+/// can't be produced.  Per `Trace-Files/CTFS-Migration-Guide.md` §3e the
+/// `.ct` bundle is the only supported materialized-trace format; legacy
+/// sidecars (`trace_metadata.json` / `trace.json` / `trace.bin`) are no
+/// longer accepted.
+fn load_db_from_ctfs(target_dir: &std::path::Path) -> Option<Db> {
     let ct_path = std::fs::read_dir(target_dir)
-        .ok()
-        .and_then(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
-        })
-        .unwrap_or_else(|| panic!("no trace_metadata.json or *.ct found in {}", target_dir.display()));
-    let mut ctfs = db_backend::ctfs_trace_reader::ctfs_container::CtfsReader::open(&ct_path)
-        .unwrap_or_else(|e| panic!("open {}: {}", ct_path.display(), e));
-    let meta_bytes = ctfs
-        .read_file("meta.json")
-        .unwrap_or_else(|e| panic!("read meta.json from {}: {}", ct_path.display(), e));
-    serde_json::from_slice(&meta_bytes).unwrap_or_else(|e| panic!("parse meta.json from {}: {}", ct_path.display(), e))
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|ext| ext == "ct"))?;
+    let reader = CTFSTraceReader::open(&ct_path)
+        .unwrap_or_else(|e| panic!("CTFSTraceReader::open({}): {}", ct_path.display(), e));
+    Some(reader.db().clone())
 }
 
 /// SKIP gate: every Noir-recorder test requires `nargo` on PATH.
@@ -164,24 +157,18 @@ fn flow_request_for_iterate_asteroids_returns_shield_nr_loops() {
         return;
     };
 
-    // Auto-detect the trace event format (binary or json, post-1.61
-    // ctfs binary is preferred).
-    let (trace_file, format) = if target_dir.join("trace.bin").exists() {
-        (
-            target_dir.join("trace.bin"),
-            codetracer_trace_reader::TraceEventsFileFormat::Binary,
-        )
-    } else {
-        (
-            target_dir.join("trace.json"),
-            codetracer_trace_reader::TraceEventsFileFormat::Json,
-        )
+    // CTFS-only: pull the materialised `Db` directly from the `.ct`
+    // container.  The reader runs `TraceProcessor::postprocess` for us, so
+    // we no longer need to drive event decode + postprocess by hand.
+    let Some(db) = load_db_from_ctfs(&target_dir) else {
+        eprintln!(
+            "SKIPPED: nargo did not produce a *.ct CTFS container in {} — \
+             the Noir recorder still emits the legacy layout, which is no \
+             longer supported by this diagnostic.",
+            target_dir.display()
+        );
+        return;
     };
-    let metadata = load_trace_metadata_either(&target_dir);
-    let events = load_trace_data(&trace_file, format).expect("events");
-    let mut db = Db::new(&metadata.workdir);
-    let mut tp = TraceProcessor::new(&mut db);
-    tp.postprocess(&events).expect("postprocess events");
 
     let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db.clone()));
     let (target_step_id, shield_path) =
