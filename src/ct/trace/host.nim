@@ -432,6 +432,11 @@ proc resolveLocalReference(reference, manifestPath, manifestKey: string): string
   manifestPath.parentDir / local
 
 proc findMaterializedTraceFolder(path: string): string =
+  ## Resolve `path` to a directory holding a CTFS materialized trace, or to
+  ## the `.ct` container itself when the user passes the file path directly.
+  ## Materialized traces are CTFS-only: any folder must contain at least one
+  ## `*.ct` file (legacy `trace_metadata.json`/`trace.bin`/`trace.json`
+  ## sidecar bundles are no longer accepted).
   if path.len == 0:
     return ""
   let fullPath = try:
@@ -446,19 +451,21 @@ proc findMaterializedTraceFolder(path: string): string =
       fileExists(fullPath)
     except OSError:
       false
+
+  proc dirHasCtFile(dir: string): bool =
+    for entry in walkDir(dir):
+      if entry.kind == pcFile and entry.path.endsWith(".ct"):
+        return true
+    false
+
   if isDir:
-    if fileExists(fullPath / "trace_metadata.json"):
+    if dirHasCtFile(fullPath):
       return fullPath
     for entry in walkDir(fullPath):
-      if entry.kind in {pcDir, pcLinkToDir} and fileExists(entry.path / "trace_metadata.json"):
+      if entry.kind in {pcDir, pcLinkToDir} and dirHasCtFile(entry.path):
         return entry.path
-  elif isFile:
-    let parent = fullPath.parentDir
-    if fullPath.extractFilename in ["trace.json", "trace.bin"] and
-        fileExists(parent / "trace_metadata.json"):
-      return parent
-    if fullPath.endsWith(".ct"):
-      return fullPath
+  elif isFile and fullPath.endsWith(".ct"):
+    return fullPath
   ""
 
 proc applyReplayStartEnv(start: HostStartCoordinates) =

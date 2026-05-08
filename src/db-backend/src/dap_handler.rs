@@ -2541,7 +2541,8 @@ mod tests {
     use crate::lang;
     use crate::task;
     use crate::task::{gen_task_id, GlobalCallLineIndex};
-    use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
+    use crate::ctfs_trace_reader::CTFSTraceReader;
+    use crate::trace_processor::TraceProcessor;
     use clap::error::Result;
     // use event_db::{IndexInSingleTable, SingleTableId};
     // use futures::stream::Iter;
@@ -2825,22 +2826,28 @@ mod tests {
             id: gen_task_id(kind),
         }
     }
+    /// Open the CTFS materialized trace at `path` and return its populated
+    /// `Db`. Used by db-backend unit tests that drive the handler against a
+    /// pre-recorded `.ct` container. Legacy
+    /// `trace.bin`/`trace.json`/`trace_metadata.json` triplets are no longer
+    /// supported.
     fn load_db_for_trace(path: &Path) -> Db {
-        let mut trace_file = path.join("trace.bin");
-        let mut trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Binary;
-        if !trace_file.exists() {
-            trace_file = path.join("trace.json");
-            trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Json;
-        }
-        let trace_metadata_file = path.join("trace_metadata.json");
-        let trace = load_trace_data(&trace_file, trace_file_format).expect("expected that it can load the trace file");
-        info!("trace {:?}", trace);
-        let trace_metadata =
-            load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
-        let mut db = Db::new(&trace_metadata.workdir);
-        let mut trace_processor = TraceProcessor::new(&mut db);
-        trace_processor.postprocess(&trace).unwrap();
-        db
+        let ct_path = if path.is_file()
+            && path.extension().is_some_and(|ext| ext == std::ffi::OsStr::new("ct"))
+        {
+            path.to_path_buf()
+        } else {
+            std::fs::read_dir(path)
+                .unwrap_or_else(|e| panic!("failed to read trace dir {}: {}", path.display(), e))
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"))
+                .unwrap_or_else(|| panic!("no *.ct container found in {}", path.display()))
+        };
+
+        let reader = CTFSTraceReader::open(&ct_path)
+            .unwrap_or_else(|e| panic!("CTFS open failed for {}: {}", ct_path.display(), e));
+        reader.db().clone()
     }
 
     fn setup_db() -> Db {

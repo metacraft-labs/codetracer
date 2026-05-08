@@ -9,11 +9,11 @@ use num_derive::FromPrimitive;
 use serde::{Deserialize, Serialize};
 use serde_repr::*;
 
+use crate::ctfs_trace_reader::CTFSTraceReader;
 use crate::db::{Db, MaterializedReplaySession};
 use crate::flow_preloader::FlowPreloader;
 use crate::in_memory_trace_reader::InMemoryTraceReader;
 use crate::task::{FlowUpdate, TraceKind};
-use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Diff {
@@ -68,23 +68,34 @@ pub struct DiffLine {
 }
 
 // loop shape 1:
+/// Open the CTFS materialized trace at `trace_folder` and return its
+/// populated `Db`.  Materialized traces are CTFS-only; the helper rejects
+/// folders without a `.ct` container.
 pub fn load_and_postprocess_trace(trace_folder: &Path) -> Result<Db, Box<dyn Error>> {
     info!("load_and_postprocess_trace {:?}", trace_folder.display());
-    let mut trace_path = trace_folder.join("trace.json");
-    let mut trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Json;
-    if !trace_path.exists() {
-        trace_path = trace_folder.join("trace.bin");
-        trace_file_format = codetracer_trace_reader::TraceEventsFileFormat::Binary;
-    }
-    let metadata_path = trace_folder.join("trace_metadata.json");
+    let ct_path = if trace_folder.is_file()
+        && trace_folder
+            .extension()
+            .is_some_and(|ext| ext == std::ffi::OsStr::new("ct"))
+    {
+        trace_folder.to_path_buf()
+    } else {
+        std::fs::read_dir(trace_folder)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"))
+            .ok_or_else(|| {
+                format!(
+                    "no *.ct CTFS container found in {} (legacy \
+                     trace_metadata.json + trace.bin/trace.json sidecars are \
+                     no longer accepted)",
+                    trace_folder.display()
+                )
+            })?
+    };
 
-    let meta = load_trace_metadata(&metadata_path)?;
-    let trace = load_trace_data(&trace_path, trace_file_format)?;
-    let mut db = Db::new(&meta.workdir);
-    let mut processor = TraceProcessor::new(&mut db);
-    processor.postprocess(&trace)?;
-
-    Ok(db)
+    let reader = CTFSTraceReader::open(&ct_path)?;
+    Ok(reader.db().clone())
 }
 
 // loop shape 2:

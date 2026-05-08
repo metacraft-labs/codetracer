@@ -1,15 +1,9 @@
-#[cfg(feature = "io-transport")]
-use std::path::PathBuf;
-
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
-use std::path::Path;
-use std::str;
 
 // use log::info;
 use codetracer_trace_types::{
-    CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TraceMetadata, TypeId, ValueRecord,
+    CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TypeId, ValueRecord,
 };
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
@@ -451,56 +445,8 @@ impl<'a> TraceProcessor<'a> {
     }
 }
 
-#[cfg(feature = "io-transport")]
-fn expand_tilde_path(path: &Path) -> PathBuf {
-    PathBuf::from(shellexpand::tilde(path.to_string_lossy().as_ref()).into_owned())
-}
-
-#[cfg(feature = "io-transport")]
-#[allow(clippy::panic)]
-pub fn load_trace_data(
-    trace_file: &Path,
-    file_format: codetracer_trace_reader::TraceEventsFileFormat,
-) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    let mut trace_reader = codetracer_trace_reader::create_trace_reader(file_format);
-    // copied and adapted from https://stackoverflow.com/a/70926549/438099
-    let path = expand_tilde_path(trace_file);
-    let trace_events = trace_reader.load_trace_events(&path)?;
-    Ok(trace_events)
-}
-
-#[cfg(all(feature = "browser-transport", not(feature = "io-transport")))]
-#[allow(clippy::panic)]
-pub fn load_trace_data(
-    trace_file: &Path,
-    file_format: codetracer_trace_reader::TraceEventsFileFormat,
-) -> Result<Vec<TraceLowLevelEvent>, Box<dyn Error>> {
-    use crate::vfs::load_trace_data_vfs;
-
-    let path_str = trace_file.to_str().unwrap();
-
-    load_trace_data_vfs(path_str, file_format)
-}
-
-#[cfg(feature = "io-transport")]
-#[allow(clippy::panic)]
-pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
-    // copied and adapted from https://stackoverflow.com/a/70926549/438099
-    let path = expand_tilde_path(trace_metadata_file);
-    let raw_bytes = fs::read(&path)?; //.unwrap_or_else(|_| panic!("metadata file {path:?} read error"));
-    let raw = str::from_utf8(&raw_bytes)?;
-
-    let trace_metadata: TraceMetadata = serde_json::from_str(raw)?;
-
-    Ok(trace_metadata)
-}
-
-#[cfg(all(feature = "browser-transport", not(feature = "io-transport")))]
-#[allow(clippy::panic)]
-pub fn load_trace_metadata(trace_metadata_file: &Path) -> Result<TraceMetadata, Box<dyn Error>> {
-    use crate::vfs::load_trace_metadata_vfs;
-
-    let path_str = trace_metadata_file.to_str().unwrap();
-
-    load_trace_metadata_vfs(path_str)
-}
+// NOTE: legacy `load_trace_data` / `load_trace_metadata` helpers were removed
+// when the materialized-trace format was consolidated to CTFS-only. Callers
+// must read traces through `crate::ctfs_trace_reader::CTFSTraceReader::open`
+// (or `from_bytes` for the in-memory VFS path), which produces a populated
+// `Db` directly.

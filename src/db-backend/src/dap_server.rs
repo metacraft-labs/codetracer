@@ -34,7 +34,6 @@ use crate::transport_endpoint::windows_named_pipe_path_for_pid;
 use crate::transport_endpoint::DapEndpoint;
 
 use crate::ctfs_trace_reader::{ctfs_container::CtfsReader, CTFSTraceReader};
-use crate::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use crate::trace_reader::TraceReader;
 
 use crate::transport::DapTransport;
@@ -341,16 +340,12 @@ fn setup(
     thread_name: &str,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
-    let metadata_path = trace_folder.join("trace_metadata.json");
     let trace_path = trace_folder.join(trace_file);
-    let is_ttd_run_trace = trace_path
-        .extension()
-        .is_some_and(|ext| ext == std::ffi::OsStr::new("run"));
 
-    // Check whether the trace is a CodeTracer DB CTFS container. Native MCR
-    // traces are also CTFS containers, but they carry recorder streams such as
-    // `t00000000000` instead of DB trace files and must fall through to the
-    // replay-worker path below.
+    // Materialized traces are CTFS-only. Native MCR traces are also CTFS
+    // containers, but they carry recorder streams such as `t00000000000`
+    // instead of DB trace files and must fall through to the replay-worker
+    // path below.
     //
     // We try several candidate paths because different callers pass trace info
     // differently:
@@ -394,80 +389,17 @@ fn setup(
                 return Ok(handler);
             }
             Err(e) => {
-                // Not a valid CTFS container — fall through to try other
-                // formats (MCR native replay, rr trace, etc.).
+                // Not a valid CTFS materialised trace — fall through to
+                // MCR native replay or rr replay-worker handling below.
                 info!(
-                    "CTFS open failed for {}: {e} — trying other formats",
+                    "CTFS open as materialised trace failed for {}: {e} — trying replay-worker path",
                     ctfs_path.display()
                 );
             }
         }
     }
 
-    // MCR traces (.ct files) are handled by ct-native-replay replay-worker,
-    // not by the DB trace reader. Skip DB metadata loading for them.
-    // At this point, if the file was a valid CTFS container it would have been
-    // handled above, so any remaining .ct files are MCR native replay traces.
-    //
-    // We also check whether trace_file has a .ct extension: if the CTFS reader
-    // rejected the file (e.g. due to a version mismatch), we must not try to
-    // parse it as CBOR+Zstd binary data, which would panic.
-    let is_mcr_trace = (trace_folder.is_file()
-        && trace_folder
-            .extension()
-            .is_some_and(|ext| ext == std::ffi::OsStr::new("ct")))
-        || trace_file
-            .extension()
-            .is_some_and(|ext| ext == std::ffi::OsStr::new("ct"));
-    let trace_file_format = if trace_file.extension() == Some(std::ffi::OsStr::new("json")) {
-        codetracer_trace_reader::TraceEventsFileFormat::Json
-    } else {
-        codetracer_trace_reader::TraceEventsFileFormat::Binary
-    };
-    // duration code copied from
-    // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-    if !is_ttd_run_trace && !is_mcr_trace {
-        let meta_result = load_trace_metadata(&metadata_path);
-        let trace_result = load_trace_data(&trace_path, trace_file_format);
-        if let Err(ref e) = meta_result {
-            info!("load_trace_metadata failed for {:?}: {}", metadata_path, e);
-        }
-        if let Err(ref e) = trace_result {
-            info!(
-                "load_trace_data failed for {:?} (format {:?}): {}",
-                trace_path, trace_file_format, e
-            );
-        }
-        if let (Ok(meta), Ok(trace)) = (meta_result, trace_result) {
-            let mut db = Db::new(&meta.workdir);
-            let mut proc = TraceProcessor::new(&mut db);
-            proc.postprocess(&trace)?;
-
-            let mut handler = Handler::new(
-                TraceKind::Materialized,
-                RecreatorArgs {
-                    name: thread_name.to_string(),
-                    ..RecreatorArgs::default()
-                },
-                Box::new(db),
-            );
-            handler.raw_diff_index = raw_diff_index;
-            // Load macro sourcemaps for Nim macro expansion support (S6).
-            handler.load_macro_sourcemaps(trace_folder);
-            if for_launch {
-                handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-            }
-            handler.initialized = true;
-            return Ok(handler);
-        }
-    } else {
-        info!(
-            "skipping runtime-tracing metadata load for TTD .run replay trace: {}",
-            trace_path.display()
-        );
-    }
-
-    info!("can't read db metadata or path trace files: try to read as rr trace");
+    info!("not a CTFS materialized trace; trying replay-worker (MCR / rr / TTD .run) path");
     eprintln!("[db-backend setup] trying rr trace path");
     if let Some(path) = resolve_replay_trace_path(trace_folder, trace_file) {
         let db = Db::new(&PathBuf::from(""));
@@ -496,14 +428,11 @@ fn setup(
 /// Browser/WASM-specific setup path that reads trace data from the in-memory
 /// VFS instead of the real filesystem.
 ///
-/// In the browser WASM build, trace files are pushed into the VFS via
-/// `vfs_write_file` from JavaScript before any DAP messages arrive. This
-/// function mirrors the logic in [`setup`] but replaces all filesystem
-/// operations (`Path::exists`, `std::fs::File::open`, etc.) with VFS reads.
-///
-/// Only materialized (DB-based) traces are supported in the browser: both
-/// CTFS containers and loose `trace_metadata.json` + `trace.bin`/`trace.json`
-/// layouts.  MCR native replay and rr traces are not available in WASM.
+/// In the browser WASM build, the `.ct` CTFS container is pushed into the VFS
+/// via `vfs_write_file` from JavaScript before any DAP messages arrive. CTFS
+/// is the only supported materialized-trace format — legacy
+/// `trace_metadata.json` + `trace.bin` / `trace.json` sidecar layouts are no
+/// longer accepted.
 #[cfg(feature = "browser-transport")]
 pub fn setup_from_vfs(
     trace_folder: &str,
@@ -528,10 +457,11 @@ pub fn setup_from_vfs(
 
     let trace_vfs_path = join_vfs(trace_folder, trace_file);
 
-    // 1. Try CTFS container (check magic bytes from VFS data).
-    //    We try the trace_folder itself as a virtual path (e.g. "recording.ct")
-    //    and the joined trace_folder/trace_file path.
-    let ctfs_candidates = [trace_folder.to_string(), trace_vfs_path.clone()];
+    // Try every candidate VFS path that could contain the .ct payload:
+    //   - `trace_folder` itself when JS pushes the container under the
+    //     folder name (e.g. "recording.ct").
+    //   - `trace_folder/trace_file` when both are passed.
+    let ctfs_candidates = [trace_folder.to_string(), trace_vfs_path];
     for candidate in &ctfs_candidates {
         if !crate::vfs::vfs_exists(candidate) {
             continue;
@@ -569,46 +499,15 @@ pub fn setup_from_vfs(
                     return Ok(handler);
                 }
                 Err(e) => {
-                    info!("CTFS from_bytes failed for VFS path {candidate:?}: {e} — trying other formats");
+                    info!("CTFS from_bytes failed for VFS path {candidate:?}: {e}");
+                    return Err(format!("CTFS from_bytes failed for {candidate:?}: {e}").into());
                 }
             }
         }
     }
 
-    // 2. Try DB trace (trace_metadata.json + trace.bin/trace.json) from VFS.
-    let metadata_vfs_path = join_vfs(trace_folder, "trace_metadata.json");
-    let trace_file_format = if trace_file.ends_with(".json") {
-        codetracer_trace_reader::TraceEventsFileFormat::Json
-    } else {
-        codetracer_trace_reader::TraceEventsFileFormat::Binary
-    };
-
-    if let (Ok(meta), Ok(trace)) = (
-        load_trace_metadata(Path::new(&metadata_vfs_path)),
-        load_trace_data(Path::new(&trace_vfs_path), trace_file_format),
-    ) {
-        let mut db = Db::new(&meta.workdir);
-        let mut proc = TraceProcessor::new(&mut db);
-        proc.postprocess(&trace)?;
-
-        let mut handler = Handler::new(
-            TraceKind::Materialized,
-            RecreatorArgs {
-                name: thread_name.to_string(),
-                ..RecreatorArgs::default()
-            },
-            Box::new(db),
-        );
-        handler.raw_diff_index = raw_diff_index;
-        if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
-        }
-        handler.initialized = true;
-        return Ok(handler);
-    }
-
-    Err("setup_from_vfs: could not load trace from VFS — \
-         no valid CTFS container or DB metadata+trace files found"
+    Err("setup_from_vfs: no CTFS (.ct) container found in VFS \
+         (legacy trace_metadata.json / trace.bin / trace.json sidecars are no longer supported)"
         .into())
 }
 
@@ -704,35 +603,24 @@ fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
 /// Determine whether the trace in `folder` is a DB-based trace (JavaScript,
 /// Python, Ruby, etc.) that does NOT require an rr replay worker.
 ///
-/// A trace is considered DB-based when the folder contains DB metadata files
-/// (`trace.bin` or `trace.json` + `trace_metadata.json`) or when the resolved
-/// trace file is a CodeTracer DB CTFS container.
+/// Materialized traces are CTFS-only, so this reduces to detecting whether
+/// the folder (or the resolved trace file) is a CodeTracer DB CTFS
+/// container with materialized contents (`steps.dat` or `events.log`).
+/// Native MCR traces also use CTFS magic but their stream layout is handled
+/// by ct-native-replay; `is_codetracer_ctfs_file` distinguishes the two by
+/// looking for the DB stream files inside the container.
 ///
 /// This check prevents `resolve_recreator_exe` from auto-discovering
 /// `ct-native-replay` on PATH for DB traces, which would cause the rr replay
 /// worker to start and fail.
 fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
-    // DB recorders produce trace_metadata.json alongside either trace.bin
-    // (CBOR+Zstd) or trace.json (legacy JSON format).
-    let metadata_path = folder.join("trace_metadata.json");
-    if metadata_path.is_file() {
-        let trace_path = folder.join(trace_file);
-        if trace_path.is_file() {
-            return true;
-        }
-    }
-
-    // CodeTracer DB CTFS containers embed events directly and do not need a
-    // replay worker. Native MCR traces also have CTFS magic, but their stream
-    // layout is handled by ct-native-replay.
-    let trace_path = folder.join(trace_file);
     if folder.is_file() && is_codetracer_ctfs_file(folder) {
         return true;
     }
+    let trace_path = folder.join(trace_file);
     if trace_path.exists() && is_codetracer_ctfs_file(&trace_path) {
         return true;
     }
-
     false
 }
 
@@ -1016,33 +904,20 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 if let Some(trace_file) = &args.trace_file {
                     ctx.launch_trace_file = trace_file.clone();
                 } else {
-                    // Auto-detect trace file format.  Priority:
-                    //   1. trace.bin  — binary CBOR+zstd (Python/Ruby/WASM recorders)
-                    //   2. trace.json — DB trace (JS and other recorders that emit
-                    //                   trace_metadata.json + trace.json)
-                    //   3. *.ct      — CTFS container (shell recorders via Nim writer
-                    //                  may name the file after the program, e.g.
-                    //                  `bash_flow_test.ct` instead of `trace.ct`)
-                    //   4. trace.json — fallback (legacy JSON format)
-                    //
-                    // trace.json is checked before *.ct because some recorders
-                    // (e.g. JavaScript) produce both a `.ct` file and
-                    // `trace.json` + `trace_metadata.json`. Selecting the `.ct`
-                    // file causes the setup logic to treat the trace as an MCR
-                    // replay trace, skipping the DB metadata loading path.
-                    let bin_path = folder.join("trace.bin");
-                    let json_path = folder.join("trace.json");
-                    if bin_path.is_file() {
-                        ctx.launch_trace_file = "trace.bin".into();
-                    } else if json_path.is_file() {
-                        ctx.launch_trace_file = "trace.json".into();
-                    } else if let Some(ct_path) = find_ct_file_in_dir(folder) {
-                        // Store just the file name — setup() joins it with the folder.
+                    // Auto-detect the trace file. Materialized traces are
+                    // CTFS-only (`<program>.ct` or `trace.ct`); legacy
+                    // sidecars (`trace.bin` / `trace.json` +
+                    // `trace_metadata.json`) are no longer supported.
+                    if let Some(ct_path) = find_ct_file_in_dir(folder) {
+                        // Store just the file name — setup() joins it with
+                        // the folder.
                         if let Some(name) = ct_path.file_name() {
                             ctx.launch_trace_file = name.into();
                         }
                     } else {
-                        ctx.launch_trace_file = "trace.json".into();
+                        // No .ct found; default to "trace.ct" so the error
+                        // message in setup() points at the canonical name.
+                        ctx.launch_trace_file = "trace.ct".into();
                     }
                 }
 
@@ -1192,16 +1067,13 @@ pub fn handle_message_browser(
             // Store launch parameters in ctx (same as native path).
             handle_message(msg, sender.clone(), ctx)?;
 
-            // In the browser, re-detect trace files from VFS.  The native
-            // path's auto-detect uses Path::is_file() which always returns
-            // false in WASM, causing it to fall back to "trace.json" even
-            // when the VFS contains a different file (e.g. trace.ct).  We
-            // always re-run detection using VFS-aware checks.
+            // In the browser, re-detect the trace file from the VFS.  The
+            // native auto-detect uses `Path::is_file()` which always returns
+            // false in WASM, so we always re-run detection here using
+            // VFS-aware lookups. Materialized traces are CTFS-only.
             {
                 let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
-                // Priority matches the native path: binary DB traces first,
-                // then JSON DB traces, then CTFS containers (.ct files).
-                let candidates = ["trace.bin", "trace.json", "trace.ct"];
+                let candidates = ["trace.ct"];
                 for name in &candidates {
                     let vfs_path = if folder.is_empty() {
                         (*name).to_string()
@@ -1359,25 +1231,16 @@ fn task_thread(
                 let launch_trace_file = if let Some(trace_file) = &args.trace_file {
                     trace_file.clone()
                 } else {
-                    // Auto-detect trace file format (same priority as the
-                    // initial launch handler above):
-                    //   1. trace.bin  — binary CBOR+zstd
-                    //   2. trace.json — DB trace (checked before *.ct because
-                    //      some recorders produce both formats)
-                    //   3. *.ct      — CTFS container
-                    //   4. trace.json — fallback
-                    let bin_path = folder.join("trace.bin");
-                    let json_path = folder.join("trace.json");
-                    if bin_path.is_file() {
-                        "trace.bin".into()
-                    } else if json_path.is_file() {
-                        "trace.json".into()
-                    } else if let Some(ct_path) = find_ct_file_in_dir(folder) {
+                    // Materialized traces are CTFS-only — pick the first
+                    // `.ct` container in the folder, falling back to the
+                    // canonical name so setup() yields a clear error if
+                    // nothing matches.
+                    if let Some(ct_path) = find_ct_file_in_dir(folder) {
                         ct_path
                             .file_name()
-                            .map_or_else(|| "trace.json".into(), |name| name.into())
+                            .map_or_else(|| "trace.ct".into(), |name| name.into())
                     } else {
-                        "trace.json".into()
+                        "trace.ct".into()
                     }
                 };
 

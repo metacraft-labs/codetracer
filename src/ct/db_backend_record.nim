@@ -87,13 +87,13 @@ proc recordDb(
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
 
   createDir(traceFolder)
-  let tracePath = traceFolder / "trace.json"
-  let traceMetadataPath = traceFolder / "trace_metadata.json"
   if lang == LangNoir and vmExe.len == 0:
     echo fmt"error: CODETRACER_NOIR_EXE_PATH is not set in the env variables"
     quit(1)
-  putEnv("CODETRACER_DB_TRACE_PATH", tracePath)
-  # echo "record db ", getEnv("CODETRACER_DB_TRACE_PATH")
+  # Materialized traces are CTFS-only; the recorders write a single
+  # `<program>.ct` container into ``traceFolder`` directly, so we no longer
+  # need to set CODETRACER_DB_TRACE_PATH (which used to point recorders at
+  # the legacy ``trace.json`` sidecar).
 
   var startArgs: seq[string]
   case lang:

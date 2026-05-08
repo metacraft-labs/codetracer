@@ -239,8 +239,10 @@ impl FlowTestRunner {
     ///
     /// Unlike `new()` (for RR traces), this does NOT need ct-rr-support or
     /// prepare_trace_folder. DB traces (Python, Ruby, JavaScript, Noir, WASM)
-    /// are self-contained: the trace folder has trace.json/trace.bin +
-    /// trace_metadata.json and db-backend auto-detects the format.
+    /// are self-contained: the trace folder contains a single `<program>.ct`
+    /// CTFS container that db-backend opens directly. Legacy
+    /// `trace.json`/`trace.bin` + `trace_metadata.json` triplets are no
+    /// longer accepted.
     pub fn new_db_trace(db_backend_bin: &Path, trace_dir: &Path) -> Result<Self, BoxError> {
         Self::new_db_trace_with_timeout(db_backend_bin, trace_dir, Duration::from_secs(10))
     }

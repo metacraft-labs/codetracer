@@ -15,12 +15,12 @@ use std::{
 use codetracer_trace_types::{StepId, TypeKind};
 
 use crate::{
+    ctfs_trace_reader::CTFSTraceReader,
     db::{Db, MaterializedReplaySession},
     in_memory_trace_reader::InMemoryTraceReader,
     lang::Lang,
     replay::ReplaySession,
     task::StringAndValueTuple,
-    trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor},
     trace_reader::TraceReader,
     value::Value,
 };
@@ -39,11 +39,7 @@ fn log_array() -> Result<(), Box<dyn Error>> {
     let expected = vec![var("arr", seq_val(vec![int_val(42), int_val(-13), int_val(5)]))];
 
     check_tracepoint_evaluate(src, 3, "array", Lang::Ruby, &expected)?;
-    if find_nargo() {
-        check_tracepoint_evaluate(src, 3, "array", Lang::Noir, &expected)?;
-    } else {
-        eprintln!("SKIPPED: Noir variant — nargo not found on PATH");
-    }
+    run_noir_variant(src, 3, "array", &expected)?;
 
     Ok(())
 }
@@ -66,13 +62,28 @@ log(arr[2])";
     ];
 
     check_tracepoint_evaluate(src, 3, "array", Lang::Ruby, &expected)?;
-    if find_nargo() {
-        check_tracepoint_evaluate(src, 3, "array", Lang::Noir, &expected)?;
-    } else {
-        eprintln!("SKIPPED: Noir variant — nargo not found on PATH");
-    }
+    run_noir_variant(src, 3, "array", &expected)?;
 
     Ok(())
+}
+
+/// Run the Noir variant of a tracepoint test if `nargo` is available and
+/// produces a CTFS container.  Materialized traces are CTFS-only — when
+/// `nargo` is found but emits the legacy `trace.bin`/`trace_metadata.json`
+/// triplet instead of a `.ct` container, the test panics with a clear
+/// upgrade instruction rather than silently skipping. This matches the
+/// directive that legacy materialized-trace bundles are no longer accepted.
+fn run_noir_variant(
+    src: &str,
+    line: usize,
+    trace_name: &str,
+    expected: &[StringAndValueTuple],
+) -> Result<(), Box<dyn Error>> {
+    if !find_nargo() {
+        eprintln!("SKIPPED: Noir variant — nargo not found on PATH");
+        return Ok(());
+    }
+    check_tracepoint_evaluate(src, line, trace_name, Lang::Noir, expected)
 }
 
 // ----------------------------------------------------------------------------------------------------------------
@@ -163,32 +174,37 @@ fn check_equal_values(actual: &Value, expected: &Value) {
     }
 }
 
+/// Open the CTFS materialized trace recorded under `path` and return its
+/// populated `Db`. Materialized traces are CTFS-only — legacy
+/// `trace.bin`/`trace.json` + `trace_metadata.json` triplets are no longer
+/// accepted by db-backend.
+///
+/// Panics with a clear regeneration instruction when the recorder did not
+/// produce a `.ct` container, so the failure is loud (per the
+/// CTFS-only migration directive — silent fallbacks are forbidden).
 fn load_db_for_trace(path: &Path) -> Db {
-    // Auto-detect the trace file format: binary (trace.bin) takes priority
-    // over JSON (trace.json), matching the convention used elsewhere in the
-    // codebase (see lib.rs, diff.rs, dap_server.rs).
-    let (trace_file, file_format) = if path.join("trace.bin").exists() {
-        (
-            path.join("trace.bin"),
-            codetracer_trace_reader::TraceEventsFileFormat::Binary,
-        )
-    } else if path.join("trace.json").exists() {
-        (
-            path.join("trace.json"),
-            codetracer_trace_reader::TraceEventsFileFormat::Json,
-        )
-    } else {
-        panic!("neither trace.bin nor trace.json found in {}", path.display());
-    };
+    let ct_path = std::fs::read_dir(path)
+        .unwrap_or_else(|e| panic!("read_dir {}: {}", path.display(), e))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no *.ct CTFS container found in {}.\n  \
+                 Materialized traces are CTFS-only — legacy \
+                 trace.bin/trace.json/trace_metadata.json bundles are no \
+                 longer accepted.\n  \
+                 If the recorder is producing the legacy 3-file layout, \
+                 update it to emit a `.ct` container (the trace-format \
+                 migration is documented in \
+                 codetracer-specs/Trace-Files/CTFS-Migration-Guide.md).",
+                path.display()
+            )
+        });
 
-    let trace_metadata_file = path.join("trace_metadata.json");
-    let trace = load_trace_data(&trace_file, file_format).expect("expected that it can load the trace file");
-    let trace_metadata =
-        load_trace_metadata(&trace_metadata_file).expect("expected that it can load the trace metadata file");
-    let mut db = Db::new(&trace_metadata.workdir);
-    let mut trace_processor = TraceProcessor::new(&mut db);
-    trace_processor.postprocess(&trace).unwrap();
-    db
+    let reader = CTFSTraceReader::open(&ct_path)
+        .unwrap_or_else(|e| panic!("CTFS open failed for {}: {}", ct_path.display(), e));
+    reader.db().clone()
 }
 
 fn lang_to_string(lang: Lang) -> Result<String, Box<dyn Error>> {
@@ -208,9 +224,11 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Native Ruby recorder (CTFS-only). The legacy pure-Ruby recorder is
+    // no longer auto-detected because it cannot produce `.ct` containers.
     let locations = [
-        "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
+        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
     ];
     for loc in locations {
         let path = manifest_dir.join(loc);
@@ -231,7 +249,7 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
         }
     };
     let main_path = program_dir.join("main.rb");
-    let trace_path = target_dir.join("trace.json");
+    // The native Ruby recorder always writes a `.ct` CTFS container.
     let result = Command::new("ruby")
         .args([
             recorder.to_str().unwrap(),
@@ -239,7 +257,7 @@ fn record_ruby_trace(program_dir: &Path, target_dir: &Path) -> Result<(), Box<dy
             target_dir.to_str().unwrap(),
             main_path.to_str().unwrap(),
         ])
-        .env("CODETRACER_DB_TRACE_PATH", trace_path.to_str().unwrap())
+        .env("CODETRACER_TRACE_FORMAT", "ctfs")
         .output()
         .unwrap();
 

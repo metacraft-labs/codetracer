@@ -1,10 +1,15 @@
 ## ct print -- Print trace events in human-readable format.
 ##
 ## Auto-detects the trace type:
-## - MCR .ct files: prints summary info and delegates to ct-mcr
-## - Materialized traces (trace.bin): reads metadata and event summaries
+## - `.ct` containers: materialized DB traces and MCR replay traces alike are
+##   stored in CTFS containers; `ct print` shows summary info and delegates
+##   detailed event analysis to `ct-mcr` / `ct-print` companion tools.
 ## - JSONL span manifests: parses and pretty-prints HTTP requests
 ## - Trace directories: scans for trace files within
+##
+## Legacy 3-file materialized traces (trace.bin / trace.json +
+## trace_metadata.json + trace_paths.json) are no longer accepted — those
+## bundles must be regenerated as `.ct` containers per the CTFS migration.
 
 import
   std/[os, json, strutils, strformat, options]
@@ -13,7 +18,7 @@ type
   TraceType* = enum
     ttUnknown
     ttMcrTrace       ## MCR .ct file
-    ttMaterialized   ## trace.bin + trace_metadata.json (Ruby/Python/PHP)
+    ttMaterialized   ## Legacy materialized trace (no longer supported by readers)
     ttSpanManifest   ## JSONL span manifest (session_manifest.jsonl, codetracer_spans.jsonl)
     ttTraceDirectory ## Directory containing trace files
 
@@ -37,7 +42,9 @@ proc detectTraceType*(path: string): TraceType =
       return ttMcrTrace
     if path.endsWith(".jsonl"):
       return ttSpanManifest
-    if path.endsWith(".bin"):
+    if path.endsWith(".bin") or path.endsWith(".json"):
+      # Legacy materialized trace fragments — no longer accepted, but
+      # report them so callers can produce a clear migration message.
       return ttMaterialized
     # Peek at the first bytes to detect JSON lines
     try:
@@ -48,17 +55,19 @@ proc detectTraceType*(path: string): TraceType =
       discard
     return ttUnknown
 
-  # Directory -- look for known marker files
-  if fileExists(path / "trace.bin") or fileExists(path / "trace.json"):
-    return ttMaterialized
+  # Directory -- look for `.ct` containers (materialized DB or MCR).
+  for kind, file in walkDir(path):
+    if kind == pcFile and file.endsWith(".ct"):
+      return ttMcrTrace
+
   if fileExists(path / "session_manifest.jsonl") or
       fileExists(path / "codetracer_spans.jsonl"):
     return ttSpanManifest
 
-  # Check for .ct files inside the directory
-  for kind, file in walkDir(path):
-    if kind == pcFile and file.endsWith(".ct"):
-      return ttMcrTrace
+  # Legacy 3-file bundle detection (kept only for the migration message).
+  if fileExists(path / "trace.bin") or fileExists(path / "trace.json") or
+      fileExists(path / "trace_metadata.json"):
+    return ttMaterialized
 
   return ttTraceDirectory
 
@@ -129,103 +138,18 @@ proc printSpanManifest(path: string, opts: PrintOptions) =
     echo fmt"Total: {count} requests"
 
 proc printMaterializedTrace(path: string, opts: PrintOptions) =
-  ## Print events from a materialized trace (trace.bin + metadata).
-  let traceDir = if dirExists(path): path else: parentDir(path)
-
-  let metadataPath = traceDir / "trace_metadata.json"
-  let tracePath =
-    if fileExists(traceDir / "trace.bin"):
-      traceDir / "trace.bin"
-    elif fileExists(traceDir / "trace.json"):
-      traceDir / "trace.json"
-    else:
-      ""
-
-  # Print metadata summary
-  if fileExists(metadataPath):
-    try:
-      let meta = parseJson(readFile(metadataPath))
-      echo "Trace metadata:"
-      let program = meta{"program"}.getStr("unknown")
-      let workdir = meta{"workdir"}.getStr("-")
-      let format = meta{"format"}.getStr("-")
-      echo "  Program: " & program
-      echo "  Working dir: " & workdir
-      echo "  Format: " & format
-      echo ""
-    except CatchableError:
-      discard
-
-  # Print source file paths if available
-  let pathsFile = traceDir / "trace_paths.json"
-  if fileExists(pathsFile):
-    try:
-      let paths = parseJson(readFile(pathsFile))
-      echo fmt"Source files: {paths.len}"
-      for i in 0 ..< paths.len:
-        if i < 5:
-          echo fmt"  [{i}] {paths[i].getStr()}"
-        elif i == 5:
-          echo fmt"  ... and {paths.len - 5} more"
-      echo ""
-    except CatchableError:
-      discard
-
-  # Print event summary from trace_events.jsonl if available
-  let eventsFile = traceDir / "trace_events.jsonl"
-  if fileExists(eventsFile):
-    var calls, steps, returns, variables = 0
-    var printed = 0
-    for line in lines(eventsFile):
-      let trimmed = line.strip()
-      if trimmed.len == 0:
-        continue
-      try:
-        let ev = parseJson(trimmed)
-        let evType = ev{"type"}.getStr("")
-        case evType
-        of "call": inc calls
-        of "step": inc steps
-        of "return": inc returns
-        of "variable": inc variables
-        else: discard
-
-        # Apply filters
-        if opts.filter.len > 0 and opts.filter != evType:
-          continue
-        if opts.function.len > 0:
-          let funcName = ev{"function"}.getStr("")
-          if opts.function notin funcName:
-            continue
-
-        inc printed
-        if opts.limit > 0 and printed > opts.limit:
-          continue
-
-        if opts.format == "json":
-          echo trimmed
-        elif opts.format == "csv":
-          let fn = ev{"function"}.getStr("-")
-          let file = ev{"file"}.getStr("-")
-          let line = ev{"line"}.getInt(0)
-          echo evType & "," & fn & "," & file & "," & $line
-      except CatchableError:
-        discard
-    if opts.format != "json" and opts.format != "csv":
-      echo "Events:"
-      echo fmt"  Calls:     {calls}"
-      echo fmt"  Steps:     {steps}"
-      echo fmt"  Returns:   {returns}"
-      echo fmt"  Variables: {variables}"
-      echo fmt"  Total:     {calls + steps + returns + variables}"
-    return
-
-  if tracePath.len > 0:
-    let size = getFileSize(tracePath)
-    echo fmt"Trace file: {tracePath} ({size} bytes)"
-    echo "(Binary trace -- use ct replay to inspect events)"
-  else:
-    echo "No trace events file found in: " & traceDir
+  ## Stub: legacy 3-file materialized traces (trace.bin / trace.json +
+  ## trace_metadata.json + trace_paths.json) are no longer supported.
+  ## Materialized traces now live in `.ct` CTFS containers and are printed
+  ## via `printMcrTrace`. This stub stays around so detection of legacy
+  ## artefacts produces a helpful migration message rather than silently
+  ## walking nonexistent files.
+  discard opts
+  echo fmt"Legacy materialized trace detected at: {path}"
+  echo "  Legacy 3-file bundles (trace.bin / trace.json + trace_metadata.json"
+  echo "  + trace_paths.json) are no longer accepted; the trace must be"
+  echo "  regenerated as a CTFS `.ct` container (see"
+  echo "  codetracer-specs/Trace-Files/CTFS-Migration-Guide.md)."
 
 proc printMcrTrace(path: string, opts: PrintOptions) =
   ## Print info about an MCR .ct trace file.
@@ -303,60 +227,15 @@ proc verifySpanManifest(path: string): VerifyResult =
   result.valid = result.httpRequestCount > 0 and result.errors.len == 0
 
 proc verifyMaterializedTrace(path: string): VerifyResult =
-  ## Verify a materialized trace directory has the expected files and events.
+  ## Legacy materialized traces are no longer supported; verification just
+  ## reports a clear migration error so CI smoke tests fail loudly instead
+  ## of silently passing on a stale 3-file bundle.
   result.traceType = ttMaterialized
-  let traceDir = if dirExists(path): path else: parentDir(path)
-
-  # Check trace files exist
-  let hasMetadata = fileExists(traceDir / "trace_metadata.json")
-  let hasEvents = fileExists(traceDir / "trace.bin") or
-                  fileExists(traceDir / "trace.json") or
-                  fileExists(traceDir / "trace_events.jsonl")
-  let hasPaths = fileExists(traceDir / "trace_paths.json")
-
-  if not hasMetadata:
-    result.errors.add("Missing trace_metadata.json")
-  if not hasEvents:
-    result.errors.add(
-      "Missing trace events file " &
-      "(trace.bin/trace.json/trace_events.jsonl)")
-  if not hasPaths:
-    result.errors.add("Missing trace_paths.json")
-
-  # Count events from JSONL if available
-  if fileExists(traceDir / "trace_events.jsonl"):
-    for line in lines(traceDir / "trace_events.jsonl"):
-      let trimmed = line.strip()
-      if trimmed.len == 0: continue
-      try:
-        let ev = parseJson(trimmed)
-        result.eventCount += 1
-        let evType = ev{"type"}.getStr("")
-        case evType
-        of "call": result.callCount += 1
-        of "step": result.stepCount += 1
-        else: discard
-      except CatchableError:
-        discard
-  elif fileExists(traceDir / "trace.bin"):
-    # Binary trace -- check file size as a proxy for content
-    let size = getFileSize(traceDir / "trace.bin")
-    if size > 100:
-      result.eventCount = 1  # At least something is there
-    else:
-      result.errors.add(
-        "trace.bin is suspiciously small (" &
-        $size & " bytes)")
-
-  # Count source files
-  if hasPaths:
-    try:
-      let paths = parseJson(readFile(traceDir / "trace_paths.json"))
-      result.sourceFileCount = paths.len
-    except CatchableError:
-      discard
-
-  result.valid = result.errors.len == 0 and result.eventCount > 0
+  result.valid = false
+  let msg = "Legacy materialized trace at " & path &
+            " is no longer supported (CTFS-only). Regenerate as a `.ct` " &
+            "container per codetracer-specs/Trace-Files/CTFS-Migration-Guide.md."
+  result.errors.add(msg)
 
 proc verifyMcrTrace(path: string): VerifyResult =
   ## Verify an MCR .ct trace file exists and has reasonable size.

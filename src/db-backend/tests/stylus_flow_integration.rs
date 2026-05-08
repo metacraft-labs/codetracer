@@ -434,13 +434,34 @@ fn test_stylus_trace_analysis() {
     // --- Tier 2: Trace content verification ---
     println!("\n=== Verifying trace contents ===");
 
-    // Parse trace.json
-    let trace_json_path = trace_dir.join("trace.json");
-    let trace_content =
-        std::fs::read_to_string(&trace_json_path).unwrap_or_else(|e| panic!("Failed to read trace.json: {}", e));
+    // Locate the .ct CTFS container produced by wazero -stylus and pull
+    // recorded events out via the CTFS reader. Materialized traces are
+    // CTFS-only; the legacy `trace.json` sidecar is no longer accepted.
+    let ct_path = std::fs::read_dir(&trace_dir)
+        .unwrap_or_else(|e| panic!("read_dir {}: {}", trace_dir.display(), e))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
+        .unwrap_or_else(|| panic!("no *.ct CTFS container produced at {}", trace_dir.display()));
 
-    let trace_events: Vec<TraceLowLevelEvent> =
-        serde_json::from_str(&trace_content).unwrap_or_else(|e| panic!("Failed to parse trace.json: {}", e));
+    let ctfs_reader = db_backend::ctfs_trace_reader::CTFSTraceReader::open(&ct_path)
+        .unwrap_or_else(|e| panic!("Failed to open CTFS container {}: {}", ct_path.display(), e));
+
+    // Synthesize a `TraceLowLevelEvent` view from the populated Db so the
+    // assertions below (which were written against the raw event stream)
+    // continue to work without re-parsing the on-disk encoding.
+    let db = ctfs_reader.db();
+    let trace_events: Vec<TraceLowLevelEvent> = db
+        .events
+        .iter()
+        .map(|ev| {
+            TraceLowLevelEvent::Event(RecordEvent {
+                kind: ev.kind,
+                content: ev.content.clone(),
+                metadata: ev.metadata.clone(),
+            })
+        })
+        .collect();
 
     println!("Trace has {} entries", trace_events.len());
     assert!(!trace_events.is_empty(), "trace.json should contain at least one entry");
@@ -572,8 +593,12 @@ fn test_stylus_trace_analysis() {
 /// format correctly: initializes without panicking, returns thread info, and
 /// delivers stopped + complete-move events.
 ///
-/// Uses the trace at `STYLUS_TRACE_DIR` (env var) or the checked-in fixture at
-/// `tests/fixtures/stylus-fund-trace/`. Does NOT require a devnode — works offline.
+/// Uses the CTFS trace at `STYLUS_TRACE_DIR` (env var) or the committed CTFS
+/// fixture at `tests/fixtures/stylus-fund-trace/`. Does NOT require a devnode
+/// — works offline once the fixture is present. Materialized traces are
+/// CTFS-only; if the fixture is missing or only contains the legacy 3-file
+/// JSON bundle, regenerate it via
+/// `src/db-backend/tests/fixtures/regenerate-stylus-fixture.sh`.
 #[test]
 fn test_stylus_dap_trace() {
     // Use STYLUS_TRACE_DIR env var if set, otherwise fall back to the committed fixture.
@@ -584,13 +609,24 @@ fn test_stylus_dap_trace() {
             manifest_dir.join("tests/fixtures/stylus-fund-trace")
         });
 
+    // Require a CTFS .ct container inside the fixture directory.
+    let has_ct = std::fs::read_dir(&trace_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.path().is_file() && e.path().extension().is_some_and(|ext| ext == "ct"))
+        })
+        .unwrap_or(false);
     assert!(
-        trace_dir.join("trace.json").exists(),
-        "Stylus trace fixture not found at {}",
+        has_ct,
+        "Stylus CTFS fixture not found at {}.\n  \
+         Regenerate it via \
+         src/db-backend/tests/fixtures/regenerate-stylus-fixture.sh\n  \
+         (requires Arbitrum devnode + cargo-stylus + cast + wazero).",
         trace_dir.display()
     );
 
-    println!("Using Stylus trace at: {}", trace_dir.display());
+    println!("Using Stylus CTFS trace at: {}", trace_dir.display());
 
     // Create a TestRecording pointing at the fixture trace.
     // Use a throwaway temp_dir so Drop doesn't remove the fixture.
@@ -608,10 +644,10 @@ fn test_stylus_dap_trace() {
     // --- DAP session ---
     let mut client = DapStdioTestClient::start().unwrap_or_else(|e| panic!("Failed to start DAP server: {}", e));
 
-    // Initialize and launch — this exercises the trace_processor postprocess
-    // and run_to_entry codepaths that previously panicked on event-only traces.
+    // Initialize and launch — this exercises the CTFS reader and
+    // run_to_entry codepaths that previously panicked on event-only traces.
     // Success means:
-    //   1. trace_processor.postprocess() didn't panic on empty steps (trace_processor.rs:74)
+    //   1. CTFSTraceReader::open didn't panic on empty steps
     //   2. run_to_entry() / load_location() handled empty steps (db.rs:98)
     //   3. The "stopped" and "ct/complete-move" events were received
     client

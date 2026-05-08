@@ -145,11 +145,21 @@ proc replay*(
 
     if trace.isNil and traceFolderArg.isSome:
       let traceFolder = traceFolderArg.get()
+      var hasCtSibling = false
+      if dirExists(traceFolder):
+        for entry in walkDir(traceFolder):
+          if entry.kind == pcFile and entry.path.endsWith(".ct"):
+            hasCtSibling = true
+            break
       let traceKind =
-        if fileExists(traceFolder / "trace_metadata.json"):
+        if traceFolder.endsWith(".ct") or fileExists(traceFolder / "mcr"):
+          # MCR + materialized CTFS share the `.ct` container; native MCR
+          # replays go through the worker (ct-native-replay), materialized
+          # `.ct` containers are loaded by db-backend directly.
+          "rr"
+        elif hasCtSibling:
+          # Folder containing a materialized CTFS bundle.
           "db"
-        elif traceFolder.endsWith(".ct") or fileExists(traceFolder / "mcr"):
-          "rr"  # MCR uses same replay-worker as RR (via ct-native-replay)
         else:
           # replay traces (RR/TTD) carry trace_db_metadata.json
           "rr"

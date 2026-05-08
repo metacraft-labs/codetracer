@@ -1,4 +1,4 @@
-//! Integration test for Python HCR (Hot Code Reload) using CTFS trace format
+//! Integration test for Python HCR (Hot Code Reload) using the CTFS trace format.
 //!
 //! Verifies that the DAP server correctly reports variable values both before
 //! and after a module reload. The test program (`python_hcr_flow_test/main.py`)
@@ -12,12 +12,19 @@
 //!
 //! This exercises the trace's ability to capture values across a code reload
 //! boundary within a single recorded execution.
+//!
+//! Materialized traces are CTFS-only: the recorder driven here is the
+//! Rust-backed `codetracer_python_recorder` Python module, which writes a
+//! single `.ct` container — the legacy pure-Python `trace.py` recorder is
+//! no longer auto-detected because db-backend has dropped support for the
+//! `trace.json` / `trace_metadata.json` / `trace_paths.json` 3-file layout.
 
 mod test_harness;
 
 use std::path::PathBuf;
 use test_harness::{
-    find_pure_python_recorder, find_suitable_python, DapStdioTestClient, FlowData, Language, TestRecording,
+    find_python_recorder, find_suitable_python, DapStdioTestClient, FlowData, Language, TestRecording,
+    RUST_PYTHON_RECORDER_MODULE_SENTINEL,
 };
 
 /// Line number in main.py where `value = mymodule.compute(counter)` lives.
@@ -69,18 +76,19 @@ fn prepare_hcr_workdir() -> Result<(PathBuf, PathBuf), String> {
 /// We cannot use `TestRecording::create_db_trace_with_format` directly because
 /// the HCR program is a multi-file directory and the recording must happen with
 /// CWD set to the program directory (so module imports work). Instead we drive
-/// the recorder manually and construct the `TestRecording` ourselves.
+/// the Rust-backed recorder manually and construct the `TestRecording`
+/// ourselves.
 fn record_hcr_trace(
     main_py: &std::path::Path,
     workdir: &std::path::Path,
     version_label: &str,
 ) -> Result<TestRecording, String> {
-    // Use the pure-Python recorder explicitly: this test pins specific
-    // value/stepping behaviour the pure recorder exhibits, which differs
-    // from the Rust-backed recorder's CTFS output.  The pure recorder
-    // writes the legacy 3-file JSON shape into `trace_dir`, which the
-    // production DAP server still loads via its sidecar code path.
-    let recorder = find_pure_python_recorder().ok_or("pure-Python recorder not found")?;
+    let recorder = find_python_recorder().ok_or(
+        "Python recorder not found. Install the Rust-backed \
+         `codetracer_python_recorder` Python module \
+         (sibling repo `codetracer-python-recorder`) or set \
+         CODETRACER_PYTHON_RECORDER_PATH to a CTFS-emitting recorder.",
+    )?;
 
     let trace_dir = workdir.join("trace");
     std::fs::create_dir_all(&trace_dir).map_err(|e| format!("failed to create trace dir: {}", e))?;
@@ -104,9 +112,23 @@ fn record_hcr_trace(
                 .to_string()
         });
 
-    let output = std::process::Command::new(&python)
-        .args([recorder.to_str().unwrap(), main_py.to_str().unwrap()])
+    let mut cmd = std::process::Command::new(&python);
+    if recorder.to_str() == Some(RUST_PYTHON_RECORDER_MODULE_SENTINEL) {
+        // Drive the Rust-backed recorder via its module entry point.
+        cmd.args([
+            "-m",
+            "codetracer_python_recorder",
+            "--out-dir",
+            trace_dir.to_str().unwrap(),
+            main_py.to_str().unwrap(),
+        ]);
+    } else {
+        // Explicit override path (still required to be CTFS-emitting).
+        cmd.args([recorder.to_str().unwrap(), main_py.to_str().unwrap()]);
+    }
+    let output = cmd
         .current_dir(&trace_dir)
+        .env("CODETRACER_TRACE_FORMAT", "ctfs")
         .output()
         .map_err(|e| format!("failed to run Python recorder: {}", e))?;
 
@@ -118,20 +140,29 @@ fn record_hcr_trace(
         ));
     }
 
-    // Copy main.py into trace_dir so the DAP server can resolve it
+    // Copy main.py into trace_dir so the DAP server can resolve it via the
+    // workdir-relative paths the recorder stored.
     let dest = trace_dir.join("main.py");
     if !dest.exists() {
         std::fs::copy(main_py, &dest).map_err(|e| format!("failed to copy main.py to trace dir: {}", e))?;
     }
 
-    // The pure-Python recorder writes the legacy 3-file JSON shape; verify
-    // the trace event file exists.  This test exists to pin the legacy
-    // production loader's behaviour against the pure-Python recorder until
-    // that recorder is migrated to CTFS — at which point this check will
-    // be tightened.
-    let trace_json = trace_dir.join("trace.json");
-    if !trace_json.exists() {
-        return Err(format!("no trace.json produced in {}", trace_dir.display()));
+    // Verify the recorder produced a CTFS container — the only supported
+    // materialized-trace format.
+    let ct_count = std::fs::read_dir(&trace_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+                .count()
+        })
+        .unwrap_or(0);
+    if ct_count == 0 {
+        return Err(format!(
+            "no *.ct container produced in {} (CTFS is the only \
+             supported materialized-trace format)",
+            trace_dir.display()
+        ));
     }
 
     Ok(TestRecording {
@@ -155,11 +186,11 @@ fn extract_var_value(flow: &FlowData, var_name: &str) -> Option<i64> {
 
 #[test]
 fn test_python_hcr_ctfs_integration() {
-    // -- Guard: skip if recorder or Python 3.10+ unavailable --
-    if find_pure_python_recorder().is_none() {
+    // -- Guard: skip if the CTFS-emitting recorder or Python 3.10+ unavailable --
+    if find_python_recorder().is_none() {
         eprintln!(
-            "SKIPPED: Python recorder not found \
-             (set CODETRACER_PYTHON_RECORDER_PATH or check out sibling/submodule)"
+            "SKIPPED: CTFS-emitting Python recorder not found \
+             (install codetracer_python_recorder or set CODETRACER_PYTHON_RECORDER_PATH)"
         );
         return;
     }

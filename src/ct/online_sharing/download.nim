@@ -64,22 +64,28 @@ proc downloadTrace*(url: string,
   unzipIntoFolder(downloadTarget, unzippedLocation)
   removeFile(downloadTarget)
 
-  let tracePath = unzippedLocation / "trace.json"
-  let traceJson = parseJson(readFile(tracePath))
-  let traceMetadataPath = unzippedLocation / "trace_metadata.json"
-  let metadataJson = parseJson(readFile(traceMetadataPath))
-  let tracePathsMetadata = parseJson(readFile(unzippedLocation / "trace_paths.json"))
-  let isWasm = metadataJson{"program"}.getStr("").extractFilename.split(".")[^1] == "wasm" # Check if language is wasm
-
-  var pathValue = ""
-  for item in tracePathsMetadata:
-    if item.getStr("") != "":
-      pathValue = item.getStr("")
+  # Materialized traces are CTFS-only: the downloaded zip must contain a
+  # `.ct` container (legacy `trace.json` + `trace_metadata.json` +
+  # `trace_paths.json` bundles are no longer accepted).
+  var ctPath = ""
+  for entry in walkDir(unzippedLocation):
+    if entry.kind == pcFile and entry.path.endsWith(".ct"):
+      ctPath = entry.path
       break
 
-  let lang = detectLang(pathValue.extractFilename, LangUnknown, isWasm)
-  let recordPid = NO_PID # for now not processing the pid , but it can be
-  # accessed from trace metadata file if we need it in the future
+  if ctPath.len == 0:
+    echo "error: downloaded archive contains no `.ct` CTFS container; "
+    echo "  legacy 3-file materialized bundles are no longer accepted "
+    echo "  (see codetracer-specs/Trace-Files/CTFS-Migration-Guide.md)."
+    quit(1)
+
+  # Best-effort language detection from the program name embedded in the
+  # `.ct` filename. Recorders typically name the container after the
+  # recorded program (e.g. `my_app.ct`).
+  let programFilename = ctPath.extractFilename.changeFileExt("")
+  let isWasm = programFilename.endsWith(".wasm")
+  let lang = detectLang(programFilename, LangUnknown, isWasm)
+  let recordPid = NO_PID # pid is recoverable from the CTFS metadata block.
   discard importTrace(unzippedLocation, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, url)
   return traceId
 

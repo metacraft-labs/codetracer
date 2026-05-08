@@ -68,7 +68,9 @@ pub fn _start() {
 /// DAP server before any requests arrive.  Called from JavaScript after the WASM
 /// module is initialised but before `wasm_start`.
 ///
-/// `path` is a virtual path (e.g. `"trace/metadata.json"`).
+/// `path` is a virtual path. For CTFS-only loading, this is typically the
+/// path to a single `.ct` container (e.g. `"recording.ct"`) — there are no
+/// loose sidecar files (`trace_metadata.json`, `trace.bin`, etc.) anymore.
 /// `data` is the raw file content as a byte slice.
 #[cfg(feature = "browser-transport")]
 #[wasm_bindgen]
@@ -89,11 +91,12 @@ pub fn vfs_file_exists(path: &str) -> bool {
 ///
 /// JavaScript should first push all trace files into the VFS via
 /// [`vfs_write_file`], then call this function to verify that the data can
-/// be parsed.  Returns `true` when the trace is successfully loaded (CTFS
-/// container or DB metadata + events), `false` otherwise.
+/// be parsed.  Returns `true` when the trace is successfully loaded as a
+/// CTFS container, `false` otherwise.
 ///
-/// `trace_folder` is the virtual directory prefix used when writing files
-/// (e.g. `"trace"` if files were written as `"trace/trace_metadata.json"`).
+/// `trace_folder` is the virtual path of the `.ct` container (or a prefix
+/// containing one).  Legacy sidecar layouts (`trace_metadata.json` +
+/// `trace.bin`/`trace.json`) are no longer supported — only CTFS.
 #[cfg(feature = "browser-transport")]
 #[wasm_bindgen]
 pub fn load_trace_from_vfs(trace_folder: &str) -> bool {
@@ -101,30 +104,13 @@ pub fn load_trace_from_vfs(trace_folder: &str) -> bool {
 
     info!("load_trace_from_vfs: folder={trace_folder:?}");
 
-    // Detect the trace file name by checking what exists in the VFS.
-    let join = |file: &str| -> String {
-        if trace_folder.is_empty() {
-            file.to_string()
-        } else {
-            format!("{}/{}", trace_folder.trim_end_matches('/'), file)
-        }
-    };
-
-    // Try to read and validate the trace.  We use setup_from_vfs with a
-    // dummy sender (we only care about whether parsing succeeds).
-    let trace_file = if vfs::vfs_exists(&join("trace.bin")) {
-        "trace.bin"
-    } else if vfs::vfs_exists(&join("trace.json")) {
-        "trace.json"
-    } else {
-        // The folder itself might be a .ct file path.
-        trace_folder
-    };
-
+    // The CTFS-only loader expects either the .ct container path itself or
+    // a folder prefix containing one. setup_from_vfs handles both cases by
+    // probing for the CTFS magic.
     let (sender, _receiver) = std::sync::mpsc::channel();
     match dap_server::setup_from_vfs(
         trace_folder,
-        trace_file,
+        trace_folder,
         None, // raw_diff_index
         None, // restore_location
         sender,

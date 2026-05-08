@@ -124,7 +124,7 @@ pub enum Language {
     Zsh,
     Stylus,
     /// EVM/Solidity: recorded by the codetracer-evm-recorder binary.
-    /// Traces are DB-based (trace.json + trace_metadata.json).
+    /// Materialized traces are CTFS-only — recorded as a `.ct` container.
     Solidity,
     /// Miden MASM: recorded by codetracer-miden-recorder
     Masm,
@@ -1248,42 +1248,11 @@ fn accept_with_timeout(
 /// CTFS `.ct` container — the only supported materialized-trace format.
 pub const RUST_PYTHON_RECORDER_MODULE_SENTINEL: &str = "<rust-python-recorder-module>";
 
-/// Locate the legacy pure-Python recorder script (`trace.py`).
-///
-/// This is kept as a separate API for test programs that depend on the
-/// pure-Python recorder's specific stepping / value-capture behaviour
-/// (e.g. `python_hcr_ctfs_integration.rs`).  New tests should use
-/// [`find_python_recorder`] instead, which prefers the Rust-backed
-/// recorder and emits CTFS by default.
-pub fn find_pure_python_recorder() -> Option<PathBuf> {
-    if let Ok(path) = env::var("CODETRACER_PURE_PYTHON_RECORDER_PATH") {
-        let p = PathBuf::from(&path);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    if let Some(path) = find_on_path("trace.py") {
-        return Some(path);
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let locations = [
-        // Sibling repo (workspace layout)
-        "../../../codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py",
-        // Legacy submodule
-        "../../libs/codetracer-python-recorder/codetracer-pure-python-recorder/src/trace.py",
-    ];
-
-    for loc in locations {
-        let path = manifest_dir.join(loc);
-        if path.exists() {
-            return Some(safe_canonicalize(&path));
-        }
-    }
-
-    None
-}
+// NOTE: The legacy pure-Python recorder (`trace.py`) wrote the deprecated
+// 3-file JSON layout and is no longer accepted: db-backend only loads CTFS
+// `.ct` containers. The previous `find_pure_python_recorder` helper has
+// therefore been removed; tests should use `find_python_recorder()`, which
+// resolves to the Rust-backed `codetracer_python_recorder` Python module.
 
 /// Locate a Python recorder that produces CTFS output.
 ///
@@ -1710,16 +1679,17 @@ pub fn record_stylus_wasm_trace(wasm_path: &Path, trace_dir: &Path, evm_trace_pa
     Ok(())
 }
 
-/// Record a Python trace by running the pure-Python recorder.
+/// Record a Python trace by running the Rust-backed CTFS Python recorder.
 ///
-/// The recorder writes `trace.json`, `trace_metadata.json`, `trace_paths.json` to CWD,
-/// so we set `current_dir` to `trace_dir`.
+/// The recorder writes a single `.ct` CTFS container into `trace_dir` (no
+/// loose sidecars — `trace.json` / `trace_metadata.json` / `trace_paths.json`
+/// are no longer produced).
 ///
 /// The recorder stores source paths as relative filenames (e.g. `python_flow_test.py`)
 /// and sets `workdir` to CWD. The DAP server's ExprLoader resolves source files relative
 /// to workdir, so we must copy the source file into the trace_dir to make it findable.
 fn record_python_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
-    record_python_trace_with_format(source_path, trace_dir, "binary")
+    record_python_trace_with_format(source_path, trace_dir, "ctfs")
 }
 
 /// Record a Python trace with the specified trace format.
@@ -4068,23 +4038,11 @@ impl TestRecording {
         // Per Trace-Files/CTFS-Migration-Guide.md §3e, CTFS is the only
         // supported materialized-trace format and a `.ct` container is
         // self-contained — there is no sidecar `trace_metadata.json`,
-        // `trace.json`, or `trace.bin`.  Recorders that have already
-        // migrated (Python via the Rust-backed recorder, Ruby native, JS,
-        // BEAM/Elixir/Erlang, shell) MUST emit exactly one `*.ct`.  A
-        // small set of recorders (Noir/nargo, wazero) still emit the
-        // legacy 3-file shape; for those, we accept either layout while
-        // their migration is in flight, so the broader test suite stays
-        // green.
-        let recorder_emits_ctfs = matches!(
-            language,
-            Language::Python
-                | Language::Ruby
-                | Language::JavaScript
-                | Language::Bash
-                | Language::Zsh
-                | Language::Elixir
-                | Language::Erlang
-        );
+        // `trace.json`, or `trace.bin`.  Every recorder driven by this
+        // harness MUST emit exactly one `*.ct`; the previous tolerant
+        // fallback for recorders mid-migration was removed once the
+        // recorder convention compliance pass landed.
+        let _ = language;
         let ct_count = fs::read_dir(&trace_dir)
             .map(|entries| {
                 entries
@@ -4093,32 +4051,20 @@ impl TestRecording {
                     .count()
             })
             .unwrap_or(0);
-        if recorder_emits_ctfs {
-            if ct_count == 0 {
-                return Err(format!(
-                    "no *.ct container produced in {} (CTFS is the only \
-                     supported materialized-trace format; legacy trace.json / \
-                     trace.bin / trace_metadata.json are no longer accepted)",
-                    trace_dir.display()
-                ));
-            }
-            if ct_count > 1 {
-                return Err(format!(
-                    "expected exactly one *.ct container in {}, found {}",
-                    trace_dir.display(),
-                    ct_count
-                ));
-            }
-        } else {
-            // Tolerant fallback for recorders still mid-migration.
-            let trace_json = trace_dir.join("trace.json");
-            let trace_bin = trace_dir.join("trace.bin");
-            if ct_count == 0 && !trace_json.exists() && !trace_bin.exists() {
-                return Err(format!(
-                    "no trace file (*.ct, trace.json, or trace.bin) produced in {}",
-                    trace_dir.display()
-                ));
-            }
+        if ct_count == 0 {
+            return Err(format!(
+                "no *.ct container produced in {} (CTFS is the only \
+                 supported materialized-trace format; legacy trace.json / \
+                 trace.bin / trace_metadata.json are no longer accepted)",
+                trace_dir.display()
+            ));
+        }
+        if ct_count > 1 {
+            return Err(format!(
+                "expected exactly one *.ct container in {}, found {}",
+                trace_dir.display(),
+                ct_count
+            ));
         }
 
         Ok(TestRecording {
