@@ -1172,6 +1172,7 @@ test-vm: test-vm-native test-vm-js
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
 
-# Capture automated screenshots for the README in animated WebP format.
-capture-readme-screenshots:
-  bash scripts/docs/capture-readme-screenshots.sh
+# Capture automated animations for the README in animated WebP format (for review).
+# The results will be placed in test-results/readme-animations-review/
+capture-readme-animations-review:
+  bash scripts/docs/capture-readme-animations.sh

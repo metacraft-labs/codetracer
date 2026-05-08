@@ -39,6 +39,7 @@ test.describe("README animations", () => {
   async function setup(ctPage: Page) {
     const layout = new LayoutPage(ctPage);
     // Be resilient to layout variations by not waiting for ALL components
+    await layout.waitForTraceLoaded();
     await layout.waitForEditorLoaded();
     await layout.waitForStateLoaded();
     await layout.waitForCallTraceLoaded();
@@ -51,7 +52,7 @@ test.describe("README animations", () => {
         // The tab title might be "fibonacci.py" or the full path
         editor = tabs.find(t => t.tabButtonText.toLowerCase().includes("fibonacci.py"));
         return !!editor;
-    }, { maxAttempts: 30 });
+    }, { maxAttempts: 60, delayMs: 1000 });
 
     await editor.tabButton().click();
     // Wait for Monaco editor to appear
