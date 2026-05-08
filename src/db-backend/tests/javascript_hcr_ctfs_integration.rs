@@ -65,8 +65,10 @@ fn prepare_hcr_workdir() -> Result<(PathBuf, PathBuf), String> {
 /// Record the HCR program and return a `TestRecording`.
 ///
 /// We drive the JS recorder manually because the HCR program is a multi-file
-/// directory. The JS recorder uses `node <cli> record <source> --format ctfs
-/// --out-dir <dir>` and creates a `trace-N` subdirectory inside the output dir.
+/// directory. The JS recorder uses `node <cli> record <source> --out-dir <dir>`
+/// and creates a `trace-N` subdirectory inside the output dir. The recorder
+/// selects the trace format itself (CTFS by default after the recorder
+/// convention compliance work); ct-side callers must not pass `--format`.
 fn record_hcr_trace(
     index_js: &std::path::Path,
     workdir: &std::path::Path,
@@ -86,8 +88,6 @@ fn record_hcr_trace(
             recorder.to_str().unwrap(),
             "record",
             index_js.to_str().unwrap(),
-            "--format",
-            "ctfs",
             "--out-dir",
             recorder_out.to_str().unwrap(),
         ])

@@ -1802,9 +1802,12 @@ pub fn find_js_recorder() -> Option<PathBuf> {
 
 /// Record a JavaScript trace by running the JS recorder CLI.
 ///
-/// Uses `node <cli> record <source> --format json --out-dir <tmp>`.
+/// Uses `node <cli> record <source> --out-dir <tmp>`.
 /// The recorder creates a `trace-N` subdirectory inside the output dir,
 /// so after recording we find that subdirectory and rename it to `trace_dir`.
+/// The trace format is selected by the recorder itself; ct-side callers
+/// must not pass `--format` (the recorder rejects it after the recorder
+/// convention compliance work).
 ///
 /// The recorder stores absolute source paths in the manifest, so suffix-matching works.
 fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
@@ -1822,8 +1825,6 @@ fn record_javascript_trace(source_path: &Path, trace_dir: &Path) -> Result<(), S
             recorder.to_str().unwrap(),
             "record",
             source_path.to_str().unwrap(),
-            "--format",
-            "binary",
             "--out-dir",
             recorder_out.to_str().unwrap(),
         ])
@@ -2676,7 +2677,10 @@ pub fn find_erlang_flow_test() -> Option<PathBuf> {
 
 /// Record a Bash trace by running the shell recorder launcher.
 ///
-/// Uses `bash <launcher.sh> --out-dir <trace_dir> --format binary <source>`.
+/// Uses `bash <launcher.sh> --out-dir <trace_dir> <source>`.
+/// The trace format is selected by the recorder; ct-side callers must not
+/// pass `--format` (the recorder rejects it after the recorder convention
+/// compliance work).
 fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let recorder = find_bash_recorder()
         .ok_or("Bash recorder not found. Set CODETRACER_BASH_RECORDER_PATH or check out codetracer-shell-recorders")?;
@@ -2703,8 +2707,6 @@ fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
             recorder.to_str().unwrap(),
             "--out-dir",
             trace_dir.to_str().unwrap(),
-            "--format",
-            "binary",
             source_path.to_str().unwrap(),
         ])
         .output()
@@ -2723,7 +2725,10 @@ fn record_bash_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String>
 
 /// Record a Zsh trace by running the shell recorder launcher.
 ///
-/// Uses `zsh <launcher.zsh> --out-dir <trace_dir> --format binary <source>`.
+/// Uses `zsh <launcher.zsh> --out-dir <trace_dir> <source>`.
+/// The trace format is selected by the recorder; ct-side callers must not
+/// pass `--format` (the recorder rejects it after the recorder convention
+/// compliance work).
 fn record_zsh_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> {
     let recorder = find_zsh_recorder()
         .ok_or("Zsh recorder not found. Set CODETRACER_ZSH_RECORDER_PATH or check out codetracer-shell-recorders")?;
@@ -2750,8 +2755,6 @@ fn record_zsh_trace(source_path: &Path, trace_dir: &Path) -> Result<(), String> 
             recorder.to_str().unwrap(),
             "--out-dir",
             trace_dir.to_str().unwrap(),
-            "--format",
-            "binary",
             source_path.to_str().unwrap(),
         ])
         .output()
