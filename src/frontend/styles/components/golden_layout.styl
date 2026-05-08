@@ -14,8 +14,15 @@
 .lm_splitter
   background: colors-ui-surface-primary-default !important
   opacity: unset !important
-  transition: opacity 200ms ease !important
+  transition: background 150ms ease !important
   z-index: 4 !important
+  cursor: col-resize
+
+  &.lm_vertical
+    cursor: row-resize
+
+  &:hover
+    background: colors-ui-border-interactive-default !important
 
 .lm_stack
   overflow: hidden !important

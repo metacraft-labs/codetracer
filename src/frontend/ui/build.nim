@@ -137,9 +137,9 @@ proc buildElapsedStr(self: BuildComponent): string =
   let secs = elapsedSec - float(mins * 60)
   return &"{mins}m {secs:.1f}s"
 
-template appendBuild(self: BuildComponent, line: string, stdout: bool): untyped =
+template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): untyped =
   let klass = if stdout: "build-stdout" else: "build-stderr"
-  let (match, location, rawLocation, other) = self.matchLocation(line)
+  let (match, location, rawLocation, other) = self.matchLocation(buildLine)
   if match:
     if rawLocation.len > 0:
       self.build.output.add((rawLocation, stdout))
@@ -148,7 +148,7 @@ template appendBuild(self: BuildComponent, line: string, stdout: bool): untyped 
     self.build.errors.add((location, rawLocation, other))
 
     # BP-M4: Publish a structured Problem for the Problems panel.
-    let parsed = parseBuildLocation(line)
+    let parsed = parseBuildLocation(buildLine)
     if parsed.found:
       self.build.problems.add(BuildProblem(
         severity: buildSeverityToProblem(parsed.severity),
@@ -157,8 +157,8 @@ template appendBuild(self: BuildComponent, line: string, stdout: bool): untyped 
         col: parsed.col,
         message: cstring(parsed.message)))
   else:
-    if line.len > 0:
-      self.build.output.add((cstring(line), stdout))
+    if buildLine.len > 0:
+      self.build.output.add((cstring(buildLine), stdout))
 
 method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   self.build.command = response.command
@@ -176,8 +176,8 @@ method onBuildStdout*(self: BuildComponent, response: BuildOutput) {.async.} =
   let lines = ($response.data).splitLines
   if self.build.output.len == 0:
     self.focusBuild()
-  for line in lines:
-    self.appendBuild(line, true)
+  for outputLine in lines:
+    self.appendBuild(outputLine, true)
   self.data.redraw()
   if self.build.autoScroll:
     self.scrollBuildToBottom()
@@ -186,8 +186,8 @@ method onBuildStderr*(self: BuildComponent, response: BuildOutput) {.async.} =
   let lines = ($response.data).splitLines
   if self.build.output.len == 0:
     self.focusBuild()
-  for line in lines:
-    self.appendBuild(line, false)
+  for outputLine in lines:
+    self.appendBuild(outputLine, false)
   self.data.redraw()
   if self.build.autoScroll:
     self.scrollBuildToBottom()
