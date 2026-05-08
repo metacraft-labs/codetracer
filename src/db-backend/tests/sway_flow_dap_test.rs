@@ -38,15 +38,27 @@ fn sway_flow_dap_recording_and_launch() {
     println!("Trace recorded to: {}", recording.trace_dir.display());
 
     // Verify trace files exist
+    // A modern CTFS bundle (`.ct`) is self-contained — `trace_metadata.json`
+    // is no longer emitted (see Trace-Files/CTFS-Migration-Guide.md §3e).
+    // The `.ct` container also satisfies the "trace data file" requirement,
+    // so we collapse the two assertions into a single accept-either check.
+    let trace_dir = &recording.trace_dir;
+    let has_ct = trace_dir.join("trace.ct").exists()
+        || std::fs::read_dir(trace_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+            })
+            .unwrap_or(false);
     assert!(
-        recording.trace_dir.join("trace.bin").exists()
-            || recording.trace_dir.join("trace.json").exists()
-            || recording.trace_dir.join("trace.ct").exists(),
-        "No trace data file produced"
+        trace_dir.join("trace.bin").exists() || trace_dir.join("trace.json").exists() || has_ct,
+        "No trace data file produced (expected trace.bin, trace.json, or *.ct)"
     );
     assert!(
-        recording.trace_dir.join("trace_metadata.json").exists(),
-        "trace_metadata.json not produced"
+        has_ct || trace_dir.join("trace_metadata.json").exists(),
+        "neither *.ct nor trace_metadata.json found in {}",
+        trace_dir.display()
     );
 
     // Verify DAP server launches and reaches stopped state

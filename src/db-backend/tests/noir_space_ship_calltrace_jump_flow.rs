@@ -49,13 +49,41 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use codetracer_trace_types::StepId;
+use codetracer_trace_types::{StepId, TraceMetadata};
 use db_backend::db::{Db, MaterializedReplaySession};
 use db_backend::flow_preloader::FlowPreloader;
 use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::task::{FlowMode, Location, RRTicks, TraceKind};
 use db_backend::trace_processor::{load_trace_data, load_trace_metadata, TraceProcessor};
 use db_backend::trace_reader::TraceReader;
+
+/// Load `TraceMetadata` from a recording directory, preferring the legacy
+/// sidecar `trace_metadata.json` and falling back to the `meta.json`
+/// block stored inside a `.ct` CTFS container.
+///
+/// See `Trace-Files/CTFS-Migration-Guide.md` §3e: modern CTFS bundles are
+/// self-contained and stop emitting the sidecar; we accept both layouts.
+fn load_trace_metadata_either(target_dir: &std::path::Path) -> TraceMetadata {
+    let legacy = target_dir.join("trace_metadata.json");
+    if legacy.exists() {
+        return load_trace_metadata(&legacy).expect("trace_metadata.json");
+    }
+    let ct_path = std::fs::read_dir(target_dir)
+        .ok()
+        .and_then(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
+        })
+        .unwrap_or_else(|| panic!("no trace_metadata.json or *.ct found in {}", target_dir.display()));
+    let mut ctfs = db_backend::ctfs_trace_reader::ctfs_container::CtfsReader::open(&ct_path)
+        .unwrap_or_else(|e| panic!("open {}: {}", ct_path.display(), e));
+    let meta_bytes = ctfs
+        .read_file("meta.json")
+        .unwrap_or_else(|e| panic!("read meta.json from {}: {}", ct_path.display(), e));
+    serde_json::from_slice(&meta_bytes).unwrap_or_else(|e| panic!("parse meta.json from {}: {}", ct_path.display(), e))
+}
 
 /// SKIP gate: every Noir-recorder test requires `nargo` on PATH.
 fn find_nargo() -> bool {
@@ -149,7 +177,7 @@ fn flow_request_for_iterate_asteroids_returns_shield_nr_loops() {
             codetracer_trace_reader::TraceEventsFileFormat::Json,
         )
     };
-    let metadata = load_trace_metadata(&target_dir.join("trace_metadata.json")).expect("metadata");
+    let metadata = load_trace_metadata_either(&target_dir);
     let events = load_trace_data(&trace_file, format).expect("events");
     let mut db = Db::new(&metadata.workdir);
     let mut tp = TraceProcessor::new(&mut db);

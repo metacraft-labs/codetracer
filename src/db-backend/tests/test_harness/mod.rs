@@ -3986,17 +3986,18 @@ impl TestRecording {
                         .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
                 })
                 .unwrap_or(false);
-        let trace_metadata = trace_dir.join("trace_metadata.json");
+        // Per the CTFS migration guide (Trace-Files/CTFS-Migration-Guide.md
+        // §3e), a `.ct` container is self-contained: metadata that used to
+        // live in a sidecar `trace_metadata.json` is now baked into the
+        // container's `meta.dat` block and read via `ct-print --json` or
+        // the CTFS reader library. We therefore only require *some* trace
+        // file (trace.json, trace.bin, or any *.ct) — the historical
+        // existence check on trace_metadata.json is dropped because modern
+        // CTFS-only bundles legitimately omit that sidecar.
         if !trace_json.exists() && !trace_bin.exists() && !has_any_ct {
             return Err(format!(
                 "no trace file (trace.json, trace.bin, or *.ct) produced in {}",
                 trace_dir.display()
-            ));
-        }
-        if !trace_metadata.exists() {
-            return Err(format!(
-                "trace_metadata.json not produced at {}",
-                trace_metadata.display()
             ));
         }
 

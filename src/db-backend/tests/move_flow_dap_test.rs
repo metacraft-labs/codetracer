@@ -126,12 +126,25 @@ fn setup_move_trace(test_fn_name: &str) -> (PathBuf, TestRecording, PathBuf) {
 fn run_move_dap_lifecycle_test(test_fn_name: &str) {
     let (db_backend, recording, source_path) = setup_move_trace(test_fn_name);
 
-    // Verify trace files were produced.
-    let trace_metadata = recording.trace_dir.join("trace_metadata.json");
+    // Verify trace files were produced.  Per the CTFS migration guide
+    // (Trace-Files/CTFS-Migration-Guide.md §3e) `trace_metadata.json` is
+    // legacy: modern CTFS bundles bake metadata into the `.ct` container's
+    // `meta.dat` block.  Accept either layout so the test works for both
+    // legacy and CTFS-only recorders.
+    let trace_dir = &recording.trace_dir;
+    let has_ct = trace_dir.join("trace.ct").exists()
+        || std::fs::read_dir(trace_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+            })
+            .unwrap_or(false);
+    let trace_metadata = trace_dir.join("trace_metadata.json");
     assert!(
-        trace_metadata.exists(),
-        "trace_metadata.json not found in {}",
-        recording.trace_dir.display()
+        has_ct || trace_metadata.exists(),
+        "neither *.ct nor trace_metadata.json found in {}",
+        trace_dir.display()
     );
 
     // Launch DAP server and verify initialization.

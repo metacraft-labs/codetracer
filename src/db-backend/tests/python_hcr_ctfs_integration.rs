@@ -132,13 +132,12 @@ fn record_hcr_trace(
         return Err(format!("no trace file produced in {}", trace_dir.display()));
     }
 
-    let trace_metadata = trace_dir.join("trace_metadata.json");
-    if !trace_metadata.exists() {
-        return Err(format!(
-            "trace_metadata.json not produced at {}",
-            trace_metadata.display()
-        ));
-    }
+    // Per the CTFS migration guide (Trace-Files/CTFS-Migration-Guide.md
+    // §3e), a `.ct` container is self-contained: metadata lives in
+    // `meta.dat` inside the container, not in a sidecar `trace_metadata.json`.
+    // CTFS-only bundles intentionally omit the sidecar, so the existence
+    // check has been removed; the `.ct`/`trace.bin`/`trace.json` check
+    // above already guarantees that *something* was recorded.
 
     Ok(TestRecording {
         trace_dir,

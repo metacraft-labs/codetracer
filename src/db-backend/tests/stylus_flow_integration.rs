@@ -286,6 +286,37 @@ fn record_stylus_trace(project_path: &Path) -> Result<(PathBuf, PathBuf, PathBuf
     Ok((wasm_path, trace_dir, temp_dir))
 }
 
+/// Load `TraceMetadata` from a recording directory, preferring the
+/// legacy sidecar `trace_metadata.json` and falling back to the
+/// `meta.json` block embedded in a `.ct` CTFS container.
+///
+/// See `Trace-Files/CTFS-Migration-Guide.md` §3e for the rationale: a
+/// modern `.ct` container is self-contained and ships its metadata in
+/// `meta.json` / `meta.dat` rather than as a sidecar.
+fn load_stylus_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, String> {
+    let legacy = trace_dir.join("trace_metadata.json");
+    if legacy.exists() {
+        let content = std::fs::read_to_string(&legacy).map_err(|e| format!("read {}: {}", legacy.display(), e))?;
+        return serde_json::from_str(&content).map_err(|e| format!("parse {}: {}", legacy.display(), e));
+    }
+
+    // Fall back to the CTFS container.  Pick the first `*.ct` file in
+    // `trace_dir` (recorders may name it `trace.ct` or `<program>.ct`).
+    let ct_path = std::fs::read_dir(trace_dir)
+        .map_err(|e| format!("read_dir {}: {}", trace_dir.display(), e))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|ext| ext == "ct"))
+        .ok_or_else(|| format!("no trace_metadata.json or *.ct in {}", trace_dir.display()))?;
+
+    let mut ctfs = db_backend::ctfs_trace_reader::ctfs_container::CtfsReader::open(&ct_path)
+        .map_err(|e| format!("open {}: {}", ct_path.display(), e))?;
+    let meta_bytes = ctfs
+        .read_file("meta.json")
+        .map_err(|e| format!("read meta.json from {}: {}", ct_path.display(), e))?;
+    serde_json::from_slice(&meta_bytes).map_err(|e| format!("parse meta.json from {}: {}", ct_path.display(), e))
+}
+
 /// Copy the trace directory to an external fixture location if
 /// `STYLUS_FIXTURE_OUTPUT_DIR` is set. Used by the VS Code extension's
 /// `scripts/prepare-stylus-fixture.sh` to generate a pre-recorded fixture.
@@ -344,18 +375,28 @@ fn test_stylus_flow_integration() {
         Err(e) => panic!("Stylus recording failed: {}", e),
     };
 
-    // Verify trace files were produced
+    // Verify trace files were produced. Per CTFS-Migration-Guide.md §3e a
+    // self-contained `.ct` container is allowed in place of the legacy
+    // `trace.json` + `trace_metadata.json` pair.
     let trace_json = trace_dir.join("trace.json");
     let trace_metadata = trace_dir.join("trace_metadata.json");
+    let has_ct = trace_dir.join("trace.ct").exists()
+        || std::fs::read_dir(&trace_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+            })
+            .unwrap_or(false);
     assert!(
-        trace_json.exists(),
-        "trace.json not produced at {}",
-        trace_json.display()
+        trace_json.exists() || has_ct,
+        "neither trace.json nor *.ct produced at {}",
+        trace_dir.display()
     );
     assert!(
-        trace_metadata.exists(),
-        "trace_metadata.json not produced at {}",
-        trace_metadata.display()
+        trace_metadata.exists() || has_ct,
+        "neither trace_metadata.json nor *.ct produced at {}",
+        trace_dir.display()
     );
 
     println!("Stylus flow integration test passed!");
@@ -371,7 +412,8 @@ fn test_stylus_flow_integration() {
 /// - `trace.json` contains EVM event entries (EventLogKind::EvmEvent)
 /// - Expected EVM host function calls are present (read_args, storage operations)
 /// - The `read_args` event contains the `fund(uint256)` selector (0xca1d209d)
-/// - `trace_metadata.json` is valid and references the WASM binary
+/// - The trace metadata (from `trace_metadata.json` or the `.ct`
+///   container's `meta.dat`) is valid and references the WASM binary
 ///
 /// Note: Stylus traces currently contain only Event entries (EVM host function
 /// calls), not Step/Call/Function entries. Source-level DAP debugging is not yet
@@ -507,17 +549,18 @@ fn test_stylus_trace_analysis() {
         println!("Verified: storage writes present (storage_store_bytes32)");
     }
 
-    // Parse and verify trace_metadata.json
-    let metadata_path = trace_dir.join("trace_metadata.json");
-    let metadata_content =
-        std::fs::read_to_string(&metadata_path).unwrap_or_else(|e| panic!("Failed to read trace_metadata.json: {}", e));
-
-    let metadata: TraceMetadata = serde_json::from_str(&metadata_content)
-        .unwrap_or_else(|e| panic!("Failed to parse trace_metadata.json: {}", e));
+    // Parse and verify trace metadata.  Per the CTFS migration guide
+    // (Trace-Files/CTFS-Migration-Guide.md §3e) the canonical home for
+    // metadata is `meta.json` (old CTFS) or `meta.dat` (new CTFS) inside
+    // the `.ct` container.  We prefer the legacy sidecar `trace_metadata.json`
+    // when it exists (current Stylus path), and otherwise extract
+    // `meta.json` from the `.ct` container via the CTFS reader library.
+    let metadata: TraceMetadata = load_stylus_trace_metadata(&trace_dir)
+        .unwrap_or_else(|e| panic!("Failed to load trace metadata from {}: {}", trace_dir.display(), e));
 
     assert!(
         metadata.program.contains("stylus_fund_tracking_demo"),
-        "trace_metadata.json program should reference the Stylus WASM binary, got: {}",
+        "trace metadata program should reference the Stylus WASM binary, got: {}",
         metadata.program
     );
     println!("Verified: trace_metadata references '{}'", metadata.program);
