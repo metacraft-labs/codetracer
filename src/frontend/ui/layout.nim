@@ -152,12 +152,17 @@ proc addPanelTransferContextMenu(tab: GoldenTab, contentItem: GoldenContentItem)
         int(data.activeSessionIndex)
       else:
         0
+    let x = event.clientX.to(int)
+    let y = event.clientY.to(int)
 
-    discard requestWindowList().then(proc(response: JsObject) =
+    # Use an async wrapper so we can await the window list without relying on
+    # Future.then, which is only available on Nim >= 1.5.1.
+    proc showWindowMenu() {.async.} =
+      let response = await requestWindowList()
       let items = buildSendToWindowMenuItems(contentItem, sessionId, response)
-      let x = event.clientX.to(int)
-      let y = event.clientY.to(int)
-      showContextMenu(items, x, y)))
+      showContextMenu(items, x, y)
+
+    discard showWindowMenu())
 
 let commonContextMenuOptions: seq[ContextMenuOption] = @[
   ContextMenuOption(
