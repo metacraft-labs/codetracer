@@ -54,6 +54,33 @@ proc configureFind =
 
 var document {.importc.}: js
 
+proc enforceMinStackWidth*(layout: GoldenLayout) =
+  ## Walk every stack in the layout tree and distribute the desired constant
+  ## minimum width evenly across its component items so GL's per-component sum
+  ## always equals MIN_STACK_PX regardless of how many tabs are open.
+  ## SizeUnitEnum.Pixel is the string "px" in GL 2.x.
+  {.emit: """
+    const MIN_STACK_PX = 150;
+    const MIN_STACK_PX_H = 50;
+    function visit(item) {
+      if (!item || !item.contentItems) return;
+      if (item.isStack) {
+        const n = item.contentItems.length;
+        if (n > 0) {
+          const perW = Math.ceil(MIN_STACK_PX / n);
+          const perH = Math.ceil(MIN_STACK_PX_H / n);
+          for (const ci of item.contentItems) {
+            ci.minSize     = `layout`.isColumn ? perH : perW;
+            ci.minSizeUnit = "px";
+          }
+        }
+      } else {
+        for (const ci of item.contentItems) visit(ci);
+      }
+    }
+    if (`layout`.groundItem) visit(`layout`.groundItem);
+  """.}
+
 proc newGoldenLayout*(
   root: JsObject,
   bindComponentCallback: proc,
@@ -830,7 +857,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       ), 200)
 
+  # Widen the splitter grab zone so it is easier to grab with the mouse.
+  # The per-stack minimum width is enforced dynamically by enforceMinStackWidth
+  # (called after loadLayout and on every stateChanged) so it stays constant
+  # regardless of how many tabs are open in the stack.
+  {.emit: """
+    if (!`initialLayout`.dimensions) `initialLayout`.dimensions = {};
+    `initialLayout`.dimensions.borderGrabWidth = 8;
+  """.}
   layout.loadLayout(initialLayout)
+  enforceMinStackWidth(layout)
 
   # M21: Register IPC handler for receiving panels from other windows.
   registerPanelAttachHandler(layout)
@@ -1163,6 +1199,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   layout.on(cstring"stateChanged") do (event: js):
     cdebug "layout event: stateChanged"
+    enforceMinStackWidth(layout)
 
     # check if only one tab is left and prevent user from close/drag it
     let mainContainer = data.ui.layout.groundItem.contentItems[0]
