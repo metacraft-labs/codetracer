@@ -4,6 +4,7 @@
 //! rationale and the two-format approach.
 
 pub mod ctfs_container;
+pub mod meta_dat;
 
 use std::collections::HashMap;
 use std::error::Error;
