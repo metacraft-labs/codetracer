@@ -44,8 +44,10 @@ async function fetchIntoVfs(url, vfsPath, headers = {}) {
  * answers with 206 PartialContent and a Content-Range header. The full
  * payload is staged into the VFS via `vfs_write_file`.
  *
- * Returns { bytes, status, contentRange } where status is the HTTP status
- * (typically 206).
+ * Returns { bytes, status, contentRange, data } where status is the HTTP
+ * status (typically 206) and `data` is the Uint8Array that was just written
+ * to the VFS so callers can mirror the same bytes to additional VFS paths
+ * without re-issuing the network request.
  */
 async function fetchRangeIntoVfs(rangeUrl, vfsPath, authToken) {
   const response = await fetch(rangeUrl, {
@@ -65,6 +67,7 @@ async function fetchRangeIntoVfs(rangeUrl, vfsPath, authToken) {
     bytes: data.byteLength,
     status: response.status,
     contentRange: response.headers.get("Content-Range") || "",
+    data,
   };
 }
 
@@ -173,6 +176,18 @@ function vfsFileNameForObjectKey(objectKey) {
         const folder = traceFolder || "trace";
         const files = [];
         const rangeStatuses = [];
+        // Track whether we've already pinned a CTFS payload at the
+        // canonical `<folder>/trace.ct` VFS path. The WASM's
+        // `handle_message_browser` launch handler auto-detects the trace
+        // file by checking `vfs_exists("<folder>/trace.ct")` (see
+        // `dap_server.rs:1076`). The DAP `setup_from_vfs` then loads
+        // `<folder>/<launch_trace_file>` -- so unless we materialize the
+        // `.ct` payload at that canonical name, configurationDone fails
+        // with "no valid CTFS container found in VFS". The original
+        // gateway object key (e.g. `recordings/inventory/inventory.ct`)
+        // is preserved alongside for future multi-file traces and for
+        // diagnostic transparency in the test result.
+        let canonicalCtfsAssigned = false;
         for (const objectKey of keys) {
           const rangeUrl = `${gatewayBaseUrl}/api/v1/observability/gateway/ranges/${encodeURIComponent(traceId)}/${encodeObjectKeyForGateway(objectKey)}`;
           const fileName = vfsFileNameForObjectKey(objectKey);
@@ -187,6 +202,37 @@ function vfsFileNameForObjectKey(objectKey) {
             contentRange: result.contentRange,
           });
           rangeStatuses.push(String(result.status));
+
+          // If this payload looks like a CTFS container (magic
+          // [c0 de 72 ac e2]) and we haven't assigned the canonical
+          // path yet, mirror the same bytes at `<folder>/trace.ct` so
+          // the WASM's launch-time auto-detect (`["trace.ct"]`
+          // candidate list, see `dap_server.rs:1076`) sees them.
+          // Multi-file traces (sharded segments) are not yet wired
+          // through the canonical-name auto-detect; for now the first
+          // CTFS-magic payload wins, matching the single-recording
+          // assumption of the M40 live MCR pipeline.
+          if (!canonicalCtfsAssigned) {
+            const data = result.data;
+            const isCtfs =
+              data && data.length >= 5 &&
+              data[0] === 0xc0 && data[1] === 0xde && data[2] === 0x72 && data[3] === 0xac && data[4] === 0xe2;
+            if (isCtfs) {
+              const canonicalPath = `${folder}/trace.ct`;
+              if (canonicalPath !== vfsPath) {
+                vfs_write_file(canonicalPath, data);
+                files.push({
+                  objectKey,
+                  vfsPath: canonicalPath,
+                  bytes: data.byteLength,
+                  source: "gateway-range-canonical-mirror",
+                  status: result.status,
+                  contentRange: result.contentRange,
+                });
+              }
+              canonicalCtfsAssigned = true;
+            }
+          }
         }
 
         self.postMessage({

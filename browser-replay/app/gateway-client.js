@@ -13,9 +13,13 @@
 //      against `${gatewayBaseUrl}/api/v1/observability/gateway/ranges/${traceId}/...`.
 //   4. Pushes the fetched bytes into the WASM in-memory VFS so the existing
 //      CTFS/MCR loader can replay the trace entirely client-side.
-//   5. Drives the DAP initialize / launch / configurationDone handshake and
-//      surfaces a hard-asserted result on `window.__replayTestResult` for
-//      Playwright (and any future codetracer-ci integration test) to inspect.
+//   5. Drives the DAP initialize / launch / configurationDone handshake plus
+//      a follow-up state-inspection sequence (threads, stackTrace, scopes,
+//      variables, setBreakpoints) and surfaces a hard-asserted result on
+//      `window.__replayTestResult` for Playwright (and any future
+//      codetracer-ci integration test) to inspect. The state-inspection
+//      sequence (F5) is what proves the user can actually examine real
+//      captured program state through the live MCR replay path.
 //
 // The WASM module itself is NOT modified -- the gateway URL and auth token
 // are intercepted on the JavaScript side, then the bytes are presented to
@@ -131,17 +135,55 @@ function collectMessages(durationMs = 2000) {
   });
 }
 
-async function sendDapRequest(command, args = {}, collectMs = 3000) {
+async function sendDapRequest(command, args = {}, collectMs = 3000, postResponseGraceMs = 150) {
   if (!workerAlive) {
     return { response: null, events: [], allMessages: [], seq: -1, workerDead: true };
   }
   const seq = nextSeq++;
-  const collector = collectMessages(collectMs);
-  worker.postMessage({ seq, type: "request", command, arguments: args });
-  const allMessages = await collector;
-  const response = allMessages.find((m) => m && m.command === command && m.type === "response") || null;
-  const events = allMessages.filter((m) => m && m.type === "event");
-  return { response, events, allMessages, seq };
+  // Short-circuit collector: resolve as soon as the response arrives,
+  // plus a small grace window so trailing `event` messages (like the
+  // `stopped` event after configurationDone) are picked up too. If no
+  // response shows up within `collectMs`, fall back to the original
+  // "drain everything until timeout" behaviour. This keeps the existing
+  // semantics for cases where the WASM does not respond at all (so the
+  // test can assert response: null) while bringing the F5 multi-request
+  // sequence under the Playwright test timeout.
+  return new Promise((resolve) => {
+    const messages = [];
+    let hardTimer = null;
+    let graceTimer = null;
+
+    function finish() {
+      worker.removeEventListener("message", handler);
+      if (hardTimer) clearTimeout(hardTimer);
+      if (graceTimer) clearTimeout(graceTimer);
+      const response = messages.find((m) => m && m.command === command && m.type === "response") || null;
+      const events = messages.filter((m) => m && m.type === "event");
+      resolve({ response, events, allMessages: messages, seq });
+    }
+
+    function handler(event) {
+      const data = event.data;
+      let parsed;
+      if (typeof data === "string") {
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          parsed = data;
+        }
+      } else {
+        parsed = data;
+      }
+      messages.push(parsed);
+      if (parsed && parsed.command === command && parsed.type === "response" && !graceTimer) {
+        graceTimer = setTimeout(finish, postResponseGraceMs);
+      }
+    }
+
+    worker.addEventListener("message", handler);
+    worker.postMessage({ seq, type: "request", command, arguments: args });
+    hardTimer = setTimeout(finish, collectMs);
+  });
 }
 
 // Expose a hook for the legacy "Send DAP Initialize" button in index.html.
@@ -245,15 +287,128 @@ window.addEventListener("manual-dap-initialize", async () => {
     let launchOk = false;
     let configDoneOk = false;
     let stoppedEvent = null;
+    let launchResponse = null;
+    let configDoneResponse = null;
     if (initOk) {
       const launchResult = await sendDapRequest("launch", { traceFolder });
       appendLog(`launch: ${safeStringify(launchResult.response)}`);
       launchOk = !!(launchResult.response && launchResult.response.success);
+      launchResponse = launchResult.response;
 
       const configResult = await sendDapRequest("configurationDone", {}, 5000);
       appendLog(`configurationDone: ${safeStringify(configResult.response)}`);
       configDoneOk = !!(configResult.response && configResult.response.success);
+      configDoneResponse = configResult.response;
       stoppedEvent = configResult.events.find((e) => e.event === "stopped") || null;
+    }
+
+    // -------------------------------------------------------------------
+    // Step 3 (F5): drive the rest of the DAP session so the test can
+    // assert the user can examine real captured program state. We probe
+    // threads -> stackTrace -> scopes -> variables, then set a
+    // breakpoint at a recognizable line in the recorded source. All
+    // results are surfaced on window.__replayTestResult so the
+    // Playwright spec can hard-assert against them.
+    //
+    // The Rust db_backend WASM module (`src/db-backend`) implements all
+    // of these requests in `dap_handler.rs`; see `dap_server.rs` for the
+    // dispatch table. Executing them only makes sense when launch +
+    // configurationDone both succeeded -- otherwise the trace isn't
+    // mounted and threads()/stackTrace() will respond with default
+    // empties at best, panic at worst (see produce_stack_frame's expect
+    // on a valid step_id).
+    // -------------------------------------------------------------------
+    let threads = null;
+    let stackFrames = null;
+    let scopes = null;
+    let variables = null;
+    let breakpointVerified = false;
+    let threadsResponse = null;
+    let stackTraceResponse = null;
+    let scopesResponse = null;
+    let variablesResponse = null;
+    let setBreakpointsResponse = null;
+    let breakpointPath = null;
+    let breakpointLine = null;
+
+    if (launchOk && configDoneOk) {
+      const threadsResult = await sendDapRequest("threads", {});
+      threadsResponse = threadsResult.response;
+      appendLog(`threads: ${safeStringify(threadsResult.response)}`);
+      threads = (threadsResult.response && threadsResult.response.body && threadsResult.response.body.threads) || null;
+
+      const firstThreadId = threads && threads.length > 0 ? threads[0].id : 1;
+      const stackTraceResult = await sendDapRequest("stackTrace", {
+        threadId: firstThreadId,
+        startFrame: 0,
+        levels: 64,
+      });
+      stackTraceResponse = stackTraceResult.response;
+      appendLog(`stackTrace: ${safeStringify(stackTraceResult.response)}`);
+      stackFrames =
+        (stackTraceResult.response && stackTraceResult.response.body && stackTraceResult.response.body.stackFrames) ||
+        null;
+
+      const topFrame = stackFrames && stackFrames.length > 0 ? stackFrames[0] : null;
+      if (topFrame) {
+        const scopesResult = await sendDapRequest("scopes", { frameId: topFrame.id });
+        scopesResponse = scopesResult.response;
+        appendLog(`scopes: ${safeStringify(scopesResult.response)}`);
+        scopes =
+          (scopesResult.response && scopesResult.response.body && scopesResult.response.body.scopes) || null;
+
+        const firstScope = scopes && scopes.length > 0 ? scopes[0] : null;
+        if (firstScope) {
+          const variablesResult = await sendDapRequest("variables", {
+            variablesReference: firstScope.variablesReference,
+          });
+          variablesResponse = variablesResult.response;
+          appendLog(`variables: ${safeStringify(variablesResult.response)}`);
+          variables =
+            (variablesResult.response && variablesResult.response.body && variablesResult.response.body.variables) ||
+            null;
+        }
+      }
+
+      // Pick a recognizable line for the breakpoint. Prefer the top stack
+      // frame's source.path + the recorded line number (which is the
+      // line the program is currently stopped at) -- that line is by
+      // definition reachable in the recorded trace, so the WASM should
+      // verify the breakpoint as set. We deliberately don't hard-code
+      // the inventory_service.nim path because the recorded program may
+      // be stopped inside an imported module (asynchttpserver, etc.); a
+      // breakpoint at the top frame is always a frame the user could
+      // visit while inspecting captured state.
+      const breakpointSource =
+        topFrame && topFrame.source && typeof topFrame.source.path === "string"
+          ? topFrame.source.path
+          : null;
+      const breakpointLineCandidate =
+        topFrame && typeof topFrame.line === "number" && topFrame.line > 0 ? topFrame.line : null;
+
+      if (breakpointSource && breakpointLineCandidate) {
+        breakpointPath = breakpointSource;
+        breakpointLine = breakpointLineCandidate;
+        const setBreakpointsResult = await sendDapRequest("setBreakpoints", {
+          source: { path: breakpointSource, name: breakpointSource.split("/").pop() || breakpointSource },
+          breakpoints: [{ line: breakpointLineCandidate }],
+          lines: [breakpointLineCandidate],
+        });
+        setBreakpointsResponse = setBreakpointsResult.response;
+        appendLog(`setBreakpoints: ${safeStringify(setBreakpointsResult.response)}`);
+        const bps =
+          (setBreakpointsResult.response &&
+            setBreakpointsResult.response.body &&
+            setBreakpointsResult.response.body.breakpoints) ||
+          [];
+        // The WASM marks every breakpoint with `verified: true` once it
+        // resolves the source line; treat any verified entry as success.
+        breakpointVerified = bps.some((b) => b && b.verified === true);
+      } else {
+        appendLog(
+          `setBreakpoints: skipped (top frame has no usable source.path or line: path=${breakpointSource}, line=${breakpointLineCandidate})`,
+        );
+      }
     }
 
     const result = {
@@ -265,8 +420,23 @@ window.addEventListener("manual-dap-initialize", async () => {
       files: loadResult.files,
       initResponse: initResult.response,
       launchSucceeded: launchOk,
+      launchResponse,
       configDoneSucceeded: configDoneOk,
+      configDoneResponse,
       stoppedEvent,
+      // F5 fields.
+      threads,
+      threadsResponse,
+      stackFrames,
+      stackTraceResponse,
+      scopes,
+      scopesResponse,
+      variables,
+      variablesResponse,
+      breakpointVerified,
+      setBreakpointsResponse,
+      breakpointPath,
+      breakpointLine,
     };
 
     window.__replayTestResult = result;
@@ -275,7 +445,8 @@ window.addEventListener("manual-dap-initialize", async () => {
       setStatus(
         `Replay ready -- manifest=${loadResult.manifestStatus}, ` +
           `ranges=${loadResult.rangeStatuses.join(",")}, ` +
-          `dap=ok`,
+          `dap=ok, threads=${threads ? threads.length : 0}, frames=${stackFrames ? stackFrames.length : 0}, ` +
+          `vars=${variables ? variables.length : 0}, bp=${breakpointVerified ? "verified" : "unverified"}`,
         "ok",
       );
     } else {
