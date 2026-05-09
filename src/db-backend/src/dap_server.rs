@@ -433,6 +433,17 @@ fn setup(
 /// is the only supported materialized-trace format — legacy
 /// `trace_metadata.json` + `trace.bin` / `trace.json` sidecar layouts are no
 /// longer accepted.
+///
+/// MCR (live recording) traces are detected here via the `meta.dat`
+/// `FlagHasMcrFields` bit and rejected with a loud, actionable error.
+/// They require an MCR-aware replay engine: the native `setup` path
+/// forwards them to the `ct-native-replay` subprocess, but the WASM
+/// browser-replay client cannot fork and the in-process emulator is not
+/// yet wired into this build (tracked separately under
+/// `Browser-Replay.status.org §F5a`). Returning an explicit error here
+/// is preferable to letting `CTFSTraceReader::from_bytes` succeed with
+/// zero materialised events, which would surface to users as a silent
+/// "empty trace" regression.
 #[cfg(feature = "browser-transport")]
 pub fn setup_from_vfs(
     trace_folder: &str,
@@ -473,6 +484,39 @@ pub fn setup_from_vfs(
         // Check CTFS magic: [C0 DE 72 AC E2]
         if bytes.len() >= 5 && bytes[..5] == [0xC0, 0xDE, 0x72, 0xAC, 0xE2] {
             info!("setup_from_vfs: detected CTFS container at VFS path {candidate:?}");
+
+            // Gate against MCR live-recording traces before we spend time
+            // materialising the rest of the container: those require the
+            // MCR replay engine, which the WASM browser client does not
+            // yet integrate. Without this check `CTFSTraceReader::
+            // from_bytes` would happily return an "empty" Db (no
+            // events.log / steps.dat to walk) and the user would see
+            // `stackFrames=[]` instead of a real diagnostic.
+            //
+            // Cost note: parsing the meta.dat header is O(meta.dat size)
+            // — a few hundred bytes for typical traces — so this adds
+            // negligible startup overhead for the materialised-DB code
+            // path that flows through immediately afterwards.
+            match CtfsReader::from_bytes(bytes.clone()) {
+                Ok(mut probe) => {
+                    if is_mcr_ctfs_container(&mut probe) {
+                        return Err("setup_from_vfs: trace declares FlagHasMcrFields (MCR live recording); \
+                             the WASM browser-replay client requires an MCR-aware replay engine \
+                             which is not yet wired into this build. The native dap_server uses \
+                             ct-native-replay for MCR traces; the WASM path will gain emulator \
+                             support in a follow-up. See codetracer-specs/Planned-Work/\
+                             Browser-Replay.status.org §F5a."
+                            .into());
+                    }
+                }
+                Err(e) => {
+                    info!(
+                        "setup_from_vfs: CTFS probe failed for {candidate:?}: {e} \
+                         — passing through to CTFSTraceReader for a typed error"
+                    );
+                }
+            }
+
             match CTFSTraceReader::from_bytes(bytes) {
                 Ok(ctfs_reader) => {
                     info!(
@@ -629,6 +673,32 @@ fn is_codetracer_ctfs_file(path: &Path) -> bool {
         return false;
     };
     reader.has_file("steps.dat") || reader.has_file("events.log")
+}
+
+/// Returns true if the CTFS container contains a `meta.dat` declaring
+/// MCR fields (`FlagHasMcrFields = 0x1`). Such traces require the
+/// MCR-native replay engine and cannot be served by the materialized
+/// DB-trace reader.
+///
+/// The native `dap_server::setup` path falls back to the
+/// `ct-native-replay` subprocess for MCR traces. The WASM
+/// `setup_from_vfs` path errors loudly because browsers cannot fork and
+/// the in-process emulator is not yet wired into this build (see
+/// `Browser-Replay.status.org §F5a`).
+///
+/// This helper is intentionally tolerant of containers without a
+/// `meta.dat` (legacy materialised traces): a missing or unparseable
+/// `meta.dat` is treated as "not classifiable as MCR" rather than an
+/// error so the caller can fall through to its normal open path.
+fn is_mcr_ctfs_container(ctfs: &mut CtfsReader) -> bool {
+    let bytes = match ctfs.read_file("meta.dat") {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    match crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&bytes) {
+        Ok(meta) => meta.mcr.is_some(),
+        Err(_) => false,
+    }
 }
 
 fn patch_message_seq(message: &DapMessage, seq: i64) -> DapMessage {
@@ -1512,4 +1582,152 @@ where
     }
 
     Ok(())
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────
+//
+// These tests pin the MCR-detection behaviour added in F5a Phase B for
+// the WASM browser-replay path. They drive `is_mcr_ctfs_container`
+// directly with crafted CTFS containers because constructing a fully
+// initialised `Handler` (the return type of `setup_from_vfs`) requires
+// a live DAP message channel and a populated VFS — both heavyweight
+// for a unit test.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::ctfs_trace_reader::ctfs_container::{write_minimal_ctfs, CtfsReader};
+    use crate::ctfs_trace_reader::meta_dat::{
+        serialize_meta_dat, McrFields, MetaDat, FLAG_HAS_MCR_FIELDS, META_DAT_VERSION,
+    };
+
+    /// Build a `meta.dat` payload with the `FlagHasMcrFields` bit set.
+    /// The MCR sub-block is filled with plausible-but-arbitrary values:
+    /// we only care that the bit is set so the parser exposes
+    /// `mcr.is_some()`.
+    fn mcr_meta_dat_bytes() -> Vec<u8> {
+        serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
+            flags: FLAG_HAS_MCR_FIELDS,
+            program: "/usr/bin/example".to_owned(),
+            args: vec!["arg0".to_owned()],
+            workdir: "/tmp/run".to_owned(),
+            recorder_id: "mcr".to_owned(),
+            paths: vec!["src/main.c".to_owned()],
+            mcr: Some(McrFields {
+                tick_source: 1,
+                total_threads: 1,
+                atomic_mode: 0,
+                total_events: 0,
+                total_checkpoints: 0,
+                start_time_unix_us: 0,
+                platform: "linux-x86_64".to_owned(),
+                tick_granularity: "instruction".to_owned(),
+                tick_source_str: "rdtsc".to_owned(),
+                atomic_mode_str: "seq_cst".to_owned(),
+                start_time_str: "1970-01-01T00:00:00Z".to_owned(),
+            }),
+        })
+    }
+
+    /// Build a `meta.dat` payload for a materialised (non-MCR) trace.
+    fn non_mcr_meta_dat_bytes() -> Vec<u8> {
+        serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
+            flags: 0,
+            program: "/usr/bin/ruby".to_owned(),
+            args: vec!["script.rb".to_owned()],
+            workdir: "/srv/proj".to_owned(),
+            recorder_id: "ruby".to_owned(),
+            paths: vec![],
+            mcr: None,
+        })
+    }
+
+    /// Read a fixture container into an in-memory `CtfsReader`.
+    fn read_ctfs(path: &Path) -> CtfsReader {
+        let bytes = std::fs::read(path).unwrap();
+        CtfsReader::from_bytes(bytes).unwrap()
+    }
+
+    /// Positive case: a CTFS container whose `meta.dat` has the MCR
+    /// flag bit set must be classified as MCR. This mirrors what a live
+    /// recording produced by `codetracer-native-recorder` writes.
+    #[test]
+    fn is_mcr_ctfs_container_detects_flag_has_mcr_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("mcr.ct");
+
+        let dat = mcr_meta_dat_bytes();
+        // Live MCR traces ship per-thread streams instead of materialised
+        // DB files; include a placeholder thread stream to exercise the
+        // realistic file layout, even though `is_mcr_ctfs_container`
+        // only inspects `meta.dat`.
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("t00000000000", b"")]).unwrap();
+
+        let mut ctfs = read_ctfs(&ct_path);
+        assert!(
+            is_mcr_ctfs_container(&mut ctfs),
+            "expected meta.dat with FlagHasMcrFields to be classified as MCR",
+        );
+    }
+
+    /// Negative case: a materialised trace (legacy DB-trace layout)
+    /// with `meta.dat` but no MCR fields must NOT be classified as MCR
+    /// — otherwise we would regress every existing browser-replay user.
+    #[test]
+    fn is_mcr_ctfs_container_rejects_materialized_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("materialized.ct");
+
+        let dat = non_mcr_meta_dat_bytes();
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", b"placeholder")]).unwrap();
+
+        let mut ctfs = read_ctfs(&ct_path);
+        assert!(
+            !is_mcr_ctfs_container(&mut ctfs),
+            "materialised trace without FlagHasMcrFields must not be classified as MCR",
+        );
+    }
+
+    /// Containers without any `meta.dat` (legacy `meta.json`-only
+    /// traces) must not be classified as MCR. The helper has to be
+    /// tolerant of missing metadata so callers can fall through to the
+    /// JSON fallback path without seeing spurious errors.
+    #[test]
+    fn is_mcr_ctfs_container_handles_missing_meta_dat() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("legacy.ct");
+
+        let meta_json = br#"{"workdir":"/legacy","program":"/legacy/app","args":[]}"#;
+        write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
+
+        let mut ctfs = read_ctfs(&ct_path);
+        assert!(
+            !is_mcr_ctfs_container(&mut ctfs),
+            "missing meta.dat must not classify as MCR (fall-through to legacy reader)",
+        );
+    }
+
+    /// A corrupted `meta.dat` is treated as "not classifiable as MCR"
+    /// rather than as an error: `setup_from_vfs` will then call
+    /// `CTFSTraceReader::from_bytes` which produces a typed error
+    /// surfaced to the user. We verify that the helper itself does not
+    /// panic on garbage input.
+    #[test]
+    fn is_mcr_ctfs_container_tolerates_corrupt_meta_dat() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("corrupt.ct");
+
+        // Bytes too short to even contain the 8-byte header — guarantees
+        // a `MetaDatError::TooShort` from the parser.
+        let bad_dat = [0u8; 4];
+        write_minimal_ctfs(&ct_path, &[("meta.dat", &bad_dat)]).unwrap();
+
+        let mut ctfs = read_ctfs(&ct_path);
+        assert!(
+            !is_mcr_ctfs_container(&mut ctfs),
+            "corrupt meta.dat must be treated as not-MCR so the typed error surfaces later",
+        );
+    }
 }
