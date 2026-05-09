@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 // use log::info;
-use codetracer_trace_types::{
-    CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TypeId, ValueRecord,
-};
+use codetracer_trace_types::{CallKey, EventLogKind, PathId, Place, StepId, TraceLowLevelEvent, TypeId, ValueRecord};
 
 use crate::db::{CellChange, Db, DbCall, DbRecordEvent, DbStep, EndOfProgram};
 use crate::task::NO_INDEX;

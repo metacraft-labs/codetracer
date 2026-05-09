@@ -2538,10 +2538,10 @@ mod tests {
 
     use super::*;
     // use crate::event_db;
+    use crate::ctfs_trace_reader::CTFSTraceReader;
     use crate::lang;
     use crate::task;
     use crate::task::{gen_task_id, GlobalCallLineIndex};
-    use crate::ctfs_trace_reader::CTFSTraceReader;
     use crate::trace_processor::TraceProcessor;
     use clap::error::Result;
     // use event_db::{IndexInSingleTable, SingleTableId};
@@ -2832,9 +2832,7 @@ mod tests {
     /// `trace.bin`/`trace.json`/`trace_metadata.json` triplets are no longer
     /// supported.
     fn load_db_for_trace(path: &Path) -> Db {
-        let ct_path = if path.is_file()
-            && path.extension().is_some_and(|ext| ext == std::ffi::OsStr::new("ct"))
-        {
+        let ct_path = if path.is_file() && path.extension().is_some_and(|ext| ext == std::ffi::OsStr::new("ct")) {
             path.to_path_buf()
         } else {
             std::fs::read_dir(path)

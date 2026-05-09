@@ -47,8 +47,7 @@ fn find_fixture_ct_file(fixture_dir: &Path) -> Result<PathBuf, String> {
         ));
     }
 
-    let entries = fs::read_dir(fixture_dir)
-        .map_err(|e| format!("read_dir {}: {}", fixture_dir.display(), e))?;
+    let entries = fs::read_dir(fixture_dir).map_err(|e| format!("read_dir {}: {}", fixture_dir.display(), e))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("dir entry: {}", e))?;
         let path = entry.path();
@@ -84,12 +83,8 @@ fn stylus_flow_dap_loads_ctfs_fixture() {
     let ct_path = find_fixture_ct_file(&fixture_dir).unwrap_or_else(|msg| panic!("{msg}"));
     println!("Stylus CTFS fixture: {}", ct_path.display());
 
-    let runner = FlowTestRunner::new_db_trace(&db_backend, &fixture_dir).unwrap_or_else(|e| {
-        panic!(
-            "DAP init failed for Stylus CTFS fixture {}: {e}",
-            ct_path.display()
-        )
-    });
+    let runner = FlowTestRunner::new_db_trace(&db_backend, &fixture_dir)
+        .unwrap_or_else(|e| panic!("DAP init failed for Stylus CTFS fixture {}: {e}", ct_path.display()));
     runner.finish().expect("disconnect failed");
     println!("Stylus DAP CTFS fixture loaded successfully");
 }

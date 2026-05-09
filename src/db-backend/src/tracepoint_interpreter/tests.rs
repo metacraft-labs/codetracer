@@ -202,8 +202,8 @@ fn load_db_for_trace(path: &Path) -> Db {
             )
         });
 
-    let reader = CTFSTraceReader::open(&ct_path)
-        .unwrap_or_else(|e| panic!("CTFS open failed for {}: {}", ct_path.display(), e));
+    let reader =
+        CTFSTraceReader::open(&ct_path).unwrap_or_else(|e| panic!("CTFS open failed for {}: {}", ct_path.display(), e));
     reader.db().clone()
 }
 
