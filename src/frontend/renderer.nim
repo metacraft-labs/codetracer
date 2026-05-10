@@ -503,22 +503,37 @@ proc expand*(path: cstring, line: int) {.exportc, used.} =
   ## the expansion, and returns a Location with expansion fields populated.
   ## The response is handled by the `ct/update-expansion` DAP response
   ## handler which opens the expanded code inline or in a tab.
-  let packet = js{
-    seq:        data.dapApi.seq,
-    `type`:     cstring"request",
-    command:    cstring"ct/update-expansion",
-    arguments:  js{
-      path: path,
-      line: line,
-      update: js{
-        kind: cstring"MacroUpdateExpand",
-        times: 1
+  ##
+  ## VSCode-extension builds (`-d:ctInExtension`) use a different
+  ## `DapApi` shape (no `seq` / `sessionId`) and dispatch DAP through
+  ## a separate path entirely. Without the guard the body fails to
+  ## type-check there — `data.dapApi.seq` resolves to the typedesc
+  ## `seq[T]` rather than reporting the missing field, which broke
+  ## `just build-ui-js`.
+  when not defined(ctInExtension):
+    # `DapApi.seq` collides with something in this module's import
+    # graph: `d.seq` for `d: DapApi` resolves to a typedesc lookup
+    # (probably via UFCS visibility of `seq[T]`) before reaching the
+    # DapApi field. dap.nim's own scope does not trip this — its
+    # imports are narrower — so we read the field through accessors
+    # exported there.
+    let dap = data.dapApi
+    let packet = js{
+      `seq`:      readSeq(dap),
+      `type`:     cstring"request",
+      command:    cstring"ct/update-expansion",
+      arguments:  js{
+        path: path,
+        line: line,
+        update: js{
+          kind: cstring"MacroUpdateExpand",
+          times: 1
+        }
       }
     }
-  }
-  data.dapApi.seq += 1
-  packet["sessionId"] = data.dapApi.sessionId
-  ipc.send("CODETRACER::dap-raw-message", packet)
+    bumpSeq(dap)
+    packet["sessionId"] = dap.sessionId
+    ipc.send("CODETRACER::dap-raw-message", packet)
 
 var debugResponse* = DebugOutput(kind: DebugResult, output: cstring"") # per-replay
 

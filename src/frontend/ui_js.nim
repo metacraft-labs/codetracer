@@ -782,9 +782,13 @@ proc configure(data: Data) =
   # `-d:ctHmr` AND the renderer's environment has `CT_HMR=1`. Both
   # gates fail closed: production builds and CI launches never enter
   # this branch. The transport returns nil if either gate is off.
+  # `defaultBundleFile` is the basename hint used when the runtime
+  # resolver can't auto-derive the bundle path from the script tag —
+  # the resolver normally finds the actual on-disk path, so the
+  # value is rarely consulted.
   when defined(ctHmr):
     discard installCtHmrTransport(
-      defaultBundleFile = cstring"src/build-debug/public/ui.js",
+      defaultBundleFile = cstring"ui.js",
       bundleUrl = cstring"ui.js")
 
   Mousetrap.`bind`("ctrl+f5") do ():

@@ -83,9 +83,21 @@ endif
 !ts = |> ^ %f^ $(TSC) %f |> %o
 
 # JS Rules:
+#
+# `-d:ctHmr` activates the codetracer hot-module-reload integration
+# (`src/frontend/hmr_runtime.nim`). It transitively enables
+# `-d:isonimHmr` so isonim's `{.uiComponent.}` pragmas register slots
+# and `mountUiHot` boundaries listen for swaps. The HMR transport is
+# *only* installed when the renderer's environment also has CT_HMR=1,
+# so a binary built with these flags behaves like a non-HMR binary
+# until the developer opts in at launch time. Production builds go
+# through the nix flake's release path which does not include these
+# flags.
 !nim_js = |> ^ %f^ $(NIM_DEBUG)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
+-d:ctHmr\
+-d:isonimHmr\
 --debugInfo:on\
 --lineDir:on\
 --hints:off \

@@ -206,6 +206,18 @@ proc dapEventToCtEventKind*(event: cstring): CtEventKind =
 
 ### DapApi procedures:
 
+# Read/bump accessors for the `seq` field. The field is named after
+# the DAP wire-format key (`seq`), which collides with Nim's `seq[T]`
+# typedesc inside the `js{}` literal macro's field-access probe — see
+# the call site in `renderer.nim`. dap.nim's own import set does not
+# trip the lookup ambiguity, so we expose the access through a typed
+# accessor here and call it from the noisy module. Only the
+# non-extension `DapApi` carries this field; in `-d:ctInExtension`
+# builds DAP dispatch goes through the VSCode runtime.
+when not defined(ctInExtension):
+  proc readSeq*(dap: DapApi): int {.inline.} = dap.seq
+  proc bumpSeq*(dap: DapApi) {.inline.} = dap.seq += 1
+
 proc on*[T](dap: DapApi, kind: CtEventKind, handler: proc(kind: CtEventKind, value: T)) =
   dap.handlers[kind].add(proc(kind: CtEventKind, rawValue: JsObject) =
     handler(kind, rawValue.to(T)))

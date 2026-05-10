@@ -74,6 +74,38 @@ build-hmr-fixture:
 test-hmr-fixture: build-hmr-fixture
   cd src/tests/gui && ./node_modules/.bin/playwright test --config ../hmr_fixture/playwright.config.ts
 
+# End-to-end HMR test against the actual ct binary. Requires
+# `just build` (or `just build-once`) to have produced the
+# HMR-enabled renderer at src/build-debug/bin/ct. Tests:
+#   - JS-bundle hot reload by directly mutating ui.js
+#   - CSS LiveReload by directly mutating loader.css
+#   - No full-page navigation across a JS reload
+#
+# Uses an Xvfb display under Linux/macOS, the native display under
+# Windows — same scheme the broader test-gui recipe uses.
+test-hmr-e2e:
+  #!/usr/bin/env bash
+  set -e
+  export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|*_NT*)
+      cd src/tests/gui && ./node_modules/.bin/playwright test tests/hmr/hmr_views_and_styles.spec.ts
+      ;;
+    *)
+      DISPLAY_NUM=99
+      while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+      done
+      Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+      XVFB_PID=$!
+      trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+      sleep 1
+      export DISPLAY=":${DISPLAY_NUM}"
+      cd src/tests/gui && ./node_modules/.bin/playwright test tests/hmr/hmr_views_and_styles.spec.ts
+      ;;
+  esac
+
 build-storybook-components:
   mkdir -p storybook/dist
   nim \
