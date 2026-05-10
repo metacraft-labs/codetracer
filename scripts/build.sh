@@ -14,13 +14,13 @@ set -euo pipefail
 #   * Compile time: Tup's !nim_js rule passes -d:ctHmr -d:isonimHmr,
 #     so {.uiComponent.} pragmas register slots and mountUiHot
 #     boundaries listen for swaps. See src/Tuprules.tup.
-#   * Runtime gate: the env var CT_HMR=1. With this set, the renderer
-#     installs Node fs.watch transports (one for ui.js, one per
-#     codetracer-managed stylesheet) at startup. Without it, the dev
-#     binary runs as if HMR were absent.
+#   * Runtime: HMR is *on by default* in dev builds. Set CT_HMR=0
+#     (or `false` / `off`) to launch the dev binary without installing
+#     the watchers — useful for measuring baseline behaviour.
 #
-# To use HMR after `just build` returns:
-#   CT_HMR=1 src/build-debug/bin/ct
+# After `just build` returns:
+#   src/build-debug/bin/ct       # HMR active
+#   CT_HMR=0 src/build-debug/bin/ct   # HMR off, same binary
 #
 # Edit a panel's source or .styl file. tup monitor rebuilds the
 # affected output. fs.watch in the renderer fires; the JS bundle is
@@ -45,10 +45,11 @@ cat <<'HMR_BANNER'
 ==============================================================
   CodeTracer dev build complete — HMR-enabled binary ready.
 
-  Run with:  CT_HMR=1 src/build-debug/bin/ct
+  Run with:  src/build-debug/bin/ct
 
-  Edits to .nim panel sources and .styl theme files trigger
-  in-place reloads in the running ct window. Without CT_HMR=1
-  the binary behaves like a non-HMR build (zero runtime cost).
+  HMR is on by default. Edits to .nim panel sources and .styl
+  theme files trigger in-place reloads in the running ct
+  window. To disable for a launch (baseline measurement,
+  troubleshooting), prefix with CT_HMR=0.
 ==============================================================
 HMR_BANNER

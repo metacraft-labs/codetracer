@@ -72,8 +72,11 @@ function restoreLoaderCss() {
   }
 }
 
-/** Build a clean env that opts into HMR and routes the bundle watcher
- *  at the on-disk file the renderer's <script> actually loaded.
+/** Build a clean env for the dev ct binary. HMR is on by default in
+ *  `-d:ctHmr` builds — we don't pass `CT_HMR=1` here on purpose, to
+ *  cover that out-of-the-box workflow. The bundle path override is
+ *  left set so the test stays robust against any layout drift in
+ *  build-debug/.
  */
 function makeHmrEnv(): Record<string, string> {
   const env: Record<string, string> = {};
@@ -85,9 +88,9 @@ function makeHmrEnv(): Record<string, string> {
   env.CODETRACER_NEW_TRACE_POLICY = "window";
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
-  // Activate the HMR transport.
-  env.CT_HMR = "1";
   env.CT_HMR_BUNDLE = UI_JS_PATH;
+  // Make sure CT_HMR is not stuck at 0 from a prior test or shell.
+  delete env.CT_HMR;
   return env;
 }
 

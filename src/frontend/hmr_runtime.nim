@@ -39,12 +39,20 @@ when defined(ctHmr):
     {.importjs: "(globalThis.process && globalThis.process.env && globalThis.process.env[#])".}
 
   proc isHmrRequested*(): bool =
-    ## True when the renderer's environment opts into HMR. Reading
-    ## `process.env.CT_HMR` works in Electron renderers; in pure
-    ## browsers `globalThis.process` is undefined and the importjs
-    ## guard returns undefined which converts to false.
+    ## HMR is on by default for `-d:ctHmr` builds — the developer who
+    ## ran `just build` already opted in at compile time, so making
+    ## them remember to also `CT_HMR=1` every time they launch ct
+    ## defeats the "edit, save, see the change" flow. The env var is
+    ## now an *opt-out*: set `CT_HMR=0` (or `false` / `off`) to launch
+    ## the dev binary without installing the watchers.
+    ##
+    ## Production builds — which lack `-d:ctHmr` entirely — never
+    ## reach this code; the `else` branch below short-circuits to
+    ## the no-op stub and the JS bundle contains no HMR machinery.
     let v = nodeProcessEnv(cstring"CT_HMR")
-    not v.isNil and (v == cstring"1" or v == cstring"true")
+    if v.isNil or v.len == 0:
+      return true
+    return v != cstring"0" and v != cstring"false" and v != cstring"off"
 
   proc resolveBundleFile(): cstring =
     ## Bundle file the FS watcher should observe. Honour
