@@ -47,6 +47,10 @@ src/common/paths_test
 ui.js
 debugger.js
 browsersync_serv.js
+
+# HMR fixture build outputs
+src/tests/hmr_fixture/main.js
+src/tests/hmr_fixture/test-results/
 tes?_py*
 testcache/
 .config.json

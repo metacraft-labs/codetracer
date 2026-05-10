@@ -31,6 +31,49 @@ build-ui-js output:
     --out:{{output}} \
     js src/frontend/ui_js.nim
 
+# HMR-enabled renderer build. Adds `-d:ctHmr` (which transitively
+# activates `-d:isonimHmr`) so {.uiComponent.} pragmas register slots
+# and `mountUiHot` boundaries listen for swaps. The runtime gate is
+# the env var CT_HMR=1 — without it the transport stays uninstalled
+# even in this binary, so this output can be the everyday dev binary.
+# CT_HMR_BUNDLE optionally overrides the bundle file the FS watcher
+# observes; the default is `src/build-debug/public/ui.js`.
+build-ui-js-hmr output:
+  nim \
+    -d:chronicles_enabled=off \
+    -d:ctRenderer \
+    -d:ctInExtension \
+    -d:ctHmr \
+    -d:isonimHmr \
+    --debugInfo:on \
+    --lineDir:on \
+    --hotCodeReloading:on \
+    --out:{{output}} \
+    js src/frontend/ui_js.nim
+
+# Build the HMR integration fixture: a tiny standalone page that
+# mounts two parametric panels via the same {.uiComponent.} +
+# mountUiHot pattern production panels use. Used by the
+# test-hmr-fixture target.
+build-hmr-fixture:
+  nim \
+    -d:chronicles_enabled=off \
+    -d:ctHmr \
+    -d:isonimHmr \
+    --path:src \
+    --hints:off \
+    --out:src/tests/hmr_fixture/main.js \
+    js src/tests/hmr_fixture/main.nim
+
+# Run the HMR fixture's Playwright spec. Verifies that the codetracer
+# integration pattern (parametric pragma + mountUiHot wrapper)
+# preserves Panel A's identity / focus / signal state across a swap of
+# Panel B's slot, and contains failed swaps without touching Panel A.
+# Uses the Playwright install in src/tests/gui/node_modules — the
+# fixture has no node_modules of its own.
+test-hmr-fixture: build-hmr-fixture
+  cd src/tests/gui && ./node_modules/.bin/playwright test --config ../hmr_fixture/playwright.config.ts
+
 build-storybook-components:
   mkdir -p storybook/dist
   nim \

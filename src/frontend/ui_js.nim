@@ -45,6 +45,7 @@ import viewmodel/backend/[backend_service, real_backend]
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
 from isonim/core/batch as isoBatch import batch
+import hmr_runtime
 var activeSessionVM: SessionViewModel
 var activeIsoNimApp: IsoNimApp
 const MIN_FONTSIZE = 6
@@ -777,6 +778,15 @@ data.functions.focusEditorView = focusEditorView
 
 
 proc configure(data: Data) =
+  # Hot module reload — only active when the binary was built with
+  # `-d:ctHmr` AND the renderer's environment has `CT_HMR=1`. Both
+  # gates fail closed: production builds and CI launches never enter
+  # this branch. The transport returns nil if either gate is off.
+  when defined(ctHmr):
+    discard installCtHmrTransport(
+      defaultBundleFile = cstring"src/build-debug/public/ui.js",
+      bundleUrl = cstring"ui.js")
+
   Mousetrap.`bind`("ctrl+f5") do ():
     data.toggleMode()
 

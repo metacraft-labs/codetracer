@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>CodeTracer HMR Fixture</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 16px; }
+      .panel-host { border: 1px solid #ccc; padding: 12px; margin-bottom: 12px; }
+      .panel-host h2 { margin: 0 0 8px 0; font-size: 14px; }
+      .ct-shell-input-row { display: flex; gap: 6px; }
+      .ct-shell-input { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <h1>CodeTracer HMR Fixture</h1>
+    <section class="panel-host">
+      <h2>Panel A (kept stable across the swap)</h2>
+      <div id="panel-a"></div>
+    </section>
+    <section class="panel-host">
+      <h2>Panel B (mutated by the spec)</h2>
+      <div id="panel-b"></div>
+    </section>
+    <div id="filler" style="height: 2000px"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
