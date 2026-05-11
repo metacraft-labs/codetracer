@@ -93,6 +93,14 @@ endif
 # until the developer opts in at launch time. Production builds go
 # through the nix flake's release path which does not include these
 # flags.
+#
+# Note: `--hotCodeReloading:on` is intentionally NOT set here.
+# Nim's JS HCR wraps each module's init in a `if (loaded == undefined)`
+# guard, which makes module init code run only once per process — the
+# opposite of what our HMR pipeline needs (we want every bundle
+# re-evaluation to re-run module init so changed Nim source actually
+# takes effect). No code in the codebase calls the Nim HCR runtime,
+# so dropping the flag is a no-op for everything except HMR.
 !nim_js = |> ^ %f^ $(NIM_DEBUG)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
@@ -102,7 +110,6 @@ endif
 --lineDir:on\
 --hints:off \
 --warnings:off \
---hotCodeReloading:on\
 --out:%o\
 js %f |> %B.js
 
