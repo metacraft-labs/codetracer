@@ -3,18 +3,26 @@
 //
 // These tests prove the developer-facing workflow:
 //
-//   1. Run `just build` (produces the dev binary with -d:ctHmr and
-//      starts `tup monitor -a` in the background).
-//   2. Launch `src/build-debug/bin/ct` (HMR active by default).
+//   1. Run `just build` (produces the dev binary with -d:ctHmr,
+//      starts `tup monitor -a`, and starts a `livereload` daemon
+//      watching src/build-debug/).
+//   2. Launch `src/build-debug/bin/ct` (HMR active by default — the
+//      renderer connects to the daemon as a LiveReload WS client).
 //   3. Edit a `.nim` panel source or a `.styl` theme file.
 //   4. The running ct window updates without a navigation.
 //
 // Each test backs the source file up at start, mutates it, runs
 // `tup upd` (which rebuilds the affected output — Stylus → .css for
 // `.styl` edits, nim js → ui.js for `.nim` edits), and waits for the
-// renderer's fs.watch transport to react. On test exit the source
-// file is restored and Tup is re-run so the build artifacts settle
-// back to their pristine state.
+// renderer to receive the daemon's `reload` broadcast and apply it.
+// On test exit the source file is restored and Tup is re-run so the
+// build artifacts settle back to their pristine state.
+//
+// The tests spin up their own `livereload` daemon (on a random
+// non-canonical port) and point the ct instances at it via
+// `CT_LIVERELOAD_URL`. This isolates the suite from any daemon
+// `just build` may have started on the canonical port 35729, and
+// keeps parallel test runs from colliding on the WS port.
 //
 // Robustness: each test's `captureSource` step also runs
 // `git checkout HEAD -- <path>` to wash out any leftover mutations
@@ -30,7 +38,8 @@ import { test, expect, _electron, type ElectronApplication, type Page } from "@p
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
+import { createConnection } from "node:net";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..", "..", "..");
 const CT_BIN = join(REPO_ROOT, "src", "build-debug", "bin", "ct");
@@ -96,15 +105,58 @@ function makeHmrEnv(): Record<string, string> {
   env.CODETRACER_NEW_TRACE_POLICY = "window";
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
-  env.CT_HMR_BUNDLE = UI_JS_PATH;
+  // Point the renderer at the test-owned daemon rather than the
+  // canonical 35729. `lrPort` is filled in by `beforeAll`.
+  env.CT_LIVERELOAD_URL = `ws://localhost:${lrPort}/livereload`;
   // HMR is on by default for -d:ctHmr builds; make sure CT_HMR is
   // not stuck at 0 from the inherited shell.
   delete env.CT_HMR;
   return env;
 }
 
+async function waitForTcpPort(port: number, timeoutMs: number = 10_000): Promise<void> {
+  // The `livereload` CLI prints a banner before it's truly ready;
+  // probing the TCP port is the most reliable readiness signal.
+  // Use `localhost` rather than `127.0.0.1` because the daemon
+  // binds to the IPv6 loopback (::1) on Linux, and renderers
+  // similarly connect via the WS URL containing `localhost`.
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const ok = await new Promise<boolean>((resolve) => {
+      const sock = createConnection({ port, host: "localhost" }, () => {
+        sock.end();
+        resolve(true);
+      });
+      sock.on("error", () => resolve(false));
+      sock.setTimeout(200, () => { sock.destroy(); resolve(false); });
+    });
+    if (ok) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  throw new Error(`livereload daemon never started listening on port ${port}`);
+}
+
+function startLivereloadDaemon(port: number): ChildProcess {
+  // Mirror the invocation in scripts/build.sh. `--wait` is the
+  // livereload-CLI knob for "delay reload broadcasts by N ms",
+  // which softens Tup's occasional multi-pass rebuilds.
+  const bin = join(REPO_ROOT, "node_modules", ".bin", "livereload");
+  return spawn(bin, [
+    join(REPO_ROOT, "src", "build-debug"),
+    "--port", String(port),
+    "--wait", "200",
+    "--usepolling", "false",
+  ], {
+    cwd: REPO_ROOT,
+    stdio: ["ignore", "ignore", "ignore"],
+    detached: false,
+  });
+}
+
 let app: ElectronApplication | null = null;
 let page: Page | null = null;
+let lrDaemon: ChildProcess | null = null;
+let lrPort: number = 0;
 
 test.describe("CodeTracer HMR — full build pipeline", () => {
   // Each Nim edit triggers a ~15-20s `nim js` recompile, plus a
@@ -117,8 +169,18 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
     `ct binary not built at ${CT_BIN}; run \`just build\` first`);
   test.skip(!existsSync(UI_JS_PATH),
     `ui.js not built at ${UI_JS_PATH}; run \`just build\` first`);
+  test.skip(!existsSync(join(REPO_ROOT, "node_modules", ".bin", "livereload")),
+    "livereload npm package missing; run `npm install` at repo root");
 
   test.beforeAll(async () => {
+    // Pick a random high port to avoid colliding with a canonical
+    // livereload daemon that `just build` may have started on
+    // 35729. The renderers connect to whichever port we expose
+    // via CT_LIVERELOAD_URL.
+    lrPort = 40_000 + Math.floor(Math.random() * 10_000);
+    lrDaemon = startLivereloadDaemon(lrPort);
+    await waitForTcpPort(lrPort);
+
     app = await _electron.launch({
       executablePath: CT_BIN,
       cwd: REPO_ROOT,
@@ -127,13 +189,14 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
     page = await app.firstWindow();
     await page.waitForLoadState("domcontentloaded");
     // Let the renderer finish post-load init — `configure()` is
-    // where the HMR transports get installed.
+    // where the LiveReload transport gets installed and the WS
+    // connection to the daemon comes up.
     await page.waitForTimeout(1500);
   });
 
   test.afterAll(async () => {
     // Tear Electron down before any final restoration so the
-    // renderer doesn't pick up a flurry of fs.watch events on the
+    // renderer doesn't pick up a flurry of reload events on the
     // way out.
     if (app !== null) {
       const pid = app.process().pid;
@@ -145,6 +208,10 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       }
       app = null;
       page = null;
+    }
+    if (lrDaemon !== null) {
+      try { lrDaemon.kill("SIGKILL"); } catch { /* already gone */ }
+      lrDaemon = null;
     }
   });
 
@@ -178,9 +245,12 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
       writeFileSync(LOADER_STYL, stylBackup + probeRule);
       tupUpd();
 
-      // The renderer's CSS watcher sees loader.css change and
-      // swaps the link's href. 10s is generous — the actual swap
-      // happens within ~200ms of stylus emitting the file.
+      // The daemon notices loader.css changed and broadcasts
+      // `reload`; the renderer's LiveReload transport classifies
+      // the path as CSS and swaps the link's href in place. 10s
+      // is generous — the actual swap happens within ~200ms of
+      // stylus emitting the file (debounce window + WS round
+      // trip).
       await p.waitForFunction(
         ({ sel, before }) => {
           const node = document.querySelector(sel) as HTMLLinkElement | null;
@@ -264,12 +334,12 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
   });
 
   test("a single .nim edit triggers HMR in TWO concurrent ct instances watching the same bundle", async () => {
-    // Each ct binary's renderer process installs its own
-    // fs.watchFile handle on src/build-debug/ui.js. Two
-    // independent ct windows are two independent watchers — a
-    // single edit fans out to both, the bundle reload runs
-    // independently in each, and the marker shows up in both
-    // globalThis objects.
+    // Each ct renderer connects to the shared LiveReload daemon as
+    // a WS client. A single source edit makes Tup rebuild ui.js;
+    // the daemon notices the file change and fans the `reload`
+    // message out to every connected client. Both renderers
+    // evaluate the new bundle in-place and the marker shows up in
+    // each one's globalThis.
     //
     // The first instance is the one beforeAll launched (`app` /
     // `page` module-scope). We launch a second one here in the

@@ -779,17 +779,13 @@ data.functions.focusEditorView = focusEditorView
 
 proc configure(data: Data) =
   # Hot module reload — only active when the binary was built with
-  # `-d:ctHmr` AND the renderer's environment has `CT_HMR=1`. Both
-  # gates fail closed: production builds and CI launches never enter
-  # this branch. The transport returns nil if either gate is off.
-  # `defaultBundleFile` is the basename hint used when the runtime
-  # resolver can't auto-derive the bundle path from the script tag —
-  # the resolver normally finds the actual on-disk path, so the
-  # value is rarely consulted.
+  # `-d:ctHmr`. The renderer connects to the external LiveReload
+  # daemon that `just build` started; `CT_HMR=0` opts out per
+  # launch. The bundleUrl is the same relative URL the document's
+  # initial `<script>` tag used; the transport resolves it to a
+  # file:// path for inline-script bundle reload.
   when defined(ctHmr):
-    discard installCtHmrTransport(
-      defaultBundleFile = cstring"ui.js",
-      bundleUrl = cstring"ui.js")
+    discard installCtHmrTransport(bundleUrl = cstring"ui.js")
 
   Mousetrap.`bind`("ctrl+f5") do ():
     data.toggleMode()
