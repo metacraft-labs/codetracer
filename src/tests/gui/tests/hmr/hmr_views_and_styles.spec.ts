@@ -27,7 +27,8 @@
 // `just build` since src/Tuprules.tup landed the flag).
 
 import { test, expect, _electron, type ElectronApplication, type Page } from "@playwright/test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -259,6 +260,114 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
     } finally {
       writeFileSync(HMR_RUNTIME_NIM, nimBackup);
       tupUpd();
+    }
+  });
+
+  test("a single .nim edit triggers HMR in TWO concurrent ct instances watching the same bundle", async () => {
+    // Each ct binary's renderer process installs its own
+    // fs.watchFile handle on src/build-debug/ui.js. Two
+    // independent ct windows are two independent watchers — a
+    // single edit fans out to both, the bundle reload runs
+    // independently in each, and the marker shows up in both
+    // globalThis objects.
+    //
+    // The first instance is the one beforeAll launched (`app` /
+    // `page` module-scope). We launch a second one here in the
+    // test body so its lifetime is scoped to this test.
+    expect(page).not.toBeNull();
+    const p1 = page!;
+
+    // Two Electron instances on the same host need isolated
+    // userData dirs — otherwise the second one collides with the
+    // first's SingletonLock at `~/.config/Electron/SingletonLock`
+    // and Chromium exits before the renderer ever starts. The ct
+    // wrapper intercepts `--user-data-dir` as a codetracer CLI
+    // option (it isn't passed through to Electron), so the
+    // standard knob doesn't work here. The fallback is to point
+    // the second process at a fresh HOME: Electron's
+    // `app.getPath('userData')` on Linux resolves through
+    // XDG_CONFIG_HOME → $HOME/.config/<appName>, so a unique HOME
+    // gives a unique userData.
+    const fakeHome2 = mkdtempSync(join(tmpdir(), "ct-hmr-multi-"));
+    let app2: ElectronApplication | null = null;
+    const nimBackup = captureSource(HMR_RUNTIME_NIM);
+    try {
+      const env2 = makeHmrEnv();
+      env2.HOME = fakeHome2;
+      env2.XDG_CONFIG_HOME = join(fakeHome2, ".config");
+      env2.XDG_DATA_HOME = join(fakeHome2, ".local", "share");
+      env2.XDG_CACHE_HOME = join(fakeHome2, ".cache");
+      app2 = await _electron.launch({
+        executablePath: CT_BIN,
+        cwd: REPO_ROOT,
+        env: env2,
+      });
+      const p2 = await app2.firstWindow();
+      await p2.waitForLoadState("domcontentloaded");
+      await p2.waitForTimeout(1500);
+
+      // Sanity: each renderer has its own globalThis. A marker
+      // set in one shouldn't be present in the other before we
+      // edit.
+      const marker =
+        `__ct_hmr_multi_marker_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      expect(await p1.evaluate((k) => (globalThis as any)[k], marker))
+        .toBeUndefined();
+      expect(await p2.evaluate((k) => (globalThis as any)[k], marker))
+        .toBeUndefined();
+
+      const navsBefore1 = await p1.evaluate(() =>
+        performance.getEntriesByType("navigation").length);
+      const navsBefore2 = await p2.evaluate(() =>
+        performance.getEntriesByType("navigation").length);
+
+      const setExpr = `globalThis[${JSON.stringify(marker)}] = 'applied';`;
+      const appended =
+        `\nwhen defined(ctHmr):\n` +
+        `  proc setCtHmrMultiMarker() =\n` +
+        `    {.emit: ${JSON.stringify(setExpr)}.}\n` +
+        `  setCtHmrMultiMarker()\n`;
+      writeFileSync(HMR_RUNTIME_NIM, nimBackup + appended);
+      tupUpd();
+
+      // Both renderers should see the marker. Parallel waits —
+      // a serial check works too but parallelising surfaces a
+      // bug where the second renderer's watcher silently never
+      // fires.
+      await Promise.all([
+        p1.waitForFunction(
+          (k) => (globalThis as any)[k] === "applied",
+          marker,
+          { timeout: 60_000 },
+        ),
+        p2.waitForFunction(
+          (k) => (globalThis as any)[k] === "applied",
+          marker,
+          { timeout: 60_000 },
+        ),
+      ]);
+
+      // Neither renderer should have done a full-page reload.
+      const navsAfter1 = await p1.evaluate(() =>
+        performance.getEntriesByType("navigation").length);
+      const navsAfter2 = await p2.evaluate(() =>
+        performance.getEntriesByType("navigation").length);
+      expect(navsAfter1).toBe(navsBefore1);
+      expect(navsAfter2).toBe(navsBefore2);
+    } finally {
+      writeFileSync(HMR_RUNTIME_NIM, nimBackup);
+      tupUpd();
+      if (app2 !== null) {
+        const pid = app2.process().pid;
+        if (pid !== undefined) {
+          try { execSync(`pkill -P ${pid}`, { stdio: "ignore" }); }
+          catch { /* pkill exits 1 when no children matched */ }
+          try { process.kill(pid, "SIGKILL"); }
+          catch { /* already gone */ }
+        }
+      }
+      try { rmSync(fakeHome2, { recursive: true, force: true }); }
+      catch { /* best-effort cleanup */ }
     }
   });
 });
