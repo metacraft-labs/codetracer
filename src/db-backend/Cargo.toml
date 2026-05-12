@@ -6,7 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-cc = { version = "*", optional = true }
+# Always needed: build.rs links the Nim MCR emulator's generated C output
+# into the crate via cc::Build (F5c-1, native target).
+cc = "1"
 
 [dependencies]
 num-traits = "0.2"
@@ -132,7 +134,6 @@ io-transport = ["dep:shellexpand"]
 # variable extraction, and tracepoint compilation.  Disable for WASM builds
 # where the C grammars cannot be cross-compiled.
 syntax-highlight = [
-  "dep:cc",
   "dep:tree-sitter",
   "dep:tree-sitter-traversal2",
   "dep:tree-sitter-rust",
