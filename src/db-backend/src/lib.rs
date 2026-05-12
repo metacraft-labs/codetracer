@@ -35,6 +35,11 @@ pub mod dap_types;
 pub mod db;
 pub mod diff;
 pub mod distinct_vec;
+// M-DWARF-1: DWARF parsing infrastructure. Compiles on both native and
+// wasm32 targets — addr2line/gimli/object are no_std-friendly and contain
+// no C dependencies. M-DWARF-2/3/4 will wire this into the recorder,
+// emulator session, and stack unwinder respectively.
+pub mod dwarf_index;
 // The Nim MCR emulator is linked into both the native build (as a shared
 // library — see F5c-1) and the wasm32 build (as a plain static archive —
 // see F5c-2). The FFI surface and the `EmulatorReplaySession` wrapper

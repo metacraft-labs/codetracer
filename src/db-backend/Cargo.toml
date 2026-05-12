@@ -57,6 +57,37 @@ vfs = "0.12"
 
 shellexpand = { version = "3.1.1", optional = true }
 
+# DWARF parsing (M-DWARF-1). These three crates form the de-facto pure-Rust
+# stack for symbolicating native PCs back to (file, line, function):
+#   * `object`    — ELF (and other) container parsing.
+#   * `gimli`     — DWARF section parsing.
+#   * `addr2line` — high-level PC -> source location index built on gimli.
+#
+# All three are no_std-friendly when their default features are turned off
+# and they vendor no C dependencies, so they compile cleanly to wasm32 for
+# the browser-replay build. We deliberately avoid:
+#   * `addr2line/loader`  — pulls in `memmap2` (POSIX mmap; wasm-hostile).
+#   * `addr2line/cpp_demangle` — pulls in C++ demangler with heavier deps;
+#     M-DWARF-1 leaves demangling raw, M-DWARF-2/3 can switch it on if
+#     Rust/C++ traces show up.
+#   * `object/compression` — flate2/ruzstd not needed for the small
+#     uncompressed DWARF the MCR recorder will emit; reduces wasm size.
+addr2line = { version = "0.26", default-features = false, features = [
+  "std",
+  "fallible-iterator",
+  "rustc-demangle",
+] }
+gimli = { version = "0.33", default-features = false, features = [
+  "read",
+  "std",
+  "endian-reader",
+] }
+object = { version = "0.39", default-features = false, features = [
+  "read_core",
+  "elf",
+  "std",
+] }
+
 ntest = "0.9.3"
 
 # tree-sitter dependencies — only needed for syntax highlighting / source
