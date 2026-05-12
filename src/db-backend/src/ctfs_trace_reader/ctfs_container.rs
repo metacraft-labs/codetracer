@@ -344,6 +344,25 @@ impl CtfsReader {
     /// - Level 2+: each entry points to a lower-level mapping block
     ///
     /// Where N = `entries_per_block` (e.g. 128 for 1024-byte blocks).
+    ///
+    /// # Known writer pitfall (see M-CTFS-LargeFile)
+    ///
+    /// If a live (streaming) CTFS writer is read concurrently while it is
+    /// emitting a file that spans more than `entries_per_block - 1` data
+    /// blocks (512 - 1 = 511 for the default 4096-byte block size), the
+    /// writer must flush every mapping block in the descent path — including
+    /// intermediate level-1 child blocks created inside the multi-level
+    /// chain.  An earlier Nim writer bug flushed only the root block and
+    /// the level-2 chain block, leaving the level-1 child block as the
+    /// zeros written by `flushBlock` at `allocBlock` time.  Concurrent
+    /// readers and post-mortem readers of unclosed recordings then saw the
+    /// data block pointer for index 511 as 0 and surfaced "unallocated
+    /// block at index 511".  The fix lives in
+    /// `codetracer-trace-format-nim/src/codetracer_ctfs/block_mapping.nim`
+    /// (`navigateAndInsert`); this reader is otherwise correct — do not be
+    /// tempted to "patch around" a similar error here by treating zero
+    /// pointers as data blocks, because that would silently corrupt reads
+    /// of properly-written containers.
     fn resolve_block(&self, root_map_block: u64, logical_index: usize) -> Result<u64, CtfsError> {
         let direct_entries = self.entries_per_block - 1; // Last entry is the indirect pointer
 
@@ -455,107 +474,179 @@ impl CtfsReader {
 
 // ── Test-only writer ────────────────────────────────────────────────────
 
-/// Write a minimal CTFS v2 container for testing purposes.
+/// Write a CTFS container for testing purposes.
 ///
-/// Creates a container with block_size=4096, max_root_entries=31, containing
-/// the specified files. This is NOT a production writer — it uses the simplest
-/// possible layout (one data block per file, no multi-level mapping needed).
+/// Creates a container with block_size=4096, max_root_entries=31 and lays
+/// out each file using the same bottom-up multi-level chain mapping that
+/// the production Rust and Nim writers use:
+///
+/// - Each file owns a root mapping block.  Entries `[0..usable)` of the
+///   root are direct pointers to data blocks; entry `usable`
+///   (= `entries_per_block - 1`) is the chain pointer to a level-2
+///   mapping block when the file exceeds `usable` data blocks.
+/// - Level-2 mapping blocks repeat the layout: entries `[0..usable)` each
+///   point to a level-1 child mapping block (which in turn holds up to
+///   `usable` direct data block pointers), and entry `usable` is the chain
+///   pointer to a level-3 block.
+/// - Levels 3..5 follow the same recursive pattern.
+///
+/// This intentionally mirrors `navigateAndInsert`/`insertDataBlock` in
+/// `codetracer-trace-format-nim/src/codetracer_ctfs/block_mapping.nim` so
+/// that the reader can be exercised against files large enough to require
+/// multi-level mapping (>511 data blocks for the default block size).
 ///
 /// # Panics
 ///
 /// Panics if any file name is longer than 12 characters or contains
 /// characters outside the base40 alphabet.
 pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> Result<(), Box<dyn Error>> {
-    let block_size: usize = 4096;
-    let max_root_entries: u32 = 31;
+    const BLOCK_SIZE: usize = 4096;
+    const MAX_ROOT_ENTRIES: u32 = 31;
+    let entries_per_block: usize = BLOCK_SIZE / 8;
+    let usable: u64 = (entries_per_block - 1) as u64;
 
-    // Compute how many blocks we need:
-    // Block 0: header + file entries
-    // For each file: 1 mapping block + ceil(size / block_size) data blocks
-    let mut next_block: u64 = 1; // Block 0 is the root block
-
-    struct FileLayout {
-        name_encoded: u64,
-        size: u64,
-        map_block: u64,
-        data_blocks: Vec<u64>,
-    }
-
-    let mut layouts = Vec::with_capacity(files.len());
-
-    for &(name, data) in files {
-        let name_encoded = base40_encode(name)?;
-        let num_data_blocks = if data.is_empty() {
-            0
-        } else {
-            data.len().div_ceil(block_size)
-        };
-
-        let map_block = if data.is_empty() {
-            0
-        } else {
-            let mb = next_block;
-            next_block += 1;
-            mb
-        };
-
-        let mut data_blocks = Vec::with_capacity(num_data_blocks);
-        for _ in 0..num_data_blocks {
-            data_blocks.push(next_block);
-            next_block += 1;
+    // Helpers operating on the in-memory buffer.  Kept as free fns so they
+    // can mutually recurse without fighting Rust's closure borrow rules.
+    fn alloc_block(buf: &mut Vec<u8>, next_block: &mut u64) -> u64 {
+        let blk = *next_block;
+        *next_block += 1;
+        let needed = (*next_block as usize) * BLOCK_SIZE;
+        if needed > buf.len() {
+            buf.resize(needed, 0);
         }
-
-        layouts.push(FileLayout {
-            name_encoded,
-            size: data.len() as u64,
-            map_block,
-            data_blocks,
-        });
+        blk
     }
 
-    // Allocate the output buffer
-    let total_size = next_block as usize * block_size;
-    let mut buf = vec![0u8; total_size];
+    fn read_ptr(buf: &[u8], block: u64, index: u64) -> u64 {
+        let off = (block as usize) * BLOCK_SIZE + (index as usize) * 8;
+        // The slice is always exactly 8 bytes — `buf` is grown to a multiple
+        // of `BLOCK_SIZE` by `alloc_block`, and `index < BLOCK_SIZE / 8`.
+        // Pattern-match instead of `unwrap()` to keep the lint clean.
+        let bytes: [u8; 8] = match buf[off..off + 8].try_into() {
+            Ok(b) => b,
+            Err(_) => unreachable!("test writer: read_ptr slice is always 8 bytes"),
+        };
+        u64::from_le_bytes(bytes)
+    }
 
-    // Write header
+    fn write_ptr(buf: &mut [u8], block: u64, index: u64, value: u64) {
+        let off = (block as usize) * BLOCK_SIZE + (index as usize) * 8;
+        buf[off..off + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn level_capacity(usable: u64, level: u32) -> u64 {
+        let mut cap: u64 = 1;
+        for _ in 0..level {
+            cap = cap.saturating_mul(usable);
+        }
+        cap
+    }
+
+    // Recursive descent through level-k mapping blocks, allocating
+    // intermediate child mapping blocks as needed and writing the data
+    // block pointer at the final level-1 entry.
+    fn navigate_and_insert(
+        buf: &mut Vec<u8>,
+        next_block: &mut u64,
+        mapping_block: u64,
+        level: u32,
+        idx_within_level: u64,
+        data_block: u64,
+        usable: u64,
+    ) {
+        if level == 1 {
+            write_ptr(buf, mapping_block, idx_within_level, data_block);
+            return;
+        }
+        let sub_cap = level_capacity(usable, level - 1);
+        let entry_idx = idx_within_level / sub_cap;
+        let sub_idx = idx_within_level % sub_cap;
+        let mut child = read_ptr(buf, mapping_block, entry_idx);
+        if child == 0 {
+            child = alloc_block(buf, next_block);
+            write_ptr(buf, mapping_block, entry_idx, child);
+        }
+        navigate_and_insert(buf, next_block, child, level - 1, sub_idx, data_block, usable);
+    }
+
+    // Bottom-up chain insert (matches `insertDataBlock` in the Nim writer).
+    fn insert_data_block(
+        buf: &mut Vec<u8>,
+        next_block: &mut u64,
+        root_block: u64,
+        block_index: u64,
+        data_block: u64,
+        usable: u64,
+    ) {
+        let mut idx = block_index;
+        let mut current_level_block = root_block;
+        let mut level: u32 = 1;
+        loop {
+            let cap = level_capacity(usable, level);
+            if idx < cap {
+                break;
+            }
+            idx -= cap;
+            level += 1;
+            assert!(level <= MAX_MAPPING_LEVELS as u32, "test writer: >5 mapping levels");
+            let chain = read_ptr(buf, current_level_block, usable);
+            current_level_block = if chain == 0 {
+                let new_block = alloc_block(buf, next_block);
+                write_ptr(buf, current_level_block, usable, new_block);
+                new_block
+            } else {
+                chain
+            };
+        }
+        navigate_and_insert(buf, next_block, current_level_block, level, idx, data_block, usable);
+    }
+
+    // Allocate enough buffer up-front for the root block; grow lazily.
+    let mut buf: Vec<u8> = vec![0u8; BLOCK_SIZE];
+    let mut next_block: u64 = 1;
+
+    // Header (8 bytes) + extended header (8 bytes) + file entries.
     buf[0..5].copy_from_slice(&CTFS_MAGIC);
-    buf[5] = CTFS_VERSION_MAX; // Write using the latest supported version
-                               // bytes 6-7: encryption=0, max_shards=0 (already zero)
+    buf[5] = CTFS_VERSION_MAX;
+    // bytes 6-7: encryption=0, max_shards=0 (already zero)
+    buf[8..12].copy_from_slice(&(BLOCK_SIZE as u32).to_le_bytes());
+    buf[12..16].copy_from_slice(&MAX_ROOT_ENTRIES.to_le_bytes());
 
-    // Write extended header
-    buf[8..12].copy_from_slice(&(block_size as u32).to_le_bytes());
-    buf[12..16].copy_from_slice(&max_root_entries.to_le_bytes());
-
-    // Write file entries
     let entry_start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
-    for (i, layout) in layouts.iter().enumerate() {
-        let offset = entry_start + i * FILE_ENTRY_SIZE;
-        buf[offset..offset + 8].copy_from_slice(&layout.size.to_le_bytes());
-        buf[offset + 8..offset + 16].copy_from_slice(&layout.map_block.to_le_bytes());
-        buf[offset + 16..offset + 24].copy_from_slice(&layout.name_encoded.to_le_bytes());
-    }
 
-    // Write mapping blocks and data blocks
-    for (file_idx, &(_, data)) in files.iter().enumerate() {
-        let layout = &layouts[file_idx];
+    for (i, &(name, data)) in files.iter().enumerate() {
+        let name_encoded = base40_encode(name)?;
+        let size = data.len() as u64;
+        let entry_off = entry_start + i * FILE_ENTRY_SIZE;
         if data.is_empty() {
+            buf[entry_off..entry_off + 8].copy_from_slice(&0u64.to_le_bytes());
+            buf[entry_off + 8..entry_off + 16].copy_from_slice(&0u64.to_le_bytes());
+            buf[entry_off + 16..entry_off + 24].copy_from_slice(&name_encoded.to_le_bytes());
             continue;
         }
+        let map_block = alloc_block(&mut buf, &mut next_block);
+        buf[entry_off..entry_off + 8].copy_from_slice(&size.to_le_bytes());
+        buf[entry_off + 8..entry_off + 16].copy_from_slice(&map_block.to_le_bytes());
+        buf[entry_off + 16..entry_off + 24].copy_from_slice(&name_encoded.to_le_bytes());
 
-        // Write the mapping block: entries point to data blocks
-        let map_offset = layout.map_block as usize * block_size;
-        for (j, &db) in layout.data_blocks.iter().enumerate() {
-            let entry_offset = map_offset + j * 8;
-            buf[entry_offset..entry_offset + 8].copy_from_slice(&db.to_le_bytes());
-        }
-
-        // Write data blocks
-        let mut remaining = data;
-        for &db in &layout.data_blocks {
-            let data_offset = db as usize * block_size;
-            let to_write = remaining.len().min(block_size);
-            buf[data_offset..data_offset + to_write].copy_from_slice(&remaining[..to_write]);
-            remaining = &remaining[to_write..];
+        // Stream data blocks, inserting each into the multi-level mapping
+        // hierarchy and writing the file contents into the block.
+        let num_data_blocks = data.len().div_ceil(BLOCK_SIZE);
+        let mut written = 0usize;
+        for block_index in 0..num_data_blocks {
+            let data_block = alloc_block(&mut buf, &mut next_block);
+            insert_data_block(
+                &mut buf,
+                &mut next_block,
+                map_block,
+                block_index as u64,
+                data_block,
+                usable,
+            );
+            let to_write = (data.len() - written).min(BLOCK_SIZE);
+            let off = (data_block as usize) * BLOCK_SIZE;
+            buf[off..off + to_write].copy_from_slice(&data[written..written + to_write]);
+            written += to_write;
         }
     }
 
@@ -698,6 +789,62 @@ mod tests {
             let encoded = base40_encode(&s).unwrap();
             let decoded = base40_decode(encoded);
             assert_eq!(decoded, s, "base40 roundtrip failed for char '{ch}'");
+        }
+    }
+
+    /// Regression test for **M-CTFS-LargeFile**.
+    ///
+    /// At the default 4096-byte block size, `entries_per_block = 512` and
+    /// the level-1 mapping block holds `usable = 511` direct data block
+    /// pointers.  The 512th data block of a file (logical index 511) is
+    /// the first one that requires the writer to allocate a level-2 chain
+    /// block + a level-1 child block and to populate the data block
+    /// pointer through two layers of indirection.  Files with more data
+    /// blocks fan further into the chain.
+    ///
+    /// This test writes a multi-block file (>511 blocks) using the
+    /// test-only multi-level chain writer, then reads it back through
+    /// `CtfsReader::read_file` and asserts a byte-for-byte round-trip.
+    /// Before the M-CTFS-LargeFile fix the Nim production writer in
+    /// streaming mode left the level-1 child block on disk as zeros, and
+    /// `read_file` surfaced the corruption as
+    /// `unallocated block at index 511`.  Although this Rust test does not
+    /// drive the streaming writer directly, it exercises the same multi-
+    /// level mapping path that the reader must traverse, guarding against
+    /// any future regression in the reader's `resolve_block` /
+    /// `resolve_multilevel` traversal logic.
+    #[test]
+    fn test_file_spans_multi_level_mapping() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi_level.ct");
+
+        // 600 blocks × 4096 bytes ≈ 2.4 MB — comfortably past the
+        // usable=511 level-1 boundary so the writer has to use the
+        // multi-level chain.
+        const BLOCK_SIZE: usize = 4096;
+        const NUM_BLOCKS: usize = 600;
+        let total = NUM_BLOCKS * BLOCK_SIZE;
+        let mut big: Vec<u8> = Vec::with_capacity(total);
+        for i in 0..total {
+            // Non-trivial pattern so a single zeroed block in the middle
+            // would be caught by byte-for-byte comparison.
+            big.push(((i.wrapping_mul(31).wrapping_add(17)) % 251) as u8);
+        }
+
+        write_minimal_ctfs(&path, &[("big.file", &big)]).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        let read_back = reader.read_file("big.file").unwrap();
+        assert_eq!(read_back.len(), big.len(), "size mismatch");
+        // Compare in chunks to keep assert output readable on failure.
+        for block_index in 0..NUM_BLOCKS {
+            let start = block_index * BLOCK_SIZE;
+            let end = start + BLOCK_SIZE;
+            assert_eq!(
+                &read_back[start..end],
+                &big[start..end],
+                "byte mismatch in block {block_index}"
+            );
         }
     }
 }
