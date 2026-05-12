@@ -64,6 +64,12 @@ pub mod program_search_tool;
 pub mod query;
 pub mod recreator_session;
 pub mod replay;
+// M-DWARF-4: DWARF CFI walker for multi-frame stack unwinding.
+// Owns the parsed `.eh_frame` / `.debug_frame` sections and offers an
+// `unwind` entry point that the `EmulatorReplaySession::load_callstack`
+// integration calls into. Kept separate from `dwarf_index` so the line
+// resolver stays focused on PC -> (file, line, function).
+pub mod stack_unwinder;
 pub mod step_lines_loader;
 pub mod task;
 pub mod trace_processor;
