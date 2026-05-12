@@ -1830,6 +1830,15 @@ pub struct Breakpoint {
 pub enum TraceKind {
     Materialized,
     Recreator,
+    /// In-process MCR emulator backing the WASM browser-replay client
+    /// (and the native code path when an MCR-bearing CTFS container is
+    /// loaded). The Handler's `replay` field is an
+    /// [`crate::emulator_session::EmulatorReplaySession`]; the
+    /// `stack_trace`/`scopes`/`variables` DAP handlers delegate to it
+    /// directly because there is no pre-materialised DB or
+    /// recreator-subprocess channel to query. See F5c-4 wiring in
+    /// `dap_server::setup_from_vfs`.
+    Emulator,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]

@@ -144,15 +144,45 @@ impl Handler {
         reader: Arc<dyn TraceReader>,
         indirect_send: bool,
     ) -> Handler {
+        let replay: Box<dyn ReplaySession> = if trace_kind == TraceKind::Materialized {
+            Box::new(MaterializedReplaySession::new(Arc::clone(&reader)))
+        } else {
+            // Recreator (RR) — drives an out-of-process replay worker.
+            // Emulator-kind handlers must go through
+            // `construct_with_replay`, where the caller supplies the
+            // pre-built `EmulatorReplaySession`.
+            Box::new(RecreatorReplaySession::new(&ct_rr_args.name, 0, ct_rr_args.clone()))
+        };
+        Self::construct_with_replay(trace_kind, ct_rr_args, reader, replay, indirect_send)
+    }
+
+    /// Build a `Handler` from a pre-constructed [`TraceReader`] AND a
+    /// pre-constructed [`ReplaySession`].
+    ///
+    /// This is the entry point used by the F5c-4 WASM browser-replay
+    /// pathway: the MCR-aware [`crate::emulator_session::
+    /// EmulatorReplaySession`] is built directly from CTFS bytes by
+    /// `setup_from_vfs` and handed in here together with a placeholder
+    /// `InMemoryTraceReader` for the empty-DB code paths
+    /// (`Calltrace::new`, `initialize_breakpoint_cache`, etc.) that the
+    /// rest of the handler still touches.
+    ///
+    /// Callers should pair `trace_kind == TraceKind::Emulator` with an
+    /// [`crate::emulator_session::EmulatorReplaySession`]; the DAP
+    /// handlers (`stack_trace`, `scopes`, `variables`) branch on
+    /// `TraceKind::Emulator` to surface the trait-derived state rather
+    /// than reading from the materialised DB-backed `reader`.
+    pub fn construct_with_replay(
+        trace_kind: TraceKind,
+        ct_rr_args: RecreatorArgs,
+        reader: Arc<dyn TraceReader>,
+        replay: Box<dyn ReplaySession>,
+        indirect_send: bool,
+    ) -> Handler {
         let calltrace = Calltrace::new(&*reader);
         let trace = CoreTrace::default();
         let mut expr_loader = ExprLoader::new(trace.clone());
         let step_lines_loader = StepLinesLoader::new(&*reader, &mut expr_loader);
-        let replay: Box<dyn ReplaySession> = if trace_kind == TraceKind::Materialized {
-            Box::new(MaterializedReplaySession::new(Arc::clone(&reader)))
-        } else {
-            Box::new(RecreatorReplaySession::new(&ct_rr_args.name, 0, ct_rr_args.clone()))
-        };
         // let sender = sender::Sender::new();
         let mut handler = Handler {
             trace_kind,
@@ -2345,8 +2375,13 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
-            if self.trace_kind == TraceKind::Recreator {
-                // RR traces need a stack frame derived from the current location so VS Code can show the locator arrow.
+            // Both the Recreator (out-of-process RR worker) and the
+            // Emulator (in-process MCR) backends surface the callstack via
+            // the `ReplaySession` trait rather than through a
+            // pre-materialised DB, so they share the same DAP-frame
+            // synthesis path.
+            if self.trace_kind == TraceKind::Recreator || self.trace_kind == TraceKind::Emulator {
+                // RR / Emulator traces need a stack frame derived from the current location so VS Code can show the locator arrow.
                 let current_location = self.replay.load_location(&mut self.expr_loader)?;
                 let mut stack_frames: Vec<dap_types::StackFrame> = Vec::new();
                 stack_frames.push(dap_types::StackFrame {
@@ -2446,6 +2481,39 @@ impl Handler {
             self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![] }, sender)?;
             return Ok(());
         }
+        if self.trace_kind == TraceKind::Emulator {
+            // The Emulator backend has no materialised call/function
+            // table to query — instead we synthesise a single "locals"
+            // scope rooted at the replay's current location. The
+            // `variables` handler resolves `variables_reference ==
+            // frame_id` by calling `replay.load_locals()`, so the value
+            // chosen here is opaque (we re-use `frame_id` to mirror the
+            // materialised path).
+            let location = self.replay.load_location(&mut self.expr_loader)?;
+            let scope = dap_types::Scope {
+                name: if !location.function_name.is_empty() {
+                    location.function_name.clone()
+                } else {
+                    "locals".to_string()
+                },
+                presentation_hint: Some("locals".to_string()),
+                variables_reference: arg.frame_id,
+                named_variables: Some(0),
+                indexed_variables: Some(0),
+                expensive: false,
+                source: None,
+                line: if location.line >= 0 {
+                    Some(location.line)
+                } else {
+                    Some(0)
+                },
+                column: Some(1),
+                end_line: None,
+                end_column: None,
+            };
+            self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![scope] }, sender)?;
+            return Ok(());
+        }
         let call = self
             .reader
             .call(CallKey(arg.frame_id))
@@ -2485,6 +2553,30 @@ impl Handler {
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::Recreator {
             self.respond_dap(request, dap_types::VariablesResponseBody { variables: vec![] }, sender)?;
+            return Ok(());
+        }
+        if self.trace_kind == TraceKind::Emulator {
+            // Source locals from the replay session — the emulator
+            // projects every named register (and, in future, DWARF-derived
+            // locals) as a `VariableWithRecord`. The DAP `variables`
+            // request carries an opaque `variables_reference`; we ignore
+            // it here because the emulator surfaces a single flat scope
+            // per frame.
+            let locals_with_records = self.replay.load_locals(task::CtLoadLocalsArguments::default())?;
+            let dap_variables: Vec<dap_types::Variable> = locals_with_records
+                .iter()
+                .map(|l| {
+                    let ct_val = to_ct_value(&l.value);
+                    dap::new_dap_variable(&l.expression, &ct_val.text_repr(), 0)
+                })
+                .collect();
+            self.respond_dap(
+                request,
+                dap_types::VariablesResponseBody {
+                    variables: dap_variables,
+                },
+                sender,
+            )?;
             return Ok(());
         }
         let empty_vars: Vec<FullValueRecord> = vec![];
