@@ -37,6 +37,8 @@ pub mod diff;
 pub mod distinct_vec;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod emulator_ffi;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod emulator_session;
 pub mod event_db;
 pub mod expr_loader;
 pub mod flow_preloader;
