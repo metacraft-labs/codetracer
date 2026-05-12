@@ -487,15 +487,47 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         // WASM is single-threaded, so the drain happens synchronously.
         let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
 
-        if let Err(e) = handle_message_browser(&dap_message, sender, &mut ctx, &mut handler) {
-            web_sys::console::error_1(&JsValue::from_str(&format!("handle_message_browser error: {e}")));
-            panic!("handle_message_browser failed: {e}");
-        }
+        let handler_result = handle_message_browser(&dap_message, sender, &mut ctx, &mut handler);
 
-        // Drain all response messages and post them to the main thread.
+        // Drain whatever messages handle_message_browser already produced
+        // before failing — e.g. a partial responses sequence — so the
+        // main thread sees them in order, then surface the error as a
+        // structured DAP failure response instead of unwinding the
+        // worker. Panicking here trips wasm32's `unreachable` trap which
+        // would kill the worker mid-session and leave the browser
+        // replay client hanging on configurationDone.
         while let Ok(msg) = receiver.try_recv() {
             let json = serde_json::to_string(&msg).unwrap_throw();
             t_clone.post_message(&JsValue::from_str(&json)).unwrap_throw();
+        }
+
+        if let Err(e) = handler_result {
+            let err_text = format!("handle_message_browser failed: {e}");
+            web_sys::console::error_1(&JsValue::from_str(&err_text));
+
+            // Build a synthetic error response so the JS side observes a
+            // proper DAP failure for whichever request triggered the
+            // error.  We default to seq=0 / command="" if the incoming
+            // payload was not a Request — events and responses don't
+            // expect a reply, so an empty stub is harmless.
+            let (request_seq, command) = match &dap_message {
+                DapMessage::Request(r) => (r.base.seq, r.command.clone()),
+                _ => (0, String::new()),
+            };
+            let error_response = DapMessage::Response(Response {
+                base: ProtocolMessage {
+                    seq: 0,
+                    type_: "response".to_string(),
+                },
+                request_seq,
+                success: false,
+                command,
+                message: Some(err_text),
+                body: serde_json::json!({}),
+            });
+            if let Ok(json) = serde_json::to_string(&error_response) {
+                let _ = t_clone.post_message(&JsValue::from_str(&json));
+            }
         }
     }) as Box<dyn FnMut(_)>)
     .into_js_value()
