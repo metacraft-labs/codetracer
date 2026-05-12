@@ -124,6 +124,29 @@ const CP0_REGS_FILE: &str = "cp0.regs";
 #[allow(dead_code)]
 const CP0_FSBASE_FILE: &str = "cp0.fsbase";
 
+/// CTFS sidecar carrying a snapshot of `/proc/self/maps` at cp0-capture
+/// time.
+///
+/// Wire format: a UTF-8 text blob, one entry per line in the standard
+/// kernel format:
+///
+/// ```text
+/// <start>-<end> <perms> <offset> <dev>:<inode> <pathname>
+/// ```
+///
+/// The replay backend consults this file at session construction to
+/// recover the ASLR load base for the main executable. Without it, the
+/// emulator's runtime PC (which the recorder captured verbatim from
+/// `/proc/self/maps`-style addresses) does not match the static
+/// addresses that DWARF encodes — every line resolves to the M-DWARF-2
+/// placeholder of 1.
+///
+/// The file is optional. Traces produced before the M-Replay-PC-Rebase
+/// milestone do not ship it and fall back to the un-rebased lookup,
+/// which is still correct for static binaries with no ASLR (load base
+/// equals static base).
+const CP0_MAPS_FILE: &str = "cp0.maps";
+
 /// Compact layout: 18 × u64 LE.
 const CP0_REGS_COMPACT_LEN: usize = 18 * 8;
 
@@ -370,6 +393,201 @@ fn install_registers(regs: &InitialRegisters) {
     }
 }
 
+/// One executable mapping entry parsed from `cp0.maps`.
+///
+/// Only entries with `x` (executable) permission for the main program
+/// are interesting for PC rebasing — the recorder writes both read-only
+/// and read/write segments to the maps file, but DWARF line addresses
+/// only live in the `.text` (executable) segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExecutableMapping {
+    /// Runtime start address of the mapping (kernel-assigned).
+    start: u64,
+    /// File offset within `pathname` where this mapping begins. Used to
+    /// pick the matching `PT_LOAD` segment in the ELF for accurate
+    /// sub-page rebase math.
+    file_offset: u64,
+    /// Absolute path of the backing file. The recorder writes the path
+    /// the kernel reported, which is what `meta.program` also points at,
+    /// so a full-string equality check is reliable; we also fall back to
+    /// a basename match for paranoia.
+    pathname: String,
+}
+
+/// Parse a `cp0.maps` UTF-8 blob and return every `r-xp` (executable)
+/// mapping whose pathname matches `program`. The kernel can split a
+/// single ELF object across multiple `r-xp` mappings (rare on x86_64
+/// but possible if the binary has non-contiguous executable segments),
+/// so the caller chooses the lowest-start entry from the returned list.
+///
+/// Format reminder (per `Documentation/filesystems/proc.rst`):
+/// ```text
+/// <start>-<end> <perms> <offset> <dev>:<inode> <pathname>
+/// ```
+/// Whitespace separators are runs of spaces or tabs; the `<pathname>`
+/// field is optional (anonymous mappings, `[heap]`, `[stack]`, etc.)
+/// and we skip lines that lack one.
+fn parse_executable_mappings(blob: &str, program: &str) -> Vec<ExecutableMapping> {
+    let program_basename = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let mut out = Vec::new();
+    for line in blob.lines() {
+        // Skip empty lines and any comment lines a future recorder might
+        // emit; the kernel format itself has neither.
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut parts = trimmed.split_ascii_whitespace();
+        let Some(range) = parts.next() else { continue };
+        let Some(perms) = parts.next() else { continue };
+        let Some(offset_str) = parts.next() else { continue };
+        // Skip dev (next) and inode (the one after) to land on pathname.
+        if parts.next().is_none() {
+            continue;
+        }
+        if parts.next().is_none() {
+            continue;
+        }
+        // Re-join the remainder so paths containing whitespace (rare,
+        // but legal on Linux) are preserved verbatim.
+        let pathname_rest: String = parts.collect::<Vec<_>>().join(" ");
+        if pathname_rest.is_empty() {
+            continue;
+        }
+        if !perms.contains('x') {
+            continue;
+        }
+        // Match either by full path (recorder writes absolute paths) or
+        // by basename — same defensive contract as elsewhere in this
+        // module where the recorder may report a canonicalised path
+        // that differs from `meta.program`.
+        let matches_program = pathname_rest == program
+            || pathname_rest
+                .rsplit(['/', '\\'])
+                .next()
+                .map(|b| b == program_basename)
+                .unwrap_or(false);
+        if !matches_program {
+            continue;
+        }
+        // `start-end` — we only need the start.
+        let Some((start_hex, _end_hex)) = range.split_once('-') else {
+            continue;
+        };
+        let Ok(start) = u64::from_str_radix(start_hex, 16) else {
+            continue;
+        };
+        let Ok(file_offset) = u64::from_str_radix(offset_str, 16) else {
+            continue;
+        };
+        out.push(ExecutableMapping {
+            start,
+            file_offset,
+            pathname: pathname_rest,
+        });
+    }
+    out
+}
+
+/// Compute the PC rebase offset for the main executable.
+///
+/// The rebase offset is `mapping.start - segment.p_vaddr` where the
+/// `segment` is the ELF `PT_LOAD` whose `p_offset` matches the mapping's
+/// `<offset>` field. That formula produces the correct delta even when
+/// the first executable PT_LOAD has a non-zero `p_vaddr` (e.g. PIE
+/// binaries linked with `--no-rosegment` whose `.text` starts at
+/// `p_vaddr == 0x1000`):
+///
+/// ```text
+/// runtime_pc - rebase_offset
+///   == runtime_pc - (mapping.start - p_vaddr)
+///   == (mapping.start + Δ) - mapping.start + p_vaddr
+///   == p_vaddr + Δ
+///   == static_pc
+/// ```
+///
+/// If no matching segment is found we fall back to `mapping.start`,
+/// which is correct whenever `p_vaddr == 0` (the common case for
+/// PIE binaries that don't carry a rosegment).
+fn compute_pc_rebase(elf_bytes: &[u8], mapping: &ExecutableMapping) -> u64 {
+    // `object` is already a dependency from M-DWARF-1; reusing its
+    // segment iterator keeps us out of hand-rolling ELF parsing.
+    use object::{Object, ObjectSegment};
+    match object::File::parse(elf_bytes) {
+        Ok(file) => {
+            for segment in file.segments() {
+                // `file_range()` returns the segment's `(p_offset, p_filesz)`.
+                let (seg_offset, _seg_filesz) = segment.file_range();
+                if seg_offset == mapping.file_offset {
+                    return mapping.start.wrapping_sub(segment.address());
+                }
+            }
+            // Fallback: no matching segment offset (corrupt ELF, or
+            // recorder wrote a non-load page-aligned offset). Assume the
+            // mapping was placed at the segment's virtual base, which is
+            // correct for vanilla PIE builds where `p_vaddr == 0`.
+            mapping.start
+        }
+        Err(_) => mapping.start,
+    }
+}
+
+/// Read `cp0.maps` from `ctfs` and compute the runtime → static PC
+/// rebase offset for `program`. Returns `None` when:
+///
+/// * `cp0.maps` is absent (older traces).
+/// * `program` is empty (no meta.program to match against).
+/// * No executable mapping in the file matches `program`.
+///
+/// The returned offset is what `build_location` subtracts from the raw
+/// PC before consulting the DWARF index. `elf_bytes` is the bundled
+/// `debug.dat` blob; when absent we still produce a useful rebase by
+/// falling back to `mapping.start` (correct when `p_vaddr == 0`, which
+/// covers most PIE binaries).
+fn compute_pc_rebase_from_cp0_maps(ctfs: &mut CtfsReader, program: &str, elf_bytes: Option<&[u8]>) -> Option<u64> {
+    if program.is_empty() {
+        return None;
+    }
+    let maps_bytes = match ctfs.read_file(CP0_MAPS_FILE) {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        _ => return None,
+    };
+    // The recorder writes UTF-8; non-UTF-8 paths are a recorder bug we
+    // refuse to paper over silently here.
+    let blob = match std::str::from_utf8(&maps_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: cp0.maps is not valid UTF-8 ({e}); skipping PC rebase");
+            return None;
+        }
+    };
+    let mut mappings = parse_executable_mappings(blob, program);
+    if mappings.is_empty() {
+        eprintln!(
+            "warning: cp0.maps did not list an executable mapping for program `{program}`; \
+             PC rebase disabled (DWARF lookups will use the raw runtime PC)"
+        );
+        return None;
+    }
+    // The kernel may place multiple `r-xp` mappings for the same object
+    // (uncommon on x86_64 but legal — see Linux's `mmap_region` /
+    // segment-splitting paths). The lowest start address is the
+    // canonical load base because it sits on the first executable
+    // PT_LOAD; later mappings cover trailing executable pages whose
+    // `p_offset` is already non-zero and whose rebase math is identical.
+    mappings.sort_by_key(|m| m.start);
+    let mapping = &mappings[0];
+    let offset = match elf_bytes {
+        Some(bytes) if !bytes.is_empty() => compute_pc_rebase(bytes, mapping),
+        // No bundled ELF — fall back to the page-aligned base. This
+        // matches the common PIE case where `p_vaddr == 0` for the
+        // first PT_LOAD; non-PIE binaries with rosegments would need
+        // the ELF to compute the correct delta.
+        _ => mapping.start,
+    };
+    Some(offset)
+}
+
 /// Initialise the Nim runtime exactly once per process.
 fn ensure_nim_runtime() {
     NIM_RUNTIME_INIT.call_once(|| {
@@ -438,6 +656,26 @@ pub struct EmulatorReplaySession {
     /// When `None`, the session falls back to the M-DWARF-2 behaviour
     /// where `build_location` synthesises `(meta.paths[0], 1)`.
     dwarf: Option<DwarfIndex>,
+    /// PC rebase offset for the main executable: the value to subtract
+    /// from the runtime PC before consulting the bundled DWARF index.
+    ///
+    /// At record time the kernel chooses an ASLR load address for the
+    /// program (e.g. `0x5580aae44000`) and instructions execute at
+    /// those runtime addresses — that's what the recorder captures in
+    /// `cp0.regs.rip`. DWARF, however, encodes the addresses the
+    /// compiler emitted in the binary's static address space. We
+    /// recover the offset by reading `cp0.maps`, finding the executable
+    /// (`r-xp`) mapping that matches `meta.program`, and combining it
+    /// with the matching `PT_LOAD` segment's `p_vaddr` so the math is
+    /// correct even when the first executable segment has a non-zero
+    /// virtual address (which it does for PIE binaries: the segment's
+    /// `p_vaddr` is the *offset* of `.text` within the image, not 0).
+    ///
+    /// `None` means "no rebase" — either because `cp0.maps` is absent
+    /// (older traces) or because the program path could not be located
+    /// in the maps blob. In both cases `build_location` queries DWARF
+    /// with the raw PC, which is correct for static / non-PIE builds.
+    pc_rebase: Option<u64>,
 }
 
 /// Manual `Debug` impl: [`DwarfIndex`] wraps an `addr2line::Context` that
@@ -459,6 +697,7 @@ impl std::fmt::Debug for EmulatorReplaySession {
                     .as_ref()
                     .map(|d| format!("DwarfIndex({} source files)", d.source_file_count())),
             )
+            .field("pc_rebase", &self.pc_rebase)
             .finish()
     }
 }
@@ -503,6 +742,7 @@ impl EmulatorReplaySession {
             breakpoints_enabled: true,
             current_step_id: StepId(0),
             dwarf: None,
+            pc_rebase: None,
         }
     }
 
@@ -540,8 +780,17 @@ impl EmulatorReplaySession {
         // failures are tolerated identically so a corrupt bundle never
         // prevents the session from coming up at all; the session just
         // falls back to the M-DWARF-2 placeholder location.
-        let dwarf = match ctfs.read_file(BUNDLED_DEBUG_FILE) {
-            Ok(elf_bytes) if !elf_bytes.is_empty() => match DwarfIndex::from_elf_bytes(&elf_bytes) {
+        //
+        // We hold on to `elf_bytes` past the DWARF index construction
+        // because M-Replay-PC-Rebase also needs the parsed ELF segments
+        // to compute the correct sub-page rebase offset.
+        let elf_bytes: Option<Vec<u8>> = match ctfs.read_file(BUNDLED_DEBUG_FILE) {
+            Ok(bytes) if !bytes.is_empty() => Some(bytes),
+            // Either the file isn't present (older trace) or it's empty.
+            _ => None,
+        };
+        let dwarf = match elf_bytes.as_deref() {
+            Some(bytes) => match DwarfIndex::from_elf_bytes(bytes) {
                 Ok(index) => Some(index),
                 Err(e) => {
                     eprintln!(
@@ -551,11 +800,23 @@ impl EmulatorReplaySession {
                     None
                 }
             },
-            // Either the file isn't present (older trace) or it's empty.
-            // Both are silent fallbacks — they are the documented
-            // graceful-degradation contract for M-DWARF-3.
-            _ => None,
+            // No bundled ELF: silent fallback to the M-DWARF-2 contract.
+            None => None,
         };
+
+        // M-Replay-PC-Rebase: read the kernel's `/proc/self/maps`
+        // snapshot from `cp0.maps` and compute the runtime → static PC
+        // delta for the main executable. This is what turns the
+        // recorded ASLR-shifted RIP (e.g. `0x5580aaec3d69`) into the
+        // static address DWARF actually carries for that instruction.
+        //
+        // The lookup is best-effort: if `cp0.maps` is missing, the
+        // program isn't found in it, or the ELF parse fails, we leave
+        // `pc_rebase = None` and let the resolver query DWARF with the
+        // raw PC. That preserves the M-DWARF-3 behaviour for the small
+        // set of statically-linked / non-PIE traces where no rebase is
+        // needed.
+        let pc_rebase = compute_pc_rebase_from_cp0_maps(&mut ctfs, &meta.program, elf_bytes.as_deref());
 
         ensure_nim_runtime();
         // SAFETY: see `new()`.
@@ -582,6 +843,7 @@ impl EmulatorReplaySession {
             breakpoints_enabled: true,
             current_step_id: StepId(0),
             dwarf,
+            pc_rebase,
         })
     }
 
@@ -705,7 +967,22 @@ impl EmulatorReplaySession {
         // SAFETY: same rationale as `build_location` — the emulator FFI
         // getter reads from Nim-managed globals seeded by `mcrInit`.
         let pc = unsafe { emulator_ffi::mcrGetPC() };
-        dwarf.resolve_pc(pc)
+        // M-Replay-PC-Rebase: subtract the load-base delta so the DWARF
+        // index — which speaks the binary's static address space — sees
+        // the correct address. Without this step the runtime PC for any
+        // PIE binary falls outside every CU range and `resolve_pc`
+        // returns `None`, dropping the location back to the M-DWARF-2
+        // placeholder.
+        //
+        // `wrapping_sub` so we never panic on a degenerate offset
+        // (e.g. a misparsed cp0.maps that produces an offset > pc); a
+        // wrapped address simply won't resolve and we fall through to
+        // the placeholder, which is the same outcome as `None` here.
+        let static_pc = match self.pc_rebase {
+            Some(offset) => pc.wrapping_sub(offset),
+            None => pc,
+        };
+        dwarf.resolve_pc(static_pc)
     }
 
     /// Build a [`Location`] from the current emulator state.
@@ -1576,10 +1853,28 @@ mod tests {
     /// bundled `debug.dat` ELF, and the meta-block flags the emulator
     /// session requires. Returns the in-memory `.ct` bytes ready to feed
     /// into `EmulatorReplaySession::new_from_ctfs_bytes`.
+    ///
+    /// `cp0_maps` lets the M-Replay-PC-Rebase tests bake in a synthetic
+    /// `/proc/self/maps` blob alongside the other cp0 sidecars; when
+    /// `None`, no `cp0.maps` is written and PC rebasing falls back to
+    /// `None` (no rebase, raw PC for DWARF lookup).
+    #[allow(clippy::too_many_arguments)]
     fn synthetic_mcr_ctfs_bytes_with_cp0(
         cp0_regs: Option<&[u8]>,
         cp0_mem_regions: &[(u64, Vec<u8>)],
         include_dwarf: bool,
+    ) -> Vec<u8> {
+        synthetic_mcr_ctfs_bytes_with_cp0_maps(cp0_regs, cp0_mem_regions, include_dwarf, None)
+    }
+
+    /// Extended fixture builder that also writes a `cp0.maps` blob.
+    /// Kept as a separate helper so the existing M-Checkpoint-Replay
+    /// callers don't have to thread `None` arguments through.
+    fn synthetic_mcr_ctfs_bytes_with_cp0_maps(
+        cp0_regs: Option<&[u8]>,
+        cp0_mem_regions: &[(u64, Vec<u8>)],
+        include_dwarf: bool,
+        cp0_maps: Option<&str>,
     ) -> Vec<u8> {
         let meta = MetaDat {
             version: META_DAT_VERSION,
@@ -1623,6 +1918,10 @@ mod tests {
         }
         if let Some(regs) = cp0_regs {
             entries.push((CP0_REGS_FILE, regs));
+        }
+        let cp0_maps_bytes: Option<&[u8]> = cp0_maps.map(|s| s.as_bytes());
+        if let Some(bytes) = cp0_maps_bytes {
+            entries.push((CP0_MAPS_FILE, bytes));
         }
 
         write_minimal_ctfs(&ct_path, &entries).unwrap();
@@ -1862,5 +2161,300 @@ mod tests {
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes)
             .expect("corrupt cp0.regs must not abort session construction");
         assert!(session.dwarf.is_none(), "no DWARF was bundled in this fixture");
+    }
+
+    // ── M-Replay-PC-Rebase fixtures ─────────────────────────────────────
+    //
+    // hello.elf's executable PT_LOAD lives at p_offset=0x1000, p_vaddr=
+    // 0x401000, p_filesz=0x73. PC_ADD_BODY = 0x40100a sits in that
+    // segment. Simulating ASLR is just a matter of picking a fake
+    // runtime base address for the segment and constructing a
+    // /proc/self/maps-style line that matches.
+    //
+    // We pick `0x5580aae45000` for the executable mapping start —
+    // chosen to look like a real Linux ASLR-shifted address (the upper
+    // half is in the 47-bit user space the kernel uses, the low nibble
+    // is page-aligned).
+    const FAKE_ASLR_EXEC_BASE: u64 = 0x5580_aae4_5000;
+    /// `mapping.start - segment.p_vaddr` = 0x5580aae45000 - 0x401000.
+    const FAKE_ASLR_REBASE_OFFSET: u64 = FAKE_ASLR_EXEC_BASE - 0x0040_1000;
+    /// Runtime equivalent of `PC_ADD_BODY` after ASLR.
+    const FAKE_ASLR_RUNTIME_PC: u64 = PC_ADD_BODY + FAKE_ASLR_REBASE_OFFSET;
+
+    /// Build a synthetic `cp0.maps` blob that mimics what the recorder
+    /// would emit for `/usr/local/bin/hello` after the kernel placed it
+    /// at `FAKE_ASLR_EXEC_BASE`. Includes a leading r--p mapping at file
+    /// offset 0 (the read-only PT_LOAD) and the r-xp mapping at file
+    /// offset 0x1000 (the executable PT_LOAD), so the parser has to
+    /// correctly pick the executable one.
+    fn fake_cp0_maps_for_hello() -> String {
+        // Lines are intentionally formatted like real `/proc/self/maps`
+        // output, including a libc-like decoy entry to exercise the
+        // "filter by pathname" logic.
+        let ro_base = FAKE_ASLR_EXEC_BASE - 0x1000; // r--p PT_LOAD #0
+        let mut s = String::new();
+        s.push_str(&format!(
+            "{ro_base:x}-{end:x} r--p 00000000 fe:01 12345 /usr/local/bin/hello\n",
+            end = ro_base + 0x1000,
+        ));
+        s.push_str(&format!(
+            "{exec:x}-{end:x} r-xp 00001000 fe:01 12345 /usr/local/bin/hello\n",
+            exec = FAKE_ASLR_EXEC_BASE,
+            end = FAKE_ASLR_EXEC_BASE + 0x1000,
+        ));
+        // Decoy libc-like entry — the parser must ignore it.
+        s.push_str("7fa8b1a00000-7fa8b1a22000 r-xp 00010000 fe:01 67890 /nix/store/xyz/lib/libc.so.6\n");
+        s
+    }
+
+    /// Pure-function: the parser must keep only r-xp entries that
+    /// match the program path (or its basename).
+    #[test]
+    fn parse_executable_mappings_filters_by_program_and_perms() {
+        let blob = fake_cp0_maps_for_hello();
+        let mappings = parse_executable_mappings(&blob, "/usr/local/bin/hello");
+        assert_eq!(mappings.len(), 1, "exactly one r-xp entry should match");
+        assert_eq!(mappings[0].start, FAKE_ASLR_EXEC_BASE);
+        assert_eq!(mappings[0].file_offset, 0x1000);
+        assert_eq!(mappings[0].pathname, "/usr/local/bin/hello");
+
+        // Empty program -> no match.
+        let mappings = parse_executable_mappings(&blob, "/usr/local/bin/different");
+        assert!(mappings.is_empty(), "non-matching program must yield no mappings");
+
+        // Basename match still works when the recorder reported a
+        // canonicalised path that differs from `meta.program`.
+        let mappings = parse_executable_mappings(&blob, "hello");
+        assert_eq!(mappings.len(), 1);
+    }
+
+    /// Pure-function: multiple r-xp mappings for the same program must
+    /// sort so the lowest-start entry is the canonical load base.
+    #[test]
+    fn parse_executable_mappings_picks_lowest_start() {
+        // Two r-xp entries for the same program with different start
+        // addresses; the lower one is the canonical first PT_LOAD.
+        let blob = "\
+6000000000-6000001000 r-xp 00002000 fe:01 1 /opt/proggy\n\
+5000000000-5000001000 r-xp 00001000 fe:01 1 /opt/proggy\n\
+";
+        let mut mappings = parse_executable_mappings(blob, "/opt/proggy");
+        mappings.sort_by_key(|m| m.start);
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[0].start, 0x50_0000_0000);
+        assert_eq!(mappings[0].file_offset, 0x1000);
+    }
+
+    /// Pure-function: `compute_pc_rebase` must use
+    /// `mapping.start - segment.p_vaddr` (with the segment selected by
+    /// matching `p_offset` against the mapping's file offset).
+    #[test]
+    fn compute_pc_rebase_uses_segment_p_vaddr() {
+        let mapping = ExecutableMapping {
+            start: FAKE_ASLR_EXEC_BASE,
+            file_offset: 0x1000,
+            pathname: "/usr/local/bin/hello".to_owned(),
+        };
+        let offset = compute_pc_rebase(HELLO_ELF_FIXTURE, &mapping);
+        // hello.elf's executable PT_LOAD has p_vaddr=0x401000, so
+        // the rebase offset must be FAKE_ASLR_EXEC_BASE - 0x401000.
+        assert_eq!(offset, FAKE_ASLR_REBASE_OFFSET);
+        // Sanity: rebasing the fake runtime PC must land exactly on the
+        // static PC_ADD_BODY — that's the whole point of this milestone.
+        assert_eq!(FAKE_ASLR_RUNTIME_PC.wrapping_sub(offset), PC_ADD_BODY);
+    }
+
+    /// Headline acceptance: a CTFS container with cp0.maps simulating
+    /// an ASLR-shifted load address must seed `pc_rebase` correctly so
+    /// that `load_callstack` resolves the runtime PC via DWARF (line ≠ 1,
+    /// path = hello.c) — proving the rebase path works end-to-end.
+    #[test]
+    fn new_from_ctfs_bytes_with_cp0_maps_rebases_pc_to_dwarf_line() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let regs = InitialRegisters {
+            rax: 0xdeadbeef,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0x7fff_0000_0000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            // RIP is the ASLR-shifted runtime address — DWARF won't
+            // resolve this directly. The rebase logic is the only
+            // reason the assertion below can pass.
+            rip: FAKE_ASLR_RUNTIME_PC,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let maps_blob = fake_cp0_maps_for_hello();
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0_maps(
+            Some(&regs_blob),
+            &[],
+            /* include_dwarf */ true,
+            Some(&maps_blob),
+        );
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+        assert_eq!(
+            session.pc_rebase,
+            Some(FAKE_ASLR_REBASE_OFFSET),
+            "cp0.maps + bundled ELF should compute the rebase as mapping.start - segment.p_vaddr",
+        );
+
+        // mcrGetPC must reflect the raw runtime RIP — we do NOT rebase
+        // inside the FFI surface, only at the DWARF query boundary.
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        assert_eq!(pc, FAKE_ASLR_RUNTIME_PC);
+
+        // load_callstack must DWARF-resolve the rebased PC and surface
+        // the recorded line (24 for PC_ADD_BODY in hello.c).
+        let frames = session.load_callstack().expect("callstack must succeed");
+        assert!(!frames.is_empty(), "expected at least one frame");
+        let loc = &frames[0].content.call.location;
+        assert_eq!(
+            loc.line, PC_ADD_BODY_LINE,
+            "DWARF must resolve the rebased PC to the recorded line; got loc = {loc:?}",
+        );
+        assert!(
+            loc.path.ends_with("hello.c"),
+            "DWARF-resolved file should override meta.paths[0]; got path={}",
+            loc.path,
+        );
+        // The raw runtime PC must still flow through `Location.offset`
+        // for diagnostics — the rebase only affects the DWARF lookup,
+        // not the user-visible PC.
+        assert_eq!(loc.offset, FAKE_ASLR_RUNTIME_PC as i64);
+    }
+
+    /// Without cp0.maps, the session must leave `pc_rebase = None` and
+    /// the headline `seeds_pc_and_resolves_via_dwarf` test (which uses
+    /// the static `PC_ADD_BODY` as the RIP) must still resolve — i.e.
+    /// the absence of `cp0.maps` preserves the pre-M-Replay-PC-Rebase
+    /// behaviour for traces that don't need rebasing.
+    #[test]
+    fn new_from_ctfs_bytes_without_cp0_maps_leaves_rebase_none() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0x7fff_0000_0000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: PC_ADD_BODY,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        // No cp0.maps argument: `synthetic_mcr_ctfs_bytes_with_cp0`
+        // dispatches to the variant that writes none.
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &[], /* include_dwarf */ true);
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+        assert!(
+            session.pc_rebase.is_none(),
+            "missing cp0.maps must leave pc_rebase = None"
+        );
+    }
+
+    /// A cp0.maps that does not contain an entry for `meta.program`
+    /// must collapse to `pc_rebase = None` (and emit a warning, which
+    /// we do not assert on here — eprintln! is verified by reviewing
+    /// logs, not test fixtures).
+    #[test]
+    fn new_from_ctfs_bytes_with_cp0_maps_missing_program_falls_back() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0x7fff_0000_0000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: PC_ADD_BODY,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        // Only a libc-like entry — none for /usr/local/bin/hello (which
+        // is the program path baked into the fixture's meta).
+        let maps_blob = "7fa8b1a00000-7fa8b1a22000 r-xp 00010000 fe:01 67890 /nix/store/xyz/lib/libc.so.6\n";
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0_maps(
+            Some(&regs_blob),
+            &[],
+            /* include_dwarf */ true,
+            Some(maps_blob),
+        );
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+        assert!(
+            session.pc_rebase.is_none(),
+            "cp0.maps without the program must leave pc_rebase = None"
+        );
+    }
+
+    /// When the bundled ELF is missing but cp0.maps is present, the
+    /// rebase falls back to `mapping.start` — correct for the common
+    /// PIE case where the first executable PT_LOAD has `p_vaddr == 0`.
+    #[test]
+    fn compute_pc_rebase_falls_back_to_mapping_start_without_elf() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let maps_blob = fake_cp0_maps_for_hello();
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0x7fff_0000_0000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: FAKE_ASLR_RUNTIME_PC,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0_maps(
+            Some(&regs_blob),
+            &[],
+            /* include_dwarf */ false,
+            Some(&maps_blob),
+        );
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+        // Without the ELF we can't read p_vaddr, so the rebase collapses
+        // to `mapping.start` — Some(FAKE_ASLR_EXEC_BASE).
+        assert_eq!(session.pc_rebase, Some(FAKE_ASLR_EXEC_BASE));
     }
 }
