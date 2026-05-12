@@ -35,6 +35,8 @@ pub mod dap_types;
 pub mod db;
 pub mod diff;
 pub mod distinct_vec;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod emulator_ffi;
 pub mod event_db;
 pub mod expr_loader;
 pub mod flow_preloader;
