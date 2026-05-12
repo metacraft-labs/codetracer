@@ -60,6 +60,7 @@ use crate::emulator_ffi;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::ReplaySession;
+use crate::stack_unwinder::{StackUnwinder, MCR_REG_COUNT};
 use crate::task::{
     Action, Breakpoint, Call, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg,
     Location, ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_EVENT, NO_POSITION,
@@ -676,7 +677,21 @@ pub struct EmulatorReplaySession {
     /// in the maps blob. In both cases `build_location` queries DWARF
     /// with the raw PC, which is correct for static / non-PIE builds.
     pc_rebase: Option<u64>,
+    /// CFI walker for multi-frame stack unwinding (M-DWARF-4). Built
+    /// from the same `debug.dat` ELF bytes as [`Self::dwarf`]. `None`
+    /// when no bundle was present or the ELF failed to parse — the
+    /// session then surfaces only the single synthesised root frame
+    /// (the pre-M-DWARF-4 contract).
+    stack_unwinder: Option<StackUnwinder>,
 }
+
+/// Hard cap on the number of frames returned by `load_callstack`.
+///
+/// Protects against runaway unwind loops over a cyclic or corrupted
+/// stack — at 64 frames every realistic application call chain still
+/// fits comfortably (a 64-deep async stack is already extreme), while
+/// keeping the worst-case CPU and memory cost bounded.
+const MAX_CALLSTACK_FRAMES: usize = 64;
 
 /// Manual `Debug` impl: [`DwarfIndex`] wraps an `addr2line::Context` that
 /// does not implement `Debug`, and the parsed sections aren't useful in
@@ -698,6 +713,7 @@ impl std::fmt::Debug for EmulatorReplaySession {
                     .map(|d| format!("DwarfIndex({} source files)", d.source_file_count())),
             )
             .field("pc_rebase", &self.pc_rebase)
+            .field("stack_unwinder", &self.stack_unwinder.as_ref().map(|_| "<present>"))
             .finish()
     }
 }
@@ -743,6 +759,7 @@ impl EmulatorReplaySession {
             current_step_id: StepId(0),
             dwarf: None,
             pc_rebase: None,
+            stack_unwinder: None,
         }
     }
 
@@ -804,6 +821,27 @@ impl EmulatorReplaySession {
             None => None,
         };
 
+        // M-DWARF-4: build the CFI walker from the same ELF bytes so
+        // `load_callstack` can produce multi-frame stack traces. A
+        // parse failure here is non-fatal — we fall back to the
+        // single-frame synthesis path. The unwinder shares no state
+        // with the DWARF line index; they are independent consumers
+        // of the same ELF.
+        let stack_unwinder = match elf_bytes.as_deref() {
+            Some(bytes) => match StackUnwinder::from_elf_bytes(bytes) {
+                Ok(unwinder) => Some(unwinder),
+                Err(e) => {
+                    eprintln!(
+                        "warning: EmulatorReplaySession could not build a CFI unwinder from \
+                         `{BUNDLED_DEBUG_FILE}` ({e}); load_callstack will surface only the \
+                         current frame"
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+
         // M-Replay-PC-Rebase: read the kernel's `/proc/self/maps`
         // snapshot from `cp0.maps` and compute the runtime → static PC
         // delta for the main executable. This is what turns the
@@ -844,6 +882,7 @@ impl EmulatorReplaySession {
             current_step_id: StepId(0),
             dwarf,
             pc_rebase,
+            stack_unwinder,
         })
     }
 
@@ -983,6 +1022,103 @@ impl EmulatorReplaySession {
             None => pc,
         };
         dwarf.resolve_pc(static_pc)
+    }
+
+    /// Resolve a specific (runtime, static) PC pair against the bundled
+    /// DWARF. Used by the multi-frame [`load_callstack`] path so each
+    /// recovered frame can carry its own (file, line, function).
+    fn dwarf_pc_info_for(&self, pc_static: u64) -> Option<PcInfo> {
+        self.dwarf.as_ref()?.resolve_pc(pc_static)
+    }
+
+    /// Build a [`Location`] for a frame at `(pc, pc_static)`. Mirrors
+    /// the per-frame portion of [`build_location`] but is parameterised
+    /// over the PC so it can be applied to each frame the CFI walker
+    /// recovers. The function name falls back to
+    /// [`root_function_name`] when DWARF carries no `DW_AT_name` for
+    /// the function — preserving the F5 "non-empty name" acceptance bar.
+    fn build_location_for(&self, pc: u64, pc_static: u64) -> Location {
+        let mut path = self.primary_path();
+        let mut line: i64 = 1;
+        let mut function_name = self.root_function_name();
+
+        if let Some(info) = self.dwarf_pc_info_for(pc_static) {
+            let dwarf_path = info.file.to_string_lossy().into_owned();
+            if !dwarf_path.is_empty() {
+                path = dwarf_path;
+            }
+            line = info.line as i64;
+            // Prefer the DWARF-supplied function name when present —
+            // the per-frame names are what makes `inventory_service ->
+            // runForever -> _start` legible in DAP stackTrace output.
+            if let Some(name) = info.function {
+                if !name.is_empty() {
+                    function_name = name;
+                }
+            }
+        }
+
+        Location {
+            path: path.clone(),
+            line,
+            function_name: function_name.clone(),
+            high_level_path: path.clone(),
+            high_level_line: line,
+            high_level_function_name: function_name,
+            low_level_path: path,
+            low_level_line: line,
+            rr_ticks: RRTicks(self.current_step_id.0),
+            function_first: NO_POSITION,
+            function_last: NO_POSITION,
+            event: NO_EVENT,
+            expression: String::new(),
+            offset: pc as i64,
+            error: false,
+            callstack_depth: 0,
+            originating_instruction_address: pc as i64,
+            key: String::new(),
+            global_call_key: String::new(),
+            expansion_id: -1,
+            expansion_first_line: -1,
+            expansion_last_line: -1,
+            missing_path: self.meta.paths.is_empty() && self.meta.program.is_empty(),
+            ..Location::default()
+        }
+    }
+
+    /// Build a single-frame `CallLine` from the current emulator state.
+    ///
+    /// Shared between the M-DWARF-4 "no unwinder bundled" fallback
+    /// path and the legacy single-frame contract. Centralising the
+    /// frame construction here keeps the F5 acceptance invariants
+    /// (non-empty `raw_name`, sensible `path`) in one place.
+    fn single_frame_callstack(&self) -> CallLine {
+        let location = self.build_location();
+        let call = Call {
+            key: "0".to_string(),
+            children: Vec::new(),
+            depth: 0,
+            location,
+            parent: None,
+            raw_name: self.root_function_name(),
+            args: Vec::new(),
+            return_value: crate::value::Value::default(),
+            with_args_and_return: false,
+        };
+        CallLine::call(call, /* hidden_children */ false, /* count */ 0, 0)
+    }
+
+    /// Snapshot the 18-slot register file via [`mcrGetRegister`] for
+    /// the CFI walker. Reads through the FFI so no register-decode
+    /// duplication is introduced.
+    fn snapshot_registers(&self) -> [u64; MCR_REG_COUNT] {
+        let mut regs = [0u64; MCR_REG_COUNT];
+        for (idx, slot) in regs.iter_mut().enumerate() {
+            // SAFETY: indices 0..=17 are total per the emulator FFI
+            // contract documented in `emulator_ffi.rs`.
+            *slot = unsafe { emulator_ffi::mcrGetRegister(idx as std::os::raw::c_int) };
+        }
+        regs
     }
 
     /// Build a [`Location`] from the current emulator state.
@@ -1166,25 +1302,89 @@ impl ReplaySession for EmulatorReplaySession {
     }
 
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>> {
-        // Synthesise a single root frame. `load_callstack` is what feeds
-        // DAP `stackTrace`, so producing one frame with a non-empty
-        // function name (and a sensible source path) is the F5
-        // acceptance bar.
-        let location = self.build_location();
-        let call = Call {
-            key: "0".to_string(),
-            children: Vec::new(),
-            depth: 0,
-            location,
-            parent: None,
-            raw_name: self.root_function_name(),
-            args: Vec::new(),
-            return_value: crate::value::Value::default(),
-            with_args_and_return: false,
+        // M-DWARF-4: drive the CFI walker for multi-frame stack
+        // traces. We always synthesise the innermost frame from
+        // `build_location` to preserve the F5 "non-empty name" /
+        // "sensible source path" acceptance bar; the unwinder layers
+        // any recoverable parent frames on top.
+        //
+        // When no unwinder is available (no bundled debug.dat, or the
+        // ELF failed to parse), we surface just the single innermost
+        // frame — matching the pre-M-DWARF-4 contract.
+        let Some(unwinder) = self.stack_unwinder.as_ref() else {
+            return Ok(vec![self.single_frame_callstack()]);
         };
-        Ok(vec![CallLine::call(
-            call, /* hidden_children */ false, /* count */ 0, 0,
-        )])
+
+        // SAFETY: same rationale as elsewhere — the emulator FFI
+        // getters read from Nim-managed globals seeded by `mcrInit` /
+        // `mcrSetRegisters`.
+        let initial_pc = unsafe { emulator_ffi::mcrGetPC() };
+        let registers = self.snapshot_registers();
+
+        // The unwinder uses the `static` PC for FDE lookups but
+        // reports the runtime PC back so DAP frames keep their ASLR
+        // address. The rebase delta is the same one
+        // `dwarf_pc_info_for` uses (set once during construction).
+        let frames = unwinder.unwind(
+            initial_pc,
+            self.pc_rebase,
+            registers,
+            // Memory-reading closure: the unwinder may need to dereference
+            // CFA-relative addresses (saved RA, saved RBP, etc.) to
+            // recover caller registers. `mcrReadMemory` returns 0 on
+            // success and -1 when the address is not covered by any
+            // installed region — translate that into the `Result<(), ()>`
+            // shape the unwinder expects.
+            |addr, buf| {
+                // SAFETY: `buf.as_mut_ptr()` is valid for `buf.len()`
+                // bytes; `mcrReadMemory` copies into it without
+                // retaining the pointer.
+                let rc =
+                    unsafe { emulator_ffi::mcrReadMemory(addr, buf.as_mut_ptr(), buf.len() as std::os::raw::c_int) };
+                if rc == 0 {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            },
+            MAX_CALLSTACK_FRAMES,
+        );
+
+        if frames.is_empty() {
+            // Degenerate case (max_frames = 0 was passed somehow); fall
+            // back to the single-frame synthesis to preserve the F5
+            // acceptance contract.
+            return Ok(vec![self.single_frame_callstack()]);
+        }
+
+        let mut out = Vec::with_capacity(frames.len());
+        for (depth, frame) in frames.iter().enumerate() {
+            let location = self.build_location_for(frame.pc, frame.pc_static);
+            // Use the DWARF-resolved function name for the call's
+            // `raw_name` when available — falling back to the
+            // synthesised root name preserves the F5 "non-empty name"
+            // bar for the innermost frame when its DWARF is missing.
+            let raw_name = if location.function_name.is_empty() {
+                self.root_function_name()
+            } else {
+                location.function_name.clone()
+            };
+            let call = Call {
+                key: depth.to_string(),
+                children: Vec::new(),
+                depth,
+                location,
+                parent: None,
+                raw_name,
+                args: Vec::new(),
+                return_value: crate::value::Value::default(),
+                with_args_and_return: false,
+            };
+            out.push(CallLine::call(
+                call, /* hidden_children */ false, /* count */ 0, depth,
+            ));
+        }
+        Ok(out)
     }
 
     fn load_history(&mut self, _arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
@@ -2456,5 +2656,131 @@ mod tests {
         // Without the ELF we can't read p_vaddr, so the rebase collapses
         // to `mapping.start` — Some(FAKE_ASLR_EXEC_BASE).
         assert_eq!(session.pc_rebase, Some(FAKE_ASLR_EXEC_BASE));
+    }
+
+    // ── M-DWARF-4 fixtures ──────────────────────────────────────────────
+    //
+    // The CFI walker is exercised end-to-end against the same hello.elf
+    // fixture by hand-crafting a synthetic stack inside `cp0.mem` so
+    // the recorded RIP / RBP / stack contents represent
+    // `add -> compute -> main` mid-execution.
+
+    /// M-DWARF-4 acceptance: with a bundled `debug.dat` and a synthetic
+    /// stack laid out per the hello.elf CFI rules, `load_callstack`
+    /// must return three frames (add, compute, main) instead of just
+    /// the innermost one.
+    #[test]
+    fn load_callstack_returns_multiple_frames_via_cfi_walk() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        // Synthetic stack layout — matches the same `a/b/c` chain used
+        // by the unit test in `stack_unwinder.rs`. The stack lives in
+        // a single 4 KB page so cp0.mem only needs one region.
+        let stack_page_base: u64 = 0x7fff_ffff_0000;
+        let a: u64 = stack_page_base + 0x100; // main's rbp
+        let b: u64 = stack_page_base + 0x080; // compute's rbp
+        let c: u64 = stack_page_base + 0x040; // add's rbp
+
+        // Build a 4 KB buffer with the saved (rbp, ra) pairs at the
+        // right offsets. Everything else stays zero.
+        let mut page = vec![0u8; 4096];
+        let put = |page: &mut Vec<u8>, addr: u64, val: u64| {
+            let off = (addr - stack_page_base) as usize;
+            page[off..off + 8].copy_from_slice(&val.to_le_bytes());
+        };
+        // main's frame: saved_rbp=0, ra=0 (top sentinel, walk stops).
+        put(&mut page, a, 0);
+        put(&mut page, a + 8, 0);
+        // compute's frame: saved_rbp = main's rbp, ra back into main.
+        put(&mut page, b, a);
+        put(&mut page, b + 8, 0x40_105a);
+        // add's frame: saved_rbp = compute's rbp, ra back into compute.
+        put(&mut page, c, b);
+        put(&mut page, c + 8, 0x40_103a);
+
+        // RIP inside `add`'s body. RBP = c, RSP somewhere below c.
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: c,
+            rsp: c - 0x20,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: PC_ADD_BODY,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let mem_regions = vec![(stack_page_base, page)];
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &mem_regions, /* include_dwarf */ true);
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+        assert!(
+            session.stack_unwinder.is_some(),
+            "bundled debug.dat must populate the stack unwinder"
+        );
+
+        let frames = session.load_callstack().expect("callstack must succeed");
+        // Expected chain: add -> compute -> main.
+        assert!(
+            frames.len() >= 3,
+            "expected at least 3 frames from CFI walk, got {}: {:?}",
+            frames.len(),
+            frames.iter().map(|f| &f.content.call.raw_name).collect::<Vec<_>>(),
+        );
+
+        // Innermost frame: add at line 24.
+        let f0 = &frames[0].content.call;
+        assert_eq!(f0.location.line, PC_ADD_BODY_LINE, "frame 0 should be inside add()");
+        assert_eq!(
+            f0.raw_name, "add",
+            "DWARF-resolved function name must surface as raw_name on the innermost frame",
+        );
+
+        // Frame 1: compute (RA = 0x40103a, which lives inside compute's body).
+        let f1 = &frames[1].content.call;
+        assert_eq!(
+            f1.raw_name, "compute",
+            "DWARF should name frame 1 `compute` (RA 0x40103a lies in compute)",
+        );
+        assert!(f1.location.path.ends_with("hello.c"));
+
+        // Frame 2: main (RA = 0x40105a, inside main's body).
+        let f2 = &frames[2].content.call;
+        assert_eq!(
+            f2.raw_name, "main",
+            "DWARF should name frame 2 `main` (RA 0x40105a lies in main)",
+        );
+    }
+
+    /// Without a bundled ELF, `load_callstack` must fall back to the
+    /// pre-M-DWARF-4 single-frame contract — important so older traces
+    /// that didn't ship a debug.dat still produce a frame the F5
+    /// gateway-client can render.
+    #[test]
+    fn load_callstack_falls_back_to_single_frame_without_unwinder() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes(); // no debug.dat, no cp0.regs
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        assert!(session.stack_unwinder.is_none(), "no debug.dat -> no CFI unwinder",);
+        let frames = session.load_callstack().expect("callstack must succeed");
+        assert_eq!(
+            frames.len(),
+            1,
+            "without an unwinder we must surface the synthesised root frame only",
+        );
+        let raw_name = &frames[0].content.call.raw_name;
+        assert!(
+            !raw_name.is_empty(),
+            "single-frame fallback must keep the F5 non-empty-name bar"
+        );
     }
 }
