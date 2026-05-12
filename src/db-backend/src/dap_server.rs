@@ -485,13 +485,14 @@ pub fn setup_from_vfs(
         if bytes.len() >= 5 && bytes[..5] == [0xC0, 0xDE, 0x72, 0xAC, 0xE2] {
             info!("setup_from_vfs: detected CTFS container at VFS path {candidate:?}");
 
-            // Gate against MCR live-recording traces before we spend time
-            // materialising the rest of the container: those require the
-            // MCR replay engine, which the WASM browser client does not
-            // yet integrate. Without this check `CTFSTraceReader::
-            // from_bytes` would happily return an "empty" Db (no
-            // events.log / steps.dat to walk) and the user would see
-            // `stackFrames=[]` instead of a real diagnostic.
+            // Probe the CTFS container for an MCR live-recording trace.
+            // MCR traces declare `FlagHasMcrFields` in `meta.dat` and do
+            // NOT ship a materialised events/steps DB — instead they
+            // carry per-thread checkpoint streams the in-process Nim
+            // emulator can replay. We route those through
+            // `EmulatorReplaySession` (F5c-1/2/3); only materialised
+            // (non-MCR) traces fall through to the DB-backed
+            // `CTFSTraceReader::from_bytes` code path below.
             //
             // Cost note: parsing the meta.dat header is O(meta.dat size)
             // — a few hundred bytes for typical traces — so this adds
@@ -500,13 +501,34 @@ pub fn setup_from_vfs(
             match CtfsReader::from_bytes(bytes.clone()) {
                 Ok(mut probe) => {
                     if is_mcr_ctfs_container(&mut probe) {
-                        return Err("setup_from_vfs: trace declares FlagHasMcrFields (MCR live recording); \
-                             the WASM browser-replay client requires an MCR-aware replay engine \
-                             which is not yet wired into this build. The native dap_server uses \
-                             ct-native-replay for MCR traces; the WASM path will gain emulator \
-                             support in a follow-up. See codetracer-specs/Planned-Work/\
-                             Browser-Replay.status.org §F5a."
-                            .into());
+                        info!("setup_from_vfs: MCR-bearing CTFS at {candidate:?} — routing to EmulatorReplaySession");
+                        let emulator =
+                            crate::emulator_session::EmulatorReplaySession::new_from_ctfs_bytes(bytes.clone())?;
+                        // The emulator owns its own state machine; the
+                        // Handler's `reader` field is only consulted by
+                        // code paths that key off
+                        // `TraceKind::Materialized`, so an empty
+                        // `InMemoryTraceReader` is a safe placeholder.
+                        let placeholder_reader: Arc<dyn TraceReader> =
+                            Arc::new(crate::in_memory_trace_reader::InMemoryTraceReader::new(
+                                crate::db::Db::new(&PathBuf::from("")),
+                            ));
+                        let mut handler = Handler::construct_with_replay(
+                            TraceKind::Emulator,
+                            RecreatorArgs {
+                                name: thread_name.to_string(),
+                                ..RecreatorArgs::default()
+                            },
+                            placeholder_reader,
+                            Box::new(emulator),
+                            false,
+                        );
+                        handler.raw_diff_index = raw_diff_index;
+                        if for_launch {
+                            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+                        }
+                        handler.initialized = true;
+                        return Ok(handler);
                     }
                 }
                 Err(e) => {
