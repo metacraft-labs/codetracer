@@ -411,6 +411,94 @@ window.addEventListener("manual-dap-initialize", async () => {
       }
     }
 
+    // -------------------------------------------------------------------
+    // M-Step-Stress: when launched in `mode=step-stress`, drive the
+    // additional DAP step actions and capture a per-action stackTrace
+    // snapshot. The Playwright spec asserts that the (file, line, frame
+    // depth) tuple evolves as expected:
+    //
+    //   * `next` (step-over) — line advances within the same frame.
+    //   * `stepIn` — frame depth grows or the top frame's name changes.
+    //   * `stepOut` — frame depth shrinks (or top frame name reverts).
+    //   * `continue` — halts at a breakpoint (or reports "no
+    //     breakpoint hit" when no breakpoint is set after stepIn).
+    //
+    // Reverse step is intentionally exercised too — the EmulatorReplaySession
+    // returns an error for reverse, and we surface that response so the
+    // Playwright spec can assert the diagnostic surfaces cleanly.
+    // -------------------------------------------------------------------
+    const stepStressEnabled = testMode === "step-stress" && launchOk && configDoneOk;
+    const stepStress = stepStressEnabled
+      ? {
+          enabled: true,
+          actions: [],
+        }
+      : { enabled: false };
+
+    if (stepStressEnabled) {
+      const firstThreadId = (threads && threads.length > 0 && threads[0].id) || 1;
+      const recordStep = async (label, command, reverse = false) => {
+        appendLog(`step-stress: sending ${label}`);
+        const response = await sendDapRequest(
+          command,
+          {
+            threadId: firstThreadId,
+            // `reverse` is what the DAP next/stepIn/stepOut/continue
+            // schemas use for the reverse-execution variant; the
+            // db-backend's `dap_handler.rs::step` reads `arg.reverse`.
+            reverse,
+            granularity: "line",
+            singleThread: true,
+          },
+          // step requests can take longer on a real `.ct` because the
+          // emulator may have to walk thousands of instructions.
+          15_000,
+        );
+        const stResult = await sendDapRequest("stackTrace", {
+          threadId: firstThreadId,
+          startFrame: 0,
+          levels: 64,
+        });
+        const stFrames =
+          (stResult.response && stResult.response.body && stResult.response.body.stackFrames) || [];
+        const top = stFrames[0] || null;
+        stepStress.actions.push({
+          label,
+          command,
+          reverse,
+          responseSuccess: !!(response.response && response.response.success),
+          responseMessage:
+            (response.response && (response.response.message || (response.response.body && response.response.body.error))) ||
+            null,
+          stackDepth: stFrames.length,
+          topFrameName: top ? top.name : null,
+          topFrameLine: top ? top.line : null,
+          topFramePath: top && top.source ? top.source.path : null,
+        });
+      };
+
+      try {
+        // 1. step-over (next).
+        await recordStep("next", "next");
+        // 2. step-in.
+        await recordStep("stepIn", "stepIn");
+        // 3. step-out.
+        await recordStep("stepOut", "stepOut");
+        // 4. continue. We rely on the breakpoint we already set above.
+        //    The continue response from an emulator-backed session may
+        //    report success even when no breakpoint is hit; the
+        //    Playwright spec inspects the post-continue stackTrace to
+        //    distinguish.
+        await recordStep("continue", "continue");
+        // 5. reverse step — must surface an error response so the
+        //    DAP client knows reverse is unsupported on MCR.
+        await recordStep("reverse-next", "next", true);
+      } catch (stepErr) {
+        appendLog(`step-stress: aborted with ${stepErr.message}`);
+        stepStress.error = stepErr.message;
+      }
+    }
+
     const result = {
       success: initOk,
       gatewayBaseUrl,
@@ -437,6 +525,8 @@ window.addEventListener("manual-dap-initialize", async () => {
       setBreakpointsResponse,
       breakpointPath,
       breakpointLine,
+      // M-Step-Stress fields.
+      stepStress,
     };
 
     window.__replayTestResult = result;

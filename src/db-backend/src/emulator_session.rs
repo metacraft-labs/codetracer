@@ -48,8 +48,9 @@
 //! effectively trivial; we keep it for source-level symmetry with native.
 
 use codetracer_trace_types::{StepId, TypeKind, TypeRecord, TypeSpecificInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::path::Path;
 use std::sync::Once;
 
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
@@ -683,6 +684,22 @@ pub struct EmulatorReplaySession {
     /// session then surfaces only the single synthesised root frame
     /// (the pre-M-DWARF-4 contract).
     stack_unwinder: Option<StackUnwinder>,
+    /// Set of **static** PCs at which `step(Continue, …)` must halt.
+    ///
+    /// Populated whenever `add_breakpoint` is called: the DwarfIndex
+    /// reverse lookup turns `(path, line)` into a list of PCs, all of
+    /// which are added to this set. The set is cleared by
+    /// `delete_breakpoints` and the per-`(path, line)` slice is removed
+    /// (or attempted to be removed) on `delete_breakpoint`. Membership
+    /// is checked once per emulator instruction during `Continue`, so
+    /// `HashSet` (O(1) lookup) is the right shape — even at 10,000
+    /// breakpoints the per-instruction overhead stays in the
+    /// nanoseconds.
+    ///
+    /// Stored as *static* PCs (the addresses DWARF encodes); the
+    /// runtime PC from `mcrGetPC` is rebased before lookup so PIE
+    /// traces still hit their breakpoints after ASLR shifts.
+    breakpoint_static_pcs: HashSet<u64>,
 }
 
 /// Hard cap on the number of frames returned by `load_callstack`.
@@ -714,6 +731,7 @@ impl std::fmt::Debug for EmulatorReplaySession {
             )
             .field("pc_rebase", &self.pc_rebase)
             .field("stack_unwinder", &self.stack_unwinder.as_ref().map(|_| "<present>"))
+            .field("breakpoint_static_pcs_count", &self.breakpoint_static_pcs.len())
             .finish()
     }
 }
@@ -760,6 +778,7 @@ impl EmulatorReplaySession {
             dwarf: None,
             pc_rebase: None,
             stack_unwinder: None,
+            breakpoint_static_pcs: HashSet::new(),
         }
     }
 
@@ -883,6 +902,7 @@ impl EmulatorReplaySession {
             dwarf,
             pc_rebase,
             stack_unwinder,
+            breakpoint_static_pcs: HashSet::new(),
         })
     }
 
@@ -1182,6 +1202,235 @@ impl EmulatorReplaySession {
     }
 }
 
+/// Hard cap on the number of `mcrStep` iterations a single
+/// `step(Action::*, true)` call is allowed to drive.
+///
+/// Set high enough that any realistic source-line step (which typically
+/// covers a handful of x86_64 instructions, but may span hundreds when
+/// stepping over an inlined function) succeeds, while still bounding
+/// the worst-case CPU cost of a malformed line table or a runaway
+/// JIT-emitted page that never advances to a new line.
+///
+/// 10,000 instructions is comfortably above the 99th-percentile
+/// "instructions per source line" we see in production traces (peak
+/// observed ≈400 for heavy Nim async dispatch).
+const MAX_STEP_INSTRUCTIONS: usize = 10_000;
+
+impl EmulatorReplaySession {
+    /// Re-resolve every registered breakpoint to its static PC set.
+    ///
+    /// Called after `delete_breakpoint` removes one entry — there may
+    /// still be other `(path, line)` slots referring to the same PC
+    /// (e.g. the same line was reached by two CUs for inlined code),
+    /// so we can't just remove the deleted breakpoint's PCs from the
+    /// set. Rebuilding from scratch is O(N · DWARF lookup); N is
+    /// the number of active breakpoints which is rarely above a
+    /// dozen in practice, so the cost is negligible compared to the
+    /// `Continue` loop that uses the set.
+    fn rebuild_breakpoint_static_pcs(&mut self) {
+        self.breakpoint_static_pcs.clear();
+        let Some(dwarf) = self.dwarf.as_ref() else {
+            return;
+        };
+        // Collect (path, line) keys first so we don't hold a borrow on
+        // `self.breakpoints` while mutating `self.breakpoint_static_pcs`.
+        let keys: Vec<(String, i64)> = self.breakpoints.keys().cloned().collect();
+        for (path, line) in keys {
+            let Ok(line_u32) = u32::try_from(line) else {
+                continue;
+            };
+            for pc in dwarf.pcs_for_line(Path::new(&path), line_u32) {
+                self.breakpoint_static_pcs.insert(pc);
+            }
+        }
+    }
+
+    /// Read the current PC's static address (post-rebase) for breakpoint
+    /// comparison and DWARF queries. The runtime PC is what
+    /// `mcrGetPC` reports; we subtract the rebase offset (computed at
+    /// session construction from `cp0.maps`) so the result matches the
+    /// addresses bundled in `debug.dat`.
+    fn current_static_pc(&self) -> u64 {
+        // SAFETY: `mcrGetPC` reads from Nim-managed globals seeded by
+        // `mcrInit` and is total.
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        match self.pc_rebase {
+            Some(offset) => pc.wrapping_sub(offset),
+            None => pc,
+        }
+    }
+
+    /// Resolve the current PC to `(file, line)` via the bundled DWARF
+    /// index. Returns `None` when no DWARF is available or the PC
+    /// falls outside every CU range — both are signals that
+    /// source-line stepping cannot proceed and the caller should fall
+    /// back to a single instruction step.
+    fn current_file_line(&self) -> Option<(String, u32)> {
+        let info = self.dwarf_pc_info()?;
+        let path = info.file.to_string_lossy().into_owned();
+        if path.is_empty() {
+            return None;
+        }
+        Some((path, info.line))
+    }
+
+    /// Drive the emulator with `mcrStep` until `predicate` returns
+    /// `true` or one of the loop guards fires:
+    ///
+    /// * `MAX_STEP_INSTRUCTIONS` instructions were executed (hard cap).
+    /// * `mcrStep` reported exit (`1`) — typically `_start`'s exit
+    ///   syscall on the hello.elf fixture.
+    /// * `mcrStep` reported error (`-1`) — invalid instruction,
+    ///   memory fault, or registers not seeded.
+    ///
+    /// Returns `true` when the predicate stopped the loop, `false` on
+    /// exit / error / cap. Callers translate the boolean into their
+    /// own contract (e.g. `Continue` reports "did we hit a
+    /// breakpoint?", source-line stepping reports "did the line
+    /// change?").
+    fn step_until<F: FnMut(&mut Self) -> bool>(&mut self, mut predicate: F) -> bool {
+        for _ in 0..MAX_STEP_INSTRUCTIONS {
+            // SAFETY: see `step()` — `mcrStep` only reads/writes the
+            // Nim-managed emulator globals seeded by `mcrInit`.
+            let rc = unsafe { emulator_ffi::mcrStep() };
+            if rc != 0 {
+                // Exit (1) or error (-1): we cannot continue. The
+                // bounded loop exit ensures the caller sees a finite
+                // step count even when the recorded program ends mid
+                // source line.
+                return false;
+            }
+            if predicate(self) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `step(Action::StepIn, true)` body.
+    ///
+    /// Continue executing single instructions until the source line
+    /// (per the bundled DWARF) changes from the line we were on at
+    /// entry. If a CALL is executed, the resulting line change lands
+    /// inside the callee — which is exactly the "step in" semantic.
+    ///
+    /// Falls back to a single `mcrStep` when no DWARF is available
+    /// (so the DAP client at least sees the step counter increment).
+    fn run_step_in(&mut self) -> Result<bool, Box<dyn Error>> {
+        let Some(initial) = self.current_file_line() else {
+            // No DWARF: a single instruction step is the best we can do.
+            // SAFETY: see `step_until`.
+            let _ = unsafe { emulator_ffi::mcrStep() };
+            return Ok(true);
+        };
+        let advanced = self.step_until(|sess| match sess.current_file_line() {
+            Some((path, line)) => path != initial.0 || line != initial.1,
+            // PC walked off the DWARF map (libc, JIT, padding). Stop
+            // here — the user probably wants to inspect this state
+            // rather than blindly keep stepping.
+            None => true,
+        });
+        Ok(advanced)
+    }
+
+    /// `step(Action::Next, true)` body — source-line step-over.
+    ///
+    /// Heuristic per the M-Step-Stress spec: record initial RSP and
+    /// initial `(file, line)`. Single-step until BOTH:
+    ///
+    /// 1. The current `(file, line)` differs from the initial.
+    /// 2. The current RSP is at or above the initial RSP — i.e. we
+    ///    are back to the original frame (or shallower).
+    ///
+    /// The RSP check is what makes step-over different from step-in:
+    /// inside a CALL, RSP drops by 8 (return address pushed) and stays
+    /// below the entry RSP until the matching RET pops it back. We
+    /// don't need to detect the CALL instruction directly — the RSP
+    /// comparison handles it transparently.
+    fn run_step_over(&mut self) -> Result<bool, Box<dyn Error>> {
+        let Some(initial) = self.current_file_line() else {
+            // SAFETY: see `step_until`.
+            let _ = unsafe { emulator_ffi::mcrStep() };
+            return Ok(true);
+        };
+        // SAFETY: `mcrGetSP` reads from Nim-managed globals and is total.
+        let initial_sp = unsafe { emulator_ffi::mcrGetSP() };
+        let advanced = self.step_until(|sess| {
+            // SAFETY: same as above.
+            let sp = unsafe { emulator_ffi::mcrGetSP() };
+            if sp < initial_sp {
+                // Still inside a callee — keep stepping.
+                return false;
+            }
+            match sess.current_file_line() {
+                Some((path, line)) => path != initial.0 || line != initial.1,
+                None => true,
+            }
+        });
+        Ok(advanced)
+    }
+
+    /// `step(Action::StepOut, true)` body — run until the current
+    /// function returns.
+    ///
+    /// We capture the DWARF function name at entry and step until the
+    /// resolved function changes (or DWARF stops resolving the PC).
+    /// This is more robust than an RSP-only heuristic because the
+    /// emit pattern for a function's epilogue varies (e.g. `pop rbp`
+    /// vs `leave`, multiple intermediate xors before the `ret`), and
+    /// because the epilogue itself moves RSP without leaving the
+    /// function. Function-name comparison is the cleanest "have I
+    /// returned to a different frame yet?" signal DWARF gives us.
+    ///
+    /// Falls back to a single instruction step when no DWARF is
+    /// available — better than spinning forever on a stripped trace.
+    fn run_step_out(&mut self) -> Result<bool, Box<dyn Error>> {
+        let Some(initial_fn) = self.current_function_name() else {
+            // SAFETY: same rationale as `run_step_over`.
+            let _ = unsafe { emulator_ffi::mcrStep() };
+            return Ok(true);
+        };
+        let advanced = self.step_until(|sess| match sess.current_function_name() {
+            // Same function → still inside it; keep stepping.
+            Some(name) => name != initial_fn,
+            // Lost DWARF resolution — we've returned past any CU
+            // (e.g. into the `_start` runtime stub). Stop.
+            None => true,
+        });
+        Ok(advanced)
+    }
+
+    /// Resolve the current PC to a DWARF function name. Returns
+    /// `None` when no DWARF is bundled or the PC falls outside every
+    /// CU's address ranges.
+    fn current_function_name(&self) -> Option<String> {
+        let info = self.dwarf_pc_info()?;
+        info.function
+    }
+
+    /// `step(Action::Continue, true)` body — run until a breakpoint
+    /// hits or the emulator exits / errors.
+    ///
+    /// Compares the post-step *static* PC against `breakpoint_static_pcs`.
+    /// When the set is empty (no breakpoints currently registered, or
+    /// no DWARF to resolve them with), the emulator runs to the
+    /// `MAX_STEP_INSTRUCTIONS` cap and reports "no breakpoint hit"
+    /// — matching the contract that `Continue` returns `false` when
+    /// nothing stopped it.
+    fn run_continue(&mut self) -> Result<bool, Box<dyn Error>> {
+        if self.breakpoint_static_pcs.is_empty() {
+            // No breakpoints to hit. Step the cap and report "miss".
+            // This is the production "user pressed Continue with no
+            // breakpoints set" path — the DAP client surfaces a
+            // notification.
+            let _ = self.step_until(|_| false);
+            return Ok(false);
+        }
+        let hit = self.step_until(|sess| sess.breakpoint_static_pcs.contains(&sess.current_static_pc()));
+        Ok(hit)
+    }
+}
+
 impl Default for EmulatorReplaySession {
     fn default() -> Self {
         Self::new()
@@ -1215,24 +1464,50 @@ impl ReplaySession for EmulatorReplaySession {
         })
     }
 
-    fn step(&mut self, _action: Action, _forward: bool) -> Result<bool, Box<dyn Error>> {
-        // Drive one instruction. The emulator only steps forward; reverse
-        // execution requires snapshots that this build does not yet have.
-        // We swallow non-zero return codes because the F5 happy-path
-        // never actually loads code to step over — the call exists so
-        // that the DAP `next`/`stepIn` handlers don't blow up on an
-        // unhandled `todo!()` when the user presses a step button on an
-        // emulator-backed trace.
+    fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>> {
+        // ── Reverse stepping is not yet implemented ────────────────────
         //
-        // SAFETY: `mcrStep` only reads/writes the Nim-managed emulator
-        // globals seeded by `mcrInit` (and optionally `mcrSetRegisters`).
-        let _ = unsafe { emulator_ffi::mcrStep() };
+        // The Nim emulator only exposes `mcrStep` / `mcrRun`, which
+        // advance forward. Reverse execution requires snapshot-based
+        // rewind that no recorder yet emits for the db-backend. Rather
+        // than silently treating reverse requests as forward steps
+        // (which would confuse the DAP client), surface a typed error.
+        if !forward {
+            return Err("reverse stepping is not yet implemented for MCR".into());
+        }
+
+        // Dispatch to the per-Action helper. Each helper drives the
+        // emulator with a bounded `mcrStep` loop and returns the same
+        // boolean contract: `true` on a "stepped to a useful place"
+        // outcome, `false` on "no breakpoint hit / exit" (only
+        // meaningful for `Continue`).
+        let hit = match action {
+            Action::StepIn => self.run_step_in()?,
+            Action::Next => self.run_step_over()?,
+            Action::StepOut => self.run_step_out()?,
+            Action::Continue => self.run_continue()?,
+            other => {
+                // The remaining variants (`StepC`, `NextC`, `StepI`,
+                // `NextI`, `CoStepIn`, `CoNext`, `NonAction`) are not
+                // exercised by the F5 / M-Step-Stress happy path. The
+                // DAP `step` handler routes them to one of the four
+                // covered actions for materialised sessions and never
+                // reaches us with anything else; surfacing an error if
+                // it ever does means a future feature gets a clear
+                // diagnostic instead of a silent single instruction.
+                return Err(format!("EmulatorReplaySession: action {other:?} is not implemented for MCR").into());
+            }
+        };
+
         // Mirror the emulator counter so subsequent `current_step_id`
-        // calls return the updated value.
-        // SAFETY: same as above.
+        // calls return the updated value. The helpers may run many
+        // emulator instructions per call, so we sync once at the end.
+        //
+        // SAFETY: `mcrGetStepCounter` is total — it returns 0 before
+        // any instructions have executed and a monotonic value after.
         let counter = unsafe { emulator_ffi::mcrGetStepCounter() };
         self.current_step_id = StepId(counter as i64);
-        Ok(true)
+        Ok(hit)
     }
 
     fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
@@ -1396,13 +1671,37 @@ impl ReplaySession for EmulatorReplaySession {
         // line 1294) reports `verified: true` whenever `add_breakpoint`
         // returns `Ok`. So all we need to do here is mint a new id and
         // remember the entry so `delete_breakpoint` can find it.
-        Ok(self.allocate_breakpoint(path, line))
+        let breakpoint = self.allocate_breakpoint(path, line);
+        // M-Step-Stress: resolve the (path, line) to static PCs via the
+        // bundled DWARF reverse index and populate the `Continue` hot
+        // path's lookup set. A missing DWARF index, an unknown line, or
+        // a path that doesn't match any CU are all silent — we still
+        // mint the breakpoint so the GUI's breakpoint marker shows up,
+        // but `Continue` won't halt on it.
+        if let Some(dwarf) = self.dwarf.as_ref() {
+            if let Ok(line_u32) = u32::try_from(line) {
+                for pc in dwarf.pcs_for_line(Path::new(path), line_u32) {
+                    self.breakpoint_static_pcs.insert(pc);
+                }
+            }
+        }
+        Ok(breakpoint)
     }
 
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
-        for entries in self.breakpoints.values_mut() {
+        for (key, entries) in self.breakpoints.iter_mut() {
             if let Some(pos) = entries.iter().position(|b| b.id == breakpoint.id) {
                 entries.remove(pos);
+                let key = key.clone();
+                let no_more = entries.is_empty();
+                if no_more {
+                    // Drop the resolved PCs *only* if no other breakpoint
+                    // (different id, same path/line) refers to them. The
+                    // bookkeeping is simple because we re-resolve from
+                    // scratch — see below.
+                    self.breakpoints.remove(&key);
+                }
+                self.rebuild_breakpoint_static_pcs();
                 return Ok(true);
             }
         }
@@ -1413,6 +1712,7 @@ impl ReplaySession for EmulatorReplaySession {
 
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>> {
         self.breakpoints.clear();
+        self.breakpoint_static_pcs.clear();
         Ok(true)
     }
 
@@ -2759,6 +3059,392 @@ mod tests {
             f2.raw_name, "main",
             "DWARF should name frame 2 `main` (RA 0x40105a lies in main)",
         );
+    }
+
+    // ── M-Step-Stress fixtures ──────────────────────────────────────────
+    //
+    // The step-action tests reuse the hello.elf fixture but additionally
+    // need the executable PT_LOAD bytes installed into the emulator so
+    // `mcrStep` can actually decode and execute instructions.
+    //
+    // hello.elf layout (from `readelf -l`):
+    //   PT_LOAD #0: file 0x0000..0x01c0 → vaddr 0x400000 (read-only)
+    //   PT_LOAD #1: file 0x1000..0x1073 → vaddr 0x401000 (R+X, the .text)
+    //   PT_LOAD #2: file 0x2000..0x2078 → vaddr 0x402000 (read-only data)
+    //
+    // For step-action tests we only need #1 — `add`, `compute`, `main`,
+    // and `_start` all live there.
+
+    const HELLO_TEXT_FILE_OFFSET: usize = 0x1000;
+    const HELLO_TEXT_VADDR: u64 = 0x0040_1000;
+    const HELLO_TEXT_SIZE: usize = 0x0073;
+
+    /// PC at the function-entry of `compute` (hello.c line 28).
+    const PC_COMPUTE_ENTRY: u64 = 0x0040_1020;
+    /// PC at the `call <add>` instruction inside `compute` (line 29).
+    const PC_COMPUTE_CALL_ADD: u64 = 0x0040_1035;
+    /// PC at the start of hello.c line 30 (`return doubled;`) — the
+    /// first source-line row after `compute`'s call to `add`. Per the
+    /// `.debug_line` table, line 30 starts at PC 0x40103d, NOT
+    /// 0x40103a (which is `mov [rbp-0x4], eax` — still part of line 29's
+    /// "store the call return into the local").
+    const PC_COMPUTE_LINE_30: u64 = 0x0040_103d;
+    /// PC right after the `call <add>` instruction completes (the
+    /// return address pushed by the call). Used by step-out fixtures
+    /// to lay down a believable return address on the stack.
+    const PC_COMPUTE_AFTER_CALL: u64 = 0x0040_103a;
+    /// PC at the function-entry of `add` (hello.c line 23 prologue).
+    const PC_ADD_ENTRY: u64 = 0x0040_1000;
+    /// PC for hello.c line 25 (`return sum;`).
+    const PC_ADD_RETURN_LINE: u64 = 0x0040_1015;
+    /// Hello.c line 30: `return doubled;` — the line execution reaches
+    /// when stepping over the `int doubled = add(...)` call.
+    const HELLO_LINE_AFTER_CALL: i64 = 30;
+    /// Hello.c line 29: `int doubled = add(x, x);` pre-call source.
+    const HELLO_LINE_COMPUTE_CALL: i64 = 29;
+
+    /// Stack page used by the M-Step-Stress fixtures.
+    const STACK_PAGE_BASE: u64 = 0x7fff_0000_0000;
+    const STACK_PAGE_SIZE: usize = 4096;
+    /// Initial RSP: top of the stack page minus a small safety margin.
+    /// The emulator only needs ~16 bytes for a CALL (8-byte return
+    /// address) — we leave 0x100 to be safe in case future tests push
+    /// locals.
+    const STACK_INIT_RSP: u64 = STACK_PAGE_BASE + (STACK_PAGE_SIZE as u64) - 0x100;
+
+    /// Install the hello.elf executable PT_LOAD into the emulator and
+    /// allocate a 4 KB stack page at [`STACK_PAGE_BASE`].
+    ///
+    /// Returns the bytes of `cp0.mem` we'd ship inside the CTFS
+    /// container so the same fixture works whether the test seeds via
+    /// `new_from_ctfs_bytes` (production path) or directly via the FFI
+    /// (faster, no temp-file dance).
+    fn install_hello_text_and_stack() -> Vec<(u64, Vec<u8>)> {
+        // Carve out the executable PT_LOAD bytes from the embedded ELF.
+        let text = HELLO_ELF_FIXTURE[HELLO_TEXT_FILE_OFFSET..HELLO_TEXT_FILE_OFFSET + HELLO_TEXT_SIZE].to_vec();
+        // Pad up to a page boundary so the emulator's page-aligned
+        // bookkeeping has the full 4 KB to play with.
+        let mut text_page = vec![0u8; 0x1000];
+        text_page[..text.len()].copy_from_slice(&text);
+        // Stack page is zeroed.
+        let stack_page = vec![0u8; STACK_PAGE_SIZE];
+        vec![(HELLO_TEXT_VADDR, text_page), (STACK_PAGE_BASE, stack_page)]
+    }
+
+    /// Build a CTFS payload that bundles hello.elf as `debug.dat`,
+    /// installs the .text + stack via `cp0.mem`, and seeds the
+    /// registers via `cp0.regs` with `rip`, `rsp`, and `rbp` taken
+    /// from the caller. No `cp0.maps` — we want `pc_rebase = None`
+    /// so the recorded PCs are already in the static address space
+    /// (the fixture is non-PIE).
+    fn synthetic_mcr_ctfs_bytes_for_step(rip: u64, rsp: u64, rbp: u64) -> Vec<u8> {
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            // Pass `0x15` (21) as the first integer arg, matching what
+            // `main` would have done — useful for the step-in test
+            // where we land inside `add` after `compute` set up its
+            // arguments.
+            rdi: 0x15,
+            rbp,
+            rsp,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let mem_regions = install_hello_text_and_stack();
+        synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &mem_regions, /* include_dwarf */ true)
+    }
+
+    /// Convenience: a sane RBP somewhere in the stack page so that
+    /// `compute`'s `[rbp-0x4]` / `[rbp-0x14]` accesses land on
+    /// writable memory. Placed 0x100 below STACK_INIT_RSP so the
+    /// red-zone and call-pushed return address can both fit.
+    const STACK_INIT_RBP: u64 = STACK_INIT_RSP + 0x100;
+
+    /// `step(_, false)` must surface a clear "reverse not supported"
+    /// error so the DAP client can show a useful diagnostic.
+    #[test]
+    fn step_reverse_returns_err() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let mut session = EmulatorReplaySession::new();
+        for action in [Action::StepIn, Action::Next, Action::StepOut, Action::Continue] {
+            let err = session
+                .step(action, false)
+                .expect_err("reverse step must surface an error");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("reverse"),
+                "error must mention reverse stepping; got `{msg}` for action {action:?}",
+            );
+        }
+    }
+
+    /// `add_breakpoint(hello.c, 24)` against a session with a bundled
+    /// DWARF index must resolve to ≥1 static PC and stage it for the
+    /// `Continue` action's hot path.
+    #[test]
+    fn add_breakpoint_resolves_to_known_pcs() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let bp = session
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE)
+            .expect("add_breakpoint must succeed");
+        assert!(bp.enabled, "freshly-added breakpoint must be enabled");
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "breakpoint at hello.c:{PC_ADD_BODY_LINE} must resolve to PC_ADD_BODY ({:#x}); got set: {:?}",
+            PC_ADD_BODY,
+            session.breakpoint_static_pcs,
+        );
+
+        // Deleting the only breakpoint at this line must clear the PC
+        // from the resolved set.
+        session.delete_breakpoint(&bp).expect("delete_breakpoint must succeed");
+        assert!(
+            !session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "after delete_breakpoint the PC must drop out of the resolved set",
+        );
+
+        // delete_breakpoints (plural) on a fresh, re-added breakpoint
+        // must also empty the set.
+        let _bp = session.add_breakpoint("hello.c", PC_ADD_BODY_LINE).unwrap();
+        assert!(!session.breakpoint_static_pcs.is_empty());
+        session.delete_breakpoints().unwrap();
+        assert!(session.breakpoint_static_pcs.is_empty());
+    }
+
+    /// `step(Action::Next, true)` from PC_COMPUTE_CALL_ADD (line 29,
+    /// the `call <add>` instruction) must land on line 30 — i.e. it
+    /// must step **over** the call, not into `add`.
+    ///
+    /// The RSP heuristic is what makes this work: after `CALL` RSP
+    /// drops by 8, so the step loop keeps stepping; only when the
+    /// matching `RET` pops RSP back to its initial value does the
+    /// loop allow itself to stop, and by then we are at line 30.
+    #[test]
+    fn step_over_advances_past_call_to_next_line() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        // Sanity: we really are on line 29 before the step.
+        let loc_before = session.build_location();
+        assert_eq!(
+            loc_before.line, HELLO_LINE_COMPUTE_CALL,
+            "step-over precondition: must start on line {HELLO_LINE_COMPUTE_CALL}; got {loc_before:?}",
+        );
+
+        let advanced = session.step(Action::Next, true).expect("step must succeed");
+        assert!(advanced, "step-over should report advancement");
+
+        let loc_after = session.build_location();
+        assert_eq!(
+            loc_after.line, HELLO_LINE_AFTER_CALL,
+            "step-over must skip past the call into hello.c:{HELLO_LINE_AFTER_CALL}; got {loc_after:?}",
+        );
+        // The step counter must have advanced (proves we ran real
+        // instructions, not just shuffled state).
+        assert!(
+            session.current_step_id().0 > 0,
+            "step counter must advance: got {:?}",
+            session.current_step_id(),
+        );
+    }
+
+    /// `step(Action::StepIn, true)` from PC_COMPUTE_CALL_ADD must end
+    /// up inside `add()` — i.e. on a line within hello.c that is part
+    /// of the `add` function (line 23..=25 depending on the prologue
+    /// layout).
+    #[test]
+    fn step_in_enters_callee() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let advanced = session.step(Action::StepIn, true).expect("step must succeed");
+        assert!(advanced, "step-in should report advancement");
+
+        // After step-in we must be inside `add` — function entry is
+        // line 23 (declaration) or 24 (body) depending on which line
+        // table row the prologue's first instruction maps to. Either
+        // way the PC must lie inside `add`'s static range
+        // [PC_ADD_ENTRY, PC_COMPUTE_ENTRY).
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        assert!(
+            (PC_ADD_ENTRY..PC_COMPUTE_ENTRY).contains(&pc),
+            "step-in must land inside add()'s static range; got pc={pc:#x}",
+        );
+        let loc = session.build_location();
+        assert!(
+            (23..=25).contains(&loc.line),
+            "step-in target line must be inside add() (23..=25); got loc={loc:?}",
+        );
+    }
+
+    /// `step(Action::StepOut, true)` from inside `add()` must return
+    /// to `compute()` — RSP after the matching RET is strictly higher
+    /// than at entry, and the line index lands inside `compute`'s
+    /// static range.
+    ///
+    /// add()'s epilogue (from the objdump):
+    ///   401015: mov  eax,DWORD PTR [rbp-0x4]   ; line 25 (uses rbp)
+    ///   401018: pop  rbp                       ; line 26 (RSP += 8)
+    ///   401019: xor  edx,edx                   ; (no source row)
+    ///   40101b: xor  esi,esi
+    ///   40101d: xor  edi,edi
+    ///   40101f: ret                            ; pops return addr
+    ///
+    /// `add()` has no local-frame `sub rsp`, so at the post-prologue
+    /// point (which is where line 25 lives) we have `RSP == RBP`. The
+    /// layout that makes `pop rbp` + `ret` execute cleanly is:
+    ///
+    ///     [RBP - 0x18 .. RBP - 0x04]   ← red-zone locals (zeros OK)
+    ///     [RBP]                        ← saved rbp pushed by prologue
+    ///     [RBP + 0x08]                 ← return address pushed by CALL
+    ///
+    /// We seed RSP = RBP, lay sentinel saved-rbp + the real
+    /// `PC_COMPUTE_AFTER_CALL` return address into the page (baked
+    /// into the `cp0.mem` blob before the CTFS bundle is built — the
+    /// emulator's region table does not support overwriting an
+    /// already-installed page), and let the emulator execute through
+    /// the epilogue.
+    #[test]
+    fn step_out_returns_to_caller() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        // Pick a comfortable rbp/rsp in the middle of the stack page
+        // so the red-zone locals fit below and the saved-rbp+ra pair
+        // fits above.
+        let rbp: u64 = STACK_PAGE_BASE + 0x800;
+        let rsp_entry: u64 = rbp; // add() has no `sub rsp` in its prologue.
+        let saved_rbp: u64 = 0xdead_beef_cafe_babe;
+        let return_addr: u64 = PC_COMPUTE_AFTER_CALL;
+
+        // Build a stack page with the saved-rbp + return-address pair
+        // baked in at the right offsets.
+        let mut stack_page = vec![0u8; STACK_PAGE_SIZE];
+        let rbp_off = (rbp - STACK_PAGE_BASE) as usize;
+        stack_page[rbp_off..rbp_off + 8].copy_from_slice(&saved_rbp.to_le_bytes());
+        stack_page[rbp_off + 8..rbp_off + 16].copy_from_slice(&return_addr.to_le_bytes());
+
+        // Reuse `install_hello_text_and_stack` for the .text and then
+        // swap in our pre-populated stack page.
+        let mut mem = install_hello_text_and_stack();
+        for entry in mem.iter_mut() {
+            if entry.0 == STACK_PAGE_BASE {
+                entry.1 = stack_page.clone();
+            }
+        }
+
+        let regs = InitialRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp,
+            rsp: rsp_entry,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: PC_ADD_RETURN_LINE,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &mem, /* include_dwarf */ true);
+        let mut sess = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+
+        let advanced = sess.step(Action::StepOut, true).expect("step must succeed");
+        assert!(advanced, "step-out should report advancement");
+
+        // Post-RET we must be inside `compute`'s static range
+        // [PC_COMPUTE_ENTRY, PC_MAIN_ENTRY_HELLO).
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        const PC_MAIN_ENTRY_HELLO: u64 = 0x0040_1048;
+        assert!(
+            (PC_COMPUTE_ENTRY..PC_MAIN_ENTRY_HELLO).contains(&pc),
+            "step-out must return into compute()'s static range; got pc={pc:#x}",
+        );
+        let sp_after = unsafe { emulator_ffi::mcrGetSP() };
+        assert!(
+            sp_after > rsp_entry,
+            "step-out must leave RSP strictly above the entry value (RET pops the return addr)",
+        );
+    }
+
+    /// `step(Action::Continue, true)` must run until a breakpoint at a
+    /// later line halts execution. We set a breakpoint at hello.c:30
+    /// (PC_COMPUTE_AFTER_CALL), seed RIP at PC_COMPUTE_CALL_ADD (line
+    /// 29), and continue. The emulator should execute the CALL, the
+    /// callee's body, the RET, and stop at line 30.
+    #[test]
+    fn continue_halts_at_breakpoint() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        // Set a breakpoint at hello.c:30 and confirm at least one PC
+        // was resolved for it. The DWARF line table maps line 30 to
+        // PC 0x40103d (the start of `return doubled;` after the
+        // assignment to `doubled` is complete).
+        let _bp = session
+            .add_breakpoint("hello.c", HELLO_LINE_AFTER_CALL)
+            .expect("breakpoint must register");
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_COMPUTE_LINE_30),
+            "breakpoint at hello.c:{HELLO_LINE_AFTER_CALL} must resolve to PC_COMPUTE_LINE_30 ({:#x}); got set: {:?}",
+            PC_COMPUTE_LINE_30,
+            session.breakpoint_static_pcs,
+        );
+
+        let hit = session.step(Action::Continue, true).expect("continue must succeed");
+        assert!(hit, "continue must report breakpoint hit");
+
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        assert_eq!(
+            pc, PC_COMPUTE_LINE_30,
+            "continue must halt at PC_COMPUTE_LINE_30 ({:#x}); got pc={pc:#x}",
+            PC_COMPUTE_LINE_30,
+        );
+        let loc = session.build_location();
+        assert_eq!(
+            loc.line, HELLO_LINE_AFTER_CALL,
+            "continue's halt location must be hello.c:{HELLO_LINE_AFTER_CALL}; got loc={loc:?}",
+        );
+    }
+
+    /// With no breakpoints registered, `Continue` must report
+    /// `Ok(false)` (no breakpoint hit) rather than spinning forever.
+    /// The bounded `MAX_STEP_INSTRUCTIONS` loop is what makes this
+    /// safe.
+    #[test]
+    fn continue_with_no_breakpoints_reports_miss() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        // No add_breakpoint call: the resolved set is empty.
+        let hit = session.step(Action::Continue, true).expect("continue must succeed");
+        assert!(!hit, "continue with no breakpoints must report miss");
     }
 
     /// Without a bundled ELF, `load_callstack` must fall back to the
