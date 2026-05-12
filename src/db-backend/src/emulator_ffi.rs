@@ -1,20 +1,26 @@
-//! Raw FFI bindings to the Nim MCR emulator (F5c-1).
+//! Raw FFI bindings to the Nim MCR emulator (F5c-1 native, F5c-2 wasm32).
 //!
 //! The implementation lives at
 //! `codetracer-native-recorder/ct_emulator/src/ct_emulator/emulator_wasm_api.nim`
-//! and is compiled to C by `build_native_api.sh`, then linked into this
-//! crate by `build.rs` via `cc::Build`.
+//! and is compiled to C either by `build_native_api.sh` (host target) or
+//! `build_wasm_api.sh` (wasm32 target). `build.rs` then links the right
+//! artifact into this crate:
+//!   * native build → `libmcr_emulator.so` / `.dylib` (visibility-scoped
+//!     shared library, to avoid clashing with the `codetracer_trace_writer_nim`
+//!     Nim runtime).
+//!   * wasm32 build → plain static archive `libmcr_emulator.a`, because
+//!     the wasm build excludes `codetracer_trace_writer_nim` entirely
+//!     (see `Cargo.toml`'s `browser-transport` feature set).
 //!
 //! Callers MUST invoke `NimMain()` exactly once before using any `mcr*`
 //! function. The higher-level [`crate::emulator_session::EmulatorReplaySession`]
 //! wrapper handles this through a `std::sync::Once`.
 //!
-//! Scope for F5c-1: only the symbols exercised by the bring-up unit test
-//! and the session stub. F5c-3 will expand this to cover memory regions,
-//! syscall events, and the full register file once the trait impl needs
-//! them.
+//! Scope for F5c-1/F5c-2: only the symbols exercised by the bring-up unit
+//! test and the session stub. F5c-3 will expand this to cover memory
+//! regions, syscall events, and the full register file once the trait
+//! impl needs them.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(non_snake_case)]
 
 use std::os::raw::c_int;

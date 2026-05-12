@@ -1,15 +1,14 @@
 //! [`EmulatorReplaySession`] — `ReplaySession` impl backed by the Nim MCR
-//! emulator (F5c-1, native target only).
+//! emulator (F5c-1 native, F5c-2 wasm32).
 //!
 //! ## Scope
 //!
-//! This file is the F5c-1 deliverable: it exists primarily to prove the
-//! Nim → C → Rust pipeline links and the Nim runtime initialises cleanly.
-//! All trait methods are stubbed with `todo!()` so the trait surface is
-//! satisfied without the caller ever invoking them.
+//! This file is the F5c-1/F5c-2 deliverable: it exists primarily to prove
+//! the Nim → C → Rust pipeline links on both targets and the Nim runtime
+//! initialises cleanly. All trait methods are stubbed with `todo!()` so
+//! the trait surface is satisfied without the caller ever invoking them.
 //!
 //! Subsequent milestones:
-//! - F5c-2 wires the same wrapper through wasm32 (emcc/wasm-bindgen).
 //! - F5c-3 implements real `ReplaySession` behaviour against the emulator.
 //! - F5c-4 routes MCR traces in `dap_server::setup_from_vfs` to this type
 //!   instead of returning the FlagHasMcrFields rejection.
@@ -21,8 +20,9 @@
 //! that constructing multiple sessions (e.g. during testing) is safe.
 //! `mcrInit` itself is idempotent and is called on every `new()` so each
 //! session starts from a clean emulator state.
-
-#![cfg(not(target_arch = "wasm32"))]
+//!
+//! On wasm32 the runtime is single-threaded so the `Once` guard is
+//! effectively trivial; we keep it for source-level symmetry with native.
 
 use codetracer_trace_types::StepId;
 use std::error::Error;
