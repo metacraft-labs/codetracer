@@ -16,7 +16,7 @@
 //!
 //! ```text
 //! [4 bytes] magic "CTMD"  (0x43 0x54 0x4D 0x44)
-//! [2 bytes] version u16 little-endian (must be 1)
+//! [2 bytes] version u16 little-endian (must be 2 — current)
 //! [2 bytes] flags u16 little-endian
 //!           bit 0       — FLAG_HAS_MCR_FIELDS
 //!           bits 1..=3  — reserved (must be 0; readers reject if set)
@@ -41,10 +41,23 @@
 //!     varint-prefixed UTF-8 string : tick_source_str
 //!     varint-prefixed UTF-8 string : atomic_mode_str
 //!     varint-prefixed UTF-8 string : start_time_str
+//!     varint-prefixed UTF-8 string : hook_profile               (v2+)
+//!     varint                       : hook_strategies_count      (v2+)
+//!       ⤷ hook_strategies_count × varint-prefixed UTF-8 string : hook_strategies[i]
 //! ```
 //!
 //! Varints are unsigned LEB128 (max 10 bytes per value). All strings are
 //! UTF-8 with no nul terminator.
+//!
+//! ## Version history
+//!
+//! - **v1** — initial release (no `hook_profile` / `hook_strategies`).
+//!   Removed before any external consumer shipped. v1 traces are not
+//!   readable by this parser.
+//! - **v2** — appended `hook_profile` and `hook_strategies` inside the
+//!   MCR-fields block so `meta.dat` reaches parity with the legacy
+//!   `meta.json`. Matches Nim writer commit `2c28a0a` on
+//!   `codetracer-trace-format-nim`.
 
 use std::error::Error;
 use std::fmt;
@@ -54,8 +67,21 @@ use std::fmt;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// The only `meta.dat` format version this reader/writer supports.
-pub const META_DAT_VERSION: u16 = 1;
+/// The `meta.dat` format version emitted by this serializer and the
+/// current Nim writer (commit `2c28a0a` on `codetracer-trace-format-nim`).
+///
+/// The parser additionally accepts older versions enumerated in
+/// [`SUPPORTED_VERSIONS`] to keep historical fixtures loadable.
+pub const META_DAT_VERSION: u16 = 2;
+
+/// All `meta.dat` versions this reader can decode.
+///
+/// v1 has been retired (the Nim writer no longer emits it), but we keep
+/// it in the supported set so that any in-tree dev fixtures recorded
+/// before the v2 rollout still load via the WASM/native readers without
+/// a hard error. The parser silently treats the absent v1 fields
+/// (`hook_profile`, `hook_strategies`) as empty/empty-list.
+pub const SUPPORTED_VERSIONS: &[u16] = &[1, 2];
 
 /// Flag bit 0 — when set, the MCR (Multi-process Concurrent Recording)
 /// fields are appended after the paths block.
@@ -75,7 +101,10 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS;
 /// Decoded contents of a `meta.dat` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetaDat {
-    /// Format version. Always `1` for the format defined here.
+    /// Format version actually present in the parsed header.
+    ///
+    /// The serializer always writes [`META_DAT_VERSION`]; the parser
+    /// accepts any version listed in [`SUPPORTED_VERSIONS`].
     pub version: u16,
     /// Raw flag bits as parsed from the header.
     pub flags: u16,
@@ -123,6 +152,15 @@ pub struct McrFields {
     pub atomic_mode_str: String,
     /// Stringified start time (e.g. ISO-8601 form emitted by the writer).
     pub start_time_str: String,
+    /// Name of the active MCR hook profile (e.g. `"default"`, `"dotnet"`,
+    /// `"pal_probe"`). Introduced in `meta.dat` v2; empty string when
+    /// parsing a v1 fixture that predates the field.
+    pub hook_profile: String,
+    /// Identifiers of the hook strategies active during recording (e.g.
+    /// `"ldpreload"`, `"seccomp_unotify"`, `"callsite_patch"`).
+    /// Introduced in `meta.dat` v2; empty vector when parsing a v1
+    /// fixture that predates the field.
+    pub hook_strategies: Vec<String>,
 }
 
 // ── Error type ──────────────────────────────────────────────────────────
@@ -320,7 +358,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     }
 
     let version = u16::from_le_bytes([input[4], input[5]]);
-    if version != META_DAT_VERSION {
+    if !SUPPORTED_VERSIONS.contains(&version) {
         return Err(MetaDatError::UnsupportedVersion(version));
     }
 
@@ -363,6 +401,23 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         let tick_source_str = read_string(input, &mut pos)?;
         let atomic_mode_str = read_string(input, &mut pos)?;
         let start_time_str = read_string(input, &mut pos)?;
+        // v2+ appended hook_profile + hook_strategies at the tail of the
+        // MCR block. For older v1 fixtures the fields are absent — fall
+        // back to empty defaults so the parser still produces a usable
+        // McrFields struct rather than failing the whole load.
+        let (hook_profile, hook_strategies) = if version >= 2 {
+            let hook_profile = read_string(input, &mut pos)?;
+            let hook_strategies_count_u64 = decode_varint(input, &mut pos)?;
+            let hook_strategies_count = usize::try_from(hook_strategies_count_u64)
+                .map_err(|_| MetaDatError::StringTooLong(hook_strategies_count_u64))?;
+            let mut hook_strategies = Vec::with_capacity(hook_strategies_count);
+            for _ in 0..hook_strategies_count {
+                hook_strategies.push(read_string(input, &mut pos)?);
+            }
+            (hook_profile, hook_strategies)
+        } else {
+            (String::new(), Vec::new())
+        };
         Some(McrFields {
             tick_source,
             total_threads,
@@ -375,6 +430,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
             tick_source_str,
             atomic_mode_str,
             start_time_str,
+            hook_profile,
+            hook_strategies,
         })
     } else {
         None
@@ -446,6 +503,14 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         write_string(&mcr.tick_source_str, &mut out);
         write_string(&mcr.atomic_mode_str, &mut out);
         write_string(&mcr.start_time_str, &mut out);
+        // v2 trailing fields. We always emit them because the version
+        // header is set to METADAT_VERSION (currently 2); their presence
+        // is required by the v2 reader contract.
+        write_string(&mcr.hook_profile, &mut out);
+        encode_varint(mcr.hook_strategies.len() as u64, &mut out);
+        for strategy in &mcr.hook_strategies {
+            write_string(strategy, &mut out);
+        }
     }
 
     out
@@ -514,6 +579,12 @@ mod tests {
                 tick_source_str: "rdtsc".to_owned(),
                 atomic_mode_str: "seq_cst".to_owned(),
                 start_time_str: "2024-05-06T12:00:00Z".to_owned(),
+                hook_profile: "dotnet".to_owned(),
+                hook_strategies: vec![
+                    "ldpreload".to_owned(),
+                    "seccomp_unotify".to_owned(),
+                    "callsite_patch".to_owned(),
+                ],
             }),
         }
     }
@@ -578,7 +649,7 @@ mod tests {
     ///
     /// ```text
     /// MetaDat {
-    ///     version: 1,
+    ///     version: 2,
     ///     flags: 0,
     ///     program: "hi",
     ///     args: ["a"],
@@ -592,7 +663,7 @@ mod tests {
     /// Bytes (annotated):
     /// ```text
     /// 43 54 4D 44                    magic "CTMD"
-    /// 01 00                          version u16 LE = 1
+    /// 02 00                          version u16 LE = 2
     /// 00 00                          flags u16 LE = 0
     /// 02 68 69                       program: varint(2) "hi"
     /// 01                             args_count = 1
@@ -603,6 +674,10 @@ mod tests {
     /// 01 78                            paths[0]: varint(1) "x"
     /// ```
     ///
+    /// Note the MCR-block extension introduced in v2 (`hook_profile` +
+    /// `hook_strategies`) does not appear here because `flags = 0`, i.e.
+    /// no MCR-fields block is emitted.
+    ///
     /// This fixture is the contract between the Nim writer at
     /// `codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim`
     /// (`writeMetaDatToBuffer`) and this Rust reader. It is hand-derived
@@ -611,7 +686,7 @@ mod tests {
     /// serializer drifts.
     const WRITER_COMPAT_FIXTURE: &[u8] = &[
         0x43, 0x54, 0x4D, 0x44, // magic "CTMD"
-        0x01, 0x00, // version u16 LE = 1
+        0x02, 0x00, // version u16 LE = 2
         0x00, 0x00, // flags u16 LE = 0
         0x02, 0x68, 0x69, // program "hi"
         0x01, // args_count
@@ -626,7 +701,7 @@ mod tests {
     fn writer_compatibility_fixture() {
         let parsed = parse_meta_dat(WRITER_COMPAT_FIXTURE).expect("parse fixture");
         let expected = MetaDat {
-            version: 1,
+            version: 2,
             flags: 0,
             program: "hi".to_owned(),
             args: vec!["a".to_owned()],
@@ -642,6 +717,71 @@ mod tests {
         // from the canonical format.
         let serialized = serialize_meta_dat(&expected);
         assert_eq!(serialized.as_slice(), WRITER_COMPAT_FIXTURE);
+    }
+
+    /// Backward-compatibility: a v1 payload (predating the
+    /// `hook_profile` / `hook_strategies` MCR-block extension) must
+    /// still parse so any in-tree dev fixtures keep loading.  Mirrors
+    /// `WRITER_COMPAT_FIXTURE` byte-for-byte except for the version
+    /// field (`0x01 0x00` instead of `0x02 0x00`).
+    const V1_COMPAT_FIXTURE: &[u8] = &[
+        0x43, 0x54, 0x4D, 0x44, // magic "CTMD"
+        0x01, 0x00, // version u16 LE = 1 (legacy)
+        0x00, 0x00, // flags u16 LE = 0
+        0x02, 0x68, 0x69, // program "hi"
+        0x01, // args_count
+        0x01, 0x61, // args[0] "a"
+        0x02, 0x2F, 0x77, // workdir "/w"
+        0x01, 0x72, // recorder_id "r"
+        0x01, // paths_count
+        0x01, 0x78, // paths[0] "x"
+    ];
+
+    #[test]
+    fn v1_payload_still_parses() {
+        let parsed = parse_meta_dat(V1_COMPAT_FIXTURE).expect("parse v1 fixture");
+        // version field round-trips so callers can detect legacy traces
+        // if they need to.
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.program, "hi");
+        assert_eq!(parsed.args, vec!["a".to_owned()]);
+        assert!(parsed.mcr.is_none());
+    }
+
+    #[test]
+    fn v1_with_mcr_block_treats_hook_fields_as_empty() {
+        // Build a v1 payload that has the MCR block but no v2 trailing
+        // fields. The parser should populate hook_profile = ""
+        // and hook_strategies = vec![] rather than reading garbage.
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&1u16.to_le_bytes()); // version 1
+        buf.extend_from_slice(&FLAG_HAS_MCR_FIELDS.to_le_bytes());
+        encode_varint(0, &mut buf); // program: ""
+        encode_varint(0, &mut buf); // args_count: 0
+        encode_varint(0, &mut buf); // workdir: ""
+        encode_varint(0, &mut buf); // recorder_id: ""
+        encode_varint(0, &mut buf); // paths_count: 0
+                                    // MCR block (v1 layout — no hook fields).
+        encode_varint(1, &mut buf); // tick_source
+        encode_varint(2, &mut buf); // total_threads
+        encode_varint(0, &mut buf); // atomic_mode
+        encode_varint(0, &mut buf); // total_events
+        encode_varint(0, &mut buf); // total_checkpoints
+        encode_varint(0, &mut buf); // start_time_unix_us
+        encode_varint(0, &mut buf); // platform: ""
+        encode_varint(0, &mut buf); // tick_granularity: ""
+        encode_varint(0, &mut buf); // tick_source_str: ""
+        encode_varint(0, &mut buf); // atomic_mode_str: ""
+        encode_varint(0, &mut buf); // start_time_str: ""
+
+        let parsed = parse_meta_dat(&buf).expect("parse v1 with MCR");
+        assert_eq!(parsed.version, 1);
+        let mcr = parsed.mcr.expect("v1 mcr present");
+        assert_eq!(mcr.tick_source, 1);
+        assert_eq!(mcr.total_threads, 2);
+        assert_eq!(mcr.hook_profile, "");
+        assert!(mcr.hook_strategies.is_empty());
     }
 
     #[test]
@@ -691,7 +831,7 @@ mod tests {
         // extends past EOF.
         let buf = vec![
             0x43, 0x54, 0x4D, 0x44, // magic
-            0x01, 0x00, // version
+            0x02, 0x00, // version
             0x00, 0x00, // flags
             0x05, 0x68, // program: varint declares 5 bytes, only "h" follows
         ];
@@ -712,7 +852,7 @@ mod tests {
         // Construct a payload where `program` is two bytes of invalid UTF-8.
         let mut buf = vec![
             0x43, 0x54, 0x4D, 0x44, // magic
-            0x01, 0x00, // version
+            0x02, 0x00, // version
             0x00, 0x00, // flags
             0x02, 0xFF, 0xFE, // program: two invalid UTF-8 bytes
             0x00, // args_count = 0

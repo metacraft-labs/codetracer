@@ -1626,6 +1626,8 @@ mod tests {
                 tick_source_str: "rdtsc".to_owned(),
                 atomic_mode_str: "seq_cst".to_owned(),
                 start_time_str: "1970-01-01T00:00:00Z".to_owned(),
+                hook_profile: String::new(),
+                hook_strategies: Vec::new(),
             }),
         })
     }
