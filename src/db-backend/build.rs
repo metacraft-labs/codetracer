@@ -4,16 +4,20 @@
 //! library and link it into db-backend so that an `EmulatorReplaySession`
 //! can drive MCR traces without spawning ct-native-replay.
 //!
-//! Native-target only for now. F5c-2 will reintroduce a wasm32 path.
+//! F5c-2 extends this to wasm32: the WASM build feature set
+//! (`browser-transport`) does NOT include `codetracer_trace_writer_nim`,
+//! so there is no second Nim runtime to collide with and we can use a
+//! plain static archive — much simpler than the .so + version script
+//! dance the native build needs.
 //!
-//! ## Why a shared library instead of a static one
+//! ## Why a shared library on native, a static archive on wasm32
 //!
-//! db-backend already links `codetracer_trace_writer_nim`, which ships its
-//! own Nim runtime (`@psystem.nim.c.o`, `NimMain`, `allocSharedImpl`, ...).
-//! Linking a second Nim runtime in via `cc::Build::compile()` produces a
-//! sea of "multiple definition" errors at the final `rustc -C link`
-//! step, because static archives merge all their object files into the
-//! consumer's symbol namespace.
+//! db-backend's native build already links `codetracer_trace_writer_nim`,
+//! which ships its own Nim runtime (`@psystem.nim.c.o`, `NimMain`,
+//! `allocSharedImpl`, ...). Linking a second Nim runtime in via
+//! `cc::Build::compile()` produces "multiple definition" errors at the
+//! final `rustc -C link` step, because static archives merge all their
+//! object files into the consumer's symbol namespace.
 //!
 //! Shared libraries solve this cleanly: their internal symbols are
 //! private to the .so unless explicitly exported, so two independent Nim
@@ -22,41 +26,42 @@
 //! `-fvisibility=hidden` and link them into a `cdylib`; only the `mcr*`
 //! symbols (and `NimMain`) carry `__attribute__((visibility("default")))`
 //! by virtue of Nim's `{.exportc, dynlib.}` semantics — for the others
-//! we tighten visibility ourselves so the runtime symbols stay private.
+//! we tighten visibility ourselves via a linker version script.
+//!
+//! The wasm32 build does not pull in `codetracer_trace_writer_nim`
+//! (see the `browser-transport` feature in `Cargo.toml`), so there is
+//! exactly one Nim runtime in the final wasm module. A static archive
+//! is therefore safe and avoids the cost of building a wasm `cdylib`.
 
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    // F5c-2 will reintroduce wasm32 emulator linkage via emcc/wasm-bindgen;
-    // for F5c-1 we only target the host architecture.
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    if target_arch == "wasm32" {
-        println!(
-            "cargo:warning=db-backend: skipping MCR emulator linkage on wasm32 \
-             target (deferred to F5c-2)."
-        );
-        return;
-    }
+    println!("cargo:rerun-if-changed=build.rs");
 
-    // Locate the recorder's emulator C build directory. db-backend lives at
-    // codetracer/src/db-backend/ and the recorder is a sibling worktree at
-    // codetracer-native-recorder/. The path is resolved relative to
-    // CARGO_MANIFEST_DIR so the build is reproducible across checkouts.
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let recorder_root = manifest_dir
         .join("../../../codetracer-native-recorder")
         .canonicalize()
         .expect("expected sibling codetracer-native-recorder repo");
     let emulator_dir = recorder_root.join("ct_emulator");
+
+    if target_arch == "wasm32" {
+        build_wasm32(&emulator_dir);
+    } else {
+        build_native(&emulator_dir, &target_arch);
+    }
+}
+
+// =====================================================================
+// Native target: shared library + version script.
+// =====================================================================
+
+fn build_native(emulator_dir: &Path, target_arch: &str) {
     let native_c_dir = emulator_dir.join("build").join("native_c_files");
 
-    // Tell cargo to re-run this script when the Nim sources or the
-    // generated C output change. The Nim files are the upstream source of
-    // truth; if a developer edits them and forgets to regenerate, we still
-    // want to surface a stale-output diagnostic on the next build.
-    println!("cargo:rerun-if-changed=build.rs");
     println!(
         "cargo:rerun-if-changed={}",
         emulator_dir.join("src/ct_emulator/emulator_wasm_api.nim").display()
@@ -68,16 +73,11 @@ fn main() {
     println!("cargo:rerun-if-changed={}", native_c_dir.display());
 
     if !native_c_dir.join("@memulator_wasm_api.nim.c").exists() {
-        regenerate_native_c(&emulator_dir, &native_c_dir);
+        regenerate_c(emulator_dir, "build_native_api.sh", &native_c_dir);
     }
 
-    // Discover the Nim stdlib include dir: build_native_api.sh writes it to
-    // `.nim_lib_path` on every regeneration.
     let nim_lib = read_nim_lib_path(&native_c_dir);
 
-    // We use `cc::Build` only to produce the object files with the right
-    // include paths and visibility flags; the final link into a .so is
-    // handled manually so we can pass `-shared` and `-Wl,--no-undefined`.
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let obj_dir = out_dir.join("mcr_emulator_obj");
     std::fs::create_dir_all(&obj_dir).expect("create obj_dir");
@@ -87,7 +87,7 @@ fn main() {
         let entry = entry.expect("dir entry");
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "c") {
-            let obj = compile_c_to_obj(&path, &obj_dir, &nim_lib, &emulator_dir);
+            let obj = compile_c_to_obj_native(&path, &obj_dir, &nim_lib, emulator_dir);
             object_files.push(obj);
         }
     }
@@ -97,18 +97,11 @@ fn main() {
         native_c_dir.display()
     );
 
-    // Link the objects into a shared library. Naming convention:
-    //   lib<name>.so on Linux, lib<name>.dylib on macOS.
-    let so_path = link_shared(&object_files, &out_dir, &target_arch);
+    let so_path = link_shared(&object_files, &out_dir, target_arch);
 
-    // Emit cargo directives so that the .so is found at link time and at
-    // runtime (via rpath).
     let parent = so_path.parent().expect("so has parent");
     println!("cargo:rustc-link-search=native={}", parent.display());
     println!("cargo:rustc-link-lib=dylib=mcr_emulator");
-    // rpath so test binaries and the dev `replay-server` binary can find
-    // the .so without LD_LIBRARY_PATH. This is dev-only; production
-    // packaging will move the .so alongside the binary.
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", parent.display());
 
     println!(
@@ -121,7 +114,7 @@ fn main() {
 
 /// Compile a single .c file into an object file with hidden-visibility
 /// defaults so that the Nim runtime symbols stay private to the .so.
-fn compile_c_to_obj(src: &Path, obj_dir: &Path, nim_lib: &Path, emulator_dir: &Path) -> PathBuf {
+fn compile_c_to_obj_native(src: &Path, obj_dir: &Path, nim_lib: &Path, emulator_dir: &Path) -> PathBuf {
     let stem = src
         .file_name()
         .expect("src has file_name")
@@ -156,10 +149,6 @@ fn compile_c_to_obj(src: &Path, obj_dir: &Path, nim_lib: &Path, emulator_dir: &P
 
 /// Link the previously-compiled object files into a shared library and
 /// return the path to the resulting `lib<name>.so` (or `.dylib`).
-///
-/// We use a linker version script to expose only the `mcr*` symbols and
-/// `NimMain` — the rest of the Nim runtime stays internal and so cannot
-/// collide with the other Nim runtime linked into `codetracer_trace_writer_nim`.
 fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBuf {
     let so_name = if cfg!(target_os = "macos") {
         "libmcr_emulator.dylib"
@@ -168,10 +157,6 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
     };
     let so_path = out_dir.join(so_name);
 
-    // Linker version script: list every public symbol explicitly so that
-    // additions to the Nim API surface require a deliberate edit here.
-    // This also keeps `allocSharedImpl`, `nimRawDispose`, `NimSeqV2`, ...
-    // private to the .so, avoiding collisions with other Nim runtimes.
     let version_script = out_dir.join("mcr_emulator.ver");
     std::fs::write(
         &version_script,
@@ -195,11 +180,8 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
     )
     .expect("write version script");
 
-    let _ = target_arch; // currently unused, but kept to flag future per-arch tweaks
+    let _ = target_arch;
 
-    // Use the compiler driver (cc/gcc) as the linker so it pulls in the
-    // C runtime and libpthread automatically. Nim's `--mm:arc` does not
-    // need libgcc_s for unwinding because we built with --exceptions:goto.
     let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
     let mut cmd = Command::new(cc);
     cmd.arg("-shared").arg("-fPIC").arg("-o").arg(&so_path);
@@ -213,43 +195,152 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
     so_path
 }
 
-/// Regenerate the native C output by invoking the recorder's helper script
-/// under `direnv exec` (so that the Nim 2.2 toolchain from the recorder's
+// =====================================================================
+// wasm32 target: plain static archive via cc::Build.
+// =====================================================================
+
+fn build_wasm32(emulator_dir: &Path) {
+    let wasm_c_dir = emulator_dir.join("build").join("wasm_c_files");
+
+    println!(
+        "cargo:rerun-if-changed={}",
+        emulator_dir.join("src/ct_emulator/emulator_wasm_api.nim").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        emulator_dir.join("build_wasm_api.sh").display()
+    );
+    println!("cargo:rerun-if-changed={}", wasm_c_dir.display());
+
+    if !wasm_c_dir.join("@memulator_wasm_api.nim.c").exists() {
+        regenerate_c(emulator_dir, "build_wasm_api.sh", &wasm_c_dir);
+    }
+
+    let nim_lib = read_nim_lib_path(&wasm_c_dir);
+
+    // wasm-sysroot path lives next to the consumer crate (db-backend),
+    // not the recorder, because it is specific to the db-backend wasm
+    // build's chosen libc surface.
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let wasm_sysroot_include = manifest_dir.join("wasm-sysroot/include");
+    assert!(
+        wasm_sysroot_include.exists(),
+        "expected wasm-sysroot/include at {}",
+        wasm_sysroot_include.display()
+    );
+
+    // Collect the generated .c files. The cc::Build call below produces
+    // a single static archive `libmcr_emulator.a` in OUT_DIR, which
+    // cargo links into the final wasm binary alongside Rust object files.
+    let mut sources = Vec::new();
+    for entry in std::fs::read_dir(&wasm_c_dir).expect("read wasm_c_files dir") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "c") {
+            sources.push(path);
+        }
+    }
+    assert!(
+        !sources.is_empty(),
+        "no .c files found in {} — did Nim regeneration succeed?",
+        wasm_c_dir.display()
+    );
+
+    let mut build = cc::Build::new();
+    build
+        // Explicit target: build_wasm.sh sets CC_wasm32_unknown_unknown=clang
+        // and AR_wasm32_unknown_unknown=llvm-ar, but the `cc` crate also
+        // needs `--target=...` on the clang command line itself because a
+        // generic `clang` binary defaults to the host triple. The cc crate
+        // will inject this automatically when CARGO_CFG_TARGET_ARCH is
+        // wasm32, but we set it explicitly to be robust against future
+        // changes in the crate's defaults.
+        .target("wasm32-unknown-unknown")
+        .flag("--target=wasm32-unknown-unknown")
+        // No host CRT in wasm32; Nim's emitted code only needs
+        // <limits.h>, <stddef.h>, <stdbool.h>, <stdint.h>, <stdlib.h>,
+        // and <string.h>. The first four come from clang's resource dir;
+        // the rest come from our trimmed sysroot.
+        .include(&wasm_sysroot_include)
+        .include(&nim_lib)
+        .include(emulator_dir.join("src/ct_emulator"))
+        // Suppress Nim's noisy warnings; we don't own this generated code.
+        .flag_if_supported("-w")
+        .flag_if_supported("-fno-strict-aliasing")
+        .flag_if_supported("-fno-math-errno")
+        // wasm32 has no exception-handling lowering by default; Nim's
+        // --exceptions:goto already avoids unwinder dependencies, but
+        // belt-and-braces.
+        .flag_if_supported("-fno-exceptions")
+        // The trimmed wasm-sysroot's stdlib.h declares the standard
+        // allocator surface but not `exit`. clang 21 turns implicit
+        // function declarations into hard errors by default, so we
+        // demote the diagnostic back to a warning (which `-w` then
+        // silences) and supply `exit` from `emulator_wasm_libc_shims.rs`.
+        // Tightening the sysroot to declare `exit` would force every
+        // other consumer of `wasm-sysroot/include/stdlib.h` to confront
+        // the same symbol; keeping the override local is less invasive.
+        .flag_if_supported("-Wno-implicit-function-declaration")
+        .files(&sources);
+    build.compile("mcr_emulator");
+
+    // Allow the wasm-ld pass to leave a few libc symbols undefined.
+    // Rust's `compiler_builtins` will resolve `memcpy`/`memset`/`memmove`
+    // at link time, and our `c_compat`/`emulator_wasm_libc_shims` modules
+    // resolve `malloc`/`free`/`realloc`/`calloc`/`exit`. Anything we have
+    // missed (Nim runtime versions evolve) should still be allowed at
+    // link time so the build surfaces a clear "wasm-bindgen-side import"
+    // error rather than a hard link failure — easier to diagnose.
+    println!("cargo:rustc-link-arg=--import-undefined");
+
+    println!(
+        "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) from {} into wasm32 static archive",
+        sources.len(),
+        wasm_c_dir.display()
+    );
+}
+
+// =====================================================================
+// Shared helpers.
+// =====================================================================
+
+/// Regenerate the recorder's C output by invoking the named helper
+/// script under `direnv exec` (so the Nim toolchain from the recorder's
 /// flake is on PATH).
-fn regenerate_native_c(emulator_dir: &Path, native_c_dir: &Path) {
+fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
     eprintln!(
-        "db-backend build.rs: generated C missing at {}; invoking build_native_api.sh",
-        native_c_dir.display()
+        "db-backend build.rs: generated C missing at {}; invoking {}",
+        output_dir.display(),
+        script_name,
     );
 
     let recorder_root = emulator_dir.parent().expect("emulator_dir has a parent").to_path_buf();
 
-    // direnv exec <dir> <cmd...> — runs <cmd> with the .envrc-loaded env of <dir>.
     let status = Command::new("direnv")
         .arg("exec")
         .arg(&recorder_root)
         .arg("bash")
-        .arg(emulator_dir.join("build_native_api.sh"))
+        .arg(emulator_dir.join(script_name))
         .status();
 
     match status {
         Ok(s) if s.success() => {}
         Ok(s) => panic!(
-            "build_native_api.sh exited with status {s}; \
-             run it manually via `direnv exec {} bash ct_emulator/build_native_api.sh`",
-            recorder_root.display()
+            "{script_name} exited with status {s}; \
+             run it manually via `direnv exec {} bash ct_emulator/{script_name}`",
+            recorder_root.display(),
         ),
         Err(e) => panic!(
-            "failed to spawn `direnv exec` for build_native_api.sh: {e}. \
+            "failed to spawn `direnv exec` for {script_name}: {e}. \
              Ensure direnv is on PATH and the recorder's .envrc has been allowed."
         ),
     }
 }
 
-/// Read the Nim stdlib include path written by build_native_api.sh, with a
+/// Read the Nim stdlib include path written by build_*_api.sh, with a
 /// best-effort fallback to `nim dump` if the marker file is missing.
-fn read_nim_lib_path(native_c_dir: &Path) -> PathBuf {
-    let marker = native_c_dir.join(".nim_lib_path");
+fn read_nim_lib_path(c_dir: &Path) -> PathBuf {
+    let marker = c_dir.join(".nim_lib_path");
     if let Ok(s) = std::fs::read_to_string(&marker) {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
@@ -257,8 +348,6 @@ fn read_nim_lib_path(native_c_dir: &Path) -> PathBuf {
         }
     }
 
-    // Fallback: ask `nim dump`. May fail in pristine CI shells; that's a
-    // hard error because the include path is mandatory.
     let output = Command::new("nim")
         .arg("dump")
         .output()
@@ -270,6 +359,6 @@ fn read_nim_lib_path(native_c_dir: &Path) -> PathBuf {
     }
     panic!(
         "could not determine Nim stdlib include path; \
-         re-run ct_emulator/build_native_api.sh to populate .nim_lib_path"
+         re-run the emulator build script to populate .nim_lib_path"
     );
 }

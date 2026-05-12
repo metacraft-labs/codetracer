@@ -35,10 +35,18 @@ pub mod dap_types;
 pub mod db;
 pub mod diff;
 pub mod distinct_vec;
-#[cfg(not(target_arch = "wasm32"))]
+// The Nim MCR emulator is linked into both the native build (as a shared
+// library — see F5c-1) and the wasm32 build (as a plain static archive —
+// see F5c-2). The FFI surface and the `EmulatorReplaySession` wrapper
+// are identical across targets; build.rs hands the linker a target-
+// appropriate artifact in either case.
 pub mod emulator_ffi;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod emulator_session;
+// Stubs for the few libc symbols that the wasm-targeted Nim runtime
+// references but that `c_compat.rs` does not already cover (currently
+// just `exit`). Linked only into the wasm32 binary.
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+pub mod emulator_wasm_libc_shims;
 pub mod event_db;
 pub mod expr_loader;
 pub mod flow_preloader;
