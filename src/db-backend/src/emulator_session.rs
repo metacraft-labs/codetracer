@@ -81,6 +81,295 @@ static NIM_RUNTIME_INIT: Once = Once::new();
 /// will need the full binary anyway for `.eh_frame`-driven unwinding.
 const BUNDLED_DEBUG_FILE: &str = "debug.dat";
 
+/// CTFS file carrying the initial memory snapshot, written by the
+/// recorder's `__libc_start_main` wrapper (see
+/// `codetracer-native-recorder/ct_interpose/src/ct_interpose/full_snapshot.c`).
+///
+/// Wire format: a flat sequence of `(address: u64 LE, size: u64 LE, bytes[size])`
+/// tuples — one per captured memory region. The recorder writes one region
+/// per `/proc/self/maps` entry it deems "live" (skipping kernel-only ranges
+/// and explicit `[vvar]/[vsyscall]` slots), capping the total at
+/// `CT_FULL_SNAPSHOT_LIMIT_MB` (~256 MB by default). Decoding is documented
+/// on the Nim side in `ct_replayer/src/ct_replayer/trace_loader.nim`'s
+/// `readMemorySnapshot` proc.
+const CP0_MEM_FILE: &str = "cp0.mem";
+
+/// CTFS file carrying the initial register snapshot for checkpoint 0.
+///
+/// Wire format: a flat sequence of per-thread blobs
+/// `(tid: u32 LE, reg_data_len: u32 LE, reg_data[reg_data_len])`. For
+/// M-Checkpoint-Replay we only need the **first** thread's register file —
+/// later milestones (multi-thread emulator priming) can revisit this.
+///
+/// The inner `reg_data` body is either:
+/// * **144 bytes (18 × u64 LE)** — the compact layout written by the
+///   LD_PRELOAD `__libc_start_main` wrapper. Order matches the
+///   `mcrSetRegisters` argument list verbatim: rax, rbx, rcx, rdx, rsi,
+///   rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15, rip, rflags.
+/// * **216 bytes** — the kernel `user_regs_struct` ptrace layout (27 × u64
+///   LE). Used by recorders that read state via `PTRACE_GETREGS`.
+///
+/// See `ct_emulator/src/ct_emulator/ctfs_bridge.nim`'s
+/// `loadInitialStateFromTrace` for the canonical Nim-side decoder.
+const CP0_REGS_FILE: &str = "cp0.regs";
+
+/// Optional CTFS sidecar holding the recorded FS_BASE / GS_BASE.
+///
+/// Two little-endian `u64`s (`fsbase`, `gsbase`), 16 bytes total. The FS
+/// base is not part of the standard 18-register `mcrSetRegisters` signature,
+/// so M-Checkpoint-Replay does not install it directly — but reading the
+/// file is harmless and we expose it for diagnostics. Future milestones can
+/// wire a `mcrSetFsBase` shim once the emulator needs TLS access during
+/// replay.
+#[allow(dead_code)]
+const CP0_FSBASE_FILE: &str = "cp0.fsbase";
+
+/// Compact layout: 18 × u64 LE.
+const CP0_REGS_COMPACT_LEN: usize = 18 * 8;
+
+/// Full `user_regs_struct` layout: 27 × u64 LE.
+const CP0_REGS_USER_STRUCT_LEN: usize = 27 * 8;
+
+/// Per-thread blob header: `(tid: u32, reg_data_len: u32)`.
+const CP0_REGS_THREAD_HEADER_LEN: usize = 8;
+
+/// Diagnostics produced by [`EmulatorReplaySession::seed_emulator_from_cp0`].
+///
+/// Kept distinct from the FFI getters (`mcrGetPC`, `mcrGetRegister`) so
+/// tests can assert on the *seeding action* rather than the emulator's
+/// observable state — useful when a recorder writes a region the emulator
+/// then refuses to expose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+struct SeedDiagnostics {
+    /// Number of memory regions installed via `mcrLoadMemoryRegion`.
+    regions: usize,
+    /// Cumulative byte count across installed regions. May exceed 64 KB
+    /// of `usize` granularity, so we use `u64`.
+    total_bytes: u64,
+    /// Whether `mcrSetRegisters` was invoked. False when `cp0.regs` was
+    /// missing, empty, or unparseable.
+    registers_installed: bool,
+}
+
+/// Decoded register file installed via `mcrSetRegisters`.
+///
+/// The field order matches the FFI argument order so the `install` call
+/// site reads like a verbatim transcription of `mcrSetRegisters`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InitialRegisters {
+    rax: u64,
+    rbx: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    rbp: u64,
+    rsp: u64,
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rip: u64,
+    rflags: u64,
+}
+
+/// Read a little-endian `u64` at `data[offset..offset + 8]`. Returns 0 if
+/// the slice is too short — the caller already validated lengths so this
+/// guard is defensive only.
+fn read_u64_le(data: &[u8], offset: usize) -> u64 {
+    if offset + 8 > data.len() {
+        return 0;
+    }
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&data[offset..offset + 8]);
+    u64::from_le_bytes(buf)
+}
+
+/// Read a little-endian `u32` at `data[offset..offset + 4]`.
+fn read_u32_le(data: &[u8], offset: usize) -> u32 {
+    if offset + 4 > data.len() {
+        return 0;
+    }
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(&data[offset..offset + 4]);
+    u32::from_le_bytes(buf)
+}
+
+/// Decode the first-thread register blob from a `cp0.regs` file body.
+///
+/// Returns `None` when the outer per-thread header is missing, the inner
+/// length does not match a supported layout, or the inner bytes are
+/// truncated. Callers fall back to leaving the register file zero-initialised
+/// when this returns `None`.
+fn decode_first_thread_registers(raw: &[u8]) -> Option<InitialRegisters> {
+    if raw.len() < CP0_REGS_THREAD_HEADER_LEN {
+        return None;
+    }
+    // First u32 is the recording tid (ignored); second is the length of
+    // the per-thread register body that follows.
+    let reg_data_len = read_u32_le(raw, 4) as usize;
+    if reg_data_len == 0 || CP0_REGS_THREAD_HEADER_LEN + reg_data_len > raw.len() {
+        return None;
+    }
+    let body = &raw[CP0_REGS_THREAD_HEADER_LEN..CP0_REGS_THREAD_HEADER_LEN + reg_data_len];
+
+    if body.len() >= CP0_REGS_USER_STRUCT_LEN {
+        // Full `user_regs_struct` ptrace order:
+        //   r15 r14 r13 r12 rbp rbx r11 r10 r9 r8 rax rcx rdx rsi rdi
+        //   orig_rax rip cs eflags rsp ss fs_base gs_base ds es fs gs
+        // See https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/user_64.h
+        Some(InitialRegisters {
+            r15: read_u64_le(body, 0),
+            r14: read_u64_le(body, 8),
+            r13: read_u64_le(body, 16),
+            r12: read_u64_le(body, 24),
+            rbp: read_u64_le(body, 32),
+            rbx: read_u64_le(body, 40),
+            r11: read_u64_le(body, 48),
+            r10: read_u64_le(body, 56),
+            r9: read_u64_le(body, 64),
+            r8: read_u64_le(body, 72),
+            rax: read_u64_le(body, 80),
+            rcx: read_u64_le(body, 88),
+            rdx: read_u64_le(body, 96),
+            rsi: read_u64_le(body, 104),
+            rdi: read_u64_le(body, 112),
+            // orig_rax at 120 — skipped (no slot in the emulator's
+            // register file).
+            rip: read_u64_le(body, 128),
+            // cs at 136 — skipped.
+            rflags: read_u64_le(body, 144),
+            rsp: read_u64_le(body, 152),
+            // fs_base/gs_base at 160/168 — currently unused; future
+            // milestone wires them through a dedicated FS-base setter.
+        })
+    } else if body.len() >= CP0_REGS_COMPACT_LEN {
+        // Compact LD_PRELOAD layout — argument order of `mcrSetRegisters`.
+        Some(InitialRegisters {
+            rax: read_u64_le(body, 0),
+            rbx: read_u64_le(body, 8),
+            rcx: read_u64_le(body, 16),
+            rdx: read_u64_le(body, 24),
+            rsi: read_u64_le(body, 32),
+            rdi: read_u64_le(body, 40),
+            rbp: read_u64_le(body, 48),
+            rsp: read_u64_le(body, 56),
+            r8: read_u64_le(body, 64),
+            r9: read_u64_le(body, 72),
+            r10: read_u64_le(body, 80),
+            r11: read_u64_le(body, 88),
+            r12: read_u64_le(body, 96),
+            r13: read_u64_le(body, 104),
+            r14: read_u64_le(body, 112),
+            r15: read_u64_le(body, 120),
+            rip: read_u64_le(body, 128),
+            rflags: read_u64_le(body, 136),
+        })
+    } else {
+        None
+    }
+}
+
+/// Iterate the `(address, length, bytes)` tuples in a `cp0.mem` blob and
+/// install each region via `mcrLoadMemoryRegion`.
+///
+/// We deliberately slice into the caller's `Vec<u8>` rather than copying
+/// each region into a fresh allocation — the recorder's snapshot can reach
+/// ~256 MB on glibc-linked programs, and a copy would temporarily double
+/// the memory footprint inside the WASM linear address space.
+///
+/// Truncated trailing data (caused by a partial recorder flush) is logged
+/// and ignored; we never abort the seeding step over a corrupt tail since
+/// the regions parsed so far are still correct and useful.
+///
+/// Returns the number of regions installed plus their cumulative size in
+/// bytes, primarily for diagnostics and tests.
+fn install_memory_regions(blob: &[u8]) -> (usize, u64) {
+    let mut pos = 0usize;
+    let mut regions: usize = 0;
+    let mut total_bytes: u64 = 0;
+
+    while pos + 16 <= blob.len() {
+        let address = read_u64_le(blob, pos);
+        let size = read_u64_le(blob, pos + 8) as usize;
+        pos += 16;
+
+        if size == 0 {
+            // Recorder may emit zero-length placeholders for guard pages.
+            continue;
+        }
+        if pos + size > blob.len() {
+            // Truncated tail. Stop here rather than panic — the
+            // already-installed regions are still authoritative.
+            eprintln!(
+                "warning: cp0.mem truncated at region @0x{address:x} (size={size}, \
+                 remaining={remaining})",
+                remaining = blob.len() - pos,
+            );
+            break;
+        }
+
+        let slice = &blob[pos..pos + size];
+        // SAFETY: `slice.as_ptr()` lives for the duration of the FFI call;
+        // the Nim side copies the bytes into its own region table before
+        // returning. `size` fits in `c_int` for any single region the
+        // recorder produces (regions are capped at the recorder's
+        // per-region budget of 64 MB).
+        let rc = unsafe { emulator_ffi::mcrLoadMemoryRegion(address, slice.as_ptr(), size as std::os::raw::c_int) };
+        if rc != 0 {
+            eprintln!(
+                "warning: mcrLoadMemoryRegion failed (rc={rc}) for region @0x{address:x} \
+                 size={size}; subsequent reads of this range will return 0",
+            );
+            // Continue installing later regions — a failure on one slot
+            // shouldn't sabotage the rest of the snapshot.
+        } else {
+            regions += 1;
+            total_bytes += size as u64;
+        }
+        pos += size;
+    }
+
+    (regions, total_bytes)
+}
+
+/// Install the decoded register file via `mcrSetRegisters`. Wrapping the
+/// FFI call here keeps the unsafe surface in one place and lets unit tests
+/// substitute a fake by swapping this helper for a test double.
+fn install_registers(regs: &InitialRegisters) {
+    // SAFETY: `mcrSetRegisters` is total — every argument is a plain u64
+    // copied into the Nim-managed register file. It expects the runtime
+    // to have been initialised, which `ensure_nim_runtime()` plus
+    // `mcrInit()` (called by `new_from_ctfs_bytes`) have already done.
+    unsafe {
+        emulator_ffi::mcrSetRegisters(
+            regs.rax,
+            regs.rbx,
+            regs.rcx,
+            regs.rdx,
+            regs.rsi,
+            regs.rdi,
+            regs.rbp,
+            regs.rsp,
+            regs.r8,
+            regs.r9,
+            regs.r10,
+            regs.r11,
+            regs.r12,
+            regs.r13,
+            regs.r14,
+            regs.r15,
+            regs.rip,
+            regs.rflags,
+        );
+    }
+}
+
 /// Initialise the Nim runtime exactly once per process.
 fn ensure_nim_runtime() {
     NIM_RUNTIME_INIT.call_once(|| {
@@ -272,6 +561,20 @@ impl EmulatorReplaySession {
         // SAFETY: see `new()`.
         unsafe { emulator_ffi::mcrInit() };
 
+        // M-Checkpoint-Replay: seed the emulator from the recorded cp0
+        // checkpoint. We deliberately install memory FIRST and registers
+        // SECOND so any future code that triggers PC validation against
+        // installed regions (a defensive consistency check in some
+        // emulator builds) sees a populated address space when RIP lands.
+        //
+        // Both files are *optional* — a recorder that didn't reach the
+        // `__libc_start_main` wrapper (early-crash, stripped libc) won't
+        // have produced them. In that case we leave the emulator in its
+        // post-`mcrInit` zero state and rely on the M-DWARF-2 fallback
+        // for `build_location`. This mirrors the recorder-side "best
+        // effort" snapshotting contract.
+        Self::seed_emulator_from_cp0(&mut ctfs);
+
         Ok(Self {
             meta,
             breakpoints: HashMap::new(),
@@ -280,6 +583,57 @@ impl EmulatorReplaySession {
             current_step_id: StepId(0),
             dwarf,
         })
+    }
+
+    /// Read `cp0.mem` + `cp0.regs` from a CTFS reader and install them on
+    /// the active emulator instance.
+    ///
+    /// Returns the diagnostics tuple `(regions_installed, total_bytes,
+    /// registers_installed)` so unit tests can observe the seeding
+    /// outcome without dispatching to the FFI getters.
+    fn seed_emulator_from_cp0(ctfs: &mut CtfsReader) -> SeedDiagnostics {
+        // ---- cp0.mem -----------------------------------------------------
+        //
+        // Even a 90 MB blob is decoded by streaming through it tuple-by-tuple
+        // (`install_memory_regions` slices into `mem_bytes` without copying).
+        // The blob is dropped as soon as `seed_emulator_from_cp0` returns so
+        // the peak transient memory cost is one copy of cp0.mem — not two.
+        let (regions, total_bytes) = match ctfs.read_file(CP0_MEM_FILE) {
+            Ok(mem_bytes) if !mem_bytes.is_empty() => install_memory_regions(&mem_bytes),
+            // Missing or empty is a silent fallback — older traces lack
+            // the cp0 stream entirely.
+            _ => (0, 0u64),
+        };
+
+        // ---- cp0.regs ----------------------------------------------------
+        //
+        // We only need the first thread's blob for M-Checkpoint-Replay; the
+        // emulator's `mcrSetRegisters` is a single-thread surface. Future
+        // multi-thread work will iterate per-thread blobs and dispatch to a
+        // forthcoming `mcrSetThreadRegisters` shim.
+        let registers_installed = match ctfs.read_file(CP0_REGS_FILE) {
+            Ok(reg_bytes) if !reg_bytes.is_empty() => match decode_first_thread_registers(&reg_bytes) {
+                Some(regs) => {
+                    install_registers(&regs);
+                    true
+                }
+                None => {
+                    eprintln!(
+                        "warning: cp0.regs present but unparseable ({} bytes); leaving \
+                         emulator registers zero-initialised",
+                        reg_bytes.len(),
+                    );
+                    false
+                }
+            },
+            _ => false,
+        };
+
+        SeedDiagnostics {
+            regions,
+            total_bytes,
+            registers_installed,
+        }
     }
 
     /// Allocate and store a new breakpoint record under `(path, line)`.
@@ -701,6 +1055,7 @@ mod tests {
     /// program.
     #[test]
     fn new_session_initialises_nim_runtime_and_resets_state() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let mut session = EmulatorReplaySession::new();
 
         // SAFETY: After `new()` the Nim runtime is initialised and
@@ -724,6 +1079,7 @@ mod tests {
     /// meta-derived source path and program name.
     #[test]
     fn new_from_ctfs_bytes_populates_meta() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes();
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
 
@@ -744,6 +1100,7 @@ mod tests {
     /// emulator path.
     #[test]
     fn new_from_ctfs_bytes_rejects_non_mcr_traces() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
@@ -772,6 +1129,7 @@ mod tests {
     /// mirrors what the F5 gateway-client checks via DAP `stackTrace`.
     #[test]
     fn load_callstack_returns_frame_with_non_empty_name() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -802,6 +1160,7 @@ mod tests {
     /// path: `delete_breakpoint` with an unknown id must error.
     #[test]
     fn add_breakpoint_returns_enabled_record() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -825,6 +1184,7 @@ mod tests {
     /// expression so the variables view renders something.
     #[test]
     fn load_locals_returns_register_variables() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -848,6 +1208,7 @@ mod tests {
     /// and surface a typed error for unknown expressions.
     #[test]
     fn load_value_resolves_registers_and_errors_for_unknown() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -875,6 +1236,7 @@ mod tests {
     /// consistent with the emulator-reported counter.
     #[test]
     fn step_does_not_error_without_a_loaded_program() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let mut session = EmulatorReplaySession::new();
         session.step(Action::Next, true).expect("step must succeed");
         // SAFETY: the FFI getter is total; it returns 0 before any
@@ -890,6 +1252,7 @@ mod tests {
     /// pagination warm-up).
     #[test]
     fn empty_returns_for_stub_paths() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let mut session = EmulatorReplaySession::new();
         let events = session.load_events().expect("load_events must succeed");
         assert!(events.events.is_empty());
@@ -973,6 +1336,7 @@ mod tests {
     /// `DwarfIndex` accessible via the session's `dwarf` field.
     #[test]
     fn new_from_ctfs_bytes_with_debug_populates_dwarf_index() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
 
@@ -1001,6 +1365,7 @@ mod tests {
     /// to the M-DWARF-2 placeholder location behaviour silently.
     #[test]
     fn new_from_ctfs_bytes_with_bad_debug_falls_back() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
@@ -1061,6 +1426,7 @@ mod tests {
     /// single test process.
     #[test]
     fn load_callstack_uses_dwarf_resolved_line() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
         let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -1114,5 +1480,387 @@ mod tests {
         // resolving PC 0 from leftover state, which would silently fail
         // the line assertion above too).
         assert_eq!(loc.offset, PC_ADD_BODY as i64);
+    }
+
+    // ── FFI test serialisation ───────────────────────────────────────────
+    //
+    // Tests that mutate the Nim-managed emulator globals (`mcrInit`,
+    // `mcrLoadMemoryRegion`, `mcrSetRegisters`) must run serially —
+    // otherwise a sibling test's `mcrInit` can wipe state between our
+    // own write and its subsequent read. Cargo runs unit tests in
+    // parallel by default, so we guard the FFI block with a per-process
+    // `Mutex`. Tests that only inspect FFI state from inside a freshly
+    // constructed session (e.g. assertions on `mcrGetPC` right after
+    // `new_from_ctfs_bytes`) also acquire this lock so they don't race
+    // against memory-installing tests.
+    use std::sync::Mutex;
+    static FFI_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    // ── M-Checkpoint-Replay fixtures ────────────────────────────────────
+    //
+    // `cp0.regs` and `cp0.mem` carry the recorded initial state from the
+    // LD_PRELOAD `__libc_start_main` wrapper. The on-disk format is the
+    // same one the Nim emulator side already decodes in
+    // `ct_emulator/src/ct_emulator/ctfs_bridge.nim::loadInitialStateFromTrace`
+    // (cross-checked against the C writer at
+    // `ct_interpose/src/ct_interpose/full_snapshot.c` lines 480–506).
+    //
+    // We hand-build minimal fixtures rather than depending on a recorded
+    // trace, so the tests run in seconds and don't pull in the full
+    // recorder toolchain.
+
+    /// Serialise an `(address, size, bytes[size])` tuple into a `cp0.mem`
+    /// blob. Multiple regions are concatenated by the caller.
+    fn pack_cp0_mem_region(address: u64, bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(16 + bytes.len());
+        out.extend_from_slice(&address.to_le_bytes());
+        out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    /// Build a `cp0.regs` blob for the compact 18 × u64 LE layout
+    /// (`tid = 0, reg_data_len = 144`, then the GPRs in `mcrSetRegisters`
+    /// argument order).
+    #[allow(clippy::too_many_arguments)]
+    fn pack_cp0_regs_compact(regs: &InitialRegisters) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + CP0_REGS_COMPACT_LEN);
+        out.extend_from_slice(&0u32.to_le_bytes()); // tid = 0
+        out.extend_from_slice(&(CP0_REGS_COMPACT_LEN as u32).to_le_bytes());
+        for &v in &[
+            regs.rax,
+            regs.rbx,
+            regs.rcx,
+            regs.rdx,
+            regs.rsi,
+            regs.rdi,
+            regs.rbp,
+            regs.rsp,
+            regs.r8,
+            regs.r9,
+            regs.r10,
+            regs.r11,
+            regs.r12,
+            regs.r13,
+            regs.r14,
+            regs.r15,
+            regs.rip,
+            regs.rflags,
+        ] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out
+    }
+
+    /// Build a `cp0.regs` blob for the ptrace `user_regs_struct` layout
+    /// (27 × u64 LE). Only RIP / RSP / RFLAGS need to be set explicitly
+    /// for our decoder path; everything else can be zero.
+    fn pack_cp0_regs_user_struct(rip: u64, rsp: u64, rflags: u64, rax: u64) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + CP0_REGS_USER_STRUCT_LEN);
+        out.extend_from_slice(&0u32.to_le_bytes()); // tid
+        out.extend_from_slice(&(CP0_REGS_USER_STRUCT_LEN as u32).to_le_bytes());
+        // r15 r14 r13 r12 rbp rbx r11 r10 r9 r8 rax rcx rdx rsi rdi
+        // orig_rax rip cs eflags rsp ss fs_base gs_base ds es fs gs
+        let mut regs = [0u64; 27];
+        regs[10] = rax; // rax slot in user_regs_struct
+        regs[16] = rip;
+        regs[18] = rflags;
+        regs[19] = rsp;
+        for v in regs.iter() {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out
+    }
+
+    /// Serialise a CTFS container with the M-Checkpoint-Replay seeds, a
+    /// bundled `debug.dat` ELF, and the meta-block flags the emulator
+    /// session requires. Returns the in-memory `.ct` bytes ready to feed
+    /// into `EmulatorReplaySession::new_from_ctfs_bytes`.
+    fn synthetic_mcr_ctfs_bytes_with_cp0(
+        cp0_regs: Option<&[u8]>,
+        cp0_mem_regions: &[(u64, Vec<u8>)],
+        include_dwarf: bool,
+    ) -> Vec<u8> {
+        let meta = MetaDat {
+            version: META_DAT_VERSION,
+            flags: FLAG_HAS_MCR_FIELDS,
+            program: "/usr/local/bin/hello".to_owned(),
+            args: vec![],
+            workdir: "/tmp/run".to_owned(),
+            recorder_id: "mcr".to_owned(),
+            paths: vec!["src/main.c".to_owned()],
+            mcr: Some(McrFields {
+                tick_source: 1,
+                total_threads: 1,
+                atomic_mode: 0,
+                total_events: 0,
+                total_checkpoints: 0,
+                start_time_unix_us: 0,
+                platform: "linux-x86_64".to_owned(),
+                tick_granularity: "instruction".to_owned(),
+                tick_source_str: "rdtsc".to_owned(),
+                atomic_mode_str: "seq_cst".to_owned(),
+                start_time_str: "1970-01-01T00:00:00Z".to_owned(),
+                hook_profile: String::new(),
+                hook_strategies: Vec::new(),
+            }),
+        };
+        let dat = serialize_meta_dat(&meta);
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("synthetic_with_cp0.ct");
+
+        let mut mem_blob: Vec<u8> = Vec::new();
+        for (addr, bytes) in cp0_mem_regions {
+            mem_blob.extend(pack_cp0_mem_region(*addr, bytes));
+        }
+
+        let mut entries: Vec<(&str, &[u8])> = vec![("meta.dat", &dat), ("t00000000000", b"")];
+        if include_dwarf {
+            entries.push((BUNDLED_DEBUG_FILE, HELLO_ELF_FIXTURE));
+        }
+        if !mem_blob.is_empty() {
+            entries.push((CP0_MEM_FILE, &mem_blob));
+        }
+        if let Some(regs) = cp0_regs {
+            entries.push((CP0_REGS_FILE, regs));
+        }
+
+        write_minimal_ctfs(&ct_path, &entries).unwrap();
+        std::fs::read(&ct_path).unwrap()
+    }
+
+    /// Pure-function: decoding a compact 144-byte register payload must
+    /// produce an `InitialRegisters` whose RIP matches the payload's
+    /// 17th u64 (offset 128 inside the body).
+    #[test]
+    fn decode_first_thread_registers_compact_layout() {
+        let expected = InitialRegisters {
+            rax: 0x1111_1111_1111_1111,
+            rbx: 0x2222_2222_2222_2222,
+            rcx: 0x3333_3333_3333_3333,
+            rdx: 0x4444_4444_4444_4444,
+            rsi: 0x5555_5555_5555_5555,
+            rdi: 0x6666_6666_6666_6666,
+            rbp: 0x7777_7777_7777_7777,
+            rsp: 0x8888_8888_8888_8888,
+            r8: 0x9999_9999_9999_9999,
+            r9: 0xaaaa_aaaa_aaaa_aaaa,
+            r10: 0xbbbb_bbbb_bbbb_bbbb,
+            r11: 0xcccc_cccc_cccc_cccc,
+            r12: 0xdddd_dddd_dddd_dddd,
+            r13: 0xeeee_eeee_eeee_eeee_u64,
+            r14: 0x1234_5678_9abc_def0,
+            r15: 0x0fed_cba9_8765_4321,
+            rip: PC_ADD_BODY,
+            rflags: 0x202,
+        };
+        let blob = pack_cp0_regs_compact(&expected);
+        let decoded = decode_first_thread_registers(&blob).expect("compact layout must decode");
+        assert_eq!(decoded, expected);
+    }
+
+    /// Pure-function: decoding the ptrace `user_regs_struct` layout must
+    /// pick up RIP/RSP/RFLAGS/RAX from the right offsets.
+    #[test]
+    fn decode_first_thread_registers_user_struct_layout() {
+        let blob = pack_cp0_regs_user_struct(
+            /* rip */ PC_ADD_BODY,
+            /* rsp */ 0xdead_beef,
+            /* rflags */ 0x202,
+            /* rax */ 0xfeed_face,
+        );
+        let decoded = decode_first_thread_registers(&blob).expect("user_regs_struct layout must decode");
+        assert_eq!(decoded.rip, PC_ADD_BODY);
+        assert_eq!(decoded.rsp, 0xdead_beef);
+        assert_eq!(decoded.rflags, 0x202);
+        assert_eq!(decoded.rax, 0xfeed_face);
+    }
+
+    /// Defensive: a truncated `cp0.regs` body returns `None` rather than
+    /// reading past the end of the slice. Mirrors the recorder-side
+    /// guard against partially-flushed sidecar files.
+    #[test]
+    fn decode_first_thread_registers_rejects_truncation() {
+        // Outer header says 144 bytes follow but we only provide 16.
+        let mut blob = vec![0u8; 8];
+        blob[4..8].copy_from_slice(&144u32.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 16]);
+        assert!(decode_first_thread_registers(&blob).is_none());
+
+        // Empty input must also return None without panicking.
+        assert!(decode_first_thread_registers(&[]).is_none());
+
+        // Inner length = 0 means "no register data" — must also be None.
+        let mut empty_inner = vec![0u8; 8];
+        empty_inner[4..8].copy_from_slice(&0u32.to_le_bytes());
+        assert!(decode_first_thread_registers(&empty_inner).is_none());
+    }
+
+    /// `install_memory_regions` must walk every well-formed
+    /// `(address, size, bytes)` tuple, return a region count + total
+    /// byte tally that matches the input, and tolerate a truncated tail
+    /// rather than panic.
+    #[test]
+    fn install_memory_regions_parses_well_formed_tuples() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        // Reset the emulator before we install regions so this test's
+        // diagnostics aren't polluted by leftover state from a sibling.
+        // We also have to seed registers via `mcrSetRegisters` — the Nim
+        // emulator's `mcrReadMemory` gates on `gInitialized` which only
+        // flips true once registers are installed (see
+        // `ct_emulator/src/ct_emulator/emulator_wasm_api.nim`).
+        ensure_nim_runtime();
+        unsafe { emulator_ffi::mcrInit() };
+
+        let mut blob = pack_cp0_mem_region(0x4000_0000, &[0xab; 64]);
+        blob.extend(pack_cp0_mem_region(0x5000_0000, &[0xcd; 32]));
+        let (regions, bytes) = install_memory_regions(&blob);
+        assert_eq!(regions, 2);
+        assert_eq!(bytes, 96);
+
+        // Flip `gInitialized` to true so the memory readback below is
+        // permitted. The actual register values don't matter for the
+        // assertion — we only need the gate flipped.
+        unsafe {
+            emulator_ffi::mcrSetRegisters(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        // Reading back via `mcrReadMemory` should produce the original
+        // bytes — proves the FFI handoff worked end-to-end.
+        let mut read_back = [0u8; 64];
+        let rc = unsafe {
+            emulator_ffi::mcrReadMemory(
+                0x4000_0000,
+                read_back.as_mut_ptr(),
+                read_back.len() as std::os::raw::c_int,
+            )
+        };
+        assert_eq!(rc, 0, "mcrReadMemory must succeed for an installed region");
+        assert!(
+            read_back.iter().all(|&b| b == 0xab),
+            "memory contents must round-trip verbatim"
+        );
+    }
+
+    /// A truncated trailing tuple (size > bytes available) must not
+    /// panic or claim the missing region; only the regions installed
+    /// before the corrupt tail count.
+    #[test]
+    fn install_memory_regions_tolerates_truncated_tail() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        ensure_nim_runtime();
+        unsafe { emulator_ffi::mcrInit() };
+
+        let mut blob = pack_cp0_mem_region(0x6000_0000, &[0x11; 16]);
+        // Append a header that claims 128 bytes but provide only 8.
+        blob.extend_from_slice(&0x7000_0000u64.to_le_bytes());
+        blob.extend_from_slice(&128u64.to_le_bytes());
+        blob.extend_from_slice(&[0u8; 8]);
+        let (regions, bytes) = install_memory_regions(&blob);
+        assert_eq!(regions, 1, "only the well-formed leading region counts");
+        assert_eq!(bytes, 16);
+    }
+
+    /// Headline acceptance: a CTFS container with cp0.regs + cp0.mem +
+    /// debug.dat must seed the emulator so that `mcrGetPC` reflects the
+    /// captured RIP and `load_callstack` returns a frame whose line was
+    /// resolved by DWARF — not the M-DWARF-2 placeholder of 1.
+    ///
+    /// This is the milestone's end-to-end test: it covers the full
+    /// "recorder → CTFS → replay → DAP stackTrace" data path.
+    #[test]
+    fn new_from_ctfs_bytes_seeds_pc_and_resolves_via_dwarf() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let regs = InitialRegisters {
+            rax: 0xdeadbeef,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            rsp: 0x7fff_0000_0000,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rip: PC_ADD_BODY,
+            rflags: 0x202,
+        };
+        let regs_blob = pack_cp0_regs_compact(&regs);
+        // A trivial 64-byte mock memory region at PC_ADD_BODY so the
+        // installation path is exercised end-to-end. The DWARF resolver
+        // never touches emulator memory — it works purely off the
+        // bundled ELF — so the exact contents don't matter.
+        let mem_regions = vec![(PC_ADD_BODY & !0xFFF, vec![0xCC; 4096])];
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &mem_regions, /* include_dwarf */ true);
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+
+        // After construction the emulator's PC must reflect the recorded
+        // RIP (not the post-mcrInit zero).
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        assert_eq!(pc, PC_ADD_BODY, "mcrGetPC must report the recorded RIP");
+
+        // RAX should round-trip — proves we installed all 18 GPRs, not
+        // just RIP/RSP.
+        let rax = unsafe { emulator_ffi::mcrGetRegister(0) };
+        assert_eq!(rax, 0xdeadbeef);
+
+        // load_callstack must walk the DWARF path: line ≠ 1.
+        let frames = session.load_callstack().expect("callstack must succeed");
+        assert!(!frames.is_empty());
+        let loc = &frames[0].content.call.location;
+        assert_eq!(
+            loc.line, PC_ADD_BODY_LINE,
+            "DWARF resolver must override the M-DWARF-2 placeholder line=1 \
+             once cp0.regs seeds the PC; got {loc:?}",
+        );
+        assert!(
+            loc.path.ends_with("hello.c"),
+            "DWARF-resolved file should override meta.paths[0]; got path={}",
+            loc.path,
+        );
+        assert_eq!(loc.offset, PC_ADD_BODY as i64);
+    }
+
+    /// Missing cp0 files must not block session construction — older
+    /// traces predate the M-Checkpoint-Replay milestone and must still
+    /// come up (falling back to the M-DWARF-2 line=1 placeholder when
+    /// the recorder didn't seed a PC).
+    #[test]
+    fn new_from_ctfs_bytes_without_cp0_falls_back() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(
+            /* cp0_regs */ None,
+            /* cp0_mem  */ &[],
+            /* include_dwarf */ false,
+        );
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+        // No dwarf bundled either: location falls back to meta.paths[0]
+        // / line=1.
+        assert!(session.dwarf.is_none());
+    }
+
+    /// A corrupt cp0.regs must not abort session construction — the
+    /// emulator should come up with zeroed registers and the M-DWARF-2
+    /// fallback should still produce a well-formed location.
+    #[test]
+    fn new_from_ctfs_bytes_with_corrupt_cp0_regs_falls_back() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        // 16 bytes of garbage: outer header reads tid=0xDEADBEEF /
+        // reg_data_len=0xCAFEBABE but the body is empty. decode must
+        // return None and the constructor must still succeed.
+        let regs_blob = vec![
+            0xef, 0xbe, 0xad, 0xde, 0xbe, 0xba, 0xfe, 0xca, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ];
+        let bytes = synthetic_mcr_ctfs_bytes_with_cp0(Some(&regs_blob), &[], /* include_dwarf */ false);
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes)
+            .expect("corrupt cp0.regs must not abort session construction");
+        assert!(session.dwarf.is_none(), "no DWARF was bundled in this fixture");
     }
 }
