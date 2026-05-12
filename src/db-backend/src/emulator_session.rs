@@ -55,6 +55,7 @@ use std::sync::Once;
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::meta_dat::{parse_meta_dat, MetaDat};
 use crate::db::DbRecordEvent;
+use crate::dwarf_index::{DwarfIndex, PcInfo};
 use crate::emulator_ffi;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
@@ -66,6 +67,19 @@ use crate::task::{
 use crate::value::ValueRecordWithType;
 
 static NIM_RUNTIME_INIT: Once = Once::new();
+
+/// Name of the CTFS internal file that carries the recorded binary plus its
+/// DWARF sections (M-DWARF-3).
+///
+/// Conventions: lowercase, ≤12 chars, `.dat` extension to mirror the binary
+/// `meta.dat` neighbour. We bundle the **full ELF** rather than only the
+/// `.debug_*` sections so the replay backend can reuse the existing
+/// `DwarfIndex::from_elf_bytes` parser without inventing a new
+/// concat-of-sections format. The trade-off is ~1 MB of `.text`/`.data`
+/// extra per trace; for the F5 inventory binary the full ELF is ~3 MB and
+/// the DWARF subset is ~2 MB, so the overhead is acceptable. M-DWARF-4
+/// will need the full binary anyway for `.eh_frame`-driven unwinding.
+const BUNDLED_DEBUG_FILE: &str = "debug.dat";
 
 /// Initialise the Nim runtime exactly once per process.
 fn ensure_nim_runtime() {
@@ -101,7 +115,6 @@ fn ctfs_error(msg: impl Into<String>) -> Box<dyn Error> {
 /// F5c-1 bring-up smoke test) or with
 /// [`new_from_ctfs_bytes`](Self::new_from_ctfs_bytes) to populate the
 /// session from a `.ct` container with `FLAG_HAS_MCR_FIELDS` set.
-#[derive(Debug)]
 pub struct EmulatorReplaySession {
     /// Parsed `meta.dat` for the active trace.
     ///
@@ -127,6 +140,38 @@ pub struct EmulatorReplaySession {
     /// keep this field so unit tests can deterministically inspect the
     /// last reported value without having to dispatch to FFI.
     current_step_id: StepId,
+    /// Parsed DWARF index for the recorded program, when the `.ct`
+    /// container bundled a `debug.dat` blob (M-DWARF-3). `None` when:
+    ///
+    /// * The recorder did not include the binary (e.g. stripped target).
+    /// * The bundled bytes failed to parse as an ELF (corrupt bundle).
+    ///
+    /// When `None`, the session falls back to the M-DWARF-2 behaviour
+    /// where `build_location` synthesises `(meta.paths[0], 1)`.
+    dwarf: Option<DwarfIndex>,
+}
+
+/// Manual `Debug` impl: [`DwarfIndex`] wraps an `addr2line::Context` that
+/// does not implement `Debug`, and the parsed sections aren't useful in
+/// log output anyway. Surfacing `Some/None` plus a coarse source-file
+/// count is enough for diagnostics.
+impl std::fmt::Debug for EmulatorReplaySession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmulatorReplaySession")
+            .field("meta", &self.meta)
+            .field("breakpoints", &self.breakpoints)
+            .field("next_breakpoint_id", &self.next_breakpoint_id)
+            .field("breakpoints_enabled", &self.breakpoints_enabled)
+            .field("current_step_id", &self.current_step_id)
+            .field(
+                "dwarf",
+                &self
+                    .dwarf
+                    .as_ref()
+                    .map(|d| format!("DwarfIndex({} source files)", d.source_file_count())),
+            )
+            .finish()
+    }
 }
 
 /// Default empty type record for synthesised values.
@@ -168,6 +213,7 @@ impl EmulatorReplaySession {
             next_breakpoint_id: 1,
             breakpoints_enabled: true,
             current_step_id: StepId(0),
+            dwarf: None,
         }
     }
 
@@ -199,6 +245,29 @@ impl EmulatorReplaySession {
             ));
         }
 
+        // M-DWARF-3: look for the recorder-bundled binary (`debug.dat`).
+        // Missing is fine — older traces predate the bundling step, and
+        // stripped binaries skip the bundle on the recorder side. Parse
+        // failures are tolerated identically so a corrupt bundle never
+        // prevents the session from coming up at all; the session just
+        // falls back to the M-DWARF-2 placeholder location.
+        let dwarf = match ctfs.read_file(BUNDLED_DEBUG_FILE) {
+            Ok(elf_bytes) if !elf_bytes.is_empty() => match DwarfIndex::from_elf_bytes(&elf_bytes) {
+                Ok(index) => Some(index),
+                Err(e) => {
+                    eprintln!(
+                        "warning: EmulatorReplaySession could not parse bundled `{BUNDLED_DEBUG_FILE}` \
+                         ({e}); falling back to placeholder line numbers"
+                    );
+                    None
+                }
+            },
+            // Either the file isn't present (older trace) or it's empty.
+            // Both are silent fallbacks — they are the documented
+            // graceful-degradation contract for M-DWARF-3.
+            _ => None,
+        };
+
         ensure_nim_runtime();
         // SAFETY: see `new()`.
         unsafe { emulator_ffi::mcrInit() };
@@ -209,6 +278,7 @@ impl EmulatorReplaySession {
             next_breakpoint_id: 1,
             breakpoints_enabled: true,
             current_step_id: StepId(0),
+            dwarf,
         })
     }
 
@@ -264,23 +334,67 @@ impl EmulatorReplaySession {
         "<entry>".to_string()
     }
 
+    /// Resolve the current emulator PC against the bundled DWARF, if any.
+    ///
+    /// Returns `None` when:
+    ///
+    /// * No DWARF was bundled (older trace or stripped binary).
+    /// * The PC falls outside every CU range (libc, JIT page, padding).
+    ///
+    /// The returned `PcInfo.file` is the raw DWARF path; the caller is
+    /// responsible for deciding whether to override `meta.paths[0]` with
+    /// it. We deliberately don't canonicalise here — the recorder side
+    /// embeds source paths exactly as the compiler emitted them, so the
+    /// DWARF path matches the meta path for the same compilation unit.
+    fn dwarf_pc_info(&self) -> Option<PcInfo> {
+        let dwarf = self.dwarf.as_ref()?;
+        // SAFETY: same rationale as `build_location` — the emulator FFI
+        // getter reads from Nim-managed globals seeded by `mcrInit`.
+        let pc = unsafe { emulator_ffi::mcrGetPC() };
+        dwarf.resolve_pc(pc)
+    }
+
     /// Build a [`Location`] from the current emulator state.
+    ///
+    /// When a bundled DWARF index is available and resolves the current
+    /// PC, the returned location carries the real `(file, line)` from
+    /// the binary's `.debug_line` table. Otherwise it falls back to the
+    /// M-DWARF-2 placeholder of `(meta.paths[0], 1)` — F5 still passes
+    /// against that fallback, just with a less informative breakpoint
+    /// line.
     fn build_location(&self) -> Location {
         // SAFETY: getters never read uninitialised memory; they read
         // from the Nim-managed emulator globals which `mcrInit` reset.
         let pc = unsafe { emulator_ffi::mcrGetPC() };
-        let path = self.primary_path();
+
+        // Default to the M-DWARF-2 fallback so missing/incomplete DWARF
+        // always produces a well-formed location.
+        let mut path = self.primary_path();
+        let mut line: i64 = 1;
         let function_name = self.root_function_name();
+
+        if let Some(info) = self.dwarf_pc_info() {
+            // Adopt the DWARF-reported source file when it disagrees
+            // with `meta.paths[0]` — the DWARF line table is the
+            // authoritative answer for "which source file does this PC
+            // belong to". `meta.paths[0]` is a useful default but is
+            // chosen by recorder-side heuristics, not by the PC.
+            let dwarf_path = info.file.to_string_lossy().into_owned();
+            if !dwarf_path.is_empty() {
+                path = dwarf_path;
+            }
+            line = info.line as i64;
+        }
 
         Location {
             path: path.clone(),
-            line: 1,
+            line,
             function_name: function_name.clone(),
             high_level_path: path.clone(),
-            high_level_line: 1,
+            high_level_line: line,
             high_level_function_name: function_name,
             low_level_path: path,
-            low_level_line: 1,
+            low_level_line: line,
             rr_ticks: RRTicks(self.current_step_id.0),
             function_first: NO_POSITION,
             function_last: NO_POSITION,
@@ -788,5 +902,217 @@ mod tests {
             .load_return_value(None, Lang::Unknown)
             .expect("load_return_value must succeed");
         assert!(matches!(rv, ValueRecordWithType::None { .. }));
+    }
+
+    // ── M-DWARF-3 fixtures ──────────────────────────────────────────────
+    //
+    // The DWARF-bundling tests reuse the same small ELF fixture as the
+    // `dwarf_index` module (built from `tests/fixtures/dwarf/hello.c` by
+    // `rebuild.sh`). The file is ~11 KB and contains three functions
+    // (`add`, `compute`, `main`) compiled with `-O0 -g` so its line
+    // numbers stay stable across rebuilds.
+    //
+    // PC constants here mirror `dwarf_index::tests`: `PC_ADD_BODY`
+    // (0x40100a) sits on hello.c line 24 — the `int sum = a + b;`
+    // statement, which is the same line every gcc since 11 has emitted
+    // for that source. The DWARF resolver is the authoritative source of
+    // the expected number; we re-state it as a constant only so the test
+    // failure message includes the expected value alongside the actual
+    // one.
+
+    const HELLO_ELF_FIXTURE: &[u8] = include_bytes!("../tests/fixtures/dwarf/hello.elf");
+    const PC_ADD_BODY: u64 = 0x40100a;
+    const PC_ADD_BODY_LINE: i64 = 24;
+
+    /// Build a synthetic CTFS payload like `synthetic_mcr_ctfs_bytes()`
+    /// but **with** a bundled `debug.dat` file carrying the hello.elf
+    /// fixture. The resulting session's `dwarf` field should round-trip
+    /// the parsed DWARF index so `build_location` can resolve PCs.
+    fn synthetic_mcr_ctfs_bytes_with_dwarf() -> Vec<u8> {
+        let meta = MetaDat {
+            version: META_DAT_VERSION,
+            flags: FLAG_HAS_MCR_FIELDS,
+            program: "/usr/local/bin/hello".to_owned(),
+            args: vec![],
+            workdir: "/tmp/run".to_owned(),
+            recorder_id: "mcr".to_owned(),
+            paths: vec!["src/main.c".to_owned()],
+            mcr: Some(McrFields {
+                tick_source: 1,
+                total_threads: 1,
+                atomic_mode: 0,
+                total_events: 0,
+                total_checkpoints: 0,
+                start_time_unix_us: 0,
+                platform: "linux-x86_64".to_owned(),
+                tick_granularity: "instruction".to_owned(),
+                tick_source_str: "rdtsc".to_owned(),
+                atomic_mode_str: "seq_cst".to_owned(),
+                start_time_str: "1970-01-01T00:00:00Z".to_owned(),
+                hook_profile: String::new(),
+                hook_strategies: Vec::new(),
+            }),
+        };
+        let dat = serialize_meta_dat(&meta);
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("synthetic_with_dwarf.ct");
+        write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", &dat),
+                ("t00000000000", b""),
+                (BUNDLED_DEBUG_FILE, HELLO_ELF_FIXTURE),
+            ],
+        )
+        .unwrap();
+        std::fs::read(&ct_path).unwrap()
+    }
+
+    /// M-DWARF-3 acceptance: when the CTFS container bundles a
+    /// `debug.dat` ELF, `new_from_ctfs_bytes` must parse it into a
+    /// `DwarfIndex` accessible via the session's `dwarf` field.
+    #[test]
+    fn new_from_ctfs_bytes_with_debug_populates_dwarf_index() {
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
+
+        let dwarf = session.dwarf.as_ref().expect("debug.dat must produce a DwarfIndex");
+        // hello.c is the primary source; the fixture also references
+        // hello_start.S so we expect at least 1 source file.
+        assert!(
+            dwarf.source_file_count() >= 1,
+            "DwarfIndex should know about at least one source file"
+        );
+        // Spot-check that a known PC inside the fixture resolves — this
+        // exercises the full end-to-end "CTFS file → ELF bytes → gimli
+        // sections → addr2line context" pipeline rather than just
+        // confirming the bytes survived the bundle round-trip.
+        let info = dwarf
+            .resolve_pc(PC_ADD_BODY)
+            .expect("PC_ADD_BODY must resolve through the bundled DWARF");
+        assert_eq!(
+            info.line, PC_ADD_BODY_LINE as u32,
+            "expected line {PC_ADD_BODY_LINE}, got {info:?}"
+        );
+    }
+
+    /// M-DWARF-3 acceptance: a corrupt or unrecognisable `debug.dat`
+    /// must not prevent the session from coming up — it must fall back
+    /// to the M-DWARF-2 placeholder location behaviour silently.
+    #[test]
+    fn new_from_ctfs_bytes_with_bad_debug_falls_back() {
+        let meta = MetaDat {
+            version: META_DAT_VERSION,
+            flags: FLAG_HAS_MCR_FIELDS,
+            program: "/usr/local/bin/hello".to_owned(),
+            args: vec![],
+            workdir: "/tmp/run".to_owned(),
+            recorder_id: "mcr".to_owned(),
+            paths: vec!["src/main.c".to_owned()],
+            mcr: Some(McrFields {
+                tick_source: 1,
+                total_threads: 1,
+                atomic_mode: 0,
+                total_events: 0,
+                total_checkpoints: 0,
+                start_time_unix_us: 0,
+                platform: "linux-x86_64".to_owned(),
+                tick_granularity: "instruction".to_owned(),
+                tick_source_str: "rdtsc".to_owned(),
+                atomic_mode_str: "seq_cst".to_owned(),
+                start_time_str: "1970-01-01T00:00:00Z".to_owned(),
+                hook_profile: String::new(),
+                hook_strategies: Vec::new(),
+            }),
+        };
+        let dat = serialize_meta_dat(&meta);
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("synthetic_bad_dwarf.ct");
+        write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", &dat),
+                ("t00000000000", b""),
+                // Not an ELF — DwarfIndex::from_elf_bytes will return
+                // DwarfError::Object("File magic is not …"), which the
+                // M-DWARF-3 constructor must collapse to `dwarf: None`.
+                (BUNDLED_DEBUG_FILE, b"this is definitely not ELF bytes"),
+            ],
+        )
+        .unwrap();
+        let bytes = std::fs::read(&ct_path).unwrap();
+
+        let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes)
+            .expect("CTFS load must succeed even with a malformed debug.dat");
+        assert!(
+            session.dwarf.is_none(),
+            "malformed debug.dat must collapse to None, not crash the session"
+        );
+    }
+
+    /// M-DWARF-3 acceptance: with a bundled `debug.dat` AND a non-zero
+    /// PC matching a real instruction, `load_callstack` must surface a
+    /// frame whose `line` is the DWARF-resolved line (not the M-DWARF-2
+    /// `1` placeholder) and whose `path` matches the DWARF-emitted file
+    /// (overriding `meta.paths[0]` when they disagree).
+    ///
+    /// This is the headline test for M-DWARF-3: it walks the full
+    /// recorder → bundle → replay → DAP `stackTrace` data path inside a
+    /// single test process.
+    #[test]
+    fn load_callstack_uses_dwarf_resolved_line() {
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        // SAFETY: mcrSetRegisters is the canonical way to seed the
+        // emulator program counter; `new_from_ctfs_bytes` has just
+        // called `mcrInit` so the register file is in a clean,
+        // uninitialised state.
+        //
+        // We set every GPR to 0 and only RIP to PC_ADD_BODY so the
+        // location calculation has a deterministic input. RFLAGS is set
+        // to 0x202 (the x86_64 reset value: bit 1 must be set, plus IF
+        // typically set) but its value does not affect PC resolution.
+        unsafe {
+            emulator_ffi::mcrSetRegisters(
+                /* rax */ 0,
+                /* rbx */ 0,
+                /* rcx */ 0,
+                /* rdx */ 0,
+                /* rsi */ 0,
+                /* rdi */ 0,
+                /* rbp */ 0,
+                /* rsp */ 0,
+                /* r8  */ 0,
+                /* r9  */ 0,
+                /* r10 */ 0,
+                /* r11 */ 0,
+                /* r12 */ 0,
+                /* r13 */ 0,
+                /* r14 */ 0,
+                /* r15 */ 0,
+                /* rip */ PC_ADD_BODY,
+                /* rflags */ 0x202,
+            );
+        }
+
+        let frames = session.load_callstack().expect("callstack must succeed");
+        assert!(!frames.is_empty(), "expected at least one frame");
+        let loc = &frames[0].content.call.location;
+
+        assert_eq!(
+            loc.line, PC_ADD_BODY_LINE,
+            "DWARF-resolved line must override the M-DWARF-2 placeholder; got loc = {loc:?}",
+        );
+        assert!(
+            loc.path.ends_with("hello.c"),
+            "DWARF-resolved path must override meta.paths[0] (= src/main.c); got loc.path = {}",
+            loc.path,
+        );
+        // The emulator FFI surfaces the raw PC via `Location.offset` —
+        // sanity-check that the test actually set it (otherwise we'd be
+        // resolving PC 0 from leftover state, which would silently fail
+        // the line assertion above too).
+        assert_eq!(loc.offset, PC_ADD_BODY as i64);
     }
 }
