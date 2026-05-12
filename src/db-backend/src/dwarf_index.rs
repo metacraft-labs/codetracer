@@ -65,7 +65,7 @@
 //! * <https://dwarfstd.org/doc/DWARF5.pdf>
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -156,6 +156,24 @@ pub struct DwarfIndex {
     /// `BTreeSet<PathBuf>` to deduplicate (a single header is often
     /// referenced from many CUs) and yield a deterministic order.
     source_files: Arc<BTreeSet<PathBuf>>,
+
+    /// Reverse `(file, line) -> [PC]` index built from every CU's line
+    /// program. Used by [`Self::pcs_for_line`] so the emulator session
+    /// can resolve a user-set breakpoint at `(source, line)` to one or
+    /// more static PCs at session-construction time — letting the
+    /// `Continue` step action compare runtime PCs against a small
+    /// `HashSet` instead of re-walking DWARF after every emulator
+    /// instruction.
+    ///
+    /// The key uses `(PathBuf, u32)` — we lower-case neither nor
+    /// canonicalise the path, so callers must pass the same path string
+    /// DWARF emitted. Two reasonable lookup strategies are exposed via
+    /// [`Self::pcs_for_line`]:
+    ///
+    /// * Exact match against the DWARF path (cheap O(1) probe).
+    /// * Basename fallback — useful when the GUI sends a different but
+    ///   equivalent path (e.g. relative vs absolute, or canonicalised).
+    pcs_by_line: Arc<HashMap<(PathBuf, u32), Vec<u64>>>,
 }
 
 impl DwarfIndex {
@@ -217,7 +235,15 @@ impl DwarfIndex {
         // rather than as a silent empty file list later.
         let source_files = collect_source_files(&dwarf)?;
 
-        // Phase 4: hand the loaded sections to addr2line. From this
+        // Phase 4: walk every CU's line program a second time to build
+        // the reverse `(file, line) -> [PC]` index. This is the
+        // foundation for breakpoint resolution in M-Step-Stress: when
+        // the DAP client sets a breakpoint at `(path, line)` the
+        // emulator session needs to know which static PC(s) to
+        // compare runtime PCs against during `Continue`.
+        let pcs_by_line = collect_pcs_by_line(&dwarf)?;
+
+        // Phase 5: hand the loaded sections to addr2line. From this
         // point on we don't need `object_file` (which still borrowed
         // `bytes`), and the returned `Context` owns its sections via
         // `Arc<Dwarf<R>>` internally.
@@ -226,6 +252,7 @@ impl DwarfIndex {
         Ok(Self {
             context,
             source_files: Arc::new(source_files),
+            pcs_by_line: Arc::new(pcs_by_line),
         })
     }
 
@@ -263,6 +290,7 @@ impl DwarfIndex {
         Self {
             context,
             source_files: Arc::new(BTreeSet::new()),
+            pcs_by_line: Arc::new(HashMap::new()),
         }
     }
 
@@ -334,6 +362,56 @@ impl DwarfIndex {
     pub fn source_file_count(&self) -> usize {
         self.source_files.len()
     }
+
+    /// Reverse lookup: every static PC whose line-program row maps to
+    /// `(file, line)`. Returns an empty `Vec` when nothing matches.
+    ///
+    /// The DAP `setBreakpoints` request reaches the emulator session as
+    /// `(path, line)` from the client. We need to resolve that pair to
+    /// concrete static PCs so the `Continue` action can compare each
+    /// post-step PC against an O(1) `HashSet<u64>` rather than
+    /// re-walking the DWARF context after every emulator instruction.
+    ///
+    /// Lookup is tolerant of two common path mismatches between DAP and
+    /// DWARF:
+    ///
+    /// 1. **Exact match** on the DWARF-emitted path (canonical case).
+    /// 2. **Basename fallback** — when the GUI sends `/abs/hello.c` but
+    ///    DWARF has `hello.c`, or vice versa. This is a pragmatic
+    ///    compromise: identically-named files across CUs collapse, but
+    ///    inventory/demo binaries practically never have name clashes,
+    ///    and forcing the GUI to round-trip the canonical DWARF path
+    ///    through `setBreakpoints` would force ugly client-side logic.
+    ///
+    /// All matching PCs are deduplicated and returned in ascending
+    /// order — useful for tests and for deterministic breakpoint sets.
+    pub fn pcs_for_line(&self, file: &Path, line: u32) -> Vec<u64> {
+        let mut out: BTreeSet<u64> = BTreeSet::new();
+
+        // Exact match: the cheapest and most common case for traces
+        // where the recorder and GUI agree on the path.
+        if let Some(pcs) = self.pcs_by_line.get(&(file.to_path_buf(), line)) {
+            out.extend(pcs.iter().copied());
+        }
+
+        // Basename fallback: scan the map looking for any (file', line)
+        // whose `file'.file_name()` matches our `file.file_name()`. The
+        // table is small (one entry per (path, executed line)) so the
+        // linear scan is fine in practice — a typical binary maps a few
+        // hundred to a few thousand (file, line) keys.
+        if let Some(needle) = file.file_name() {
+            for ((path, l), pcs) in self.pcs_by_line.iter() {
+                if *l != line {
+                    continue;
+                }
+                if path.file_name() == Some(needle) {
+                    out.extend(pcs.iter().copied());
+                }
+            }
+        }
+
+        out.into_iter().collect()
+    }
 }
 
 /// Walk every compilation unit's line program and collect the set of
@@ -393,6 +471,117 @@ fn collect_source_files(dwarf: &gimli::Dwarf<Reader>) -> Result<BTreeSet<PathBuf
         }
     }
     Ok(files)
+}
+
+/// Walk every CU's line program and build the reverse `(file, line) ->
+/// [PC]` index used by [`DwarfIndex::pcs_for_line`].
+///
+/// We deliberately use the line program's *execution* rather than just
+/// the file table, because each row reports `(address, file_index,
+/// line, column, is_stmt, ...)`. Only statement rows (`is_stmt`) are
+/// kept — non-statement rows are intermediate steps inside a single
+/// source statement and would muddy the breakpoint resolution if we
+/// included them.
+///
+/// PC values are recorded verbatim from the line program rows — they
+/// are the **static** addresses the compiler emitted, so callers that
+/// have a runtime PC must rebase before comparing against this table.
+/// `EmulatorReplaySession` does that rebase using `cp0.maps` data.
+fn collect_pcs_by_line(dwarf: &gimli::Dwarf<Reader>) -> Result<HashMap<(PathBuf, u32), Vec<u64>>, DwarfError> {
+    let mut out: HashMap<(PathBuf, u32), Vec<u64>> = HashMap::new();
+    let mut units = dwarf.units();
+    while let Some(header) = units.next().map_err(|e| DwarfError::Dwarf(format!("unit iter: {e}")))? {
+        let unit = dwarf
+            .unit(header)
+            .map_err(|e| DwarfError::Dwarf(format!("unit parse: {e}")))?;
+        let Some(line_program) = unit.line_program.clone() else {
+            continue;
+        };
+
+        // Resolve each FileEntry to a full path string once, indexed by
+        // the file_index the line program emits. Building this up-front
+        // means we don't re-walk the file table per row.
+        let header_ref = line_program.header();
+        let mut path_for_index: Vec<PathBuf> = Vec::new();
+        // DWARF 2/3/4 numbers files starting at 1; DWARF 5 starts at 0.
+        // We push a sentinel at slot 0 for both flavours; the line
+        // program's row file index is used verbatim as a Vec index, so
+        // out-of-bounds rows are skipped (defensive against malformed
+        // DWARF).
+        path_for_index.push(PathBuf::new());
+        for file_entry in header_ref.file_names() {
+            let file_name = match dwarf.attr_string(&unit, file_entry.path_name()) {
+                Ok(s) => s,
+                Err(_) => {
+                    path_for_index.push(PathBuf::new());
+                    continue;
+                }
+            };
+            let file_name_str = file_name.to_string_lossy().unwrap_or_default().into_owned();
+            let dir_index = file_entry.directory_index();
+            let dir_attr = header_ref.directory(dir_index);
+            let dir = match dir_attr {
+                Some(attr) => match dwarf.attr_string(&unit, attr) {
+                    Ok(s) => s.to_string_lossy().unwrap_or_default().into_owned(),
+                    Err(_) => String::new(),
+                },
+                None => String::new(),
+            };
+            let path = if dir.is_empty() {
+                PathBuf::from(file_name_str)
+            } else {
+                Path::new(&dir).join(file_name_str)
+            };
+            path_for_index.push(path);
+        }
+
+        // Execute the line program. `rows()` consumes the program and
+        // returns an iterator that yields one row per state-machine
+        // step. We only care about *statement* rows (`is_stmt`) — those
+        // are the rows debuggers should single-step to.
+        let mut rows = line_program.rows();
+        while let Some((_header, row)) = rows
+            .next_row()
+            .map_err(|e| DwarfError::Dwarf(format!("line row: {e}")))?
+        {
+            if row.end_sequence() {
+                continue;
+            }
+            if !row.is_stmt() {
+                continue;
+            }
+            let Some(line) = row.line() else {
+                continue;
+            };
+            let line_u32 = line.get() as u32;
+            let address = row.address();
+            // DWARF 2/3/4: file index 0 means "no file"; DWARF 5: 0 is
+            // the compilation file. Either way, looking it up in our
+            // `path_for_index` is correct because we pushed an empty
+            // sentinel at slot 0 for DWARF 2/3/4 (which skips it via
+            // the empty-path check below) and DWARF 5's first entry is
+            // also at index 0 in `file_names()`. To stay portable
+            // across both, we tolerate either layout: lookup the
+            // index, and skip empty paths.
+            let file_index = row.file_index() as usize;
+            let Some(path) = path_for_index.get(file_index) else {
+                continue;
+            };
+            if path.as_os_str().is_empty() {
+                continue;
+            }
+            out.entry((path.clone(), line_u32)).or_default().push(address);
+        }
+    }
+
+    // Deduplicate per (file, line) — the same address can show up via
+    // different file-index aliases for headers included from multiple
+    // CUs, and consumers expect each PC at most once.
+    for v in out.values_mut() {
+        v.sort_unstable();
+        v.dedup();
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -530,5 +719,52 @@ mod tests {
         assert_eq!(index.source_file_count(), 0);
         assert!(index.resolve_pc(0x401000).is_none());
         assert!(index.source_files().next().is_none());
+        assert!(index.pcs_for_line(Path::new("hello.c"), 24).is_empty());
+    }
+
+    /// M-Step-Stress: the reverse `(file, line) -> [PC]` lookup must
+    /// return at least one PC for a known statement line in the hello.c
+    /// fixture. We use line 24 (`int sum = a + b;`) — the same line the
+    /// forward `resolve_pc(PC_ADD_BODY)` test already pins.
+    #[test]
+    fn pcs_for_line_finds_known_statement_pcs() {
+        let index = DwarfIndex::from_elf_bytes(FIXTURE_ELF).expect("parse");
+        let pcs = index.pcs_for_line(Path::new("hello.c"), 24);
+        assert!(!pcs.is_empty(), "expected ≥1 PC for hello.c:24, got an empty vec");
+        // Round-trip: every PC the reverse lookup yields must resolve
+        // back to the same `(file, line)` via the forward index.
+        for pc in &pcs {
+            let info = index.resolve_pc(*pc).expect("reverse-lookup PC must resolve");
+            assert_eq!(info.line, 24, "forward+reverse must agree on line at pc {pc:#x}");
+            assert!(
+                info.file.to_string_lossy().ends_with("hello.c"),
+                "forward+reverse must agree on file at pc {pc:#x}, got {:?}",
+                info.file,
+            );
+        }
+    }
+
+    /// Basename fallback: a caller passing `/some/absolute/path/hello.c`
+    /// must still match the DWARF-emitted `hello.c` entry. The GUI may
+    /// canonicalise breakpoint paths, so this fallback prevents
+    /// silently-empty breakpoint sets.
+    #[test]
+    fn pcs_for_line_matches_by_basename() {
+        let index = DwarfIndex::from_elf_bytes(FIXTURE_ELF).expect("parse");
+        let pcs = index.pcs_for_line(Path::new("/canonicalised/abs/path/hello.c"), 24);
+        assert!(
+            !pcs.is_empty(),
+            "basename fallback must match hello.c regardless of directory prefix"
+        );
+    }
+
+    /// Out-of-range line numbers must return an empty Vec, not panic.
+    #[test]
+    fn pcs_for_line_returns_empty_for_unknown_line() {
+        let index = DwarfIndex::from_elf_bytes(FIXTURE_ELF).expect("parse");
+        let pcs = index.pcs_for_line(Path::new("hello.c"), 9999);
+        assert!(pcs.is_empty(), "unknown line must return an empty Vec");
+        let pcs = index.pcs_for_line(Path::new("not_a_file.c"), 24);
+        assert!(pcs.is_empty(), "unknown file must return an empty Vec");
     }
 }
