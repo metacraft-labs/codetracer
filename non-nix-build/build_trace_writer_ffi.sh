@@ -14,14 +14,17 @@ echo "-----------"
 : "${ROOT_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 : "${DEPS_DIR:=$PWD/deps}"
 
-TRACE_FORMAT_DIR="$ROOT_DIR/libs/codetracer-trace-format"
+# codetracer-trace-format is now a sibling repo (not a submodule).
+# Override with TRACE_FORMAT_DIR=... when working off a non-standard layout.
+: "${TRACE_FORMAT_DIR:=$ROOT_DIR/../codetracer-trace-format}"
 FFI_STAGE_DIR="$DEPS_DIR/trace-writer-ffi"
 
 # --- pre-flight checks ---
 
 if [ ! -f "$TRACE_FORMAT_DIR/Cargo.toml" ]; then
-	echo "ERROR: codetracer-trace-format submodule not initialized."
-	echo "  Run: git submodule update --init libs/codetracer-trace-format"
+	echo "ERROR: codetracer-trace-format checkout not found at $TRACE_FORMAT_DIR."
+	echo "  Clone it as a workspace sibling, or set TRACE_FORMAT_DIR to point at"
+	echo "  an existing checkout."
 	exit 1
 fi
 

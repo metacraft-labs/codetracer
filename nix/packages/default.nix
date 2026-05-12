@@ -330,6 +330,13 @@
                 (cd $sourceRoot/libs/tree-sitter-nim && tree-sitter generate)
               fi
 
+              # Materialize codetracer-trace-format as a sibling of $sourceRoot
+              # so the cargo path deps in src/db-backend/Cargo.toml resolve.
+              # Outside the Nix sandbox the workspace .envrc provides a real
+              # checkout; inside the sandbox only the flake input is available.
+              cp -r ${inputs.codetracer-trace-format} $sourceRoot/../codetracer-trace-format
+              chmod -R u+w $sourceRoot/../codetracer-trace-format
+
               # Copy Cargo.lock to root for cargoSetupHook
               cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
             '';

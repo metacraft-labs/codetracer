@@ -90,11 +90,16 @@
       flake = true;
     };
 
-    # Non-flake input: the trace-format library lives in a git submodule whose
-    # content isn't available during `nix flake check`.  Fetching it as an input
-    # lets nix resolve the source and Cargo.lock at evaluation time.
+    # Non-flake input: the trace-format Rust workspace.  At runtime in the
+    # workspace dev shell, `.envrc` overrides this with `--override-input
+    # codetracer-trace-format path:../codetracer-trace-format` so changes
+    # in the sibling checkout are picked up immediately.  In CI / fresh
+    # nix builds without a sibling, the input fetches from GitHub.
+    #
+    # See codetracer-specs/Working-with-the-CodeTracer-Repos.md for the
+    # sibling-detection mechanism.
     codetracer-trace-format = {
-      url = "github:metacraft-labs/codetracer-trace-format/ffi-crate-and-format-fixes";
+      url = "github:metacraft-labs/codetracer-trace-format/main";
       flake = false;
     };
 

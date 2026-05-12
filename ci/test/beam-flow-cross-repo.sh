@@ -112,8 +112,8 @@ print_pin_summary() {
 	if [[ -d "$CODETRACER_BEAM_RECORDER_PATH/.git" ]]; then
 		echo "codetracer-beam-recorder HEAD: $(git -C "$CODETRACER_BEAM_RECORDER_PATH" rev-parse HEAD)"
 	fi
-	if [[ -d "$REPO_ROOT/libs/codetracer-trace-format/.git" ]]; then
-		echo "codetracer-trace-format HEAD: $(git -C "$REPO_ROOT/libs/codetracer-trace-format" rev-parse HEAD)"
+	if [[ -d "$REPO_ROOT/../codetracer-trace-format/.git" ]]; then
+		echo "codetracer-trace-format HEAD: $(git -C "$REPO_ROOT/../codetracer-trace-format" rev-parse HEAD)"
 	fi
 }
 

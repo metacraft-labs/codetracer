@@ -73,10 +73,6 @@
 [submodule "examples/recordings"]
 	path = examples/recordings
 	url = https://github.com/metacraft-labs/codetracer-example-recordings.git
-[submodule "libs/codetracer-trace-format"]
-	path = libs/codetracer-trace-format
-	url = https://github.com/metacraft-labs/codetracer-trace-format.git
-	branch = main
 [submodule "libs/codetracer-design-system"]
 	path = libs/codetracer-design-system
 	url = https://github.com/metacraft-labs/codetracer-design-system.git
