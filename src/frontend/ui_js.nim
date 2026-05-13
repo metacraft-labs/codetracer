@@ -3017,6 +3017,7 @@ proc updateLayout(data: Data) =
   data.ui.layout.updateSize()
 
 proc zoomInEditors*(data: Data) =
+  echo "######## fontSize: ", data.ui.fontSize
   if data.ui.fontSize < MAX_FONTSIZE:
     data.ui.fontSize += 2
     data.updateLayout()
@@ -3030,6 +3031,7 @@ proc zoomInEditors*(data: Data) =
     clog "editor: zoom in!"
 
 proc zoomOutEditors*(data: Data) =
+  echo "######## fontSize: ", data.ui.fontSize
   if data.ui.fontSize > MIN_FONTSIZE:
     data.ui.fontSize -= 2
 
