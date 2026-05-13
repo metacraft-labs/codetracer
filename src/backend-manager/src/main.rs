@@ -15,11 +15,11 @@ mod session;
 mod trace_metadata;
 
 use std::error::Error;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 /// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
 /// a visible console window when spawned as child processes.
@@ -28,21 +28,40 @@ pub(crate) const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
+#[cfg(windows)]
+use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use tokio::{
     fs::{create_dir_all, read_to_string, remove_file, write},
     io::{AsyncReadExt, AsyncWriteExt},
     signal,
     sync::mpsc,
 };
-#[cfg(unix)]
-use tokio::net::UnixStream;
-#[cfg(windows)]
-use tokio::net::TcpStream;
 
 use crate::backend_manager::BackendManager;
 use crate::config::DaemonConfig;
 use crate::dap_parser::DapParser;
 use crate::paths::CODETRACER_PATHS;
+
+/// Resolve a CLI-supplied trace-path argument to a daemon-friendly path
+/// string.  If the argument looks like an HTTP(S) URL it is treated as
+/// an observability dive-in URL and the recording is fetched (or read
+/// from cache).  Otherwise the path is canonicalized as before.
+async fn resolve_cli_trace_path(trace_path: &std::path::Path) -> Result<String, Box<dyn Error>> {
+    let as_str = trace_path.to_string_lossy().into_owned();
+    if observability_fetch::looks_like_url(&as_str) {
+        let fetched = observability_fetch::fetch_recording_from_dive_in_url(&as_str)
+            .await
+            .map_err(|e| format!("failed to fetch dive-in URL: {e}"))?;
+        return Ok(fetched.local_path.to_string_lossy().into_owned());
+    }
+    Ok(trace_path
+        .canonicalize()
+        .unwrap_or_else(|_| trace_path.to_path_buf())
+        .to_string_lossy()
+        .to_string())
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -401,7 +420,9 @@ async fn daemon_status(socket_path: &PathBuf, pid_path: &PathBuf) {
 
     // Try to connect to the daemon via TCP.
     let connected = if let Ok(port) = read_port_file(socket_path).await {
-        TcpStream::connect(format!("127.0.0.1:{port}")).await.is_ok()
+        TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .is_ok()
     } else {
         false
     };
@@ -2323,11 +2344,7 @@ async fn run_trace_query(
 
     let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
 
-    let trace_path_str = trace_path
-        .canonicalize()
-        .unwrap_or_else(|_| trace_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     // Send ct/exec-script request.
     //
@@ -2399,11 +2416,7 @@ async fn run_session_close(
 ) -> Result<(), Box<dyn Error>> {
     let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
 
-    let trace_path_str = trace_path
-        .canonicalize()
-        .unwrap_or_else(|_| trace_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     let resp = cli_dap_request(
         &mut stream,
@@ -2439,11 +2452,7 @@ async fn run_trace_info(
 ) -> Result<(), Box<dyn Error>> {
     let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
 
-    let trace_path_str = trace_path
-        .canonicalize()
-        .unwrap_or_else(|_| trace_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     // First, open the trace so that trace-info has session data to return.
     // Large traces (e.g. 96 MB Python traces) may take a while to load,
@@ -2564,11 +2573,7 @@ async fn run_trace_query(
 
     let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
 
-    let trace_path_str = trace_path
-        .canonicalize()
-        .unwrap_or_else(|_| trace_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     let resp = cli_dap_request(
         &mut stream,
@@ -2627,11 +2632,7 @@ async fn run_session_close(
 ) -> Result<(), Box<dyn Error>> {
     let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
 
-    let trace_path_str = trace_path
-        .canonicalize()
-        .unwrap_or_else(|_| trace_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     let resp = cli_dap_request(
         &mut stream,
@@ -2664,11 +2665,7 @@ async fn run_trace_info(
 ) -> Result<(), Box<dyn Error>> {
     let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
 
-    let trace_path_str = trace_path
-        .canonicalize()
-        .unwrap_or_else(|_| trace_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
 
     let open_resp = cli_dap_request(
         &mut stream,
