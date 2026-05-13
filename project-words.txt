@@ -166,3 +166,8 @@ WINDBG
 windepfile
 wpathname
 wstat
+ctfs
+Ctfs
+regs
+fsbase
+fdebug
