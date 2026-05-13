@@ -172,10 +172,20 @@
   align-items: center !important
 
 .lm_controls > *
+  // Secondary button style — matches [class*="-button-"][class*="-secondary"] in button.styl
   opacity: 1 !important
-//   margin-right: 10px !important
-//   height: 12px !important
-//   width: 12px !important
+  background-color: colors-ui-surface-primary-default !important
+  border: 0.03125em solid colors-ui-border-primary !important
+  border-radius: 0.375em !important
+  background-position: center !important
+  background-repeat: no-repeat !important
+  background-size: 1em 1em !important
+  width: 1.5em !important
+  height: 1.5em !important
+  cursor: pointer
+
+  &:hover
+    background-color: colors-ui-surface-primary-default-hover !important
 
 .lm_maximise
   background-image: LAYOUT_MAXIMIZE_ICON_PATH !important

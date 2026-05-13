@@ -401,7 +401,6 @@ method render*(self: DebugComponent): VNode =
           debugButton("run-tests")
         else:
           debugButton("run-tests-loading")
-        separateBar()
       else:
         debugStepButton("continue", Continue, false)
         debugButton("run-to-entry")
