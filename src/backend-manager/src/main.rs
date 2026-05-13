@@ -7,6 +7,7 @@ mod dap_init;
 mod dap_parser;
 mod errors;
 pub mod mcp_server;
+pub mod observability_fetch;
 mod paths;
 mod python_bridge;
 mod script_executor;
