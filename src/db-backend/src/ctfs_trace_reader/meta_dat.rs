@@ -19,8 +19,9 @@
 //! [2 bytes] version u16 little-endian (must be 2 — current)
 //! [2 bytes] flags u16 little-endian
 //!           bit 0       — FLAG_HAS_MCR_FIELDS
-//!           bits 1..=3  — reserved (must be 0; readers reject if set)
-//!           bits 4..=15 — reserved for future use (must be 0)
+//!           bit 1       — FLAG_HAS_REPLAY_LAUNCH_FIELDS (M-RLP-1, §6A.5)
+//!           bit 2       — FLAG_HAS_LAYOUT_SNAPSHOT (M-RLP-2, §6B.7)
+//!           bits 3..=15 — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
 //!   ⤷ args_count × varint-prefixed UTF-8 string : args[i]
@@ -87,14 +88,22 @@ pub const SUPPORTED_VERSIONS: &[u16] = &[1, 2];
 /// fields are appended after the paths block.
 pub const FLAG_HAS_MCR_FIELDS: u16 = 1 << 0;
 
+/// Flag bit 1 — replay-launch fields (M-RLP-1, spec §6A.5) follow the MCR
+/// block. Currently a single `aslr_disabled` byte; layout may grow. See
+/// `codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim`.
+pub const FLAG_HAS_REPLAY_LAUNCH_FIELDS: u16 = 1 << 1;
+
+/// Flag bit 2 — layout-snapshot fields (M-RLP-2, spec §6B.7) follow the
+/// replay-launch block: u64 LE `layout_hash` + varint-prefixed
+/// `layout_fingerprint`. Recorder uses these to detect replay-time layout
+/// drift; the WASM browser-replay path parses-and-ignores them.
+pub const FLAG_HAS_LAYOUT_SNAPSHOT: u16 = 1 << 2;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
-/// Any bit outside this mask is rejected by [`parse_meta_dat`] so that
-/// future writers introducing new flag bits force readers to upgrade
-/// explicitly. Bits 1..=3 are documented as reserved in
-/// `CTFS-Binary-Format.md` §8 (commit `610d4f4` on `codetracer-specs`)
-/// but no writer currently emits them.
-const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS;
+/// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
+/// writers introducing new flag bits force readers to upgrade explicitly.
+const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS | FLAG_HAS_REPLAY_LAUNCH_FIELDS | FLAG_HAS_LAYOUT_SNAPSHOT;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -120,6 +129,39 @@ pub struct MetaDat {
     pub paths: Vec<String>,
     /// MCR metadata. `Some` iff `flags & FLAG_HAS_MCR_FIELDS != 0`.
     pub mcr: Option<McrFields>,
+    /// Replay-launch fields (M-RLP-1). `Some` iff
+    /// `flags & FLAG_HAS_REPLAY_LAUNCH_FIELDS != 0`.
+    pub replay_launch: Option<ReplayLaunchFields>,
+    /// Layout-snapshot fields (M-RLP-2). `Some` iff
+    /// `flags & FLAG_HAS_LAYOUT_SNAPSHOT != 0`.
+    pub layout_snapshot: Option<LayoutSnapshotFields>,
+}
+
+/// Replay-launch metadata (M-RLP-1, spec §6A.5).
+///
+/// Captures launch-time configuration the replay engine needs to
+/// reproduce the recorded address-space layout. Mirror of the Nim
+/// writer's `ReplayLaunchFields`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayLaunchFields {
+    /// `true` if the recorded process was launched with ASLR disabled
+    /// (e.g. via `personality(ADDR_NO_RANDOMIZE)` / `setarch -R`).
+    pub aslr_disabled: bool,
+}
+
+/// Layout-snapshot metadata (M-RLP-2, spec §6B.7).
+///
+/// Fingerprint of the recorded address-space layout at trace-start time.
+/// Used by recorder/replay coordination to detect drift. The WASM
+/// browser-replay path parses-and-ignores these fields today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutSnapshotFields {
+    /// 64-bit fingerprint hash of the layout snapshot (writer-side
+    /// computation; opaque to readers).
+    pub layout_hash: u64,
+    /// Opaque fingerprint byte string. Length is varint-prefixed on the
+    /// wire; canonical content is writer-chosen.
+    pub layout_fingerprint: Vec<u8>,
 }
 
 /// MCR (Multi-process Concurrent Recording) metadata block.
@@ -437,6 +479,59 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         None
     };
 
+    // Replay-launch fields (M-RLP-1). Single `aslr_disabled` byte today.
+    let replay_launch = if flags & FLAG_HAS_REPLAY_LAUNCH_FIELDS != 0 {
+        if pos >= input.len() {
+            return Err(MetaDatError::StringEof {
+                declared_len: 1,
+                remaining: 0,
+            });
+        }
+        let aslr_disabled = input[pos] != 0;
+        pos += 1;
+        Some(ReplayLaunchFields { aslr_disabled })
+    } else {
+        None
+    };
+
+    // Layout-snapshot fields (M-RLP-2). u64 LE layout_hash + varint
+    // fingerprint length + fingerprint bytes.
+    let layout_snapshot = if flags & FLAG_HAS_LAYOUT_SNAPSHOT != 0 {
+        if input.len() - pos < 8 {
+            return Err(MetaDatError::StringEof {
+                declared_len: 8,
+                remaining: input.len() - pos,
+            });
+        }
+        let layout_hash = u64::from_le_bytes([
+            input[pos],
+            input[pos + 1],
+            input[pos + 2],
+            input[pos + 3],
+            input[pos + 4],
+            input[pos + 5],
+            input[pos + 6],
+            input[pos + 7],
+        ]);
+        pos += 8;
+        let fp_len_u64 = decode_varint(input, &mut pos)?;
+        let fp_len = usize::try_from(fp_len_u64).map_err(|_| MetaDatError::StringTooLong(fp_len_u64))?;
+        if input.len() - pos < fp_len {
+            return Err(MetaDatError::StringEof {
+                declared_len: fp_len,
+                remaining: input.len() - pos,
+            });
+        }
+        let layout_fingerprint = input[pos..pos + fp_len].to_vec();
+        pos += fp_len;
+        Some(LayoutSnapshotFields {
+            layout_hash,
+            layout_fingerprint,
+        })
+    } else {
+        None
+    };
+
     if pos != input.len() {
         return Err(MetaDatError::TrailingBytes {
             extra: input.len() - pos,
@@ -452,6 +547,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         recorder_id,
         paths,
         mcr,
+        replay_launch,
+        layout_snapshot,
     })
 }
 
@@ -474,7 +571,16 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     out.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
 
     // Canonicalise flags — only emit bits we know how to read back.
-    let flags: u16 = if meta.mcr.is_some() { FLAG_HAS_MCR_FIELDS } else { 0 };
+    let mut flags: u16 = 0;
+    if meta.mcr.is_some() {
+        flags |= FLAG_HAS_MCR_FIELDS;
+    }
+    if meta.replay_launch.is_some() {
+        flags |= FLAG_HAS_REPLAY_LAUNCH_FIELDS;
+    }
+    if meta.layout_snapshot.is_some() {
+        flags |= FLAG_HAS_LAYOUT_SNAPSHOT;
+    }
     out.extend_from_slice(&flags.to_le_bytes());
 
     // Program / args / workdir / recorder_id / paths.
@@ -513,6 +619,18 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         }
     }
 
+    // Optional replay-launch block (M-RLP-1).
+    if let Some(rl) = &meta.replay_launch {
+        out.push(if rl.aslr_disabled { 1 } else { 0 });
+    }
+
+    // Optional layout-snapshot block (M-RLP-2).
+    if let Some(ls) = &meta.layout_snapshot {
+        out.extend_from_slice(&ls.layout_hash.to_le_bytes());
+        encode_varint(ls.layout_fingerprint.len() as u64, &mut out);
+        out.extend_from_slice(&ls.layout_fingerprint);
+    }
+
     out
 }
 
@@ -535,6 +653,8 @@ mod tests {
             recorder_id: String::new(),
             paths: vec![],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         }
     }
 
@@ -553,6 +673,8 @@ mod tests {
                 "/home/user/proj/lib/util.rb".to_owned(),
             ],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         }
     }
 
@@ -586,6 +708,8 @@ mod tests {
                     "callsite_patch".to_owned(),
                 ],
             }),
+            replay_launch: None,
+            layout_snapshot: None,
         }
     }
 
@@ -709,6 +833,8 @@ mod tests {
             recorder_id: "r".to_owned(),
             paths: vec!["x".to_owned()],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         };
         assert_eq!(parsed, expected);
 
@@ -812,17 +938,77 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Set bit 1 — currently reserved per CTFS-Binary-Format.md §8.
+        // Bit 3 is the lowest still-reserved flag; bits 0..=2 are now
+        // FLAG_HAS_MCR_FIELDS / FLAG_HAS_REPLAY_LAUNCH_FIELDS /
+        // FLAG_HAS_LAYOUT_SNAPSHOT respectively.
         let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
-        buf[6] = 0b0000_0010;
+        buf[6] = 0b0000_1000;
         buf[7] = 0;
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0000_0010);
-                assert_eq!(unknown_bits, 0b0000_0010);
+                assert_eq!(flags, 0b0000_1000);
+                assert_eq!(unknown_bits, 0b0000_1000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_replay_launch_fields() {
+        // FLAG_HAS_REPLAY_LAUNCH_FIELDS (bit 1) with `aslr_disabled = true`
+        // appended as a single byte after the paths block.
+        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        buf[6] = 0b0000_0010;
+        buf[7] = 0;
+        buf.push(1u8);
+        let parsed = parse_meta_dat(&buf).expect("parse replay-launch");
+        assert_eq!(parsed.replay_launch, Some(ReplayLaunchFields { aslr_disabled: true }));
+        assert!(parsed.layout_snapshot.is_none());
+    }
+
+    #[test]
+    fn parses_layout_snapshot_fields() {
+        // FLAG_HAS_LAYOUT_SNAPSHOT (bit 2) with a hash + 3-byte fingerprint.
+        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        buf[6] = 0b0000_0100;
+        buf[7] = 0;
+        buf.extend_from_slice(&0xdead_beef_1234_5678u64.to_le_bytes());
+        buf.push(3); // varint length
+        buf.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+        let parsed = parse_meta_dat(&buf).expect("parse layout-snapshot");
+        assert_eq!(
+            parsed.layout_snapshot,
+            Some(LayoutSnapshotFields {
+                layout_hash: 0xdead_beef_1234_5678,
+                layout_fingerprint: vec![0xaa, 0xbb, 0xcc],
+            })
+        );
+        assert!(parsed.replay_launch.is_none());
+    }
+
+    #[test]
+    fn roundtrips_replay_launch_and_layout_snapshot() {
+        // Build a fixture with both new blocks present, serialise, parse,
+        // and confirm byte-for-byte equality. Ensures the serializer
+        // writes flag bits + payloads matching the parser's expectations.
+        let original = MetaDat {
+            version: META_DAT_VERSION,
+            flags: FLAG_HAS_REPLAY_LAUNCH_FIELDS | FLAG_HAS_LAYOUT_SNAPSHOT,
+            program: "p".to_owned(),
+            args: vec![],
+            workdir: "w".to_owned(),
+            recorder_id: "r".to_owned(),
+            paths: vec![],
+            mcr: None,
+            replay_launch: Some(ReplayLaunchFields { aslr_disabled: false }),
+            layout_snapshot: Some(LayoutSnapshotFields {
+                layout_hash: 0x0102_0304_0506_0708,
+                layout_fingerprint: b"\xde\xad".to_vec(),
+            }),
+        };
+        let bytes = serialize_meta_dat(&original);
+        let parsed = parse_meta_dat(&bytes).expect("parse round-trip");
+        assert_eq!(parsed, original);
     }
 
     #[test]

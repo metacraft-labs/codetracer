@@ -770,6 +770,8 @@ impl EmulatorReplaySession {
                 recorder_id: String::new(),
                 paths: Vec::new(),
                 mcr: None,
+                replay_launch: None,
+                layout_snapshot: None,
             },
             breakpoints: HashMap::new(),
             next_breakpoint_id: 1,
@@ -1813,6 +1815,8 @@ mod tests {
                 hook_profile: String::new(),
                 hook_strategies: Vec::new(),
             }),
+            replay_launch: None,
+            layout_snapshot: None,
         };
         let dat = serialize_meta_dat(&meta);
 
@@ -1887,6 +1891,8 @@ mod tests {
             recorder_id: "ruby".to_owned(),
             paths: vec!["script.rb".to_owned()],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
@@ -2092,6 +2098,8 @@ mod tests {
                 hook_profile: String::new(),
                 hook_strategies: Vec::new(),
             }),
+            replay_launch: None,
+            layout_snapshot: None,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
@@ -2166,6 +2174,8 @@ mod tests {
                 hook_profile: String::new(),
                 hook_strategies: Vec::new(),
             }),
+            replay_launch: None,
+            layout_snapshot: None,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
@@ -2399,6 +2409,8 @@ mod tests {
                 hook_profile: String::new(),
                 hook_strategies: Vec::new(),
             }),
+            replay_launch: None,
+            layout_snapshot: None,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();

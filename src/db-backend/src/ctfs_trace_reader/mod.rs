@@ -2186,6 +2186,8 @@ mod tests {
             recorder_id: "ruby".to_owned(),
             paths: vec![],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         });
 
         ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
@@ -2252,6 +2254,8 @@ mod tests {
             recorder_id: "test".to_owned(),
             paths: vec![],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         });
         let meta_json = br#"{"workdir":"/from-json-workdir","program":"/from-json","args":[]}"#;
 

@@ -1651,6 +1651,8 @@ mod tests {
                 hook_profile: String::new(),
                 hook_strategies: Vec::new(),
             }),
+            replay_launch: None,
+            layout_snapshot: None,
         })
     }
 
@@ -1665,6 +1667,8 @@ mod tests {
             recorder_id: "ruby".to_owned(),
             paths: vec![],
             mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
         })
     }
 
