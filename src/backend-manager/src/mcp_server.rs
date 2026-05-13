@@ -39,10 +39,10 @@
 
 use std::collections::HashMap;
 use std::io::BufRead;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -55,6 +55,7 @@ use tokio::net::UnixStream;
 type UnixStream = tokio::net::TcpStream;
 
 use crate::dap_parser::DapParser;
+use crate::observability_fetch;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -98,7 +99,7 @@ fn exec_script_tool() -> Value {
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Path to the trace file or folder"
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_trace_id` (e.g. `http://host/observability/v0/debug-session?trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<trace_id>/`."
                 },
                 "script": {
                     "type": "string",
@@ -123,13 +124,13 @@ fn exec_script_tool() -> Value {
 fn trace_info_tool() -> Value {
     json!({
         "name": "trace_info",
-        "description": "Get metadata about a CodeTracer trace file: language, event count, source files, and duration.",
+        "description": "Get metadata about a CodeTracer trace: language, event count, source files, and duration.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Path to the trace file or folder"
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL (see `exec_script` for URL format)."
                 }
             },
             "required": ["trace_path"]
@@ -147,10 +148,90 @@ fn list_source_files_tool() -> Value {
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Path to the trace file or folder"
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL."
                 }
             },
             "required": ["trace_path"]
+        }
+    })
+}
+
+/// Returns the JSON schema for the `find_recordings_by_window` tool.
+///
+/// This tool wraps `ct-observe extract`: given a time window and a
+/// query (service name for Jaeger, TraceQL for Tempo/Grafana-Tempo),
+/// it returns the matching spans as a JSON array.  Each row carries a
+/// `dive_in_url` that can be passed directly to any of the other
+/// trace tools.
+fn find_recordings_by_window_tool() -> Value {
+    json!({
+        "name": "find_recordings_by_window",
+        "description": "Discover CodeTracer recordings by querying a tracing backend over a time window. Shells out to `ct-observe extract` and returns the matching spans as a JSON array. Each row includes `trace_id`, `span_id`, `service_name`, `span_name`, `request_key`, `recording_available`, and `dive_in_url`. The `dive_in_url` can be passed to `exec_script`, `trace_info`, `list_source_files`, or `read_source_file` to dive directly into the recording.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string",
+                    "enum": ["jaeger", "tempo", "grafana-tempo"],
+                    "description": "Tracing backend to query"
+                },
+                "backend_url": {
+                    "type": "string",
+                    "description": "Base URL of the backend (e.g. http://localhost:16686 for Jaeger). For grafana-tempo, this should be the Grafana base URL."
+                },
+                "from_time": {
+                    "type": "string",
+                    "description": "Window start. RFC3339 / ISO 8601 (e.g. 2025-05-12T10:00:00Z) or relative (e.g. now-10m)."
+                },
+                "to_time": {
+                    "type": "string",
+                    "description": "Window end. Same format as `from_time`."
+                },
+                "service": {
+                    "type": "string",
+                    "description": "Service name (Jaeger only). Mutually exclusive with `traceql`."
+                },
+                "traceql": {
+                    "type": "string",
+                    "description": "TraceQL query (Tempo / Grafana-Tempo). Mutually exclusive with `service`."
+                },
+                "datasource_uid": {
+                    "type": "string",
+                    "description": "Grafana data source UID (required for grafana-tempo backend)."
+                }
+            },
+            "required": ["backend", "from_time", "to_time"]
+        }
+    })
+}
+
+/// Returns the JSON schema for the `find_recording_by_trace_id` tool.
+fn find_recording_by_trace_id_tool() -> Value {
+    json!({
+        "name": "find_recording_by_trace_id",
+        "description": "Look up a single trace by ID. Shells out to `ct-observe trace` and returns the matching spans as a JSON array (one row per span in the trace). Each row carries a `dive_in_url` that can be passed to the other trace tools.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string",
+                    "enum": ["jaeger", "tempo", "grafana-tempo"],
+                    "description": "Tracing backend to query"
+                },
+                "backend_url": {
+                    "type": "string",
+                    "description": "Base URL of the backend."
+                },
+                "trace_id": {
+                    "type": "string",
+                    "description": "Trace ID to look up."
+                },
+                "datasource_uid": {
+                    "type": "string",
+                    "description": "Grafana data source UID (required for grafana-tempo backend)."
+                }
+            },
+            "required": ["backend", "trace_id"]
         }
     })
 }
@@ -165,7 +246,7 @@ fn read_source_file_tool() -> Value {
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Path to the trace file or folder"
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL."
                 },
                 "file_path": {
                     "type": "string",
@@ -902,6 +983,8 @@ fn handle_tools_list(id: &Value) -> Value {
                 trace_info_tool(),
                 list_source_files_tool(),
                 read_source_file_tool(),
+                find_recordings_by_window_tool(),
+                find_recording_by_trace_id_tool(),
             ]
         }),
     )
@@ -929,6 +1012,8 @@ async fn handle_tools_call(
         "trace_info" => handle_trace_info(id, arguments, config, loaded_traces).await,
         "list_source_files" => handle_list_source_files(id, arguments, config).await,
         "read_source_file" => handle_read_source_file(id, arguments, config).await,
+        "find_recordings_by_window" => handle_find_recordings_by_window(id, arguments).await,
+        "find_recording_by_trace_id" => handle_find_recording_by_trace_id(id, arguments).await,
         _ => jsonrpc_error(id, -32602, &format!("Unknown tool: {tool_name}")),
     }
 }
@@ -1376,8 +1461,7 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
 
     // Try to connect to an already-running daemon via port file.
     if let Ok(port) = read_port_file_mcp(socket_path).await
-        && let Ok(stream) =
-            tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
+        && let Ok(stream) = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
     {
         return Ok(stream);
     }
@@ -1433,8 +1517,7 @@ async fn connect_to_daemon(config: &McpServerConfig) -> Result<UnixStream, Strin
         tokio::time::sleep(delay).await;
 
         if let Ok(port) = read_port_file_mcp(socket_path).await
-            && let Ok(stream) =
-                tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
+            && let Ok(stream) = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
         {
             return Ok(stream);
         }
@@ -1585,7 +1668,7 @@ async fn handle_exec_script(
 ) -> Value {
     let start = Instant::now();
 
-    let trace_path = match arguments
+    let raw_trace_path = match arguments
         .and_then(|a| a.get("trace_path"))
         .and_then(Value::as_str)
     {
@@ -1597,6 +1680,16 @@ async fn handle_exec_script(
             );
         }
     };
+
+    // Resolve dive-in URLs to a local cached path before talking to the daemon.
+    let trace_path_owned = match resolve_trace_path_or_url(raw_trace_path).await {
+        Ok(p) => p,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+        }
+    };
+    let trace_path: &str = &trace_path_owned;
 
     let script = match arguments
         .and_then(|a| a.get("script"))
@@ -1770,7 +1863,7 @@ async fn handle_trace_info(
 ) -> Value {
     let start = Instant::now();
 
-    let trace_path = match arguments
+    let raw_trace_path = match arguments
         .and_then(|a| a.get("trace_path"))
         .and_then(Value::as_str)
     {
@@ -1782,6 +1875,15 @@ async fn handle_trace_info(
             );
         }
     };
+
+    let trace_path_owned = match resolve_trace_path_or_url(raw_trace_path).await {
+        Ok(p) => p,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+        }
+    };
+    let trace_path: &str = &trace_path_owned;
 
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
@@ -1944,7 +2046,7 @@ async fn handle_list_source_files(
 ) -> Value {
     let start = Instant::now();
 
-    let trace_path = match arguments
+    let raw_trace_path = match arguments
         .and_then(|a| a.get("trace_path"))
         .and_then(Value::as_str)
     {
@@ -1956,6 +2058,15 @@ async fn handle_list_source_files(
             );
         }
     };
+
+    let trace_path_owned = match resolve_trace_path_or_url(raw_trace_path).await {
+        Ok(p) => p,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+        }
+    };
+    let trace_path: &str = &trace_path_owned;
 
     let mut stream = match connect_to_daemon(config).await {
         Ok(s) => s,
@@ -2072,7 +2183,7 @@ async fn handle_read_source_file(
 ) -> Value {
     let start = Instant::now();
 
-    let trace_path = match arguments
+    let raw_trace_path = match arguments
         .and_then(|a| a.get("trace_path"))
         .and_then(Value::as_str)
     {
@@ -2084,6 +2195,15 @@ async fn handle_read_source_file(
             );
         }
     };
+
+    let trace_path_owned = match resolve_trace_path_or_url(raw_trace_path).await {
+        Ok(p) => p,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+        }
+    };
+    let trace_path: &str = &trace_path_owned;
 
     let file_path = match arguments
         .and_then(|a| a.get("file_path"))
@@ -2270,9 +2390,8 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
     {
         let workdir_resolved = std::path::Path::new(workdir).join(relative);
         if workdir_resolved.exists() {
-            return std::fs::read_to_string(&workdir_resolved).map_err(|e| {
-                format!("failed to read {}: {e}", workdir_resolved.display())
-            });
+            return std::fs::read_to_string(&workdir_resolved)
+                .map_err(|e| format!("failed to read {}: {e}", workdir_resolved.display()));
         }
     }
 
@@ -2290,6 +2409,228 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
         "source file not found: tried {}, absolute path, workdir, and parent dir",
         embedded_path.display()
     ))
+}
+
+// ---------------------------------------------------------------------------
+// URL-aware trace_path resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve a raw `trace_path` argument to a local path string.
+///
+/// If `raw` looks like an HTTP(S) URL it is treated as an observability
+/// dive-in URL: the recording bytes are fetched (or read from cache)
+/// and the function returns the on-disk path to the cached directory.
+/// Otherwise it is returned as-is.
+///
+/// All four trace tools delegate to this helper so the URL pathway is
+/// uniform — the rest of the pipeline never has to think about URLs.
+async fn resolve_trace_path_or_url(raw: &str) -> Result<String, String> {
+    if !observability_fetch::looks_like_url(raw) {
+        return Ok(raw.to_string());
+    }
+    let fetched = observability_fetch::fetch_recording_from_dive_in_url(raw)
+        .await
+        .map_err(|e| format!("failed to fetch dive-in URL: {e}"))?;
+    Ok(fetched.local_path.to_string_lossy().into_owned())
+}
+
+// ---------------------------------------------------------------------------
+// New MCP tools: observability discovery (ct-observe wrappers)
+// ---------------------------------------------------------------------------
+
+/// Shell out to `ct-observe` and parse its JSONL output into a JSON array.
+///
+/// The subcommand + arguments are caller-supplied — this helper handles
+/// process spawning, stdout capture, JSONL parsing, and error surfacing.
+async fn run_ct_observe_jsonl(args: Vec<String>) -> Result<Vec<Value>, String> {
+    let exe = std::env::var("CT_OBSERVE_BIN").unwrap_or_else(|_| "ct-observe".to_string());
+    let mut cmd = tokio::process::Command::new(&exe);
+    cmd.args(&args);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn ct-observe ({exe}): {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "ct-observe exited with status {}: {stderr}",
+            output.status
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut rows = Vec::new();
+    for (line_no, line) in stdout.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_str(trimmed)
+            .map_err(|e| format!("ct-observe stdout line {line_no} is not valid JSON: {e}"))?;
+        rows.push(value);
+    }
+    Ok(rows)
+}
+
+/// Handles the `find_recordings_by_window` tool.
+async fn handle_find_recordings_by_window(id: &Value, arguments: Option<&Value>) -> Value {
+    let start = Instant::now();
+    let args = match arguments {
+        Some(a) => a,
+        None => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing arguments for find_recordings_by_window"),
+            );
+        }
+    };
+
+    let backend = match args.get("backend").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(id, tool_result_error("Missing required argument: backend"));
+        }
+    };
+    let from_time = match args.get("from_time").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing required argument: from_time"),
+            );
+        }
+    };
+    let to_time = match args.get("to_time").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(id, tool_result_error("Missing required argument: to_time"));
+        }
+    };
+
+    let mut cli = vec![
+        "extract".to_string(),
+        "--backend".to_string(),
+        backend.clone(),
+        "--from".to_string(),
+        from_time,
+        "--to".to_string(),
+        to_time,
+        "--format".to_string(),
+        "jsonl".to_string(),
+    ];
+
+    if let Some(url) = args.get("backend_url").and_then(Value::as_str)
+        && !url.is_empty()
+    {
+        if backend == "grafana-tempo" {
+            cli.push("--grafana-url".to_string());
+        } else {
+            cli.push("--url".to_string());
+        }
+        cli.push(url.to_string());
+    }
+
+    if let Some(service) = args.get("service").and_then(Value::as_str)
+        && !service.is_empty()
+    {
+        cli.push("--service".to_string());
+        cli.push(service.to_string());
+    }
+
+    if let Some(traceql) = args.get("traceql").and_then(Value::as_str)
+        && !traceql.is_empty()
+    {
+        cli.push("--traceql".to_string());
+        cli.push(traceql.to_string());
+    }
+
+    if let Some(uid) = args.get("datasource_uid").and_then(Value::as_str)
+        && !uid.is_empty()
+    {
+        cli.push("--datasource-uid".to_string());
+        cli.push(uid.to_string());
+    }
+
+    match run_ct_observe_jsonl(cli).await {
+        Ok(rows) => {
+            let pretty = serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".to_string());
+            let duration_ms = start.elapsed().as_millis();
+            jsonrpc_result(id, tool_result_text_with_timing(&pretty, duration_ms))
+        }
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms))
+        }
+    }
+}
+
+/// Handles the `find_recording_by_trace_id` tool.
+async fn handle_find_recording_by_trace_id(id: &Value, arguments: Option<&Value>) -> Value {
+    let start = Instant::now();
+    let args = match arguments {
+        Some(a) => a,
+        None => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing arguments for find_recording_by_trace_id"),
+            );
+        }
+    };
+
+    let backend = match args.get("backend").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(id, tool_result_error("Missing required argument: backend"));
+        }
+    };
+    let trace_id = match args.get("trace_id").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(id, tool_result_error("Missing required argument: trace_id"));
+        }
+    };
+
+    let mut cli = vec![
+        "trace".to_string(),
+        "--backend".to_string(),
+        backend.clone(),
+        "--trace-id".to_string(),
+        trace_id,
+        "--format".to_string(),
+        "jsonl".to_string(),
+    ];
+    if let Some(url) = args.get("backend_url").and_then(Value::as_str)
+        && !url.is_empty()
+    {
+        if backend == "grafana-tempo" {
+            cli.push("--grafana-url".to_string());
+        } else {
+            cli.push("--url".to_string());
+        }
+        cli.push(url.to_string());
+    }
+    if let Some(uid) = args.get("datasource_uid").and_then(Value::as_str)
+        && !uid.is_empty()
+    {
+        cli.push("--datasource-uid".to_string());
+        cli.push(uid.to_string());
+    }
+
+    match run_ct_observe_jsonl(cli).await {
+        Ok(rows) => {
+            let pretty = serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".to_string());
+            let duration_ms = start.elapsed().as_millis();
+            jsonrpc_result(id, tool_result_text_with_timing(&pretty, duration_ms))
+        }
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2368,19 +2709,83 @@ mod tests {
     fn test_handle_tools_list() {
         let resp = handle_tools_list(&json!(2));
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 4);
+        // 4 trace tools + 2 observability-discovery tools.
+        assert_eq!(tools.len(), 6);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"exec_script"));
         assert!(names.contains(&"trace_info"));
         assert!(names.contains(&"list_source_files"));
         assert!(names.contains(&"read_source_file"));
+        assert!(names.contains(&"find_recordings_by_window"));
+        assert!(names.contains(&"find_recording_by_trace_id"));
 
         // Verify each tool has an inputSchema.
         for tool in tools {
             assert!(
                 tool.get("inputSchema").is_some(),
                 "tool missing inputSchema"
+            );
+        }
+    }
+
+    #[test]
+    fn test_find_recordings_by_window_schema_is_well_formed() {
+        let tool = find_recordings_by_window_tool();
+        assert_eq!(tool["name"], "find_recordings_by_window");
+        let required = tool["inputSchema"]["required"]
+            .as_array()
+            .expect("required array");
+        let required: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(required.contains(&"backend"));
+        assert!(required.contains(&"from_time"));
+        assert!(required.contains(&"to_time"));
+        // Optional disambiguation parameters.
+        let props = tool["inputSchema"]["properties"]
+            .as_object()
+            .expect("properties");
+        assert!(props.contains_key("service"));
+        assert!(props.contains_key("traceql"));
+        assert!(props.contains_key("datasource_uid"));
+    }
+
+    #[test]
+    fn test_find_recording_by_trace_id_schema_is_well_formed() {
+        let tool = find_recording_by_trace_id_tool();
+        assert_eq!(tool["name"], "find_recording_by_trace_id");
+        let required = tool["inputSchema"]["required"]
+            .as_array()
+            .expect("required array");
+        let required: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(required.contains(&"backend"));
+        assert!(required.contains(&"trace_id"));
+    }
+
+    /// Verifies that the JSONL parser used by `find_recordings_by_window`
+    /// and `find_recording_by_trace_id` accepts a small fixture file that
+    /// mirrors real `ct-observe extract --format jsonl` output, including
+    /// the `dive_in_url` field that subsequent tools consume.
+    #[test]
+    fn test_ct_observe_jsonl_fixture_parses() {
+        let fixture = std::fs::read_to_string("tests/fixtures/observability/jaeger-extract.jsonl")
+            .expect("fixture exists");
+        let rows: Vec<Value> = fixture
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("valid jsonl row"))
+            .collect();
+        assert!(rows.len() >= 2, "fixture should have multiple rows");
+        // Every row should expose the agent-facing fields.
+        for row in &rows {
+            assert!(row.get("trace_id").is_some(), "missing trace_id: {row}");
+            assert!(row.get("span_id").is_some(), "missing span_id: {row}");
+            let dive_in = row
+                .get("dive_in_url")
+                .and_then(Value::as_str)
+                .expect("dive_in_url must be a string");
+            assert!(
+                dive_in.starts_with("http://") || dive_in.starts_with("https://"),
+                "dive_in_url should be a URL: {dive_in}"
             );
         }
     }
@@ -2588,10 +2993,8 @@ mod tests {
         std::fs::write(source_dir.join("main.py"), "print('hello')").unwrap();
 
         let source_path = source_dir.join("main.py");
-        let result = read_source_from_trace_dir(
-            trace_dir.to_str().unwrap(),
-            source_path.to_str().unwrap(),
-        );
+        let result =
+            read_source_from_trace_dir(trace_dir.to_str().unwrap(), source_path.to_str().unwrap());
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
         assert_eq!(result.unwrap(), "print('hello')");
 
@@ -2641,8 +3044,7 @@ mod tests {
         std::fs::create_dir_all(tmp.join("program/src")).unwrap();
         std::fs::write(tmp.join("program/src/main.py"), "x = 1").unwrap();
 
-        let result =
-            read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/src/main.py");
+        let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/src/main.py");
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
         assert_eq!(result.unwrap(), "x = 1");
 
@@ -2665,19 +3067,13 @@ mod tests {
 
         // Also embed it under files/.
         let abs_source = source_dir.join("lib.py");
-        let relative = abs_source
-            .to_str()
-            .unwrap()
-            .strip_prefix('/')
-            .unwrap();
+        let relative = abs_source.to_str().unwrap().strip_prefix('/').unwrap();
         let embedded = trace_dir.join("files").join(relative);
         std::fs::create_dir_all(embedded.parent().unwrap()).unwrap();
         std::fs::write(&embedded, "# embedded version").unwrap();
 
-        let result = read_source_from_trace_dir(
-            trace_dir.to_str().unwrap(),
-            abs_source.to_str().unwrap(),
-        );
+        let result =
+            read_source_from_trace_dir(trace_dir.to_str().unwrap(), abs_source.to_str().unwrap());
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
         assert_eq!(
             result.unwrap(),
