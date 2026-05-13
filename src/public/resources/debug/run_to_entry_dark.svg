@@ -1,15 +1,8 @@
 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_95_650)">
 <path d="M16 14L5.33333 14" stroke="#DDDDDD" stroke-miterlimit="10"/>
 <path d="M16 11L5.33333 11" stroke="#DDDDDD" stroke-miterlimit="10"/>
 <path d="M16 8H8.88889" stroke="#DDDDDD" stroke-miterlimit="10"/>
 <path d="M16 5L5.33333 5" stroke="#DDDDDD" stroke-miterlimit="10"/>
 <path d="M16 2L5.33333 2" stroke="#DDDDDD" stroke-miterlimit="10"/>
-<path d="M3.12636e-05 4.83221L5.33339 7.91627L2.96162e-05 11.0003" fill="#DDDDDD"/>
-</g>
-<defs>
-<clipPath id="clip0_95_650">
-<rect width="16" height="16" fill="white" transform="matrix(1 0 0 -1 0 16)"/>
-</clipPath>
-</defs>
+<path d="M7.46011e-07 4.83221L5.33336 7.91627L-9.01353e-07 11.0003" fill="#DDDDDD"/>
 </svg>
