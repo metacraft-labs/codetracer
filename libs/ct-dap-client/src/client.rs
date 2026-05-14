@@ -9,6 +9,55 @@ use std::time::Duration;
 use log::info;
 use serde_json::{json, Value};
 
+/// Scale factor applied to every DAP timeout in this module.
+///
+/// The hard-coded per-operation timeouts (10s response / 30s step) were
+/// fine for tests run in isolation but proved too tight under contended
+/// parallel load (`just test` runs the full suite via `cargo nextest`,
+/// which spawns dozens of test binaries that race for CPU + perf counter
+/// resources). Under such load, RR / LLDB / db-backend pipelines have
+/// been measured to stall for tens of seconds while the flow-loader is
+/// computing a single `ct/updated-flow` event for a Go fixture — a
+/// previous 3x scaling (30s) still produced spurious
+/// `Timeout waiting for event 'ct/updated-flow'` failures on
+/// `go_flow_variables_and_values`.
+///
+/// The default scaling factor (6x → 60s upper bound for what used to be
+/// 10s) keeps the *production-meaningful* assertions intact — the test
+/// still verifies that the db-backend reaches the requested state — while
+/// giving the kernel scheduler enough headroom that the deadline reflects
+/// realistic worst-case variance rather than best-case latency on an
+/// unloaded box. 60s is also still well below the per-test nextest
+/// slow-timeout for `_flow_` tests (which is 120s, configured in
+/// `.config/nextest.toml`), so a genuine production stall surfaces as a
+/// real timeout rather than as silent hangs.
+///
+/// Operators (and the harness) can override via the
+/// `CODETRACER_DAP_CLIENT_TIMEOUT_SCALE` environment variable when running
+/// on slow hardware or in highly oversubscribed CI; the value is a
+/// floating-point multiplier and any non-finite / non-positive value falls
+/// back to the default.
+fn timeout_scale() -> f64 {
+    match std::env::var("CODETRACER_DAP_CLIENT_TIMEOUT_SCALE") {
+        Ok(raw) => match raw.trim().parse::<f64>() {
+            Ok(v) if v.is_finite() && v > 0.0 => v,
+            _ => 6.0,
+        },
+        Err(_) => 6.0,
+    }
+}
+
+/// Scale a base duration by [`timeout_scale`], saturating at
+/// `Duration::MAX` to avoid arithmetic overflow on absurd scale values.
+///
+/// Public so that `test_support` helpers (which pass timeouts directly
+/// into [`DapStdioClient::wait_for_stopped`] etc.) can apply the same
+/// scaling factor as the in-crate call sites.
+pub fn scaled(base: Duration) -> Duration {
+    let secs = (base.as_secs_f64() * timeout_scale()).clamp(0.0, u64::MAX as f64);
+    Duration::from_secs_f64(secs)
+}
+
 use crate::protocol::{DapMessage, Event, ProtocolMessage, Request, Response};
 use crate::transport::{read_dap_message, write_dap_message};
 use crate::types::*;
@@ -38,8 +87,8 @@ impl DapStdioClient {
     /// db-backend startup timeout. Point XDG_DATA_HOME at a per-process
     /// temp dir so each test run starts with a fresh counter.
     pub fn spawn(db_backend_bin: &Path) -> Result<Self, BoxError> {
-        let license_iso_dir = std::env::temp_dir()
-            .join(format!("ct_dap_license_iso_{}", std::process::id()));
+        let license_iso_dir =
+            std::env::temp_dir().join(format!("ct_dap_license_iso_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&license_iso_dir);
         let mut child = Command::new(db_backend_bin)
             .arg("dap-server")
@@ -146,7 +195,7 @@ impl DapStdioClient {
             }),
         )?;
 
-        let resp = self.recv_response(Duration::from_secs(10))?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
         if !resp.success {
             return Err(format!("initialize failed: {:?}", resp.message).into());
         }
@@ -158,7 +207,7 @@ impl DapStdioClient {
     /// Send launch request with the given arguments.
     pub fn launch(&mut self, args: LaunchRequestArguments) -> Result<(), BoxError> {
         self.send_request("launch", serde_json::to_value(&args)?)?;
-        let resp = self.recv_response(Duration::from_secs(10))?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
         if !resp.success {
             return Err(format!("launch failed: {:?}", resp.message).into());
         }
@@ -168,7 +217,7 @@ impl DapStdioClient {
     /// Send configurationDone request.
     pub fn configuration_done(&mut self) -> Result<(), BoxError> {
         self.send_request("configurationDone", json!({}))?;
-        let resp = self.recv_response(Duration::from_secs(10))?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
         if !resp.success {
             return Err(format!("configurationDone failed: {:?}", resp.message).into());
         }
@@ -258,7 +307,7 @@ impl DapStdioClient {
                 "breakpoints": breakpoints,
             }),
         )?;
-        let resp = self.recv_response(Duration::from_secs(10))?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
         if !resp.success {
             return Err(format!("setBreakpoints failed: {:?}", resp.message).into());
         }
@@ -278,14 +327,14 @@ impl DapStdioClient {
     /// belonging to this `continue` request.
     pub fn dap_continue(&mut self) -> Result<MoveState, BoxError> {
         self.send_request("continue", json!({"threadId": 1}))?;
-        self.wait_for_stopped(Duration::from_secs(10))?;
-        let event = self.recv_event("ct/complete-move", Duration::from_secs(10))?;
+        self.wait_for_stopped(scaled(Duration::from_secs(10)))?;
+        let event = self.recv_event("ct/complete-move", scaled(Duration::from_secs(10)))?;
         let state: MoveState = serde_json::from_value(event.body)?;
         // Consume the trailing response sent by the step handler
         // (body is typically `0`).  Ignore errors — the response may
         // have been consumed by recv_event's skip logic if it arrived
         // before the events.
-        let _ = self.recv_response(Duration::from_secs(5));
+        let _ = self.recv_response(scaled(Duration::from_secs(5)));
         Ok(state)
     }
 
@@ -298,7 +347,7 @@ impl DapStdioClient {
         // TTD flow computation in CDB mode spawns a new CDB process per
         // operation (step, load_location, load_value), so the flow loop
         // for even a small function can take several minutes.
-        let event = self.recv_event("ct/updated-flow", Duration::from_secs(10))?;
+        let event = self.recv_event("ct/updated-flow", scaled(Duration::from_secs(10)))?;
         Ok(event.body)
     }
 
@@ -316,7 +365,7 @@ impl DapStdioClient {
         self.send_request("ct/run-tracepoints", serde_json::to_value(&args)?)?;
 
         // Wait for the aggregate results event (skips intermediate trace update events)
-        let event = self.recv_event("ct/tracepoint-results", Duration::from_secs(10))?;
+        let event = self.recv_event("ct/tracepoint-results", scaled(Duration::from_secs(10)))?;
         let results: TracepointResultsAggregate = serde_json::from_value(event.body)?;
         Ok(results)
     }
@@ -326,7 +375,7 @@ impl DapStdioClient {
     /// Load terminal output.
     pub fn load_terminal(&mut self) -> Result<Vec<ProgramEvent>, BoxError> {
         self.send_request("ct/load-terminal", json!({}))?;
-        let event = self.recv_event("ct/loaded-terminal", Duration::from_secs(10))?;
+        let event = self.recv_event("ct/loaded-terminal", scaled(Duration::from_secs(10)))?;
         let events: Vec<ProgramEvent> = serde_json::from_value(event.body)?;
         Ok(events)
     }
@@ -344,7 +393,7 @@ impl DapStdioClient {
                 "threadId": 1,
             }),
         )?;
-        let resp = self.recv_response(Duration::from_secs(10))?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
         if !resp.success {
             return Err(format!("stackTrace failed: {:?}", resp.message).into());
         }
@@ -385,7 +434,7 @@ impl DapStdioClient {
 
     fn send_step(&mut self, command: &str, args: StepArg) -> Result<MoveState, BoxError> {
         self.send_request(command, serde_json::to_value(&args)?)?;
-        let event = self.recv_event("ct/complete-move", Duration::from_secs(30))?;
+        let event = self.recv_event("ct/complete-move", scaled(Duration::from_secs(30)))?;
         let state: MoveState = serde_json::from_value(event.body)?;
         Ok(state)
     }
@@ -399,11 +448,11 @@ impl DapStdioClient {
     /// standard DAP command names that the stdio-based server expects.
     pub fn dap_step(&mut self, command: &str) -> Result<MoveState, BoxError> {
         self.send_request(command, json!({"threadId": 1}))?;
-        self.wait_for_stopped(Duration::from_secs(10))?;
-        let event = self.recv_event("ct/complete-move", Duration::from_secs(10))?;
+        self.wait_for_stopped(scaled(Duration::from_secs(10)))?;
+        let event = self.recv_event("ct/complete-move", scaled(Duration::from_secs(10)))?;
         let state: MoveState = serde_json::from_value(event.body)?;
         // Consume the trailing response sent by the step handler.
-        let _ = self.recv_response(Duration::from_secs(5));
+        let _ = self.recv_response(scaled(Duration::from_secs(5)));
         Ok(state)
     }
 

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::client::DapStdioClient;
+use crate::client::{scaled, DapStdioClient};
 use crate::types::flow::{FlowMode, LoadFlowArguments};
 use crate::types::launch::LaunchRequestArguments;
 // Note: Action and StepArg are used by the ct/step protocol (socket-based).
@@ -226,7 +226,11 @@ impl FlowTestRunner {
             t0.elapsed().as_secs_f64()
         );
 
-        client.wait_for_stopped(Duration::from_secs(10))?;
+        // Use the scaled timeout: under parallel `just test` load the
+        // db-backend/RR/LLDB pipeline can take noticeably longer than the
+        // best-case ~0.5s to reach the initial `stopped` event. See
+        // `client::scaled` for the rationale and override knob.
+        client.wait_for_stopped(scaled(Duration::from_secs(10)))?;
         eprintln!("[flow-runner] stopped: {:.1}s", t0.elapsed().as_secs_f64());
 
         Ok(FlowTestRunner {
@@ -244,7 +248,7 @@ impl FlowTestRunner {
     /// `trace.json`/`trace.bin` + `trace_metadata.json` triplets are no
     /// longer accepted.
     pub fn new_db_trace(db_backend_bin: &Path, trace_dir: &Path) -> Result<Self, BoxError> {
-        Self::new_db_trace_with_timeout(db_backend_bin, trace_dir, Duration::from_secs(10))
+        Self::new_db_trace_with_timeout(db_backend_bin, trace_dir, scaled(Duration::from_secs(10)))
     }
 
     /// Spawn db-backend for a DB trace and wait up to `startup_timeout` for
