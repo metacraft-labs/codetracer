@@ -2355,16 +2355,66 @@ impl Handler {
         }
     }
     pub fn threads(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        self.respond_dap(
-            request,
-            dap_types::ThreadsResponseBody {
-                threads: vec![dap_types::Thread {
+        // For multi-process recordings (fork / exec), enumerate the recorded
+        // processes via `ReplaySession::list_processes` and surface one DAP
+        // `Thread` per process. The DAP spec has no first-class "process"
+        // concept, so VS Code-style clients use the threads list as the
+        // process selector for multi-process debugging.
+        //
+        // The thread id mapping is `pid as i64`. PIDs are unique within a
+        // trace (rr preserves them across replay), so this is a stable
+        // identifier across repeated `threads` requests in a session.
+        //
+        // For traces without process metadata (in-process backends, single-
+        // process recordings, or worker errors) `list_processes` returns a
+        // synthetic single entry — we map it to the historical
+        // `Thread { id: 1, name: "<thread 1>" }` to preserve behaviour for
+        // existing single-process traces.
+        let threads = match self.replay.list_processes() {
+            Ok(processes) if !processes.is_empty() => processes
+                .into_iter()
+                .map(|info| {
+                    // pid==0 is the synthetic single-process fallback; keep
+                    // the legacy id and label so we don't break clients that
+                    // hard-coded "<thread 1>".
+                    if info.pid == 0 {
+                        dap_types::Thread {
+                            id: 1,
+                            name: "<thread 1>".to_string(),
+                        }
+                    } else {
+                        // Strip the leading binary path from the recorded
+                        // command for a more readable label. `rr ps` records
+                        // commands like `/full/path/m12_orchestrator` for the
+                        // root and `m12_child_cpp 10` for forked exec'd
+                        // children — we keep the latter form and shorten the
+                        // former to just the basename.
+                        let label = if let Some(first) = info.command.split_whitespace().next() {
+                            let basename = first.rsplit('/').next().unwrap_or(first);
+                            format!("{} (pid {})", basename, info.pid)
+                        } else {
+                            format!("pid {}", info.pid)
+                        };
+                        dap_types::Thread {
+                            id: info.pid as i64,
+                            name: label,
+                        }
+                    }
+                })
+                .collect(),
+            Ok(_) => vec![dap_types::Thread {
+                id: 1,
+                name: "<thread 1>".to_string(),
+            }],
+            Err(e) => {
+                warn!("threads: list_processes failed, falling back to single-thread: {e}");
+                vec![dap_types::Thread {
                     id: 1,
                     name: "<thread 1>".to_string(),
-                }],
-            },
-            sender,
-        )?;
+                }]
+            }
+        };
+        self.respond_dap(request, dap_types::ThreadsResponseBody { threads }, sender)?;
         Ok(())
     }
 

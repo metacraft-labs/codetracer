@@ -67,6 +67,17 @@ pub enum ReplayQuery {
     TtdTracepointEvaluate {
         request: TtdTracepointEvalRequest,
     },
+    /// Query the process table from the trace.
+    ///
+    /// For RR traces, the worker shells out to `rr ps` and returns the parsed
+    /// process tree. For MCR traces, the worker reads process metadata from
+    /// the trace. The returned JSON payload is `Vec<ProcessInfo>` (see
+    /// [`crate::task::ProcessInfo`]).
+    ///
+    /// Used by the DAP `threads` request to enumerate processes in a
+    /// multi-process recording so that VS Code / DAP clients show one thread
+    /// per recorded process instead of a single synthetic thread.
+    GetProcessInfo,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

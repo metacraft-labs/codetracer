@@ -6,7 +6,7 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::task::{
     Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
-    ProgramEvent, VariableWithRecord,
+    ProcessInfo, ProgramEvent, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -69,4 +69,29 @@ pub trait ReplaySession: std::fmt::Debug {
     ) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
     fn current_step_id(&mut self) -> StepId;
+
+    /// Enumerate the processes captured in this trace.
+    ///
+    /// Multi-process traces (fork / exec) record multiple processes; this
+    /// method returns one [`ProcessInfo`] per recorded process. The DAP
+    /// `threads` handler maps each entry to a `Thread { id: pid, name }`
+    /// so that DAP clients see one thread per process.
+    ///
+    /// For single-process recordings (or backends that do not track per-
+    /// process metadata) the default implementation returns a synthetic
+    /// single-entry vector with `pid = 0` and `command = "main"`. This
+    /// preserves the historical "one thread" behavior for non-multiprocess
+    /// traces without weakening the multi-process case.
+    ///
+    /// Implementations that talk to a replay worker (RR / MCR) should
+    /// override this method to forward a `GetProcessInfo` query and parse
+    /// the returned `Vec<ProcessInfo>`.
+    fn list_processes(&mut self) -> Result<Vec<ProcessInfo>, Box<dyn Error>> {
+        Ok(vec![ProcessInfo {
+            pid: 0,
+            ppid: 0,
+            exit_code: None,
+            command: "main".to_string(),
+        }])
+    }
 }

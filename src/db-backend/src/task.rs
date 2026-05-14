@@ -200,6 +200,30 @@ pub struct StepArg {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EmptyArg {}
 
+/// Information about a single process recorded in a multi-process trace.
+///
+/// This mirrors `ct_native_replay::multiprocess::ProcessInfo` so that the
+/// JSON payload returned by the worker's `GetProcessInfo` query deserializes
+/// without any field renaming.
+///
+/// Used by the DAP `threads` handler to enumerate threads (one per process)
+/// for multi-process recordings (fork/exec). For non-multiprocess traces the
+/// backend returns a synthetic single-entry vector with `pid = 0` and
+/// `name = "main"`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProcessInfo {
+    /// Process ID (as recorded; preserved across replay).
+    pub pid: u32,
+    /// Parent process ID. `0` for the root of the recording or when the
+    /// parent was already running before recording started.
+    pub ppid: u32,
+    /// Exit status: `Some(code)` for normal exit, `Some(-signal)` for
+    /// signal-terminated processes, `None` if unknown / still running.
+    pub exit_code: Option<i32>,
+    /// Command line of the process, including arguments.
+    pub command: String,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Variable {

@@ -803,6 +803,33 @@ impl ReplaySession for RecreatorReplaySession {
 
         Err("tracepoint call evaluation did not return a value".into())
     }
+
+    /// Forward `GetProcessInfo` to the replay worker.
+    ///
+    /// The native-backend worker either shells out to `rr ps` (for RR traces)
+    /// or reads the recorded process table (for in-process MCR). On any
+    /// failure we fall back to a synthetic single-process list so the DAP
+    /// `threads` request still returns a non-empty array.
+    fn list_processes(&mut self) -> Result<Vec<crate::task::ProcessInfo>, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self.stable.dispatch_replay_query(ReplayQuery::GetProcessInfo)?;
+        let processes: Vec<crate::task::ProcessInfo> =
+            serde_json::from_str(&response).map_err(|e| -> Box<dyn Error> {
+                format!("GetProcessInfo: failed to parse worker response: {e}; payload: {response}").into()
+            })?;
+        if processes.is_empty() {
+            // Worker returned `[]` (rr ps unavailable or recording metadata
+            // missing). Fall back to one synthetic process so the DAP layer
+            // still surfaces at least one thread to the client.
+            return Ok(vec![crate::task::ProcessInfo {
+                pid: 0,
+                ppid: 0,
+                exit_code: None,
+                command: "main".to_string(),
+            }]);
+        }
+        Ok(processes)
+    }
 }
 
 fn tracepoint_response_value(response: &TtdTracepointEvalResponseEnvelope) -> Option<ValueRecordWithType> {
