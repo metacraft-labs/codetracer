@@ -200,11 +200,33 @@ pub struct FlowTestRunner {
 impl FlowTestRunner {
     /// Spawn db-backend, run DAP init sequence with the given RR trace folder.
     pub fn new(db_backend_bin: &Path, rr_trace_dir: &Path) -> Result<Self, BoxError> {
+        Self::new_with_target_pid(db_backend_bin, rr_trace_dir, None)
+    }
+
+    /// Spawn db-backend targeting a specific process in a multi-process trace.
+    ///
+    /// When `target_pid` is `Some(pid)`, the replay worker (`ct-native-replay`)
+    /// is instructed via the `CT_NATIVE_REPLAY_TARGET_PID` environment variable
+    /// to start `rr replay -f <pid>` (for fork-only children) or `-p <pid>`
+    /// (for exec'd children) instead of following the root process. This
+    /// allows DAP-based flow tests to inspect child-process code paths in
+    /// recordings produced by `m2_parent.c`, `m3_pipe_parent.c`, etc., where
+    /// the breakpoint line is reached only by the child process.
+    pub fn new_with_target_pid(
+        db_backend_bin: &Path,
+        rr_trace_dir: &Path,
+        target_pid: Option<u32>,
+    ) -> Result<Self, BoxError> {
         let t0 = std::time::Instant::now();
         let (launch_folder, wrapper) = prepare_trace_folder(rr_trace_dir)?;
         let ct_rr_worker_exe = find_ct_rr_support()?;
 
-        let mut client = DapStdioClient::spawn(db_backend_bin)?;
+        let pid_str = target_pid.map(|p| p.to_string());
+        let envs: Vec<(&str, &str)> = match pid_str.as_deref() {
+            Some(s) => vec![("CT_NATIVE_REPLAY_TARGET_PID", s)],
+            None => Vec::new(),
+        };
+        let mut client = DapStdioClient::spawn_with_envs(db_backend_bin, &envs)?;
         eprintln!("[flow-runner] spawn: {:.1}s", t0.elapsed().as_secs_f64());
 
         let _caps = client.initialize()?;

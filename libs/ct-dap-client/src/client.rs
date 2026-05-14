@@ -87,14 +87,33 @@ impl DapStdioClient {
     /// db-backend startup timeout. Point XDG_DATA_HOME at a per-process
     /// temp dir so each test run starts with a fresh counter.
     pub fn spawn(db_backend_bin: &Path) -> Result<Self, BoxError> {
+        Self::spawn_with_envs(db_backend_bin, &[])
+    }
+
+    /// Spawn db-backend with additional environment variables.
+    ///
+    /// Each `(key, value)` pair is passed to the child process on top of the
+    /// default isolation env vars (`XDG_DATA_HOME`, `HOME`). Used by multi-
+    /// process tests to inject `CT_NATIVE_REPLAY_TARGET_PID` so the replay
+    /// worker spawns `rr replay -f <pid>` / `-p <pid>` against the requested
+    /// process in the recording.
+    pub fn spawn_with_envs(
+        db_backend_bin: &Path,
+        extra_envs: &[(&str, &str)],
+    ) -> Result<Self, BoxError> {
         let license_iso_dir =
             std::env::temp_dir().join(format!("ct_dap_license_iso_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&license_iso_dir);
-        let mut child = Command::new(db_backend_bin)
+        let mut command = Command::new(db_backend_bin);
+        command
             .arg("dap-server")
             .arg("--stdio")
             .env("XDG_DATA_HOME", &license_iso_dir)
-            .env("HOME", &license_iso_dir)
+            .env("HOME", &license_iso_dir);
+        for (key, value) in extra_envs {
+            command.env(*key, *value);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
