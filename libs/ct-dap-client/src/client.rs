@@ -28,10 +28,24 @@ pub struct DapStdioClient {
 
 impl DapStdioClient {
     /// Spawn a db-backend process and set up DAP communication over stdio.
+    ///
+    /// db-backend (and the ct-native-replay replay-worker it spawns) reads
+    /// the daily-free-tier license counter from `$XDG_DATA_HOME/codetracer/state.db`.
+    /// Without isolation, every test invocation increments the developer's
+    /// real `~/.local/share/codetracer/state.db`; once the daily quota is
+    /// exhausted, the replay-worker exits with
+    /// `daily_replay_limit_reached`, which surfaces in the DAP layer as a
+    /// db-backend startup timeout. Point XDG_DATA_HOME at a per-process
+    /// temp dir so each test run starts with a fresh counter.
     pub fn spawn(db_backend_bin: &Path) -> Result<Self, BoxError> {
+        let license_iso_dir = std::env::temp_dir()
+            .join(format!("ct_dap_license_iso_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&license_iso_dir);
         let mut child = Command::new(db_backend_bin)
             .arg("dap-server")
             .arg("--stdio")
+            .env("XDG_DATA_HOME", &license_iso_dir)
+            .env("HOME", &license_iso_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
