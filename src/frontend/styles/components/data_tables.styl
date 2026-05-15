@@ -189,3 +189,15 @@
   //   background-image: none !important
   //   padding-left: 4px !important
   //   padding-right: 4px !important
+
+// DataTables adds tabindex="0" to .dt-scroll-body and the table element for
+// keyboard navigation. Suppress the system default ring (orange on macOS/Electron)
+// on those elements — the selected row highlight is the visual indicator instead.
+.dt-scroll-body,
+.data-table table,
+.data-table tbody,
+.data-table tr
+  &:focus,
+  &:focus-visible
+    outline: none !important
+    box-shadow: none !important
