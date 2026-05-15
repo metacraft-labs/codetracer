@@ -854,6 +854,8 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
   let categoryName = ($event).toLowerAscii()
   let dropDownId = "category-image"
   var dropDownClass = if event == Filter: "ct-button-image-md-secondary ct-button-no-border" else: "medium-control-button"
+  if self.dropDowns[category]:
+    dropDownClass = dropDownClass & " open"
   let dropDownListId = dropDownId & "-list"
   var dropDownListClass = "dropdown-list"
   var dropDownContainerClass = "dropdown-container"
@@ -1066,11 +1068,13 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
     dropdownElem.style.display = "block"
     self.dropDowns[category] = true
     self.focusedDropDowns[category] = true
+    self.redraw()
 
   proc hideDropdown() =
     let dropdownElem = document.getElementById(dropDownContainerId)
     if dropdownElem != nil:
       dropdownElem.style.display = "none"
+    self.redraw()
 
   buildHtml(
     button(
@@ -1279,7 +1283,7 @@ method render*(self: EventLogComponent): VNode =
   result = buildHtml(
     tdiv(
       class = componentContainerClass("eventLog"),
-      tabIndex = "2",
+      tabIndex = "0",
       onclick = proc(ev: Event, v:VNode) =
         stopPropagationSafe(ev)
         if self.data.ui.activeFocus != self:

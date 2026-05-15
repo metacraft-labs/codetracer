@@ -388,8 +388,9 @@
       padding-left: 15px
       overflow-wrap: break-word
 
-      &:focus
-        outline: 2px solid BORDERS_COLOR !important
+      &:focus-visible
+        outline: none !important
+        box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
     .bug-report-button-container
       display: flex
@@ -401,8 +402,9 @@
       padding-bottom: 5px
       margin-bottom: 10px
 
-      &:focus
-        outline: 2px solid BORDERS_COLOR !important
+      &:focus-visible
+        outline: none !important
+        box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
 // [1vw] file info lang , file info encoding [2vw] file info editor whitespace [20vw] operation [25vw] errors, build output buttons [..] location version control status [3vw] end
 

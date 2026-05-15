@@ -238,7 +238,7 @@ method render*(self: RequestPanelComponent): VNode =
   buildHtml(
     tdiv(
       class = componentContainerClass("request-panel"),
-      tabIndex = "2",
+      tabIndex = "0",
       onclick = proc(ev: Event, v: VNode) =
         ev.stopPropagation()
         if self.data.ui.activeFocus != self:

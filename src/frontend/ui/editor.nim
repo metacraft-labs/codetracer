@@ -1895,7 +1895,7 @@ proc editorView(self: EditorViewComponent): VNode = #{.time.} =
       id = &"editorComponent-{index}",
       class = &"editor code-editor tab {expansionClass}",
       `data-label`= tabInfo.name,
-      tabIndex = "2"
+      tabIndex = "0"
     )
   )
 
