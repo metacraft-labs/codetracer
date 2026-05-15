@@ -15,11 +15,9 @@ button
   &:hover:not(:disabled)
     color: colors-ui-text-primary-body
 
-  &:focus:not(:disabled)
-    outline: 0.125em solid colors-ui-border-focus !important
-
   &:focus-visible:not(:disabled)
-    outline: 0.125em solid colors-ui-border-focus
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
     color: colors-ui-text-primary-body
 
   &:disabled
@@ -161,7 +159,7 @@ button
 #category-image
   background-image: ct-images-layout-tab
 
-  &:focus
+  &.open
     background-image: ct-images-layout-tab-active !important
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
 

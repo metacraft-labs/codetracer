@@ -90,6 +90,23 @@ TRACE_LOG_EDITOR_Z_INDEX = 50
   height: 100% !important
   min-height: 170px
 
+// Replace Electron/OS default accent color (orange on macOS) with our blue.
+:root
+  accent-color: colors-ui-border-focus
+
+// Show focus ring only on keyboard navigation, never on mouse click.
+// :focus-visible catches buttons/divs, but text inputs ALWAYS satisfy
+// :focus-visible in Chromium (by spec), so we also use a JS-driven
+// data-focus-mode attribute on <html> set by mousedown/keydown listeners
+// in ui_js.nim to suppress the ring for inputs on mouse click.
+*:focus:not(:focus-visible)
+  outline: none !important
+  box-shadow: none !important
+
+[data-focus-mode="mouse"] *:focus
+  outline: none !important
+  box-shadow: none !important
+
 html, body
   padding: 0
   margin: 0
@@ -447,6 +464,14 @@ input:checked ~ .checkmark:after
   background-repeat: no-repeat
   background-position: center
   cursor: pointer
+
+  &:focus
+    outline: none !important
+    box-shadow: none !important
+
+  &:focus-visible
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
   &:hover
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND

@@ -1403,6 +1403,21 @@ proc onReady(event: dom.Event) =
     data.tryInitLayout()
     cast[js](dom.document).onmousemove = followMouse
 
+    # Track whether focus was triggered by mouse or keyboard so that CSS can
+    # suppress the focus ring on click even for text inputs (which always match
+    # :focus-visible in Chromium). Sets data-focus-mode="mouse" on <html> on any
+    # mousedown, and "keyboard" when Tab is pressed.
+    {.emit: """
+      document.documentElement.addEventListener('mousedown', function() {
+        document.documentElement.setAttribute('data-focus-mode', 'mouse');
+      }, true);
+      document.documentElement.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+          document.documentElement.setAttribute('data-focus-mode', 'keyboard');
+        }
+      }, true);
+    """.}
+
     # jqueryFind("body").toJs.on(cstring"click", onGlobalClick)
 
     discard windowsetInterval(proc =

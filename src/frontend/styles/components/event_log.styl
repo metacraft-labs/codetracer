@@ -85,7 +85,12 @@
     color: DROPDOWN_TEXT_FOCUSED_COLOR
     background-color: CT_PRIMARY_DEFAULT_FOCUSED !important
     background-image: EVENT_LOG_FA_UP_ICON !important
-    outline: 0px
+    outline: none !important
+    box-shadow: none !important
+
+  &:focus-visible
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
   &:hover
     background-color: CT_PRIMARY_DEFAULT_FOCUSED
@@ -119,7 +124,14 @@
     align-items: center
 
   &:focus
-    border: 1px solid BORDERS_COLOR
+    outline: none !important
+    box-shadow: none !important
+    cursor: pointer
+    background-color: BUTTON_HOVER_BACKGROUND
+
+  &:focus-visible
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
     cursor: pointer
     background-color: BUTTON_HOVER_BACKGROUND
 
@@ -279,7 +291,6 @@
         border-color: colors-ui-surface-primary-tertiary
         background: colors-editor-surface-select
 
-      &:focus,
       &:focus-visible
         outline: none !important
         border-color: colors-ui-surface-primary-tertiary
