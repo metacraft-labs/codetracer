@@ -1,7 +1,7 @@
 import
   std/[ cstrutils, jsre ],
   ui_imports, trace, debug, menu, flow, value, no_source, shortcuts, kdom,
-  trace_macro,
+  trace_macro, trace_static,
   ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/ct_event
 
@@ -1194,6 +1194,82 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
                                  traceLine - 1, traceCol - 1)
     )
     contextMenu &= traceMacroItem
+
+    # "Trace Static Block Execution" action (CTFS-M-StaticBlockTrace).
+    # Heuristic offer: surface the action when the right-clicked line —
+    # or any of the few lines above it inside the current Nim view —
+    # contains a ``static:`` / ``const`` / ``{.compileTime.}`` token.
+    # The langserver itself does the authoritative check via nimsuggest's
+    # ``tracestatic`` query (which matches at evalConstExprAux entry
+    # points), so a false positive here just yields a user-visible
+    # "not a static block" warning.
+    #
+    # TODO: replace the textual heuristic with a real AST / sym check
+    # once nimsuggest exposes a position-classification query that
+    # mirrors what `tracestatic` accepts.
+    let model = self.monacoEditor.toJs.getModel()
+    var showStaticAction = false
+    if not model.isNil:
+      # Walk upward from the cursor for a bounded number of lines.  The
+      # langserver's `tracestatic` query is authoritative — a false
+      # positive here just yields a user-visible "not a static block"
+      # warning, so we err on the side of being permissive within the
+      # scan window.
+      let scanFrom = max(1, traceLine - 20)
+      var scanned = 0
+      for ln in countdown(traceLine, scanFrom):
+        try:
+          let raw = $cast[cstring](model.getLineContent(ln))
+          let trimmed = raw.strip()
+          # `static:` block opener (allow trailing comment).
+          if trimmed.startsWith("static:"):
+            showStaticAction = true
+            break
+          # `const` section / single-line const declaration.
+          if trimmed == "const" or trimmed.startsWith("const ") or
+             trimmed.startsWith("const\t") or trimmed.startsWith("const:"):
+            showStaticAction = true
+            break
+          # `{.compileTime.}` pragma — usually on a proc/func signature.
+          if "{.compileTime" in trimmed or "{. compileTime" in trimmed:
+            showStaticAction = true
+            break
+          # `static(expr)` — single-token form, anywhere on the line.
+          if "static(" in trimmed:
+            showStaticAction = true
+            break
+          # Bail out once the scan crosses a clearly unrelated top-level
+          # construct: an `import`/`type`/`proc`/etc. above us means we
+          # are no longer inside a static: / const section.  Skip the
+          # very first iteration (the right-clicked line itself) so the
+          # action still appears when the user right-clicks directly on
+          # a `proc {.compileTime.}` signature line.
+          if scanned > 0 and trimmed.len > 0 and
+             (trimmed.startsWith("proc ") or trimmed.startsWith("func ") or
+              trimmed.startsWith("template ") or trimmed.startsWith("macro ") or
+              trimmed.startsWith("method ") or trimmed.startsWith("iterator ") or
+              trimmed.startsWith("converter ") or trimmed.startsWith("type ") or
+              trimmed.startsWith("import ") or trimmed.startsWith("from ") or
+              trimmed.startsWith("include ")):
+            break
+          inc scanned
+        except:
+          break
+
+    if showStaticAction:
+      let staticLine = traceLine
+      let staticCol = traceCol
+      let staticPath = tracePath
+      let staticData = traceData
+      let traceStaticItem = ContextMenuItem(
+        name: "Trace Static Block Execution",
+        hint: "",
+        handler: proc(e: Event) =
+          # Monaco positions are 1-based; LSP uses 0-based coordinates.
+          discard traceStaticBlock(staticData, staticPath,
+                                   staticLine - 1, staticCol - 1)
+      )
+      contextMenu &= traceStaticItem
 
   return contextMenu
 
