@@ -175,6 +175,73 @@ package codeTracer:
         inputs = @["ui.js"],
         outputs = @["public/ui.js"])
 
+      discard buildAction("frontend-subwindow-js",
+        codeTracer.executable("nim").
+          subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+          args = @[
+            "-d:chronicles_sinks=json",
+            "-d:chronicles_line_numbers=true",
+            "-d:chronicles_timestamps=UnixTime",
+            "-d:ssl",
+            "--mm:refc",
+            "-d:nimNoLentIterators",
+            "--hints:off",
+            "--warnings:off",
+            "--hint[Processing]:off",
+            "--hint[Conf]:off",
+            "--hint[CC]:off",
+            "--hint[Pattern]:off",
+            "--hint[XDeclaredButNotUsed]:off",
+            "--hint[XCannotRaiseY]:off",
+            "--warning[CaseTransition]:off",
+            "-d:debug",
+            "--debugInfo",
+            "--lineDir:on",
+            "--stacktrace:on",
+            "--linetrace:on",
+            "-d:chronicles_enabled=off",
+            "-d:ctRenderer",
+            "--debugInfo:on",
+            "--lineDir:on",
+            "--hotCodeReloading:on",
+            "--sourcemap:on",
+            "--out:subwindow.js",
+            "--path:libs/NimYAML",
+            "--path:libs/asynctools",
+            "--path:libs/karax/karax",
+            "--path:libs/nim",
+            "--path:libs/nim-chronicles/",
+            "--path:libs/nim-faststreams",
+            "--path:libs/nim-json-serialization",
+            "--path:libs/nim-prompt",
+            "--path:libs/nim-serialization",
+            "--path:libs/nim-stew",
+            "--path:libs/nim-unicodedb/src",
+            "--path:libs/poly",
+            "--path:libs/quicktest",
+            "--path:libs/asynctools",
+            "--path:libs/chronos",
+            "--path:libs/parsetoml/src",
+            "--path:libs/nim-result",
+            "--path:libs/nim-confutils",
+            "--path:libs/nimcrypto",
+            "--path:libs/zip",
+            "--path:libs/jsony/src",
+            "--path:libs/nim-uuid4/src",
+            "js",
+            "src/frontend/subwindow.nim"
+          ]),
+        inputs = @["src/frontend/subwindow.nim"],
+        outputs = @["subwindow.js", "subwindow.js.map"],
+        dependencyPolicy = automaticMonitorPolicy())
+
+      discard buildAction("frontend-src-subwindow-js",
+        codeTracer.executable("sh").subcmd_2d_c(
+          args = @["mkdir -p src && cp subwindow.js src/subwindow.js"]),
+        deps = @["frontend-subwindow-js"],
+        inputs = @["subwindow.js"],
+        outputs = @["src/subwindow.js"])
+
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
           args = @[
