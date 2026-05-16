@@ -104,7 +104,8 @@ package codeTracer:
           "src/frontend/index/ipc_registry.nim",
           "src/frontend/lib/jslib.nim"
         ],
-        outputs = @["tests/ipc_registry_test.js"])
+        outputs = @["tests/ipc_registry_test.js"],
+        dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
@@ -116,7 +117,8 @@ package codeTracer:
             "test-programs/c_sudoku_solver/main.c"
           ]),
         inputs = @["test-programs/c_sudoku_solver/main.c"],
-        outputs = @["build/c/main.tup.o"])
+        outputs = @["build/c/main.tup.o"],
+        dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("c-sudoku-object-with-generated-header",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
@@ -134,4 +136,5 @@ package codeTracer:
           "test-programs/c_sudoku_solver/main.c",
           "build/generated/ct_config.h"
         ],
-        outputs = @["build/c/main.with-header.o"])
+        outputs = @["build/c/main.with-header.o"],
+        dependencyPolicy = automaticMonitorPolicy())
