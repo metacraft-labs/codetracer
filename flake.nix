@@ -103,6 +103,20 @@
       flake = false;
     };
 
+    # Non-flake input: the metacraft-labs/langserver fork (a.k.a. nim-langserver),
+    # branch `codetracer`.  Carries patches on top of upstream nim-lang/langserver
+    # that the CodeTracer GUI depends on — currently `nim/traceExpandMacro`
+    # (M11) and `nim/traceStaticBlock` (CTFS-M-StaticBlockTrace) LSP commands.
+    # The overlay in `perSystem` substitutes nixpkgs' `nimlangserver` src with
+    # this revision, so a stock `nix develop` ships our patched binary.
+    #
+    # `.envrc` can override with `--override-input nim-langserver path:../nim-langserver`
+    # to consume a local sibling checkout during development.
+    nim-langserver = {
+      url = "github:metacraft-labs/langserver?ref=codetracer";
+      flake = false;
+    };
+
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };
@@ -182,6 +196,36 @@
                 "electron-24.8.6"
               ];
             };
+            overlays = [
+              # Substitute nixpkgs' upstream `nimlangserver` source with our
+              # metacraft-labs/langserver fork (branch `codetracer`), so the
+              # binary in the dev shell carries the `nim/traceExpandMacro`
+              # and `nim/traceStaticBlock` LSP commands the CodeTracer GUI
+              # depends on.
+              #
+              # Nixpkgs' `nimlangserver` derivation computes
+              # `meta = final.src.meta // { ... }` inside the
+              # `buildNimPackage` fix-point — so a raw flake-input path
+              # (which lacks a `.meta` attribute, unlike the
+              # `fetchFromGitHub` output it replaces) breaks the inner
+              # evaluation BEFORE `overrideAttrs` has a chance to fix up
+              # the final meta.  We therefore decorate the source with an
+              # empty `meta` via the `//` operator so the inner lookup
+              # succeeds; the final meta is overridden a second time at the
+              # outer derivation level (where `overrideAttrs` does run).
+              (_final: prev: {
+                nimlangserver = prev.nimlangserver.overrideAttrs (old: {
+                  version = "${prev.nimlangserver.version}-metacraft-codetracer";
+                  src = inputs.nim-langserver // {
+                    meta = { };
+                  };
+                  meta = (old.meta or { }) // {
+                    description = "Nim language server (metacraft-labs/langserver, branch codetracer)";
+                    homepage = "https://github.com/metacraft-labs/langserver";
+                  };
+                });
+              })
+            ];
           };
 
           _module.args.unstablePkgs = import nixpkgs-unstable {

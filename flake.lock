@@ -239,16 +239,16 @@
     "codetracer-trace-format_3": {
       "flake": false,
       "locked": {
-        "lastModified": 1773220650,
-        "narHash": "sha256-vYaqyBhbNc3I2pSJI9h00vE9PcJUTsR1oOuG89hj9gc=",
+        "lastModified": 1778770325,
+        "narHash": "sha256-CIE9bNlFs+Bl2zKiiNvcwY177KVvFeho4QO4NuMY2fA=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format",
-        "rev": "549b859962bbc8405b04f59c0585edee0780655c",
+        "rev": "33bd590e39ea514f57663b12706418de6e664ee3",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "ffi-crate-and-format-fixes",
+        "ref": "main",
         "repo": "codetracer-trace-format",
         "type": "github"
       }
@@ -1353,6 +1353,23 @@
         "type": "github"
       }
     },
+    "nim-langserver": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778908939,
+        "narHash": "sha256-+gRSrFfKxZZAhgICwcEAh8HaUGZTqYDO0MPFcXY/ccg=",
+        "owner": "metacraft-labs",
+        "repo": "langserver",
+        "rev": "93841d0c06d5fed8e1104edd028c48defc147a5b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "codetracer",
+        "repo": "langserver",
+        "type": "github"
+      }
+    },
     "nix": {
       "inputs": {
         "flake-compat": [
@@ -2378,6 +2395,7 @@
         "flake-parts": "flake-parts_2",
         "flake-utils": "flake-utils_3",
         "git-hooks-nix": "git-hooks-nix",
+        "nim-langserver": "nim-langserver",
         "nix-blockchain-development": "nix-blockchain-development",
         "nix-blockchain-development-sui": "nix-blockchain-development-sui",
         "nixpkgs": [
