@@ -364,6 +364,24 @@ package codeTracer:
         inputs = @["subwindow.js"],
         outputs = @["src/subwindow.js"])
 
+      discard buildAction("frontend-index-html",
+        codeTracer.executable("sh").subcmd_2d_c(
+          args = @["cp src/frontend/index.html index.html"]),
+        inputs = @["src/frontend/index.html"],
+        outputs = @["index.html"])
+
+      discard buildAction("frontend-subwindow-html",
+        codeTracer.executable("sh").subcmd_2d_c(
+          args = @["cp src/frontend/subwindow.html subwindow.html"]),
+        inputs = @["src/frontend/subwindow.html"],
+        outputs = @["subwindow.html"])
+
+      discard buildAction("frontend-src-helpers-js",
+        codeTracer.executable("sh").subcmd_2d_c(
+          args = @["mkdir -p src && cp helpers.js src/helpers.js"]),
+        inputs = @["helpers.js"],
+        outputs = @["src/helpers.js"])
+
       discard buildAction("frontend",
         codeTracer.executable("sh").subcmd_2d_c(
           args = @[
@@ -374,19 +392,28 @@ package codeTracer:
             "printf '%s\n' 'src/subwindow.js'; " &
             "printf '%s\n' 'public/ui.js'; " &
             "printf '%s\n' 'server_index.js'; " &
+            "printf '%s\n' 'index.html'; " &
+            "printf '%s\n' 'subwindow.html'; " &
+            "printf '%s\n' 'src/helpers.js'; " &
             "} > build/reprobuild/frontend.stamp"
           ]),
         deps = @[
           "frontend-src-index-js",
           "frontend-src-subwindow-js",
           "frontend-public-ui-js",
-          "frontend-server-index-js"
+          "frontend-server-index-js",
+          "frontend-index-html",
+          "frontend-subwindow-html",
+          "frontend-src-helpers-js"
         ],
         inputs = @[
           "src/index.js",
           "src/subwindow.js",
           "public/ui.js",
-          "server_index.js"
+          "server_index.js",
+          "index.html",
+          "subwindow.html",
+          "src/helpers.js"
         ],
         outputs = @["build/reprobuild/frontend.stamp"])
 
