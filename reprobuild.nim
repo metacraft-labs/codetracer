@@ -364,6 +364,32 @@ package codeTracer:
         inputs = @["subwindow.js"],
         outputs = @["src/subwindow.js"])
 
+      discard buildAction("frontend",
+        codeTracer.executable("sh").subcmd_2d_c(
+          args = @[
+            "mkdir -p build/reprobuild && " &
+            "{ " &
+            "printf '%s\n' 'CodeTracer frontend aggregate'; " &
+            "printf '%s\n' 'src/index.js'; " &
+            "printf '%s\n' 'src/subwindow.js'; " &
+            "printf '%s\n' 'public/ui.js'; " &
+            "printf '%s\n' 'server_index.js'; " &
+            "} > build/reprobuild/frontend.stamp"
+          ]),
+        deps = @[
+          "frontend-src-index-js",
+          "frontend-src-subwindow-js",
+          "frontend-public-ui-js",
+          "frontend-server-index-js"
+        ],
+        inputs = @[
+          "src/index.js",
+          "src/subwindow.js",
+          "public/ui.js",
+          "server_index.js"
+        ],
+        outputs = @["build/reprobuild/frontend.stamp"])
+
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
           args = @[
