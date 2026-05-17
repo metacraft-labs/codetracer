@@ -684,6 +684,7 @@ package codeTracer:
           deps = codetracerDeps,
           inputs = codetracerInputs,
           outputs = @["build/reprobuild/codetracer.stamp"])
+        defaultBuildAction("codetracer")
 
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
