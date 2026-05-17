@@ -69,6 +69,7 @@ proc stampScript(path, title: string; entries: openArray[string]): string =
   result.add("} > " & quoteShell(path) & "\n")
 
 package codeTracer:
+  usesImportPath "reprobuild/packages"
   uses:
     "nim >=1.6 <2.0"
     "nim-js >=2"
@@ -76,31 +77,7 @@ package codeTracer:
     "gcc >=1"
     "sh >=1"
 
-  executable nimTool:
-    name "nim"
-    cli:
-      subcmd "-d:asyncBackend=asyncdispatch":
-        pos args, seq[string], position = 0
-
-  executable nimJsTool:
-    name "nim-js"
-    cli:
-      subcmd "-d:asyncBackend=asyncdispatch":
-        pos args, seq[string], position = 0
-
-  executable shTool:
-    name "sh"
-    cli:
-      subcmd "-c":
-        pos args, seq[string], position = 0
-
-  executable gccTool:
-    name "gcc"
-    cli:
-      subcmd "-fPIC":
-        pos args, seq[string], position = 0
-
-    build:
+  build:
       let headerScript =
         "set -eu\n" &
         "out=$1\n" &
@@ -113,13 +90,12 @@ package codeTracer:
         "EOF\n"
 
       discard buildAction("generate-config-header",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @[headerScript, "sh", "build/generated/ct_config.h"]),
         outputs = @["build/generated/ct_config.h"])
 
       discard buildAction("nim-js-ipc-registry-test",
-        codeTracer.executable("nim-js").
-          subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+        nim_js.js(
           args = @[
             "-d:chronicles_sinks=json",
             "-d:chronicles_line_numbers=true",
@@ -183,8 +159,7 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-ui-js",
-        codeTracer.executable("nim-js").
-          subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+        nim_js.js(
           args = @[
             "-d:chronicles_sinks=json",
             "-d:chronicles_line_numbers=true",
@@ -244,15 +219,13 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-public-ui-js",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @["mkdir -p public && cp ui.js public/ui.js"]),
-        deps = @["frontend-ui-js"],
         inputs = @["ui.js"],
         outputs = @["public/ui.js"])
 
       discard buildAction("frontend-index-js",
-        codeTracer.executable("nim-js").
-          subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+        nim_js.js(
           args = @[
             "-d:chronicles_sinks=json",
             "-d:chronicles_line_numbers=true",
@@ -308,15 +281,13 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-src-index-js",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @["cp index.js src/index.js"]),
-        deps = @["frontend-index-js"],
         inputs = @["index.js"],
         outputs = @["src/index.js"])
 
       discard buildAction("frontend-server-index-js",
-        codeTracer.executable("nim-js").
-          subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+        nim_js.js(
           args = @[
             "-d:chronicles_sinks=json",
             "-d:chronicles_line_numbers=true",
@@ -373,8 +344,7 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-subwindow-js",
-        codeTracer.executable("nim-js").
-          subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+        nim_js.js(
           args = @[
             "-d:chronicles_sinks=json",
             "-d:chronicles_line_numbers=true",
@@ -433,26 +403,25 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-src-subwindow-js",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @["mkdir -p src && cp subwindow.js src/subwindow.js"]),
-        deps = @["frontend-subwindow-js"],
         inputs = @["subwindow.js"],
         outputs = @["src/subwindow.js"])
 
       discard buildAction("frontend-index-html",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @["cp src/frontend/index.html index.html"]),
         inputs = @["src/frontend/index.html"],
         outputs = @["index.html"])
 
       discard buildAction("frontend-subwindow-html",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @["cp src/frontend/subwindow.html subwindow.html"]),
         inputs = @["src/frontend/subwindow.html"],
         outputs = @["subwindow.html"])
 
       discard buildAction("frontend-src-helpers-js",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @["mkdir -p src && cp helpers.js src/helpers.js"]),
         inputs = @["helpers.js"],
         outputs = @["src/helpers.js"])
@@ -464,32 +433,29 @@ package codeTracer:
       let publicTree = collectPublicResourceTree(PublicResourceRoot)
       for dirPath in publicTree.dirs:
         providerDirectoryInput(normalizedRelPath(dirPath))
-      var publicResourceDeps: seq[string] = @[]
       var publicResourceOutputs: seq[string] = @[]
       for sourcePath in publicTree.files:
         let relative = normalizedRelPath(relativePath(sourcePath,
           PublicResourceRoot))
         let actionId = publicResourceActionId(relative)
         let output = publicResourceOutput(sourcePath)
-        publicResourceDeps.add(actionId)
         publicResourceOutputs.add(output)
         discard buildAction(actionId,
-          codeTracer.executable("sh").subcmd_2d_c(
+          sh.c(
             args = @[copyScript(normalizedRelPath(sourcePath), output)]),
           inputs = @[normalizedRelPath(sourcePath)],
           outputs = @[output])
 
       discard buildAction("frontend-public-resources",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @[stampScript("build/reprobuild/frontend-public-resources.stamp",
             "CodeTracer frontend public resource tree",
             publicResourceOutputs)]),
-        deps = publicResourceDeps,
         inputs = publicResourceOutputs,
         outputs = @["build/reprobuild/frontend-public-resources.stamp"])
 
       discard buildAction("frontend",
-        codeTracer.executable("sh").subcmd_2d_c(
+        sh.c(
           args = @[
             "mkdir -p build/reprobuild && " &
             "{ " &
@@ -504,16 +470,6 @@ package codeTracer:
             "printf '%s\n' 'build/reprobuild/frontend-public-resources.stamp'; " &
             "} > build/reprobuild/frontend.stamp"
           ]),
-        deps = @[
-          "frontend-src-index-js",
-          "frontend-src-subwindow-js",
-          "frontend-public-ui-js",
-          "frontend-server-index-js",
-          "frontend-index-html",
-          "frontend-subwindow-html",
-          "frontend-src-helpers-js",
-          "frontend-public-resources"
-        ],
         inputs = @[
           "src/index.js",
           "src/subwindow.js",
@@ -526,29 +482,26 @@ package codeTracer:
         ],
         outputs = @["build/reprobuild/frontend.stamp"])
 
-      var codetracerDeps = @["frontend"]
       var codetracerInputs = @["build/reprobuild/frontend.stamp"]
       var codetracerEntries = @["build/reprobuild/frontend.stamp"]
 
       if fileExists("src/config/default_layout.json"):
         discard buildAction("config-default-layout-json",
-          codeTracer.executable("sh").subcmd_2d_c(
+          sh.c(
             args = @[copyScript("src/config/default_layout.json",
               "config/default_layout.json")]),
           inputs = @["src/config/default_layout.json"],
           outputs = @["config/default_layout.json"])
-        codetracerDeps.add("config-default-layout-json")
         codetracerInputs.add("config/default_layout.json")
         codetracerEntries.add("config/default_layout.json")
 
       if fileExists("src/config/default_config.yaml"):
         discard buildAction("config-default-config-yaml",
-          codeTracer.executable("sh").subcmd_2d_c(
+          sh.c(
             args = @[copyScript("src/config/default_config.yaml",
               "config/default_config.yaml")]),
           inputs = @["src/config/default_config.yaml"],
           outputs = @["config/default_config.yaml"])
-        codetracerDeps.add("config-default-config-yaml")
         codetracerInputs.add("config/default_config.yaml")
         codetracerEntries.add("config/default_config.yaml")
 
@@ -564,8 +517,7 @@ package codeTracer:
 
       if fileExists("src/ct/db_backend_record.nim"):
         discard buildAction("db-backend-record",
-          codeTracer.executable("nim").
-            subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+          nim.c(
             args = @[
               "-d:chronicles_sinks=json",
               "-d:chronicles_line_numbers=true",
@@ -615,14 +567,12 @@ package codeTracer:
           inputs = @["src/ct/db_backend_record.nim"],
           outputs = @["src/bin/db-backend-record"],
           dependencyPolicy = automaticMonitorPolicy())
-        codetracerDeps.add("db-backend-record")
         codetracerInputs.add("src/bin/db-backend-record")
         codetracerEntries.add("src/bin/db-backend-record")
 
       if fileExists("src/ct/codetracer.nim"):
         discard buildAction("ct",
-          codeTracer.executable("nim").
-            subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+          nim.c(
             args = @[
               "-d:chronicles_sinks=json",
               "-d:chronicles_line_numbers=true",
@@ -672,22 +622,20 @@ package codeTracer:
           inputs = @["src/ct/codetracer.nim"],
           outputs = @["src/bin/ct"],
           dependencyPolicy = automaticMonitorPolicy())
-        codetracerDeps.add("ct")
         codetracerInputs.add("src/bin/ct")
         codetracerEntries.add("src/bin/ct")
 
       if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
         discard buildAction("codetracer",
-          codeTracer.executable("sh").subcmd_2d_c(
+          sh.c(
             args = @[stampScript("build/reprobuild/codetracer.stamp",
               "CodeTracer selected app aggregate", codetracerEntries)]),
-          deps = codetracerDeps,
           inputs = codetracerInputs,
           outputs = @["build/reprobuild/codetracer.stamp"])
         defaultBuildAction("codetracer")
 
       discard buildAction("c-sudoku-object-tup",
-        codeTracer.executable("gcc").subcmd_2d_fPIC(
+        gcc.compile(
           args = @[
             "-g3",
             "-c",
@@ -700,7 +648,7 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("c-sudoku-object-with-generated-header",
-        codeTracer.executable("gcc").subcmd_2d_fPIC(
+        gcc.compile(
           args = @[
             "-g3",
             "-c",
@@ -710,7 +658,6 @@ package codeTracer:
             "build/c/main.with-header.o",
             "test-programs/c_sudoku_solver/main.c"
           ]),
-        deps = @["generate-config-header"],
         inputs = @[
           "test-programs/c_sudoku_solver/main.c",
           "build/generated/ct_config.h"
