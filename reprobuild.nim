@@ -634,33 +634,17 @@ package codeTracer:
           outputs = @["build/reprobuild/codetracer.stamp"])
         defaultBuildAction("codetracer")
 
-      discard buildAction("c-sudoku-object-tup",
-        gcc.compile(
-          args = @[
-            "-g3",
-            "-c",
-            "-o",
-            "build/c/main.tup.o",
-            "test-programs/c_sudoku_solver/main.c"
-          ]),
-        inputs = @["test-programs/c_sudoku_solver/main.c"],
-        outputs = @["build/c/main.tup.o"],
-        dependencyPolicy = automaticMonitorPolicy())
+      gcc.compile(
+        actionId = "c-sudoku-object-tup",
+        source = "test-programs/c_sudoku_solver/main.c",
+        output = "build/c/main.tup.o",
+        pic = true,
+        debug3 = true)
 
-      discard buildAction("c-sudoku-object-with-generated-header",
-        gcc.compile(
-          args = @[
-            "-g3",
-            "-c",
-            "-include",
-            "build/generated/ct_config.h",
-            "-o",
-            "build/c/main.with-header.o",
-            "test-programs/c_sudoku_solver/main.c"
-          ]),
-        inputs = @[
-          "test-programs/c_sudoku_solver/main.c",
-          "build/generated/ct_config.h"
-        ],
-        outputs = @["build/c/main.with-header.o"],
-        dependencyPolicy = automaticMonitorPolicy())
+      gcc.compile(
+        actionId = "c-sudoku-object-with-generated-header",
+        source = "test-programs/c_sudoku_solver/main.c",
+        output = "build/c/main.with-header.o",
+        pic = true,
+        debug3 = true,
+        includes = @["build/generated/ct_config.h"])
