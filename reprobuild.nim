@@ -71,12 +71,19 @@ proc stampScript(path, title: string; entries: openArray[string]): string =
 package codeTracer:
   uses:
     "nim >=1.6 <2.0"
+    "nim-js >=2"
     "node >=20"
     "gcc >=1"
     "sh >=1"
 
   executable nimTool:
     name "nim"
+    cli:
+      subcmd "-d:asyncBackend=asyncdispatch":
+        pos args, seq[string], position = 0
+
+  executable nimJsTool:
+    name "nim-js"
     cli:
       subcmd "-d:asyncBackend=asyncdispatch":
         pos args, seq[string], position = 0
@@ -111,7 +118,7 @@ package codeTracer:
         outputs = @["build/generated/ct_config.h"])
 
       discard buildAction("nim-js-ipc-registry-test",
-        codeTracer.executable("nim").
+        codeTracer.executable("nim-js").
           subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
           args = @[
             "-d:chronicles_sinks=json",
@@ -176,7 +183,7 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-ui-js",
-        codeTracer.executable("nim").
+        codeTracer.executable("nim-js").
           subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
           args = @[
             "-d:chronicles_sinks=json",
@@ -244,7 +251,7 @@ package codeTracer:
         outputs = @["public/ui.js"])
 
       discard buildAction("frontend-index-js",
-        codeTracer.executable("nim").
+        codeTracer.executable("nim-js").
           subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
           args = @[
             "-d:chronicles_sinks=json",
@@ -308,7 +315,7 @@ package codeTracer:
         outputs = @["src/index.js"])
 
       discard buildAction("frontend-server-index-js",
-        codeTracer.executable("nim").
+        codeTracer.executable("nim-js").
           subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
           args = @[
             "-d:chronicles_sinks=json",
@@ -366,7 +373,7 @@ package codeTracer:
         dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("frontend-subwindow-js",
-        codeTracer.executable("nim").
+        codeTracer.executable("nim-js").
           subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
           args = @[
             "-d:chronicles_sinks=json",
@@ -519,6 +526,42 @@ package codeTracer:
         ],
         outputs = @["build/reprobuild/frontend.stamp"])
 
+      var codetracerDeps = @["frontend"]
+      var codetracerInputs = @["build/reprobuild/frontend.stamp"]
+      var codetracerEntries = @["build/reprobuild/frontend.stamp"]
+
+      if fileExists("src/config/default_layout.json"):
+        discard buildAction("config-default-layout-json",
+          codeTracer.executable("sh").subcmd_2d_c(
+            args = @[copyScript("src/config/default_layout.json",
+              "config/default_layout.json")]),
+          inputs = @["src/config/default_layout.json"],
+          outputs = @["config/default_layout.json"])
+        codetracerDeps.add("config-default-layout-json")
+        codetracerInputs.add("config/default_layout.json")
+        codetracerEntries.add("config/default_layout.json")
+
+      if fileExists("src/config/default_config.yaml"):
+        discard buildAction("config-default-config-yaml",
+          codeTracer.executable("sh").subcmd_2d_c(
+            args = @[copyScript("src/config/default_config.yaml",
+              "config/default_config.yaml")]),
+          inputs = @["src/config/default_config.yaml"],
+          outputs = @["config/default_config.yaml"])
+        codetracerDeps.add("config-default-config-yaml")
+        codetracerInputs.add("config/default_config.yaml")
+        codetracerEntries.add("config/default_config.yaml")
+
+      let hasFrontendInputs =
+        fileExists("src/frontend/ui_js.nim") and
+        fileExists("src/frontend/index.nim") and
+        fileExists("src/frontend/subwindow.nim") and
+        fileExists("src/frontend/index.html") and
+        fileExists("src/frontend/subwindow.html") and
+        fileExists("helpers.js")
+      let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
+      let hasCtInput = fileExists("src/ct/codetracer.nim")
+
       if fileExists("src/ct/db_backend_record.nim"):
         discard buildAction("db-backend-record",
           codeTracer.executable("nim").
@@ -572,6 +615,9 @@ package codeTracer:
           inputs = @["src/ct/db_backend_record.nim"],
           outputs = @["src/bin/db-backend-record"],
           dependencyPolicy = automaticMonitorPolicy())
+        codetracerDeps.add("db-backend-record")
+        codetracerInputs.add("src/bin/db-backend-record")
+        codetracerEntries.add("src/bin/db-backend-record")
 
       if fileExists("src/ct/codetracer.nim"):
         discard buildAction("ct",
@@ -626,6 +672,18 @@ package codeTracer:
           inputs = @["src/ct/codetracer.nim"],
           outputs = @["src/bin/ct"],
           dependencyPolicy = automaticMonitorPolicy())
+        codetracerDeps.add("ct")
+        codetracerInputs.add("src/bin/ct")
+        codetracerEntries.add("src/bin/ct")
+
+      if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
+        discard buildAction("codetracer",
+          codeTracer.executable("sh").subcmd_2d_c(
+            args = @[stampScript("build/reprobuild/codetracer.stamp",
+              "CodeTracer selected app aggregate", codetracerEntries)]),
+          deps = codetracerDeps,
+          inputs = codetracerInputs,
+          outputs = @["build/reprobuild/codetracer.stamp"])
 
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
