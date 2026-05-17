@@ -141,6 +141,16 @@ const defaultVisualReplayLayoutJson* = """{
                       "content": 4
                     },
                     "title": "genericUiComponent"
+                  },
+                  {
+                    "type": "component",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "filesystemComponent-0",
+                      "content": 9
+                    },
+                    "title": "genericUiComponent"
                   }
                 ]
               },
@@ -155,6 +165,16 @@ const defaultVisualReplayLayoutJson* = """{
                       "id": 0,
                       "label": "calltraceComponent-0",
                       "content": 6
+                    },
+                    "title": "genericUiComponent"
+                  },
+                  {
+                    "type": "component",
+                    "componentType": "genericUiComponent",
+                    "componentState": {
+                      "id": 0,
+                      "label": "scratchpadComponent-0",
+                      "content": 17
                     },
                     "title": "genericUiComponent"
                   }
