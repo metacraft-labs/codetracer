@@ -573,6 +573,60 @@ package codeTracer:
           outputs = @["src/bin/db-backend-record"],
           dependencyPolicy = automaticMonitorPolicy())
 
+      if fileExists("src/ct/codetracer.nim"):
+        discard buildAction("ct",
+          codeTracer.executable("nim").
+            subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+            args = @[
+              "-d:chronicles_sinks=json",
+              "-d:chronicles_line_numbers=true",
+              "-d:chronicles_timestamps=UnixTime",
+              "-d:ssl",
+              "--mm:refc",
+              "-d:nimNoLentIterators",
+              "--hints:off",
+              "--warnings:off",
+              "--hint[Processing]:off",
+              "--hint[Conf]:off",
+              "--hint[CC]:off",
+              "--hint[Pattern]:off",
+              "--hint[XDeclaredButNotUsed]:off",
+              "--hint[XCannotRaiseY]:off",
+              "--warning[CaseTransition]:off",
+              "-d:debug",
+              "--debugInfo",
+              "--lineDir:on",
+              "--stacktrace:on",
+              "--linetrace:on",
+              "-d:testing",
+              "--boundChecks:on",
+              "--stacktrace:on",
+              "--linetrace:on",
+              "--warnings:on",
+              "--hints:on",
+              "-d:ctEntrypoint",
+              "-d:withTup",
+              "-d:useOpenssl3",
+              "-d:ssl",
+              "--dynlibOverride:libcrypto",
+              "--dynlibOverride:libssl",
+              "--dynlibOverride:sqlite3",
+              "--dynlibOverride:pcre",
+              "--dynlibOverride:libzip",
+              "--passL:-lssl",
+              "--passL:-lcrypto",
+              "--passL:-lsqlite3",
+              "--passL:-lpcre",
+              "--passL:-lzip",
+              "--nimcache:/tmp/ct-nim-cache/codetracer_codetracer_binary",
+              "--out:src/bin/ct",
+              "c",
+              "src/ct/codetracer.nim"
+            ]),
+          inputs = @["src/ct/codetracer.nim"],
+          outputs = @["src/bin/ct"],
+          dependencyPolicy = automaticMonitorPolicy())
+
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
           args = @[
