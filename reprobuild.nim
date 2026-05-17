@@ -1,4 +1,72 @@
+import std/[algorithm, os, osproc, strutils]
+
 import repro_project_dsl
+
+const PublicResourceRoot = "src/public"
+
+proc normalizedRelPath(path: string): string =
+  path.replace('\\', '/')
+
+proc stableHashHex(value: string): string =
+  var hash = 2166136261'u32
+  for ch in value:
+    hash = (hash xor uint32(ord(ch))) * 16777619'u32
+  toHex(hash, 8).toLowerAscii()
+
+proc actionSlug(value: string): string =
+  for ch in value:
+    if ch in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '.', '_', '-'}:
+      result.add(ch.toLowerAscii())
+    else:
+      result.add("-" & toHex(ord(ch), 2).toLowerAscii())
+  if result.len == 0:
+    result = "resource"
+
+proc publicResourceActionId(relative: string): string =
+  let normalized = normalizedRelPath(relative)
+  let tail = splitPath(normalized).tail
+  "frontend-public-resource-" & actionSlug(tail) & "-" &
+    stableHashHex(normalized)
+
+proc collectPublicResourceTree(root: string): tuple[dirs: seq[string];
+    files: seq[string]] =
+  if not dirExists(root):
+    return
+  var pending = @[root]
+  while pending.len > 0:
+    let dir = pending.pop()
+    result.dirs.add(dir)
+    for kind, path in walkDir(dir):
+      case kind
+      of pcDir:
+        pending.add(path)
+      of pcFile:
+        result.files.add(path)
+      else:
+        discard
+  result.dirs.sort()
+  result.files.sort()
+
+proc publicResourceOutput(sourcePath: string): string =
+  "public" / normalizedRelPath(relativePath(sourcePath, PublicResourceRoot))
+
+proc copyScript(input, output: string): string =
+  let outputDir = splitPath(output).head
+  result = "set -eu\n"
+  if outputDir.len > 0:
+    result.add(
+      "for i in 1 2 3; do mkdir -p " & quoteShell(outputDir) &
+        " && break; sleep 0.05; done\n")
+    result.add("test -d " & quoteShell(outputDir) & "\n")
+  result.add("cp " & quoteShell(input) & " " & quoteShell(output) & "\n")
+
+proc stampScript(path, title: string; entries: openArray[string]): string =
+  result = "set -eu\nmkdir -p " & quoteShell(splitPath(path).head) & "\n"
+  result.add("{\n")
+  result.add("printf '%s\\n' " & quoteShell(title) & "\n")
+  for entry in entries:
+    result.add("printf '%s\\n' " & quoteShell(entry) & "\n")
+  result.add("} > " & quoteShell(path) & "\n")
 
 package codeTracer:
   uses:
@@ -382,6 +450,37 @@ package codeTracer:
         inputs = @["helpers.js"],
         outputs = @["src/helpers.js"])
 
+      # Coarse generated-copy resource semantics for the current src/public
+      # tree. This intentionally enumerates regular files only and is not a
+      # full model of Tup !tup_preserve, symlink behavior, removal cleanup, or
+      # platform-specific resource installation semantics.
+      let publicTree = collectPublicResourceTree(PublicResourceRoot)
+      for dirPath in publicTree.dirs:
+        providerDirectoryInput(normalizedRelPath(dirPath))
+      var publicResourceDeps: seq[string] = @[]
+      var publicResourceOutputs: seq[string] = @[]
+      for sourcePath in publicTree.files:
+        let relative = normalizedRelPath(relativePath(sourcePath,
+          PublicResourceRoot))
+        let actionId = publicResourceActionId(relative)
+        let output = publicResourceOutput(sourcePath)
+        publicResourceDeps.add(actionId)
+        publicResourceOutputs.add(output)
+        discard buildAction(actionId,
+          codeTracer.executable("sh").subcmd_2d_c(
+            args = @[copyScript(normalizedRelPath(sourcePath), output)]),
+          inputs = @[normalizedRelPath(sourcePath)],
+          outputs = @[output])
+
+      discard buildAction("frontend-public-resources",
+        codeTracer.executable("sh").subcmd_2d_c(
+          args = @[stampScript("build/reprobuild/frontend-public-resources.stamp",
+            "CodeTracer frontend public resource tree",
+            publicResourceOutputs)]),
+        deps = publicResourceDeps,
+        inputs = publicResourceOutputs,
+        outputs = @["build/reprobuild/frontend-public-resources.stamp"])
+
       discard buildAction("frontend",
         codeTracer.executable("sh").subcmd_2d_c(
           args = @[
@@ -395,6 +494,7 @@ package codeTracer:
             "printf '%s\n' 'index.html'; " &
             "printf '%s\n' 'subwindow.html'; " &
             "printf '%s\n' 'src/helpers.js'; " &
+            "printf '%s\n' 'build/reprobuild/frontend-public-resources.stamp'; " &
             "} > build/reprobuild/frontend.stamp"
           ]),
         deps = @[
@@ -404,7 +504,8 @@ package codeTracer:
           "frontend-server-index-js",
           "frontend-index-html",
           "frontend-subwindow-html",
-          "frontend-src-helpers-js"
+          "frontend-src-helpers-js",
+          "frontend-public-resources"
         ],
         inputs = @[
           "src/index.js",
@@ -413,7 +514,8 @@ package codeTracer:
           "server_index.js",
           "index.html",
           "subwindow.html",
-          "src/helpers.js"
+          "src/helpers.js",
+          "build/reprobuild/frontend-public-resources.stamp"
         ],
         outputs = @["build/reprobuild/frontend.stamp"])
 
