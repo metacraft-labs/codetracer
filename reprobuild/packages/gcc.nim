@@ -1,6 +1,8 @@
 import repro_project_dsl
 
 defineCliInterface gcc, "gcc":
+  dependencyPolicy automaticMonitor
+
   call:
     boolFlag pic is bool, alias = "-fPIC"
     boolFlag debug3 is bool, alias = "-g3"

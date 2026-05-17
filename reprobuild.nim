@@ -151,63 +151,83 @@ package codeTracer:
     "sh >=1"
 
   build:
-      let headerScript =
-        "set -eu\n" &
-        "out=" & quoteShell("build/generated/ct_config.h") & "\n" &
-        "mkdir -p \"$(dirname \"$out\")\" build/c\n" &
-        "cat > \"$out\" <<'EOF'\n" &
-        "#ifndef REPROBUILD_CT_SUBSET_CONFIG_H\n" &
-        "#define REPROBUILD_CT_SUBSET_CONFIG_H\n" &
-        "#define REPROBUILD_CT_SUBSET_GENERATED 1\n" &
-        "#endif\n" &
-        "EOF\n"
+      template ctNimJs(actionName: string;
+                       definesValue: seq[string];
+                       outputPath, sourcePath: string;
+                       extraInputsValue: openArray[string] = [];
+                       extraOutputsValue: openArray[string] = [];
+                       debugInfoOnValue = false;
+                       sourcemapOnValue = false;
+                       hotCodeReloadingOnValue = false): BuildActionDef =
+        nim.js(
+          actionId = actionName,
+          defines = definesValue,
+          mm = "refc",
+          hintsOff = true,
+          warningsOff = true,
+          disabledHints = DisabledNimHints,
+          disabledWarnings = DisabledCaseTransitionWarning,
+          debugInfo = true,
+          debugInfoOn = debugInfoOnValue,
+          lineDirOn = true,
+          stacktraceOn = true,
+          linetraceOn = true,
+          sourcemapOn = sourcemapOnValue,
+          hotCodeReloadingOn = hotCodeReloadingOnValue,
+          output = outputPath,
+          extraInputs = extraInputsValue,
+          extraOutputs = extraOutputsValue,
+          paths = CodeTracerNimPaths,
+          source = sourcePath)
+
+      template ctNative(actionName, outputPath, sourcePath,
+                        nimcachePath: string): BuildActionDef =
+        nim.c(
+          actionId = actionName,
+          defines = NativeDefines,
+          mm = "refc",
+          hintsOff = true,
+          warningsOff = true,
+          disabledHints = DisabledNimHints,
+          disabledWarnings = DisabledCaseTransitionWarning,
+          debugInfo = true,
+          lineDirOn = true,
+          stacktraceOn = true,
+          linetraceOn = true,
+          boundChecksOn = true,
+          warningsOn = true,
+          hintsOn = true,
+          dynlibOverrides = NativeDynlibOverrides,
+          passL = NativePassL,
+          nimcache = nimcachePath,
+          output = outputPath,
+          source = sourcePath)
 
       sh(
         actionId = "generate-config-header",
-        command = headerScript,
+        command = "sh reprobuild/scripts/generate_ct_config.sh",
+        extraInputs = @["reprobuild/scripts/generate_ct_config.sh"],
         extraOutputs = @["build/generated/ct_config.h"])
 
-      nim.js(
-        actionId = "nim-js-ipc-registry-test",
-        defines = CommonNimDefines & RendererDefines,
-        mm = "refc",
-        hintsOff = true,
-        warningsOff = true,
-        disabledHints = DisabledNimHints,
-        disabledWarnings = DisabledCaseTransitionWarning,
-        debugInfo = true,
-        debugInfoOn = true,
-        lineDirOn = true,
-        stacktraceOn = true,
-        linetraceOn = true,
-        hotCodeReloadingOn = true,
-        output = "tests/ipc_registry_test.js",
-        paths = CodeTracerNimPaths,
-        source = "src/frontend/tests/ipc_registry_test.nim",
-        extraInputs = @[
+      ctNimJs(
+        actionName = "nim-js-ipc-registry-test",
+        definesValue = CommonNimDefines & RendererDefines,
+        outputPath = "tests/ipc_registry_test.js",
+        sourcePath = "src/frontend/tests/ipc_registry_test.nim",
+        extraInputsValue = @[
           "src/frontend/index/ipc_registry.nim",
           "src/frontend/lib/jslib.nim"
         ],
-        dependencyPolicy = automaticMonitorPolicy())
+        debugInfoOnValue = true,
+        hotCodeReloadingOnValue = true)
 
-      nim.js(
-        actionId = "frontend-ui-js",
-        defines = CommonNimDefines & RendererDefines,
-        mm = "refc",
-        hintsOff = true,
-        warningsOff = true,
-        disabledHints = DisabledNimHints,
-        disabledWarnings = DisabledCaseTransitionWarning,
-        debugInfo = true,
-        debugInfoOn = true,
-        lineDirOn = true,
-        stacktraceOn = true,
-        linetraceOn = true,
-        hotCodeReloadingOn = true,
-        output = "ui.js",
-        paths = CodeTracerNimPaths,
-        source = "src/frontend/ui_js.nim",
-        dependencyPolicy = automaticMonitorPolicy())
+      ctNimJs(
+        actionName = "frontend-ui-js",
+        definesValue = CommonNimDefines & RendererDefines,
+        outputPath = "ui.js",
+        sourcePath = "src/frontend/ui_js.nim",
+        debugInfoOnValue = true,
+        hotCodeReloadingOnValue = true)
 
       sh(
         actionId = "frontend-public-ui-js",
@@ -215,24 +235,13 @@ package codeTracer:
         extraInputs = @["ui.js"],
         extraOutputs = @["public/ui.js"])
 
-      nim.js(
-        actionId = "frontend-index-js",
-        defines = CommonNimDefines & @["ctIndex", "nodejs"],
-        mm = "refc",
-        hintsOff = true,
-        warningsOff = true,
-        disabledHints = DisabledNimHints,
-        disabledWarnings = DisabledCaseTransitionWarning,
-        debugInfo = true,
-        lineDirOn = true,
-        stacktraceOn = true,
-        linetraceOn = true,
-        sourcemapOn = true,
-        output = "index.js",
-        extraOutputs = @["index.js.map"],
-        paths = CodeTracerNimPaths,
-        source = "src/frontend/index.nim",
-        dependencyPolicy = automaticMonitorPolicy())
+      ctNimJs(
+        actionName = "frontend-index-js",
+        definesValue = CommonNimDefines & @["ctIndex", "nodejs"],
+        outputPath = "index.js",
+        extraOutputsValue = @["index.js.map"],
+        sourcePath = "src/frontend/index.nim",
+        sourcemapOnValue = true)
 
       sh(
         actionId = "frontend-src-index-js",
@@ -240,45 +249,23 @@ package codeTracer:
         extraInputs = @["index.js"],
         extraOutputs = @["src/index.js"])
 
-      nim.js(
-        actionId = "frontend-server-index-js",
-        defines = CommonNimDefines & @["ctIndex", "server", "nodejs"],
-        mm = "refc",
-        hintsOff = true,
-        warningsOff = true,
-        disabledHints = DisabledNimHints,
-        disabledWarnings = DisabledCaseTransitionWarning,
-        debugInfo = true,
-        lineDirOn = true,
-        stacktraceOn = true,
-        linetraceOn = true,
-        sourcemapOn = true,
-        output = "server_index.js",
-        extraOutputs = @["server_index.js.map"],
-        paths = CodeTracerNimPaths,
-        source = "src/frontend/index.nim",
-        dependencyPolicy = automaticMonitorPolicy())
+      ctNimJs(
+        actionName = "frontend-server-index-js",
+        definesValue = CommonNimDefines & @["ctIndex", "server", "nodejs"],
+        outputPath = "server_index.js",
+        extraOutputsValue = @["server_index.js.map"],
+        sourcePath = "src/frontend/index.nim",
+        sourcemapOnValue = true)
 
-      nim.js(
-        actionId = "frontend-subwindow-js",
-        defines = CommonNimDefines & RendererDefines,
-        mm = "refc",
-        hintsOff = true,
-        warningsOff = true,
-        disabledHints = DisabledNimHints,
-        disabledWarnings = DisabledCaseTransitionWarning,
-        debugInfo = true,
-        debugInfoOn = true,
-        lineDirOn = true,
-        stacktraceOn = true,
-        linetraceOn = true,
-        hotCodeReloadingOn = true,
-        sourcemapOn = true,
-        output = "subwindow.js",
-        extraOutputs = @["subwindow.js.map"],
-        paths = CodeTracerNimPaths,
-        source = "src/frontend/subwindow.nim",
-        dependencyPolicy = automaticMonitorPolicy())
+      ctNimJs(
+        actionName = "frontend-subwindow-js",
+        definesValue = CommonNimDefines & RendererDefines,
+        outputPath = "subwindow.js",
+        extraOutputsValue = @["subwindow.js.map"],
+        sourcePath = "src/frontend/subwindow.nim",
+        debugInfoOnValue = true,
+        sourcemapOnValue = true,
+        hotCodeReloadingOnValue = true)
 
       sh(
         actionId = "frontend-src-subwindow-js",
@@ -393,63 +380,31 @@ package codeTracer:
       let hasCtInput = fileExists("src/ct/codetracer.nim")
 
       if fileExists("src/ct/db_backend_record.nim"):
-        nim.c(
-          actionId = "db-backend-record",
-          defines = NativeDefines,
-          mm = "refc",
-          hintsOff = true,
-          warningsOff = true,
-          disabledHints = DisabledNimHints,
-          disabledWarnings = DisabledCaseTransitionWarning,
-          debugInfo = true,
-          lineDirOn = true,
-          stacktraceOn = true,
-          linetraceOn = true,
-          boundChecksOn = true,
-          warningsOn = true,
-          hintsOn = true,
-          dynlibOverrides = NativeDynlibOverrides,
-          passL = NativePassL,
-          nimcache = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
-          output = "src/bin/db-backend-record",
-          source = "src/ct/db_backend_record.nim",
-          dependencyPolicy = automaticMonitorPolicy())
+        ctNative(
+          actionName = "db-backend-record",
+          nimcachePath = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
+          outputPath = "src/bin/db-backend-record",
+          sourcePath = "src/ct/db_backend_record.nim")
         codetracerInputs.add("src/bin/db-backend-record")
         codetracerEntries.add("src/bin/db-backend-record")
 
       if fileExists("src/ct/codetracer.nim"):
-        nim.c(
-          actionId = "ct",
-          defines = NativeDefines,
-          mm = "refc",
-          hintsOff = true,
-          warningsOff = true,
-          disabledHints = DisabledNimHints,
-          disabledWarnings = DisabledCaseTransitionWarning,
-          debugInfo = true,
-          lineDirOn = true,
-          stacktraceOn = true,
-          linetraceOn = true,
-          boundChecksOn = true,
-          warningsOn = true,
-          hintsOn = true,
-          dynlibOverrides = NativeDynlibOverrides,
-          passL = NativePassL,
-          nimcache = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
-          output = "src/bin/ct",
-          source = "src/ct/codetracer.nim",
-          dependencyPolicy = automaticMonitorPolicy())
+        ctNative(
+          actionName = "ct",
+          nimcachePath = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
+          outputPath = "src/bin/ct",
+          sourcePath = "src/ct/codetracer.nim")
         codetracerInputs.add("src/bin/ct")
         codetracerEntries.add("src/bin/ct")
 
       if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
-        sh(
+        let codetracer = sh(
           actionId = "codetracer",
           command = stampScript("build/reprobuild/codetracer.stamp",
             "CodeTracer selected app aggregate", codetracerEntries),
           extraInputs = codetracerInputs,
           extraOutputs = @["build/reprobuild/codetracer.stamp"])
-        defaultBuildAction("codetracer")
+        defaultBuildAction(codetracer)
 
       gcc(
         actionId = "c-sudoku-object-tup",
@@ -457,8 +412,7 @@ package codeTracer:
         output = "build/c/main.tup.o",
         pic = true,
         debug3 = true,
-        compileOnly = true,
-        dependencyPolicy = automaticMonitorPolicy())
+        compileOnly = true)
 
       gcc(
         actionId = "c-sudoku-object-with-generated-header",
@@ -467,5 +421,4 @@ package codeTracer:
         pic = true,
         debug3 = true,
         compileOnly = true,
-        includes = @["build/generated/ct_config.h"],
-        dependencyPolicy = automaticMonitorPolicy())
+        includes = @["build/generated/ct_config.h"])

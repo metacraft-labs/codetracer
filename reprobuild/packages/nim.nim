@@ -1,6 +1,8 @@
 import repro_project_dsl
 
 defineCliInterface nim, "nim":
+  dependencyPolicy automaticMonitor
+
   template commonNimCompilerFlags() =
     flag defines is seq[string],
       alias = "-d:",
