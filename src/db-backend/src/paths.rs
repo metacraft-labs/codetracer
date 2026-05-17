@@ -29,10 +29,44 @@ impl Default for Paths {
 
 pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> = LazyLock::new(|| Mutex::new(Paths::default()));
 
+/// Locate the directory in which CodeTracer stores per-run Unix-domain
+/// sockets and small log files for a particular `run_id`.
+///
+/// Base directory resolution (first match wins):
+/// 1. `$CODETRACER_RUNTIME_DIR` — explicit escape hatch (tests, unusual deployments).
+/// 2. **Linux**: `$XDG_RUNTIME_DIR/codetracer/` when the path exists.
+///    The XDG Base Directory spec designates this for sockets and other
+///    runtime files; systemd-logind sets it at login (`/run/user/<uid>`,
+///    tmpfs) and the value is stable across spawned children — crucially,
+///    intermediate spawn wrappers do not silently re-derive it the way
+///    they can with `$TMPDIR`, which historically led to `dap-server`
+///    and the `ct-native-replay` worker computing different socket
+///    directories and failing handshake. It also keeps sockets off
+///    `/tmp`, which routinely fills up during long debug sessions.
+/// 3. Fallback: the supplied `tmp_path` (preserves historical behaviour
+///    in environments without XDG / on macOS / in unit tests).
 pub fn run_dir_for(tmp_path: &Path, run_id: usize) -> Result<PathBuf, Box<dyn Error>> {
-    let run_dir = tmp_path.join(format!("run-{run_id}"));
+    let base = socket_runtime_base_dir(tmp_path);
+    let run_dir = base.join(format!("run-{run_id}"));
     std::fs::create_dir_all(&run_dir)?;
     Ok(run_dir)
+}
+
+fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
+    if let Ok(explicit) = env::var("CODETRACER_RUNTIME_DIR") {
+        if !explicit.is_empty() {
+            return PathBuf::from(explicit);
+        }
+    }
+    if !cfg!(target_os = "macos") {
+        if let Ok(xdg) = env::var("XDG_RUNTIME_DIR") {
+            let candidate = PathBuf::from(&xdg);
+            if !xdg.is_empty() && candidate.is_dir() {
+                return candidate.join("codetracer");
+            }
+        }
+    }
+    fallback_tmp.to_path_buf()
 }
 
 pub fn recreator_socket_path(
