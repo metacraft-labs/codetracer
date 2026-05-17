@@ -145,8 +145,7 @@ const
 package codeTracer:
   usesImportPath "reprobuild/packages"
   uses:
-    "nim >=1.6 <2.0"
-    "nim-js >=2"
+    "nim >=1.6 <3.0"
     "node >=20"
     "gcc >=1"
     "sh >=1"
@@ -168,7 +167,7 @@ package codeTracer:
         command = headerScript,
         extraOutputs = @["build/generated/ct_config.h"])
 
-      nimJs.js(
+      nim.js(
         actionId = "nim-js-ipc-registry-test",
         defines = CommonNimDefines & RendererDefines,
         mm = "refc",
@@ -191,7 +190,7 @@ package codeTracer:
         ],
         dependencyPolicy = automaticMonitorPolicy())
 
-      nimJs.js(
+      nim.js(
         actionId = "frontend-ui-js",
         defines = CommonNimDefines & RendererDefines,
         mm = "refc",
@@ -216,7 +215,7 @@ package codeTracer:
         extraInputs = @["ui.js"],
         extraOutputs = @["public/ui.js"])
 
-      nimJs.js(
+      nim.js(
         actionId = "frontend-index-js",
         defines = CommonNimDefines & @["ctIndex", "nodejs"],
         mm = "refc",
@@ -241,7 +240,7 @@ package codeTracer:
         extraInputs = @["index.js"],
         extraOutputs = @["src/index.js"])
 
-      nimJs.js(
+      nim.js(
         actionId = "frontend-server-index-js",
         defines = CommonNimDefines & @["ctIndex", "server", "nodejs"],
         mm = "refc",
@@ -260,7 +259,7 @@ package codeTracer:
         source = "src/frontend/index.nim",
         dependencyPolicy = automaticMonitorPolicy())
 
-      nimJs.js(
+      nim.js(
         actionId = "frontend-subwindow-js",
         defines = CommonNimDefines & RendererDefines,
         mm = "refc",
