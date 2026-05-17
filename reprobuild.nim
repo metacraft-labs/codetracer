@@ -68,6 +68,80 @@ proc stampScript(path, title: string; entries: openArray[string]): string =
     result.add("printf '%s\\n' " & quoteShell(entry) & "\n")
   result.add("} > " & quoteShell(path) & "\n")
 
+const
+  CommonNimDefines = @[
+    "chronicles_sinks=json",
+    "chronicles_line_numbers=true",
+    "chronicles_timestamps=UnixTime",
+    "ssl",
+    "nimNoLentIterators",
+    "debug"
+  ]
+  RendererDefines = @[
+    "chronicles_enabled=off",
+    "ctRenderer"
+  ]
+  NativeDefines = @[
+    "chronicles_sinks=json",
+    "chronicles_line_numbers=true",
+    "chronicles_timestamps=UnixTime",
+    "ssl",
+    "nimNoLentIterators",
+    "debug",
+    "testing",
+    "ctEntrypoint",
+    "withTup",
+    "useOpenssl3",
+    "ssl"
+  ]
+  DisabledNimHints = @[
+    "Processing]:off",
+    "Conf]:off",
+    "CC]:off",
+    "Pattern]:off",
+    "XDeclaredButNotUsed]:off",
+    "XCannotRaiseY]:off"
+  ]
+  DisabledCaseTransitionWarning = @["CaseTransition]:off"]
+  CodeTracerNimPaths = @[
+    "libs/NimYAML",
+    "libs/asynctools",
+    "libs/karax/karax",
+    "libs/nim",
+    "libs/nim-chronicles/",
+    "libs/nim-faststreams",
+    "libs/nim-json-serialization",
+    "libs/nim-prompt",
+    "libs/nim-serialization",
+    "libs/nim-stew",
+    "libs/nim-unicodedb/src",
+    "libs/poly",
+    "libs/quicktest",
+    "libs/asynctools",
+    "libs/chronos",
+    "libs/parsetoml/src",
+    "libs/nim-result",
+    "libs/nim-confutils",
+    "libs/nimcrypto",
+    "libs/zip",
+    "libs/jsony/src",
+    "libs/nim-uuid4/src"
+  ]
+  NativeDynlibOverrides = @[
+    "libcrypto",
+    "libssl",
+    "sqlite3",
+    "pcre",
+    "libzip"
+  ]
+  NativePassL = @[
+    "-lssl",
+    "-lcrypto",
+    "-lsqlite3",
+    "-lpcre",
+    "-lzip"
+  ]
+
 package codeTracer:
   usesImportPath "reprobuild/packages"
   uses:
@@ -80,7 +154,7 @@ package codeTracer:
   build:
       let headerScript =
         "set -eu\n" &
-        "out=$1\n" &
+        "out=" & quoteShell("build/generated/ct_config.h") & "\n" &
         "mkdir -p \"$(dirname \"$out\")\" build/c\n" &
         "cat > \"$out\" <<'EOF'\n" &
         "#ifndef REPROBUILD_CT_SUBSET_CONFIG_H\n" &
@@ -89,342 +163,147 @@ package codeTracer:
         "#endif\n" &
         "EOF\n"
 
-      discard buildAction("generate-config-header",
-        sh.c(
-          args = @[headerScript, "sh", "build/generated/ct_config.h"]),
-        outputs = @["build/generated/ct_config.h"])
+      sh(
+        actionId = "generate-config-header",
+        command = headerScript,
+        extraOutputs = @["build/generated/ct_config.h"])
 
-      discard buildAction("nim-js-ipc-registry-test",
-        nim_js.js(
-          args = @[
-            "-d:chronicles_sinks=json",
-            "-d:chronicles_line_numbers=true",
-            "-d:chronicles_timestamps=UnixTime",
-            "-d:ssl",
-            "--mm:refc",
-            "-d:nimNoLentIterators",
-            "--hints:off",
-            "--warnings:off",
-            "--hint[Processing]:off",
-            "--hint[Conf]:off",
-            "--hint[CC]:off",
-            "--hint[Pattern]:off",
-            "--hint[XDeclaredButNotUsed]:off",
-            "--hint[XCannotRaiseY]:off",
-            "--warning[CaseTransition]:off",
-            "-d:debug",
-            "--debugInfo",
-            "--lineDir:on",
-            "--stacktrace:on",
-            "--linetrace:on",
-            "-d:chronicles_enabled=off",
-            "-d:ctRenderer",
-            "--debugInfo:on",
-            "--lineDir:on",
-            "--hints:off",
-            "--warnings:off",
-            "--hotCodeReloading:on",
-            "--out:tests/ipc_registry_test.js",
-            "--path:libs/NimYAML",
-            "--path:libs/asynctools",
-            "--path:libs/karax/karax",
-            "--path:libs/nim",
-            "--path:libs/nim-chronicles/",
-            "--path:libs/nim-faststreams",
-            "--path:libs/nim-json-serialization",
-            "--path:libs/nim-prompt",
-            "--path:libs/nim-serialization",
-            "--path:libs/nim-stew",
-            "--path:libs/nim-unicodedb/src",
-            "--path:libs/poly",
-            "--path:libs/quicktest",
-            "--path:libs/asynctools",
-            "--path:libs/chronos",
-            "--path:libs/parsetoml/src",
-            "--path:libs/nim-result",
-            "--path:libs/nim-confutils",
-            "--path:libs/nimcrypto",
-            "--path:libs/zip",
-            "--path:libs/jsony/src",
-            "--path:libs/nim-uuid4/src",
-            "js",
-            "src/frontend/tests/ipc_registry_test.nim"
-          ]),
-        inputs = @[
-          "src/frontend/tests/ipc_registry_test.nim",
+      nimJs.js(
+        actionId = "nim-js-ipc-registry-test",
+        defines = CommonNimDefines & RendererDefines,
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        debugInfoOn = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        hotCodeReloadingOn = true,
+        output = "tests/ipc_registry_test.js",
+        paths = CodeTracerNimPaths,
+        source = "src/frontend/tests/ipc_registry_test.nim",
+        extraInputs = @[
           "src/frontend/index/ipc_registry.nim",
           "src/frontend/lib/jslib.nim"
         ],
-        outputs = @["tests/ipc_registry_test.js"],
         dependencyPolicy = automaticMonitorPolicy())
 
-      discard buildAction("frontend-ui-js",
-        nim_js.js(
-          args = @[
-            "-d:chronicles_sinks=json",
-            "-d:chronicles_line_numbers=true",
-            "-d:chronicles_timestamps=UnixTime",
-            "-d:ssl",
-            "--mm:refc",
-            "-d:nimNoLentIterators",
-            "--hints:off",
-            "--warnings:off",
-            "--hint[Processing]:off",
-            "--hint[Conf]:off",
-            "--hint[CC]:off",
-            "--hint[Pattern]:off",
-            "--hint[XDeclaredButNotUsed]:off",
-            "--hint[XCannotRaiseY]:off",
-            "--warning[CaseTransition]:off",
-            "-d:debug",
-            "--debugInfo",
-            "--lineDir:on",
-            "--stacktrace:on",
-            "--linetrace:on",
-            "-d:chronicles_enabled=off",
-            "-d:ctRenderer",
-            "--debugInfo:on",
-            "--lineDir:on",
-            "--hints:off",
-            "--warnings:off",
-            "--hotCodeReloading:on",
-            "--out:ui.js",
-            "--path:libs/NimYAML",
-            "--path:libs/asynctools",
-            "--path:libs/karax/karax",
-            "--path:libs/nim",
-            "--path:libs/nim-chronicles/",
-            "--path:libs/nim-faststreams",
-            "--path:libs/nim-json-serialization",
-            "--path:libs/nim-prompt",
-            "--path:libs/nim-serialization",
-            "--path:libs/nim-stew",
-            "--path:libs/nim-unicodedb/src",
-            "--path:libs/poly",
-            "--path:libs/quicktest",
-            "--path:libs/asynctools",
-            "--path:libs/chronos",
-            "--path:libs/parsetoml/src",
-            "--path:libs/nim-result",
-            "--path:libs/nim-confutils",
-            "--path:libs/nimcrypto",
-            "--path:libs/zip",
-            "--path:libs/jsony/src",
-            "--path:libs/nim-uuid4/src",
-            "js",
-            "src/frontend/ui_js.nim"
-          ]),
-        inputs = @["src/frontend/ui_js.nim"],
-        outputs = @["ui.js"],
+      nimJs.js(
+        actionId = "frontend-ui-js",
+        defines = CommonNimDefines & RendererDefines,
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        debugInfoOn = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        hotCodeReloadingOn = true,
+        output = "ui.js",
+        paths = CodeTracerNimPaths,
+        source = "src/frontend/ui_js.nim",
         dependencyPolicy = automaticMonitorPolicy())
 
-      discard buildAction("frontend-public-ui-js",
-        sh.c(
-          args = @["mkdir -p public && cp ui.js public/ui.js"]),
-        inputs = @["ui.js"],
-        outputs = @["public/ui.js"])
+      sh(
+        actionId = "frontend-public-ui-js",
+        command = "mkdir -p public && cp ui.js public/ui.js",
+        extraInputs = @["ui.js"],
+        extraOutputs = @["public/ui.js"])
 
-      discard buildAction("frontend-index-js",
-        nim_js.js(
-          args = @[
-            "-d:chronicles_sinks=json",
-            "-d:chronicles_line_numbers=true",
-            "-d:chronicles_timestamps=UnixTime",
-            "-d:ssl",
-            "--mm:refc",
-            "-d:nimNoLentIterators",
-            "--hints:off",
-            "--warnings:off",
-            "--hint[Processing]:off",
-            "--hint[Conf]:off",
-            "--hint[CC]:off",
-            "--hint[Pattern]:off",
-            "--hint[XDeclaredButNotUsed]:off",
-            "--hint[XCannotRaiseY]:off",
-            "--warning[CaseTransition]:off",
-            "-d:debug",
-            "--debugInfo",
-            "--lineDir:on",
-            "--stacktrace:on",
-            "--linetrace:on",
-            "-d:ctIndex",
-            "-d:nodejs",
-            "--sourcemap:on",
-            "--out:index.js",
-            "--path:libs/NimYAML",
-            "--path:libs/asynctools",
-            "--path:libs/karax/karax",
-            "--path:libs/nim",
-            "--path:libs/nim-chronicles/",
-            "--path:libs/nim-faststreams",
-            "--path:libs/nim-json-serialization",
-            "--path:libs/nim-prompt",
-            "--path:libs/nim-serialization",
-            "--path:libs/nim-stew",
-            "--path:libs/nim-unicodedb/src",
-            "--path:libs/poly",
-            "--path:libs/quicktest",
-            "--path:libs/asynctools",
-            "--path:libs/chronos",
-            "--path:libs/parsetoml/src",
-            "--path:libs/nim-result",
-            "--path:libs/nim-confutils",
-            "--path:libs/nimcrypto",
-            "--path:libs/zip",
-            "--path:libs/jsony/src",
-            "--path:libs/nim-uuid4/src",
-            "js",
-            "src/frontend/index.nim"
-          ]),
-        inputs = @["src/frontend/index.nim"],
-        outputs = @["index.js", "index.js.map"],
+      nimJs.js(
+        actionId = "frontend-index-js",
+        defines = CommonNimDefines & @["ctIndex", "nodejs"],
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        sourcemapOn = true,
+        output = "index.js",
+        extraOutputs = @["index.js.map"],
+        paths = CodeTracerNimPaths,
+        source = "src/frontend/index.nim",
         dependencyPolicy = automaticMonitorPolicy())
 
-      discard buildAction("frontend-src-index-js",
-        sh.c(
-          args = @["cp index.js src/index.js"]),
-        inputs = @["index.js"],
-        outputs = @["src/index.js"])
+      sh(
+        actionId = "frontend-src-index-js",
+        command = "cp index.js src/index.js",
+        extraInputs = @["index.js"],
+        extraOutputs = @["src/index.js"])
 
-      discard buildAction("frontend-server-index-js",
-        nim_js.js(
-          args = @[
-            "-d:chronicles_sinks=json",
-            "-d:chronicles_line_numbers=true",
-            "-d:chronicles_timestamps=UnixTime",
-            "-d:ssl",
-            "--mm:refc",
-            "-d:nimNoLentIterators",
-            "--hints:off",
-            "--warnings:off",
-            "--hint[Processing]:off",
-            "--hint[Conf]:off",
-            "--hint[CC]:off",
-            "--hint[Pattern]:off",
-            "--hint[XDeclaredButNotUsed]:off",
-            "--hint[XCannotRaiseY]:off",
-            "--warning[CaseTransition]:off",
-            "-d:debug",
-            "--debugInfo",
-            "--lineDir:on",
-            "--stacktrace:on",
-            "--linetrace:on",
-            "-d:ctIndex",
-            "-d:server",
-            "-d:nodejs",
-            "--sourcemap:on",
-            "--out:server_index.js",
-            "--path:libs/NimYAML",
-            "--path:libs/asynctools",
-            "--path:libs/karax/karax",
-            "--path:libs/nim",
-            "--path:libs/nim-chronicles/",
-            "--path:libs/nim-faststreams",
-            "--path:libs/nim-json-serialization",
-            "--path:libs/nim-prompt",
-            "--path:libs/nim-serialization",
-            "--path:libs/nim-stew",
-            "--path:libs/nim-unicodedb/src",
-            "--path:libs/poly",
-            "--path:libs/quicktest",
-            "--path:libs/asynctools",
-            "--path:libs/chronos",
-            "--path:libs/parsetoml/src",
-            "--path:libs/nim-result",
-            "--path:libs/nim-confutils",
-            "--path:libs/nimcrypto",
-            "--path:libs/zip",
-            "--path:libs/jsony/src",
-            "--path:libs/nim-uuid4/src",
-            "js",
-            "src/frontend/index.nim"
-          ]),
-        inputs = @["src/frontend/index.nim"],
-        outputs = @["server_index.js", "server_index.js.map"],
+      nimJs.js(
+        actionId = "frontend-server-index-js",
+        defines = CommonNimDefines & @["ctIndex", "server", "nodejs"],
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        sourcemapOn = true,
+        output = "server_index.js",
+        extraOutputs = @["server_index.js.map"],
+        paths = CodeTracerNimPaths,
+        source = "src/frontend/index.nim",
         dependencyPolicy = automaticMonitorPolicy())
 
-      discard buildAction("frontend-subwindow-js",
-        nim_js.js(
-          args = @[
-            "-d:chronicles_sinks=json",
-            "-d:chronicles_line_numbers=true",
-            "-d:chronicles_timestamps=UnixTime",
-            "-d:ssl",
-            "--mm:refc",
-            "-d:nimNoLentIterators",
-            "--hints:off",
-            "--warnings:off",
-            "--hint[Processing]:off",
-            "--hint[Conf]:off",
-            "--hint[CC]:off",
-            "--hint[Pattern]:off",
-            "--hint[XDeclaredButNotUsed]:off",
-            "--hint[XCannotRaiseY]:off",
-            "--warning[CaseTransition]:off",
-            "-d:debug",
-            "--debugInfo",
-            "--lineDir:on",
-            "--stacktrace:on",
-            "--linetrace:on",
-            "-d:chronicles_enabled=off",
-            "-d:ctRenderer",
-            "--debugInfo:on",
-            "--lineDir:on",
-            "--hotCodeReloading:on",
-            "--sourcemap:on",
-            "--out:subwindow.js",
-            "--path:libs/NimYAML",
-            "--path:libs/asynctools",
-            "--path:libs/karax/karax",
-            "--path:libs/nim",
-            "--path:libs/nim-chronicles/",
-            "--path:libs/nim-faststreams",
-            "--path:libs/nim-json-serialization",
-            "--path:libs/nim-prompt",
-            "--path:libs/nim-serialization",
-            "--path:libs/nim-stew",
-            "--path:libs/nim-unicodedb/src",
-            "--path:libs/poly",
-            "--path:libs/quicktest",
-            "--path:libs/asynctools",
-            "--path:libs/chronos",
-            "--path:libs/parsetoml/src",
-            "--path:libs/nim-result",
-            "--path:libs/nim-confutils",
-            "--path:libs/nimcrypto",
-            "--path:libs/zip",
-            "--path:libs/jsony/src",
-            "--path:libs/nim-uuid4/src",
-            "js",
-            "src/frontend/subwindow.nim"
-          ]),
-        inputs = @["src/frontend/subwindow.nim"],
-        outputs = @["subwindow.js", "subwindow.js.map"],
+      nimJs.js(
+        actionId = "frontend-subwindow-js",
+        defines = CommonNimDefines & RendererDefines,
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        debugInfoOn = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        hotCodeReloadingOn = true,
+        sourcemapOn = true,
+        output = "subwindow.js",
+        extraOutputs = @["subwindow.js.map"],
+        paths = CodeTracerNimPaths,
+        source = "src/frontend/subwindow.nim",
         dependencyPolicy = automaticMonitorPolicy())
 
-      discard buildAction("frontend-src-subwindow-js",
-        sh.c(
-          args = @["mkdir -p src && cp subwindow.js src/subwindow.js"]),
-        inputs = @["subwindow.js"],
-        outputs = @["src/subwindow.js"])
+      sh(
+        actionId = "frontend-src-subwindow-js",
+        command = "mkdir -p src && cp subwindow.js src/subwindow.js",
+        extraInputs = @["subwindow.js"],
+        extraOutputs = @["src/subwindow.js"])
 
-      discard buildAction("frontend-index-html",
-        sh.c(
-          args = @["cp src/frontend/index.html index.html"]),
-        inputs = @["src/frontend/index.html"],
-        outputs = @["index.html"])
+      sh(
+        actionId = "frontend-index-html",
+        command = "cp src/frontend/index.html index.html",
+        extraInputs = @["src/frontend/index.html"],
+        extraOutputs = @["index.html"])
 
-      discard buildAction("frontend-subwindow-html",
-        sh.c(
-          args = @["cp src/frontend/subwindow.html subwindow.html"]),
-        inputs = @["src/frontend/subwindow.html"],
-        outputs = @["subwindow.html"])
+      sh(
+        actionId = "frontend-subwindow-html",
+        command = "cp src/frontend/subwindow.html subwindow.html",
+        extraInputs = @["src/frontend/subwindow.html"],
+        extraOutputs = @["subwindow.html"])
 
-      discard buildAction("frontend-src-helpers-js",
-        sh.c(
-          args = @["mkdir -p src && cp helpers.js src/helpers.js"]),
-        inputs = @["helpers.js"],
-        outputs = @["src/helpers.js"])
+      sh(
+        actionId = "frontend-src-helpers-js",
+        command = "mkdir -p src && cp helpers.js src/helpers.js",
+        extraInputs = @["helpers.js"],
+        extraOutputs = @["src/helpers.js"])
 
       # Coarse generated-copy resource semantics for the current src/public
       # tree. This intentionally enumerates regular files only and is not a
@@ -440,37 +319,36 @@ package codeTracer:
         let actionId = publicResourceActionId(relative)
         let output = publicResourceOutput(sourcePath)
         publicResourceOutputs.add(output)
-        discard buildAction(actionId,
-          sh.c(
-            args = @[copyScript(normalizedRelPath(sourcePath), output)]),
-          inputs = @[normalizedRelPath(sourcePath)],
-          outputs = @[output])
+        sh(
+          actionId = actionId,
+          command = copyScript(normalizedRelPath(sourcePath), output),
+          extraInputs = @[normalizedRelPath(sourcePath)],
+          extraOutputs = @[output])
 
-      discard buildAction("frontend-public-resources",
-        sh.c(
-          args = @[stampScript("build/reprobuild/frontend-public-resources.stamp",
-            "CodeTracer frontend public resource tree",
-            publicResourceOutputs)]),
-        inputs = publicResourceOutputs,
-        outputs = @["build/reprobuild/frontend-public-resources.stamp"])
+      sh(
+        actionId = "frontend-public-resources",
+        command = stampScript("build/reprobuild/frontend-public-resources.stamp",
+          "CodeTracer frontend public resource tree",
+          publicResourceOutputs),
+        extraInputs = publicResourceOutputs,
+        extraOutputs = @["build/reprobuild/frontend-public-resources.stamp"])
 
-      discard buildAction("frontend",
-        sh.c(
-          args = @[
-            "mkdir -p build/reprobuild && " &
-            "{ " &
-            "printf '%s\n' 'CodeTracer frontend aggregate'; " &
-            "printf '%s\n' 'src/index.js'; " &
-            "printf '%s\n' 'src/subwindow.js'; " &
-            "printf '%s\n' 'public/ui.js'; " &
-            "printf '%s\n' 'server_index.js'; " &
-            "printf '%s\n' 'index.html'; " &
-            "printf '%s\n' 'subwindow.html'; " &
-            "printf '%s\n' 'src/helpers.js'; " &
-            "printf '%s\n' 'build/reprobuild/frontend-public-resources.stamp'; " &
-            "} > build/reprobuild/frontend.stamp"
-          ]),
-        inputs = @[
+      sh(
+        actionId = "frontend",
+        command =
+          "mkdir -p build/reprobuild && " &
+          "{ " &
+          "printf '%s\n' 'CodeTracer frontend aggregate'; " &
+          "printf '%s\n' 'src/index.js'; " &
+          "printf '%s\n' 'src/subwindow.js'; " &
+          "printf '%s\n' 'public/ui.js'; " &
+          "printf '%s\n' 'server_index.js'; " &
+          "printf '%s\n' 'index.html'; " &
+          "printf '%s\n' 'subwindow.html'; " &
+          "printf '%s\n' 'src/helpers.js'; " &
+          "printf '%s\n' 'build/reprobuild/frontend-public-resources.stamp'; " &
+          "} > build/reprobuild/frontend.stamp",
+        extraInputs = @[
           "src/index.js",
           "src/subwindow.js",
           "public/ui.js",
@@ -480,28 +358,28 @@ package codeTracer:
           "src/helpers.js",
           "build/reprobuild/frontend-public-resources.stamp"
         ],
-        outputs = @["build/reprobuild/frontend.stamp"])
+        extraOutputs = @["build/reprobuild/frontend.stamp"])
 
       var codetracerInputs = @["build/reprobuild/frontend.stamp"]
       var codetracerEntries = @["build/reprobuild/frontend.stamp"]
 
       if fileExists("src/config/default_layout.json"):
-        discard buildAction("config-default-layout-json",
-          sh.c(
-            args = @[copyScript("src/config/default_layout.json",
-              "config/default_layout.json")]),
-          inputs = @["src/config/default_layout.json"],
-          outputs = @["config/default_layout.json"])
+        sh(
+          actionId = "config-default-layout-json",
+          command = copyScript("src/config/default_layout.json",
+            "config/default_layout.json"),
+          extraInputs = @["src/config/default_layout.json"],
+          extraOutputs = @["config/default_layout.json"])
         codetracerInputs.add("config/default_layout.json")
         codetracerEntries.add("config/default_layout.json")
 
       if fileExists("src/config/default_config.yaml"):
-        discard buildAction("config-default-config-yaml",
-          sh.c(
-            args = @[copyScript("src/config/default_config.yaml",
-              "config/default_config.yaml")]),
-          inputs = @["src/config/default_config.yaml"],
-          outputs = @["config/default_config.yaml"])
+        sh(
+          actionId = "config-default-config-yaml",
+          command = copyScript("src/config/default_config.yaml",
+            "config/default_config.yaml"),
+          extraInputs = @["src/config/default_config.yaml"],
+          extraOutputs = @["config/default_config.yaml"])
         codetracerInputs.add("config/default_config.yaml")
         codetracerEntries.add("config/default_config.yaml")
 
@@ -516,135 +394,79 @@ package codeTracer:
       let hasCtInput = fileExists("src/ct/codetracer.nim")
 
       if fileExists("src/ct/db_backend_record.nim"):
-        discard buildAction("db-backend-record",
-          nim.c(
-            args = @[
-              "-d:chronicles_sinks=json",
-              "-d:chronicles_line_numbers=true",
-              "-d:chronicles_timestamps=UnixTime",
-              "-d:ssl",
-              "--mm:refc",
-              "-d:nimNoLentIterators",
-              "--hints:off",
-              "--warnings:off",
-              "--hint[Processing]:off",
-              "--hint[Conf]:off",
-              "--hint[CC]:off",
-              "--hint[Pattern]:off",
-              "--hint[XDeclaredButNotUsed]:off",
-              "--hint[XCannotRaiseY]:off",
-              "--warning[CaseTransition]:off",
-              "-d:debug",
-              "--debugInfo",
-              "--lineDir:on",
-              "--stacktrace:on",
-              "--linetrace:on",
-              "-d:testing",
-              "--boundChecks:on",
-              "--stacktrace:on",
-              "--linetrace:on",
-              "--warnings:on",
-              "--hints:on",
-              "-d:ctEntrypoint",
-              "-d:withTup",
-              "-d:useOpenssl3",
-              "-d:ssl",
-              "--dynlibOverride:libcrypto",
-              "--dynlibOverride:libssl",
-              "--dynlibOverride:sqlite3",
-              "--dynlibOverride:pcre",
-              "--dynlibOverride:libzip",
-              "--passL:-lssl",
-              "--passL:-lcrypto",
-              "--passL:-lsqlite3",
-              "--passL:-lpcre",
-              "--passL:-lzip",
-              "--nimcache:/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
-              "--out:src/bin/db-backend-record",
-              "c",
-              "src/ct/db_backend_record.nim"
-            ]),
-          inputs = @["src/ct/db_backend_record.nim"],
-          outputs = @["src/bin/db-backend-record"],
+        nim.c(
+          actionId = "db-backend-record",
+          defines = NativeDefines,
+          mm = "refc",
+          hintsOff = true,
+          warningsOff = true,
+          disabledHints = DisabledNimHints,
+          disabledWarnings = DisabledCaseTransitionWarning,
+          debugInfo = true,
+          lineDirOn = true,
+          stacktraceOn = true,
+          linetraceOn = true,
+          boundChecksOn = true,
+          warningsOn = true,
+          hintsOn = true,
+          dynlibOverrides = NativeDynlibOverrides,
+          passL = NativePassL,
+          nimcache = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
+          output = "src/bin/db-backend-record",
+          source = "src/ct/db_backend_record.nim",
           dependencyPolicy = automaticMonitorPolicy())
         codetracerInputs.add("src/bin/db-backend-record")
         codetracerEntries.add("src/bin/db-backend-record")
 
       if fileExists("src/ct/codetracer.nim"):
-        discard buildAction("ct",
-          nim.c(
-            args = @[
-              "-d:chronicles_sinks=json",
-              "-d:chronicles_line_numbers=true",
-              "-d:chronicles_timestamps=UnixTime",
-              "-d:ssl",
-              "--mm:refc",
-              "-d:nimNoLentIterators",
-              "--hints:off",
-              "--warnings:off",
-              "--hint[Processing]:off",
-              "--hint[Conf]:off",
-              "--hint[CC]:off",
-              "--hint[Pattern]:off",
-              "--hint[XDeclaredButNotUsed]:off",
-              "--hint[XCannotRaiseY]:off",
-              "--warning[CaseTransition]:off",
-              "-d:debug",
-              "--debugInfo",
-              "--lineDir:on",
-              "--stacktrace:on",
-              "--linetrace:on",
-              "-d:testing",
-              "--boundChecks:on",
-              "--stacktrace:on",
-              "--linetrace:on",
-              "--warnings:on",
-              "--hints:on",
-              "-d:ctEntrypoint",
-              "-d:withTup",
-              "-d:useOpenssl3",
-              "-d:ssl",
-              "--dynlibOverride:libcrypto",
-              "--dynlibOverride:libssl",
-              "--dynlibOverride:sqlite3",
-              "--dynlibOverride:pcre",
-              "--dynlibOverride:libzip",
-              "--passL:-lssl",
-              "--passL:-lcrypto",
-              "--passL:-lsqlite3",
-              "--passL:-lpcre",
-              "--passL:-lzip",
-              "--nimcache:/tmp/ct-nim-cache/codetracer_codetracer_binary",
-              "--out:src/bin/ct",
-              "c",
-              "src/ct/codetracer.nim"
-            ]),
-          inputs = @["src/ct/codetracer.nim"],
-          outputs = @["src/bin/ct"],
+        nim.c(
+          actionId = "ct",
+          defines = NativeDefines,
+          mm = "refc",
+          hintsOff = true,
+          warningsOff = true,
+          disabledHints = DisabledNimHints,
+          disabledWarnings = DisabledCaseTransitionWarning,
+          debugInfo = true,
+          lineDirOn = true,
+          stacktraceOn = true,
+          linetraceOn = true,
+          boundChecksOn = true,
+          warningsOn = true,
+          hintsOn = true,
+          dynlibOverrides = NativeDynlibOverrides,
+          passL = NativePassL,
+          nimcache = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
+          output = "src/bin/ct",
+          source = "src/ct/codetracer.nim",
           dependencyPolicy = automaticMonitorPolicy())
         codetracerInputs.add("src/bin/ct")
         codetracerEntries.add("src/bin/ct")
 
       if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
-        discard buildAction("codetracer",
-          sh.c(
-            args = @[stampScript("build/reprobuild/codetracer.stamp",
-              "CodeTracer selected app aggregate", codetracerEntries)]),
-          inputs = codetracerInputs,
-          outputs = @["build/reprobuild/codetracer.stamp"])
+        sh(
+          actionId = "codetracer",
+          command = stampScript("build/reprobuild/codetracer.stamp",
+            "CodeTracer selected app aggregate", codetracerEntries),
+          extraInputs = codetracerInputs,
+          extraOutputs = @["build/reprobuild/codetracer.stamp"])
         defaultBuildAction("codetracer")
 
-      gcc.compile(
+      gcc(
         actionId = "c-sudoku-object-tup",
         source = "test-programs/c_sudoku_solver/main.c",
         output = "build/c/main.tup.o",
         pic = true,
-        debug3 = true)
+        debug3 = true,
+        compileOnly = true,
+        dependencyPolicy = automaticMonitorPolicy())
 
-      gcc.compile(
+      gcc(
         actionId = "c-sudoku-object-with-generated-header",
         source = "test-programs/c_sudoku_solver/main.c",
         output = "build/c/main.with-header.o",
         pic = true,
         debug3 = true,
-        includes = @["build/generated/ct_config.h"])
+        compileOnly = true,
+        includes = @["build/generated/ct_config.h"],
+        dependencyPolicy = automaticMonitorPolicy())
