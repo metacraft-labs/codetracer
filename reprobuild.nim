@@ -70,7 +70,7 @@ proc stampScript(path, title: string; entries: openArray[string]): string =
 
 package codeTracer:
   uses:
-    "nim >=2.0"
+    "nim >=1.6 <2.0"
     "node >=20"
     "gcc >=1"
     "sh >=1"
@@ -518,6 +518,60 @@ package codeTracer:
           "build/reprobuild/frontend-public-resources.stamp"
         ],
         outputs = @["build/reprobuild/frontend.stamp"])
+
+      if fileExists("src/ct/db_backend_record.nim"):
+        discard buildAction("db-backend-record",
+          codeTracer.executable("nim").
+            subcmd_2d_d_3a_asyncBackend_3d_asyncdispatch(
+            args = @[
+              "-d:chronicles_sinks=json",
+              "-d:chronicles_line_numbers=true",
+              "-d:chronicles_timestamps=UnixTime",
+              "-d:ssl",
+              "--mm:refc",
+              "-d:nimNoLentIterators",
+              "--hints:off",
+              "--warnings:off",
+              "--hint[Processing]:off",
+              "--hint[Conf]:off",
+              "--hint[CC]:off",
+              "--hint[Pattern]:off",
+              "--hint[XDeclaredButNotUsed]:off",
+              "--hint[XCannotRaiseY]:off",
+              "--warning[CaseTransition]:off",
+              "-d:debug",
+              "--debugInfo",
+              "--lineDir:on",
+              "--stacktrace:on",
+              "--linetrace:on",
+              "-d:testing",
+              "--boundChecks:on",
+              "--stacktrace:on",
+              "--linetrace:on",
+              "--warnings:on",
+              "--hints:on",
+              "-d:ctEntrypoint",
+              "-d:withTup",
+              "-d:useOpenssl3",
+              "-d:ssl",
+              "--dynlibOverride:libcrypto",
+              "--dynlibOverride:libssl",
+              "--dynlibOverride:sqlite3",
+              "--dynlibOverride:pcre",
+              "--dynlibOverride:libzip",
+              "--passL:-lssl",
+              "--passL:-lcrypto",
+              "--passL:-lsqlite3",
+              "--passL:-lpcre",
+              "--passL:-lzip",
+              "--nimcache:/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
+              "--out:src/bin/db-backend-record",
+              "c",
+              "src/ct/db_backend_record.nim"
+            ]),
+          inputs = @["src/ct/db_backend_record.nim"],
+          outputs = @["src/bin/db-backend-record"],
+          dependencyPolicy = automaticMonitorPolicy())
 
       discard buildAction("c-sudoku-object-tup",
         codeTracer.executable("gcc").subcmd_2d_fPIC(
