@@ -333,6 +333,27 @@ proc sanitizeEditLayoutJson*(raw: cstring): cstring =
     config, ord(Content.EditorView), editModeHiddenContentIds())
   return stringifyJson(sanitized)
 
+proc sanitizeDefaultLayoutJson*(raw: cstring): cstring =
+  ## Strip per-trace editor tabs from the persisted replay-mode layout.
+  ##
+  ## Panel arrangement (state / calltrace / event log / filesystem / ...)
+  ## is preserved — only `Content.EditorView` entries are dropped because
+  ## their `componentState.fullPath` refers to absolute source files from
+  ## whatever program was being debugged at save time.  Re-instantiating
+  ## those entries in a later session that loads a *different* trace
+  ## leaves the editor in a broken state: the irrelevant tabs race with
+  ## the source-request for the actually-active trace and Monaco never
+  ## mounts.
+  ##
+  ## Reuses the existing `sanitizeEditLayoutConfig` helper with an empty
+  ## hidden-content list so it only filters editor tabs.
+  let config = parseLayoutJson(raw, "Default layout config JSON parse error while saving")
+  if config.isNil:
+    return raw
+  let sanitized = sanitizeEditLayoutConfig(
+    config, ord(Content.EditorView), @[])
+  return stringifyJson(sanitized)
+
 proc resetLayoutToDefault*(filename: string): Future[js] {.async.} =
   ## Delete the corrupt layout file and copy the bundled default.
   ## Returns the fresh default config.

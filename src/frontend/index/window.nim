@@ -137,7 +137,6 @@ proc onCloseWindow*(sender: js, response: JsObject) {.async.} =
   mainWindow.close()
 
 proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, isEditMode=bool)) {.async.} =
-  # TODO: fix problem with editor tabs and reopened layouts?
   # Determine which layout file to save to based on mode
   let layoutFileName = if response.isEditMode:
       "default_edit_layout.json"
@@ -146,14 +145,28 @@ proc onSaveConfig*(sender: js, response: jsobject(name=cstring, layout=cstring, 
 
   let layoutFilePath = frontend_config.userLayoutDir / layoutFileName
 
-  # Edit layouts preserve the panel arrangement only. Persisting concrete
-  # editor tabs makes the next `ct edit <folder>` resurrect stale file paths
-  # before the selected workspace is initialized.
+  # Strip per-trace editor tabs from BOTH the edit-mode and replay-mode
+  # default layouts before persisting.  Concrete editor tabs are
+  # trace-specific (they reference absolute source paths from whatever
+  # program was being debugged when the layout was saved), so resurrecting
+  # them in the next session — which may be a completely different trace
+  # — leaves the editor in a broken state: it tries to open files that
+  # don't apply to the current trace, races with the active source
+  # request, and the Monaco editor for the actually-relevant file may
+  # never mount.  Surfaced by GUI test flakiness: a clean
+  # `~/.config/codetracer/default_layout.json` made `static-block-stepping`
+  # pass in 5s; an inherited layout from a previous test session stalled
+  # Monaco for the full 30s `waitForNimEditorReady` timeout.
+  #
+  # Edit-mode additionally drops the hidden replay-only panels via the
+  # editModeHiddenContentIds list.  Replay-mode keeps every panel
+  # (state/calltrace/event-log/...) since those are panel arrangements
+  # the user explicitly placed and they survive across traces.
   let layoutToSave =
     if response.isEditMode:
       sanitizeEditLayoutJson(response.layout)
     else:
-      response.layout
+      sanitizeDefaultLayoutJson(response.layout)
 
   # Save layout to file (directory should already exist from app startup)
   let errWrite = await fsWriteFileWithErr(cstring(layoutFilePath), layoutToSave)
