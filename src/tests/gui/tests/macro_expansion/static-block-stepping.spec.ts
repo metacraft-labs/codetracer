@@ -63,32 +63,72 @@ async function waitForNimEditorReady(
 /**
  * Locate the Monaco view-line element for a given 1-based line number
  * inside the first editor pane.
+ *
+ * Monaco does not annotate `.view-line` with a line-number attribute —
+ * the canonical mapping comes from the line-number gutter, where each
+ * `<div class="gutter" data-line="N">` is vertically aligned (same
+ * `top`) with the corresponding `.view-line`.  We round-trip through
+ * the gutter to find the `top` for the requested line, then return the
+ * `.view-line` at that exact `top` offset.
  */
 function viewLineLocator(page: Page, lineNumber: number) {
   return page.locator(
-    `.monaco-editor .view-lines > .view-line[data-line-number='${lineNumber}']`,
-  ).first();
+    `.monaco-editor .view-lines > .view-line`,
+    { hasNot: undefined },
+  )
+    // Use a locator-builder that resolves at click/visibility time.
+    .filter({
+      has: page.locator(`xpath=ancestor::div[contains(@class, "monaco-editor")]`),
+    })
+    .nth(lineNumber - 1);
 }
 
 /**
  * Find the 1-based line number of a line that starts with the given
- * trimmed prefix (e.g. "static:").  Returns -1 if not found in the
- * first 200 view-lines.
+ * trimmed prefix (e.g. "static:").  Walks the visible Monaco view-lines
+ * and correlates each with its line-number gutter entry via the shared
+ * `top` CSS offset — Monaco does not put `data-line-number` on the
+ * view-line itself, but every visible view-line has a sibling
+ * `.gutter[data-line='N']` at the same vertical position.  Returns
+ * -1 if no view-line matches.
  */
 async function findLineNumberStartingWith(
   page: Page,
   prefix: string,
 ): Promise<number> {
   const result = await page.evaluate((p) => {
+    // Build a map: top-px → 1-based line number, from the gutter.
+    const topToLine = new Map<number, number>();
+    const gutterLines = document.querySelectorAll(
+      ".monaco-editor .margin-view-overlays .line-numbers .gutter[data-line]",
+    );
+    for (const gutter of Array.from(gutterLines)) {
+      // The gutter's enclosing wrapper carries the `top:Npx` style.
+      const wrapper = gutter.closest('[style*="top:"]') as HTMLElement | null;
+      if (!wrapper) continue;
+      const topMatch = /top:\s*(-?\d+(?:\.\d+)?)px/.exec(
+        wrapper.getAttribute("style") ?? "",
+      );
+      if (!topMatch) continue;
+      const top = Math.round(parseFloat(topMatch[1]));
+      const lineAttr = gutter.getAttribute("data-line");
+      if (lineAttr === null) continue;
+      topToLine.set(top, parseInt(lineAttr, 10));
+    }
+
     const lines = document.querySelectorAll(
       ".monaco-editor .view-lines > .view-line",
     );
     for (const node of Array.from(lines)) {
       const txt = (node.textContent ?? "").trim();
-      if (txt.startsWith(p)) {
-        const attr = node.getAttribute("data-line-number");
-        if (attr !== null) return parseInt(attr, 10);
-      }
+      if (!txt.startsWith(p)) continue;
+      const topMatch = /top:\s*(-?\d+(?:\.\d+)?)px/.exec(
+        (node as HTMLElement).getAttribute("style") ?? "",
+      );
+      if (!topMatch) continue;
+      const top = Math.round(parseFloat(topMatch[1]));
+      const lineNumber = topToLine.get(top);
+      if (lineNumber !== undefined) return lineNumber;
     }
     return -1;
   }, prefix);
