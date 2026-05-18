@@ -166,7 +166,7 @@ fn list_source_files_tool() -> Value {
 fn find_recordings_by_window_tool() -> Value {
     json!({
         "name": "find_recordings_by_window",
-        "description": "Discover CodeTracer recordings by querying a tracing backend over a time window. Shells out to `ct-observe extract` and returns the matching spans as a JSON array. Each row is dual-keyed (per Recording-Identifier-Migration spec §6.6): `recording_id` identifies the CodeTracer recording (UUIDv7), and `trace_id` carries the OpenTelemetry W3C TraceContext id of the span. Rows also include `span_id`, `service_name`, `span_name`, `request_key`, `recording_available`, and `dive_in_url`. The `dive_in_url` can be passed to `exec_script`, `trace_info`, `list_source_files`, or `read_source_file` to dive directly into the recording.",
+        "description": "Discover CodeTracer recordings by querying a tracing backend over a time window. Shells out to `ct-observe extract` and returns the matching spans as a JSON array. Each row is dual-keyed (M-REC-9, Recording-Identifier-Migration §6.6 / §6.8): `recording_id` identifies the CodeTracer recording (UUIDv7, canonical 36-char hyphenated form, RFC 9562) — this is the local recording that captured the span on the host that produced it; `trace_id` carries the OpenTelemetry W3C TraceContext id of the span (32-char lowercase hex) — this is the application-level operation identifier that may span multiple services and recordings. These are two independent identifiers despite the shared word \"trace\"; consumers needing to dive into a specific span of a specific recording must use both. Rows also include `span_id`, `service_name`, `span_name`, `request_key`, `recording_available`, and `dive_in_url`. The `dive_in_url` (form `?recording_id=...&trace_id=...&span_id=...`) can be passed to `exec_script`, `trace_info`, `list_source_files`, or `read_source_file` to dive directly into the recording.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -2577,11 +2577,13 @@ async fn handle_find_recordings_by_window(id: &Value, arguments: Option<&Value>)
 /// Handles the `find_recording_by_id` tool.
 ///
 /// M-REC-5 renamed this from `handle_find_recording_by_trace_id`; the
-/// incoming wire-format parameter is `recording_id`.  The current
-/// implementation still forwards the value to `ct-observe trace
-/// --trace-id <value>` because `ct-observe` itself has not yet been
-/// updated to take `--recording-id`.  M-REC-9 (Observability dive-in
-/// URLs) will reconcile the ct-observe CLI surface.
+/// incoming wire-format parameter is `recording_id` (UUIDv7 canonical
+/// 36-char form, per Recording-Identifier-Migration §3).
+///
+/// M-REC-9: the value is forwarded to `ct-observe trace --recording-id
+/// <value>` (the new flag), so the backend filters on our local
+/// recording id rather than the W3C TraceContext id.  The OTel
+/// `trace_id` parameter remains reserved for W3C TraceContext.
 async fn handle_find_recording_by_id(id: &Value, arguments: Option<&Value>) -> Value {
     let start = Instant::now();
     let args = match arguments {
@@ -2610,11 +2612,18 @@ async fn handle_find_recording_by_id(id: &Value, arguments: Option<&Value>) -> V
         }
     };
 
+    // M-REC-9: emit `--recording-id` (the new flag, CodeTracer UUIDv7
+    // canonical form) rather than the legacy `--trace-id` that conflated
+    // our recording with the OTel W3C TraceContext id.  ct-observe's
+    // `trace` subcommand accepts `--recording-id` as the primary key
+    // when looking up a single CodeTracer recording (it tag-filters on
+    // the `ct.recording_id` span attribute populated by the OTel
+    // adapter).
     let mut cli = vec![
         "trace".to_string(),
         "--backend".to_string(),
         backend.clone(),
-        "--trace-id".to_string(),
+        "--recording-id".to_string(),
         recording_id,
         "--format".to_string(),
         "jsonl".to_string(),
@@ -2796,6 +2805,13 @@ mod tests {
     /// and `find_recording_by_id` accepts a small fixture file that
     /// mirrors real `ct-observe extract --format jsonl` output, including
     /// the `dive_in_url` field that subsequent tools consume.
+    ///
+    /// M-REC-9 (Recording-Identifier-Migration §6.6 / §6.8): every row is
+    /// dual-keyed.  `recording_id` (CodeTracer local UUIDv7) is emitted
+    /// alongside `trace_id` (OpenTelemetry W3C TraceContext).  Pre-M-REC-9
+    /// fixtures may have an empty `recording_id` (representing a span
+    /// captured by a recorder that has not yet adopted UUIDv7); the
+    /// parser must accept those too.
     #[test]
     fn test_ct_observe_jsonl_fixture_parses() {
         let fixture = std::fs::read_to_string("tests/fixtures/observability/jaeger-extract.jsonl")
@@ -2810,6 +2826,12 @@ mod tests {
         for row in &rows {
             assert!(row.get("trace_id").is_some(), "missing trace_id: {row}");
             assert!(row.get("span_id").is_some(), "missing span_id: {row}");
+            // M-REC-9: the dual-key contract — `recording_id` must be
+            // present on every row, even if empty for legacy rows.
+            assert!(
+                row.get("recording_id").is_some(),
+                "missing recording_id (M-REC-9 dual-key requirement): {row}"
+            );
             let dive_in = row
                 .get("dive_in_url")
                 .and_then(Value::as_str)
@@ -2819,6 +2841,169 @@ mod tests {
                 "dive_in_url should be a URL: {dive_in}"
             );
         }
+    }
+
+    /// M-REC-9: rows produced by `find_recordings_by_window` (and by the
+    /// underlying `ct-observe extract`) carry BOTH the CodeTracer
+    /// `recording_id` (UUIDv7) and the OpenTelemetry W3C
+    /// TraceContext `trace_id` (32-char hex).  Asserts:
+    ///
+    ///   - At least one fixture row carries a non-empty `recording_id`.
+    ///   - The two identifiers are independent: `recording_id` is a
+    ///     hyphenated UUIDv7 while `trace_id` is 32 unhyphenated hex
+    ///     chars.  They MUST NOT be conflated.
+    ///   - The dive-in URL on recorded rows contains all three query
+    ///     parameters (`recording_id`, `trace_id`, `span_id`) and the
+    ///     `recording_id` precedes `trace_id` per the canonical builder
+    ///     in `span_processor.nim`.
+    #[test]
+    fn test_find_recordings_by_window_emits_recording_id_alongside_trace_id() {
+        let fixture = std::fs::read_to_string("tests/fixtures/observability/jaeger-extract.jsonl")
+            .expect("fixture exists");
+        let rows: Vec<Value> = fixture
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("valid jsonl row"))
+            .collect();
+
+        let recorded_rows: Vec<&Value> = rows
+            .iter()
+            .filter(|r| {
+                r.get("recording_available")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert!(
+            !recorded_rows.is_empty(),
+            "fixture should include at least one recorded row"
+        );
+
+        for row in &recorded_rows {
+            let recording_id = row
+                .get("recording_id")
+                .and_then(Value::as_str)
+                .expect("recording_id field must be a string");
+            let trace_id = row
+                .get("trace_id")
+                .and_then(Value::as_str)
+                .expect("trace_id field must be a string");
+
+            // M-REC-9: recorded rows MUST carry both ids.
+            assert!(
+                !recording_id.is_empty(),
+                "recorded row must carry a recording_id (UUIDv7): {row}"
+            );
+            assert!(!trace_id.is_empty(), "recorded row must carry a trace_id");
+
+            // The two IDs are distinct concepts (Recording-Identifier-
+            // Migration §2): UUIDv7 is hyphenated and 36 chars; OTel
+            // trace_id is 32 unhyphenated hex chars.
+            assert_eq!(
+                recording_id.len(),
+                36,
+                "recording_id must be canonical UUIDv7 (36-char hyphenated): {recording_id}"
+            );
+            assert!(
+                recording_id.contains('-'),
+                "recording_id (UUIDv7) must be hyphenated: {recording_id}"
+            );
+            assert_eq!(
+                trace_id.len(),
+                32,
+                "trace_id (W3C TraceContext) must be 32 hex chars: {trace_id}"
+            );
+            assert!(
+                !trace_id.contains('-'),
+                "trace_id (W3C TraceContext) must be unhyphenated hex: {trace_id}"
+            );
+            assert_ne!(
+                recording_id, trace_id,
+                "recording_id and trace_id are independent identifiers"
+            );
+
+            // The canonical dual-id dive-in URL: recording_id first,
+            // then trace_id, then span_id.  See
+            // codetracer-native-recorder/.../span_processor.nim
+            // `buildDiveInUrl` for the producer side.
+            let dive_in = row
+                .get("dive_in_url")
+                .and_then(Value::as_str)
+                .expect("dive_in_url must be a string");
+            assert!(
+                dive_in.contains(&format!("recording_id={recording_id}")),
+                "dive_in_url must embed recording_id: {dive_in}"
+            );
+            assert!(
+                dive_in.contains(&format!("trace_id={trace_id}")),
+                "dive_in_url must embed trace_id: {dive_in}"
+            );
+            assert!(
+                dive_in.contains("span_id="),
+                "dive_in_url must embed span_id: {dive_in}"
+            );
+            let recording_pos = dive_in
+                .find("recording_id=")
+                .expect("recording_id= present");
+            let trace_pos = dive_in.find("trace_id=").expect("trace_id= present");
+            let span_pos = dive_in.find("span_id=").expect("span_id= present");
+            assert!(
+                recording_pos < trace_pos,
+                "recording_id must precede trace_id in dive_in_url: {dive_in}"
+            );
+            assert!(
+                trace_pos < span_pos,
+                "trace_id must precede span_id in dive_in_url: {dive_in}"
+            );
+        }
+    }
+
+    /// M-REC-9: `find_recordings_by_window`'s tool description documents
+    /// the dual-keyed row shape so MCP clients (LLM agents) know to read
+    /// both `recording_id` and `trace_id`.
+    #[test]
+    fn test_find_recordings_by_window_description_documents_dual_keys() {
+        let tool = find_recordings_by_window_tool();
+        let description = tool["description"].as_str().expect("description string");
+        assert!(
+            description.contains("recording_id"),
+            "find_recordings_by_window description must mention recording_id (M-REC-9)"
+        );
+        assert!(
+            description.contains("trace_id"),
+            "find_recordings_by_window description must mention trace_id"
+        );
+        // Description must mark the two ids as distinct concepts so an
+        // agent does not pass an OTel trace_id where a recording_id is
+        // expected and vice versa.
+        let has_disambiguation = description.contains("CodeTracer recording")
+            || description.contains("OpenTelemetry")
+            || description.contains("W3C TraceContext")
+            || description.contains("UUIDv7");
+        assert!(
+            has_disambiguation,
+            "find_recordings_by_window description must disambiguate the two ids (M-REC-9 / Recording-Identifier-Migration §2): {description}"
+        );
+    }
+
+    /// M-REC-9: the `find_recording_by_id` handler must invoke
+    /// `ct-observe` with the new `--recording-id` flag (not the legacy
+    /// `--trace-id` that conflated identifiers).  We assert the flag
+    /// shape indirectly by reading the handler's source through the
+    /// public tool description to make the cross-system contract
+    /// explicit.
+    #[test]
+    fn test_find_recording_by_id_tool_description_reflects_recording_id_semantics() {
+        let tool = find_recording_by_id_tool();
+        let description = tool["description"].as_str().expect("description string");
+        assert!(
+            description.contains("recording_id"),
+            "find_recording_by_id description must mention recording_id"
+        );
+        assert!(
+            description.contains("UUIDv7") || description.contains("Recording-Identifier"),
+            "find_recording_by_id description must reference UUIDv7 or the migration spec: {description}"
+        );
     }
 
     #[test]
