@@ -155,6 +155,30 @@
       "token": "attribute.name"
     }
   ],
+  "semanticHighlighting": true,
+  "semanticTokenColors": {
+    "macro": "#AF3DB4",
+    "macro.declaration": "#AF3DB4",
+    "function": "#795E26",
+    "function.declaration": "#795E26",
+    "method": "#795E26",
+    "type": "#267F99",
+    "type.declaration": "#267F99",
+    "class": "#267F99",
+    "enum": "#267F99",
+    "interface": "#267F99",
+    "struct": "#267F99",
+    "typeParameter": "#0070C1",
+    "parameter": "#1F377F",
+    "variable": "#001080",
+    "variable.readonly": "#0070C1",
+    "property": "#001080",
+    "enumMember": "#0070C1",
+    "namespace": "#267F99",
+    "decorator": "#AF3DB4",
+    "label": "#001080",
+    "operator": "#000000"
+  },
   "colors": {
     "editor.foreground": "#f4f4f4",
     "editor.background": "#f4f4f4",

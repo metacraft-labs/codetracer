@@ -171,6 +171,30 @@
       "token": "attribute.value"
     }
   ],
+  "semanticHighlighting": true,
+  "semanticTokenColors": {
+    "macro": "#E78A4E",
+    "macro.declaration": "#E78A4E",
+    "function": "#D7C98A",
+    "function.declaration": "#D7C98A",
+    "method": "#D7C98A",
+    "type": "#4EC9B0",
+    "type.declaration": "#4EC9B0",
+    "class": "#4EC9B0",
+    "enum": "#4EC9B0",
+    "interface": "#4EC9B0",
+    "struct": "#4EC9B0",
+    "typeParameter": "#9CDCFE",
+    "parameter": "#D9E2D4",
+    "variable": "#CDD3DE",
+    "variable.readonly": "#B38BC8",
+    "property": "#9CDCFE",
+    "enumMember": "#7AA2D6",
+    "namespace": "#C586C0",
+    "decorator": "#E78A4E",
+    "label": "#CDD3DE",
+    "operator": "#C7D0DA"
+  },
   "colors": {
     "editorBracketHighlight.foreground1": "#EAB308",
     "editorBracketHighlight.foreground2": "#8B5CF6",

@@ -126,4 +126,96 @@ test.describe("Nim semantic tokens", () => {
       expect(mtkCount).toBeGreaterThan(0);
     },
   );
+
+  test(
+    "active theme carries semanticTokenColors for macro/function/type/parameter",
+    async ({ ctPage }) => {
+      // This test closes the visual-differentiation gap: the provider
+      // tags identifiers with semantic token types, but unless the
+      // active Monaco theme has `semanticTokenColors` rules for those
+      // types the user sees no color difference.  Assert at the theme
+      // level so a future theme-redesign that drops these rules fails
+      // here loudly rather than silently regressing the UX.
+      const layout = new LayoutPage(ctPage);
+      await layout.waitForBaseComponentsLoaded();
+      await expect(
+        ctPage.locator(".monaco-editor .view-lines").first(),
+      ).toBeVisible({ timeout: 30_000 });
+
+      // Probe the active theme via the standalone theme service.  Monaco
+      // does not publish a typed accessor for `semanticTokenColors`, but
+      // the `getColorTheme()` instance exposes `themeData.semanticTokenColors`
+      // on the original registration object — exactly what
+      // `monaco.editor.defineTheme` stored.  This is the same channel
+      // VS Code uses internally for semantic-aware coloring.
+      const themeRules = await ctPage.evaluate(() => {
+        const w = window as unknown as { monaco?: any };
+        const monaco = w.monaco;
+        if (!monaco?.editor?._standaloneThemeService) {
+          return { reachable: false, dark: null, white: null };
+        }
+        const svc = monaco.editor._standaloneThemeService;
+        // The two CodeTracer themes are both registered via
+        // `monaco.editor.defineTheme` in `editor.nim`.  Look both up.
+        const themes = svc._knownThemes ?? new Map();
+        const pickColors = (id: string) => {
+          const theme = themes.get(id);
+          if (!theme) return null;
+          // The original definition JSON is on `themeData`.
+          const data = theme.themeData ?? null;
+          return data
+            ? {
+                semanticHighlighting: data.semanticHighlighting === true,
+                semanticTokenColors: data.semanticTokenColors ?? null,
+              }
+            : null;
+        };
+        return {
+          reachable: true,
+          dark: pickColors("codetracerDark"),
+          white: pickColors("codetracerWhite"),
+        };
+      });
+
+      if (!themeRules.reachable) {
+        test.skip(
+          true,
+          "monaco._standaloneThemeService not reachable from page context " +
+            "(likely a Monaco version change); fall back to file-level " +
+            "assertions in a unit test runner",
+        );
+      }
+
+      // Both themes must have semantic highlighting enabled and a
+      // semanticTokenColors block.  Anything less means the user
+      // does NOT see distinct colors for the new semantic token
+      // types — the symptom that prompted this test.
+      for (const [themeName, rules] of [
+        ["codetracerDark", themeRules.dark],
+        ["codetracerWhite", themeRules.white],
+      ] as const) {
+        expect(rules, `theme ${themeName} must be registered`).not.toBeNull();
+        expect(
+          rules?.semanticHighlighting,
+          `${themeName} must opt into semanticHighlighting`,
+        ).toBe(true);
+        expect(
+          rules?.semanticTokenColors,
+          `${themeName} must define semanticTokenColors`,
+        ).not.toBeNull();
+        // The four most user-visible Nim-specific types.  Adding more
+        // here is fine; removing one should be deliberate and require
+        // updating this assertion.
+        const required = ["macro", "function", "type", "parameter"];
+        for (const key of required) {
+          expect(
+            (rules?.semanticTokenColors as Record<string, unknown> | null)?.[
+              key
+            ],
+            `${themeName}.semanticTokenColors.${key} must be set`,
+          ).toBeDefined();
+        }
+      }
+    },
+  );
 });
