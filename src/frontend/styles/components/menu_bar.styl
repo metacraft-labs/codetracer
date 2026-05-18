@@ -135,36 +135,18 @@
       padding-right: 10px
 
   #menu-main
-    font-family: "SpaceGrotesk"
-    width: 200px
+    font-family: "SpaceMono"
     font-size: MENU_FONT_SIZE
-    margin-left: 6px
-    height: fit-content
-    padding-bottom: 4px
-    // min-height: 245px
-    // border: 1px solid NAVIGATION_MENU_BORDER_COLOR
+    width: fit-content
+    min-width: 12em
+    padding: 0
     position: absolute
     top: 2.1rem
-    left: 0
-    z-index: 100
-    -webkit-app-region: no-drag
-    pointer-events: auto
-    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
-    border-radius: 6px
-
-    // &::before
-    //   content:''
-    //   position: absolute
-    //   width: 12px
-    //   height: 12px
-    //   background-color: NAVIGATION_MENU_INPUT_BACKGROUND_COLOR
-    //   transform: rotate(45deg)
-    //   top: -7.5px
-    //   left: 10px
-    //   border-left: 1px solid NAVIGATION_MENU_BORDER_COLOR
-    //   border-top: 1px solid NAVIGATION_MENU_BORDER_COLOR
-  // margin-top: -5px
-  // transform: rotate(180deg)
+    margin-left: 6px
+    background: colors-ui-surface-canvas
+    border: 0.0625em solid colors-ui-border-primary
+    border-radius: 0.75em
+    box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
 
 
   .menu-node, .menu-search-result
@@ -313,33 +295,30 @@
 
   #menu-elements
     width: 100%
-    float: left
-    // background-color: MENU_BACKGROUND_COLOR
-    // border-right: 1px solid NAVIGATION_MENU_COLOR
-    // border-left: 1px solid NAVIGATION_MENU_COLOR
-    // border-bottom: 1px solid NAVIGATION_MENU_COLOR
-    color: NAVIGATION_MENU_COLOR
-    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
+    overflow: hidden
+    border-radius: 0.75em
 
-  .menu-nested-elements-1
-    float: left
+  .menu-node-container
+    width: 100%
 
   .menu-nested-elements
     position: absolute
-    float: left
-    font-size: MENU_FONT_SIZE
-    z-index: 101
-    -webkit-app-region: no-drag
-    pointer-events: auto
-    // border: 1px NAVIGATION_MENU_BORDER_COLOR solid
-    border-radius: 6px
-    background-color: NAVIGATION_MENU_BACKGROUND_COLOR
-    padding-top: 4px
-    padding-bottom: 4px
+    font-size: 1em
+    width: fit-content
+    min-width: 12em
+    padding: 0
+    background: colors-ui-surface-canvas
+    border: 0.0625em solid colors-ui-border-primary
+    border-top-left-radius: 0
+    border-top-right-radius: 0.75em
+    border-bottom-left-radius: 0.75em
+    border-bottom-right-radius: 0.75em
+    box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
+    overflow: hidden
 
-    .menu-node-icon
-      width: 0px !important
-      margin-left: 0px !important
+  #menu-elements, .menu-nested-elements
+    .menu-node-container:last-child > .ct-menu-item
+      border-bottom: none
 
   .menu-enabled
     color: NAVIGATION_MENU_COLOR
