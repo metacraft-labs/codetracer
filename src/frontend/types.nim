@@ -1566,6 +1566,7 @@ type
     search*: bool
     keyNavigation*: bool
     skipNextBlur*: bool
+    focusByMouse*: bool
 
   TraceLogComponent* = ref object of Component
     table*: DataTableComponent

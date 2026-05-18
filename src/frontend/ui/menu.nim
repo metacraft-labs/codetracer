@@ -33,8 +33,18 @@ proc menuNestedStyle*(self: MenuComponent, value: int, depth: int, separators: i
     for i in 1..<depth:
       left += cast[int](jq(cstring(fmt"#menu-nested-elements-{i}")).toJs.clientWidth)
 
+  # Use offsetTop (integer, relative to offsetParent = #menu-main) to align
+  # the submenu with the folder item that triggered it.
+  let parentDepth = depth - 1
+  var topPx = 0
+  if parentDepth < self.activePath.len:
+    let parentIndex = self.activePath[parentDepth]
+    let folderEl = jq(cstring(fmt"#menu-folder-{parentDepth}-{parentIndex}"))
+    if not folderEl.isNil:
+      topPx = cast[int](folderEl.toJs.offsetTop)
+
   result = style(
-    (StyleAttr.top, cstring(fmt"{value * 28 + separators * 28 - 56}px")),
+    (StyleAttr.top, cstring(fmt"{topPx}px")),
     (StyleAttr.left, cstring(fmt"calc({left}px + {2 * depth}px)"))
   )
 
@@ -65,15 +75,20 @@ proc menuElementView*(
   i: int,
   depth: int,
   nameWidth: int,
-  shortcutWidth: int): VNode =
+  shortcutWidth: int,
+  isFocused: bool = false): VNode =
 
-  let enabledClass = if node.enabled: "menu-enabled" else: "menu-disabled"
-  let shortcut = loadShortcut(node.action, self.data.config)
+  let s = $node.name
+  let idx = s.find(" (")
+  let label = if idx >= 0: cstring(s[0..<idx]) else: node.name
+  let sublabel = if idx >= 0: cstring(s[idx + 1..^1]) else: cstring""
 
   buildHtml(
     tdiv(
       id = cstring(fmt"menu-element-{depth} {i}"),
-      class = cstring(fmt"menu-element menu-node {enabledClass}"),
+      class = "ct-menu-item",
+      `data-disabled` = if not node.enabled: cstring"true" else: cstring"false",
+      `data-focused` = if isFocused: cstring"true" else: cstring"false",
       onmouseover = proc =
         if not self.keyNavigation:
           self.activeIndex = i
@@ -90,14 +105,11 @@ proc menuElementView*(
         self.enterElement(node)
     )
   ):
-    span(class = "menu-node-icon"):
-      text ""
-    span(class = cstring(fmt"menu-node-name menu-element-{convertStringToHtmlClass(node.name)}"),
-         style = style(StyleAttr.width, cstring(fmt"{nameWidth}ch"))):
-      text node.name
-    if shortcut != "":
-      span(class = "menu-node-shortcut"):
-        text shortcut
+    span(class = "ct-menu-item-label"):
+      text label
+    if sublabel != cstring"":
+      span(class = "ct-menu-item-sublabel"):
+        text sublabel
 
 proc menuFolderView*(
   self: MenuComponent,
@@ -105,13 +117,15 @@ proc menuFolderView*(
   i: int,
   depth: int,
   parentLength: int,
-  nameWidth: int
+  nameWidth: int,
+  isFocused: bool = false
 ): VNode =
-  let enabledClass = if node.enabled: "menu-enabled" else: "menu-disabled"
-
   buildHtml(
     tdiv(
-      class = cstring(fmt"menu-folder menu-node {enabledClass}"),
+      id = cstring(fmt"menu-folder-{depth}-{i}"),
+      class = "ct-menu-item",
+      `data-disabled` = if not node.enabled: cstring"true" else: cstring"false",
+      `data-focused` = if isFocused: cstring"true" else: cstring"false",
       onmouseover = proc =
         if node.enabled and not self.keyNavigation:
           if node.elements.len > 0:
@@ -128,13 +142,10 @@ proc menuFolderView*(
         self.data.redraw()
     )
   ):
-    span(class = "menu-node-icon"):
-      tdiv(class = "icon " & iconClass(node.name))
-    span(class = cstring(fmt"menu-node-name menu-folder-{convertStringToHtmlClass(node.name)}"),
-         style = style(StyleAttr.width, cstring(fmt"{nameWidth}ch"))):
+    span(class = "ct-menu-item-label"):
       text node.name
-      if node.elements.len > 0:
-        span(class = "menu-expand")
+    if node.elements.len > 0:
+      span(class = "ct-menu-item-trailing")
 
 proc menuSubGroupSeparatorView*(self: MenuComponent): VNode =
   buildHtml(hr(class = "menu-sub-group-separator"))
@@ -148,21 +159,20 @@ proc menuNodeView*(
   nameWidth: int,
   shortcutWidth: int
 ): VNode =
-  let activeNode =
-    if (self.activePath.len == depth and self.activeIndex == i) or
-        (self.activePath.len() > 0 and self.activePath.len() != depth and self.activePath[depth] == i):
-      cstring"menu-active-node"
-    else:
-      cstring""
+  let isFocused =
+    self.keyNavigation and (
+      (self.activePath.len == depth and self.activeIndex == i) or
+      (self.activePath.len() > 0 and self.activePath.len() != depth and self.activePath[depth] == i)
+    )
 
-  buildHtml(tdiv(class = "menu-node-container " & activeNode)):
+  buildHtml(tdiv(class = "menu-node-container")):
     if node.kind == MenuElement:
-      menuElementView(self, node, i, depth, nameWidth, shortcutWidth)
+      menuElementView(self, node, i, depth, nameWidth, shortcutWidth, isFocused)
     else:
       let folderItemWidth = nameWidth + shortcutWidth - self.folderArrowCharWidth
-      menuFolderView(self, node, i, depth, parentLength, folderItemWidth)
-    if node.isBeforeNextSubGroup:
-      menuSubGroupSeparatorView(self)
+      menuFolderView(self, node, i, depth, parentLength, folderItemWidth, isFocused)
+    # if node.isBeforeNextSubGroup:
+    #   menuSubGroupSeparatorView(self)
 
 proc menuSearchResultView*(self: MenuComponent, res: cstring, i: int): VNode =
   result = buildHtml(
@@ -352,7 +362,21 @@ proc navigationMenuView*(self: MenuComponent): VNode =
           self.closeMenu()
           redrawAll(),
       onmousedown = proc =
-        self.activeDomElement = cast[dom.Node](dom.window.document.activeElement)
+        self.focusByMouse = true
+        self.activeDomElement = cast[dom.Node](dom.window.document.activeElement),
+      onfocus = proc =
+        if not self.focusByMouse and not self.active:
+          # Don't call openMainMenu/toggle here — focusComponent() inside those
+          # calls .blur() on the active element, stealing focus from #navigation-menu
+          # and breaking ESC / onBlur. The element already has focus from Tab.
+          self.activeIndex = 0
+          self.activeLength = self.data.ui.menuNode.elements.len
+          self.activePath = @[]
+          self.activePathWidths = JsAssoc[int, int]{}
+          self.activePathOffsets = JsAssoc[int, int]{}
+          self.active = true
+          self.data.redraw()
+        self.focusByMouse = false
     )
   ):
     tdiv(
@@ -376,8 +400,8 @@ proc navigationMenuView*(self: MenuComponent): VNode =
           ev.stopPropagation()
           self.search = false
           ev.currentTarget.parentNode.focus()):
-        tdiv(id="menu-search-results"):
-          if self.searchQuery.len > 0:
+        if self.searchQuery.len > 0:
+          tdiv(id="menu-search-results"):
             if self.searchResults.len == 0:
               tdiv(class="menu-no-search-results"):
                 text "No results found"
