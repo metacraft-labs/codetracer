@@ -1,4 +1,4 @@
-import std/[algorithm, os, osproc, strutils]
+import std/[algorithm, os, strutils]
 
 import repro_project_dsl
 
@@ -50,25 +50,13 @@ proc collectPublicResourceTree(root: string): tuple[dirs: seq[string];
 proc publicResourceOutput(sourcePath: string): string =
   "public" / normalizedRelPath(relativePath(sourcePath, PublicResourceRoot))
 
-proc copyScript(input, output: string): string =
-  let outputDir = splitPath(output).head
-  result = "set -eu\n"
-  if outputDir.len > 0:
-    result.add(
-      "for i in 1 2 3; do mkdir -p " & quoteShell(outputDir) &
-        " && break; sleep 0.05; done\n")
-    result.add("test -d " & quoteShell(outputDir) & "\n")
-  result.add("cp " & quoteShell(input) & " " & quoteShell(output) & "\n")
-
-proc stampScript(path, title: string; entries: openArray[string]): string =
-  result = "set -eu\nmkdir -p " & quoteShell(splitPath(path).head) & "\n"
-  result.add("{\n")
-  result.add("printf '%s\\n' " & quoteShell(title) & "\n")
-  for entry in entries:
-    result.add("printf '%s\\n' " & quoteShell(entry) & "\n")
-  result.add("} > " & quoteShell(path) & "\n")
-
 const
+  CtConfigHeader = """
+#ifndef REPROBUILD_CT_SUBSET_CONFIG_H
+#define REPROBUILD_CT_SUBSET_CONFIG_H
+#define REPROBUILD_CT_SUBSET_GENERATED 1
+#endif
+"""
   CommonNimDefines = @[
     "chronicles_sinks=json",
     "chronicles_line_numbers=true",
@@ -148,7 +136,6 @@ package codeTracer:
     "nim >=1.6 <3.0"
     "node >=20"
     "gcc >=1"
-    "sh >=1"
 
   build:
       template ctNimJs(actionName: string;
@@ -203,11 +190,11 @@ package codeTracer:
           output = outputPath,
           source = sourcePath)
 
-      sh(
+      fs.writeText(
         actionId = "generate-config-header",
-        command = "sh reprobuild/scripts/generate_ct_config.sh",
-        extraInputs = @["reprobuild/scripts/generate_ct_config.sh"],
-        extraOutputs = @["build/generated/ct_config.h"])
+        output = "build/generated/ct_config.h",
+        text = CtConfigHeader)
+      let buildCDir = fs.ensureDir(actionId = "build-c-dir", path = "build/c")
 
       ctNimJs(
         actionName = "nim-js-ipc-registry-test",
@@ -229,11 +216,10 @@ package codeTracer:
         debugInfoOnValue = true,
         hotCodeReloadingOnValue = true)
 
-      sh(
+      fs.copyFile(
         actionId = "frontend-public-ui-js",
-        command = "mkdir -p public && cp ui.js public/ui.js",
-        extraInputs = @["ui.js"],
-        extraOutputs = @["public/ui.js"])
+        source = "ui.js",
+        output = "public/ui.js")
 
       ctNimJs(
         actionName = "frontend-index-js",
@@ -243,11 +229,10 @@ package codeTracer:
         sourcePath = "src/frontend/index.nim",
         sourcemapOnValue = true)
 
-      sh(
+      fs.copyFile(
         actionId = "frontend-src-index-js",
-        command = "cp index.js src/index.js",
-        extraInputs = @["index.js"],
-        extraOutputs = @["src/index.js"])
+        source = "index.js",
+        output = "src/index.js")
 
       ctNimJs(
         actionName = "frontend-server-index-js",
@@ -267,29 +252,25 @@ package codeTracer:
         sourcemapOnValue = true,
         hotCodeReloadingOnValue = true)
 
-      sh(
+      fs.copyFile(
         actionId = "frontend-src-subwindow-js",
-        command = "mkdir -p src && cp subwindow.js src/subwindow.js",
-        extraInputs = @["subwindow.js"],
-        extraOutputs = @["src/subwindow.js"])
+        source = "subwindow.js",
+        output = "src/subwindow.js")
 
-      sh(
+      fs.copyFile(
         actionId = "frontend-index-html",
-        command = "cp src/frontend/index.html index.html",
-        extraInputs = @["src/frontend/index.html"],
-        extraOutputs = @["index.html"])
+        source = "src/frontend/index.html",
+        output = "index.html")
 
-      sh(
+      fs.copyFile(
         actionId = "frontend-subwindow-html",
-        command = "cp src/frontend/subwindow.html subwindow.html",
-        extraInputs = @["src/frontend/subwindow.html"],
-        extraOutputs = @["subwindow.html"])
+        source = "src/frontend/subwindow.html",
+        output = "subwindow.html")
 
-      sh(
+      fs.copyFile(
         actionId = "frontend-src-helpers-js",
-        command = "mkdir -p src && cp helpers.js src/helpers.js",
-        extraInputs = @["helpers.js"],
-        extraOutputs = @["src/helpers.js"])
+        source = "helpers.js",
+        output = "src/helpers.js")
 
       # Coarse generated-copy resource semantics for the current src/public
       # tree. This intentionally enumerates regular files only and is not a
@@ -305,36 +286,23 @@ package codeTracer:
         let actionId = publicResourceActionId(relative)
         let output = publicResourceOutput(sourcePath)
         publicResourceOutputs.add(output)
-        sh(
+        fs.copyFile(
           actionId = actionId,
-          command = copyScript(normalizedRelPath(sourcePath), output),
-          extraInputs = @[normalizedRelPath(sourcePath)],
-          extraOutputs = @[output])
+          source = normalizedRelPath(sourcePath),
+          output = output)
 
-      sh(
+      fs.stamp(
         actionId = "frontend-public-resources",
-        command = stampScript("build/reprobuild/frontend-public-resources.stamp",
-          "CodeTracer frontend public resource tree",
-          publicResourceOutputs),
-        extraInputs = publicResourceOutputs,
-        extraOutputs = @["build/reprobuild/frontend-public-resources.stamp"])
+        output = "build/reprobuild/frontend-public-resources.stamp",
+        title = "CodeTracer frontend public resource tree",
+        entries = publicResourceOutputs,
+        inputs = publicResourceOutputs)
 
-      sh(
+      fs.stamp(
         actionId = "frontend",
-        command =
-          "mkdir -p build/reprobuild && " &
-          "{ " &
-          "printf '%s\n' 'CodeTracer frontend aggregate'; " &
-          "printf '%s\n' 'src/index.js'; " &
-          "printf '%s\n' 'src/subwindow.js'; " &
-          "printf '%s\n' 'public/ui.js'; " &
-          "printf '%s\n' 'server_index.js'; " &
-          "printf '%s\n' 'index.html'; " &
-          "printf '%s\n' 'subwindow.html'; " &
-          "printf '%s\n' 'src/helpers.js'; " &
-          "printf '%s\n' 'build/reprobuild/frontend-public-resources.stamp'; " &
-          "} > build/reprobuild/frontend.stamp",
-        extraInputs = @[
+        output = "build/reprobuild/frontend.stamp",
+        title = "CodeTracer frontend aggregate",
+        entries = @[
           "src/index.js",
           "src/subwindow.js",
           "public/ui.js",
@@ -344,28 +312,33 @@ package codeTracer:
           "src/helpers.js",
           "build/reprobuild/frontend-public-resources.stamp"
         ],
-        extraOutputs = @["build/reprobuild/frontend.stamp"])
+        inputs = @[
+          "src/index.js",
+          "src/subwindow.js",
+          "public/ui.js",
+          "server_index.js",
+          "index.html",
+          "subwindow.html",
+          "src/helpers.js",
+          "build/reprobuild/frontend-public-resources.stamp"
+        ])
 
       var codetracerInputs = @["build/reprobuild/frontend.stamp"]
       var codetracerEntries = @["build/reprobuild/frontend.stamp"]
 
       if fileExists("src/config/default_layout.json"):
-        sh(
+        fs.copyFile(
           actionId = "config-default-layout-json",
-          command = copyScript("src/config/default_layout.json",
-            "config/default_layout.json"),
-          extraInputs = @["src/config/default_layout.json"],
-          extraOutputs = @["config/default_layout.json"])
+          source = "src/config/default_layout.json",
+          output = "config/default_layout.json")
         codetracerInputs.add("config/default_layout.json")
         codetracerEntries.add("config/default_layout.json")
 
       if fileExists("src/config/default_config.yaml"):
-        sh(
+        fs.copyFile(
           actionId = "config-default-config-yaml",
-          command = copyScript("src/config/default_config.yaml",
-            "config/default_config.yaml"),
-          extraInputs = @["src/config/default_config.yaml"],
-          extraOutputs = @["config/default_config.yaml"])
+          source = "src/config/default_config.yaml",
+          output = "config/default_config.yaml")
         codetracerInputs.add("config/default_config.yaml")
         codetracerEntries.add("config/default_config.yaml")
 
@@ -398,12 +371,12 @@ package codeTracer:
         codetracerEntries.add("src/bin/ct")
 
       if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
-        let codetracer = sh(
+        let codetracer = fs.stamp(
           actionId = "codetracer",
-          command = stampScript("build/reprobuild/codetracer.stamp",
-            "CodeTracer selected app aggregate", codetracerEntries),
-          extraInputs = codetracerInputs,
-          extraOutputs = @["build/reprobuild/codetracer.stamp"])
+          output = "build/reprobuild/codetracer.stamp",
+          title = "CodeTracer selected app aggregate",
+          entries = codetracerEntries,
+          inputs = codetracerInputs)
         defaultBuildAction(codetracer)
 
       gcc(
@@ -412,7 +385,8 @@ package codeTracer:
         output = "build/c/main.tup.o",
         pic = true,
         debug3 = true,
-        compileOnly = true)
+        compileOnly = true,
+        deps = @[buildCDir.id])
 
       gcc(
         actionId = "c-sudoku-object-with-generated-header",
@@ -421,4 +395,5 @@ package codeTracer:
         pic = true,
         debug3 = true,
         compileOnly = true,
-        includes = @["build/generated/ct_config.h"])
+        includes = @["build/generated/ct_config.h"],
+        deps = @[buildCDir.id])
