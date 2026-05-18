@@ -337,9 +337,10 @@ proc record*(lang: string,
     programToRecord = wasmPath
   elif not detectedLang.usesMaterializedTraces:
     # Match `ct run` behavior for RR-based languages by building first.
+    # M-REC-7: folder name is the bare ``recording_id`` (UUIDv7) — see paths.recordingFolder.
     if detectedLang == LangNim and outputFolderValue.len == 0:
       let traceID = trace_index.newID(test=false)
-      outputFolderValue = codetracerShareFolder / fmt"trace-{traceID}"
+      outputFolderValue = recordingFolder(codetracerShareFolder, traceID)
       createDir(outputFolderValue)
       nimcachePath = outputFolderValue / "nimcache"
       # Ensure the output folder is passed to the recorder after we create it.

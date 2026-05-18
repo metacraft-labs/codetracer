@@ -55,7 +55,11 @@ proc downloadTrace*(url: string,
 
   let downloadTarget = codetracerTmpPath / fmt"downloaded-trace-{traceId}.zip"
 
-  let unzippedLocation = codetracerTraceDir / "trace-" & $traceId
+  # M-REC-7: downloads land at ``<traces>/<recording_id>/`` — the bare
+  # UUIDv7 — to match the post-M-REC-7 on-disk layout for locally
+  # recorded traces.  The sharing-server wire format remains M-REC-8's
+  # concern; here we only fix the local folder name.
+  let unzippedLocation = paths.recordingFolder(codetracerTraceDir, traceId)
 
   let downloadExitCode = downloadFile(url, downloadTarget, token, baseUrl)
   if downloadExitCode != 0:

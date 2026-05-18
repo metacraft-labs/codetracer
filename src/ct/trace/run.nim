@@ -61,10 +61,11 @@ proc runWithRestart(
       var nimcachePath = ""
 
       # For Nim, pre-create the trace folder so we can set nimcache to be inside it
-      # This matches the legacy backend behavior where generated C files are kept in the trace
+      # This matches the legacy backend behavior where generated C files are kept in the trace.
+      # M-REC-7: folder name is the bare ``recording_id`` (UUIDv7) — see paths.recordingFolder.
       if lang == LangNim:
         let traceID = trace_index.newID(test=false)
-        outputFolder = codetracerShareFolder / fmt"trace-{traceID}"
+        outputFolder = recordingFolder(codetracerShareFolder, traceID)
         createDir(outputFolder)
         nimcachePath = outputFolder / "nimcache"
 

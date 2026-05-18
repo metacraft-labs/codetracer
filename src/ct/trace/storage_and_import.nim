@@ -154,10 +154,11 @@ proc importTrace*(
       trace_index.newID(test=false)
 
   let outputFolder = if recordingIdArg == NO_RECORDING_ID:
-      # M-REC-2: folder name still uses the legacy ``trace-<id>`` form
-      # because the on-disk layout rename is M-REC-7's scope.  We only
-      # changed what ``<id>`` is.
-      fmt"{codetracerTraceDir}/trace-{traceID}/"
+      # M-REC-7: folder name is the bare UUIDv7 ``recording_id``.  The
+      # pre-M-REC-7 ``trace-<int_id>`` / ``trace-<uuid>`` form was
+      # retired so that on-disk and DB identities match exactly, which
+      # is what makes folders portable across machines (parent spec §4).
+      recordingFolder(codetracerTraceDir, traceID)
     else:
       traceFolder
   if recordingIdArg == NO_RECORDING_ID:

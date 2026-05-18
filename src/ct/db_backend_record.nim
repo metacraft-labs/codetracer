@@ -230,7 +230,8 @@ proc record(
   let codetracerDir = if not test: codetracerShareFolder
                       elif customPath.len > 0: customPath
                       else: &"{codetracerTestDir}/records/"
-  let outputFolder = if outputFolderArg.len == 0: fmt"{codetracerDir}/trace-{traceID}/" else: outputFolderArg
+  # M-REC-7: folder name is the bare ``recording_id`` (UUIDv7) — see paths.recordingFolder.
+  let outputFolder = if outputFolderArg.len == 0: recordingFolder(codetracerDir, traceID) else: outputFolderArg
   let env = readRawEnv()
   let argsShell = args.join " "
   var shellCmd = cmd & " " & argsShell
@@ -603,9 +604,16 @@ proc main*(): Trace =
     cleanupOutputFolder = true
 
   let binaryName = program.extractFilename()
+  discard binaryName  # M-REC-7: binary name is no longer encoded in the
+                      # folder name; it lives in the trace_index DB row's
+                      # ``program`` column.  Kept extracted in case future
+                      # ``ct shell`` logging wants to print it.
 
   if recordsOutputFolder != "":
-    outputFolder = recordsOutputFolder / fmt"trace-{binaryName}-{traceID}"
+    # M-REC-7: folder name is the bare ``recording_id`` (UUIDv7) — the
+    # pre-M-REC-7 ``trace-<binaryName>-<id>`` composite duplicated
+    # information already stored in the DB row.  See paths.recordingFolder.
+    outputFolder = recordingFolder(recordsOutputFolder, traceID)
   else:
     # if empty, it would be constructed in `record` if it receives an empty outputFolder: get from there after `record(..)`
     # otherwise: it's already ready

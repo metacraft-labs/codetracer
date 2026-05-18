@@ -271,6 +271,26 @@ when not defined(ctRenderer):
 
   let codetracerTraceDir* = home / ".local" / "share" / "codetracer"
 
+  proc recordingFolder*(baseDir: string, recordingId: string): string =
+    ## Resolve the on-disk recording folder for ``recordingId`` under
+    ## ``baseDir``.  M-REC-7: the folder name is now the bare UUIDv7
+    ## (lowercase 36-char hyphenated form) rather than the pre-M-REC-7
+    ## ``trace-<int_id>`` / ``trace-<uuid>`` prefix.  See
+    ## ``codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md``
+    ## §4 ("On-Disk Recording Folder Layout") for the rationale: the
+    ## bare UUIDv7 is portable across machines, lex-sorts by creation
+    ## time, and lets the SQLite row remain the single source of truth
+    ## for human-friendly metadata (program name, date, args).
+    ##
+    ## Empty / sentinel recording ids are rejected here rather than
+    ## silently producing a degenerate ``baseDir/`` path that would
+    ## collide with siblings.  Callers must mint a fresh id (via
+    ## ``trace_index.newID`` / ``newRecordingId``) before invoking this
+    ## helper.
+    doAssert recordingId.len > 0,
+      "recordingFolder: recording_id must be non-empty (caller must " &
+      "mint a UUIDv7 via trace_index.newID / newRecordingId first)"
+    baseDir / recordingId
 
   let DB_FOLDERS* = @[codetracerTraceDir, codetracerTestDir]
   when not defined(serverCI):
