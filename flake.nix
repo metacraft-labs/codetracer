@@ -90,6 +90,24 @@
       flake = true;
     };
 
+    runquota = {
+      url = "github:metacraft-labs/runquota/main";
+      inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+      inputs.git-hooks.follows = "git-hooks-nix";
+      flake = true;
+    };
+
+    reprobuild = {
+      url = "github:metacraft-labs/reprobuild/main";
+      inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+      inputs.git-hooks.follows = "git-hooks-nix";
+      flake = true;
+    };
+
     # Non-flake input: the trace-format Rust workspace.  At runtime in the
     # workspace dev shell, `.envrc` overrides this with `--override-input
     # codetracer-trace-format path:../codetracer-trace-format` so changes

@@ -2382,6 +2382,38 @@
         "type": "github"
       }
     },
+    "reprobuild": {
+      "inputs": {
+        "flake-parts": [
+          "flake-parts"
+        ],
+        "git-hooks": [
+          "git-hooks-nix"
+        ],
+        "nixos-modules": [
+          "nix-blockchain-development",
+          "nixos-modules"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "runquota-src": "runquota-src"
+      },
+      "locked": {
+        "lastModified": 1779104535,
+        "narHash": "sha256-7obZd9X5UmFvFqgcvTulb9yB8NvPuDX/d/4PO566t6o=",
+        "owner": "metacraft-labs",
+        "repo": "reprobuild",
+        "rev": "668e64c98cd4acf4f3c70cc3e087c02e38d228eb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "main",
+        "repo": "reprobuild",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "appimage-channel": "appimage-channel",
@@ -2406,7 +2438,57 @@
           "nixpkgs"
         ],
         "noir": "noir",
+        "reprobuild": "reprobuild",
+        "runquota": "runquota",
         "wazero": "wazero"
+      }
+    },
+    "runquota": {
+      "inputs": {
+        "flake-parts": [
+          "flake-parts"
+        ],
+        "git-hooks": [
+          "git-hooks-nix"
+        ],
+        "nixos-modules": [
+          "nix-blockchain-development",
+          "nixos-modules"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1779102768,
+        "narHash": "sha256-VI5pEEQ0CTd+ChFxmBB2HjdZ1FFwsGBsAvQT/OIgRpo=",
+        "owner": "metacraft-labs",
+        "repo": "runquota",
+        "rev": "b325ca05ae5855b44cd54dec377a58ad36f875d6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "main",
+        "repo": "runquota",
+        "type": "github"
+      }
+    },
+    "runquota-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779102768,
+        "narHash": "sha256-VI5pEEQ0CTd+ChFxmBB2HjdZ1FFwsGBsAvQT/OIgRpo=",
+        "owner": "metacraft-labs",
+        "repo": "runquota",
+        "rev": "b325ca05ae5855b44cd54dec377a58ad36f875d6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "main",
+        "repo": "runquota",
+        "type": "github"
       }
     },
     "rust-analyzer-src": {

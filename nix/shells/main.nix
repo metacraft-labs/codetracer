@@ -11,6 +11,8 @@ let
   # Import toolchains from the codetracer-toolchains flake for multi-language support.
   # These provide compilers needed by `ct record` → `ct-native-replay build` for new languages.
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
+  runquotaPkgs = inputs'.runquota.packages;
+  reprobuildPkgs = inputs'.reprobuild.packages;
 in
 with pkgs;
 mkShell {
@@ -36,7 +38,6 @@ mkShell {
     llvmPackages_21.clang-unwrapped
     # clang
     llvm
-    glibc_multi
 
     wasm-pack
 
@@ -53,7 +54,6 @@ mkShell {
     # ourPkgs.chromedriver-102
 
     ourPkgs.noir
-    ourPkgs.ctRemote
 
     capnproto
 
@@ -63,13 +63,14 @@ mkShell {
 
     # blockchain recorder runtime dependencies
     ourPkgs.circom # Circom compiler (needed by codetracer-circom-recorder)
-    ourPkgs.forc # Sway/Fuel compiler (needed by codetracer-fuel-recorder)
-    ourPkgs.miden # Miden compiler (needed by codetracer-miden-recorder)
-    ourPkgs.cargo-build-sbf # Solana BPF compiler (needed by codetracer-solana-recorder)
-    ourPkgs.sui # Sui compiler (needed by codetracer-move-recorder)
 
     # codex acp agent client
     ourPkgs.codex-acp
+
+    # Reprobuild MVP tooling. These come from the sibling/public flakes so the
+    # CodeTracer shell exposes the same binaries used by Reprobuild's own tests.
+    runquotaPkgs.runquota
+    reprobuildPkgs.reprobuild
 
     yarn
     yarn2nix
@@ -83,7 +84,6 @@ mkShell {
     universal-ctags
 
     # Tup builds
-    fuse
     tup
 
     # Make alternative
@@ -123,7 +123,6 @@ mkShell {
     curl
 
     # for pgrep at least
-    procps
 
     # development
     pstree
@@ -154,29 +153,8 @@ mkShell {
     # Go (needed by ct-native-replay build for Go programs)
     toolchainsPkgs.go-default
 
-    # Pascal
-    toolchainsPkgs.fpc
-
-    # Fortran
-    toolchainsPkgs.gfortran
-
-    # D language (includes ldmd2)
-    toolchainsPkgs.ldc
-
-    # Crystal
-    toolchainsPkgs.crystal
-
     # Lean 4 - theorem prover and functional programming language
     lean4
-
-    # Ada
-    toolchainsPkgs.gnat
-    toolchainsPkgs.gprbuild
-
-    # BPF process monitoring (used by `just developer-setup` Phase 2)
-    bpftrace
-    libbpf # Userspace BPF library (loading, maps, ring buffers) for native BPF backend
-    bpftools # bpftool for generating vmlinux.h and inspecting BPF objects
 
     # testing shell
     tmux
@@ -216,14 +194,46 @@ mkShell {
     # Playwright / display dependencies (used by TS e2e tests)
     playwright-driver.browsers
     playwright
-    xvfb-run
-    xorg.xorgserver # provides Xephyr for visible virtual X11
-    xdotool # cross-window mouse/keyboard automation for multi-window e2e tests
 
     # runtime_tracing build dependency
     capnproto
   ]
   ++ pkgs.lib.optionals (!stdenv.isDarwin) [
+    ourPkgs.ctRemote
+
+    glibc_multi
+
+    # Tup builds use FUSE-backed file monitoring on Linux.
+    fuse
+
+    # for pgrep at least
+    procps
+
+    # Playwright / display dependencies (used by TS e2e tests)
+    xvfb-run
+    xorg.xorgserver # provides Xephyr for visible virtual X11
+    xdotool # cross-window mouse/keyboard automation for multi-window e2e tests
+
+    # BPF process monitoring (used by `just developer-setup` Phase 2)
+    bpftrace
+    libbpf # Userspace BPF library (loading, maps, ring buffers) for native BPF backend
+    bpftools # bpftool for generating vmlinux.h and inspecting BPF objects
+
+    # Extra native-language compiler coverage that is currently Linux-only or
+    # marked broken in the macOS shells.
+    toolchainsPkgs.fpc
+    toolchainsPkgs.gfortran
+    toolchainsPkgs.ldc
+    toolchainsPkgs.crystal
+    toolchainsPkgs.gnat
+    toolchainsPkgs.gprbuild
+
+    # Blockchain recorder tools not currently packaged for the Darwin shells.
+    ourPkgs.forc # Sway/Fuel compiler (needed by codetracer-fuel-recorder)
+    ourPkgs.miden # Miden compiler (needed by codetracer-miden-recorder)
+    ourPkgs.cargo-build-sbf # Solana BPF compiler (needed by codetracer-solana-recorder)
+    ourPkgs.sui # Sui compiler (needed by codetracer-move-recorder)
+
     # Building AppImage
     inputs'.appimage-channel.legacyPackages.appimagekit
     appimage-run
@@ -271,13 +281,17 @@ mkShell {
     # src/Tuprules.tup DYNLIB_OVERRIDE_FLAGS). This is particularly important
     # for tup builds, which sanitize the environment and strip the Nix
     # wrapper's NIX_LDFLAGS variable.
-    export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${libbpf.out}/lib:${elfutils.out}/lib:${zlib.out}/lib''${LIBRARY_PATH:+:$LIBRARY_PATH}";
+    export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${zlib.out}/lib${
+      pkgs.lib.optionalString (!stdenv.isDarwin) ":${libbpf.out}/lib:${elfutils.out}/lib"
+    }''${LIBRARY_PATH:+:$LIBRARY_PATH}";
 
     # C_INCLUDE_PATH is the standard gcc/cc header search path. Nim invokes
     # gcc directly (not through Nix's cc-wrapper), so NIX_CFLAGS_COMPILE
     # -isystem flags are invisible. We export libbpf's include path
     # explicitly so that #include <bpf/libbpf.h> resolves during tup builds.
-    export C_INCLUDE_PATH="${libbpf}/include''${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}";
+    ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
+      export C_INCLUDE_PATH="${libbpf}/include''${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}";
+    ''}
 
     export RUST_LOG=info
 
