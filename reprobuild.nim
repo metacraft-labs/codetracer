@@ -1,54 +1,8 @@
-import std/[algorithm, os, strutils]
+import std/os
 
-import repro_project_dsl
+import repro_dsl_stdlib
 
 const PublicResourceRoot = "src/public"
-
-proc normalizedRelPath(path: string): string =
-  path.replace('\\', '/')
-
-proc stableHashHex(value: string): string =
-  var hash = 2166136261'u32
-  for ch in value:
-    hash = (hash xor uint32(ord(ch))) * 16777619'u32
-  toHex(hash, 8).toLowerAscii()
-
-proc actionSlug(value: string): string =
-  for ch in value:
-    if ch in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '.', '_', '-'}:
-      result.add(ch.toLowerAscii())
-    else:
-      result.add("-" & toHex(ord(ch), 2).toLowerAscii())
-  if result.len == 0:
-    result = "resource"
-
-proc publicResourceActionId(relative: string): string =
-  let normalized = normalizedRelPath(relative)
-  let tail = splitPath(normalized).tail
-  "frontend-public-resource-" & actionSlug(tail) & "-" &
-    stableHashHex(normalized)
-
-proc collectPublicResourceTree(root: string): tuple[dirs: seq[string];
-    files: seq[string]] =
-  if not dirExists(root):
-    return
-  var pending = @[root]
-  while pending.len > 0:
-    let dir = pending.pop()
-    result.dirs.add(dir)
-    for kind, path in walkDir(dir):
-      case kind
-      of pcDir:
-        pending.add(path)
-      of pcFile:
-        result.files.add(path)
-      else:
-        discard
-  result.dirs.sort()
-  result.files.sort()
-
-proc publicResourceOutput(sourcePath: string): string =
-  "public" / normalizedRelPath(relativePath(sourcePath, PublicResourceRoot))
 
 const
   CtConfigHeader = """
@@ -293,24 +247,10 @@ package codeTracer:
     styleActions.add(defaultDarkThemeCss)
     let frontendStyles = aggregate("frontend-styles", actions = styleActions)
 
-    # Coarse generated-copy resource semantics for the current src/public
-    # tree. This intentionally enumerates regular files only and is not a
-    # full model of Tup !tup_preserve, symlink behavior, removal cleanup, or
-    # platform-specific resource installation semantics.
-    let publicTree = collectPublicResourceTree(PublicResourceRoot)
-    for dirPath in publicTree.dirs:
-      providerDirectoryInput(normalizedRelPath(dirPath))
-    var publicResourceActions: seq[BuildActionDef] = @[]
-    for sourcePath in publicTree.files:
-      let relative = normalizedRelPath(relativePath(sourcePath,
-        PublicResourceRoot))
-      let copyResource = fs.copyFile(
-        source = normalizedRelPath(sourcePath),
-        output = publicResourceOutput(sourcePath))
-      target(publicResourceActionId(relative), copyResource)
-      publicResourceActions.add(copyResource)
-    let publicResources = aggregate("frontend-public-resources",
-      actions = publicResourceActions)
+    let publicResources = fs.preserveTree(
+      sourceRoot = PublicResourceRoot,
+      outputRoot = "public")
+    target("frontend-public-resources", publicResources)
 
     let frontend = aggregate("frontend",
       actions = @[
@@ -323,9 +263,10 @@ package codeTracer:
         frontendSrcSubwindowJs,
         frontendIndexHtml,
         frontendSubwindowHtml,
-        frontendHelpersJs
+        frontendHelpersJs,
+        publicResources
       ],
-      targets = @[frontendStyles, publicResources])
+      targets = @[frontendStyles])
 
     var codetracerActions: seq[BuildActionDef] = @[]
 
