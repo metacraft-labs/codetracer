@@ -106,8 +106,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     //   and https://github.com/rust-cli/env_logger/issues/125#issuecomment-1582209797 (imports)
 
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
-    let run_id = std::process::id() as usize;
-    let run_dir = run_dir_for(&tmp_path, run_id)?;
+    // M-REC-11: db-backend is the spawner; it doesn't yet know any
+    // recording_id at this very early bootstrap point (cli is parsed
+    // below), so its own log/run directory still uses its pid.  This
+    // is fine — its child replay-workers will be steered to their
+    // own recording-id-derived directories via $CODETRACER_RUN_ID.
+    let run_id = std::process::id().to_string();
+    let run_dir = run_dir_for(&tmp_path, &run_id)?;
     create_dir_all(&run_dir)?;
 
     let log_path = run_dir.join("replay-server.log");
@@ -143,10 +148,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("pid {:?}", std::process::id());
 
-    let run_id = std::process::id() as usize;
+    let run_id = std::process::id().to_string();
 
     let tmp_path: PathBuf = { CODETRACER_PATHS.lock()?.tmp_path.clone() };
-    let run_dir = run_dir_for(&tmp_path, run_id)?;
+    let run_dir = run_dir_for(&tmp_path, &run_id)?;
     // remove_dir_all(&run_dir)?;
     create_dir_all(&run_dir)?;
     let last_link = tmp_path.join("last");

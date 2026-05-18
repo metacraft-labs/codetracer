@@ -407,6 +407,12 @@ fn setup(
             worker_exe: PathBuf::from(recreator_exe),
             rr_trace_folder: path,
             name: thread_name.to_string(),
+            // M-REC-11: recording_id plumbing is incremental.  The
+            // setup path here does not yet read meta.dat to obtain the
+            // UUIDv7; passing an empty string keeps the legacy
+            // PID-derived run-id rendezvous for now.  Tracked as part
+            // of M-REC-11 follow-up cleanup.
+            recording_id: String::new(),
         };
         info!("ct_rr_args {:?}", ct_rr_args);
         let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));

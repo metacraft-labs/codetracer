@@ -63,6 +63,16 @@ pub struct ReplayWorker {
     pub active: bool,
     pub recreator_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
+    /// M-REC-11: the run-id reserved for this worker (set by `start`,
+    /// passed to the child via `$CODETRACER_RUN_ID`, and reused on the
+    /// spawner side when computing the socket path).  Empty before
+    /// `start` is called.
+    run_id: String,
+    /// M-REC-11: the trace's UUIDv7 — used by `start` to reserve a
+    /// unique-within-this-process `run_id`.  May be empty for callers
+    /// that have not yet been migrated; in that case the worker falls
+    /// back to the legacy PID rendezvous.
+    recording_id: String,
     process: Option<Child>,
     stream: Option<WorkerStream>,
 }
@@ -72,6 +82,13 @@ pub struct RecreatorArgs {
     pub worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
     pub name: String,
+    /// M-REC-11: the trace's UUIDv7.  Empty string keeps the legacy
+    /// pid-derived run-id behaviour for callers that have not yet been
+    /// migrated to plumb the recording id.  When non-empty, the
+    /// spawner reserves a unique-within-this-process `run_id` derived
+    /// from this id and passes it to the worker via
+    /// `$CODETRACER_RUN_ID`.
+    pub recording_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,13 +99,28 @@ struct WorkerTransportEndpoint {
 
 impl ReplayWorker {
     pub fn new(name: &str, index: usize, recreator_exe: &Path, rr_trace_folder: &Path) -> ReplayWorker {
-        info!("new replay {name} {index}");
+        Self::new_with_recording_id(name, index, recreator_exe, rr_trace_folder, "")
+    }
+
+    /// M-REC-11 entry point: build a worker bound to a known
+    /// `recording_id`.  Pass an empty string to preserve the legacy
+    /// PID-derived rendezvous behaviour.
+    pub fn new_with_recording_id(
+        name: &str,
+        index: usize,
+        recreator_exe: &Path,
+        rr_trace_folder: &Path,
+        recording_id: &str,
+    ) -> ReplayWorker {
+        info!("new replay {name} {index} recording_id={recording_id}");
         ReplayWorker {
             name: name.to_string(),
             index,
             active: false,
             recreator_exe: PathBuf::from(recreator_exe),
             rr_trace_folder: PathBuf::from(rr_trace_folder),
+            run_id: String::new(),
+            recording_id: recording_id.to_string(),
             process: None,
             stream: None,
         }
@@ -103,12 +135,19 @@ impl ReplayWorker {
             self.rr_trace_folder.display()
         );
 
+        // M-REC-11: reserve a process-unique run-id derived from the
+        // trace's UUIDv7 (with a `-<seq>` suffix on collision).  Empty
+        // recording_id keeps the legacy PID-derived behaviour for the
+        // transitional period.  Stored on `self` so the spawner side
+        // can compute the same socket path as the child in
+        // `setup_worker_sockets` below.
+        self.run_id = crate::paths::reserve_run_id_for_recording(&self.recording_id);
+
         // Redirect worker stderr to a log file for debugging.
         // Co-locate with the worker's UDS in the per-run directory so the
         // socket and its stderr log share lifecycle (XDG_RUNTIME_DIR on
         // Linux, fallback tmp_path elsewhere — see paths::run_dir_for).
-        let run_id = std::process::id() as usize;
-        let log_path = log_path_for("ct-native-replay", &self.name, self.index, run_id)?;
+        let log_path = log_path_for("ct-native-replay", &self.name, self.index, &self.run_id)?;
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
@@ -119,6 +158,10 @@ impl ReplayWorker {
             .arg("--index")
             .arg(self.index.to_string())
             .arg(&self.rr_trace_folder)
+            // M-REC-11: the worker (ct-native-replay) reads
+            // $CODETRACER_RUN_ID to compute the socket path; falls
+            // back to getppid() only when unset (transitional).
+            .env(crate::paths::CODETRACER_RUN_ID_ENV, &self.run_id)
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr_file))
             .spawn()?;
@@ -154,8 +197,10 @@ impl ReplayWorker {
 
     #[cfg(unix)]
     fn setup_worker_sockets(&mut self) -> Result<(), Box<dyn Error>> {
-        let run_id = std::process::id() as usize;
-        let socket_path = recreator_socket_path("", &self.name, self.index, run_id)?;
+        // M-REC-11: use the same run-id that was passed to the child
+        // via $CODETRACER_RUN_ID in `start`, so spawner and worker
+        // compute the same socket path.
+        let socket_path = recreator_socket_path("", &self.name, self.index, &self.run_id)?;
 
         eprintln!("[rr-worker] connecting to socket {}", socket_path.display());
 
@@ -193,7 +238,6 @@ impl ReplayWorker {
         let poll_interval = Duration::from_millis(25);
         let mut last_error: Option<String> = None;
         let manifest_name = format!("ct_native_replay_{}_{}_from_.sock", self.name, self.index);
-        let worker_pid = self.process.as_ref().map(std::process::Child::id);
         let tmp_path = {
             CODETRACER_PATHS
                 .lock()
@@ -201,14 +245,20 @@ impl ReplayWorker {
                 .tmp_path
                 .clone()
         };
+        // M-REC-11: the worker's preferred run directory is the one
+        // that matches the run-id we reserved in `start` and passed via
+        // $CODETRACER_RUN_ID.  We still consult sibling run-* dirs as a
+        // best-effort fallback for races between spawn and manifest
+        // write.
+        let preferred_run_id = self.run_id.clone();
         info!(
             "try to resolve worker endpoint manifest for replay worker: {}",
             manifest_name
         );
 
         while Instant::now() < deadline {
-            if let Some(pid) = worker_pid {
-                let preferred_manifest = tmp_path.join(format!("run-{}", pid)).join(&manifest_name);
+            {
+                let preferred_manifest = tmp_path.join(format!("run-{}", preferred_run_id)).join(&manifest_name);
                 if preferred_manifest.exists() {
                     match std::fs::read_to_string(&preferred_manifest) {
                         Ok(payload) => {
@@ -288,10 +338,9 @@ impl ReplayWorker {
                     if !run_name.starts_with("run-") {
                         continue;
                     }
-                    if let Some(pid) = worker_pid {
-                        if run_name == format!("run-{}", pid) {
-                            continue;
-                        }
+                    // Skip the preferred run dir (already tried above).
+                    if run_name == format!("run-{}", preferred_run_id) {
+                        continue;
                     }
                     let manifest_path = path.join(&manifest_name);
                     if manifest_path.exists() {
@@ -488,7 +537,15 @@ impl RecreatorReplaySession {
         RecreatorReplaySession {
             name: name.to_string(),
             index,
-            stable: ReplayWorker::new(name, index, &ct_rr_args.worker_exe, &ct_rr_args.rr_trace_folder),
+            // M-REC-11: propagate the trace's recording_id to the
+            // worker; empty falls back to the legacy PID rendezvous.
+            stable: ReplayWorker::new_with_recording_id(
+                name,
+                index,
+                &ct_rr_args.worker_exe,
+                &ct_rr_args.rr_trace_folder,
+                &ct_rr_args.recording_id,
+            ),
             recreator_exe: ct_rr_args.worker_exe.clone(),
             rr_trace_folder: ct_rr_args.rr_trace_folder.clone(),
             last_c_location: None,
