@@ -681,7 +681,7 @@ proc events(self: EventLogComponent) =
                 tableArgs: mutData,
                 selectedKinds: self.selectedKinds,
                 isTrace: false,
-                traceId: 0,
+                eventSlot: 0,
               )
             self.api.emit(CtUpdateTable, updateTableArgs),
         }

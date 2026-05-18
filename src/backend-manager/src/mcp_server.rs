@@ -99,7 +99,7 @@ fn exec_script_tool() -> Value {
             "properties": {
                 "trace_path": {
                     "type": "string",
-                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_trace_id` (e.g. `http://host/observability/v0/debug-session?trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<trace_id>/`."
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL produced by `ct-observe` / `find_recordings_by_window` / `find_recording_by_id` (e.g. `http://host/observability/v0/debug-session?recording_id=...&trace_id=...&span_id=...`). URLs are fetched once and cached under `$XDG_CACHE_HOME/codetracer/traces/<recording_id>/`."
                 },
                 "script": {
                     "type": "string",
@@ -166,7 +166,7 @@ fn list_source_files_tool() -> Value {
 fn find_recordings_by_window_tool() -> Value {
     json!({
         "name": "find_recordings_by_window",
-        "description": "Discover CodeTracer recordings by querying a tracing backend over a time window. Shells out to `ct-observe extract` and returns the matching spans as a JSON array. Each row includes `trace_id`, `span_id`, `service_name`, `span_name`, `request_key`, `recording_available`, and `dive_in_url`. The `dive_in_url` can be passed to `exec_script`, `trace_info`, `list_source_files`, or `read_source_file` to dive directly into the recording.",
+        "description": "Discover CodeTracer recordings by querying a tracing backend over a time window. Shells out to `ct-observe extract` and returns the matching spans as a JSON array. Each row is dual-keyed (per Recording-Identifier-Migration spec §6.6): `recording_id` identifies the CodeTracer recording (UUIDv7), and `trace_id` carries the OpenTelemetry W3C TraceContext id of the span. Rows also include `span_id`, `service_name`, `span_name`, `request_key`, `recording_available`, and `dive_in_url`. The `dive_in_url` can be passed to `exec_script`, `trace_info`, `list_source_files`, or `read_source_file` to dive directly into the recording.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -205,11 +205,18 @@ fn find_recordings_by_window_tool() -> Value {
     })
 }
 
-/// Returns the JSON schema for the `find_recording_by_trace_id` tool.
-fn find_recording_by_trace_id_tool() -> Value {
+/// Returns the JSON schema for the `find_recording_by_id` tool.
+///
+/// M-REC-5 (Recording-Identifier-Migration spec §6.6) renamed this
+/// tool from `find_recording_by_trace_id` to `find_recording_by_id`
+/// and renamed its parameter from `trace_id` to `recording_id`.  The
+/// goal is to reserve the bare name `trace_id` for OpenTelemetry W3C
+/// TraceContext only; everywhere this tool family talks about "our
+/// recording" the wire-format field is `recording_id`.
+fn find_recording_by_id_tool() -> Value {
     json!({
-        "name": "find_recording_by_trace_id",
-        "description": "Look up a single trace by ID. Shells out to `ct-observe trace` and returns the matching spans as a JSON array (one row per span in the trace). Each row carries a `dive_in_url` that can be passed to the other trace tools.",
+        "name": "find_recording_by_id",
+        "description": "Look up a single CodeTracer recording by its `recording_id`. Shells out to `ct-observe trace` and returns the matching spans as a JSON array (one row per span). Each row carries a `dive_in_url` that can be passed to the other trace tools. M-REC-5 renamed this from `find_recording_by_trace_id`; the bare name `trace_id` is now reserved for OpenTelemetry W3C TraceContext (see the Recording-Identifier-Migration spec §2).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -222,16 +229,16 @@ fn find_recording_by_trace_id_tool() -> Value {
                     "type": "string",
                     "description": "Base URL of the backend."
                 },
-                "trace_id": {
+                "recording_id": {
                     "type": "string",
-                    "description": "Trace ID to look up."
+                    "description": "Recording ID to look up (UUIDv7 canonical 36-char form, per Recording-Identifier-Migration §3)."
                 },
                 "datasource_uid": {
                     "type": "string",
                     "description": "Grafana data source UID (required for grafana-tempo backend)."
                 }
             },
-            "required": ["backend", "trace_id"]
+            "required": ["backend", "recording_id"]
         }
     })
 }
@@ -984,7 +991,7 @@ fn handle_tools_list(id: &Value) -> Value {
                 list_source_files_tool(),
                 read_source_file_tool(),
                 find_recordings_by_window_tool(),
-                find_recording_by_trace_id_tool(),
+                find_recording_by_id_tool(),
             ]
         }),
     )
@@ -1013,7 +1020,7 @@ async fn handle_tools_call(
         "list_source_files" => handle_list_source_files(id, arguments, config).await,
         "read_source_file" => handle_read_source_file(id, arguments, config).await,
         "find_recordings_by_window" => handle_find_recordings_by_window(id, arguments).await,
-        "find_recording_by_trace_id" => handle_find_recording_by_trace_id(id, arguments).await,
+        "find_recording_by_id" => handle_find_recording_by_id(id, arguments).await,
         _ => jsonrpc_error(id, -32602, &format!("Unknown tool: {tool_name}")),
     }
 }
@@ -2567,15 +2574,22 @@ async fn handle_find_recordings_by_window(id: &Value, arguments: Option<&Value>)
     }
 }
 
-/// Handles the `find_recording_by_trace_id` tool.
-async fn handle_find_recording_by_trace_id(id: &Value, arguments: Option<&Value>) -> Value {
+/// Handles the `find_recording_by_id` tool.
+///
+/// M-REC-5 renamed this from `handle_find_recording_by_trace_id`; the
+/// incoming wire-format parameter is `recording_id`.  The current
+/// implementation still forwards the value to `ct-observe trace
+/// --trace-id <value>` because `ct-observe` itself has not yet been
+/// updated to take `--recording-id`.  M-REC-9 (Observability dive-in
+/// URLs) will reconcile the ct-observe CLI surface.
+async fn handle_find_recording_by_id(id: &Value, arguments: Option<&Value>) -> Value {
     let start = Instant::now();
     let args = match arguments {
         Some(a) => a,
         None => {
             return jsonrpc_result(
                 id,
-                tool_result_error("Missing arguments for find_recording_by_trace_id"),
+                tool_result_error("Missing arguments for find_recording_by_id"),
             );
         }
     };
@@ -2586,10 +2600,13 @@ async fn handle_find_recording_by_trace_id(id: &Value, arguments: Option<&Value>
             return jsonrpc_result(id, tool_result_error("Missing required argument: backend"));
         }
     };
-    let trace_id = match args.get("trace_id").and_then(Value::as_str) {
+    let recording_id = match args.get("recording_id").and_then(Value::as_str) {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => {
-            return jsonrpc_result(id, tool_result_error("Missing required argument: trace_id"));
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing required argument: recording_id"),
+            );
         }
     };
 
@@ -2598,7 +2615,7 @@ async fn handle_find_recording_by_trace_id(id: &Value, arguments: Option<&Value>
         "--backend".to_string(),
         backend.clone(),
         "--trace-id".to_string(),
-        trace_id,
+        recording_id,
         "--format".to_string(),
         "jsonl".to_string(),
     ];
@@ -2717,7 +2734,7 @@ mod tests {
         assert!(names.contains(&"list_source_files"));
         assert!(names.contains(&"read_source_file"));
         assert!(names.contains(&"find_recordings_by_window"));
-        assert!(names.contains(&"find_recording_by_trace_id"));
+        assert!(names.contains(&"find_recording_by_id"));
 
         // Verify each tool has an inputSchema.
         for tool in tools {
@@ -2749,19 +2766,34 @@ mod tests {
     }
 
     #[test]
-    fn test_find_recording_by_trace_id_schema_is_well_formed() {
-        let tool = find_recording_by_trace_id_tool();
-        assert_eq!(tool["name"], "find_recording_by_trace_id");
+    fn test_find_recording_by_id_schema_is_well_formed() {
+        let tool = find_recording_by_id_tool();
+        assert_eq!(tool["name"], "find_recording_by_id");
         let required = tool["inputSchema"]["required"]
             .as_array()
             .expect("required array");
         let required: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
         assert!(required.contains(&"backend"));
-        assert!(required.contains(&"trace_id"));
+        assert!(required.contains(&"recording_id"));
+        // M-REC-5: the bare name `trace_id` is now reserved for OTel
+        // W3C TraceContext; this tool's parameter must be
+        // `recording_id`, not `trace_id`.
+        assert!(!required.contains(&"trace_id"));
+        let props = tool["inputSchema"]["properties"]
+            .as_object()
+            .expect("properties object");
+        assert!(
+            props.contains_key("recording_id"),
+            "find_recording_by_id must expose `recording_id` (M-REC-5 wire-format rename)"
+        );
+        assert!(
+            !props.contains_key("trace_id"),
+            "find_recording_by_id must not retain the legacy `trace_id` parameter (M-REC-5)"
+        );
     }
 
     /// Verifies that the JSONL parser used by `find_recordings_by_window`
-    /// and `find_recording_by_trace_id` accepts a small fixture file that
+    /// and `find_recording_by_id` accepts a small fixture file that
     /// mirrors real `ct-observe extract --format jsonl` output, including
     /// the `dive_in_url` field that subsequent tools consume.
     #[test]

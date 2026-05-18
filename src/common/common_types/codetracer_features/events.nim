@@ -54,7 +54,15 @@ type
     tableArgs*: TableArgs
     selectedKinds*: array[EventLogKind, bool]
     isTrace*: bool
-    traceId*: int
+    ## Index into the db-backend's in-memory event-slot table
+    ## (`EventDb::single_tables`): ``0`` is the global event log, slot
+    ## ``N + 1`` is the result table for tracepoint ``N``.  M-REC-4
+    ## renamed this Rust-side from the historically overloaded
+    ## ``trace_id`` to ``event_slot``; M-REC-5 mirrors that rename here
+    ## so the Nim → Rust JSON wire-format key flips from ``traceId`` to
+    ## ``eventSlot``.  ``trace_id`` is now reserved for OpenTelemetry
+    ## W3C TraceContext (parent spec §2's third meaning).
+    eventSlot*: int
 
   TableRow* = object ## TableRow object
     directLocationRRTicks*: int
@@ -76,7 +84,10 @@ type
   TableUpdate* = object ## TableUpdate object
     data*: TableData
     isTrace*: bool
-    traceId*: int
+    ## Mirrors [UpdateTableArgs.eventSlot]; M-REC-5 wire-format rename
+    ## from ``traceId`` (now reserved for OTel W3C TraceContext) to
+    ## ``eventSlot``.  See the Recording-Identifier-Migration spec.
+    eventSlot*: int
 
   ProgramEvent* = object
     kind*: EventLogKind
