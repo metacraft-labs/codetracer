@@ -1,0 +1,60 @@
+@import "../generated/index"
+
+/*
+ * tab.styl — Design-system tab component
+ *
+ * Base class: .ct-tab
+ *
+ * State attributes:
+ *   [data-selected="true"]  — active/selected tab (action-color underline + active text)
+ *   [data-focused="true"]   — keyboard-focused tab (no underline)
+ *   [data-disabled="true"]  — disabled tab (muted text, default border)
+ */
+
+.ct-tab
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  padding: 0.5em 0.75em
+  box-sizing: border-box
+  background: transparent
+  color: colors-ui-text-primary-body
+  font-family: "SpaceGrotesk"
+  font-size: inherit
+  line-height: 1.2
+  border: none
+  border-bottom: 0.125em solid colors-ui-border-primary
+  border-radius: 0.375em
+  outline: none
+  cursor: pointer
+  user-select: none
+  text-align: center
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease
+
+  // ── Hover ─────────────────────────────────────────────────
+
+  &:hover:not([data-disabled="true"]):not([data-selected="true"])
+    background: colors-ui-surface-primary-secondary-hover
+    border-bottom-color: colors-ui-border-contrast
+
+  // ── Selected ──────────────────────────────────────────────
+
+  &[data-selected="true"]
+    background: colors-ui-surface-primary-secondary-hover
+    border-bottom-color: colors-ui-border-action
+    color: colors-ui-text-primary-active
+
+  // ── Focused (keyboard navigation or :focus-visible) ───────
+
+  &:focus-visible:not([data-disabled="true"]),
+  &[data-focused="true"]:not([data-disabled="true"])
+    outline: none
+    border-bottom: none
+
+  // ── Disabled ──────────────────────────────────────────────
+
+  &[data-disabled="true"]
+    cursor: not-allowed
+    pointer-events: none
+    color: colors-ui-text-primary-disabled
+    border-bottom-color: colors-ui-border-primary

@@ -195,7 +195,7 @@
   grid-template-columns: 9em minmax(0, 1fr)
   align-items: stretch
   min-height: 2em
-  border-top: 0.0625em solid colors-ui-border-primary
+  border-top: 0.0625em solid colors-ui-divider-primary
 
   &:first-child
     border-top: none
@@ -210,28 +210,30 @@
   min-height: 2.4em
   border-bottom: 0.0625em solid colors-ui-border-primary
 
-  button
-    flex: 0 0 auto !important
+  .ct-tab
+    flex: 0 0 auto
     height: 100%
     padding: 0.4em 0.25em 0.375em
-    border-radius: 0 !important
-    border: none !important
-    background: colors-ui-surface-canvas !important
+    border-radius: 0
+    border-bottom: none
+    background: colors-ui-surface-canvas
     color: colors-ui-text-primary-body-subtle
-    font-family: "SpaceMono"
     font-size: 1.05em
     font-weight: 500
     line-height: 1.1
     position: relative
     white-space: nowrap
+    transition: background-color 0.12s ease, color 0.12s ease
 
-    &:hover
+    &:hover:not([data-disabled="true"]):not([data-selected="true"])
       color: colors-ui-text-primary-body
-      background: colors-ui-surface-primary-default-hover !important
+      background: colors-ui-surface-primary-default-hover
+      border-bottom: none
 
-    &.active
+    &[data-selected="true"]
       color: colors-ui-border-action
-      background: colors-ui-surface-primary-default-hover !important
+      background: colors-ui-surface-primary-default-hover
+      border-bottom: none
 
       &::after
         content: ""
