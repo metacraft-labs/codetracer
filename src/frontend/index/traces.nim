@@ -58,7 +58,11 @@ proc handleReplayStartResponse(body: JsObject) =
 
 registerStartReplayHandler(handleReplayStartResponse)
 
-proc assignTrace(traceId: int): Future[bool] {.async.} =
+proc assignTrace(traceId: langstring): Future[bool] {.async.} =
+  ## M-REC-2: ``traceId`` is now the canonical UUIDv7 recording_id
+  ## (``langstring`` so the JS and native backends agree on the
+  ## representation).  The semantic rename to ``recordingId`` is M-REC-3
+  ## scope.
   var attempts = 0
   var trace: Trace = nil
   while trace.isNil and attempts < 60:
@@ -419,8 +423,8 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     visualReplayPlayerError: visualReplayPlayerError,
   }
 
-proc loadExistingRecord*(traceId: int) {.async.} =
-  infoPrint "[info]: load existing record with ID: ", $traceId
+proc loadExistingRecord*(traceId: langstring) {.async.} =
+  infoPrint "[info]: load existing record with ID: ", traceId
   if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
     if not await assignTrace(traceId):
       warnPrint "couldn't assign trace"
@@ -459,13 +463,13 @@ proc loadExistingRecord*(traceId: int) {.async.} =
   #   debugPrint "warning: exception when starting instance client:"
   #   debugPrint "  that's ok, if this was not started from shell-ui!"
 
-proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
+proc prepareForLoadingTrace*(traceId: langstring, pid: int) {.async.} =
   callerProcessPid = pid
   if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
     if not await assignTrace(traceId):
       return
   else:
-    infoPrint "index: reuse prefetched trace ", $prefetchedTrace.id, " folder ", $prefetchedTrace.outputFolder
+    infoPrint "index: reuse prefetched trace ", prefetchedTrace.id, " folder ", prefetchedTrace.outputFolder
     data.trace = prefetchedTrace
     data.pluginClient.trace = prefetchedTrace
     if data.trace.compileCommand.len == 0:
@@ -533,7 +537,9 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
   if selectedReplayId == replayId:
     selectedReplayId = -1
 
-proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
+proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
+  ## M-REC-2: returned trace identifier is the recording_id (UUIDv7 string)
+  ## printed by ``ct arb replay`` on its second-to-last line.
   callerProcessPid = pid
   let outputResult = await readProcessOutput(
     codetracerExe.cstring,
@@ -548,17 +554,17 @@ proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
       # probably because we print `traceId:<traceId>\n` : so the last line is ''
       #   and traceId is in the second last line
       if traceIdLine.startsWith("traceId:"):
-        let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+        let traceId = cstring(traceIdLine[("traceId:").len .. ^1])
         return (output, traceId)
   else:
     output = JSON.stringify(outputResult.error)
-  return (output, NO_INDEX)
+  return (output, cstring"")
 
-proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=int)) {.async.} =
+proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
-proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=int)) {.async.} =
+proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
   ## Open a trace as a new tab in the current window, rather than
   ## spawning a new Electron window.  This is the handler for the
   ## "tab" newTracePolicy.  The renderer receives a
@@ -578,7 +584,7 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=int)) {.async.} =
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
   let (rawOutputOrError, traceId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
-  if traceId != NO_INDEX:
+  if traceId.len > 0:
     await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
     await loadExistingRecord(traceId)
   else:
@@ -1028,7 +1034,9 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
       let traceIdLine = lines[^3]
       echo lines
       if traceIdLine.startsWith("traceId:"):
-        let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+        # M-REC-2: ``traceId`` is the recording_id (UUIDv7 string) printed
+        # by the recorder; pass it through untouched.
+        let traceId = cstring(traceIdLine[("traceId:").len .. ^1])
         infoPrint "index: traceId for test: ", traceId
         let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
         if trace.isNil:
@@ -1039,7 +1047,7 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
         if response.newWindow:
           infoPrint "new window"
           discard startProcess(codetracerExe,
-            @[cstring"replay", cstring(fmt"--id={traceId}")],
+            @[cstring"replay", cstring("--id=") & traceId],
             options=JsObject{stdio: cstring"inherit"}
           )
         else:

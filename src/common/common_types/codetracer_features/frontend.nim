@@ -182,7 +182,20 @@ type
     aOpenTraceInNewTab,  # Open existing trace in a new session tab
     aRecordNewTrace,     # Show record new trace dialog
     aRecordFromLaunch,   # Record using launch.json configuration
-    aNewTraceTab         # Open a new empty session tab
+    aNewTraceTab,        # Open a new empty session tab
+
+    # ── Language-dynamic menu actions ─────────────────────────────────────
+    # These actions only appear in the View menu for traces whose
+    # language exposes the corresponding capability. See
+    # `appendLanguageSpecificViewItems` in `ui_js.nim` for the
+    # gating logic. They are intentionally part of the global enum
+    # (rather than registered dynamically) so that ShortcutMap layout
+    # is stable across trace switches and `array[ClientAction, ...]`
+    # sizes do not depend on runtime state.
+
+    aSwitchSourceView,    # Cycle Nim → C → Asm → Nim (Nim traces only)
+    aTraceMacroExecution, # Trace the macro call at the editor cursor (Nim)
+    aTraceStaticBlock     # Trace the static: block at the editor cursor (Nim)
 
   InputShortcutMap* = TableLike[langstring, langstring]
 
@@ -201,7 +214,9 @@ type
     inTest*: bool
     record*: bool
     isInstalled*: bool
-    traceID*: int
+    # M-REC-2: ``traceID`` is the recording_id (UUIDv7 string).  The
+    # identifier-name rename to ``recordingId`` is M-REC-3 scope.
+    traceID*: langstring
     edit*: bool
     name*: langstring
     folder*: langstring

@@ -31,8 +31,10 @@ proc loadLine*(sessionId: int, sessionLogPath: string): int =
 
 proc findTraceForArgs*(
     patternArg: Option[string],
-    traceIdArg: Option[int],
+    traceIdArg: Option[string],
     traceFolderArg: Option[string]): Trace =
+  ## M-REC-2: ``traceIdArg`` now carries the canonical UUIDv7 recording_id
+  ## (string).  The semantic rename to ``recordingIdArg`` is M-REC-3 scope.
   # if no trace found, returning nil for now
   if traceIdArg.isSome:
     let traceId = traceIdArg.get

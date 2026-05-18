@@ -47,7 +47,18 @@ type
     events*: seq[ProgramEvent]
 
   Trace* = ref object
-    id*: int
+    # M-REC-2: `id` flipped from int → langstring (canonical UUIDv7
+    # recording_id, 36-char hyphenated form).  The *name* is intentionally
+    # preserved here even though the *type* changes; the semantic rename to
+    # `recordingId` is M-REC-3 (parent spec §6.1).  Keeping the name preserves
+    # the minimum-diff property of M-REC-2 — most consumers access `t.id`
+    # and continue to work after the flip because Nim is structurally typed
+    # where it matters (interpolation, equality, table lookups).
+    #
+    # Using `langstring` (== `string` on native, `cstring` on JS) so the JSON
+    # round-trip works on both backends the same way the existing
+    # `program`/`workdir`/`env` fields do.
+    id*: langstring
     program*: langstring
     args*: seq[langstring]
     env*: langstring

@@ -5,7 +5,9 @@ import
   lib/[ jslib, electron_lib ],
   ../common/ct_logging
 
-proc findRawTraceWithCodetracer(app: ElectronApp, traceId: int): Future[cstring] {.async.} =
+proc findRawTraceWithCodetracer(app: ElectronApp, traceId: langstring): Future[cstring] {.async.} =
+  ## M-REC-2: ``traceId`` is now the canonical UUIDv7 recording_id
+  ## (``langstring``).  Pass it through to ``ct trace-metadata --id=<uuid>``.
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[cstring"trace-metadata", cstring(fmt"--id={traceId}")])
@@ -25,7 +27,7 @@ proc findRawTraceWithCodetracer(app: ElectronApp, traceId: int): Future[cstring]
   # template/macro, sorry
   return cstring""
 
-proc findTraceWithCodetracer*(app: ElectronApp, traceId: int): Future[Trace] {.async.} =
+proc findTraceWithCodetracer*(app: ElectronApp, traceId: langstring): Future[Trace] {.async.} =
   let raw = await app.findRawTraceWithCodetracer(traceId)
   let trace = cast[Trace](JSON.parse(raw))
   return trace

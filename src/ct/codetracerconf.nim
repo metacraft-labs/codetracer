@@ -372,8 +372,8 @@ type
     of console:
       consoleTraceId* {.
         name: "id",
-        desc: "a trace id"
-      .}: Option[int]
+        desc: "a recording id (UUIDv7)"
+      .}: Option[string]
       consoleTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
@@ -667,8 +667,8 @@ type
     of StartupCommand.replay:
       replayTraceId* {.
         name: "id",
-        desc: "a trace id"
-      .}: Option[int]
+        desc: "a recording id (UUIDv7)"
+      .}: Option[string]
       replayTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
@@ -713,8 +713,8 @@ type
       # same args as replay
       uploadTraceId* {.
         name: "id",
-        desc: "a trace id"
-      .}: Option[int]
+        desc: "a recording id (UUIDv7)"
+      .}: Option[string]
       uploadTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
@@ -1087,8 +1087,8 @@ type
     of `trace-metadata`:
       traceMetadataIdArg* {.
         name: "id",
-        desc: "id of a trace"
-      .} : Option[int]
+        desc: "recording id (UUIDv7) of a trace"
+      .} : Option[string]
       traceMetadataPathArg* {.
         name: "path",
         desc: "path for a trace"

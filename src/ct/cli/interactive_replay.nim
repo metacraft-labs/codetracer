@@ -73,7 +73,10 @@ proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
       quit(0)
 
     try:
-      let traceId = raw.parseInt
+      # M-REC-2: trace ids are now UUIDv7 strings (canonical 36-char form).
+      # Accept the raw input as-is; the lookup will simply miss for malformed
+      # ids.  Short-prefix lookup with ambiguity handling is M-REC-6 territory.
+      let traceId = raw.strip
       let trace = trace_index.find(traceId, test=false)
       if not trace.isNil:
         return trace

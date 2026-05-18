@@ -884,10 +884,12 @@ proc applyAgentActivityDeepReview(vm: AgentActivityDeepReviewVM) =
 
 proc applyWelcome(vm: WelcomeScreenVM) =
   vm.setRecentTraces(@[
-    RecentTraceRecord(id: 1, program: "zir_shields",
+    RecentTraceRecord(id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
+                      program: "zir_shields",
                       args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/04 16:03:00", duration: "4.2s"),
-    RecentTraceRecord(id: 2, program: "zir_shields",
+    RecentTraceRecord(id: "01949fcc-7d93-7e9c-aaaa-bbbbbbbbbbbc",
+                      program: "zir_shields",
                       args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/03 12:44:00", duration: "1.1s"),
   ])

@@ -132,13 +132,17 @@ proc deriveWorkdir(program: string): string =
 
 proc importTrace*(
   traceFolder: string,
-  traceIdArg: int,
+  traceIdArg: string,
   recordPid: int,
   langArg: Lang = LangNoir,
   selfContained: bool = true,
   downloadUrl: string = "",
   traceKind: string = "db",
 ): Trace =
+  ## M-REC-2: ``traceIdArg`` is now the canonical UUIDv7 recording_id
+  ## (string).  Pass ``NO_TRACE_ID`` (the empty-string sentinel) to mint a
+  ## fresh id via ``trace_index.newID``.  The semantic rename to
+  ## ``recordingIdArg`` is M-REC-3 scope.
 
   # for now support different files with the same subset of fields:
   #   db: trace_metadata.json

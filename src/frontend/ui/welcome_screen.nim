@@ -95,7 +95,7 @@ proc initWelcomeScreenVM*() =
 
 proc legacyTraceRecord(trace: Trace): RecentTraceRecord =
   RecentTraceRecord(
-    id: trace.id,
+    id: $trace.id,
     program: safeStr(trace.program),
     args: toStrings(trace.args),
     workdir: safeStr(trace.workdir),
@@ -172,7 +172,7 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
   welcomeScreenVMInstance.setMode(self.currentWelcomeMode())
   welcomeScreenVMInstance.syncLoadingState(
     self.loading,
-    (if self.loadingTrace.isNil: NO_LOADING_TRACE else: self.loadingTrace.id))
+    (if self.loadingTrace.isNil: NO_LOADING_TRACE else: $self.loadingTrace.id))
   welcomeScreenVMInstance.updateNewRecord(proc(form: var NewRecordFormState) =
     if self.newRecord.isNil:
       form.executable = ""
@@ -221,15 +221,15 @@ proc showWelcomeView*(self: WelcomeScreenComponent) =
   self.loadingTrace = nil
   self.syncLegacyWelcomeScreenIntoVM()
 
-proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; traceId: int) =
+proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; traceId: string) =
   self.loading = true
   self.loadingTrace = nil
   for trace in self.data.recentTraces:
-    if trace.id == traceId:
+    if $trace.id == traceId:
       self.loadingTrace = trace
       break
   self.syncLegacyWelcomeScreenIntoVM()
-  self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: traceId }
+  self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: cstring(traceId) }
 
 proc loadRecentFolderFromWelcome*(self: WelcomeScreenComponent; folderPath: string) =
   self.loading = true
@@ -291,7 +291,7 @@ when defined(js):
   proc buildWelcomeCallbacks(self: WelcomeScreenComponent):
       WelcomeScreenCallbacks =
     WelcomeScreenCallbacks(
-      onRecentTraceClick: proc(traceId: int) =
+      onRecentTraceClick: proc(traceId: string) =
         self.loadRecentTraceFromWelcome(traceId),
       onRecentFolderClick: proc(folderPath: string) =
         self.loadRecentFolderFromWelcome(folderPath),

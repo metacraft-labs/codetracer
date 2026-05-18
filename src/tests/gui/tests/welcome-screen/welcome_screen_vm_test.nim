@@ -30,7 +30,7 @@
 ## explicitly-excluded ``integration/real_backend_test.nim`` /
 ## ``integration/language_smoke_test.nim`` paths.)
 
-import std/[options, unittest]
+import std/[options, strutils, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
@@ -67,8 +67,14 @@ proc makeTrace(id: int; program: string;
                duration: string = "0.5s";
                workdir: string = "/tmp"): RecentTraceRecord =
   ## Convenience constructor used across the suites.
+  ##
+  ## M-REC-2: the ``id: int`` parameter is mapped into a stable canonical
+  ## UUIDv7 (last 12 digits encode the integer) so existing call sites
+  ## that pass small ints keep working unchanged.  Tests that need a
+  ## specific UUIDv7 can construct the ``RecentTraceRecord`` directly.
+  let suffix = align($id, 12, '0')
   RecentTraceRecord(
-    id: id,
+    id: "01949fcc-7d92-7e9c-aaaa-" & suffix,
     program: program,
     args: args,
     workdir: workdir,
@@ -261,8 +267,8 @@ suite "WelcomeScreenVM — welcome_screen":
       vm.setRecentTraces(@[makeTrace(7, "/p")])
       check vm.hoveredTrace.val == NO_HOVERED_TRACE
 
-      vm.hoverTrace(7)
-      check vm.hoveredTrace.val == 7
+      vm.hoverTrace("01949fcc-7d92-7e9c-aaaa-000000000007")
+      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
 
       vm.clearHoveredTrace()
       check vm.hoveredTrace.val == NO_HOVERED_TRACE
@@ -277,10 +283,11 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let trace1Id = "01949fcc-7d92-7e9c-aaaa-000000000001"
       vm.setRecentTraces(@[makeTrace(1, "/p")])
-      vm.hoverTrace(1)
+      vm.hoverTrace(trace1Id)
       vm.setMode(wsmNewRecord)
-      check vm.hoveredTrace.val == 1  # survives mode change
+      check vm.hoveredTrace.val == trace1Id  # survives mode change
       vm.setRecentTraces(@[makeTrace(2, "/q")])
       check vm.hoveredTrace.val == NO_HOVERED_TRACE  # cleared on refresh
       dispose()
@@ -294,10 +301,11 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.loadRecentTrace(42)
+      let trace42Id = "01949fcc-7d92-7e9c-aaaa-000000000042"
+      vm.loadRecentTrace(trace42Id)
       drain()
       check vm.loading.val == true
-      check vm.loadingTraceId.val == 42
+      check vm.loadingTraceId.val == trace42Id
       check mock.commandCount("ct/load-recent-trace") == 1
       dispose()
 
@@ -305,7 +313,7 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.beginLoadingTrace(3)
+      vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000003")
       check vm.loading.val == true
       vm.endLoading()
       check vm.loading.val == false

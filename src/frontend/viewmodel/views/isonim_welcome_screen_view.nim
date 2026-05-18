@@ -42,7 +42,8 @@ const RecentTracesEmptyText* =
   "Record a program to create your first trace, or open an existing trace file."
 
 type WelcomeScreenCallbacks* = object
-  onRecentTraceClick*: proc(traceId: int)
+  # M-REC-2: ``traceId`` is the recording_id (UUIDv7 string).
+  onRecentTraceClick*: proc(traceId: string)
   onRecentFolderClick*: proc(folderPath: string)
   onStartOptionClick*: proc(key: string)
   onChooseExecutable*: proc()
@@ -161,7 +162,7 @@ proc triggerStartOption(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
     discard
 
 proc triggerTraceClick(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
-                       traceId: int) =
+                       traceId: string) =
   if callbacks.onRecentTraceClick != nil:
     callbacks.onRecentTraceClick(traceId)
   else:
@@ -180,11 +181,11 @@ proc folderClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
   result = proc() = triggerFolderClick(vm, callbacks, capturedPath)
 
 proc traceClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
-                       traceId: int): proc() =
+                       traceId: string): proc() =
   let capturedTraceId = traceId
   result = proc() = triggerTraceClick(vm, callbacks, capturedTraceId)
 
-proc traceMouseOverHandler(vm: WelcomeScreenVM; traceId: int): proc() =
+proc traceMouseOverHandler(vm: WelcomeScreenVM; traceId: string): proc() =
   let capturedTraceId = traceId
   result = proc() = vm.hoverTrace(capturedTraceId)
 

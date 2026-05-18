@@ -111,7 +111,7 @@ proc run*(programArg: string, args: seq[string],
   # try to record core (dispatcher run) with codetracer
 
   let recordCore = envLoadRecordCore()
-  var traceID = -1
+  var traceID = ""
   var program = programArg
   var dbBasedSupport = false
 

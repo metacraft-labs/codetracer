@@ -2,7 +2,10 @@ import std/[ os, httpclient, net, strformat, uri ]
 import ../utilities/types
 import ../../common/[ config, trace_index ]
 
-proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [ValueError, Exception].} =
+proc deleteRemoteFile*(id: string, controlId: string, config: Config) {.raises: [ValueError, Exception].} =
+  ## M-REC-2: ``id`` is now the recording_id (UUIDv7 string), matching the
+  ## type flip in ``trace_index.updateField``.  The semantic rename of the
+  ## parameter to ``recordingId`` is deferred to M-REC-3.
   let test = false
   let client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))
 
@@ -17,7 +20,7 @@ proc deleteRemoteFile*(id: int, controlId: string, config: Config) {.raises: [Va
   finally:
     client.close()
 
-proc deleteTraceCommand*(id: int, controlId: string) =
+proc deleteTraceCommand*(id: string, controlId: string) =
   let config = loadConfig(folder=getCurrentDir(), inTest=false)
 
   if not config.traceSharing.enabled:

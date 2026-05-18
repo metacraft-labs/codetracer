@@ -253,7 +253,7 @@ proc uploadTrace*(trace: Trace, org: Option[string],
 
 proc uploadCommand*(
   patternArg: Option[string],
-  traceIdArg: Option[int],
+  traceIdArg: Option[string],
   traceFolderArg: Option[string],
   interactive: bool,
   uploadOrg: Option[string],

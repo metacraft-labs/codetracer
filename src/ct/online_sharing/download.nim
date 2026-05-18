@@ -49,12 +49,14 @@ proc downloadFile(url: string, outputPath: string,
 
 proc downloadTrace*(url: string,
     token: Option[string] = none(string),
-    baseUrl: Option[string] = none(string)): int =
+    baseUrl: Option[string] = none(string)): string =
+  # M-REC-2: the local recording id is now a UUIDv7 string.  The return type
+  # flips from ``int`` to ``string`` for the same reason.
   let traceId = trace_index.newID(false)
 
   let downloadTarget = codetracerTmpPath / fmt"downloaded-trace-{traceId}.zip"
 
-  let unzippedLocation = codetracerTraceDir / "trace-" & $traceId
+  let unzippedLocation = codetracerTraceDir / "trace-" & traceId
 
   let downloadExitCode = downloadFile(url, downloadTarget, token, baseUrl)
   if downloadExitCode != 0:

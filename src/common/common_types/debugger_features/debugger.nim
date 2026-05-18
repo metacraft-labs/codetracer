@@ -26,12 +26,15 @@ type
     expireTime*: langstring
 
   UploadProgress* = object
-    id*: int
+    # M-REC-2: ``id`` is the recording_id (UUIDv7 langstring).  The
+    # rename to ``recordingId`` is M-REC-3 scope.
+    id*: langstring
     progress*: int
     msg*: langstring
 
   DeleteTraceArg* = object
-    traceId*: int
+    # M-REC-2: ``traceId`` is the local recording_id (UUIDv7).
+    traceId*: langstring
     controlId*: langstring
 
   SocketAddressInfo* = object
@@ -65,7 +68,8 @@ type
     lang*: Lang
     mode*: LayoutMode
     saveID*: int
-    traceID*: int
+    # M-REC-2: ``traceID`` is the recording_id (UUIDv7 langstring).
+    traceID*: langstring
 
   SaveFile* = object
     path*: langstring

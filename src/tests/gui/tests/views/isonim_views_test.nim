@@ -9540,8 +9540,11 @@ proc makeWelcomeTrace(id: int; program: string;
                       date: string = "2026/05/02 12:00:00";
                       duration: string = "0.5s";
                       workdir: string = "/tmp"): RecentTraceRecord =
+  ## M-REC-2: the ``id: int`` parameter is mapped into a stable canonical
+  ## UUIDv7 (last 12 digits encode the integer) so existing call sites
+  ## that pass small ints keep working unchanged.
   RecentTraceRecord(
-    id: id,
+    id: "01949fcc-7d92-7e9c-aaaa-" & align($id, 12, '0'),
     program: program,
     args: args,
     workdir: workdir,
@@ -9756,11 +9759,11 @@ suite "IsoNim Welcome Screen — welcome mode":
         makeWelcomeOption("Open folder"),
       ])
 
-      var clickedTrace = -1
+      var clickedTrace = ""
       var clickedFolder = ""
       var clickedOptions: seq[string] = @[]
       let callbacks = WelcomeScreenCallbacks(
-        onRecentTraceClick: proc(traceId: int) = clickedTrace = traceId,
+        onRecentTraceClick: proc(traceId: string) = clickedTrace = traceId,
         onRecentFolderClick: proc(folderPath: string) = clickedFolder = folderPath,
         onStartOptionClick: proc(key: string) = clickedOptions.add(key)
       )
@@ -9772,7 +9775,7 @@ suite "IsoNim Welcome Screen — welcome mode":
       for option in options:
         option.fireEvent("click")
 
-      check clickedTrace == 11
+      check clickedTrace == "01949fcc-7d92-7e9c-aaaa-000000000011"
       check clickedFolder == "/tmp/demo"
       check clickedOptions == @[
         "record-new-trace",

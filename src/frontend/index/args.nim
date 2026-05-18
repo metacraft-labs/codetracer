@@ -27,7 +27,10 @@ proc parseArgs* =
     data.startOptions.inTest = true
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TRACE_ID"):
-    data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"].parseJSInt
+    # M-REC-2: ``CODETRACER_TRACE_ID`` now carries the recording_id
+    # (UUIDv7 string).  The env-var rename to ``CODETRACER_RECORDING_ID``
+    # is M-REC-6 scope.
+    data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"]
     callerProcessPid = electronProcess.env[cstring"CODETRACER_CALLER_PID"].parseJsInt
     return
   else:
@@ -84,7 +87,7 @@ proc parseArgs* =
         if i + 1 < args.len:
           data.startOptions.deepReview = cast[DeepReviewData](JSON.parse(fs.readFileSync(args[i + 1], cstring"utf8")))
           data.startOptions.withDeepReview = true
-          data.startOptions.traceID = -1
+          data.startOptions.traceID = cstring""
           i += 2
           continue
         else:
@@ -94,7 +97,7 @@ proc parseArgs* =
         data.startOptions.record = false
       elif arg == cstring"--welcome-screen":
         data.startOptions.welcomeScreen = true
-        data.startOptions.traceID = -1
+        data.startOptions.traceID = cstring""
       elif arg == cstring"edit":
         data.startOptions.edit = true
         if i + 1 >= args.len:
@@ -125,7 +128,7 @@ proc parseArgs* =
       elif arg == cstring"--shell-ui":
         data.startOptions.shellUi = true
         data.startOptions.folder = electronprocess.cwd()
-        data.startOptions.traceID = -1
+        data.startOptions.traceID = cstring""
         break
       elif arg == cstring"--port":
         if i + 1 < args.len:
@@ -175,16 +178,19 @@ proc parseArgs* =
         else:
           errorPrint "expected --caller-pid <caller-pid>"
           break
-      elif not arg.isNaN:
+      elif (let s = $arg; s.len == 36 and s[8] == '-' and s[13] == '-' and
+          s[18] == '-' and s[23] == '-'):
+        # M-REC-2: positional arg is the recording_id (UUIDv7).  Cheap
+        # shape check: 36 chars with hyphens at the canonical positions.
         data.startOptions.screen = false
         data.startOptions.loading = true
         data.startOptions.record = false
-        data.startOptions.traceID = arg.parseJSInt
+        data.startOptions.traceID = arg
         data.startOptions.folder = electronprocess.cwd()
       else:
         discard
       i += 1
   else:
-    data.startOptions.traceID = -1
+    data.startOptions.traceID = cstring""
     data.startOptions.welcomeScreen = true
     data.startOptions.folder = electronprocess.cwd()

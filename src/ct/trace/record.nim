@@ -174,7 +174,7 @@ else:
     let combined = if diagnostics.len > 0: diagnostics else: lines.join("\n")
     return (recorderError, version, combined)
 
-proc storeTraceFolderInfoForPid(traceId: int, traceFolder: string, pid: int) =
+proc storeTraceFolderInfoForPid(traceId: string, traceFolder: string, pid: int) =
   let pidFolder = codetracerTmpPath / fmt"source-folders-{pid}"
   createDir(pidFolder)
   writeFile(pidFolder / fmt"trace-{traceId}", traceFolder)
@@ -202,7 +202,7 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
   if exCode == 0:
     let lastLine = lines[^1]
     if lastLine.startsWith("traceId:"):
-      let traceId = parseInt(lastLine[8..^1])
+      let traceId = lastLine[8..^1]
       result = trace_index.find(traceId, test=false)
 
       if withDiff.len > 0:
@@ -412,7 +412,7 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       if lines.len > 0:
         let traceIdLine = lines[^2]
         if traceIdLine.startsWith("traceId:"):
-          let traceId = traceIdLine[("traceId:").len..^1].parseInt
+          let traceId = traceIdLine[("traceId:").len..^1]
           let trace = trace_index.find(traceId, test=false)
           writeFile(trace.outputFolder / "custom-entrypoint.txt", testName)
 

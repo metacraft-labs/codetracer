@@ -85,7 +85,7 @@ import std / [options, os, osproc, strutils, strformat ],
 #   discard replayMultitrace(multitracePath, indexDiff=true)
 
 proc indexDiff*(tracePath: string) =
-  let trace = findTraceForArgs(none(string), none(int), some(tracePath))
+  let trace = findTraceForArgs(none(string), none(string), some(tracePath))
   if trace.isNil:
     echo fmt"ERROR: can't find a trace with path {tracePath}"
     quit(1)
@@ -117,7 +117,7 @@ proc indexDiff*(tracePath: string) =
 
 proc replay*(
   patternArg: Option[string],
-  traceIdArg: Option[int],
+  traceIdArg: Option[string],
   traceFolderArg: Option[string],
   interactive: bool,
   newTracePolicy: string = "",

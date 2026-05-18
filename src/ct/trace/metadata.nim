@@ -1,13 +1,14 @@
-import std/strutils,
+import std/[options, strutils],
   ../../common/[trace_index],
   json_serialization
 
 # Returns a number of types of info from trace_index in JSON format
 proc traceMetadata*(
-    idArg: Option[int], pathArg: Option[string],
+    idArg: Option[string], pathArg: Option[string],
     programArg: Option[string], recordPidArg: Option[int],
     recent: bool, recentFolders: bool, addRecentFolder: Option[string],
     recentLimit: int, test: bool) =
+  ## M-REC-2: ``idArg`` is the recording_id (UUIDv7 string).
   if idArg.isSome:
     let trace = trace_index.find(idArg.get, test)
     echo Json.encode(trace)

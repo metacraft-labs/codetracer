@@ -8,7 +8,7 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
-      pixel_history, shader_debug],
+      pixel_history, shader_debug, trace_macro, trace_static],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
   viewmodel/store/replay_data_store,
@@ -251,12 +251,114 @@ macro defineMenu(code: untyped): untyped =
   ## MenuNode(
   ##   kind: MenuFolder, name: "menu", elements: @[
   ##     MenuNode(kind: MenuElement, name: name, action: action, enabled: true)])
+  ##
+  ## NOTE: this macro intentionally does NOT register the menu with the
+  ## OS-level menu bar (Electron's `Menu.setApplicationMenu` on macOS).
+  ## Doing so here would push the static skeleton BEFORE
+  ## `webTechMenu` has had a chance to inject runtime-dynamic items
+  ## (launch configurations, language-specific actions, etc.), so the
+  ## macOS user would see a menu missing all of those.  The caller
+  ## (`webTechMenu`) is responsible for calling `registerMenu(result)`
+  ## explicitly AFTER all post-processing.
   let menuNode = defineMenuImpl(code[0])[0]
   result = quote do:
-    var m = `menuNode`
-    when defined(ctmacos):
-      registerMenu(m)
-    m
+    `menuNode`
+
+proc nimSpecificViewItems(data: Data): seq[MenuNode] =
+  ## Returns the Nim-only View-menu items.  Each item targets one of
+  ## the three language-aware actions added to `ClientAction`:
+  ##
+  ## * `aSwitchSourceView` (carries `viewId` actionData) — opens the
+  ##   generated C source (view 1) or disassembly (view 2) for the
+  ##   currently focused execution frame.  Defers to
+  ##   `renderer.openAlternativeView`, which already handles the
+  ##   `Nim → C → Asm` mapping (`renderer.nim:701-715`).
+  ## * `aTraceMacroExecution` — sends nimsuggest's `traceExpand` at
+  ##   the active editor cursor (M11).
+  ## * `aTraceStaticBlock` — sends nimsuggest's `tracestatic` at the
+  ##   active editor cursor (CTFS-M-StaticBlockTrace).
+  ##
+  ## Items are emitted as `enabled = true` even when there is no
+  ## active editor or no cursor — the action handler shows a
+  ## clarifying notification rather than a silently-disabled menu
+  ## entry (preferred per the user's "GUI is aware before trying"
+  ## thread: gating is at action-handler time, not at menu-build
+  ## time, because menu-bar items have no per-line context).
+  result = @[
+    MenuNode(
+      kind: MenuElement,
+      name: cstring"View Generated C Source",
+      action: aSwitchSourceView,
+      actionData: js{viewId: 1},
+      enabled: not data.trace.isNil,
+      elements: @[],
+      menuOs: 0,
+      role: cstring""
+    ),
+    MenuNode(
+      kind: MenuElement,
+      name: cstring"View Disassembly",
+      action: aSwitchSourceView,
+      actionData: js{viewId: 2},
+      enabled: not data.trace.isNil,
+      elements: @[],
+      isBeforeNextSubGroup: true,
+      menuOs: 0,
+      role: cstring""
+    ),
+    MenuNode(
+      kind: MenuElement,
+      name: cstring"Trace Macro at Cursor",
+      action: aTraceMacroExecution,
+      enabled: not data.trace.isNil,
+      elements: @[],
+      menuOs: 0,
+      role: cstring""
+    ),
+    MenuNode(
+      kind: MenuElement,
+      name: cstring"Trace Static Block at Cursor",
+      action: aTraceStaticBlock,
+      enabled: not data.trace.isNil,
+      elements: @[],
+      menuOs: 0,
+      role: cstring""
+    ),
+  ]
+
+proc appendLanguageSpecificViewItems(menu: MenuNode, data: Data) =
+  ## Inject language-specific View-menu items based on `data.trace.lang`.
+  ##
+  ## Each language registers its own item set via a small dispatcher.
+  ## When no trace is loaded (or the language has no language-specific
+  ## menu items defined), this is a no-op so the static menu shape is
+  ## preserved.
+  ##
+  ## macOS note: the OS-level menu is re-registered by `webTechMenu`'s
+  ## caller every time a trace loads (`ui_js.nim:1367` in
+  ## `onTraceLoaded`), so switching from one Nim trace to a Ruby trace
+  ## drops the Nim-specific items and vice versa, with no manual
+  ## bookkeeping required here.
+  if menu.isNil or seqIsNil(menu.elements):
+    return
+  let lang = if data.trace.isNil: LangUnknown else: data.trace.lang
+  let items =
+    case lang
+    of LangNim: nimSpecificViewItems(data)
+    else: @[]
+  if items.len == 0:
+    return
+  for element in menu.elements:
+    if element.kind == MenuFolder and element.name == cstring"View":
+      if seqIsNil(element.elements):
+        element.elements = @[]
+      if element.elements.len > 0:
+        # Visual separator above the language-dynamic block so the
+        # standard panel-toggle items stay grouped.
+        element.elements[^1].isBeforeNextSubGroup = true
+      for item in items:
+        element.elements.add(item)
+      break
 
 proc webTechMenu(data: Data, program: cstring): MenuNode =
   let config = data.config
@@ -533,6 +635,20 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         # generated automatically
         macfolder "Help", "help"
         macexclude_element "Exit CodeTracer", aExit, true
+
+  # Language-dynamic items live in a dedicated post-processing pass so the
+  # menu macro can stay declarative and the macOS native menu (registered
+  # below) reflects the COMPLETE menu — including launch configs (injected
+  # above) and language-specific actions injected here.
+  appendLanguageSpecificViewItems(result, data)
+
+  # Push the fully-assembled menu to the OS-level menu bar on macOS.
+  # Non-macOS sees the menu via `data.ui.menuNode` rendered by the in-app
+  # `MenuComponent`; the caller assigns `data.ui.menuNode = result` and
+  # triggers `requestMenuRender`.  See `defineMenu`'s doc comment for why
+  # this registration is deliberately separated from the macro body.
+  when defined(ctmacos):
+    registerMenu(result)
 
 
 proc update*(self: Data, build: bool = false) =
@@ -2938,6 +3054,54 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
   proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
   proc(actionData: JsObject) = createNewSession(data), # aNewTraceTab
+
+  # ── Language-dynamic action handlers ─────────────────────────────────────
+  # These actions are only ever surfaced in the menu by
+  # `appendLanguageSpecificViewItems` when the active trace's language
+  # supports them; the handlers run defensively for direct keyboard/IPC
+  # dispatch on a non-applicable trace.
+  proc(actionData: JsObject) =
+    # aSwitchSourceView — `actionData.viewId` selects the target view
+    # (1 = generated C source, 2 = disassembly). Mirrors the data shape
+    # of `aRecordFromLaunch` which carries `{configIndex: n}`.
+    if data.trace.isNil:
+      data.viewsApi.warnMessage(cstring"No trace loaded.")
+      return
+    let viewId = cast[int](actionData["viewId"])
+    data.openAlternativeView(if viewId == 0: 1 else: viewId),
+  proc(actionData: JsObject) =
+    # aTraceMacroExecution — read cursor from the active editor and
+    # forward to traceExpandMacro. See trace_macro.nim for the LSP flow.
+    let active = data.services.editor.active
+    if active.isNil or active.len == 0 or not data.ui.editors.hasKey(active):
+      data.viewsApi.warnMessage(
+        cstring"No active editor — open a Nim source tab first.")
+      return
+    let editor = data.ui.editors[active]
+    if editor.isNil or editor.tabInfo.isNil or editor.tabInfo.monacoEditor.isNil:
+      data.viewsApi.warnMessage(cstring"Editor not ready.")
+      return
+    let pos = editor.tabInfo.monacoEditor.toJs.getPosition()
+    let line = cast[int](pos["lineNumber"])
+    let column = cast[int](pos["column"])
+    discard traceExpandMacro(data, active, line - 1, column - 1),
+  proc(actionData: JsObject) =
+    # aTraceStaticBlock — analogous to aTraceMacroExecution for
+    # `static:` / `const` / `{.compileTime.}` evaluation. See
+    # trace_static.nim for the LSP flow.
+    let active = data.services.editor.active
+    if active.isNil or active.len == 0 or not data.ui.editors.hasKey(active):
+      data.viewsApi.warnMessage(
+        cstring"No active editor — open a Nim source tab first.")
+      return
+    let editor = data.ui.editors[active]
+    if editor.isNil or editor.tabInfo.isNil or editor.tabInfo.monacoEditor.isNil:
+      data.viewsApi.warnMessage(cstring"Editor not ready.")
+      return
+    let pos = editor.tabInfo.monacoEditor.toJs.getPosition()
+    let line = cast[int](pos["lineNumber"])
+    let column = cast[int](pos["column"])
+    discard traceStaticBlock(data, active, line - 1, column - 1),
 ]
 
 data.actions = actions
