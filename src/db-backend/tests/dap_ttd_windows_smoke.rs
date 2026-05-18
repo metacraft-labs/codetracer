@@ -623,7 +623,11 @@ fn request_tracepoint_locals(
         table_args,
         selected_kinds: [false; EVENT_KINDS_COUNT],
         is_trace: true,
-        trace_id: tracepoint_id,
+        // M-REC-4: the field was renamed `trace_id` → `event_slot` to remove
+        // the lexical clash with the recording-id migration.  Semantics
+        // unchanged: when `is_trace` is true, this is the tracepoint id whose
+        // result table the frontend wants paginated through.
+        event_slot: tracepoint_id,
     };
 
     session.send_request("ct/update-table", serde_json::to_value(update_args).unwrap())?;

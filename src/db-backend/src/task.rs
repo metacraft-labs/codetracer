@@ -76,7 +76,14 @@ pub struct UpdateTableArgs {
     #[serde(deserialize_with = "deserialize_selected_kinds")]
     pub selected_kinds: [bool; EVENT_KINDS_COUNT],
     pub is_trace: bool,
-    pub trace_id: usize,
+    /// Index into the in-memory event-slot table (`EventDb::single_tables`):
+    /// `0` is the global event log, slot `N + 1` is the result table for
+    /// tracepoint `N`.  M-REC-4 renamed this from the historically
+    /// overloaded `trace_id` to `event_slot`; "trace_id" is now reserved for
+    /// OpenTelemetry W3C TraceContext (parent spec §2's third meaning).
+    /// JSON wire-format key is `eventSlot` (serde camelCase); the matching
+    /// Nim renames are M-REC-5 wire-format work.
+    pub event_slot: usize,
 }
 
 /// Interpret a JSON value as a boolean, treating numeric values as truthy/falsy.
@@ -158,7 +165,12 @@ pub struct CoreTrace {
     pub binary: String,
     pub program: Vec<String>,
     pub paths: Vec<String>,
-    pub trace_id: i64,
+    /// Recording identifier (UUIDv7, canonical lowercase hyphenated 36-char
+    /// form).  M-REC-4 renamed this from the pre-migration `trace_id: i64`;
+    /// the Nim sibling `CoreTraceObject.recordingId` (M-REC-3) already sends
+    /// a string here, so this field's type also flipped to `String`.  The
+    /// JSON wire-format key is `recordingId` (serde camelCase).
+    pub recording_id: String,
     pub calltrace: bool,
     pub preload_enabled: bool,
     pub call_args_enabled: bool,
@@ -1077,7 +1089,10 @@ pub struct TableData {
 pub struct TableUpdate {
     pub data: TableData,
     pub is_trace: bool,
-    pub trace_id: usize,
+    /// Event-slot index this update belongs to (mirrors
+    /// [`UpdateTableArgs::event_slot`]; see that field's doc for the
+    /// M-REC-4 rename).  JSON wire-format key is `eventSlot`.
+    pub event_slot: usize,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1145,7 +1160,7 @@ impl Stop {
         line: i64,
         locals: Vec<StringAndValueTuple>,
         step_id: usize,
-        trace_id: usize,
+        tracepoint_id: usize,
         result_index: usize,
         stop_type: StopType,
     ) -> Stop {
@@ -1155,7 +1170,7 @@ impl Stop {
             .expect("expected now is always >= UNIX_EPOCH");
         let address = format!("{}:{}", path, line);
         Stop {
-            tracepoint_id: trace_id,
+            tracepoint_id,
             time: time.as_secs(),
             line,
             path,
@@ -2068,5 +2083,93 @@ impl StepArg {
             skip_internal: false,
             skip_no_source: false,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    //! M-REC-4 rename verification: the wire-format JSON keys for the
+    //! db-backend's recording-id and event-slot fields must flip in
+    //! lockstep with the Rust-side field renames.  The pre-migration
+    //! camelCase wire fields were `traceId` (overloaded) — these tests
+    //! pin the post-migration form so future regressions surface
+    //! immediately.
+    //!
+    //! Note: these tests cover only the db-backend's own struct
+    //! contract.  The matching Nim consumer renames are M-REC-5 wire
+    //! format work.
+    use super::*;
+
+    /// `CoreTrace.recording_id` (M-REC-4) flips both type (i64 → String)
+    /// and JSON key (`traceId` → `recordingId`).  The Nim sibling
+    /// `CoreTraceObject.recordingId` (M-REC-3) already sends a UUIDv7
+    /// string, so this asserts the Rust receiver matches.
+    #[test]
+    fn core_trace_serializes_recording_id_as_camel_case_string() {
+        let trace = CoreTrace {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
+            ..CoreTrace::default()
+        };
+        let json = serde_json::to_value(&trace).expect("CoreTrace serializes");
+        assert_eq!(
+            json["recordingId"],
+            serde_json::Value::String("01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string()),
+            "post-M-REC-4 JSON key must be `recordingId`, not the legacy `traceId`",
+        );
+        assert!(
+            json.get("traceId").is_none(),
+            "M-REC-4 retired the `traceId` wire-format key; if it reappears the rename leaked back",
+        );
+    }
+
+    /// `CoreTrace.recording_id` round-trips through serde unchanged.
+    #[test]
+    fn core_trace_recording_id_roundtrips_through_json() {
+        let original = CoreTrace {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
+            binary: "/tmp/example".to_string(),
+            ..CoreTrace::default()
+        };
+        let json = serde_json::to_string(&original).expect("serialize");
+        let parsed: CoreTrace = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.recording_id, original.recording_id);
+        assert_eq!(parsed.binary, original.binary);
+    }
+
+    /// `UpdateTableArgs.event_slot` + `TableUpdate.event_slot` (M-REC-4)
+    /// flip the wire-format JSON key from `traceId` (which used to
+    /// overload meanings) to `eventSlot`, removing the third meaning of
+    /// "trace_id" from db-backend wire format.
+    #[test]
+    fn update_table_args_serializes_event_slot_as_camel_case() {
+        let args = UpdateTableArgs {
+            is_trace: true,
+            event_slot: 7,
+            ..UpdateTableArgs::default()
+        };
+        let json = serde_json::to_value(&args).expect("UpdateTableArgs serializes");
+        assert_eq!(json["eventSlot"], serde_json::Value::Number(7.into()));
+        assert!(
+            json.get("traceId").is_none(),
+            "M-REC-4 retired the `traceId` wire-format key for event-slot args",
+        );
+    }
+
+    /// `TableUpdate.event_slot` mirrors `UpdateTableArgs.event_slot` and
+    /// must serialize with the same `eventSlot` JSON key.
+    #[test]
+    fn table_update_serializes_event_slot_as_camel_case() {
+        let update = TableUpdate {
+            is_trace: false,
+            event_slot: 0,
+            ..TableUpdate::default()
+        };
+        let json = serde_json::to_value(&update).expect("TableUpdate serializes");
+        assert_eq!(json["eventSlot"], serde_json::Value::Number(0.into()));
+        assert!(
+            json.get("traceId").is_none(),
+            "M-REC-4 retired the `traceId` wire-format key on TableUpdate too",
+        );
     }
 }

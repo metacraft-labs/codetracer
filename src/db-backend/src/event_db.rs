@@ -33,8 +33,12 @@ pub struct EventDb {
     pub single_tables: Vec<SingleTable>,
     pub disabled_tables: Vec<SingleTableId>,
     pub global_table: Vec<(StepId, SingleTableId, IndexInSingleTable)>,
-    // trace_id => [(name: , value: ..)]
-    // trace_id => [index => [multiple expressions with values possibly]]
+    // M-REC-4: the historical comment used "trace_id" for what is actually
+    // a tracepoint id (the key of `tracepoint_values`).  The recording-id
+    // migration reserves "trace_id" for OpenTelemetry W3C TraceContext;
+    // here the key is a `tracepoint_id`.
+    // tracepoint_id => [(name: , value: ..)]
+    // tracepoint_id => [index => [multiple expressions with values possibly]]
     // register_(id, from_start, group_of_results);
     // and update eventdb/send updates?
     pub tracepoint_values: HashMap<usize, Vec<Vec<StringAndValueTuple>>>,
@@ -100,27 +104,36 @@ impl EventDb {
         })
     }
 
-    fn update_single_table(&mut self, kind: DbEventKind, events: &[ProgramEvent], trace_id: usize) {
-        if trace_id < self.single_tables.len() {
-            self.single_tables[trace_id] = SingleTable {
+    /// Replace the events of an existing event-table slot.
+    ///
+    /// `event_slot` is an index into `single_tables`.  M-REC-4 renamed the
+    /// parameter from `trace_id` to `event_slot` to remove the lexical
+    /// clash with the new `recording_id` recording identifier (parent spec
+    /// §2's third meaning of "trace_id").
+    fn update_single_table(&mut self, kind: DbEventKind, events: &[ProgramEvent], event_slot: usize) {
+        if event_slot < self.single_tables.len() {
+            self.single_tables[event_slot] = SingleTable {
                 kind,
                 events: events.to_vec(),
             };
         } else {
             error!(
-                "wrong index: single tables len {}, trace_id {}",
+                "wrong index: single tables len {}, event_slot {}",
                 self.single_tables.len(),
-                trace_id
+                event_slot
             );
         }
     }
 
-    fn insert_in_single_table(&mut self, event: ProgramEvent, trace_id: usize) {
-        if self.single_tables.len() <= trace_id {
+    /// Append an event to an event-table slot, growing `single_tables` as
+    /// needed.  See [`Self::update_single_table`] for the `event_slot` /
+    /// `trace_id` rename context (M-REC-4).
+    fn insert_in_single_table(&mut self, event: ProgramEvent, event_slot: usize) {
+        if self.single_tables.len() <= event_slot {
             self.single_tables
-                .resize(trace_id + 1, SingleTable::new(DbEventKind::Trace));
+                .resize(event_slot + 1, SingleTable::new(DbEventKind::Trace));
         }
-        self.single_tables[trace_id].events.push(event);
+        self.single_tables[event_slot].events.push(event);
     }
 
     pub fn refresh_global(&mut self) {
@@ -254,7 +267,7 @@ impl EventDb {
         let event_count: usize;
         let mut trace_values_option: Option<TraceValues> = None;
         // Event log datatable ajax update
-        if !args.is_trace && args.trace_id == 0 {
+        if !args.is_trace && args.event_slot == 0 {
             if self.selected_kinds != args.selected_kinds {
                 self.selected_kinds = args.selected_kinds;
                 self.update_visible();
@@ -319,13 +332,13 @@ impl EventDb {
                 event_count = searched_table.len();
             }
         // Tracepoint log datatable ajax update
-        } else if args.table_args.search.value.is_empty() && args.trace_id < self.single_tables.len() - 1 {
-            let table: &SingleTable = &self.single_tables[min(self.single_tables.len() - 1, args.trace_id + 1)];
+        } else if args.table_args.search.value.is_empty() && args.event_slot < self.single_tables.len() - 1 {
+            let table: &SingleTable = &self.single_tables[min(self.single_tables.len() - 1, args.event_slot + 1)];
             let mut trace_locals: Vec<Vec<StringAndValueTuple>> = vec![vec![]];
             if args.table_args.start < table.events.len() {
                 for (i, event) in table.events[args.table_args.start..].iter().enumerate() {
                     table_data.push(TableRow::new(event));
-                    if let Some(value) = self.tracepoint_values.get(&args.trace_id) {
+                    if let Some(value) = self.tracepoint_values.get(&args.event_slot) {
                         // FIXME(alexander): here we had a crash on `log(0)` after reforms
                         for trace in value[args.table_args.start + i].iter() {
                             while trace_locals.len() <= args.table_args.start + i {
@@ -341,7 +354,7 @@ impl EventDb {
             }
             event_count = table.events.len();
             let tv = TraceValues {
-                id: args.trace_id,
+                id: args.event_slot,
                 locals: trace_locals,
             };
             trace_values_option = Some(tv);
@@ -349,8 +362,8 @@ impl EventDb {
             let mut trace_locals: Vec<Vec<StringAndValueTuple>> = vec![vec![]];
             let mut searched_table: Vec<TableRow> = vec![];
             // Search through all values
-            if self.single_tables.len() > args.trace_id + 1 {
-                let table: &SingleTable = &self.single_tables[args.trace_id + 1];
+            if self.single_tables.len() > args.event_slot + 1 {
+                let table: &SingleTable = &self.single_tables[args.event_slot + 1];
                 for event in table.events.iter() {
                     match args.table_args.search.value.parse::<i64>() {
                         Ok(search_num) => {
@@ -373,7 +386,7 @@ impl EventDb {
             if args.table_args.start < searched_table.len() {
                 for (i, row) in searched_table[args.table_args.start..].iter().enumerate() {
                     table_data.push(row.clone());
-                    if let Some(value) = self.tracepoint_values.get(&args.trace_id) {
+                    if let Some(value) = self.tracepoint_values.get(&args.event_slot) {
                         // FIXME(alexander): here we had a crash on `log(0)` after reforms
                         for trace in value[args.table_args.start + i].iter() {
                             if trace_locals.len() <= args.table_args.start + i {
@@ -389,7 +402,7 @@ impl EventDb {
             }
             event_count = searched_table.len();
             let tv = TraceValues {
-                id: args.trace_id,
+                id: args.event_slot,
                 locals: trace_locals,
             };
             trace_values_option = Some(tv);
@@ -402,7 +415,7 @@ impl EventDb {
                 data: table_data,
             },
             is_trace: args.is_trace,
-            trace_id: args.trace_id,
+            event_slot: args.event_slot,
         };
         Ok((table_update, trace_values_option))
     }
