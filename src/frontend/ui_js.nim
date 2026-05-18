@@ -1369,7 +1369,7 @@ proc onTraceLoaded(
   if not data.ui.menu.isNil:
     data.ui.menu.requestMenuRender()
 
-  dom.document.title = cstring(fmt"CodeTracer | Trace {data.trace.id}: {data.trace.program}")
+  dom.document.title = cstring(fmt"CodeTracer | Trace {data.trace.recordingId}: {data.trace.program}")
 
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
@@ -1428,7 +1428,7 @@ proc onTraceLoaded(
         let trace = response["trace"].to(Trace)
         # Store the Backend Manager's replayId so we can stop it on close.
         data.activeSession.replayId = response["replayId"].to(int)
-        infoPrint "ui: reinitializing dap for trace ", $trace.id
+        infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
         data.dapApi.sendCtRequest(DapConfigurationDone, js{})
         data.dapApi.sendCtRequest(DapLaunch, js{
           traceFolder: trace.outputFolder,
@@ -1447,7 +1447,7 @@ proc onTraceLoaded(
         let trace = response["trace"].to(Trace)
         # Store the Backend Manager's replayId so we can stop it on close.
         data.activeSession.replayId = response["replayId"].to(int)
-        infoPrint "ui: reinitializing dap for trace ", $trace.id
+        infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
         data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
           clientName: "codetracer"
         )))
@@ -2166,14 +2166,16 @@ proc onClose*(data: Data) =
 proc onOpenTraceInTabReady*(sender: js, response: jsobject(traceId=cstring)) =
   ## Handler for the "tab" newTracePolicy.  When a second `ct` instance
   ## sends its trace to the existing window, this handler creates a new
-  ## session tab and triggers the trace load.  M-REC-2: ``traceId`` is
-  ## a UUIDv7 recording-id string.
-  let traceId = response.traceId
-  clog "open-trace-in-tab-ready: creating new session and loading trace " & $traceId
+  ## session tab and triggers the trace load.  M-REC-3:
+  ## ``response.traceId`` carries a UUIDv7 recording-id string; the JS
+  ## IPC field name ``traceId`` is preserved as wire format (M-REC-5
+  ## territory).
+  let recordingId = response.traceId
+  clog "open-trace-in-tab-ready: creating new session and loading recording " & $recordingId
   createNewSession(data)
   # After creating the session, send the load-recent-trace IPC so the
   # main process starts the replay backend for the new trace.
-  data.ipc.send cstring"CODETRACER::load-recent-trace", js{traceId: traceId}
+  data.ipc.send cstring"CODETRACER::load-recent-trace", js{traceId: recordingId}
 
 proc onOpenEditFolderInTabReady*(
     sender: js,

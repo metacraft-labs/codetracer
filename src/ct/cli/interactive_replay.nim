@@ -27,7 +27,7 @@ func limitColumnRight(text: string, width: int): string =
 func traceInText*(trace: Trace): string =
   let displayCmd = limitColumnRight(trace.program & " " & trace.args.join(" "), TRACE_CMD_COLUMN_WIDTH)
   let displayWorkdir = limitColumnLeft("ran in " & trace.workdir, TRACE_WORKDIR_COLUMN_WIDTH)
-  let idColumn = fmt"{trace.id}."
+  let idColumn = fmt"{trace.recordingId}."
   alignLeft(idColumn, 5) & " | " & alignLeft(displayCmd, TRACE_CMD_COLUMN_WIDTH) & " | " &
   alignLeft(displayWorkdir, TRACE_WORKDIR_COLUMN_WIDTH) & " | " &
   alignLeft(toName(trace.lang), 15) & " | " & alignLeft(trace.date, 15)

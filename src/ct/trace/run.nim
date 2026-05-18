@@ -20,7 +20,7 @@ proc runRecordedTrace*(
   remoteDebuggingPort: Option[string] = none(string),
   remoteDebuggingPipe: bool = false,
 ) =
-  var args = if test: @[$trace.id, "--test"] else: @[$trace.id]
+  var args = if test: @[$trace.recordingId, "--test"] else: @[$trace.recordingId]
   let traceStructuredDiffPath = trace.outputFolder / "diff.json"
   let traceIndexDiffPath = trace.outputFolder / "diff_index.json"
   if existsFile(traceStructuredDiffPath):
@@ -88,7 +88,7 @@ proc runWithRestart(
     if not recordedTrace.isNil:
       # Always spawn a subprocess for replay so the restart loop can work.
       # (runRecordedTrace uses execv which never returns)
-      var replayArgs = @["replay", fmt"--id={recordedTrace.id}"]
+      var replayArgs = @["replay", fmt"--id={recordedTrace.recordingId}"]
       if newTracePolicy == "tab":
         replayArgs.add("--new-tab")
       elif newTracePolicy == "window":

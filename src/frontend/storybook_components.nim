@@ -883,14 +883,15 @@ proc applyAgentActivityDeepReview(vm: AgentActivityDeepReviewVM) =
     passed: false))
 
 proc applyWelcome(vm: WelcomeScreenVM) =
-  # M-REC-2: ``RecentTraceRecord.id`` is a UUIDv7 string; the fixture
-  # ids are well-known constants chosen for storybook readability.
+  # M-REC-3: ``RecentTraceRecord.recordingId`` is a UUIDv7 string; the
+  # fixture ids are well-known constants chosen for storybook
+  # readability.
   vm.setRecentTraces(@[
-    RecentTraceRecord(id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
+    RecentTraceRecord(recordingId: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
                       program: "zir_shields",
                       args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/04 16:03:00", duration: "4.2s"),
-    RecentTraceRecord(id: "01949fcc-7d92-7e9c-aaaa-cccccccccccc",
+    RecentTraceRecord(recordingId: "01949fcc-7d92-7e9c-aaaa-cccccccccccc",
                       program: "zir_shields",
                       args: @[], workdir: "/workspace/noir_space_ship",
                       date: "2026/05/03 12:44:00", duration: "1.1s"),

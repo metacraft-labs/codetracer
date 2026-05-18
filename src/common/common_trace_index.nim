@@ -15,9 +15,11 @@ type
 
 const
   ## Sentinel returned when a caller asks for "no recording id".  Pre-M-REC-2
-  ## this was the integer ``-1``; now it is the empty string, which is never
-  ## a valid UUIDv7 (the canonical form is always 36 chars).
-  NO_TRACE_ID* = ""
+  ## this was the integer ``-1``; M-REC-2 flipped it to the empty string
+  ## (never a valid UUIDv7) and M-REC-3 renamed the sentinel from
+  ## ``NO_TRACE_ID`` to ``NO_RECORDING_ID`` to match the wider recording-id
+  ## semantic cleanup.
+  NO_RECORDING_ID* = ""
 
 const SQL_CREATE_TABLE_STATEMENTS = @[
   """CREATE TABLE IF NOT EXISTS recordings (

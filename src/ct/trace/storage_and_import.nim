@@ -121,17 +121,15 @@ proc findCtFileInFolder(folder: string): string =
 
 proc importTrace*(
   traceFolder: string,
-  traceIdArg: string,
+  recordingIdArg: string,
   recordPid: int,
   langArg: Lang = LangNoir,
   selfContained: bool = true,
   downloadUrl: string = "",
   traceKind: string = "db",
 ): Trace =
-  ## M-REC-2: ``traceIdArg`` is now a UUIDv7 recording-id (empty
-  ## string == ``NO_TRACE_ID`` means "mint a fresh one").  The proc
-  ## name is preserved; M-REC-3 will rename it as part of the wider
-  ## semantic cleanup.
+  ## M-REC-3: ``recordingIdArg`` is a UUIDv7 recording-id (empty
+  ## string == ``NO_RECORDING_ID`` means "mint a fresh one").
 
   # M-REC-1.5: metadata is read from the CTFS ``meta.dat`` inside
   # ``trace.ct``.  Legacy ``trace_metadata.json`` /
@@ -150,19 +148,19 @@ proc importTrace*(
   if workdir.len == 0:
     workdir = deriveWorkdir(program)
 
-  let traceID = if traceIdArg != NO_TRACE_ID:
-      traceIdArg
+  let traceID = if recordingIdArg != NO_RECORDING_ID:
+      recordingIdArg
     else:
       trace_index.newID(test=false)
 
-  let outputFolder = if traceIdArg == NO_TRACE_ID:
+  let outputFolder = if recordingIdArg == NO_RECORDING_ID:
       # M-REC-2: folder name still uses the legacy ``trace-<id>`` form
       # because the on-disk layout rename is M-REC-7's scope.  We only
       # changed what ``<id>`` is.
       fmt"{codetracerTraceDir}/trace-{traceID}/"
     else:
       traceFolder
-  if traceIdArg == NO_TRACE_ID:
+  if recordingIdArg == NO_RECORDING_ID:
     createDir(outputFolder)
     # Copy the CTFS container itself; downstream tooling treats it as the
     # source of truth.  Any sibling ``paths.json`` produced by

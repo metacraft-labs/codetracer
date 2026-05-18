@@ -56,7 +56,7 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
       if jsonLine.hasKey("progress"):
         mainWindow.webContents.send("CODETRACER::upload-trace-progress",
         UploadProgress(
-          id: response.trace.id,
+          id: response.trace.recordingId,
           progress: jsonLine["progress"].getInt(),
           msg: jsonLine["message"].getStr("")
         )),
@@ -71,12 +71,12 @@ proc onUploadTraceFile*(sender: JsObject, response: UploadTraceArg) =
           expireTime: $parsed["storedUntilEpochSeconds"].getInt()
         )
         mainWindow.webContents.send("CODETRACER::upload-trace-file-received", js{
-          "argId": cstring(response.trace.program & ":" & $response.trace.id),
+          "argId": cstring(response.trace.program & ":" & $response.trace.recordingId),
           "value": uploadData
         })
       else:
         mainWindow.webContents.send("CODETRACER::uploaded-trace-file-received", js{
-          "argId": cstring(response.trace.program & ":" & $response.trace.id),
+          "argId": cstring(response.trace.program & ":" & $response.trace.recordingId),
           "value": UploadedTraceData(downloadKey: "Errored")
         })
   )
@@ -88,11 +88,11 @@ proc onDownloadTraceFile*(sender: js, response: jsobject(downloadKey = seq[cstri
   )
 
   if res.isOk:
-    # M-REC-2: ``ct download`` prints the UUIDv7 recording-id of the
+    # M-REC-3: ``ct download`` prints the UUIDv7 recording-id of the
     # imported trace on stdout (one line).  Take it verbatim.
-    let traceId = cstring(($res.v).strip())
-    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-    await loadExistingRecord(traceId)
+    let recordingId = cstring(($res.v).strip())
+    await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
+    await loadExistingRecord(recordingId)
     mainWindow.webContents.send "CODETRACER::successful-download"
   else:
     mainWindow.webContents.send "CODETRACER::failed-download",

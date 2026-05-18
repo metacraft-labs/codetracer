@@ -264,7 +264,7 @@ proc recordTrace*(
       sleep 100
   db.close()
   Trace(
-    id: id,
+    recordingId: id,
     program: program,
     args: args,
     sourceFolders: sourceFolders.splitWhitespace(),
@@ -285,7 +285,7 @@ proc recordTrace*(
 proc recordTrace*(trace: Trace, test: bool): Trace =
   # TODO pass here a Trace value and instead if neeeded construct it from other helpers
   recordTrace(
-    trace.id,
+    trace.recordingId,
     trace.program,
     trace.args,
     trace.compileCommand,
@@ -335,7 +335,7 @@ proc loadTrace(trace: Row, test: bool): Trace =
       discard
 
     result = Trace(
-      id: trace[0],
+      recordingId: trace[0],
       program: trace[1],
       args: trace[2].splitWhitespace,
       compileCommand: trace[3],
@@ -410,18 +410,19 @@ proc registerEvent*(reportFile: string, socketPath: string, address: string, eve
   else:
     discard # not implemented for this backend for now
 
-proc registerRecordTraceId*(pid: int, traceId: string, test: bool) =
-  ## Map a recorder process pid to the recording_id of the trace it
-  ## produced.  Pre-M-REC-2 this used an integer trace id; the proc
-  ## name is preserved per the M-REC-2 boundary (the semantic rename
-  ## happens in M-REC-3).
+proc registerRecordingForPid*(pid: int, recordingId: string, test: bool) =
+  ## Map a recorder process pid to the ``recording_id`` of the trace it
+  ## produced.  Pre-M-REC-2 this used an integer trace id and the proc
+  ## was named ``registerRecordTraceId``; M-REC-3 renamed both the proc
+  ## and its parameter so callers speak "recording" rather than the
+  ## overloaded "trace_id".
   let db = ensureDB(test=test)
   db.exec(sql"""
     INSERT INTO record_pid_recording_map
     (pid, recording_id)
     VALUES (?, ?)""",
     pid,
-    traceId
+    recordingId
   )
   db.close()
 

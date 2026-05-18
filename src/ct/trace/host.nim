@@ -38,9 +38,11 @@ type
     materializedMomentId*: string
 
   HostResolvedTrace* = object
-    # M-REC-2: UUIDv7 recording-id string.  Field name preserved per
-    # the M-REC-2 boundary; M-REC-3 will rename to ``recordingId``.
-    traceId*: string
+    # M-REC-3: UUIDv7 recording-id string.  Pre-M-REC-2 this was the
+    # integer trace-counter id; M-REC-2 flipped the type and M-REC-3
+    # renamed the field from ``traceId`` to ``recordingId`` so the
+    # codebase speaks "recording" rather than the overloaded "trace_id".
+    recordingId*: string
     start*: HostStartCoordinates
 
   StorageProtocolOptions* = object
@@ -293,7 +295,7 @@ proc importCtFile(ctFilePath: string): string =
 
   let trace = importTrace(
     tempDir,
-    NO_TRACE_ID,
+    NO_RECORDING_ID,
     NO_PID,
     LangUnknown,
     traceKind = "rr")
@@ -305,7 +307,7 @@ proc importCtFile(ctFilePath: string): string =
   if fileExists(tempDir / "trace.ct") and not fileExists(importedCtPath):
     copyFile(tempDir / "trace.ct", importedCtPath)
 
-  result = trace.id
+  result = trace.recordingId
 
 
 proc importTraceFolder(traceFolderPath: string): string =
@@ -345,7 +347,7 @@ proc importTraceFolder(traceFolderPath: string): string =
   # All freshly-imported folders now follow the CTFS-only path.
   let trace = importTrace(
     fullPath,
-    NO_TRACE_ID,
+    NO_RECORDING_ID,
     NO_PID,
     LangUnknown,
     traceKind = "rr")
@@ -353,7 +355,7 @@ proc importTraceFolder(traceFolderPath: string): string =
     echo "ct host: error: failed to import trace from folder ", traceFolderPath
     quit(1)
 
-  result = trace.id
+  result = trace.recordingId
 
 proc jsonField(node: JsonNode, names: openArray[string]): JsonNode =
   if node.isNil or node.kind != JObject:
@@ -782,10 +784,10 @@ proc resolveSharedManifest(
       raise newException(ValueError, "single_ctfs manifest missing file")
     let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     if path.len > 0 and fileExists(path):
-      result.traceId = importCtFile(path)
+      result.recordingId = importCtFile(path)
     else:
       let storagePath = writeStorageObjectToTemp(fileNode, storageOptions, "single CTFS file", ".ct")
-      result.traceId = importCtFile(storagePath)
+      result.recordingId = importCtFile(storagePath)
     result.start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
     if result.start.traceId.len == 0 and result.start.geid.len == 0:
       result.start = manifestStart
@@ -815,11 +817,11 @@ proc resolveSharedManifest(
     let path = resolveLocalReference(fileNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     if path.len > 0 and fileExists(path):
       echo "ct host: selected split_ctfs segment: ", path
-      result.traceId = importCtFile(path)
+      result.recordingId = importCtFile(path)
     else:
       let storagePath = writeStorageObjectToTempWithSupport(fileNode, selected, storageOptions, "split CTFS segment", ".ct")
       echo "ct host: selected split_ctfs segment: ", storagePath
-      result.traceId = importCtFile(storagePath)
+      result.recordingId = importCtFile(storagePath)
     result.start = start
   of "materialized_artifact":
     let artifactNode = source.jsonField(["artifact"])
@@ -828,11 +830,11 @@ proc resolveSharedManifest(
     let path = resolveLocalReference(artifactNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
     if traceFolder.len == 0:
-      result.traceId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact", source)
+      result.recordingId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact", source)
     elif traceFolder.endsWith(".ct"):
-      result.traceId = importCtFile(traceFolder)
+      result.recordingId = importCtFile(traceFolder)
     else:
-      result.traceId = importTraceFolder(traceFolder)
+      result.recordingId = importTraceFolder(traceFolder)
     result.start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
     if result.start.traceId.len == 0 and result.start.materializedMomentId.len == 0:
       result.start = manifestStart
@@ -844,7 +846,7 @@ proc resolveSharedManifest(
     var start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
     if start.traceId.len == 0 and start.geid.len == 0:
       start = manifestStart
-    result.traceId = importShardedSegment(selectedSegment(segments, start), storageOptions)
+    result.recordingId = importShardedSegment(selectedSegment(segments, start), storageOptions)
     result.start = start
   else:
     raise newException(ValueError, "unsupported shared manifest source kind: " & kind)
@@ -863,7 +865,7 @@ proc resolveRecordingManifest(
   of "mcr_slices":
     let shardedSegments = manifest.jsonField(["shardedMcrSegments", "sharded_mcr_segments"])
     if not shardedSegments.isNil and shardedSegments.kind == JArray and shardedSegments.len > 0:
-      result.traceId = importShardedSegment(selectedSegment(shardedSegments, readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))), storageOptions)
+      result.recordingId = importShardedSegment(selectedSegment(shardedSegments, readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))), storageOptions)
     else:
       let slice = manifest.firstObject(["mcrSlices", "mcr_slices"])
       if slice.isNil:
@@ -871,14 +873,14 @@ proc resolveRecordingManifest(
       requireReadableObject(slice, "MCR slice")
       let path = resolveLocalReference(slice.jsonString(["sliceKey", "slice_key"]), manifestPath, manifestKey)
       if path.len > 0 and fileExists(path):
-        result.traceId = importCtFile(path)
+        result.recordingId = importCtFile(path)
       else:
         let obj = %*{
           "objectKey": slice.jsonString(["sliceKey", "slice_key"]),
           "uploadCompletionState": slice.jsonString(["uploadCompletionState", "upload_completion_state"]),
           "retentionStatus": slice.jsonString(["retentionStatus", "retention_status"])
         }
-        result.traceId = importCtFile(writeStorageObjectToTemp(obj, storageOptions, "MCR slice", ".ct"))
+        result.recordingId = importCtFile(writeStorageObjectToTemp(obj, storageOptions, "MCR slice", ".ct"))
     result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
   of "materialized_trace":
     let artifact = manifest.firstObject(["materializedTraceArtifacts", "materialized_trace_artifacts"])
@@ -887,11 +889,11 @@ proc resolveRecordingManifest(
     let path = resolveLocalReference(artifact.jsonString(["artifactKey", "artifact_key"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
     if traceFolder.len == 0:
-      result.traceId = importMaterializedStorageObject(artifact, storageOptions, "materialized artifact")
+      result.recordingId = importMaterializedStorageObject(artifact, storageOptions, "materialized artifact")
     elif traceFolder.endsWith(".ct"):
-      result.traceId = importCtFile(traceFolder)
+      result.recordingId = importCtFile(traceFolder)
     else:
-      result.traceId = importTraceFolder(traceFolder)
+      result.recordingId = importTraceFolder(traceFolder)
     result.start = readReplayStart(artifact.jsonField(["replayStart", "replay_start"]))
     if result.start.materializedMomentId.len == 0:
       result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
@@ -980,7 +982,7 @@ proc hostCommand*(
   if localManifestPath.len > 0:
     try:
       let resolved = importLocalManifest(localManifestPath, storageOptions)
-      traceId = resolved.traceId
+      traceId = resolved.recordingId
       echo "ct host: imported manifest trace as trace id ", traceId
       flushFile(stdout)
     except CatchableError as e:
@@ -1007,7 +1009,7 @@ proc hostCommand*(
     if not (traceArg.contains('/') or traceArg.contains('\\')):
       let directTrace = trace_index.find(traceArg, test=false)
       if not directTrace.isNil:
-        traceId = directTrace.id
+        traceId = directTrace.recordingId
     if traceId.len == 0:
       let traceFolder = traceArg
       var traceFolderFullPath = ""
@@ -1022,7 +1024,7 @@ proc hostCommand*(
         if trace.isNil:
           echo "ct host error: trace not found: maybe you should import it first"
           quit(1)
-      traceId = trace.id
+      traceId = trace.recordingId
   else:
     echo "ct host: error: no trace specified. " &
       "Provide a trace ID or folder as a positional argument, " &

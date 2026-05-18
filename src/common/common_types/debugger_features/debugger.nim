@@ -27,7 +27,7 @@ type
 
   UploadProgress* = object
     # M-REC-2: UUIDv7 recording-id string (wire-format DAP/MCP rename
-    # is M-REC-5; for now we only flip the type to match Trace.id).
+    # is M-REC-5; for now we only flip the type to match Trace.recordingId).
     id*: langstring
     progress*: int
     msg*: langstring
@@ -68,7 +68,14 @@ type
     lang*: Lang
     mode*: LayoutMode
     saveID*: int
-    traceID*: int
+    # M-REC-3: dormant field.  Pre-M-REC-2 this was an ``int`` named
+    # ``traceID``; flipped to ``string`` and renamed for the
+    # Recording-Identifier-Migration semantic cleanup.  Nothing in the
+    # current codebase sets or reads it; the rename keeps the type
+    # surface consistent with sibling structs (``Trace.recordingId`` /
+    # ``StartOptions.recordingID``) so that any future wire-format
+    # serialisation does not have to chase a stale name.
+    recordingID*: langstring
 
   SaveFile* = object
     path*: langstring

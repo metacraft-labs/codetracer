@@ -459,7 +459,7 @@ proc runInitial*(conf: CodetracerConf) =
     # of StartupCommand.`import`:
     #   importCommand(conf.importTraceZipPath, conf.importOutputPath)
     # of StartupCommand.`import-db-trace`:
-    #   discard importDbTrace(conf.importDbTracePath, NO_TRACE_ID)
+    #   discard importDbTrace(conf.importDbTracePath, NO_RECORDING_ID)
     # of StartupCommand.summary:
     #   replaySummary(conf.summaryTraceId, conf.summaryOutputFolder)
     # of StartupCommand.`report-bug`:

@@ -49,7 +49,7 @@ proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError,
   echo "WASM with debug info: ", wasm, " EVM trace: ", evmTrace
 
   result = record("", ".", "", evmTrace, "", "", withDiff="", storeTraceFolderForPid = -1, upload=false, program = wasm, args = @[])
-  updateField(result.id, "program", hash, false)
+  updateField(result.recordingId, "program", hash, false)
   result.program = hash
 
 # NOTE: remove CatchableError if using custom exception

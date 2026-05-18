@@ -31,15 +31,13 @@ proc loadLine*(sessionId: int, sessionLogPath: string): int =
 
 proc findTraceForArgs*(
     patternArg: Option[string],
-    traceIdArg: Option[string],
+    recordingIdArg: Option[string],
     traceFolderArg: Option[string]): Trace =
-  ## M-REC-2: ``traceIdArg`` is now a UUIDv7 recording-id string.  The
-  ## proc name + param name are preserved (M-REC-3 will rename them);
-  ## the type-only flip mirrors the trace_index API change.
+  ## M-REC-3: ``recordingIdArg`` is a UUIDv7 recording-id string.
   # if no trace found, returning nil for now
-  if traceIdArg.isSome:
-    let traceId = traceIdArg.get
-    let trace = trace_index.find(traceId, test=false)
+  if recordingIdArg.isSome:
+    let recordingId = recordingIdArg.get
+    let trace = trace_index.find(recordingId, test=false)
     if not trace.isNil:
       return trace
     else:

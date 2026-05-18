@@ -56,8 +56,8 @@ proc recordWithCtRrSupport(
     ctRRSupportExe: string,
     program: string, args: seq[string],
     traceFolder: string,
-    # M-REC-2: UUIDv7 recording-id string; empty == NO_TRACE_ID.
-    traceId: string,
+    # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
+    recordingId: string,
     traceKind: string): Trace =
 
   createDir(traceFolder)
@@ -74,7 +74,7 @@ proc recordWithCtRrSupport(
     quit(code)
 
   # import replay trace metadata written by ct-native-replay.
-  result = importTrace(traceFolder, traceId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
+  result = importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
 # rr patches for ruby/other vm-s: not supported now, instead
@@ -84,8 +84,8 @@ proc recordDb(
     lang: Lang, vmExe: string,
     program: string, args: seq[string],
     backend: string, traceFolder: string, stylusTrace: string,
-    # M-REC-2: UUIDv7 recording-id string; empty == NO_TRACE_ID.
-    traceId: string, pythonActivationPath: string = "",
+    # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
+    recordingId: string, pythonActivationPath: string = "",
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
 
   createDir(traceFolder)
@@ -199,7 +199,7 @@ proc recordDb(
     echo fmt"error: recorder exited with {exitCode} for {lang}"
     quit(1)
 
-  result = importTrace(traceFolder, traceId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+  result = importTrace(traceFolder, recordingId, recordPid, lang, DB_SELF_CONTAINED_DEFAULT, traceKind="db")
 
 
 # record a program run
@@ -208,13 +208,13 @@ proc record(
     langArg: Lang, backend: string, stylusTrace: string,
     test = false, basic = false,
     # M-REC-2: ``traceIDRecord`` is now a UUIDv7 recording-id string;
-    # empty (``""`` == NO_TRACE_ID) means "mint a fresh one".
-    traceIDRecord: string = NO_TRACE_ID, customPath: string = "", outputFolderArg: string = "",
+    # empty (``""`` == NO_RECORDING_ID) means "mint a fresh one".
+    traceIDRecord: string = NO_RECORDING_ID, customPath: string = "", outputFolderArg: string = "",
     traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
   var traceID: string
-  if traceIDRecord == NO_TRACE_ID:
+  if traceIDRecord == NO_RECORDING_ID:
     traceID = trace_index.newID(test)
   else:
     traceID = traceIDRecord
@@ -225,7 +225,7 @@ proc record(
   # as the pid of the called process
   # otherwise this should be the directly called process, so we use `getCurrentProcessId`
   let recordPid = getEnv("CODETRACER_WRAPPER_PID", $(getCurrentProcessId())).parseInt
-  trace_index.registerRecordTraceId(recordPid, traceID, test)
+  trace_index.registerRecordingForPid(recordPid, traceID, test)
 
   let codetracerDir = if not test: codetracerShareFolder
                       elif customPath.len > 0: customPath
@@ -392,8 +392,8 @@ proc record(
 proc exportRecord(
     program: string,
     recordArgs: seq[string],
-    # M-REC-2: UUIDv7 recording-id string.
-    traceId: string,
+    # M-REC-3: UUIDv7 recording-id string.
+    recordingId: string,
     exportZipPath: string,
     outputFolder: string,
     cleanupOutputFolder: bool) =
@@ -407,7 +407,7 @@ proc exportRecord(
   #   trace.ct  (carries meta.dat with recording_id + program + args + workdir)
   #
   # -> zip -> <exportZipPath>
-  discard traceId
+  discard recordingId
 
   # (alexander):
   #   trying to find full path
@@ -650,7 +650,7 @@ proc main*(): Trace =
       pythonInterpreter=pythonInterpreter,
       pythonTestFramework=pythonTestFramework,
       pythonTestArgs=pythonTestArgs)
-    traceId = trace.id
+    traceId = trace.recordingId
     outputFolder = trace.outputFolder
 
     createDir(outputFolder)

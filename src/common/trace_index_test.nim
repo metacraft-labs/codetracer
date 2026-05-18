@@ -152,3 +152,19 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
         echo "stderr: ", stderrStr
       check ok
       check "PASS" in stdoutStr
+
+  test "Trace.recordingId round-trips through recordTrace + find (M-REC-3)":
+    ## M-REC-3 acceptance: the rename of ``Trace.id`` → ``Trace.recordingId``
+    ## is only meaningful if the field is populated by ``recordTrace`` and
+    ## read back by ``find``.  The helper exercises both directions of the
+    ## DB round-trip in a fresh subprocess.
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "trace-recording-id", "tracerecid")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr

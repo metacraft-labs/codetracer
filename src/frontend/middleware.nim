@@ -48,7 +48,7 @@ when not defined(ctInExtension):
   import services / debugger_service
 
   proc dapInitializationHandler() =
-    infoPrint "middleware: launching trace id=", $data.trace.id, " folder=", $data.trace.outputFolder
+    infoPrint "middleware: launching trace recordingId=", $data.trace.recordingId, " folder=", $data.trace.outputFolder
 
     # it's important that this is in the `dapInitializationHandler` that is
     #   in the not defined(ctInExtension) case!

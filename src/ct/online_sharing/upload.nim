@@ -253,8 +253,8 @@ proc uploadTrace*(trace: Trace, org: Option[string],
 
 proc uploadCommand*(
   patternArg: Option[string],
-  # M-REC-2: UUIDv7 recording-id string (M-REC-3 will rename).
-  traceIdArg: Option[string],
+  # M-REC-3: UUIDv7 recording-id string.
+  recordingIdArg: Option[string],
   traceFolderArg: Option[string],
   interactive: bool,
   uploadOrg: Option[string],
@@ -275,7 +275,7 @@ proc uploadCommand*(
   if interactive:
     trace = interactiveTraceSelectMenu(StartupCommand.upload)
   else:
-    trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+    trace = findTraceForArgs(patternArg, recordingIdArg, traceFolderArg)
 
   if trace.isNil:
     echo "ERROR: can't find trace in local database"

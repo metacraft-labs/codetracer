@@ -27,7 +27,7 @@ import std / [options, os, osproc, strutils, strformat ],
 #     echo "ERROR: a trace folder not found inside multitrace"
 #     quit(1)
 
-#   let trace = importTrace(traceDir, NO_TRACE_ID, NO_PID, LangUnknown)
+#   let trace = importTrace(traceDir, NO_RECORDING_ID, NO_PID, LangUnknown)
 #   if trace.isNil:
 #     echo fmt"ERROR: couldn't import the trace with name {traceDir.extractFilename} from the multitrace"
 #     quit(1)
@@ -117,7 +117,7 @@ proc indexDiff*(tracePath: string) =
 
 proc replay*(
   patternArg: Option[string],
-  traceIdArg: Option[string],
+  recordingIdArg: Option[string],
   traceFolderArg: Option[string],
   interactive: bool,
   newTracePolicy: string = "",
@@ -141,7 +141,7 @@ proc replay*(
 
     # not a multitrace:
 
-    trace = findTraceForArgs(patternArg, traceIdArg, traceFolderArg)
+    trace = findTraceForArgs(patternArg, recordingIdArg, traceFolderArg)
 
     if trace.isNil and traceFolderArg.isSome:
       let traceFolder = traceFolderArg.get()
@@ -165,7 +165,7 @@ proc replay*(
           "rr"
       trace = importTrace(
         traceFolder,
-        NO_TRACE_ID,
+        NO_RECORDING_ID,
         NO_PID,
         LangUnknown,
         traceKind = traceKind)

@@ -42,8 +42,8 @@ const RecentTracesEmptyText* =
   "Record a program to create your first trace, or open an existing trace file."
 
 type WelcomeScreenCallbacks* = object
-  # M-REC-2: ``traceId`` is now a UUIDv7 recording-id string.
-  onRecentTraceClick*: proc(traceId: string)
+  # M-REC-3: ``recordingId`` is a UUIDv7 recording-id string.
+  onRecentTraceClick*: proc(recordingId: string)
   onRecentFolderClick*: proc(folderPath: string)
   onStartOptionClick*: proc(key: string)
   onChooseExecutable*: proc()
@@ -137,7 +137,7 @@ proc traceTooltipText*(trace: RecentTraceRecord): string =
     if trace.workdir.len > 0: "Workdir: " & trace.workdir else: "",
     "Recorded: " & trace.date,
     if trace.duration.len > 0: "Duration: " & trace.duration else: "",
-    "ID: " & $trace.id,
+    "ID: " & $trace.recordingId,
   ].filterIt(it.len > 0).join("\n")
 
 proc backToWelcome(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks) =
@@ -162,12 +162,12 @@ proc triggerStartOption(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
     discard
 
 proc triggerTraceClick(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
-                       # M-REC-2: UUIDv7 recording-id string.
-                       traceId: string) =
+                       # M-REC-3: UUIDv7 recording-id string.
+                       recordingId: string) =
   if callbacks.onRecentTraceClick != nil:
-    callbacks.onRecentTraceClick(traceId)
+    callbacks.onRecentTraceClick(recordingId)
   else:
-    vm.beginLoadingTrace(traceId)
+    vm.beginLoadingTrace(recordingId)
 
 proc triggerFolderClick(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
                         folderPath: string) =
@@ -182,14 +182,14 @@ proc folderClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
   result = proc() = triggerFolderClick(vm, callbacks, capturedPath)
 
 proc traceClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
-                       # M-REC-2: UUIDv7 recording-id string.
-                       traceId: string): proc() =
-  let capturedTraceId = traceId
-  result = proc() = triggerTraceClick(vm, callbacks, capturedTraceId)
+                       # M-REC-3: UUIDv7 recording-id string.
+                       recordingId: string): proc() =
+  let captured = recordingId
+  result = proc() = triggerTraceClick(vm, callbacks, captured)
 
-proc traceMouseOverHandler(vm: WelcomeScreenVM; traceId: string): proc() =
-  let capturedTraceId = traceId
-  result = proc() = vm.hoverTrace(capturedTraceId)
+proc traceMouseOverHandler(vm: WelcomeScreenVM; recordingId: string): proc() =
+  let captured = recordingId
+  result = proc() = vm.hoverTrace(captured)
 
 proc startOptionClickHandler(
     vm: WelcomeScreenVM;
@@ -210,7 +210,7 @@ proc parseArgsInput*(value: string): seq[string] =
 
 proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                            callbacks: WelcomeScreenCallbacks): MockNode =
-  let hoveredTraceId = vm.hoveredTrace.val
+  let hoveredRecordingId = vm.hoveredRecording.val
   let hoveredOptionKey = vm.hoveredOption.val
   let traces = vm.recentTraces.val
   let folders = vm.recentFolders.val
@@ -263,11 +263,11 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                 if traces.len > 0:
                   for trace in traces:
                     let traceCopy = trace
-                    let traceId = traceCopy.id
+                    let recordingId = traceCopy.recordingId
                     tdiv(class = "recent-trace-container"):
                       tdiv(class = "recent-trace",
-                           onclick = traceClickHandler(vm, callbacks, traceId),
-                           onmouseover = traceMouseOverHandler(vm, traceId),
+                           onclick = traceClickHandler(vm, callbacks, recordingId),
+                           onmouseover = traceMouseOverHandler(vm, recordingId),
                            onmouseleave = proc() =
                              vm.clearHoveredTrace()):
                         tdiv(class = "recent-trace-title"):
@@ -278,7 +278,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                           span(class = "recent-trace-title-content"):
                             text traceCommandText(traceCopy)
                         tdiv(class = traceTooltipClass(
-                               hoveredTraceId == traceId)):
+                               hoveredRecordingId == recordingId)):
                           text traceTooltipText(traceCopy)
                 else:
                   tdiv(class = "empty-state-message"):
@@ -510,7 +510,7 @@ when defined(js):
   proc renderWelcomeModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
                             callbacks: WelcomeScreenCallbacks):
       isonim_dom.Element =
-    let hoveredTraceId = vm.hoveredTrace.val
+    let hoveredRecordingId = vm.hoveredRecording.val
     let hoveredOptionKey = vm.hoveredOption.val
     let traces = vm.recentTraces.val
     let folders = vm.recentFolders.val
@@ -563,11 +563,11 @@ when defined(js):
                   if traces.len > 0:
                     for trace in traces:
                       let traceCopy = trace
-                      let traceId = traceCopy.id
+                      let recordingId = traceCopy.recordingId
                       tdiv(class = "recent-trace-container"):
                         tdiv(class = "recent-trace",
-                             onclick = traceClickHandler(vm, callbacks, traceId),
-                             onmouseover = traceMouseOverHandler(vm, traceId),
+                             onclick = traceClickHandler(vm, callbacks, recordingId),
+                             onmouseover = traceMouseOverHandler(vm, recordingId),
                              onmouseleave = proc() =
                                vm.clearHoveredTrace()):
                           tdiv(class = "recent-trace-title"):
@@ -578,7 +578,7 @@ when defined(js):
                             span(class = "recent-trace-title-content"):
                               text traceCommandText(traceCopy)
                           tdiv(class = traceTooltipClass(
-                                 hoveredTraceId == traceId)):
+                                 hoveredRecordingId == recordingId)):
                             text traceTooltipText(traceCopy)
                   else:
                     tdiv(class = "empty-state-message"):

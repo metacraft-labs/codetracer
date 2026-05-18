@@ -66,11 +66,11 @@ proc makeTrace(id: string; program: string;
                date: string = "2026/05/02 12:00:00";
                duration: string = "0.5s";
                workdir: string = "/tmp"): RecentTraceRecord =
-  ## Convenience constructor used across the suites.  M-REC-2: ``id``
-  ## is now a UUIDv7 string.  Tests that need a stable id pass a
-  ## hand-crafted canonical-form UUIDv7 string.
+  ## Convenience constructor used across the suites.  M-REC-3:
+  ## ``recordingId`` is a UUIDv7 string.  Tests that need a stable id
+  ## pass a hand-crafted canonical-form UUIDv7 string.
   RecentTraceRecord(
-    id: id,
+    recordingId: id,
     program: program,
     args: args,
     workdir: workdir,
@@ -121,7 +121,7 @@ suite "WelcomeScreenVM — defaults":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      check vm.hoveredTrace.val == NO_HOVERED_TRACE
+      check vm.hoveredRecording.val == NO_HOVERED_RECORDING
       check vm.hoveredOption.val == ""
       dispose()
 
@@ -138,7 +138,7 @@ suite "WelcomeScreenVM — defaults":
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
       check vm.loading.val == false
-      check vm.loadingTraceId.val == NO_LOADING_TRACE
+      check vm.loadingRecordingId.val == NO_LOADING_RECORDING
       dispose()
 
   test "launchConfig and newRecord start empty":
@@ -198,7 +198,7 @@ suite "WelcomeScreenVM — welcome_screen":
       vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000001","/a")])
       vm.addRecentTrace(makeTrace("01949fcc-7d92-7e9c-aaaa-000000000002","/b"))
       check vm.recentTraces.val.len == 2
-      check vm.recentTraces.val[1].id == "01949fcc-7d92-7e9c-aaaa-000000000002"
+      check vm.recentTraces.val[1].recordingId == "01949fcc-7d92-7e9c-aaaa-000000000002"
       dispose()
 
   test "recent folders section populates from setRecentFolders":
@@ -255,25 +255,25 @@ suite "WelcomeScreenVM — welcome_screen":
       dispose()
 
   test "trace tooltip becomes visible on hover and clears on leave":
-    # Spec: "trace tooltip appears on hover" — hover sets hoveredTrace
-    # to the trace id; leave clears it back to NO_HOVERED_TRACE.
+    # Spec: "trace tooltip appears on hover" — hover sets hoveredRecording
+    # to the trace id; leave clears it back to NO_HOVERED_RECORDING.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
       vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000007","/p")])
-      check vm.hoveredTrace.val == NO_HOVERED_TRACE
+      check vm.hoveredRecording.val == NO_HOVERED_RECORDING
 
       vm.hoverTrace("01949fcc-7d92-7e9c-aaaa-000000000007")
-      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
+      check vm.hoveredRecording.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
 
       vm.clearHoveredTrace()
-      check vm.hoveredTrace.val == NO_HOVERED_TRACE
+      check vm.hoveredRecording.val == NO_HOVERED_RECORDING
       dispose()
 
   test "hover state survives panel switch but is reset on list refresh":
     # The legacy view re-renders the welcome panels on every redraw
     # but the hover state lives on the component instance and would
-    # bleed between renders.  The VM keeps hoveredTrace stable across
+    # bleed between renders.  The VM keeps hoveredRecording stable across
     # mode toggles but resets it whenever the underlying list is
     # bulk-replaced (so a stale id cannot survive a list refresh).
     createRoot proc(dispose: proc()) =
@@ -282,15 +282,15 @@ suite "WelcomeScreenVM — welcome_screen":
       vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000001","/p")])
       vm.hoverTrace("01949fcc-7d92-7e9c-aaaa-000000000001")
       vm.setMode(wsmNewRecord)
-      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000001"  # survives mode change
+      check vm.hoveredRecording.val == "01949fcc-7d92-7e9c-aaaa-000000000001"  # survives mode change
       vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000002","/q")])
-      check vm.hoveredTrace.val == NO_HOVERED_TRACE  # cleared on refresh
+      check vm.hoveredRecording.val == NO_HOVERED_RECORDING  # cleared on refresh
       dispose()
 
   test "click on recent trace dispatches load and flips loading":
     # Spec implication: clicking a recent trace shows the loading
     # overlay and dispatches the load command.  We verify the VM
-    # flips ``loading`` true and stamps ``loadingTraceId`` so the
+    # flips ``loading`` true and stamps ``loadingRecordingId`` so the
     # spec's ``.welcome-screen-loading`` modifier becomes visible
     # synchronously.
     createRoot proc(dispose: proc()) =
@@ -299,7 +299,7 @@ suite "WelcomeScreenVM — welcome_screen":
       vm.loadRecentTrace("01949fcc-7d92-7e9c-aaaa-00000000002a")
       drain()
       check vm.loading.val == true
-      check vm.loadingTraceId.val == "01949fcc-7d92-7e9c-aaaa-00000000002a"
+      check vm.loadingRecordingId.val == "01949fcc-7d92-7e9c-aaaa-00000000002a"
       check mock.commandCount("ct/load-recent-trace") == 1
       dispose()
 
@@ -311,7 +311,7 @@ suite "WelcomeScreenVM — welcome_screen":
       check vm.loading.val == true
       vm.endLoading()
       check vm.loading.val == false
-      check vm.loadingTraceId.val == NO_LOADING_TRACE
+      check vm.loadingRecordingId.val == NO_LOADING_RECORDING
       dispose()
 
 # ---------------------------------------------------------------------------

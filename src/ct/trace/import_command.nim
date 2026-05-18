@@ -24,7 +24,7 @@ proc importTraceInPreparedFolder(traceZipPath: string, outputFolderFullPath: str
       "rr"
   var importedTrace = importTrace(
     outputFolderFullPath,
-    NO_TRACE_ID,
+    NO_RECORDING_ID,
     NO_PID,
     LangUnknown,
     DB_SELF_CONTAINED_DEFAULT,
@@ -32,7 +32,7 @@ proc importTraceInPreparedFolder(traceZipPath: string, outputFolderFullPath: str
   if importedTrace.isNil:
     echo "error: failed to import trace metadata from ", outputFolderFullPath
     quit(1)
-  echo "recorded with id ", importedTrace.id
+  echo "recorded with id ", importedTrace.recordingId
 
 
 proc importCommand*(traceZipPath: string, importedTraceFolder: string) =

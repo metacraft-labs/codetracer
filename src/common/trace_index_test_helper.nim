@@ -9,7 +9,7 @@
 ## wire-format result.
 ##
 ## Usage: ``trace_index_test_helper <scenario>``
-## Scenarios: ``schema``, ``old-schema``, ``newid-uuidv7``.
+## Scenarios: ``schema``, ``old-schema``, ``newid-uuidv7``, ``trace-recording-id``.
 
 import std/[os, strutils, strformat]
 
@@ -19,6 +19,8 @@ else:
   import impure/db_sqlite
 
 import recording_id
+import types
+import lang
 import trace_index
 
 proc fail(msg: string) =
@@ -140,6 +142,51 @@ proc scenarioOldSchema() =
 
   echo "PASS"
 
+proc scenarioTraceRecordingId() =
+  ## M-REC-3 acceptance: ``Trace.recordingId`` (renamed from ``Trace.id``)
+  ## round-trips through ``recordTrace`` and ``find``.  The semantic
+  ## rename only matters if the field is actually populated by the
+  ## write path and read back by the read path, so we exercise both.
+  let id = trace_index.newID(test = false)
+  if id.len != 36:
+    fail("newID returned len=" & $id.len & ": " & id)
+
+  let recorded = trace_index.recordTrace(
+    id,
+    program = "/tmp/hello",
+    args = @["arg1", "arg2"],
+    compileCommand = "",
+    env = "",
+    workdir = "/tmp",
+    lang = LangNoir,
+    sourceFolders = "",
+    lowLevelFolder = "",
+    outputFolder = "/tmp/trace-" & id,
+    test = false,
+    imported = false,
+    shellID = -1,
+    rrPid = 12345,
+    exitCode = 0,
+    calltrace = true,
+    calltraceMode = CalltraceMode.FullRecord)
+  if recorded.isNil:
+    fail("recordTrace returned nil")
+  if recorded.recordingId != id:
+    fail("Trace.recordingId not propagated: got " & recorded.recordingId &
+         ", expected " & id)
+  if recorded.program != "/tmp/hello":
+    fail("Trace.program lost in recordTrace: " & recorded.program)
+
+  let found = trace_index.find(id, test = false)
+  if found.isNil:
+    fail("find returned nil for freshly recorded id " & id)
+  if found.recordingId != id:
+    fail("find returned Trace with wrong recordingId: " & found.recordingId)
+  if found.rrPid != 12345:
+    fail("Trace.rrPid lost in find: " & $found.rrPid)
+
+  echo "PASS"
+
 proc scenarioNewIdUuidV7() =
   ## Two newID calls produce different canonical UUIDv7s and sort lex.
   let id1 = trace_index.newID(test = false)
@@ -173,5 +220,6 @@ when isMainModule:
   of "schema": scenarioSchema()
   of "old-schema": scenarioOldSchema()
   of "newid-uuidv7": scenarioNewIdUuidV7()
+  of "trace-recording-id": scenarioTraceRecordingId()
   else:
     fail("unknown scenario: " & paramStr(1))

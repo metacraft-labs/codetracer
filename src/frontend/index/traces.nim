@@ -58,27 +58,26 @@ proc handleReplayStartResponse(body: JsObject) =
 
 registerStartReplayHandler(handleReplayStartResponse)
 
-proc assignTrace(traceId: cstring): Future[bool] {.async.} =
-  ## M-REC-2: ``traceId`` is now a UUIDv7 recording-id (carried as
+proc assignTrace(recordingId: cstring): Future[bool] {.async.} =
+  ## M-REC-3: ``recordingId`` is a UUIDv7 recording-id (carried as
   ## ``cstring`` to match the renderer/Electron-IPC layer's JS string
-  ## convention).  Proc/param names unchanged — M-REC-3 owns the
-  ## rename.
+  ## convention).
   var attempts = 0
   var trace: Trace = nil
   while trace.isNil and attempts < 60:
-    trace = await electron_vars.app.findTraceWithCodetracer(traceId)
+    trace = await electron_vars.app.findTraceWithCodetracer(recordingId)
     if trace.isNil:
       await asyncSleep(100)
       inc attempts
   if trace.isNil:
-    errorPrint "Unable to locate trace metadata for ", traceId
+    errorPrint "Unable to locate trace metadata for ", recordingId
     return false
   prefetchedTrace = trace
   data.trace = trace
   data.pluginClient.trace = trace
   if data.trace.compileCommand.len == 0:
     data.trace.compileCommand = data.config.defaultBuild
-  infoPrint "index: assignTrace resolved trace ", $trace.id, " folder ", $trace.outputFolder
+  infoPrint "index: assignTrace resolved trace ", $trace.recordingId, " folder ", $trace.outputFolder
   return true
 
 when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext):
@@ -426,11 +425,11 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     visualReplayPlayerError: visualReplayPlayerError,
   }
 
-proc loadExistingRecord*(traceId: cstring) {.async.} =
-  ## M-REC-2: UUIDv7 recording-id (cstring in JS/Electron context).
-  infoPrint "[info]: load existing record with ID: ", $traceId
-  if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
-    if not await assignTrace(traceId):
+proc loadExistingRecord*(recordingId: cstring) {.async.} =
+  ## M-REC-3: UUIDv7 recording-id (cstring in JS/Electron context).
+  infoPrint "[info]: load existing record with ID: ", $recordingId
+  if prefetchedTrace.isNil or prefetchedTrace.recordingId != recordingId:
+    if not await assignTrace(recordingId):
       warnPrint "couldn't assign trace"
       return
   let trace = prefetchedTrace
@@ -467,21 +466,21 @@ proc loadExistingRecord*(traceId: cstring) {.async.} =
   #   debugPrint "warning: exception when starting instance client:"
   #   debugPrint "  that's ok, if this was not started from shell-ui!"
 
-proc prepareForLoadingTrace*(traceId: cstring, pid: int) {.async.} =
-  ## M-REC-2: UUIDv7 recording-id (cstring in JS/Electron context).
+proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
+  ## M-REC-3: UUIDv7 recording-id (cstring in JS/Electron context).
   callerProcessPid = pid
-  if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
-    if not await assignTrace(traceId):
+  if prefetchedTrace.isNil or prefetchedTrace.recordingId != recordingId:
+    if not await assignTrace(recordingId):
       return
   else:
-    infoPrint "index: reuse prefetched trace ", $prefetchedTrace.id, " folder ", $prefetchedTrace.outputFolder
+    infoPrint "index: reuse prefetched trace ", $prefetchedTrace.recordingId, " folder ", $prefetchedTrace.outputFolder
     data.trace = prefetchedTrace
     data.pluginClient.trace = prefetchedTrace
     if data.trace.compileCommand.len == 0:
       data.trace.compileCommand = data.config.defaultBuild
 
   let replayStartFuture = newReplayStartFuture()
-  infoPrint "index: requesting new replay for trace ", $traceId
+  infoPrint "index: requesting new replay for trace ", $recordingId
   if not data.trace.isNil:
     infoPrint "index: ct/start-replay for trace folder ", $data.trace.outputFolder
 
@@ -543,9 +542,11 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
     selectedReplayId = -1
 
 proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
-  ## M-REC-2: returns the UUIDv7 recording-id as a cstring; empty
+  ## M-REC-3: returns the UUIDv7 recording-id as a cstring; empty
   ## means "no trace recorded" (replacement for the legacy
-  ## ``NO_INDEX`` integer sentinel).
+  ## ``NO_INDEX`` integer sentinel).  The ``traceId:`` prefix in the
+  ## subprocess output is preserved as a wire-format hand-shake with
+  ## the recorder; M-REC-5 / M-REC-6 own the printed-label rename.
   callerProcessPid = pid
   let outputResult = await readProcessOutput(
     codetracerExe.cstring,
@@ -556,17 +557,19 @@ proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
     output = outputResult.value
     let lines = output.split(jsNl)
     if lines.len > 1:
-      let traceIdLine = $lines[^2]
+      let recordingIdLine = $lines[^2]
       # probably because we print `traceId:<traceId>\n` : so the last line is ''
       #   and traceId is in the second last line
-      if traceIdLine.startsWith("traceId:"):
-        let traceId = cstring(traceIdLine[("traceId:").len .. ^1].strip)
-        return (output, traceId)
+      if recordingIdLine.startsWith("traceId:"):
+        let recordingId = cstring(recordingIdLine[("traceId:").len .. ^1].strip)
+        return (output, recordingId)
   else:
     output = JSON.stringify(outputResult.error)
   return (output, cstring"")
 
 proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
+  ## IPC field name ``traceId`` preserved (M-REC-5 wire format).  The
+  ## payload value is our local recording id.
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
@@ -576,23 +579,25 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.
   ## "tab" newTracePolicy.  The renderer receives a
   ## "CODETRACER::open-trace-in-tab-ready" message with the trace
   ## metadata so it can create a new session tab and load the trace.
-  let traceId = response.traceId
-  infoPrint "index: open-trace-in-tab for traceId ", $traceId
+  ## The IPC field name ``traceId`` is preserved here as it is part of
+  ## the renderer ↔ main-process wire format owned by M-REC-5.
+  let recordingId = response.traceId
+  infoPrint "index: open-trace-in-tab for recording ", $recordingId
 
   # Tell the renderer to create a new session tab.
   mainWindow.webContents.send(
     "CODETRACER::open-trace-in-tab-ready",
-    js{traceId: traceId})
+    js{traceId: recordingId})
 
   # Prepare the replay backend for this trace (starts a DAP session).
-  await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-  await loadExistingRecord(traceId)
+  await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
+  await loadExistingRecord(recordingId)
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
-  let (rawOutputOrError, traceId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
-  if traceId.len > 0:
-    await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-    await loadExistingRecord(traceId)
+  let (rawOutputOrError, recordingId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
+  if recordingId.len > 0:
+    await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
+    await loadExistingRecord(recordingId)
   else:
     # TODO: process notifications in welcome screen, or a different kind of error handler for this case
     # currently not working in frontend, because no status component for now in welcome screen
@@ -609,12 +614,12 @@ proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.
 
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   let trace = await electron_vars.app.findTraceByRecordProcessId(pid)
-  infoPrint "index: trace by record process id has trace id ", trace.id
+  infoPrint "index: trace by record process id has recording id ", trace.recordingId
   prefetchedTrace = trace
   data.trace = trace
   data.pluginClient.trace = trace
-  await prepareForLoadingTrace(trace.id, pid)
-  await loadExistingRecord(trace.id)
+  await prepareForLoadingTrace(trace.recordingId, pid)
+  await loadExistingRecord(trace.recordingId)
 
 proc onStopRecordingProcess*(sender: js, response: js) {.async.} =
   if not data.recordProcess.isNil:
@@ -638,8 +643,8 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
       prefetchedTrace = trace
       data.trace = trace
       data.pluginClient.trace = trace
-      await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
-      await loadExistingRecord(trace.id)
+      await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
+      await loadExistingRecord(trace.recordingId)
     else:
       errorPrint "There is no record at given path."
 
@@ -671,8 +676,8 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
     prefetchedTrace = trace
     data.trace = trace
     data.pluginClient.trace = trace
-    await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
-    await loadExistingRecord(trace.id)
+    await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
+    await loadExistingRecord(trace.recordingId)
   else:
     errorPrint "onLoadTraceFile: no trace found at path: ", traceDir
     mainWindow.webContents.send "CODETRACER::trace-load-error",
@@ -1007,8 +1012,8 @@ proc restartDbBackend {.async.} =
   #   and the global ones are ok staying the same as its the same trace:
   #     calltrace/event log/tracpoints
 
-  await prepareForLoadingTrace(data.trace.id, nodeProcess.pid.to(int))
-  await loadExistingRecord(data.trace.id)
+  await prepareForLoadingTrace(data.trace.recordingId, nodeProcess.pid.to(int))
+  await loadExistingRecord(data.trace.recordingId)
 
 proc onRestartSubsystem*(sender: JsObject, name: cstring) {.async.} =
   if name == "replay-server" or name == "db-backend":

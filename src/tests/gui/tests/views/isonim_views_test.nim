@@ -9540,12 +9540,12 @@ proc makeWelcomeTrace(id: int; program: string;
                       date: string = "2026/05/02 12:00:00";
                       duration: string = "0.5s";
                       workdir: string = "/tmp"): RecentTraceRecord =
-  # M-REC-2: ``RecentTraceRecord.id`` is a UUIDv7 string now; we
+  # M-REC-3: ``RecentTraceRecord.recordingId`` is a UUIDv7 string; we
   # synthesize a canonical-form id from the int so the existing
   # callers (which pass small integer literals for readability) keep
   # working without churn.
   RecentTraceRecord(
-    id: "01949fcc-7d92-7e9c-aaaa-" & align($id, 12, '0'),
+    recordingId: "01949fcc-7d92-7e9c-aaaa-" & align($id, 12, '0'),
     program: program,
     args: args,
     workdir: workdir,
@@ -9693,12 +9693,12 @@ suite "IsoNim Welcome Screen — welcome mode":
       trace.fireEvent("mouseover")
       # M-REC-2: synthesized UUIDv7 from int id 7 (matches the
       # ``makeWelcomeTrace`` synthesizer).
-      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
+      check vm.hoveredRecording.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
       tooltip = findByClass(panel, "recent-trace-tooltip")
       check "visible" in tooltip.attributes["class"]
 
       trace.fireEvent("mouseleave")
-      check vm.hoveredTrace.val == NO_HOVERED_TRACE
+      check vm.hoveredRecording.val == NO_HOVERED_RECORDING
       tooltip = findByClass(panel, "recent-trace-tooltip")
       check "visible" notin tooltip.attributes["class"]
 

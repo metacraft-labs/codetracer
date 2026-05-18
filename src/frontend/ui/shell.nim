@@ -90,11 +90,11 @@ proc writeShellLine*(self: ShellComponent, line: cstring) =
 
 proc openTrace*(self: ShellComponent, event: SessionEvent) {.exportc.} =
   if event.kind == RecordingCommand:
-    self.data.ipc.send "CODETRACER::show-in-debug-instance", js{traceId: event.trace.id, outputLine: -1}
+    self.data.ipc.send "CODETRACER::show-in-debug-instance", js{traceId: event.trace.recordingId, outputLine: -1}
 
 proc showOutputInDebugInstance*(self: ShellComponent, event: SessionEvent, outputLine: int) {.exportc.} =
   if event.kind == RecordingCommand:
-    self.data.ipc.send "CODETRACER::show-in-debug-instance", js{traceId: event.trace.id, outputLine: outputLine}
+    self.data.ipc.send "CODETRACER::show-in-debug-instance", js{traceId: event.trace.recordingId, outputLine: outputLine}
 
 proc determineClickedShellRow(self: ShellComponent, targetNode: Node): int =
   let rowsContainer = cast[Node](jq".xterm-rows")
@@ -255,7 +255,7 @@ proc eventSummary(event: SessionEvent): string =
       if event.status == WorkingStatus:
         &"recording command:          {event.command}"
       elif event.status == OkStatus:
-        &"recorded command:           trace #{event.trace.id}({event.command})"
+        &"recorded command:           trace #{event.trace.recordingId}({event.command})"
       else:
         &"error recording command:    {event.command} error: {event.errorMessage}"
 

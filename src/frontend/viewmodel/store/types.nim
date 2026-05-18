@@ -503,9 +503,12 @@ type
   RecentTraceRecord* = object
     ## One trace listed in the welcome-screen "RECENT TRACES" panel.
     ##
-    ## ``id``       — unique trace identifier (matches
-    ##                ``Trace.id`` on the legacy ref-object).
-    ##                M-REC-2: now a UUIDv7 string.  Was ``int``.
+    ## ``recordingId`` — unique recording identifier (matches
+    ##                ``Trace.recordingId`` on the legacy ref-object).
+    ##                M-REC-3: UUIDv7 string.  Pre-M-REC-2 this was an
+    ##                ``int`` named ``id``; M-REC-2 flipped the type
+    ##                and M-REC-3 renamed it for the recording-id
+    ##                semantic cleanup.
     ## ``program``  — captured program path / name; rendered in the
     ##                ``recent-trace-title-content`` span.
     ## ``args``     — command-line arguments captured for the recording.
@@ -518,7 +521,7 @@ type
     ##                ago" string.
     ## ``duration`` — recorded duration string (free text, may be
     ##                empty).  Surfaced verbatim in the tooltip.
-    id*: string
+    recordingId*: string
     program*: string
     args*: seq[string]
     workdir*: string

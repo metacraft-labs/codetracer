@@ -101,15 +101,15 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
   # TODO: leave this to backend/DAP if possible
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     if bypass:
-      let trace = await electron_vars.app.findTraceWithCodetracer(data.startOptions.traceID)
+      let trace = await electron_vars.app.findTraceWithCodetracer(data.startOptions.recordingID)
       if trace.isNil:
-        errorPrint "trace is not found for ", data.startOptions.traceID
+        errorPrint "trace is not found for ", data.startOptions.recordingID
         quit(1)
       data.trace = trace
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
-      await prepareForLoadingTrace(trace.id, nodeProcess.pid.to(int))
+      await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
 
   await started()
   let configSnapshot = data.config

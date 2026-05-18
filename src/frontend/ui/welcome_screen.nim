@@ -13,7 +13,7 @@ from ../viewmodel/viewmodels/welcome_screen_vm import
   setRecentFolders, setStartOptions, setMode, updateNewRecord,
   syncLoadingState,
   setOnlineTraceInput
-from ../viewmodel/viewmodels/welcome_screen_vm import optionKey, NO_LOADING_TRACE
+from ../viewmodel/viewmodels/welcome_screen_vm import optionKey, NO_LOADING_RECORDING
 when defined(js):
   from isonim/web/dom_api as isonim_dom import nil
   from ../viewmodel/views/isonim_welcome_screen_view import
@@ -95,10 +95,10 @@ proc initWelcomeScreenVM*() =
 
 proc legacyTraceRecord(trace: Trace): RecentTraceRecord =
   RecentTraceRecord(
-    # M-REC-2: ``Trace.id`` is a UUIDv7 ``langstring``; the VM store
-    # uses ``string`` for backend portability, so ``safeStr`` does the
-    # cstring → string conversion in the JS backend.
-    id: safeStr(trace.id),
+    # M-REC-3: ``Trace.recordingId`` is a UUIDv7 ``langstring``; the VM
+    # store uses ``string`` for backend portability, so ``safeStr`` does
+    # the cstring → string conversion in the JS backend.
+    recordingId: safeStr(trace.recordingId),
     program: safeStr(trace.program),
     args: toStrings(trace.args),
     workdir: safeStr(trace.workdir),
@@ -175,7 +175,7 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
   welcomeScreenVMInstance.setMode(self.currentWelcomeMode())
   welcomeScreenVMInstance.syncLoadingState(
     self.loading,
-    (if self.loadingTrace.isNil: NO_LOADING_TRACE else: safeStr(self.loadingTrace.id)))
+    (if self.loadingTrace.isNil: NO_LOADING_RECORDING else: safeStr(self.loadingTrace.recordingId)))
   welcomeScreenVMInstance.updateNewRecord(proc(form: var NewRecordFormState) =
     if self.newRecord.isNil:
       form.executable = ""
@@ -224,16 +224,18 @@ proc showWelcomeView*(self: WelcomeScreenComponent) =
   self.loadingTrace = nil
   self.syncLegacyWelcomeScreenIntoVM()
 
-proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; traceId: cstring) =
-  ## M-REC-2: ``traceId`` is now a UUIDv7 recording-id string.
+proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; recordingId: cstring) =
+  ## M-REC-3: ``recordingId`` is a UUIDv7 recording-id string.  The IPC
+  ## payload field name ``traceId`` is preserved here as the wire format
+  ## is owned by M-REC-5.
   self.loading = true
   self.loadingTrace = nil
   for trace in self.data.recentTraces:
-    if trace.id == traceId:
+    if trace.recordingId == recordingId:
       self.loadingTrace = trace
       break
   self.syncLegacyWelcomeScreenIntoVM()
-  self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: traceId }
+  self.data.ipc.send "CODETRACER::load-recent-trace", js{ traceId: recordingId }
 
 proc loadRecentFolderFromWelcome*(self: WelcomeScreenComponent; folderPath: string) =
   self.loading = true
@@ -295,11 +297,11 @@ when defined(js):
   proc buildWelcomeCallbacks(self: WelcomeScreenComponent):
       WelcomeScreenCallbacks =
     WelcomeScreenCallbacks(
-      onRecentTraceClick: proc(traceId: string) =
-        # M-REC-2: VM callbacks pass ``string`` ids; the legacy
+      onRecentTraceClick: proc(recordingId: string) =
+        # M-REC-3: VM callbacks pass ``string`` recording-ids; the legacy
         # WelcomeScreenComponent IPC hop expects ``cstring``, so we
         # convert at the boundary.
-        self.loadRecentTraceFromWelcome(cstring(traceId)),
+        self.loadRecentTraceFromWelcome(cstring(recordingId)),
       onRecentFolderClick: proc(folderPath: string) =
         self.loadRecentFolderFromWelcome(folderPath),
       onStartOptionClick: proc(key: string) =

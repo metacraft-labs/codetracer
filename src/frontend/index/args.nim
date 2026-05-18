@@ -27,10 +27,11 @@ proc parseArgs* =
     data.startOptions.inTest = true
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TRACE_ID"):
-    # M-REC-2: ``CODETRACER_TRACE_ID`` now carries a UUIDv7 string.
-    # The env-var name is preserved (M-REC-6 owns its rename to
-    # ``CODETRACER_RECORDING_ID``).
-    data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"]
+    # M-REC-3 store the UUIDv7 recording-id read from the env var into
+    # ``startOptions.recordingID``.  The env-var name ``CODETRACER_TRACE_ID``
+    # is preserved here — M-REC-6 owns the rename to
+    # ``CODETRACER_RECORDING_ID``.
+    data.startOptions.recordingID = electronProcess.env[cstring"CODETRACER_TRACE_ID"]
     callerProcessPid = electronProcess.env[cstring"CODETRACER_CALLER_PID"].parseJsInt
     return
   else:
@@ -88,7 +89,7 @@ proc parseArgs* =
           data.startOptions.deepReview = cast[DeepReviewData](JSON.parse(fs.readFileSync(args[i + 1], cstring"utf8")))
           data.startOptions.withDeepReview = true
           # M-REC-2: empty UUIDv7 string means "no recording".  Was ``-1`` pre-M-REC-2.
-          data.startOptions.traceID = cstring""
+          data.startOptions.recordingID = cstring""
           i += 2
           continue
         else:
@@ -99,7 +100,7 @@ proc parseArgs* =
       elif arg == cstring"--welcome-screen":
         data.startOptions.welcomeScreen = true
         # M-REC-2: empty UUIDv7 string means "no recording".  Was ``-1`` pre-M-REC-2.
-        data.startOptions.traceID = cstring""
+        data.startOptions.recordingID = cstring""
       elif arg == cstring"edit":
         data.startOptions.edit = true
         if i + 1 >= args.len:
@@ -131,7 +132,7 @@ proc parseArgs* =
         data.startOptions.shellUi = true
         data.startOptions.folder = electronprocess.cwd()
         # M-REC-2: empty UUIDv7 string means "no recording".  Was ``-1`` pre-M-REC-2.
-        data.startOptions.traceID = cstring""
+        data.startOptions.recordingID = cstring""
         break
       elif arg == cstring"--port":
         if i + 1 < args.len:
@@ -190,13 +191,13 @@ proc parseArgs* =
         data.startOptions.screen = false
         data.startOptions.loading = true
         data.startOptions.record = false
-        data.startOptions.traceID = arg
+        data.startOptions.recordingID = arg
         data.startOptions.folder = electronprocess.cwd()
       else:
         discard
       i += 1
   else:
     # M-REC-2: empty UUIDv7 string means "no recording".
-    data.startOptions.traceID = cstring""
+    data.startOptions.recordingID = cstring""
     data.startOptions.welcomeScreen = true
     data.startOptions.folder = electronprocess.cwd()

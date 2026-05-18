@@ -30,7 +30,9 @@ proc sendOutputJumpIPC(instance: DebugInstance, outputLine: int) {.async.} =
   instance.pipe.write(cstring($outputLine & "\n"))
 
 proc onShowInDebugInstance*(sender: js, response: jsobject(traceId=cstring, outputLine=int)) {.async.} =
-  ## M-REC-2: ``traceId`` is a UUIDv7 recording-id string.
+  ## M-REC-3: ``response.traceId`` carries a UUIDv7 recording-id string.
+  ## The JS IPC field name ``traceId`` is preserved here as wire format
+  ## (M-REC-5 territory).
   if not data.debugInstances.hasKey(response.traceId):
     var process = child_process.spawn(
       codetracerExe,

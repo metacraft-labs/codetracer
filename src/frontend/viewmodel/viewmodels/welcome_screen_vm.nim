@@ -39,11 +39,12 @@
 ##                         the top after sorting upstream).
 ## - ``recentFolders``   — list of recently opened project folders.
 ## - ``startOptions``    — start-options buttons in render order.
-## - ``hoveredTrace``    — ``Option[int]`` of the currently-hovered
-##                         trace ``id`` (the legacy view used a
+## - ``hoveredRecording`` — UUIDv7 recording-id of the currently-hovered
+##                         recent-trace row (the legacy view used a
 ##                         per-trace tooltip; mirroring it as one
 ##                         signal lets a single render-effect drive
 ##                         the ``recent-trace-tooltip`` visibility).
+##                         Empty string == ``NO_HOVERED_RECORDING``.
 ## - ``hoveredOption``   — ``Option[string]`` of the currently-hovered
 ##                         option ``key``.  Mirrors the legacy
 ##                         ``WelcomeScreenOption.hovered`` field but
@@ -59,10 +60,11 @@
 ## - ``loading``         — overlay flag while a trace is loading after
 ##                         a recent-trace click (mirrors
 ##                         ``self.loading`` on the legacy component).
-## - ``loadingTraceId``  — id of the trace currently being loaded
-##                         (matches the legacy ``loadingTrace``
-##                         pointer; ``-1`` means "no trace being
-##                         loaded").
+## - ``loadingRecordingId`` — UUIDv7 recording-id of the trace currently
+##                         being loaded (matches the legacy
+##                         ``loadingTrace`` pointer; empty string ==
+##                         ``NO_LOADING_RECORDING`` means "no recording
+##                         being loaded").
 ## - ``launchConfig``    — reactive ``LaunchConfigState`` carrying the
 ##                         configs list, the currently selected slug,
 ##                         and the ``editFolderPath`` fixture
@@ -102,14 +104,17 @@ import ../backend/backend_service
 import ../store/[replay_data_store, types]
 
 const
-  NO_HOVERED_TRACE* = ""
-    ## Sentinel for ``hoveredTrace`` — mirrors the legacy "no trace
+  NO_HOVERED_RECORDING* = ""
+    ## Sentinel for ``hoveredRecording`` — mirrors the legacy "no trace
     ## hovered" state where the Karax view rendered no
     ## ``recent-trace-tooltip`` with the ``visible`` modifier.
-    ## M-REC-2: switched from ``-1`` (int) to ``""`` (UUIDv7 string)
-    ## per the recording-id type flip.
-  NO_LOADING_TRACE* = ""
-    ## Sentinel for ``loadingTraceId``.  M-REC-2: see NO_HOVERED_TRACE.
+    ## M-REC-3: switched from ``-1`` (int) to ``""`` (UUIDv7 string)
+    ## per the recording-id type flip, and the sentinel was renamed
+    ## from ``NO_HOVERED_TRACE`` for the wider recording-id semantic
+    ## cleanup.
+  NO_LOADING_RECORDING* = ""
+    ## Sentinel for ``loadingRecordingId``.  M-REC-3: see
+    ## ``NO_HOVERED_RECORDING``.
 
 type
   NewRecordFormState* = object
@@ -134,12 +139,12 @@ type
     recentFolders*: Signal[seq[RecentFolderRecord]]
     startOptions*: Signal[seq[WelcomeStartOptionRecord]]
     # M-REC-2: trace ids are UUIDv7 strings now.
-    hoveredTrace*: Signal[string]
+    hoveredRecording*: Signal[string]
     hoveredOption*: Signal[string]
     editMode*: Signal[bool]
     mode*: Signal[WelcomeScreenMode]
     loading*: Signal[bool]
-    loadingTraceId*: Signal[string]
+    loadingRecordingId*: Signal[string]
     onlineTraceInput*: Signal[string]
     launchConfig*: Signal[LaunchConfigState]
     newRecord*: Signal[NewRecordFormState]
@@ -191,10 +196,10 @@ proc optionKey*(name: string): string =
 proc setRecentTraces*(vm: WelcomeScreenVM; traces: seq[RecentTraceRecord]) =
   ## Bulk-replace the recent-traces list.  Used by the legacy bridge
   ## to mirror ``self.data.recentTraces`` into the VM whenever the
-  ## main process emits the latest list.  Resets ``hoveredTrace`` so
+  ## main process emits the latest list.  Resets ``hoveredRecording`` so
   ## a stale tooltip from the previous list cannot bleed through.
   vm.recentTraces.val = traces
-  vm.hoveredTrace.val = NO_HOVERED_TRACE
+  vm.hoveredRecording.val = NO_HOVERED_RECORDING
 
 proc addRecentTrace*(vm: WelcomeScreenVM; trace: RecentTraceRecord) =
   ## Append a single trace to the recent-traces list.  Used when the
@@ -220,15 +225,15 @@ proc setStartOptions*(vm: WelcomeScreenVM;
 # Actions — hover state
 # ---------------------------------------------------------------------------
 
-proc hoverTrace*(vm: WelcomeScreenVM; traceId: string) =
-  ## Set the currently-hovered trace.  ``NO_HOVERED_TRACE`` clears
-  ## the hover.
-  vm.hoveredTrace.val = traceId
+proc hoverTrace*(vm: WelcomeScreenVM; recordingId: string) =
+  ## Set the currently-hovered recording.  ``NO_HOVERED_RECORDING``
+  ## clears the hover.
+  vm.hoveredRecording.val = recordingId
 
 proc clearHoveredTrace*(vm: WelcomeScreenVM) =
-  ## Clear the trace-hover state — mirrors a Karax ``onmouseleave``
-  ## firing on the trace row.
-  vm.hoveredTrace.val = NO_HOVERED_TRACE
+  ## Clear the recording-hover state — mirrors a Karax ``onmouseleave``
+  ## firing on the recent-trace row.
+  vm.hoveredRecording.val = NO_HOVERED_RECORDING
 
 proc hoverOption*(vm: WelcomeScreenVM; key: string) =
   ## Set the currently-hovered start-option.  Empty string clears
@@ -300,12 +305,12 @@ proc setOnlineTraceInput*(vm: WelcomeScreenVM; value: string) =
 # Actions — loading overlay
 # ---------------------------------------------------------------------------
 
-proc beginLoadingTrace*(vm: WelcomeScreenVM; traceId: string) =
-  ## Flip the loading overlay on and remember which trace is being
+proc beginLoadingTrace*(vm: WelcomeScreenVM; recordingId: string) =
+  ## Flip the loading overlay on and remember which recording is being
   ## loaded.  Mirrors the Karax ``handleClick`` proc that flips
   ## ``self.loading = true`` and ``self.loadingTrace = trace``.
   vm.loading.val = true
-  vm.loadingTraceId.val = traceId
+  vm.loadingRecordingId.val = recordingId
 
 proc endLoading*(vm: WelcomeScreenVM) =
   ## Tear the loading overlay down — mirrors ``resetView`` on the
@@ -313,16 +318,16 @@ proc endLoading*(vm: WelcomeScreenVM) =
   ## (or after the load failed) so the welcome surface becomes
   ## interactive again.
   vm.loading.val = false
-  vm.loadingTraceId.val = NO_LOADING_TRACE
+  vm.loadingRecordingId.val = NO_LOADING_RECORDING
 
-proc syncLoadingState*(vm: WelcomeScreenVM; loading: bool; traceId: string) =
+proc syncLoadingState*(vm: WelcomeScreenVM; loading: bool; recordingId: string) =
   ## Bridge helper for the legacy renderer path: mirror the current
   ## loading overlay state without implying a new user action.  This
   ## lets the startup wiring replay ``self.loading`` /
   ## ``self.loadingTrace`` into the VM after IPC handlers mutate the
   ## legacy component directly.
   vm.loading.val = loading
-  vm.loadingTraceId.val = if loading: traceId else: NO_LOADING_TRACE
+  vm.loadingRecordingId.val = if loading: recordingId else: NO_LOADING_RECORDING
 
 # ---------------------------------------------------------------------------
 # Actions — launch config
@@ -416,15 +421,16 @@ proc isNewRecordValid*(vm: WelcomeScreenVM): bool =
 # Actions — backend dispatches
 # ---------------------------------------------------------------------------
 
-proc loadRecentTrace*(vm: WelcomeScreenVM; traceId: string) =
+proc loadRecentTrace*(vm: WelcomeScreenVM; recordingId: string) =
   ## Dispatch the legacy ``CODETRACER::load-recent-trace`` flow.
   ## The Karax view sent the same payload via ``self.data.ipc.send``
   ## so the main-process side picks the right handler regardless of
-  ## which view triggered it.  Out-of-range trace IDs are accepted
+  ## which view triggered it.  Unknown recording-ids are accepted
   ## (the bridge logs a warning); we pre-flip the loading overlay
-  ## so the spec sees the spinner immediately.
-  vm.beginLoadingTrace(traceId)
-  let args = %*{"traceId": traceId}
+  ## so the spec sees the spinner immediately.  The IPC field name
+  ## ``traceId`` is preserved as wire format (M-REC-5 territory).
+  vm.beginLoadingTrace(recordingId)
+  let args = %*{"traceId": recordingId}
   discard vm.store.backend.send("ct/load-recent-trace", args)
 
 proc loadRecentFolder*(vm: WelcomeScreenVM; folderPath: string) =
@@ -488,12 +494,12 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
     let recentTraces = createSignal(newSeq[RecentTraceRecord]())
     let recentFolders = createSignal(newSeq[RecentFolderRecord]())
     let startOptions = createSignal(newSeq[WelcomeStartOptionRecord]())
-    let hoveredTrace = createSignal(NO_HOVERED_TRACE)
+    let hoveredRecording = createSignal(NO_HOVERED_RECORDING)
     let hoveredOption = createSignal("")
     let editMode = createSignal(false)
     let mode = createSignal(wsmWelcome)
     let loading = createSignal(false)
-    let loadingTraceId = createSignal(NO_LOADING_TRACE)
+    let loadingRecordingId = createSignal(NO_LOADING_RECORDING)
     let onlineTraceInput = createSignal("")
     let launchConfig = createSignal(emptyLaunchConfig())
     let newRecord = createSignal(emptyNewRecord())
@@ -525,12 +531,12 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
       recentTraces: recentTraces,
       recentFolders: recentFolders,
       startOptions: startOptions,
-      hoveredTrace: hoveredTrace,
+      hoveredRecording: hoveredRecording,
       hoveredOption: hoveredOption,
       editMode: editMode,
       mode: mode,
       loading: loading,
-      loadingTraceId: loadingTraceId,
+      loadingRecordingId: loadingRecordingId,
       onlineTraceInput: onlineTraceInput,
       launchConfig: launchConfig,
       newRecord: newRecord,

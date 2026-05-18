@@ -157,6 +157,12 @@ type
     ## Multiple trace contexts allow the user to switch between
     ## different runs (e.g. latest passing, previous failing) and
     ## see the overlay data (flow values, coverage) for that run.
+    ##
+    ## M-REC-3: ``recordingId`` was previously a dormant ``int`` named
+    ## ``traceId`` (no consumer in the codebase set or read it).  The
+    ## field is renamed and re-typed as a UUIDv7 string in lockstep
+    ## with the wider recording-id migration so any future producer
+    ## emits the canonical id directly.
     id*: int
     label*: langstring
-    traceId*: int
+    recordingId*: langstring

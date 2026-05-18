@@ -201,8 +201,12 @@ type
     inTest*: bool
     record*: bool
     isInstalled*: bool
-    # M-REC-2: UUIDv7 recording-id string.  Was ``int`` pre-M-REC-2.
-    traceID*: langstring
+    # M-REC-3: UUIDv7 recording-id string.  Pre-M-REC-2 this was an
+    # ``int`` field named ``traceID``; M-REC-2 flipped the type and
+    # M-REC-3 renamed it from ``traceID`` to ``recordingID`` so the
+    # codebase speaks "recording" rather than the overloaded
+    # "trace_id".
+    recordingID*: langstring
     edit*: bool
     name*: langstring
     folder*: langstring

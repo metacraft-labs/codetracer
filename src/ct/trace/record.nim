@@ -488,7 +488,7 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       upload=false)
 
     if not trace.isNil:
-      echo fmt"traceId:{trace.id}"
+      echo fmt"traceId:{trace.recordingId}"
       quit(0)
     else:
       echo "error: Failed to record pytest test"
