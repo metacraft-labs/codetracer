@@ -37,19 +37,27 @@ proc resolveRecordingId*(arg: string): Trace =
   ##   exit; not-found and too-short surface as ``quit(1)`` with a
   ##   targeted error message.
   ##
-  ## Returns the resolved ``Trace`` or terminates the process on failure.
-  ## Callers that already validated the input may keep using
-  ## ``trace_index.find`` directly.
+  ## M-REC-10: when the argument is a canonical UUIDv7 but no matching
+  ## DB row exists, this returns ``nil`` rather than terminating.  The
+  ## caller (``ct replay``) then gets a chance to attempt an on-disk
+  ## fallback: if ``<codetracerTraceDir>/<recording_id>/`` exists with a
+  ## ``trace.ct`` (the canonical post-``scp`` shape per parent spec §4),
+  ## the caller can auto-import that folder and continue without forcing
+  ## the user to either copy the folder elsewhere first or learn the
+  ## ``--trace-folder`` flag shape.  Callers that do not want the
+  ## fallback (``ct list``, ``ct online-sharing``) should fail loudly on
+  ## a ``nil`` return; only ``replay`` currently knows how to materialise
+  ## a missing row from disk.
+  ##
+  ## The short-prefix path keeps its terminate-on-failure semantics
+  ## because a short prefix never names an on-disk folder (folders are
+  ## the bare 36-char UUIDv7); auto-import requires the full id.
   let trimmed = arg.strip
   if trimmed.len == 0:
     echo "error: empty recording id"
     quit(1)
   if recording_id.isCanonicalUuidV7(trimmed):
-    let trace = trace_index.find(trimmed, test = false)
-    if trace.isNil:
-      echo fmt"error: no recording matches id '{trimmed}'"
-      quit(1)
-    return trace
+    return trace_index.find(trimmed, test = false)
   # Not canonical: try the short-prefix path.
   let res = trace_index.findByRecordingIdPrefix(trimmed, test = false)
   if res.isOk:

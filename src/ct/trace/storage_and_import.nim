@@ -128,8 +128,22 @@ proc importTrace*(
   downloadUrl: string = "",
   traceKind: string = "db",
 ): Trace =
-  ## M-REC-3: ``recordingIdArg`` is a UUIDv7 recording-id (empty
-  ## string == ``NO_RECORDING_ID`` means "mint a fresh one").
+  ## M-REC-3: ``recordingIdArg`` is a UUIDv7 recording-id.
+  ##
+  ## M-REC-10: when ``recordingIdArg == NO_RECORDING_ID`` (the empty
+  ## string, the typical case from ``ct replay --trace-folder``), the
+  ## recording-id stored in the folder's ``meta.dat`` is preserved as the
+  ## DB row's primary key.  This is what makes cross-machine moves
+  ## (`scp` a folder, replay on the other host) terminate with the same
+  ## id on both hosts, per parent spec §8 ("Two machines holding the
+  ## same recording should observe the same id.").  Pre-M-REC-10 this
+  ## branch minted a fresh UUIDv7 via ``trace_index.newID`` which silently
+  ## broke the migration's primary goal.
+  ##
+  ## Callers that explicitly want a fresh id (for example, the
+  ## online-sharing download path on the receiving host when the upload
+  ## was anonymised) should pass an explicit non-empty
+  ## ``recordingIdArg``.
 
   # M-REC-1.5: metadata is read from the CTFS ``meta.dat`` inside
   # ``trace.ct``.  Legacy ``trace_metadata.json`` /
@@ -148,8 +162,18 @@ proc importTrace*(
   if workdir.len == 0:
     workdir = deriveWorkdir(program)
 
-  let traceID = if recordingIdArg != NO_RECORDING_ID:
+  # M-REC-10: prefer the id in meta.dat over minting a new one when the
+  # caller passed ``NO_RECORDING_ID``.  ``readCtfsMetaDat`` validates the
+  # length (36 chars) so we can trust ``meta.recordingId`` to be the
+  # canonical UUIDv7 form here; on the rare path where it is somehow
+  # absent (only possible if a future codec regression slips an empty
+  # field through), we fall back to minting a fresh one to keep the
+  # importer's failure surface unchanged.
+  let traceID =
+    if recordingIdArg != NO_RECORDING_ID:
       recordingIdArg
+    elif meta.recordingId.len == 36:
+      meta.recordingId
     else:
       trace_index.newID(test=false)
 
@@ -158,6 +182,12 @@ proc importTrace*(
       # pre-M-REC-7 ``trace-<int_id>`` / ``trace-<uuid>`` form was
       # retired so that on-disk and DB identities match exactly, which
       # is what makes folders portable across machines (parent spec §4).
+      #
+      # M-REC-10: ``traceID`` here is the *meta.dat-derived* id, so when
+      # the user has already placed the folder under
+      # ``<codetracerTraceDir>/<recording_id>/`` (the canonical "scp into
+      # place" workflow), this computation is a self-reference and no
+      # copy happens below.
       recordingFolder(codetracerTraceDir, traceID)
     else:
       traceFolder

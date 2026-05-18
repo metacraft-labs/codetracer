@@ -2,7 +2,8 @@ import std / [options, os, osproc, strutils, strformat ],
   ../utilities/[ env, zip ],
   ../cli/[ interactive_replay ],
   ../trace / storage_and_import,
-  ../../common/[ types, common_trace_index, lang, paths, config ],
+  ../../common/[ types, common_trace_index, lang, paths, config,
+                  recording_id ],
   ../codetracerconf,
   shell,
   run
@@ -169,6 +170,35 @@ proc replay*(
         NO_PID,
         LangUnknown,
         traceKind = traceKind)
+    if trace.isNil and recordingIdArg.isSome:
+      # M-REC-10: cross-machine portability fallback.  ``ct replay
+      # <recording_id>`` is the canonical "I scp'd a folder here, now
+      # open it" command shape.  If the DB row is missing (i.e. host B
+      # has no row for the recording yet) but the folder exists on disk
+      # at ``<codetracerTraceDir>/<recording_id>/`` with a ``.ct``
+      # container, auto-import it.  The id stored in the folder's
+      # ``meta.dat`` is preserved end-to-end by ``importTrace`` (see
+      # storage_and_import.nim), so the post-import DB row carries the
+      # same id the user typed — no remap step required.
+      let arg = recordingIdArg.get().strip
+      if recording_id.isCanonicalUuidV7(arg):
+        let candidateFolder = recordingFolder(codetracerTraceDir, arg)
+        if dirExists(candidateFolder) and
+            fileExists(candidateFolder / "trace.ct"):
+          try:
+            trace = importTrace(
+              candidateFolder,
+              NO_RECORDING_ID,
+              NO_PID,
+              LangUnknown,
+              traceKind = "db")
+          except CatchableError as e:
+            echo fmt"error: failed to auto-import recording from " &
+                 candidateFolder & ": " & e.msg
+            quit(1)
+      if trace.isNil:
+        echo fmt"error: no recording matches id '{arg}'"
+        quit(1)
     if trace.isNil:
       echo "ERROR: can't find or import trace"
       quit(1)
