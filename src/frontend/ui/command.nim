@@ -25,7 +25,6 @@ proc commandIsParent(self: CommandPaletteComponent, commandName: cstring): bool 
     return false
 
 proc commandResultView(self: CommandPaletteComponent, queryResult: CommandPanelResult, selected: bool, isEven: bool, i: int, activeCommandName: cstring): VNode =
-  let selectedClass = if selected: "command-selected" else: ""
   let evenClass = if isEven: "command-even" else: "command-odd"
 
   let displayResult = if queryResult.level == NotificationInfo:
@@ -102,7 +101,15 @@ proc commandResultView(self: CommandPaletteComponent, queryResult: CommandPanelR
 
   buildHtml(
     tdiv(
-      class = "command-result " & selectedClass & " " & evenClass & $(self.inputValue.len),
+      class = "ct-menu-item command-result " & evenClass & $(self.inputValue.len),
+      `data-focused` = if selected: cstring"true" else: cstring"false",
+      onmouseover = proc =
+        if not self.keyNavigation:
+          if self.selected != i:
+            self.selected = i
+            redrawAll()
+        elif self.selected != i:
+          self.keyNavigation = false,
       onclick = proc =
         self.close()
         self.interpreter.runCommandPanelResult(queryResult)

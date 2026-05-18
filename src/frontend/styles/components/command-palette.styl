@@ -32,12 +32,17 @@
     width: 100%
     max-height: 18em
     overflow-y: auto
-    background-color: COMMAND_RESULT_BACKGROUND_COLOR
+    overflow-x: hidden
+    background-color: colors-ui-surface-raised
     border: 0.03125em solid colors-ui-border-primary
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
     margin-top: 0
     border-bottom-left-radius: 0.75em
     border-bottom-right-radius: 0.75em
+    overflow: hidden
+
+    .command-result:last-child
+      border-bottom: none
 
   .command-results-open
     margin-top: 0
@@ -46,49 +51,29 @@
     min-height: 2.75em
 
   .command-result
-    background-color: COMMAND_RESULT_BACKGROUND_COLOR
-    color: TEXT_CONTENT_COLOR
-    display: flex
-    align-items: center
     gap: 0.75em
     font-size: 0.875em
     position: relative
-    min-height: 2.5em
-    width: 100%
-    line-height: 1.25
-    border-radius: 0
-    padding: 0.5em 0.75em
     overflow: hidden
-    cursor: pointer
-    opacity: 1
-
-    & + .command-result
-      border-top: 0.03125em solid colors-ui-border-primary
 
     &.empty
+      display: flex
       justify-content: center
+      align-items: center
+      min-height: 2.75em
       color: VALUE_TYPE_COLOR
 
-    &:hover
-      background-color: COMMAND_RESULT_HOVERED_BACKGROUND_COLOR
-
     b
-      color: COMMAND_HIGHLIGHTED_RESULT_TEXT_COLOR
+      color: colors-ui-text-primary-active
 
   .no-results
     display: none
 
   .command-even
     // background-color: COMMAND_EVEN_BACKGROUND_COLOR
-    // color: COMMAND_ODD_BACKGROUND_COLOR
 
   .command-odd
     // background-color: COMMAND_ODD_BACKGROUND_COLOR
-    // color: COMMAND_EVEN_BACKGROUND_COLOR
-
-  .command-selected
-    background-color: COMMAND_RESULT_SELECTED_BACKGROUND_COLOR !important
-    color: COMMAND_RESULT_SELECTED_TEXT_COLOR !important
 
 
 
