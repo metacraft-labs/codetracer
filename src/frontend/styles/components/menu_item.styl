@@ -85,28 +85,11 @@
     background: colors-ui-surface-primary-default-hover
 
   // ── Focused (keyboard navigation or :focus-visible) ───────
-  // Uses action-primary blue background — matches the Figma FOCUSED state.
 
   &:focus-visible:not([data-disabled="true"]),
   &[data-focused="true"]:not([data-disabled="true"])
     outline: none
-    background: colors-ui-border-focus
-
-    .ct-menu-item-icon,
-    .ct-menu-item-trailing
-      color: colors-ui-text-on-action-primary
-
-    .ct-menu-item-label
-      color: colors-ui-text-on-action-primary
-
-    .ct-menu-item-sublabel
-      color: colors-ui-text-on-action-primary-hover
-
-    // Adapt embedded checkbox to blue background
-    .ct-checkmark
-      --ct-checkmark-border: rgba(255, 255, 255, 0.6)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.9)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.12)
+    background: colors-ui-surface-primary-default-hover
 
   // ── Disabled ──────────────────────────────────────────────
 

@@ -1599,6 +1599,7 @@ type
     queries*: seq[string]
     activeCommandName*: cstring
     selected*: int
+    keyNavigation*: bool
     interpreter*: CommandInterpreter
     results*: seq[CommandPanelResult]
     inputField*: dom.Node
