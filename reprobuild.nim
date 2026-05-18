@@ -129,6 +129,13 @@ const
     "-lpcre",
     "-lzip"
   ]
+  StylusCssEntryPoints = @[
+    "default_white_theme",
+    "default_dark_theme_electron",
+    "default_dark_theme_extension",
+    "loader",
+    "subwindow"
+  ]
 
 package codeTracer:
   usesImportPath "reprobuild/packages"
@@ -136,264 +143,254 @@ package codeTracer:
     "nim >=1.6 <3.0"
     "node >=20"
     "gcc >=1"
+    "stylus >=0"
 
   build:
-      template ctNimJs(actionName: string;
-                       definesValue: seq[string];
-                       outputPath, sourcePath: string;
-                       extraInputsValue: openArray[string] = [];
-                       extraOutputsValue: openArray[string] = [];
-                       debugInfoOnValue = false;
-                       sourcemapOnValue = false;
-                       hotCodeReloadingOnValue = false): BuildActionDef =
-        nim.js(
-          actionId = actionName,
-          defines = definesValue,
-          mm = "refc",
-          hintsOff = true,
-          warningsOff = true,
-          disabledHints = DisabledNimHints,
-          disabledWarnings = DisabledCaseTransitionWarning,
-          debugInfo = true,
-          debugInfoOn = debugInfoOnValue,
-          lineDirOn = true,
-          stacktraceOn = true,
-          linetraceOn = true,
-          sourcemapOn = sourcemapOnValue,
-          hotCodeReloadingOn = hotCodeReloadingOnValue,
-          output = outputPath,
-          extraInputs = extraInputsValue,
-          extraOutputs = extraOutputsValue,
-          paths = CodeTracerNimPaths,
-          source = sourcePath)
+    template ctNimJs(definesValue: seq[string];
+                     outputPath, sourcePath: string;
+                     extraInputsValue: openArray[string] = [];
+                     extraOutputsValue: openArray[string] = [];
+                     debugInfoOnValue = false;
+                     sourcemapOnValue = false;
+                     hotCodeReloadingOnValue = false): BuildActionDef =
+      nim.js(
+        defines = definesValue,
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        debugInfoOn = debugInfoOnValue,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        sourcemapOn = sourcemapOnValue,
+        hotCodeReloadingOn = hotCodeReloadingOnValue,
+        output = outputPath,
+        extraInputs = extraInputsValue,
+        extraOutputs = extraOutputsValue,
+        paths = CodeTracerNimPaths,
+        source = sourcePath)
 
-      template ctNative(actionName, outputPath, sourcePath,
-                        nimcachePath: string): BuildActionDef =
-        nim.c(
-          actionId = actionName,
-          defines = NativeDefines,
-          mm = "refc",
-          hintsOff = true,
-          warningsOff = true,
-          disabledHints = DisabledNimHints,
-          disabledWarnings = DisabledCaseTransitionWarning,
-          debugInfo = true,
-          lineDirOn = true,
-          stacktraceOn = true,
-          linetraceOn = true,
-          boundChecksOn = true,
-          warningsOn = true,
-          hintsOn = true,
-          dynlibOverrides = NativeDynlibOverrides,
-          passL = NativePassL,
-          nimcache = nimcachePath,
-          output = outputPath,
-          source = sourcePath)
+    template ctNative(outputPath, sourcePath, nimcachePath: string):
+        BuildActionDef =
+      nim.c(
+        defines = NativeDefines,
+        mm = "refc",
+        hintsOff = true,
+        warningsOff = true,
+        disabledHints = DisabledNimHints,
+        disabledWarnings = DisabledCaseTransitionWarning,
+        debugInfo = true,
+        lineDirOn = true,
+        stacktraceOn = true,
+        linetraceOn = true,
+        boundChecksOn = true,
+        warningsOn = true,
+        hintsOn = true,
+        dynlibOverrides = NativeDynlibOverrides,
+        passL = NativePassL,
+        nimcache = nimcachePath,
+        output = outputPath,
+        source = sourcePath)
 
-      fs.writeText(
-        actionId = "generate-config-header",
-        output = "build/generated/ct_config.h",
-        text = CtConfigHeader)
-      let buildCDir = fs.ensureDir(actionId = "build-c-dir", path = "build/c")
+    template ctStylus(name: string): BuildActionDef =
+      stylus(
+        source = "src/frontend/styles/" & name & ".styl",
+        output = "src/frontend/styles/" & name & ".css")
 
-      ctNimJs(
-        actionName = "nim-js-ipc-registry-test",
-        definesValue = CommonNimDefines & RendererDefines,
-        outputPath = "tests/ipc_registry_test.js",
-        sourcePath = "src/frontend/tests/ipc_registry_test.nim",
-        extraInputsValue = @[
-          "src/frontend/index/ipc_registry.nim",
-          "src/frontend/lib/jslib.nim"
-        ],
-        debugInfoOnValue = true,
-        hotCodeReloadingOnValue = true)
+    let generatedConfigHeader = fs.writeText(
+      output = "build/generated/ct_config.h",
+      text = CtConfigHeader)
+    target("generate-config-header", generatedConfigHeader)
 
-      ctNimJs(
-        actionName = "frontend-ui-js",
-        definesValue = CommonNimDefines & RendererDefines,
-        outputPath = "ui.js",
-        sourcePath = "src/frontend/ui_js.nim",
-        debugInfoOnValue = true,
-        hotCodeReloadingOnValue = true)
+    let buildCDir = fs.ensureDir(path = "build/c")
+    target("build-c-dir", buildCDir)
 
-      fs.copyFile(
-        actionId = "frontend-public-ui-js",
-        source = "ui.js",
-        output = "public/ui.js")
+    let ipcRegistryTest = ctNimJs(
+      definesValue = CommonNimDefines & RendererDefines,
+      outputPath = "tests/ipc_registry_test.js",
+      sourcePath = "src/frontend/tests/ipc_registry_test.nim",
+      extraInputsValue = @[
+        "src/frontend/index/ipc_registry.nim",
+        "src/frontend/lib/jslib.nim"
+      ],
+      debugInfoOnValue = true,
+      hotCodeReloadingOnValue = true)
+    target("nim-js-ipc-registry-test", ipcRegistryTest)
 
-      ctNimJs(
-        actionName = "frontend-index-js",
-        definesValue = CommonNimDefines & @["ctIndex", "nodejs"],
-        outputPath = "index.js",
-        extraOutputsValue = @["index.js.map"],
-        sourcePath = "src/frontend/index.nim",
-        sourcemapOnValue = true)
+    let frontendUiJs = ctNimJs(
+      definesValue = CommonNimDefines & RendererDefines,
+      outputPath = "ui.js",
+      sourcePath = "src/frontend/ui_js.nim",
+      debugInfoOnValue = true,
+      hotCodeReloadingOnValue = true)
+    target("frontend-ui-js", frontendUiJs)
 
-      fs.copyFile(
-        actionId = "frontend-src-index-js",
-        source = "index.js",
-        output = "src/index.js")
+    let frontendPublicUiJs = fs.copyFile(
+      source = "ui.js",
+      output = "public/ui.js")
+    target("frontend-public-ui-js", frontendPublicUiJs)
 
-      ctNimJs(
-        actionName = "frontend-server-index-js",
-        definesValue = CommonNimDefines & @["ctIndex", "server", "nodejs"],
-        outputPath = "server_index.js",
-        extraOutputsValue = @["server_index.js.map"],
-        sourcePath = "src/frontend/index.nim",
-        sourcemapOnValue = true)
+    let frontendIndexJs = ctNimJs(
+      definesValue = CommonNimDefines & @["ctIndex", "nodejs"],
+      outputPath = "index.js",
+      extraOutputsValue = @["index.js.map"],
+      sourcePath = "src/frontend/index.nim",
+      sourcemapOnValue = true)
+    target("frontend-index-js", frontendIndexJs)
 
-      ctNimJs(
-        actionName = "frontend-subwindow-js",
-        definesValue = CommonNimDefines & RendererDefines,
-        outputPath = "subwindow.js",
-        extraOutputsValue = @["subwindow.js.map"],
-        sourcePath = "src/frontend/subwindow.nim",
-        debugInfoOnValue = true,
-        sourcemapOnValue = true,
-        hotCodeReloadingOnValue = true)
+    let frontendSrcIndexJs = fs.copyFile(
+      source = "index.js",
+      output = "src/index.js")
+    target("frontend-src-index-js", frontendSrcIndexJs)
 
-      fs.copyFile(
-        actionId = "frontend-src-subwindow-js",
-        source = "subwindow.js",
-        output = "src/subwindow.js")
+    let frontendServerIndexJs = ctNimJs(
+      definesValue = CommonNimDefines & @["ctIndex", "server", "nodejs"],
+      outputPath = "server_index.js",
+      extraOutputsValue = @["server_index.js.map"],
+      sourcePath = "src/frontend/index.nim",
+      sourcemapOnValue = true)
+    target("frontend-server-index-js", frontendServerIndexJs)
 
-      fs.copyFile(
-        actionId = "frontend-index-html",
-        source = "src/frontend/index.html",
-        output = "index.html")
+    let frontendSubwindowJs = ctNimJs(
+      definesValue = CommonNimDefines & RendererDefines,
+      outputPath = "subwindow.js",
+      extraOutputsValue = @["subwindow.js.map"],
+      sourcePath = "src/frontend/subwindow.nim",
+      debugInfoOnValue = true,
+      sourcemapOnValue = true,
+      hotCodeReloadingOnValue = true)
+    target("frontend-subwindow-js", frontendSubwindowJs)
 
-      fs.copyFile(
-        actionId = "frontend-subwindow-html",
-        source = "src/frontend/subwindow.html",
-        output = "subwindow.html")
+    let frontendSrcSubwindowJs = fs.copyFile(
+      source = "subwindow.js",
+      output = "src/subwindow.js")
+    target("frontend-src-subwindow-js", frontendSrcSubwindowJs)
 
-      fs.copyFile(
-        actionId = "frontend-src-helpers-js",
-        source = "helpers.js",
-        output = "src/helpers.js")
+    let frontendIndexHtml = fs.copyFile(
+      source = "src/frontend/index.html",
+      output = "index.html")
+    target("frontend-index-html", frontendIndexHtml)
 
-      # Coarse generated-copy resource semantics for the current src/public
-      # tree. This intentionally enumerates regular files only and is not a
-      # full model of Tup !tup_preserve, symlink behavior, removal cleanup, or
-      # platform-specific resource installation semantics.
-      let publicTree = collectPublicResourceTree(PublicResourceRoot)
-      for dirPath in publicTree.dirs:
-        providerDirectoryInput(normalizedRelPath(dirPath))
-      var publicResourceOutputs: seq[string] = @[]
-      for sourcePath in publicTree.files:
-        let relative = normalizedRelPath(relativePath(sourcePath,
-          PublicResourceRoot))
-        let actionId = publicResourceActionId(relative)
-        let output = publicResourceOutput(sourcePath)
-        publicResourceOutputs.add(output)
-        fs.copyFile(
-          actionId = actionId,
-          source = normalizedRelPath(sourcePath),
-          output = output)
+    let frontendSubwindowHtml = fs.copyFile(
+      source = "src/frontend/subwindow.html",
+      output = "subwindow.html")
+    target("frontend-subwindow-html", frontendSubwindowHtml)
 
-      fs.stamp(
-        actionId = "frontend-public-resources",
-        output = "build/reprobuild/frontend-public-resources.stamp",
-        title = "CodeTracer frontend public resource tree",
-        entries = publicResourceOutputs,
-        inputs = publicResourceOutputs)
+    let frontendHelpersJs = fs.copyFile(
+      source = "helpers.js",
+      output = "src/helpers.js")
+    target("frontend-src-helpers-js", frontendHelpersJs)
 
-      fs.stamp(
-        actionId = "frontend",
-        output = "build/reprobuild/frontend.stamp",
-        title = "CodeTracer frontend aggregate",
-        entries = @[
-          "src/index.js",
-          "src/subwindow.js",
-          "public/ui.js",
-          "server_index.js",
-          "index.html",
-          "subwindow.html",
-          "src/helpers.js",
-          "build/reprobuild/frontend-public-resources.stamp"
-        ],
-        inputs = @[
-          "src/index.js",
-          "src/subwindow.js",
-          "public/ui.js",
-          "server_index.js",
-          "index.html",
-          "subwindow.html",
-          "src/helpers.js",
-          "build/reprobuild/frontend-public-resources.stamp"
-        ])
+    var styleActions: seq[BuildActionDef] = @[]
+    for name in StylusCssEntryPoints:
+      styleActions.add(ctStylus(name))
+    let defaultDarkThemeCss = fs.copyFile(
+      source = "src/frontend/styles/default_dark_theme_extension.css",
+      output = "src/frontend/styles/default_dark_theme.css")
+    styleActions.add(defaultDarkThemeCss)
+    let frontendStyles = aggregate("frontend-styles", actions = styleActions)
 
-      var codetracerInputs = @["build/reprobuild/frontend.stamp"]
-      var codetracerEntries = @["build/reprobuild/frontend.stamp"]
+    # Coarse generated-copy resource semantics for the current src/public
+    # tree. This intentionally enumerates regular files only and is not a
+    # full model of Tup !tup_preserve, symlink behavior, removal cleanup, or
+    # platform-specific resource installation semantics.
+    let publicTree = collectPublicResourceTree(PublicResourceRoot)
+    for dirPath in publicTree.dirs:
+      providerDirectoryInput(normalizedRelPath(dirPath))
+    var publicResourceActions: seq[BuildActionDef] = @[]
+    for sourcePath in publicTree.files:
+      let relative = normalizedRelPath(relativePath(sourcePath,
+        PublicResourceRoot))
+      let copyResource = fs.copyFile(
+        source = normalizedRelPath(sourcePath),
+        output = publicResourceOutput(sourcePath))
+      target(publicResourceActionId(relative), copyResource)
+      publicResourceActions.add(copyResource)
+    let publicResources = aggregate("frontend-public-resources",
+      actions = publicResourceActions)
 
-      if fileExists("src/config/default_layout.json"):
-        fs.copyFile(
-          actionId = "config-default-layout-json",
-          source = "src/config/default_layout.json",
-          output = "config/default_layout.json")
-        codetracerInputs.add("config/default_layout.json")
-        codetracerEntries.add("config/default_layout.json")
+    let frontend = aggregate("frontend",
+      actions = @[
+        frontendUiJs,
+        frontendPublicUiJs,
+        frontendIndexJs,
+        frontendSrcIndexJs,
+        frontendServerIndexJs,
+        frontendSubwindowJs,
+        frontendSrcSubwindowJs,
+        frontendIndexHtml,
+        frontendSubwindowHtml,
+        frontendHelpersJs
+      ],
+      targets = @[frontendStyles, publicResources])
 
-      if fileExists("src/config/default_config.yaml"):
-        fs.copyFile(
-          actionId = "config-default-config-yaml",
-          source = "src/config/default_config.yaml",
-          output = "config/default_config.yaml")
-        codetracerInputs.add("config/default_config.yaml")
-        codetracerEntries.add("config/default_config.yaml")
+    var codetracerActions: seq[BuildActionDef] = @[]
 
-      let hasFrontendInputs =
-        fileExists("src/frontend/ui_js.nim") and
-        fileExists("src/frontend/index.nim") and
-        fileExists("src/frontend/subwindow.nim") and
-        fileExists("src/frontend/index.html") and
-        fileExists("src/frontend/subwindow.html") and
-        fileExists("helpers.js")
-      let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
-      let hasCtInput = fileExists("src/ct/codetracer.nim")
+    if fileExists("src/config/default_layout.json"):
+      let defaultLayout = fs.copyFile(
+        source = "src/config/default_layout.json",
+        output = "config/default_layout.json")
+      target("config-default-layout-json", defaultLayout)
+      codetracerActions.add(defaultLayout)
 
-      if fileExists("src/ct/db_backend_record.nim"):
-        ctNative(
-          actionName = "db-backend-record",
-          nimcachePath = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
-          outputPath = "src/bin/db-backend-record",
-          sourcePath = "src/ct/db_backend_record.nim")
-        codetracerInputs.add("src/bin/db-backend-record")
-        codetracerEntries.add("src/bin/db-backend-record")
+    if fileExists("src/config/default_config.yaml"):
+      let defaultConfig = fs.copyFile(
+        source = "src/config/default_config.yaml",
+        output = "config/default_config.yaml")
+      target("config-default-config-yaml", defaultConfig)
+      codetracerActions.add(defaultConfig)
 
-      if fileExists("src/ct/codetracer.nim"):
-        ctNative(
-          actionName = "ct",
-          nimcachePath = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
-          outputPath = "src/bin/ct",
-          sourcePath = "src/ct/codetracer.nim")
-        codetracerInputs.add("src/bin/ct")
-        codetracerEntries.add("src/bin/ct")
+    let hasFrontendInputs =
+      fileExists("src/frontend/ui_js.nim") and
+      fileExists("src/frontend/index.nim") and
+      fileExists("src/frontend/subwindow.nim") and
+      fileExists("src/frontend/index.html") and
+      fileExists("src/frontend/subwindow.html") and
+      fileExists("helpers.js")
+    let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
+    let hasCtInput = fileExists("src/ct/codetracer.nim")
 
-      if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
-        let codetracer = fs.stamp(
-          actionId = "codetracer",
-          output = "build/reprobuild/codetracer.stamp",
-          title = "CodeTracer selected app aggregate",
-          entries = codetracerEntries,
-          inputs = codetracerInputs)
-        defaultBuildAction(codetracer)
+    if fileExists("src/ct/db_backend_record.nim"):
+      let dbBackendRecord = ctNative(
+        nimcachePath = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
+        outputPath = "src/bin/db-backend-record",
+        sourcePath = "src/ct/db_backend_record.nim")
+      target("db-backend-record", dbBackendRecord)
+      codetracerActions.add(dbBackendRecord)
 
-      gcc(
-        actionId = "c-sudoku-object-tup",
-        source = "test-programs/c_sudoku_solver/main.c",
-        output = "build/c/main.tup.o",
-        pic = true,
-        debug3 = true,
-        compileOnly = true,
-        deps = @[buildCDir.id])
+    if fileExists("src/ct/codetracer.nim"):
+      let ct = ctNative(
+        nimcachePath = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
+        outputPath = "src/bin/ct",
+        sourcePath = "src/ct/codetracer.nim")
+      target("ct", ct)
+      codetracerActions.add(ct)
 
-      gcc(
-        actionId = "c-sudoku-object-with-generated-header",
-        source = "test-programs/c_sudoku_solver/main.c",
-        output = "build/c/main.with-header.o",
-        pic = true,
-        debug3 = true,
-        compileOnly = true,
-        includes = @["build/generated/ct_config.h"],
-        deps = @[buildCDir.id])
+    if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
+      let codetracer = aggregate("codetracer",
+        actions = codetracerActions,
+        targets = @[frontend])
+      defaultBuildAction(codetracer)
+
+    let cSudokuObjectTup = gcc(
+      source = "test-programs/c_sudoku_solver/main.c",
+      output = "build/c/main.tup.o",
+      pic = true,
+      debug3 = true,
+      compileOnly = true,
+      after = @[buildCDir])
+    target("c-sudoku-object-tup", cSudokuObjectTup)
+
+    let cSudokuObjectWithGeneratedHeader = gcc(
+      source = "test-programs/c_sudoku_solver/main.c",
+      output = "build/c/main.with-header.o",
+      pic = true,
+      debug3 = true,
+      compileOnly = true,
+      includes = @["build/generated/ct_config.h"],
+      after = @[buildCDir])
+    target("c-sudoku-object-with-generated-header",
+      cSudokuObjectWithGeneratedHeader)
