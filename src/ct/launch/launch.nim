@@ -240,7 +240,7 @@ proc runInitial*(conf: CodetracerConf) =
         else: "" # empty = defer to config/default
       replay(
         conf.lastTraceMatchingPattern,
-        conf.replayTraceId,
+        conf.replayRecordingId,
         conf.replayTraceFolder,
         replayInteractive,
         newTracePolicy = replayPolicy,
@@ -252,14 +252,25 @@ proc runInitial*(conf: CodetracerConf) =
       # When ct is launched with no subcommand, show the welcome screen.
       # If --deepreview is provided, open the deepreview view instead.
       # Playwright launches the ct binary directly and passes the trace to
-      # the Electron index process via CODETRACER_TRACE_ID. In that case we
+      # the Electron index process via CODETRACER_RECORDING_ID. In that case we
       # must not force --welcome-screen, or the renderer never enters replay
       # mode and GUI tests time out before the first real window.
+      #
+      # M-REC-6: env var renamed from ``CODETRACER_TRACE_ID`` to
+      # ``CODETRACER_RECORDING_ID`` (UUIDv7 recording-id string).  Setting
+      # both at once is a configuration error (the legacy name is gone,
+      # not aliased): fail loudly rather than silently picking one.
+      if getEnv("CODETRACER_TRACE_ID", "").len > 0:
+        errorMessage(
+          "error: CODETRACER_TRACE_ID is retired in favour of " &
+          "CODETRACER_RECORDING_ID (UUIDv7 recording-id).  " &
+          "Remove the legacy variable from the environment.")
+        quit(1)
       var frontendArgs: seq[string] = @[]
       if conf.deepreview.len > 0:
         frontendArgs.add("--deepreview")
         frontendArgs.add(conf.deepreview)
-      elif getEnv("CODETRACER_TRACE_ID", "").len == 0:
+      elif getEnv("CODETRACER_RECORDING_ID", "").len == 0:
         frontendArgs.add("--welcome-screen")
       launchElectron(
         args = frontendArgs,
@@ -314,7 +325,7 @@ proc runInitial*(conf: CodetracerConf) =
       # similar to replay/console
       uploadCommand(
         conf.uploadLastTraceMatchingPattern,
-        conf.uploadTraceId,
+        conf.uploadRecordingId,
         conf.uploadTraceFolder,
         replayInteractive,
         conf.uploadOrg,
@@ -479,7 +490,7 @@ proc runInitial*(conf: CodetracerConf) =
       wrapElectron(electronArgs, conf.electronAppArgs)
     of StartupCommand.`trace-metadata`:
       traceMetadata(
-        conf.traceMetadataIdArg, conf.traceMetadataPathArg,
+        conf.recordingMetadataIdArg, conf.traceMetadataPathArg,
         conf.traceMetadataProgramArg, conf.traceMetadataRecordPidArg,
         conf.traceMetadataRecent,
         conf.traceMetadataRecentFolders,

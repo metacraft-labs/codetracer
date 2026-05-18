@@ -171,7 +171,9 @@ function makeCleanEnv(
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
+  // M-REC-6: CODETRACER_TRACE_ID → CODETRACER_RECORDING_ID; delete both.
   delete env.CODETRACER_TRACE_ID;
+  delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   delete env.CODETRACER_PREFIX;
   env.CODETRACER_IN_UI_TEST = "1";
@@ -426,7 +428,9 @@ base.describe("cross-platform portable trace replay", () => {
         }
 
         // Clean up env vars that ct host may have set.
+        // M-REC-6: legacy CODETRACER_TRACE_ID retired; delete both names.
         delete process.env.CODETRACER_TRACE_ID;
+        delete process.env.CODETRACER_RECORDING_ID;
         delete process.env.CODETRACER_CALLER_PID;
         delete process.env.CODETRACER_IN_UI_TEST;
         delete process.env.CODETRACER_TEST;

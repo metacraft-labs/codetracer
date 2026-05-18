@@ -202,11 +202,14 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
 
   if exCode == 0:
     let lastLine = lines[^1]
-    if lastLine.startsWith("traceId:"):
-      # M-REC-2: the recorder's child process emits the recording-id
-      # as a UUIDv7 string on stdout.  We strip the ``traceId:`` prefix
-      # and take the verbatim rest.
-      let traceId = lastLine[8..^1].strip
+    # M-REC-6: stdout marker renamed from ``traceId:`` to
+    # ``recordingId:`` to stop overloading "trace_id" with our local
+    # recording identity.  The payload is still a UUIDv7 string.  Both
+    # the writer (in ``record.nim`` / ``db_backend_record.nim``) and
+    # every reader in the tree flip atomically — there is no legacy
+    # ``traceId:`` parser path.
+    if lastLine.startsWith("recordingId:"):
+      let traceId = lastLine[("recordingId:").len .. ^1].strip
       result = trace_index.find(traceId, test=false)
 
       if withDiff.len > 0:
@@ -415,9 +418,9 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       let lines = output.splitLines()
       if lines.len > 0:
         let traceIdLine = lines[^2]
-        if traceIdLine.startsWith("traceId:"):
-          # M-REC-2: recording-id is a UUIDv7 string; take verbatim.
-          let traceId = traceIdLine[("traceId:").len..^1].strip
+        # M-REC-6: stdout-marker renamed to ``recordingId:``.
+        if traceIdLine.startsWith("recordingId:"):
+          let traceId = traceIdLine[("recordingId:").len..^1].strip
           let trace = trace_index.find(traceId, test=false)
           writeFile(trace.outputFolder / "custom-entrypoint.txt", testName)
 
@@ -488,7 +491,8 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       upload=false)
 
     if not trace.isNil:
-      echo fmt"traceId:{trace.recordingId}"
+      # M-REC-6: stdout marker renamed to ``recordingId:``.
+      echo fmt"recordingId:{trace.recordingId}"
       quit(0)
     else:
       echo "error: Failed to record pytest test"

@@ -487,6 +487,109 @@ proc find*(id: string, test: bool): Trace =
   if traces.len > 0:
     result = traces[0].loadTrace(test)
 
+type
+  RecordingIdPrefixError* = enum
+    ## Outcome of a short-prefix lookup that did not return a unique match.
+    ## ``rieTooShort``  — the user-supplied prefix is shorter than
+    ##                    ``MIN_RECORDING_ID_PREFIX_LEN``.
+    ## ``rieNotFound``  — no recording in the local DB matches the prefix.
+    ## ``rieAmbiguous`` — more than one recording matches; caller must
+    ##                    print the candidate list and ask the user to
+    ##                    disambiguate.
+    rieTooShort
+    rieNotFound
+    rieAmbiguous
+
+  RecordingIdPrefixResult* = object
+    ## Result of ``findByRecordingIdPrefix``.  ``trace`` is populated only
+    ## when the lookup resolved to exactly one recording (``isOk == true``);
+    ## otherwise ``error`` describes why and ``matches`` carries the
+    ## first few canonical recording-ids that share the prefix (cap of
+    ## ``RECORDING_ID_PREFIX_MATCH_CAP``).
+    case isOk*: bool
+    of true:
+      trace*: Trace
+    of false:
+      error*: RecordingIdPrefixError
+      matches*: seq[string]
+
+const
+  MIN_RECORDING_ID_PREFIX_LEN* = 8
+    ## Minimum number of leading hex characters accepted by short-prefix
+    ## lookup.  UUIDv7's first 48 bits encode the millisecond timestamp,
+    ## so two recordings made in the same ms share a 12-hex-char prefix;
+    ## 8 chars (≈ 1/65536 collision chance after a single same-second
+    ## burst) is the documented floor in the parent spec §8.
+
+  RECORDING_ID_PREFIX_MATCH_CAP* = 5
+    ## When a prefix is ambiguous we surface at most this many candidate
+    ## ids in the error so the terminal output stays readable.
+
+proc isPrefixCharsOnly(s: string): bool =
+  ## A canonical UUIDv7 prefix is lowercase hex digits plus optional
+  ## hyphens at the standard positions (8-4-4-4-12).  We accept any
+  ## lowercase ``[0-9a-f-]`` characters here and let the database lookup
+  ## be the source of truth — a syntactically invalid prefix will simply
+  ## fail to match.
+  for c in s:
+    if not (c in {'0'..'9', 'a'..'f', '-'}):
+      return false
+  true
+
+proc findByRecordingIdPrefix*(prefix: string, test: bool): RecordingIdPrefixResult =
+  ## Resolve a user-supplied short prefix to a unique recording-id.
+  ##
+  ## Pre-1.0 behaviour:
+  ##
+  ## - Prefix < ``MIN_RECORDING_ID_PREFIX_LEN`` chars → ``rieTooShort``.
+  ## - Exactly one recording matches → ``isOk = true``, ``trace`` set.
+  ## - Zero recordings match → ``rieNotFound``.
+  ## - More than one match → ``rieAmbiguous``; ``matches`` carries up to
+  ##   ``RECORDING_ID_PREFIX_MATCH_CAP`` canonical recording-ids.
+  ##
+  ## Callers (``ct replay`` / ``ct upload`` / ``ct trace-metadata``) decide
+  ## how to render the disambiguation error.  See parent spec
+  ## ``codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md``
+  ## §8 for the design rationale.
+  let normalized = prefix.toLowerAscii
+  if normalized.len < MIN_RECORDING_ID_PREFIX_LEN:
+    return RecordingIdPrefixResult(
+      isOk: false, error: rieTooShort, matches: @[])
+  if not isPrefixCharsOnly(normalized):
+    # Non-hex characters cannot match a canonical UUIDv7; surface as
+    # "not found" rather than a syntactic error.  The CLI surface gates
+    # on validity (``recording_id.isCanonicalUuidV7``) only for the
+    # full-form path.
+    return RecordingIdPrefixResult(
+      isOk: false, error: rieNotFound, matches: @[])
+
+  let db = ensureDB(test)
+  # Cap at ``cap + 1`` so we can distinguish "exactly N matches" from
+  # "more than N matches" without scanning the whole table.  The result
+  # presented to the user is capped at ``cap``.
+  let cap = RECORDING_ID_PREFIX_MATCH_CAP
+  let pattern = normalized & "%"
+  let rows = db.getAllRows(
+    sql(
+      "SELECT * FROM recordings WHERE recording_id LIKE ? " &
+      "ORDER BY recording_id ASC LIMIT " & $(cap + 1)
+    ),
+    pattern)
+  db.close()
+  if rows.len == 0:
+    return RecordingIdPrefixResult(
+      isOk: false, error: rieNotFound, matches: @[])
+  if rows.len == 1:
+    return RecordingIdPrefixResult(
+      isOk: true, trace: rows[0].loadTrace(test))
+  var matches: seq[string] = @[]
+  for row in rows:
+    if matches.len >= cap:
+      break
+    matches.add(row[0])
+  RecordingIdPrefixResult(
+    isOk: false, error: rieAmbiguous, matches: matches)
+
 proc findByPath*(path: string, test: bool): Trace =
   let db = ensureDB(test)
   let exact = db.getAllRows(

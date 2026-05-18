@@ -376,7 +376,10 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
+  // M-REC-6: CODETRACER_TRACE_ID → CODETRACER_RECORDING_ID; delete both
+  // so neither legacy nor current env vars leak into the launched process.
   delete env.CODETRACER_TRACE_ID;
+  delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   delete env.CODETRACER_PREFIX;
   delete env.WAYLAND_DISPLAY;

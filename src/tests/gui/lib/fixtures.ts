@@ -365,7 +365,11 @@ function killStrayCodetracerProcesses(): void {
 }
 
 function cleanupCodetracerEnvVars(): void {
+  // M-REC-6: CODETRACER_TRACE_ID is retired in favour of
+  // CODETRACER_RECORDING_ID.  Both are deleted defensively in case a
+  // legacy fixture or shell still exports the old name.
   delete process.env.CODETRACER_TRACE_ID;
+  delete process.env.CODETRACER_RECORDING_ID;
   delete process.env.CODETRACER_CALLER_PID;
   delete process.env.CODETRACER_IN_UI_TEST;
   delete process.env.CODETRACER_TEST;
@@ -406,10 +410,13 @@ function recordTestProgram(recordArg: string): number {
 
   const lines = ctProcess.stdout.trim().split("\n");
   const lastLine = lines[lines.length - 1];
-  if (!lastLine.startsWith("traceId:")) {
+  // M-REC-6: stdout marker renamed from "traceId:" to "recordingId:".
+  // The payload is a UUIDv7 string; the parseInt below is a pre-existing
+  // M-REC-2 hangover (test-side trace_folder layout cleanup is M-REC-7).
+  if (!lastLine.startsWith("recordingId:")) {
     throw new Error(`Unexpected last line of ct record: ${lastLine}`);
   }
-  const rawTraceId = lastLine.split(":")[1].trim();
+  const rawTraceId = lastLine.slice("recordingId:".length).trim();
   const traceId = Number(rawTraceId);
   if (isNaN(traceId)) {
     throw new Error(`Could not parse trace id from: ${rawTraceId}`);
@@ -461,7 +468,11 @@ function makeCleanEnv(
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
+  // M-REC-6: legacy CODETRACER_TRACE_ID is retired; CODETRACER_RECORDING_ID
+  // is the new name.  We delete both so neither leaks into the launched
+  // process from the test runner's environment.
   delete env.CODETRACER_TRACE_ID;
+  delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   // On Windows with direct Electron launch, we MUST set CODETRACER_PREFIX
   // because Electron's own exe path is not inside build-debug/ so the Nim
@@ -673,7 +684,10 @@ async function launchTraceElectron(
         args: launchArgs,
         env: makeCleanEnv({
           CODETRACER_CALLER_PID: process.pid.toString(),
-          CODETRACER_TRACE_ID: traceId.toString(),
+          // M-REC-6: env-var renamed from CODETRACER_TRACE_ID.  Carries
+          // the recording-id string the Electron index process picks up
+          // in src/frontend/index/args.nim.
+          CODETRACER_RECORDING_ID: traceId.toString(),
         }),
       }),
   );
@@ -715,8 +729,8 @@ async function launchTraceElectron(
 
 /**
  * Import a pre-recorded trace folder into CodeTracer's database via the
- * `ct host` CLI.  Returns the assigned trace id which the Electron launcher
- * then opens via CODETRACER_TRACE_ID.
+ * `ct host` CLI.  Returns the assigned recording id which the Electron
+ * launcher then opens via CODETRACER_RECORDING_ID (M-REC-6).
  *
  * Used by `launchTraceFolderElectron` to support the BEAM (and other
  * recorder-bundle) tests that want to drive the GUI against a CTFS trace
@@ -762,9 +776,9 @@ function importTraceFolder(traceFolder: string): number {
  *
  * The trace folder must contain a CTFS `.ct` container (M-REC-1.5: the
  * legacy `trace_metadata.json` sidecar was retired).  The folder is
- * imported via `ct host` to obtain a stable trace id, then Electron is
- * launched with `CODETRACER_TRACE_ID` so the GUI opens that specific
- * trace.
+ * imported via `ct host` to obtain a stable recording id, then Electron is
+ * launched with `CODETRACER_RECORDING_ID` (M-REC-6) so the GUI opens
+ * that specific trace.
  */
 async function launchTraceFolderElectron(traceFolderPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
@@ -795,7 +809,10 @@ async function launchTraceFolderElectron(traceFolderPath: string): Promise<Launc
         args: launchArgs,
         env: makeCleanEnv({
           CODETRACER_CALLER_PID: process.pid.toString(),
-          CODETRACER_TRACE_ID: traceId.toString(),
+          // M-REC-6: env-var renamed from CODETRACER_TRACE_ID.  Carries
+          // the recording-id string the Electron index process picks up
+          // in src/frontend/index/args.nim.
+          CODETRACER_RECORDING_ID: traceId.toString(),
         }),
       }),
   );

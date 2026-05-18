@@ -168,3 +168,58 @@ suite "M-REC-2 — trace_index schema and UUIDv7 newID":
         echo "stderr: ", stderrStr
       check ok
       check "PASS" in stdoutStr
+
+  test "findByRecordingIdPrefix resolves a unique 8+ char prefix (M-REC-6)":
+    ## M-REC-6 acceptance: a prefix that matches exactly one recording
+    ## returns ``isOk = true`` with the canonical id in
+    ## ``trace.recordingId``.  Verifies the boundary at the minimum
+    ## prefix length and the SQL ``LIKE`` query path.
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "short-prefix-unique", "prefuniq")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr
+
+  test "findByRecordingIdPrefix reports ambiguity with sorted candidate list (M-REC-6)":
+    ## M-REC-6 acceptance: when two or more recordings share a prefix
+    ## the resolver returns ``rieAmbiguous`` with the candidate ids in
+    ## ASC order so the CLI error renders consistently.
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "short-prefix-ambiguous", "prefambig")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr
+
+  test "findByRecordingIdPrefix rejects prefixes shorter than the minimum (M-REC-6)":
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "short-prefix-too-short", "prefshort")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr
+
+  test "findByRecordingIdPrefix reports rieNotFound for a non-matching prefix (M-REC-6)":
+    if helperBin.len == 0:
+      skip()
+    else:
+      let (ok, stdoutStr, stderrStr) = runHelperScenario(
+        "short-prefix-not-found", "prefnone")
+      if not ok or "PASS" notin stdoutStr:
+        echo "stdout: ", stdoutStr
+        echo "stderr: ", stderrStr
+      check ok
+      check "PASS" in stdoutStr

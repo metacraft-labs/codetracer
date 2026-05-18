@@ -370,10 +370,12 @@ type
         ignore
       .} : seq[string]
     of console:
-      consoleTraceId* {.
+      consoleRecordingId* {.
         name: "id",
-        # M-REC-2: UUIDv7 recording-id.  See replayTraceId above.
-        desc: "a recording id (UUIDv7)"
+        # M-REC-6: UUIDv7 recording-id.  See replayRecordingId above.
+        # ``--id=<uuid>`` accepts the canonical 36-char form or an 8+
+        # hex-char short prefix (see ``trace_index.findByRecordingIdPrefix``).
+        desc: "a recording id (UUIDv7) — accepts 8+ char short prefix"
       .}: Option[string]
       consoleTraceFolder* {.
         name: "trace-folder",
@@ -666,13 +668,13 @@ type
           "'do not store in such a file'"
       .}: int
     of StartupCommand.replay:
-      replayTraceId* {.
+      replayRecordingId* {.
         name: "id",
-        # M-REC-2: ``--id`` is now a UUIDv7 recording-id (lowercase
-        # hyphenated 36-char form).  Short-prefix matching is
-        # M-REC-6's job; for now the value is matched verbatim
-        # against ``recordings.recording_id``.
-        desc: "a recording id (UUIDv7)"
+        # M-REC-6: ``--id`` is a UUIDv7 recording-id (lowercase
+        # hyphenated 36-char form).  Accepts an 8+ hex-char short prefix
+        # too; ambiguous prefixes error out with the list of matches
+        # (see ``trace_index.findByRecordingIdPrefix``).
+        desc: "a recording id (UUIDv7) — accepts 8+ char short prefix"
       .}: Option[string]
       replayTraceFolder* {.
         name: "trace-folder",
@@ -716,10 +718,11 @@ type
       .}: seq[string]
     of upload:
       # same args as replay
-      uploadTraceId* {.
+      uploadRecordingId* {.
         name: "id",
-        # M-REC-2: UUIDv7 recording-id.  See replayTraceId above.
-        desc: "a recording id (UUIDv7)"
+        # M-REC-6: UUIDv7 recording-id.  See replayRecordingId above.
+        # Short-prefix matching applies.
+        desc: "a recording id (UUIDv7) — accepts 8+ char short prefix"
       .}: Option[string]
       uploadTraceFolder* {.
         name: "trace-folder",
@@ -1091,10 +1094,12 @@ type
           "electron in our distribution"
       .} : seq[string]
     of `trace-metadata`:
-      traceMetadataIdArg* {.
+      recordingMetadataIdArg* {.
         name: "id",
-        # M-REC-2: UUIDv7 recording-id string.
-        desc: "recording id of a trace (UUIDv7)"
+        # M-REC-6: UUIDv7 recording-id string.  Accepts an 8+ char
+        # short prefix; the lookup goes through
+        # ``trace_index.findByRecordingIdPrefix``.
+        desc: "a recording id (UUIDv7) — accepts 8+ char short prefix"
       .} : Option[string]
       traceMetadataPathArg* {.
         name: "path",
@@ -1167,33 +1172,33 @@ proc customValidateConfig*(
           conf.uploadLastTraceMatchingPattern
 
 
-      let (traceId,
+      let (recordingId,
           traceFolder,
           interactive) =
         case conf.cmd:
         of StartupCommand.replay:
-          (conf.replayTraceId,
+          (conf.replayRecordingId,
             conf.replayTraceFolder,
             conf.replayInteractive)
         of StartupCommand.console:
-          (conf.consoleTraceId,
+          (conf.consoleRecordingId,
             conf.consoleTraceFolder,
             conf.consoleInteractive)
         else: # possible only upload:
-          (conf.uploadTraceId,
+          (conf.uploadRecordingId,
             conf.uploadTraceFolder,
             conf.uploadInteractive)
 
       let isSetPattern =
         lastTraceMatchingPattern.isSome
-      let isSetTraceId = traceId.isSome
+      let isSetRecordingId = recordingId.isSome
       let isSetTraceFolder =
         traceFolder.isSome
       let isSetInteractive =
         interactive.isSome
       let setArgsCount =
         isSetPattern.int +
-        isSetTraceId.int +
+        isSetRecordingId.int +
         isSetTraceFolder.int +
         isSetInteractive.int
       if setArgsCount > 1:
@@ -1206,7 +1211,7 @@ proc customValidateConfig*(
           "for more information"
         quit(1)
       if not isSetPattern and
-          not isSetTraceId and
+          not isSetRecordingId and
           not isSetTraceFolder:
         replayInteractive = true
       elif isSetInteractive:

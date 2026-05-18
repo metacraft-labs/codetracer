@@ -164,8 +164,10 @@ when defined(ctInExtension):
         let lines = output.split(jsNl)
         if lines.len > 1:
           let traceIdLine = $lines[^2]
-          if traceIdLine.startsWith("traceId:"):
-            let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+          # M-REC-6: stdout-marker renamed to ``recordingId:``.  Payload
+          # is still treated as a recording id (UUIDv7 string).
+          if traceIdLine.startsWith("recordingId:"):
+            let traceId = traceIdLine[("recordingId:").len .. ^1].parseInt
             let res = await readCTOutput(
               codetracerExe.cstring,
               @[cstring"trace-metadata", cstring(fmt"--id={traceId}")],
@@ -184,7 +186,11 @@ when defined(ctInExtension):
 
     proc getTraceId(output: cstring): int =
       let outputString = $output
-      let idx = outputString.find("traceId:")
+      # M-REC-6: stdout-marker renamed to ``recordingId:``.  The body of
+      # this proc still ``parseInt``s the payload — it predates M-REC-2
+      # and is currently unused by callers; left intact so the file
+      # builds.  Future M-REC follow-up should retire it.
+      let idx = outputString.find("recordingId:")
       if idx != NO_INDEX:
         let traceIdx = outputString.find(":", idx)
         if traceIdx != NO_INDEX:

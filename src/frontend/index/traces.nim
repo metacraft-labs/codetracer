@@ -544,9 +544,9 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
 proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
   ## M-REC-3: returns the UUIDv7 recording-id as a cstring; empty
   ## means "no trace recorded" (replacement for the legacy
-  ## ``NO_INDEX`` integer sentinel).  The ``traceId:`` prefix in the
-  ## subprocess output is preserved as a wire-format hand-shake with
-  ## the recorder; M-REC-5 / M-REC-6 own the printed-label rename.
+  ## ``NO_INDEX`` integer sentinel).
+  ## M-REC-6: the subprocess wire-format prefix is now ``recordingId:``;
+  ## the legacy ``traceId:`` prefix is no longer emitted by the recorder.
   callerProcessPid = pid
   let outputResult = await readProcessOutput(
     codetracerExe.cstring,
@@ -558,10 +558,10 @@ proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
     let lines = output.split(jsNl)
     if lines.len > 1:
       let recordingIdLine = $lines[^2]
-      # probably because we print `traceId:<traceId>\n` : so the last line is ''
-      #   and traceId is in the second last line
-      if recordingIdLine.startsWith("traceId:"):
-        let recordingId = cstring(recordingIdLine[("traceId:").len .. ^1].strip)
+      # probably because we print `recordingId:<id>\n` : so the last line is ''
+      #   and recordingId is in the second last line
+      if recordingIdLine.startsWith("recordingId:"):
+        let recordingId = cstring(recordingIdLine[("recordingId:").len .. ^1].strip)
         return (output, recordingId)
   else:
     output = JSON.stringify(outputResult.error)
@@ -1046,9 +1046,9 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
     if lines.len > 1:
       let traceIdLine = lines[^3]
       echo lines
-      if traceIdLine.startsWith("traceId:"):
-        # M-REC-2: UUIDv7 string, taken verbatim.
-        let traceId = cstring(traceIdLine[("traceId:").len .. ^1].strip)
+      # M-REC-6: stdout-marker renamed to ``recordingId:``.
+      if traceIdLine.startsWith("recordingId:"):
+        let traceId = cstring(traceIdLine[("recordingId:").len .. ^1].strip)
         infoPrint "index: traceId for test: ", traceId
         let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
         if trace.isNil:

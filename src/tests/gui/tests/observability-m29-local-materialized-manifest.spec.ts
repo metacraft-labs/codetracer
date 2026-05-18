@@ -219,7 +219,9 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
+  // M-REC-6: CODETRACER_TRACE_ID → CODETRACER_RECORDING_ID; delete both.
   delete env.CODETRACER_TRACE_ID;
+  delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   delete env.CODETRACER_PREFIX;
   delete env.WAYLAND_DISPLAY;
@@ -681,7 +683,9 @@ base.describe("Observability M29 local materialized manifest browser acceptance"
           await browser.close().catch(() => undefined);
         }
         fs.rmSync(rootDir, { recursive: true, force: true });
+        // M-REC-6: env var renamed; delete legacy and new names.
         delete process.env.CODETRACER_TRACE_ID;
+        delete process.env.CODETRACER_RECORDING_ID;
         delete process.env.CODETRACER_CALLER_PID;
         delete process.env.CODETRACER_IN_UI_TEST;
         delete process.env.CODETRACER_TEST;

@@ -676,9 +676,11 @@ proc main*(): Trace =
 
     let inUiTest = getEnv("CODETRACER_IN_UI_TEST", "") == "1"
     if inUiTest:
-      echo fmt"> codetracer: finished with trace id: {traceId}"
-    # Marker for caller
-    echo fmt"traceId:{traceId}"
+      echo fmt"> codetracer: finished with recording id: {traceId}"
+    # Marker for caller — M-REC-6 renamed the prefix from ``traceId:`` to
+    # ``recordingId:`` to remove the "trace_id" overload across our
+    # subprocess plumbing.  The payload is still a UUIDv7 string.
+    echo fmt"recordingId:{traceId}"
     return trace
   except CatchableError as e:
     if shouldSendEvents and sendAdditionalEvents:

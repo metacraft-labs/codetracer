@@ -132,14 +132,15 @@ proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): strin
       "ct record failed (exit " & $exitCode & "): " & output)
 
   for line in output.splitLines():
-    if line.startsWith("traceId:"):
-      let idStr = line[8..^1].strip()
+    # M-REC-6: stdout marker renamed to ``recordingId:``.
+    if line.startsWith("recordingId:"):
+      let idStr = line[("recordingId:").len..^1].strip()
       let traceDir = getHomeDir() / ".local" / "share" / "codetracer" / ("trace-" & idStr)
       if dirExists(traceDir):
         return traceDir
 
   raise newException(IOError,
-    "ct record succeeded but could not parse traceId from output: " & output)
+    "ct record succeeded but could not parse recordingId from output: " & output)
 
 proc findOrRecordTrace(testProgram: string; lang: string = "";
                        entryFile: string = "";

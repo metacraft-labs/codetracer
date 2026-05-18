@@ -26,12 +26,22 @@ proc parseArgs* =
       electronProcess.env[cstring"CODETRACER_TEST"] == cstring"1":
     data.startOptions.inTest = true
 
+  # M-REC-6: legacy ``CODETRACER_TRACE_ID`` is retired.  The Electron
+  # index process refuses to start if the legacy variable is still set,
+  # so a stale caller surfaces immediately instead of silently being
+  # ignored.  ``CODETRACER_RECORDING_ID`` is the new name; payload is a
+  # UUIDv7 recording-id string.
   if electronProcess.env.hasKey(cstring"CODETRACER_TRACE_ID"):
-    # M-REC-3 store the UUIDv7 recording-id read from the env var into
-    # ``startOptions.recordingID``.  The env-var name ``CODETRACER_TRACE_ID``
-    # is preserved here — M-REC-6 owns the rename to
-    # ``CODETRACER_RECORDING_ID``.
-    data.startOptions.recordingID = electronProcess.env[cstring"CODETRACER_TRACE_ID"]
+    errorPrint(
+      "args: CODETRACER_TRACE_ID is retired; use CODETRACER_RECORDING_ID " &
+      "(UUIDv7 recording-id)")
+    quit(1)
+  if electronProcess.env.hasKey(cstring"CODETRACER_RECORDING_ID"):
+    # Store the UUIDv7 recording-id read from the env var into
+    # ``startOptions.recordingID``.  The launcher in
+    # ``src/ct/launch/launch.nim`` sets this variable when forwarding a
+    # subprocess-spawned Electron instance to a specific recording.
+    data.startOptions.recordingID = electronProcess.env[cstring"CODETRACER_RECORDING_ID"]
     callerProcessPid = electronProcess.env[cstring"CODETRACER_CALLER_PID"].parseJsInt
     return
   else:

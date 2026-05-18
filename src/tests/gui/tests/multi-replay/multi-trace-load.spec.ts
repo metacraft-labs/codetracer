@@ -24,7 +24,7 @@
  * ## How loading into a new session works
  *
  * 1. Pre-record programs via `ct record` (returns trace IDs).
- * 2. Launch Electron with trace A (CODETRACER_TRACE_ID env var).
+ * 2. Launch Electron with trace A (CODETRACER_RECORDING_ID env var, M-REC-6).
  * 3. Click "+" to create a new session (tab).
  * 4. From the renderer, send `CODETRACER::load-recent-trace` IPC with
  *    trace B's ID.  The main process starts a replay for trace B and

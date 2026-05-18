@@ -106,7 +106,9 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
+  // M-REC-6: CODETRACER_TRACE_ID → CODETRACER_RECORDING_ID; delete both.
   delete env.CODETRACER_TRACE_ID;
+  delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   delete env.CODETRACER_PREFIX;
   env.CODETRACER_IN_UI_TEST = "1";
@@ -158,10 +160,13 @@ function recordTestProgram(sourcePath: string): number {
 
   const lines = ctProcess.stdout.trim().split("\n");
   const lastLine = lines[lines.length - 1];
-  if (!lastLine.startsWith("traceId:")) {
+  // M-REC-6: stdout marker renamed from "traceId:" to "recordingId:".
+  // The Number() cast below is a pre-existing M-REC-2 hangover (test-side
+  // trace_folder layout cleanup is M-REC-7's deliverable).
+  if (!lastLine.startsWith("recordingId:")) {
     throw new Error(`Unexpected ct record output: ${lastLine}`);
   }
-  return Number(lastLine.split(":")[1].trim());
+  return Number(lastLine.slice("recordingId:".length).trim());
 }
 
 function killProcessTree(pid: number): void {
@@ -221,7 +226,8 @@ const test = base.extend<{
       args: [],
       env: makeCleanEnv({
         CODETRACER_CALLER_PID: process.pid.toString(),
-        CODETRACER_TRACE_ID: traceId.toString(),
+        // M-REC-6: env-var renamed from CODETRACER_TRACE_ID.
+        CODETRACER_RECORDING_ID: traceId.toString(),
       }),
     });
 
@@ -236,7 +242,9 @@ const test = base.extend<{
     } catch {
       // already closed
     }
+    // M-REC-6: env var renamed; delete both legacy and current names.
     delete process.env.CODETRACER_TRACE_ID;
+    delete process.env.CODETRACER_RECORDING_ID;
     delete process.env.CODETRACER_CALLER_PID;
     delete process.env.CODETRACER_IN_UI_TEST;
     delete process.env.CODETRACER_TEST;

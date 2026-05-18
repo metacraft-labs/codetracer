@@ -290,7 +290,10 @@ test.describe("Welcome Open Folder via second process", () => {
     await ctPage.waitForSelector(".welcome-screen", { timeout: 15000 });
 
     const env = { ...process.env };
+    // M-REC-6: legacy CODETRACER_TRACE_ID is retired in favour of
+    // CODETRACER_RECORDING_ID; delete both so neither leaks in.
     delete env.CODETRACER_TRACE_ID;
+    delete env.CODETRACER_RECORDING_ID;
     delete env.CODETRACER_CALLER_PID;
     env.CODETRACER_IN_UI_TEST = "1";
     env.CODETRACER_TEST = "1";

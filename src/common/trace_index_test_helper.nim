@@ -9,9 +9,11 @@
 ## wire-format result.
 ##
 ## Usage: ``trace_index_test_helper <scenario>``
-## Scenarios: ``schema``, ``old-schema``, ``newid-uuidv7``, ``trace-recording-id``.
+## Scenarios: ``schema``, ``old-schema``, ``newid-uuidv7``,
+## ``trace-recording-id``, ``short-prefix-unique``, ``short-prefix-ambiguous``,
+## ``short-prefix-too-short``, ``short-prefix-not-found``.
 
-import std/[os, strutils, strformat]
+import std/[algorithm, os, strutils, strformat]
 
 when NimMajor >= 2:
   import ../db_connector/db_sqlite
@@ -213,6 +215,96 @@ proc scenarioNewIdUuidV7() =
 
   echo "PASS"
 
+proc insertRecording(id: string) =
+  ## Persist a minimal recording row so the prefix scenarios can vary
+  ## the ``recording_id`` without having to thread every column through
+  ## ``recordTrace``.
+  discard trace_index.recordTrace(
+    id,
+    program = "/tmp/short-prefix-" & id,
+    args = @[],
+    compileCommand = "",
+    env = "",
+    workdir = "/tmp",
+    lang = LangNoir,
+    sourceFolders = "",
+    lowLevelFolder = "",
+    outputFolder = "/tmp/trace-" & id,
+    test = false,
+    imported = false,
+    shellID = -1,
+    rrPid = 0,
+    exitCode = 0,
+    calltrace = false,
+    calltraceMode = CalltraceMode.NoInstrumentation)
+
+proc scenarioShortPrefixUnique() =
+  ## M-REC-6: an 8+ hex-char prefix that matches exactly one recording
+  ## resolves to that recording.  Insert ids with distinct first bytes
+  ## so the prefix is unambiguous.
+  discard trace_index.newID(test = false) # materialize the DB
+  insertRecording("01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb")
+  insertRecording("01949f00-1111-7e9c-aaaa-cccccccccccc")
+  insertRecording("019aaaaa-2222-7e9c-aaaa-dddddddddddd")
+  let res = trace_index.findByRecordingIdPrefix("01949fcc", test = false)
+  if not res.isOk:
+    fail("expected unique match for '01949fcc'; error=" & $res.error &
+         " matches=" & $res.matches)
+  if res.trace.recordingId != "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb":
+    fail("unique match resolved to wrong id: " & res.trace.recordingId)
+  echo "PASS"
+
+proc scenarioShortPrefixAmbiguous() =
+  ## Two recordings share an 8-char prefix → ambiguity error with the
+  ## candidate list.  The list is capped at
+  ## ``RECORDING_ID_PREFIX_MATCH_CAP``.
+  discard trace_index.newID(test = false)
+  let ids = @[
+    "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
+    "01949fcc-8888-7e9c-aaaa-cccccccccccc",
+    "01949fcc-9999-7e9c-aaaa-dddddddddddd",
+  ]
+  for id in ids:
+    insertRecording(id)
+  let res = trace_index.findByRecordingIdPrefix("01949fcc", test = false)
+  if res.isOk:
+    fail("expected ambiguity for '01949fcc'; got match " & res.trace.recordingId)
+  if res.error != trace_index.rieAmbiguous:
+    fail("expected rieAmbiguous; got " & $res.error)
+  if res.matches.len != ids.len:
+    fail("expected " & $ids.len & " candidate ids; got " & $res.matches)
+  # The candidate list is ASC-ordered by recording_id.  Verify ids are
+  # present and surfaced in stable order so the CLI error is reproducible.
+  for id in ids:
+    if id notin res.matches:
+      fail("ambiguous match missing id " & id & "; got " & $res.matches)
+  if res.matches != res.matches.sorted:
+    fail("candidate list not sorted ASC: " & $res.matches)
+  echo "PASS"
+
+proc scenarioShortPrefixTooShort() =
+  ## Prefix shorter than ``MIN_RECORDING_ID_PREFIX_LEN`` → ``rieTooShort``
+  ## regardless of how many recordings match.
+  discard trace_index.newID(test = false)
+  insertRecording("01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb")
+  let res = trace_index.findByRecordingIdPrefix("01949f", test = false)
+  if res.isOk:
+    fail("expected too-short error for '01949f'; got " & res.trace.recordingId)
+  if res.error != trace_index.rieTooShort:
+    fail("expected rieTooShort; got " & $res.error)
+  echo "PASS"
+
+proc scenarioShortPrefixNotFound() =
+  ## Valid 8+ char prefix that matches zero recordings → ``rieNotFound``.
+  discard trace_index.newID(test = false)
+  insertRecording("01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb")
+  let res = trace_index.findByRecordingIdPrefix("ffffffff", test = false)
+  if res.isOk:
+    fail("expected not-found error for 'ffffffff'; got " & res.trace.recordingId)
+  if res.error != trace_index.rieNotFound:
+    fail("expected rieNotFound; got " & $res.error)
+  echo "PASS"
+
 when isMainModule:
   if paramCount() < 1:
     fail("usage: trace_index_test_helper <scenario>")
@@ -221,5 +313,9 @@ when isMainModule:
   of "old-schema": scenarioOldSchema()
   of "newid-uuidv7": scenarioNewIdUuidV7()
   of "trace-recording-id": scenarioTraceRecordingId()
+  of "short-prefix-unique": scenarioShortPrefixUnique()
+  of "short-prefix-ambiguous": scenarioShortPrefixAmbiguous()
+  of "short-prefix-too-short": scenarioShortPrefixTooShort()
+  of "short-prefix-not-found": scenarioShortPrefixNotFound()
   else:
     fail("unknown scenario: " & paramStr(1))
