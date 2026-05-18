@@ -53,17 +53,17 @@ pub fn run_dir_for(tmp_path: &Path, run_id: usize) -> Result<PathBuf, Box<dyn Er
 }
 
 fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
-    if let Ok(explicit) = env::var("CODETRACER_RUNTIME_DIR") {
-        if !explicit.is_empty() {
-            return PathBuf::from(explicit);
-        }
+    if let Ok(explicit) = env::var("CODETRACER_RUNTIME_DIR")
+        && !explicit.is_empty()
+    {
+        return PathBuf::from(explicit);
     }
-    if !cfg!(target_os = "macos") {
-        if let Ok(xdg) = env::var("XDG_RUNTIME_DIR") {
-            let candidate = PathBuf::from(&xdg);
-            if !xdg.is_empty() && candidate.is_dir() {
-                return candidate.join("codetracer");
-            }
+    if !cfg!(target_os = "macos")
+        && let Ok(xdg) = env::var("XDG_RUNTIME_DIR")
+    {
+        let candidate = PathBuf::from(&xdg);
+        if !xdg.is_empty() && candidate.is_dir() {
+            return candidate.join("codetracer");
         }
     }
     fallback_tmp.to_path_buf()
