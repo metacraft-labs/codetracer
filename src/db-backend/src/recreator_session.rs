@@ -18,6 +18,7 @@ use serde::Deserialize;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
+use crate::paths::log_path_for;
 #[cfg(unix)]
 use crate::paths::recreator_socket_path;
 #[cfg(windows)]
@@ -103,9 +104,11 @@ impl ReplayWorker {
         );
 
         // Redirect worker stderr to a log file for debugging.
-        let log_dir = std::env::temp_dir().join("codetracer");
-        let _ = std::fs::create_dir_all(&log_dir);
-        let log_path = log_dir.join(format!("ct-native-replay-{}-{}.log", self.name, self.index));
+        // Co-locate with the worker's UDS in the per-run directory so the
+        // socket and its stderr log share lifecycle (XDG_RUNTIME_DIR on
+        // Linux, fallback tmp_path elsewhere — see paths::run_dir_for).
+        let run_id = std::process::id() as usize;
+        let log_path = log_path_for("ct-native-replay", &self.name, self.index, run_id)?;
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
