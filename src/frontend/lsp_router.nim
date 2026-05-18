@@ -554,6 +554,27 @@ proc attachLspDiagnostics*(kind: string; client: JsObject) =
   clientsByKind[key] = client
   readyKinds[key] = true
   reopenDocumentsForClient(key)
+  # Mirror the active client on `window.codetracerLspClients` so plain-JS
+  # modules (such as the Monaco semantic-tokens provider) can call
+  # `window.codetracerLsp.sendRequest(kind, method, params)`.  Implemented
+  # inline (rather than via separate forward-declared procs) because Nim
+  # JS targeting doesn't honour out-of-order `importjs` declarations.
+  {.emit: """
+    window.codetracerLsp = window.codetracerLsp || {};
+    window.codetracerLsp.sendRequest = function(k, m, p) {
+      return new Promise(function(resolve, reject) {
+        try {
+          var cli = window.codetracerLspClients && window.codetracerLspClients[k];
+          if (!cli) { reject(new Error('LSP client not connected for ' + k)); return; }
+          var pr = cli.sendRequest(m, p);
+          if (pr && typeof pr.then === 'function') { pr.then(resolve, reject); }
+          else { resolve(pr); }
+        } catch (e) { reject(e); }
+      });
+    };
+    window.codetracerLspClients = window.codetracerLspClients || {};
+  """.}
+  {.emit: ["window.codetracerLspClients[", key.cstring, "] = ", client, ";"].}
 
 proc detachLspDiagnostics*(kind: string) =
   let key = normalizeKind(kind)
@@ -642,3 +663,8 @@ proc sendLspRequest*(kind: string; methodName: cstring;
     raise newException(CatchableError,
       "LSP client not connected for " & kind)
   return await sendLspRequestRaw(client, methodName, params)
+
+# NB: the bridge exposed on `window.codetracerLsp` lives directly in
+# `attachLspDiagnostics` above as an inline `{.emit.}`.  Defining it as a
+# separate `importjs` proc would require an awkward forward declaration
+# (Nim's JS backend doesn't reorder them) and add zero value.

@@ -934,6 +934,30 @@ export function registerNimLanguage(monaco) {
   // Set language configuration
   monaco.languages.setLanguageConfiguration('nim', nimConf);
 
-  // Set Monarch tokens provider
+  // Set Monarch tokens provider (foreground tokenizer — runs every keystroke)
   monaco.languages.setMonarchTokensProvider('nim', nimLanguage);
+
+  // Augment the monarch coloring with semantic tokens from nimsuggest.
+  // The provider is registered eagerly so Monaco can request tokens as
+  // soon as the editor mounts; the underlying `sendRequest` bridge
+  // returns null until the LSP client connects, which Monaco interprets
+  // as "fall back to monarch".  See nimSemanticTokens.js for details.
+  // Imported lazily to keep this module dependency-light for tests that
+  // only exercise the monarch tokenizer.
+  import('./nimSemanticTokens.js').then(({ registerNimSemanticTokensProvider }) => {
+    const sendRequest = async (uri, range) => {
+      const api = (typeof window !== 'undefined') ? window.codetracerLsp : null;
+      if (!api || typeof api.sendRequest !== 'function') return null;
+      return api.sendRequest('nim', 'textDocument/semanticTokens/range', {
+        textDocument: { uri },
+        range: {
+          start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+          end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+        },
+      });
+    };
+    registerNimSemanticTokensProvider(monaco, sendRequest);
+  }).catch((err) => {
+    console.warn('[nim language] semantic tokens provider not registered', err && err.message);
+  });
 }
