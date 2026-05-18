@@ -99,11 +99,17 @@ proc onDownloadTraceFile*(sender: js, response: jsobject(downloadKey = seq[cstri
       js{errorMessage: cstring"codetracer server down or wrong download key"}
 
 proc onDeleteOnlineTraceFile*(sender: js, response: DeleteTraceArg) {.async.} =
+  # M-REC-8: forward the UUIDv7 ``recording_id`` via ``--id=`` (the
+  # consistent recording-id flag name across ``ct upload`` / ``ct
+  # replay`` / ``ct trace-metadata`` per M-REC-6).  ``cmdDelete`` is
+  # currently commented out in ``codetracerconf.nim``; this wiring is
+  # kept in place so that re-enabling the subcommand only needs the
+  # conf edit.
   let res = await readProcessOutput(
     codetracerExe.cstring,
     @[
       cstring"cmdDelete",
-      cstring"--trace-id=" & $response.traceId,
+      cstring"--id=" & $response.recordingId,
       cstring"--control-id=" & response.controlId
     ]
   )
@@ -111,7 +117,7 @@ proc onDeleteOnlineTraceFile*(sender: js, response: DeleteTraceArg) {.async.} =
   mainWindow.webContents.send(
     "CODETRACER::delete-online-trace-file-received",
     js{
-      "argId": cstring($response.traceId & ":" & response.controlId),
+      "argId": cstring($response.recordingId & ":" & response.controlId),
       "value": res.isOk
     }
   )

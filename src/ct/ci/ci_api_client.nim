@@ -306,14 +306,22 @@ proc reportProcessEvents*(client: ApiClient, token: string, runId: string,
     ensureCISuccess(response, "reportProcessEvents")
 
 proc uploadTraceMetadata*(client: ApiClient, token: string, runId: string,
+                          recordingId: string,
                           fileName: string, sizeBytes: int64, s3Key: string,
                           contentHash: string,
                           pid: int = 0): string =
   ## POST /api/v1/ci/runs/{runId}/traces -- register trace metadata.
-  ## Returns the trace ID assigned by the server.
+  ## Returns the canonical ``recordingId`` (UUIDv7) the server stored
+  ## for this trace.
+  ##
+  ## M-REC-8: the client-minted UUIDv7 ``recordingId`` is now passed in
+  ## the request body so the server records it as the canonical
+  ## identity (rather than minting a fresh server-side integer).  The
+  ## response echoes back the same value.
   withRetry("uploadTraceMetadata"):
     let url = client.baseApiUrl & fmt"ci/runs/{runId}/traces"
     let reqBody = $ %*{
+      "recordingId": recordingId,
       "fileName": fileName,
       "sizeBytes": sizeBytes,
       "s3Key": s3Key,
@@ -324,4 +332,4 @@ proc uploadTraceMetadata*(client: ApiClient, token: string, runId: string,
       url, httpMethod = HttpPost, headers = ciHeaders(token), body = reqBody)
     ensureCISuccess(response, "uploadTraceMetadata")
     let j = parseJson(response.body)
-    result = j["traceId"].getStr()
+    result = j["recordingId"].getStr()

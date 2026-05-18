@@ -10,11 +10,11 @@ suite "Trace Sharing Commands":
   # At least one trace recording needs to be present
   test "Upload, download, delete trace":
     echo "Uploading"
-    # M-REC-2: traceId is now a UUIDv7 recording-id string.  This test
-    # is not part of any automated test runner (no Tupfile/justfile
-    # reference); the placeholder below keeps it compilable.
-    let traceId = ""
-    let trace = findTraceForArgs(none(string), some(traceId), none(string))
+    # M-REC-8: ``recordingId`` is a UUIDv7 recording-id string.  This
+    # test is not part of any automated test runner (no Tupfile /
+    # justfile reference); the placeholder below keeps it compilable.
+    let recordingId = ""
+    let trace = findTraceForArgs(none(string), some(recordingId), none(string))
     if trace.isNil:
       echo "ERROR: can't find trace in local database"
       quit(1)
@@ -26,11 +26,11 @@ suite "Trace Sharing Commands":
     echo "\nDownloading"
     let (fileId, password) = extractInfoFromKey(info.downloadKey, conf)
     let newId = downloadTrace(fileId, info.downloadKey, password, conf)
-    echo "Downloaded trace ID: ", newId
-    # M-REC-2: id is a UUIDv7 string now; check it's non-empty.
+    echo "Downloaded recording id: ", newId
+    # M-REC-8: id is a UUIDv7 string now; check it's non-empty.
     check newId.len > 0
 
     echo "Deleting"
-    deleteRemoteFile(traceId, info.controlId, conf)
+    deleteRemoteFile(recordingId, info.controlId, conf)
     expect Exception:
       discard downloadTrace(fileId, info.downloadKey, password, conf)

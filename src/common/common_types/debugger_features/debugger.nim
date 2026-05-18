@@ -33,8 +33,12 @@ type
     msg*: langstring
 
   DeleteTraceArg* = object
-    # M-REC-2: UUIDv7 recording-id string.  See UploadProgress.id.
-    traceId*: langstring
+    # M-REC-8: UUIDv7 ``recording_id`` string.  Field renamed in
+    # M-REC-8 to align the JS IPC payload with the sharing-server wire
+    # format ("recordingId" alongside "controlId" / "downloadKey").
+    # ``controlId`` is a server-issued access token for the uploaded
+    # copy and keeps its original name and semantics.
+    recordingId*: langstring
     controlId*: langstring
 
   SocketAddressInfo* = object

@@ -3,8 +3,12 @@ import ../utilities/types
 import ../../common/[ config, trace_index ]
 
 proc deleteRemoteFile*(id: string, controlId: string, config: Config) {.raises: [ValueError, Exception].} =
-  ## M-REC-2: ``id`` is now a UUIDv7 recording-id.  The column names
-  ## in ``updateField`` track the new schema (``remote_share_*``
+  ## M-REC-2 / M-REC-8: ``id`` is the UUIDv7 ``recording_id`` of the
+  ## locally stored copy of the trace whose remote-share columns we are
+  ## clearing.  ``controlId`` is the server-issued access token used to
+  ## authenticate the remote delete; the two ids live in distinct
+  ## namespaces (see parent spec §6.7).  The column names in
+  ## ``updateField`` track the post-M-REC-2 schema (``remote_share_*``
   ## snake_case) per parent spec §5.
   let test = false
   let client = newHttpClient(sslContext=newContext(verifyMode=CVerifyPeer))

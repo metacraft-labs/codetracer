@@ -3,16 +3,28 @@
 ## Replaces the C# ``MonolithApiClient``. All calls target the ``/api/v1/``
 ## endpoint group. Authentication is via bearer token in the Authorization header.
 ##
-## Endpoint reference (from MonolithApiClient.cs):
-## - ``GET  tenants``                                        → list user's tenants
-## - ``POST tenants/{tenantId}/traces/upload-url``           → presigned upload URL
-## - ``POST traces/{traceId}/confirm-upload``                → confirm upload with etag
-## - ``GET  traces/{traceId}/download-url``                  → presigned download URL
-## - ``GET  billing/license``                                → license info (v2)
-## - ``POST license/issue``                                  → signed CTL license blob
-## - ``POST tenants/{tenantId}/traces/upload-session`` (M18a) → create upload session
-## - ``POST traces/{sessionId}/slice-upload-url``      (M18a) → presigned slice URL
-## - ``POST traces/{sessionId}/finalize``              (M18a) → finalize upload session
+## Endpoint reference (post M-REC-8 rename — the path parameter is now
+## the client-minted UUIDv7 ``recordingId``, not a server-side integer):
+## - ``GET  tenants``                                              → list user's tenants
+## - ``POST tenants/{tenantId}/traces/upload-url``                 → presigned upload URL
+## - ``POST traces/{recordingId}/confirm-upload``                  → confirm upload with etag
+## - ``GET  traces/{recordingId}/download-url``                    → presigned download URL
+## - ``GET  billing/license``                                      → license info (v2)
+## - ``POST license/issue``                                        → signed CTL license blob
+## - ``POST tenants/{tenantId}/traces/upload-session`` (M18a)      → create upload session
+## - ``POST traces/{sessionId}/slice-upload-url``      (M18a)      → presigned slice URL
+## - ``POST traces/{sessionId}/finalize``              (M18a)      → finalize upload session
+##
+## M-REC-8 wire-format flip (see
+## ``codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md``
+## §6.7): the previous integer ``traceId`` minted server-side at
+## upload-url request time has been replaced by the client's UUIDv7
+## ``recording_id``.  The body and path key is ``recordingId``.
+## ``controlId`` and ``downloadKey`` keep their pre-existing
+## semantics — those are server-issued access tokens for the uploaded
+## copy, not recording identities.  The ``sessionId`` family of paths
+## (slice-upload / finalize) is a separate server-side identifier for
+## the upload session itself and is unaffected by this rename.
 
 import std/[httpclient, json, net, strformat, strutils, uri]
 
@@ -24,7 +36,12 @@ type
     role*: string
 
   TraceUploadUrlResponse* = object
-    traceId*: string
+    ## M-REC-8: ``recordingId`` is the client-minted UUIDv7 the upload
+    ## flow echoes back from the server.  The server now stores this
+    ## value as the canonical identity of the uploaded trace; the
+    ## ``controlId`` / ``downloadKey`` pair (separate types) remain the
+    ## server-issued access tokens for the uploaded copy.
+    recordingId*: string
     uploadUrl*: string
     expiresAt*: string
 
@@ -110,33 +127,92 @@ proc getTenants*(client: ApiClient, bearerToken: string): seq[TenantListItem] =
 # Trace upload endpoints
 # ---------------------------------------------------------------------------
 
-proc requestTraceUploadUrl*(client: ApiClient, tenantId: string,
-    fileName: string, contentType: string, contentLength: int64,
-    bearerToken: string): TraceUploadUrlResponse =
-  ## ``POST /api/v1/tenants/{tenantId}/traces/upload-url``
-  ## Returns a presigned S3 upload URL.
-  let url = client.baseApiUrl & fmt"tenants/{tenantId}/traces/upload-url"
-  let body = $ %*{
+proc buildUploadUrlPath*(baseApiUrl, tenantId: string): string =
+  ## URL builder for ``POST /api/v1/tenants/{tenantId}/traces/upload-url``.
+  ## Extracted as a pure helper so the M-REC-8 wire-format tests can
+  ## assert the URL shape without going through the HTTP transport.
+  baseApiUrl & fmt"tenants/{tenantId}/traces/upload-url"
+
+proc buildUploadUrlBody*(recordingId, fileName, contentType: string,
+    contentLength: int64): JsonNode =
+  ## Request-body builder for ``POST .../traces/upload-url``.
+  ## M-REC-8: the body carries the client-minted UUIDv7 ``recordingId``.
+  %*{
+    "recordingId": recordingId,
     "fileName": fileName,
     "contentType": contentType,
     "contentLength": contentLength,
   }
+
+proc buildConfirmUploadPath*(baseApiUrl, recordingId: string): string =
+  ## URL builder for ``POST /api/v1/traces/{recordingId}/confirm-upload``.
+  ## M-REC-8: the path segment is the UUIDv7 ``recordingId``.
+  baseApiUrl & fmt"traces/{recordingId}/confirm-upload"
+
+proc buildDownloadUrlPath*(baseApiUrl, recordingId: string): string =
+  ## URL builder for ``GET /api/v1/traces/{recordingId}/download-url``.
+  ## M-REC-8: the path segment is the UUIDv7 ``recordingId``.
+  baseApiUrl & fmt"traces/{recordingId}/download-url"
+
+proc parseDownloadShareUrl*(url: string):
+    tuple[orgSlug: string, recordingId: string] =
+  ## Parses sharing-server download URLs of the form
+  ## ``https://<host>/{orgSlug}/{recordingId}/download`` (with the
+  ## trailing ``/download`` optional).
+  ##
+  ## M-REC-8: the path component that previously carried the
+  ## server-side integer ``traceGuid`` now carries the UUIDv7
+  ## ``recording_id``.  The parser is otherwise structurally identical
+  ## to the pre-M-REC-8 version; only the returned field name flipped
+  ## to track the new wire semantics.  Exported (rather than kept
+  ## private to ``download.nim``) so the M-REC-8 wire-format tests can
+  ## pin the URL grammar without dragging the full download stack into
+  ## the test binary.
+  let parsed = parseUri(url)
+  let parts = parsed.path.strip(chars = {'/'}).split('/')
+  if parts.len >= 2:
+    let candidateId = parts[^1]
+    if candidateId.toLowerAscii() == "download" and parts.len >= 3:
+      result.orgSlug = parts[^3]
+      result.recordingId = parts[^2]
+    else:
+      result.orgSlug = parts[^2]
+      result.recordingId = parts[^1]
+    return
+  raise newException(ValueError, "Invalid download URL: " & url)
+
+proc requestTraceUploadUrl*(client: ApiClient, tenantId: string,
+    recordingId: string, fileName: string, contentType: string,
+    contentLength: int64, bearerToken: string): TraceUploadUrlResponse =
+  ## ``POST /api/v1/tenants/{tenantId}/traces/upload-url``
+  ## Returns a presigned S3 upload URL.
+  ##
+  ## M-REC-8: the client-minted UUIDv7 ``recordingId`` is now sent in
+  ## the request body so the server can persist it as the trace's
+  ## canonical identity (rather than minting a fresh server-side
+  ## integer).  The response echoes back the same ``recordingId``.
+  let url = buildUploadUrlPath(client.baseApiUrl, tenantId)
+  let body = $ buildUploadUrlBody(
+    recordingId, fileName, contentType, contentLength)
   let response = client.httpClient.request(
     url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
   ensureSuccess(response, "requestTraceUploadUrl")
 
   let jsonBody = parseJson(response.body)
   result = TraceUploadUrlResponse(
-    traceId: jsonBody["traceId"].getStr(),
+    recordingId: jsonBody["recordingId"].getStr(),
     uploadUrl: jsonBody["uploadUrl"].getStr(),
     expiresAt: jsonBody["expiresAt"].getStr(),
   )
 
-proc confirmTraceUpload*(client: ApiClient, traceId: string, etag: string,
+proc confirmTraceUpload*(client: ApiClient, recordingId: string, etag: string,
     bearerToken: string) =
-  ## ``POST /api/v1/traces/{traceId}/confirm-upload``
+  ## ``POST /api/v1/traces/{recordingId}/confirm-upload``
   ## Confirms that the file was uploaded successfully with the given ETag.
-  let url = client.baseApiUrl & fmt"traces/{traceId}/confirm-upload"
+  ##
+  ## M-REC-8: the path parameter is the UUIDv7 ``recordingId`` returned
+  ## from ``requestTraceUploadUrl``.
+  let url = buildConfirmUploadPath(client.baseApiUrl, recordingId)
   let body = $ %*{"etag": etag}
   let response = client.httpClient.request(
     url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
@@ -146,11 +222,15 @@ proc confirmTraceUpload*(client: ApiClient, traceId: string, etag: string,
 # Trace download endpoints
 # ---------------------------------------------------------------------------
 
-proc requestTraceDownloadUrl*(client: ApiClient, traceId: string,
+proc requestTraceDownloadUrl*(client: ApiClient, recordingId: string,
     bearerToken: string): TraceDownloadUrlResponse =
-  ## ``GET /api/v1/traces/{traceId}/download-url``
+  ## ``GET /api/v1/traces/{recordingId}/download-url``
   ## Returns a presigned S3 download URL.
-  let url = client.baseApiUrl & fmt"traces/{traceId}/download-url"
+  ##
+  ## M-REC-8: the path parameter is the UUIDv7 ``recordingId`` (the
+  ## same identity the recorder minted at record-start and the client
+  ## sent during upload).
+  let url = buildDownloadUrlPath(client.baseApiUrl, recordingId)
   let response = client.httpClient.request(
     url, httpMethod = HttpGet, headers = bearerHeaders(bearerToken))
   ensureSuccess(response, "requestTraceDownloadUrl")

@@ -13,13 +13,19 @@ import remote_config, api_client, file_transfer, tenant_resolver
 import mcr_enrichment
 
 proc uploadFile(
+  trace: Trace,
   traceZipPath: string,
   org: Option[string],
   token: Option[string] = none(string),
   baseUrl: Option[string] = none(string),
 ): UploadedInfo {.raises: [KeyError, Exception].} =
   ## Uploads a trace zip file to the CI platform using the native API client.
-  ## Returns an UploadedInfo with the exit code and file ID.
+  ## Returns an UploadedInfo with the exit code and recording id.
+  ##
+  ## M-REC-8: the local ``recording_id`` (UUIDv7 minted at record-start)
+  ## is now the identity shipped to the sharing server.  ``trace`` is
+  ## carried in so the recording id (``trace.recordingId``) can be sent
+  ## in the upload-url request body.
   result = UploadedInfo(exitCode: 0)
   try:
     let remoteConf = initRemoteConfig()
@@ -34,23 +40,26 @@ proc uploadFile(
     let orgSlug = resolveTenantValueOrSlug(defaultOrg, org.get(""))
     let (tenantId, resolvedSlug) = resolveTenantId(client, orgSlug, bearerToken)
 
-    # Request a presigned upload URL from the server.
+    # Request a presigned upload URL from the server.  The client sends
+    # its own UUIDv7 ``recording_id`` so the server can record it as the
+    # canonical identity of the uploaded trace.
     let fileSize = getFileSize(traceZipPath)
     let fileName = extractFilename(traceZipPath)
     let uploadResp = client.requestTraceUploadUrl(
-      tenantId, fileName, "application/zip", fileSize, bearerToken)
+      tenantId, trace.recordingId, fileName, "application/zip", fileSize,
+      bearerToken)
 
     # Upload the file to the presigned URL.
     let etag = putFile(uploadResp.uploadUrl, traceZipPath)
 
     # Confirm the upload with the ETag.
-    client.confirmTraceUpload(uploadResp.traceId, etag, bearerToken)
+    client.confirmTraceUpload(uploadResp.recordingId, etag, bearerToken)
 
-    result.fileId = uploadResp.traceId
+    result.fileId = uploadResp.recordingId
 
-    let replayUrl = fmt"{resolvedBaseUrl}/{resolvedSlug}/replay/confirm/{uploadResp.traceId}"
+    let replayUrl = fmt"{resolvedBaseUrl}/{resolvedSlug}/replay/confirm/{uploadResp.recordingId}"
     echo "File uploaded successfully."
-    echo "File ID: " & uploadResp.traceId
+    echo "Recording ID: " & uploadResp.recordingId
     echo "You can run the replay in the browser from here:"
     echo "  " & replayUrl
 
@@ -90,7 +99,7 @@ proc uploadSplitTraceFallback(trace: Trace, slicesDir: string,
 
   var uploadInfo = UploadedInfo()
   try:
-    uploadInfo = uploadFile(outputZip, org, token, baseUrl)
+    uploadInfo = uploadFile(trace, outputZip, org, token, baseUrl)
   except CatchableError as e:
     echo "uploadSplitTrace fallback error: ", e.msg
     uploadInfo.exitCode = 1
@@ -236,7 +245,7 @@ proc uploadTrace*(trace: Trace, org: Option[string],
   zipFolder(trace.outputFolder, outputZip, onProgress = onProgress(ratio = 33, start = 0, "Zipping files..", lastPercentSent))
   var uploadInfo = UploadedInfo()
   try:
-    uploadInfo = uploadFile(outputZip, org, token, baseUrl)
+    uploadInfo = uploadFile(trace, outputZip, org, token, baseUrl)
   except CatchableError as e:
     echo "uploadTrace error: ", e.msg
     uploadInfo.exitCode = 1
