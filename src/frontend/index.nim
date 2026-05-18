@@ -81,20 +81,16 @@ when not defined(server):
               js{folderPath: editPath})
             handledSecondInstance = true
           elif argText.len > 0 and argText[0] != '-':
-            try:
-              let traceId = parseInt(argText)
-              if traceId > 0 and not mainWindow.isNil:
-                console.log cstring"index: opening trace ", cstring($traceId), cstring" in new tab (second-instance)"
-                # Signal the renderer to create a new session tab and prepare
-                # the trace.  The renderer handles this by creating a new
-                # session, and the onOpenTraceInTab IPC handler starts the
-                # backend replay and sends the trace data.
-                mainWindow.webContents.send(
-                  "CODETRACER::open-trace-in-tab-ready",
-                  js{traceId: traceId})
-                handledSecondInstance = true
-            except ValueError:
-              discard
+            # M-REC-2: positional non-flag arg is a UUIDv7 recording-id
+            # string (canonical 36-char form).  We pass it through
+            # verbatim; the renderer/backend validates it on lookup.
+            if argText.len == 36 and ($argText)[14] == '7' and ($argText)[8] == '-' and not mainWindow.isNil:
+              let traceId = argText
+              console.log cstring"index: opening trace ", traceId, cstring" in new tab (second-instance)"
+              mainWindow.webContents.send(
+                "CODETRACER::open-trace-in-tab-ready",
+                js{traceId: traceId})
+              handledSecondInstance = true
 
         if not handledSecondInstance:
           console.log cstring"index: second-instance argv did not contain an edit command or trace ID"

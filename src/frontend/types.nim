@@ -1479,7 +1479,8 @@ type
     copyMessageActive*: JsAssoc[int, bool]
     infoMessageActive*: JsAssoc[int, bool]
     errorMessageActive*: JsAssoc[int, MessageKind]
-    isUploading*: JsAssoc[int, bool]
+    # M-REC-2: keyed by UUIDv7 recording-id string.
+    isUploading*: JsAssoc[cstring, bool]
     showTraceSharing*: bool
 
   ReplComponent* = ref object of Component

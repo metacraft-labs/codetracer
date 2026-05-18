@@ -38,7 +38,9 @@ type
     materializedMomentId*: string
 
   HostResolvedTrace* = object
-    traceId*: int
+    # M-REC-2: UUIDv7 recording-id string.  Field name preserved per
+    # the M-REC-2 boundary; M-REC-3 will rename to ``recordingId``.
+    traceId*: string
     start*: HostStartCoordinates
 
   StorageProtocolOptions* = object
@@ -232,7 +234,8 @@ proc normalizeImportedTracePaths(tempDir: string) =
 
   writeFile(runtimePathsPath, $(%normalizedPaths))
 
-proc importCtFile(ctFilePath: string): int =
+proc importCtFile(ctFilePath: string): string =
+  ## M-REC-2: returns the UUIDv7 recording-id assigned by importTrace.
   ## Import a standalone .ct file by creating a minimal trace folder
   ## around it and importing into the database.
   ##
@@ -305,7 +308,8 @@ proc importCtFile(ctFilePath: string): int =
   result = trace.id
 
 
-proc importTraceFolder(traceFolderPath: string): int =
+proc importTraceFolder(traceFolderPath: string): string =
+  ## M-REC-2: returns the UUIDv7 recording-id assigned by importTrace.
   ## Import a trace folder into the database.
   ##
   ## M-REC-1.5: the folder must contain a `.ct` CTFS container; metadata
@@ -693,7 +697,8 @@ proc importMaterializedStorageObject(
     obj: JsonNode,
     options: StorageProtocolOptions,
     label: string,
-    supportOwner: JsonNode = nil): int =
+    supportOwner: JsonNode = nil): string =
+  ## M-REC-2: returns the UUIDv7 recording-id assigned by importTrace.
   let reference = obj.jsonString(["objectKey", "object_key", "artifactKey", "artifact_key", "uri", "path", "object_id"])
   let owner = if supportOwner.isNil: obj else: supportOwner
   let path =
@@ -726,7 +731,8 @@ proc selectedSegment(segments: JsonNode, start: HostStartCoordinates): JsonNode 
     result = segments[0]
 
 proc importShardedSegment(
-    segment: JsonNode, options: StorageProtocolOptions): int =
+    segment: JsonNode, options: StorageProtocolOptions): string =
+  ## M-REC-2: returns the UUIDv7 recording-id assigned by importTrace.
   if segment.isNil:
     raise newException(ValueError, "sharded_split_ctfs manifest has no selected segment")
   let shards = segment.jsonField(["shards"])
@@ -934,7 +940,9 @@ proc hostCommand*(
       frontendSocketPort.get
     else:
       DEFAULT_SOCKET_PORT
-  var traceId = -1
+  # M-REC-2: ``traceId`` is a UUIDv7 recording-id string; empty means
+  # "no trace specified yet".  Was an int sentinel ``-1`` pre-M-REC-2.
+  var traceId = ""
   let envIdleTimeout = getEnv("CODETRACER_HOST_IDLE_TIMEOUT", "")
   let parsedIdleTimeout = parseIdleTimeoutMs(
     if idleTimeoutRaw.len > 0: idleTimeoutRaw else: envIdleTimeout)
@@ -993,11 +1001,14 @@ proc hostCommand*(
       echo "ct host: error: --trace-path not found: ", tracePath
       quit(1)
   elif traceArg.len > 0:
-    try:
-      traceId = traceArg.parseInt
-    except CatchableError:
-      # probably traceId is a folder
-      # TODO don't depend on db?
+    # M-REC-2: ``traceArg`` is now either a UUIDv7 recording-id
+    # (canonical 36-char form) or a folder path.  We try the DB by
+    # both interpretations: id-first (no slashes), folder-second.
+    if not (traceArg.contains('/') or traceArg.contains('\\')):
+      let directTrace = trace_index.find(traceArg, test=false)
+      if not directTrace.isNil:
+        traceId = directTrace.id
+    if traceId.len == 0:
       let traceFolder = traceArg
       var traceFolderFullPath = ""
       try:

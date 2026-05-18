@@ -26,12 +26,15 @@ type
     expireTime*: langstring
 
   UploadProgress* = object
-    id*: int
+    # M-REC-2: UUIDv7 recording-id string (wire-format DAP/MCP rename
+    # is M-REC-5; for now we only flip the type to match Trace.id).
+    id*: langstring
     progress*: int
     msg*: langstring
 
   DeleteTraceArg* = object
-    traceId*: int
+    # M-REC-2: UUIDv7 recording-id string.  See UploadProgress.id.
+    traceId*: langstring
     controlId*: langstring
 
   SocketAddressInfo* = object

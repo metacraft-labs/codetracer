@@ -58,7 +58,11 @@ proc handleReplayStartResponse(body: JsObject) =
 
 registerStartReplayHandler(handleReplayStartResponse)
 
-proc assignTrace(traceId: int): Future[bool] {.async.} =
+proc assignTrace(traceId: cstring): Future[bool] {.async.} =
+  ## M-REC-2: ``traceId`` is now a UUIDv7 recording-id (carried as
+  ## ``cstring`` to match the renderer/Electron-IPC layer's JS string
+  ## convention).  Proc/param names unchanged — M-REC-3 owns the
+  ## rename.
   var attempts = 0
   var trace: Trace = nil
   while trace.isNil and attempts < 60:
@@ -422,7 +426,8 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     visualReplayPlayerError: visualReplayPlayerError,
   }
 
-proc loadExistingRecord*(traceId: int) {.async.} =
+proc loadExistingRecord*(traceId: cstring) {.async.} =
+  ## M-REC-2: UUIDv7 recording-id (cstring in JS/Electron context).
   infoPrint "[info]: load existing record with ID: ", $traceId
   if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
     if not await assignTrace(traceId):
@@ -462,7 +467,8 @@ proc loadExistingRecord*(traceId: int) {.async.} =
   #   debugPrint "warning: exception when starting instance client:"
   #   debugPrint "  that's ok, if this was not started from shell-ui!"
 
-proc prepareForLoadingTrace*(traceId: int, pid: int) {.async.} =
+proc prepareForLoadingTrace*(traceId: cstring, pid: int) {.async.} =
+  ## M-REC-2: UUIDv7 recording-id (cstring in JS/Electron context).
   callerProcessPid = pid
   if prefetchedTrace.isNil or prefetchedTrace.id != traceId:
     if not await assignTrace(traceId):
@@ -536,7 +542,10 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
   if selectedReplayId == replayId:
     selectedReplayId = -1
 
-proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
+proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
+  ## M-REC-2: returns the UUIDv7 recording-id as a cstring; empty
+  ## means "no trace recorded" (replacement for the legacy
+  ## ``NO_INDEX`` integer sentinel).
   callerProcessPid = pid
   let outputResult = await readProcessOutput(
     codetracerExe.cstring,
@@ -551,17 +560,17 @@ proc replayTx(txHash: cstring, pid: int): Future[(cstring, int)] {.async.} =
       # probably because we print `traceId:<traceId>\n` : so the last line is ''
       #   and traceId is in the second last line
       if traceIdLine.startsWith("traceId:"):
-        let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+        let traceId = cstring(traceIdLine[("traceId:").len .. ^1].strip)
         return (output, traceId)
   else:
     output = JSON.stringify(outputResult.error)
-  return (output, NO_INDEX)
+  return (output, cstring"")
 
-proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=int)) {.async.} =
+proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
-proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=int)) {.async.} =
+proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
   ## Open a trace as a new tab in the current window, rather than
   ## spawning a new Electron window.  This is the handler for the
   ## "tab" newTracePolicy.  The renderer receives a
@@ -581,7 +590,7 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=int)) {.async.} =
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
   let (rawOutputOrError, traceId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
-  if traceId != NO_INDEX:
+  if traceId.len > 0:
     await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
     await loadExistingRecord(traceId)
   else:
@@ -1033,7 +1042,8 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
       let traceIdLine = lines[^3]
       echo lines
       if traceIdLine.startsWith("traceId:"):
-        let traceId = traceIdLine[("traceId:").len .. ^1].parseInt
+        # M-REC-2: UUIDv7 string, taken verbatim.
+        let traceId = cstring(traceIdLine[("traceId:").len .. ^1].strip)
         infoPrint "index: traceId for test: ", traceId
         let trace = await electron_vars.app.findTraceWithCodetracer(traceId)
         if trace.isNil:

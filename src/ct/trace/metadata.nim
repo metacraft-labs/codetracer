@@ -4,7 +4,9 @@ import std/strutils,
 
 # Returns a number of types of info from trace_index in JSON format
 proc traceMetadata*(
-    idArg: Option[int], pathArg: Option[string],
+    # M-REC-2: ``idArg`` is a UUIDv7 recording-id string.  Proc/param
+    # names unchanged (M-REC-3 owns the rename).
+    idArg: Option[string], pathArg: Option[string],
     programArg: Option[string], recordPidArg: Option[int],
     recent: bool, recentFolders: bool, addRecentFolder: Option[string],
     recentLimit: int, test: bool) =

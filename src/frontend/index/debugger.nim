@@ -29,7 +29,8 @@ proc sendOutputJumpIPC(instance: DebugInstance, outputLine: int) {.async.} =
   debugPrint "send output jump ipc ", cast[int](instance.process.pid), " ", outputLine
   instance.pipe.write(cstring($outputLine & "\n"))
 
-proc onShowInDebugInstance*(sender: js, response: jsobject(traceId=int, outputLine=int)) {.async.} =
+proc onShowInDebugInstance*(sender: js, response: jsobject(traceId=cstring, outputLine=int)) {.async.} =
+  ## M-REC-2: ``traceId`` is a UUIDv7 recording-id string.
   if not data.debugInstances.hasKey(response.traceId):
     var process = child_process.spawn(
       codetracerExe,

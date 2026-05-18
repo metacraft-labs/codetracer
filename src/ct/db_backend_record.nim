@@ -56,7 +56,8 @@ proc recordWithCtRrSupport(
     ctRRSupportExe: string,
     program: string, args: seq[string],
     traceFolder: string,
-    traceId: int,
+    # M-REC-2: UUIDv7 recording-id string; empty == NO_TRACE_ID.
+    traceId: string,
     traceKind: string): Trace =
 
   createDir(traceFolder)
@@ -83,7 +84,8 @@ proc recordDb(
     lang: Lang, vmExe: string,
     program: string, args: seq[string],
     backend: string, traceFolder: string, stylusTrace: string,
-    traceId: int, pythonActivationPath: string = "",
+    # M-REC-2: UUIDv7 recording-id string; empty == NO_TRACE_ID.
+    traceId: string, pythonActivationPath: string = "",
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
 
   createDir(traceFolder)
@@ -205,12 +207,14 @@ proc record(
     cmd: string, args: seq[string], compileCommand: string,
     langArg: Lang, backend: string, stylusTrace: string,
     test = false, basic = false,
-    traceIDRecord: int = -1, customPath: string = "", outputFolderArg: string = "",
+    # M-REC-2: ``traceIDRecord`` is now a UUIDv7 recording-id string;
+    # empty (``""`` == NO_TRACE_ID) means "mint a fresh one".
+    traceIDRecord: string = NO_TRACE_ID, customPath: string = "", outputFolderArg: string = "",
     traceKind: string = "db", rrSupportPath: string = "",
     pythonInterpreter: string = "", pythonActivationPath: string = "", pythonWithDiff: bool = false,
     pythonTestFramework: string = "", pythonTestArgs: seq[string] = @[]): Trace =
-  var traceID: int
-  if traceIDRecord == -1:
+  var traceID: string
+  if traceIDRecord == NO_TRACE_ID:
     traceID = trace_index.newID(test)
   else:
     traceID = traceIDRecord
@@ -388,7 +392,8 @@ proc record(
 proc exportRecord(
     program: string,
     recordArgs: seq[string],
-    traceId: int,
+    # M-REC-2: UUIDv7 recording-id string.
+    traceId: string,
     exportZipPath: string,
     outputFolder: string,
     cleanupOutputFolder: bool) =
@@ -446,7 +451,9 @@ proc main*(): Trace =
   var recordArgs: seq[string]
   var outputFolder = ""
   #var recordArgsIndex = -1
-  var traceID = -1
+  # M-REC-2: ``traceID`` is now a UUIDv7 recording-id string.
+  # Empty means "to be assigned" (newID() is called below).
+  var traceID: string = ""
   var lang: Lang = LangUnknown
 
   var isExported = false

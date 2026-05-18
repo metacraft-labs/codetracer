@@ -372,8 +372,9 @@ type
     of console:
       consoleTraceId* {.
         name: "id",
-        desc: "a trace id"
-      .}: Option[int]
+        # M-REC-2: UUIDv7 recording-id.  See replayTraceId above.
+        desc: "a recording id (UUIDv7)"
+      .}: Option[string]
       consoleTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
@@ -667,8 +668,12 @@ type
     of StartupCommand.replay:
       replayTraceId* {.
         name: "id",
-        desc: "a trace id"
-      .}: Option[int]
+        # M-REC-2: ``--id`` is now a UUIDv7 recording-id (lowercase
+        # hyphenated 36-char form).  Short-prefix matching is
+        # M-REC-6's job; for now the value is matched verbatim
+        # against ``recordings.recording_id``.
+        desc: "a recording id (UUIDv7)"
+      .}: Option[string]
       replayTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
@@ -713,8 +718,9 @@ type
       # same args as replay
       uploadTraceId* {.
         name: "id",
-        desc: "a trace id"
-      .}: Option[int]
+        # M-REC-2: UUIDv7 recording-id.  See replayTraceId above.
+        desc: "a recording id (UUIDv7)"
+      .}: Option[string]
       uploadTraceFolder* {.
         name: "trace-folder",
         abbr: "t",
@@ -1087,8 +1093,9 @@ type
     of `trace-metadata`:
       traceMetadataIdArg* {.
         name: "id",
-        desc: "id of a trace"
-      .} : Option[int]
+        # M-REC-2: UUIDv7 recording-id string.
+        desc: "recording id of a trace (UUIDv7)"
+      .} : Option[string]
       traceMetadataPathArg* {.
         name: "path",
         desc: "path for a trace"

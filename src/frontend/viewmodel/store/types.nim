@@ -505,6 +505,7 @@ type
     ##
     ## ``id``       — unique trace identifier (matches
     ##                ``Trace.id`` on the legacy ref-object).
+    ##                M-REC-2: now a UUIDv7 string.  Was ``int``.
     ## ``program``  — captured program path / name; rendered in the
     ##                ``recent-trace-title-content`` span.
     ## ``args``     — command-line arguments captured for the recording.
@@ -517,7 +518,7 @@ type
     ##                ago" string.
     ## ``duration`` — recorded duration string (free text, may be
     ##                empty).  Surfaced verbatim in the tooltip.
-    id*: int
+    id*: string
     program*: string
     args*: seq[string]
     workdir*: string

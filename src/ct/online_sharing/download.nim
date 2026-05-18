@@ -49,7 +49,8 @@ proc downloadFile(url: string, outputPath: string,
 
 proc downloadTrace*(url: string,
     token: Option[string] = none(string),
-    baseUrl: Option[string] = none(string)): int =
+    baseUrl: Option[string] = none(string)): string =
+  ## M-REC-2: returns the UUIDv7 recording-id of the imported trace.
   let traceId = trace_index.newID(false)
 
   let downloadTarget = codetracerTmpPath / fmt"downloaded-trace-{traceId}.zip"

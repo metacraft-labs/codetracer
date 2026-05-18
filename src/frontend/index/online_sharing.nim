@@ -88,7 +88,9 @@ proc onDownloadTraceFile*(sender: js, response: jsobject(downloadKey = seq[cstri
   )
 
   if res.isOk:
-    let traceId = parseInt($res.v.trim())
+    # M-REC-2: ``ct download`` prints the UUIDv7 recording-id of the
+    # imported trace on stdout (one line).  Take it verbatim.
+    let traceId = cstring(($res.v).strip())
     await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
     await loadExistingRecord(traceId)
     mainWindow.webContents.send "CODETRACER::successful-download"

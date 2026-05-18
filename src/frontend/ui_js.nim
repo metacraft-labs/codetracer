@@ -2163,10 +2163,11 @@ proc closeAllFiles*(data: Data) {.async.} =
 proc onClose*(data: Data) =
   discard data.exit()
 
-proc onOpenTraceInTabReady*(sender: js, response: jsobject(traceId=int)) =
+proc onOpenTraceInTabReady*(sender: js, response: jsobject(traceId=cstring)) =
   ## Handler for the "tab" newTracePolicy.  When a second `ct` instance
   ## sends its trace to the existing window, this handler creates a new
-  ## session tab and triggers the trace load.
+  ## session tab and triggers the trace load.  M-REC-2: ``traceId`` is
+  ## a UUIDv7 recording-id string.
   let traceId = response.traceId
   clog "open-trace-in-tab-ready: creating new session and loading trace " & $traceId
   createNewSession(data)

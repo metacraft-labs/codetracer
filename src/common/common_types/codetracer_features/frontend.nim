@@ -201,7 +201,8 @@ type
     inTest*: bool
     record*: bool
     isInstalled*: bool
-    traceID*: int
+    # M-REC-2: UUIDv7 recording-id string.  Was ``int`` pre-M-REC-2.
+    traceID*: langstring
     edit*: bool
     name*: langstring
     folder*: langstring

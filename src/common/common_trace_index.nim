@@ -1,68 +1,59 @@
 # backend agnostic code, part of the trace_index module, should not be imported directly,
 # use common/trace_index or frontend/trace_index instead.
+#
+# Schema for ``<codetracerTraceDir>/trace_index.db`` (M-REC-2).  See
+# ``codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md``
+# §5 for the parent design and the rationale for the snake_case rename.
+#
+# Pre-1.0 policy: there is no schema-migration path from the pre-M-REC-2
+# integer-id schema.  ``ensureDB`` (in ``trace_index.nim``) detects an
+# old-schema DB at startup, renames it to ``<path>.bak`` so the user can
+# still recover individual recordings with ``ct replay <folder>``, and
+# creates a fresh DB matching ``SQL_CREATE_TABLE_STATEMENTS`` below.
 type
   CodetracerNotImplementedError* = object of ValueError
 
-const NO_TRACE_ID* = -1
-
-### FREEZE for now the state of those
-### schemas
-### TODO:
-###   eventually add ALTER statements
-###   when we add new fields
-###   as a minimal form of auto-migration
-###   or implement a more advanced form of
-###   migration logic/refactoring
-###   (idea by Nikola)
-### important: must keep in mind we
-###   use indices for native nim
-###   db row field extraction
-###   so if we add/remove fields
-###   we must update them accordingly
+const
+  ## Sentinel returned when a caller asks for "no recording id".  Pre-M-REC-2
+  ## this was the integer ``-1``; now it is the empty string, which is never
+  ## a valid UUIDv7 (the canonical form is always 36 chars).
+  NO_TRACE_ID* = ""
 
 const SQL_CREATE_TABLE_STATEMENTS = @[
-  """CREATE TABLE IF NOT EXISTS traces (
-      id integer,
-      program text,
-      args text,
-      compileCommand text,
-      env text,
-      workdir text,
-      output text,
-      sourceFolders text,
-      lowLevelFolder text,
-      outputFolder text,
-      lang integer,
-      imported integer,
-      shellID integer,
-      rrPid integer,
-      exitCode integer,
-      calltrace integer,
-      calltraceMode string,
-      date text);""",
-  """CREATE TABLE IF NOT EXISTS trace_values (
-      id integer,
-      maxTraceID integer,
-      UNIQUE(id));""",
-  """CREATE TABLE IF NOT EXISTS record_pid_trace_id_map (
-      pid integer,
-      traceId integer);""",
+  """CREATE TABLE IF NOT EXISTS recordings (
+      recording_id TEXT PRIMARY KEY,
+      program TEXT NOT NULL,
+      args TEXT,
+      compile_command TEXT,
+      env TEXT,
+      workdir TEXT,
+      output TEXT,
+      source_folders TEXT,
+      low_level_folder TEXT,
+      output_folder TEXT,
+      lang INTEGER NOT NULL,
+      imported INTEGER DEFAULT 0,
+      shell_id INTEGER,
+      rr_pid INTEGER,
+      exit_code INTEGER,
+      calltrace INTEGER,
+      calltrace_mode TEXT,
+      recorded_at TEXT NOT NULL,
+      remote_share_download_key TEXT,
+      remote_share_control_id TEXT,
+      remote_share_expire_time INTEGER DEFAULT -1
+  );""",
+  """CREATE INDEX IF NOT EXISTS idx_recordings_program ON recordings(program);""",
+  """CREATE INDEX IF NOT EXISTS idx_recordings_recorded_at ON recordings(recorded_at DESC);""",
+  """CREATE TABLE IF NOT EXISTS record_pid_recording_map (
+      pid INTEGER,
+      recording_id TEXT NOT NULL,
+      FOREIGN KEY (recording_id) REFERENCES recordings(recording_id)
+  );""",
   """CREATE TABLE IF NOT EXISTS recent_folders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       path TEXT UNIQUE,
       name TEXT,
-      lastOpened TEXT);""",
-]
-
-const SQL_INITIAL_INSERT_STATEMENTS = @[
-  """INSERT INTO trace_values (id, maxTraceID) VALUES (0, 0)""",
-]
-
-const SQL_ALTER_TABLE_STATEMENTS: seq[string] = @[
-   # example: adding a new column
-   """ALTER TABLE traces ADD COLUMN remoteShareDownloadId text;""",
-   """ALTER TABLE traces ADD COLUMN remoteShareControlId text;""",
-   """ALTER TABLE traces ADD COLUMN remoteShareExpireTime INTEGER DEFAULT -1;""",
-   """ALTER TABLE traces RENAME COLUMN remoteShareDownloadId TO remoteShareDownloadKey;"""
-   # """ALTER TABLE traces ADD COLUMN love integer;"""
+      last_opened TEXT
+  );""",
 ]

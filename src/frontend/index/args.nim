@@ -27,7 +27,10 @@ proc parseArgs* =
     data.startOptions.inTest = true
 
   if electronProcess.env.hasKey(cstring"CODETRACER_TRACE_ID"):
-    data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"].parseJSInt
+    # M-REC-2: ``CODETRACER_TRACE_ID`` now carries a UUIDv7 string.
+    # The env-var name is preserved (M-REC-6 owns its rename to
+    # ``CODETRACER_RECORDING_ID``).
+    data.startOptions.traceID = electronProcess.env[cstring"CODETRACER_TRACE_ID"]
     callerProcessPid = electronProcess.env[cstring"CODETRACER_CALLER_PID"].parseJsInt
     return
   else:
@@ -84,7 +87,8 @@ proc parseArgs* =
         if i + 1 < args.len:
           data.startOptions.deepReview = cast[DeepReviewData](JSON.parse(fs.readFileSync(args[i + 1], cstring"utf8")))
           data.startOptions.withDeepReview = true
-          data.startOptions.traceID = -1
+          # M-REC-2: empty UUIDv7 string means "no recording".  Was ``-1`` pre-M-REC-2.
+          data.startOptions.traceID = cstring""
           i += 2
           continue
         else:
@@ -94,7 +98,8 @@ proc parseArgs* =
         data.startOptions.record = false
       elif arg == cstring"--welcome-screen":
         data.startOptions.welcomeScreen = true
-        data.startOptions.traceID = -1
+        # M-REC-2: empty UUIDv7 string means "no recording".  Was ``-1`` pre-M-REC-2.
+        data.startOptions.traceID = cstring""
       elif arg == cstring"edit":
         data.startOptions.edit = true
         if i + 1 >= args.len:
@@ -125,7 +130,8 @@ proc parseArgs* =
       elif arg == cstring"--shell-ui":
         data.startOptions.shellUi = true
         data.startOptions.folder = electronprocess.cwd()
-        data.startOptions.traceID = -1
+        # M-REC-2: empty UUIDv7 string means "no recording".  Was ``-1`` pre-M-REC-2.
+        data.startOptions.traceID = cstring""
         break
       elif arg == cstring"--port":
         if i + 1 < args.len:
@@ -175,16 +181,22 @@ proc parseArgs* =
         else:
           errorPrint "expected --caller-pid <caller-pid>"
           break
-      elif not arg.isNaN:
+      elif arg.len == 36 and ($arg)[14] == '7' and ($arg)[8] == '-':
+        # M-REC-2: positional argument that looks like a canonical
+        # UUIDv7 (36 chars, version nibble '7' at position 14, hyphen
+        # at position 8) is treated as the recording-id.  Pre-M-REC-2
+        # this used ``!arg.isNaN`` to gate on integer-looking args.
+        # Loose check; the database lookup is the source of truth.
         data.startOptions.screen = false
         data.startOptions.loading = true
         data.startOptions.record = false
-        data.startOptions.traceID = arg.parseJSInt
+        data.startOptions.traceID = arg
         data.startOptions.folder = electronprocess.cwd()
       else:
         discard
       i += 1
   else:
-    data.startOptions.traceID = -1
+    # M-REC-2: empty UUIDv7 string means "no recording".
+    data.startOptions.traceID = cstring""
     data.startOptions.welcomeScreen = true
     data.startOptions.folder = electronprocess.cwd()

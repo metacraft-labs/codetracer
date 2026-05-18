@@ -95,7 +95,10 @@ proc initWelcomeScreenVM*() =
 
 proc legacyTraceRecord(trace: Trace): RecentTraceRecord =
   RecentTraceRecord(
-    id: trace.id,
+    # M-REC-2: ``Trace.id`` is a UUIDv7 ``langstring``; the VM store
+    # uses ``string`` for backend portability, so ``safeStr`` does the
+    # cstring → string conversion in the JS backend.
+    id: safeStr(trace.id),
     program: safeStr(trace.program),
     args: toStrings(trace.args),
     workdir: safeStr(trace.workdir),
@@ -172,7 +175,7 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
   welcomeScreenVMInstance.setMode(self.currentWelcomeMode())
   welcomeScreenVMInstance.syncLoadingState(
     self.loading,
-    (if self.loadingTrace.isNil: NO_LOADING_TRACE else: self.loadingTrace.id))
+    (if self.loadingTrace.isNil: NO_LOADING_TRACE else: safeStr(self.loadingTrace.id)))
   welcomeScreenVMInstance.updateNewRecord(proc(form: var NewRecordFormState) =
     if self.newRecord.isNil:
       form.executable = ""
@@ -221,7 +224,8 @@ proc showWelcomeView*(self: WelcomeScreenComponent) =
   self.loadingTrace = nil
   self.syncLegacyWelcomeScreenIntoVM()
 
-proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; traceId: int) =
+proc loadRecentTraceFromWelcome*(self: WelcomeScreenComponent; traceId: cstring) =
+  ## M-REC-2: ``traceId`` is now a UUIDv7 recording-id string.
   self.loading = true
   self.loadingTrace = nil
   for trace in self.data.recentTraces:
@@ -291,8 +295,11 @@ when defined(js):
   proc buildWelcomeCallbacks(self: WelcomeScreenComponent):
       WelcomeScreenCallbacks =
     WelcomeScreenCallbacks(
-      onRecentTraceClick: proc(traceId: int) =
-        self.loadRecentTraceFromWelcome(traceId),
+      onRecentTraceClick: proc(traceId: string) =
+        # M-REC-2: VM callbacks pass ``string`` ids; the legacy
+        # WelcomeScreenComponent IPC hop expects ``cstring``, so we
+        # convert at the boundary.
+        self.loadRecentTraceFromWelcome(cstring(traceId)),
       onRecentFolderClick: proc(folderPath: string) =
         self.loadRecentFolderFromWelcome(folderPath),
       onStartOptionClick: proc(key: string) =

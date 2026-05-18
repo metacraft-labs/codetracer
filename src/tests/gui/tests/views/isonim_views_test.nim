@@ -9540,8 +9540,12 @@ proc makeWelcomeTrace(id: int; program: string;
                       date: string = "2026/05/02 12:00:00";
                       duration: string = "0.5s";
                       workdir: string = "/tmp"): RecentTraceRecord =
+  # M-REC-2: ``RecentTraceRecord.id`` is a UUIDv7 string now; we
+  # synthesize a canonical-form id from the int so the existing
+  # callers (which pass small integer literals for readability) keep
+  # working without churn.
   RecentTraceRecord(
-    id: id,
+    id: "01949fcc-7d92-7e9c-aaaa-" & align($id, 12, '0'),
     program: program,
     args: args,
     workdir: workdir,
@@ -9608,7 +9612,7 @@ suite "IsoNim Welcome Screen — structure":
       let panel = renderWelcomeScreenPanel(r, vm)
       check findByClass(panel, "welcome-screen-loading-overlay") == nil
 
-      vm.beginLoadingTrace(7)
+      vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000007")
       let welcome = findByClass(panel, "welcome-screen")
       check "welcome-screen-loading" in welcome.attributes["class"]
       let overlay = findByClass(panel, "welcome-screen-loading-overlay")
@@ -9687,7 +9691,9 @@ suite "IsoNim Welcome Screen — welcome mode":
       check "visible" notin tooltip.attributes["class"]
 
       trace.fireEvent("mouseover")
-      check vm.hoveredTrace.val == 7
+      # M-REC-2: synthesized UUIDv7 from int id 7 (matches the
+      # ``makeWelcomeTrace`` synthesizer).
+      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
       tooltip = findByClass(panel, "recent-trace-tooltip")
       check "visible" in tooltip.attributes["class"]
 
@@ -9756,11 +9762,12 @@ suite "IsoNim Welcome Screen — welcome mode":
         makeWelcomeOption("Open folder"),
       ])
 
-      var clickedTrace = -1
+      # M-REC-2: ``clickedTrace`` is a UUIDv7 string; empty == "no click yet".
+      var clickedTrace = ""
       var clickedFolder = ""
       var clickedOptions: seq[string] = @[]
       let callbacks = WelcomeScreenCallbacks(
-        onRecentTraceClick: proc(traceId: int) = clickedTrace = traceId,
+        onRecentTraceClick: proc(traceId: string) = clickedTrace = traceId,
         onRecentFolderClick: proc(folderPath: string) = clickedFolder = folderPath,
         onStartOptionClick: proc(key: string) = clickedOptions.add(key)
       )
@@ -9772,7 +9779,9 @@ suite "IsoNim Welcome Screen — welcome mode":
       for option in options:
         option.fireEvent("click")
 
-      check clickedTrace == 11
+      # M-REC-2: synthesized canonical UUIDv7 from int id 11 (matches
+      # the ``makeWelcomeTrace`` synthesizer).
+      check clickedTrace == "01949fcc-7d92-7e9c-aaaa-000000000011"
       check clickedFolder == "/tmp/demo"
       check clickedOptions == @[
         "record-new-trace",

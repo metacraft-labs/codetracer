@@ -20,7 +20,8 @@ type
     start*: int64
     pluginCommands*: JsAssoc[cstring, SearchSource]
     pluginClient*: PluginClient
-    debugInstances*: JsAssoc[int, DebugInstance]
+    # M-REC-2: keyed by UUIDv7 recording-id string.
+    debugInstances*: JsAssoc[cstring, DebugInstance]
     recordProcess*: NodeSubProcess
     layout*: js
     helpers*: Helpers
@@ -59,7 +60,7 @@ var data* = ServerData(
     rawTestStrategy: cstring""
   ),
   pluginCommands: JsAssoc[cstring, SearchSource]{},
-  debugInstances: JsAssoc[int, DebugInstance]{}
+  debugInstances: JsAssoc[cstring, DebugInstance]{}
 )
 
 let helpers* {.exportc: "helpers".} = require("./helpers")

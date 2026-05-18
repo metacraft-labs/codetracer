@@ -102,14 +102,14 @@ import ../backend/backend_service
 import ../store/[replay_data_store, types]
 
 const
-  NO_HOVERED_TRACE* = -1
+  NO_HOVERED_TRACE* = ""
     ## Sentinel for ``hoveredTrace`` — mirrors the legacy "no trace
     ## hovered" state where the Karax view rendered no
     ## ``recent-trace-tooltip`` with the ``visible`` modifier.
-  NO_LOADING_TRACE* = -1
-    ## Sentinel for ``loadingTraceId`` — mirrors the legacy
-    ## ``self.loadingTrace`` being ``nil`` in
-    ## ``frontend/ui/welcome_screen.nim``.
+    ## M-REC-2: switched from ``-1`` (int) to ``""`` (UUIDv7 string)
+    ## per the recording-id type flip.
+  NO_LOADING_TRACE* = ""
+    ## Sentinel for ``loadingTraceId``.  M-REC-2: see NO_HOVERED_TRACE.
 
 type
   NewRecordFormState* = object
@@ -133,12 +133,13 @@ type
     recentTraces*: Signal[seq[RecentTraceRecord]]
     recentFolders*: Signal[seq[RecentFolderRecord]]
     startOptions*: Signal[seq[WelcomeStartOptionRecord]]
-    hoveredTrace*: Signal[int]
+    # M-REC-2: trace ids are UUIDv7 strings now.
+    hoveredTrace*: Signal[string]
     hoveredOption*: Signal[string]
     editMode*: Signal[bool]
     mode*: Signal[WelcomeScreenMode]
     loading*: Signal[bool]
-    loadingTraceId*: Signal[int]
+    loadingTraceId*: Signal[string]
     onlineTraceInput*: Signal[string]
     launchConfig*: Signal[LaunchConfigState]
     newRecord*: Signal[NewRecordFormState]
@@ -219,7 +220,7 @@ proc setStartOptions*(vm: WelcomeScreenVM;
 # Actions — hover state
 # ---------------------------------------------------------------------------
 
-proc hoverTrace*(vm: WelcomeScreenVM; traceId: int) =
+proc hoverTrace*(vm: WelcomeScreenVM; traceId: string) =
   ## Set the currently-hovered trace.  ``NO_HOVERED_TRACE`` clears
   ## the hover.
   vm.hoveredTrace.val = traceId
@@ -299,7 +300,7 @@ proc setOnlineTraceInput*(vm: WelcomeScreenVM; value: string) =
 # Actions — loading overlay
 # ---------------------------------------------------------------------------
 
-proc beginLoadingTrace*(vm: WelcomeScreenVM; traceId: int) =
+proc beginLoadingTrace*(vm: WelcomeScreenVM; traceId: string) =
   ## Flip the loading overlay on and remember which trace is being
   ## loaded.  Mirrors the Karax ``handleClick`` proc that flips
   ## ``self.loading = true`` and ``self.loadingTrace = trace``.
@@ -314,7 +315,7 @@ proc endLoading*(vm: WelcomeScreenVM) =
   vm.loading.val = false
   vm.loadingTraceId.val = NO_LOADING_TRACE
 
-proc syncLoadingState*(vm: WelcomeScreenVM; loading: bool; traceId: int) =
+proc syncLoadingState*(vm: WelcomeScreenVM; loading: bool; traceId: string) =
   ## Bridge helper for the legacy renderer path: mirror the current
   ## loading overlay state without implying a new user action.  This
   ## lets the startup wiring replay ``self.loading`` /
@@ -415,7 +416,7 @@ proc isNewRecordValid*(vm: WelcomeScreenVM): bool =
 # Actions — backend dispatches
 # ---------------------------------------------------------------------------
 
-proc loadRecentTrace*(vm: WelcomeScreenVM; traceId: int) =
+proc loadRecentTrace*(vm: WelcomeScreenVM; traceId: string) =
   ## Dispatch the legacy ``CODETRACER::load-recent-trace`` flow.
   ## The Karax view sent the same payload via ``self.data.ipc.send``
   ## so the main-process side picks the right handler regardless of

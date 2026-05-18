@@ -191,7 +191,7 @@ proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
     copyMessageActive: JsAssoc[int, bool]{},
     infoMessageActive: JsAssoc[int, bool]{},
     errorMessageActive: JsAssoc[int, MessageKind]{},
-    isUploading: JsAssoc[int, bool]{}
+    isUploading: JsAssoc[cstring, bool]{}
   )
   data.ui.welcomeScreen = result
   data.registerComponent(result, Content.WelcomeScreen)

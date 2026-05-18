@@ -47,7 +47,15 @@ type
     events*: seq[ProgramEvent]
 
   Trace* = ref object
-    id*: int
+    # M-REC-2: ``id`` is now a UUIDv7 recording identifier (lowercase
+    # hyphenated 36-char form per RFC 9562).  The field name remains
+    # ``id`` for now — M-REC-3 owns the semantic rename to
+    # ``recordingId``.  Type-only flip from ``int`` to ``string`` was
+    # required because the ``trace_index.db`` schema dropped the
+    # integer ``maxTraceID`` counter and switched to
+    # ``recording_id TEXT PRIMARY KEY``.  See
+    # ``codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md``.
+    id*: langstring
     program*: langstring
     args*: seq[langstring]
     env*: langstring
@@ -79,7 +87,10 @@ type
     replay*: bool
     binary*: langstring
     program*: seq[langstring]
-    traceId*: int
+    # M-REC-2/3: recording identifier as a UUIDv7 string.  Field name
+    # preserved (M-REC-3 will rename to ``recordingId``); type flipped
+    # from ``int`` per the schema cascade.
+    traceId*: langstring
     calltrace*: bool
     preloadEnabled*: bool
     callArgsEnabled*: bool

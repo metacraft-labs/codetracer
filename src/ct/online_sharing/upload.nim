@@ -253,7 +253,8 @@ proc uploadTrace*(trace: Trace, org: Option[string],
 
 proc uploadCommand*(
   patternArg: Option[string],
-  traceIdArg: Option[int],
+  # M-REC-2: UUIDv7 recording-id string (M-REC-3 will rename).
+  traceIdArg: Option[string],
   traceFolderArg: Option[string],
   interactive: bool,
   uploadOrg: Option[string],

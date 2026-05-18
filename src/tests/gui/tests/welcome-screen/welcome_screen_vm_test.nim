@@ -61,12 +61,14 @@ proc commandCount(mock: MockBackendService; command: string): int =
     if rc.command == command:
       inc result
 
-proc makeTrace(id: int; program: string;
+proc makeTrace(id: string; program: string;
                args: seq[string] = @[];
                date: string = "2026/05/02 12:00:00";
                duration: string = "0.5s";
                workdir: string = "/tmp"): RecentTraceRecord =
-  ## Convenience constructor used across the suites.
+  ## Convenience constructor used across the suites.  M-REC-2: ``id``
+  ## is now a UUIDv7 string.  Tests that need a stable id pass a
+  ## hand-crafted canonical-form UUIDv7 string.
   RecentTraceRecord(
     id: id,
     program: program,
@@ -177,8 +179,8 @@ suite "WelcomeScreenVM — welcome_screen":
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
       let traces = @[
-        makeTrace(1, "/usr/bin/python3", @["fib.py"]),
-        makeTrace(2, "/usr/bin/ruby", @["app.rb"]),
+        makeTrace("01949fcc-7d92-7e9c-aaaa-000000000001","/usr/bin/python3", @["fib.py"]),
+        makeTrace("01949fcc-7d92-7e9c-aaaa-000000000002","/usr/bin/ruby", @["app.rb"]),
       ]
       vm.setRecentTraces(traces)
       check vm.recentTraces.val.len == 2
@@ -193,10 +195,10 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.setRecentTraces(@[makeTrace(1, "/a")])
-      vm.addRecentTrace(makeTrace(2, "/b"))
+      vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000001","/a")])
+      vm.addRecentTrace(makeTrace("01949fcc-7d92-7e9c-aaaa-000000000002","/b"))
       check vm.recentTraces.val.len == 2
-      check vm.recentTraces.val[1].id == 2
+      check vm.recentTraces.val[1].id == "01949fcc-7d92-7e9c-aaaa-000000000002"
       dispose()
 
   test "recent folders section populates from setRecentFolders":
@@ -258,11 +260,11 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.setRecentTraces(@[makeTrace(7, "/p")])
+      vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000007","/p")])
       check vm.hoveredTrace.val == NO_HOVERED_TRACE
 
-      vm.hoverTrace(7)
-      check vm.hoveredTrace.val == 7
+      vm.hoverTrace("01949fcc-7d92-7e9c-aaaa-000000000007")
+      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000007"
 
       vm.clearHoveredTrace()
       check vm.hoveredTrace.val == NO_HOVERED_TRACE
@@ -277,11 +279,11 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.setRecentTraces(@[makeTrace(1, "/p")])
-      vm.hoverTrace(1)
+      vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000001","/p")])
+      vm.hoverTrace("01949fcc-7d92-7e9c-aaaa-000000000001")
       vm.setMode(wsmNewRecord)
-      check vm.hoveredTrace.val == 1  # survives mode change
-      vm.setRecentTraces(@[makeTrace(2, "/q")])
+      check vm.hoveredTrace.val == "01949fcc-7d92-7e9c-aaaa-000000000001"  # survives mode change
+      vm.setRecentTraces(@[makeTrace("01949fcc-7d92-7e9c-aaaa-000000000002","/q")])
       check vm.hoveredTrace.val == NO_HOVERED_TRACE  # cleared on refresh
       dispose()
 
@@ -294,10 +296,10 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.loadRecentTrace(42)
+      vm.loadRecentTrace("01949fcc-7d92-7e9c-aaaa-00000000002a")
       drain()
       check vm.loading.val == true
-      check vm.loadingTraceId.val == 42
+      check vm.loadingTraceId.val == "01949fcc-7d92-7e9c-aaaa-00000000002a"
       check mock.commandCount("ct/load-recent-trace") == 1
       dispose()
 
@@ -305,7 +307,7 @@ suite "WelcomeScreenVM — welcome_screen":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
-      vm.beginLoadingTrace(3)
+      vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000003")
       check vm.loading.val == true
       vm.endLoading()
       check vm.loading.val == false

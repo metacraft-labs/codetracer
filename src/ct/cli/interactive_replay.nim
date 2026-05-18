@@ -73,12 +73,16 @@ proc interactiveTraceSelectMenu*(command: StartupCommand): Trace =
       quit(0)
 
     try:
-      let traceId = raw.parseInt
+      # M-REC-2: ids are UUIDv7 strings; the user types them verbatim
+      # (full canonical 36-char form for now — short-prefix matching
+      # is M-REC-6's deliverable).  We do not validate here; the
+      # database lookup is the source of truth.
+      let traceId = raw.strip
       let trace = trace_index.find(traceId, test=false)
       if not trace.isNil:
         return trace
       else:
         echo fmt"trace with id {traceId} not found in local codetracer db, please try again"
-    except:
+    except CatchableError:
       echo "error: ", getCurrentExceptionMsg()
       echo "please try again"
