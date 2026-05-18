@@ -809,7 +809,7 @@ proc onlyTrace(self: EventLogComponent, redraw: bool = true) =
     self.redraw()
 
 proc onlyRecordedEvent(self: EventLogComponent, redraw: bool = true) =
-  let eventTags = [EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents]
+  let eventTags = [EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents, EventEvm]
 
   self.changeAllEventKinds(false, redraw = false)
 
@@ -988,17 +988,14 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
           text(EVENT_LOG_TAG_NAMES[tag])
 
   proc dropdownVNode(): VNode =
-    var activeTraceClass = if self.isOnlyTraceSelected(): "active" else: ""
-    var activeEventsClass = if self.isOnlyRecordedEventSelected(): "active" else: ""
-    var buttonClass = "ct-button-sm-secondary"
-
     buildHtml(
       tdiv(class = dropDownContainerClass, id = dropDownContainerId)
     ):
       tdiv(class = "toggle-buttons"):
         button(
           id=local("category-only-recorded-event"),
-          class = buttonClass & fmt" {activeEventsClass}",
+          class = "ct-tab",
+          `data-selected` = if self.isOnlyRecordedEventSelected(): "true" else: "false",
           tabIndex = "0",
           onclick = proc (e: Event, et: VNode) =
             self.onlyRecordedEvent(redraw = false)
@@ -1011,7 +1008,8 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
           ): text("Display only recorded events: events from the original record")
         button(
           id = local("category-onlytrace"),
-          class = buttonClass & fmt" {activeTraceClass}",
+          class = "ct-tab",
+          `data-selected` = if self.isOnlyTraceSelected(): "true" else: "false",
           tabIndex = "0",
           onclick = proc (e: Event, et: VNode) =
             self.onlyTrace(redraw = false)
@@ -1024,7 +1022,8 @@ proc eventLogCategoryButtonView(self: EventLogComponent, event: EventDropDownBox
           ): text("Display only trace logs: events that happened as part of the debugging")
         button(
           id = local("category-enabledisable"),
-          class = buttonClass,
+          class = "ct-tab",
+          `data-selected` = "false",
           tabIndex = "0",
           onclick = proc (e: Event, et: VNode) =
             self.changeAllEventKinds(self.enableOrDisable(), redraw = false)
