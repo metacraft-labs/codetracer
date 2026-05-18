@@ -319,8 +319,9 @@ method render*(self: CommandPaletteComponent): VNode =
               elif e.keyCode == ESC_KEY_CODE: # escape
                 self.resetCommandPalette()
               elif e.keyCode == TAB_KEY_CODE: # tab
-                e.preventDefault()
-                self.onTab()
+                if self.inputPlaceholder != "" and self.inputPlaceholder != self.inputValue:
+                  e.preventDefault()
+                  self.onTab()
           )
           # tdiv(class = "custom-tooltip"):
           #   text "Navigate to file (ctrl+p) / Run command (alt+p)"

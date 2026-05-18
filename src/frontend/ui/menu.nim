@@ -97,10 +97,11 @@ proc menuElementView*(
           if self.activePath[depth] != i:
               self.activePath[depth] = i
 
+          self.data.redraw(),
+      onmousemove = proc =
         if self.keyNavigation and (self.activeIndex != i or (self.activePath.len() > 1 and self.activePath[^1] != i)):
           self.keyNavigation = false
-
-        self.data.redraw(),
+          self.data.redraw(),
       onclick = proc =
         self.enterElement(node)
     )
@@ -136,10 +137,11 @@ proc menuFolderView*(
             if self.activePath[depth] != i:
               self.activePath[depth] = i
 
+          self.data.redraw(),
+      onmousemove = proc =
         if self.keyNavigation and (self.activeIndex != i or (self.activePath.len() > 1 and self.activePath[^1] != i)):
           self.keyNavigation = false
-
-        self.data.redraw()
+          self.data.redraw()
     )
   ):
     span(class = "ct-menu-item-label"):
