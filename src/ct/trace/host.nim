@@ -183,22 +183,25 @@ proc materializeImportedTracePath(tempDir, sourcePath, payloadPath: string): boo
 
 proc normalizeImportedTracePaths(tempDir: string) =
   ## Local manifest imports copy companion files into a transient trace folder.
-  ## Make trace_paths.json point at the self-contained files/ payload so the
-  ## imported trace remains browsable after the manifest temp directory is gone.
-  let tracePathsPath = tempDir / "trace_paths.json"
-  if not fileExists(tracePathsPath):
-    writeFile(tracePathsPath, "[]")
+  ## Make `paths.json` point at the self-contained files/ payload so the
+  ## imported trace remains browsable after the manifest temp directory is
+  ## gone.  M-REC-1.5: the file name was `trace_paths.json` pre-1.0; the
+  ## new name matches the CTFS internal-file name (`paths.json`) and the
+  ## legacy sidecar is no longer accepted.
+  let runtimePathsPath = tempDir / "paths.json"
+  if not fileExists(runtimePathsPath):
+    writeFile(runtimePathsPath, "[]")
     return
 
   var rawPaths: seq[string] = @[]
   try:
-    let tracePathsJson = parseJson(readFile(tracePathsPath))
-    if tracePathsJson.kind == JArray:
-      for pathNode in tracePathsJson:
+    let runtimePathsJson = parseJson(readFile(runtimePathsPath))
+    if runtimePathsJson.kind == JArray:
+      for pathNode in runtimePathsJson:
         if pathNode.kind == JString:
           rawPaths.add(pathNode.getStr())
   except CatchableError as e:
-    echo "WARNING: failed to parse trace_paths.json for local import: ", e.msg
+    echo "WARNING: failed to parse paths.json for local import: ", e.msg
     return
 
   var normalizedPaths: seq[string] = @[]
@@ -227,7 +230,7 @@ proc normalizeImportedTracePaths(tempDir: string) =
     else:
       normalizedPaths.add(rawPath)
 
-  writeFile(tracePathsPath, $(%normalizedPaths))
+  writeFile(runtimePathsPath, $(%normalizedPaths))
 
 proc importCtFile(ctFilePath: string): int =
   ## Import a standalone .ct file by creating a minimal trace folder
@@ -263,23 +266,14 @@ proc importCtFile(ctFilePath: string): int =
   if enriched:
     echo "ct host: MCR trace enriched with portable binaries/symbols"
 
-  # Create minimal trace_db_metadata.json so importTrace can read it
-  # (only if enrichment or a prior recording step did not already produce one).
-  if not fileExists(tempDir / "trace_db_metadata.json"):
-    let metaJson = %*{
-      "program": "imported",
-      "args": newJArray(),
-      "workdir": tempDir,
-      "lang": "c"
-    }
-    writeFile(tempDir / "trace_db_metadata.json", $metaJson)
-
+  # M-REC-1.5: importTrace now reads metadata from the CTFS `meta.dat`
+  # directly — no more legacy JSON sidecar bridge files.
   let ctfsSourcesExtracted = materializeCtfsSources(tempDir / "trace.ct", tempDir)
   if ctfsSourcesExtracted:
     echo "ct host: extracted CTFS source metadata"
 
-  if not fileExists(tempDir / "trace_paths.json"):
-    writeFile(tempDir / "trace_paths.json", "[]")
+  if not fileExists(tempDir / "paths.json"):
+    writeFile(tempDir / "paths.json", "[]")
 
   normalizeImportedTracePaths(tempDir)
 
@@ -313,7 +307,11 @@ proc importCtFile(ctFilePath: string): int =
 
 proc importTraceFolder(traceFolderPath: string): int =
   ## Import a trace folder into the database.
-  ## The folder should contain trace_metadata.json or trace_db_metadata.json.
+  ##
+  ## M-REC-1.5: the folder must contain a `.ct` CTFS container; metadata
+  ## comes from its internal `meta.dat`.  Legacy sidecar JSONs
+  ## (`trace_metadata.json` / `trace_db_metadata.json` / `trace_paths.json`)
+  ## are no longer accepted.
   ##
   ## If the folder contains an MCR trace (.ct file with CTFS magic),
   ## enrichment via `ct-mcr export --portable` is attempted first
@@ -329,42 +327,24 @@ proc importTraceFolder(traceFolderPath: string): int =
   if enriched:
     echo "ct host: MCR trace enriched with portable binaries/symbols"
 
+  # CTFS materialization writes `paths.json` for the frontend; the new
+  # importTrace path reads metadata fields directly from `meta.dat`.
+  let ctPath = findCtFileInFolder(fullPath)
+  if ctPath.len == 0:
+    echo "ct host: error: trace folder missing `.ct` CTFS container: ",
+      traceFolderPath
+    quit(1)
+  discard materializeCtfsSources(ctPath, fullPath)
+
   normalizeImportedTracePaths(fullPath)
 
-  let traceKind =
-    if fileExists(fullPath / "trace_metadata.json"):
-      "db"
-    else:
-      # Replay trace imports (RR/TTD) carry trace_db_metadata.json.
-      "rr"
-
-  let metaFile = if traceKind == "db":
-      fullPath / "trace_metadata.json"
-    else:
-      fullPath / "trace_db_metadata.json"
-  if not fileExists(metaFile):
-    # For MCR trace folders that lack metadata, create a minimal one
-    # so the import can proceed.
-    if findCtFileInFolder(fullPath).len > 0:
-      let metaJson = %*{
-        "program": "imported",
-        "args": newJArray(),
-        "workdir": fullPath,
-        "lang": "c"
-      }
-      writeFile(fullPath / "trace_db_metadata.json", $metaJson)
-      if not fileExists(fullPath / "trace_paths.json"):
-        writeFile(fullPath / "trace_paths.json", "[]")
-    else:
-      echo "ct host: error: trace folder missing metadata file: ", metaFile
-      quit(1)
-
+  # All freshly-imported folders now follow the CTFS-only path.
   let trace = importTrace(
     fullPath,
     NO_TRACE_ID,
     NO_PID,
     LangUnknown,
-    traceKind = traceKind)
+    traceKind = "rr")
   if trace.isNil:
     echo "ct host: error: failed to import trace from folder ", traceFolderPath
     quit(1)
@@ -435,8 +415,8 @@ proc findMaterializedTraceFolder(path: string): string =
   ## Resolve `path` to a directory holding a CTFS materialized trace, or to
   ## the `.ct` container itself when the user passes the file path directly.
   ## Materialized traces are CTFS-only: any folder must contain at least one
-  ## `*.ct` file (legacy `trace_metadata.json`/`trace.bin`/`trace.json`
-  ## sidecar bundles are no longer accepted).
+  ## `*.ct` file (legacy sidecar bundles are no longer accepted; see
+  ## M-REC-1.5).
   if path.len == 0:
     return ""
   let fullPath = try:
@@ -658,16 +638,17 @@ proc materializedPayloadFileName(obj: JsonNode): string =
   "trace.bin"
 
 proc materializePayloadTracePathAliases(tempDir, payloadPath: string) =
-  let tracePathsPath = tempDir / "trace_paths.json"
-  if not fileExists(tracePathsPath):
+  ## M-REC-1.5: `paths.json` replaces the retired `trace_paths.json`.
+  let runtimePathsPath = tempDir / "paths.json"
+  if not fileExists(runtimePathsPath):
     return
 
   let payloadFileName = payloadPath.extractFilename
   var tracePaths: JsonNode
   try:
-    tracePaths = parseJson(readFile(tracePathsPath))
+    tracePaths = parseJson(readFile(runtimePathsPath))
   except CatchableError as e:
-    echo "WARNING: failed to parse trace_paths.json for materialized payload aliases: ", e.msg
+    echo "WARNING: failed to parse paths.json for materialized payload aliases: ", e.msg
     return
 
   if tracePaths.kind != JArray:

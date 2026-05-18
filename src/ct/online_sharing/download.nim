@@ -65,8 +65,8 @@ proc downloadTrace*(url: string,
   removeFile(downloadTarget)
 
   # Materialized traces are CTFS-only: the downloaded zip must contain a
-  # `.ct` container (legacy `trace.json` + `trace_metadata.json` +
-  # `trace_paths.json` bundles are no longer accepted).
+  # `.ct` container (legacy JSON sidecar bundles are no longer accepted;
+  # see M-REC-1.5).
   var ctPath = ""
   for entry in walkDir(unzippedLocation):
     if entry.kind == pcFile and entry.path.endsWith(".ct"):

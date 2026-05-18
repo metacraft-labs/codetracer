@@ -93,21 +93,10 @@ proc findExistingTrace(programPattern: string): string =
       continue
     if not isUsableTraceDir(path):
       continue
-    var program = ""
-    var workdir = ""
-    for metaName in ["trace_metadata.json", "trace_db_metadata.json"]:
-      let metaPath = path / metaName
-      if not fileExists(metaPath):
-        continue
-      try:
-        let meta = parseFile(metaPath)
-        program = meta.getOrDefault("program").getStr("")
-        workdir = meta.getOrDefault("workdir").getStr("")
-        if program.len > 0 or workdir.len > 0:
-          break
-      except:
-        discard
-    if programPattern in program or programPattern in workdir:
+    # M-REC-1.5: derive the program identifier from the folder name
+    # (legacy JSON sidecars retired).
+    let program = dirname
+    if programPattern in program:
       return path
   return ""
 

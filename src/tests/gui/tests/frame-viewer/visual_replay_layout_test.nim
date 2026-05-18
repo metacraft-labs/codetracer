@@ -53,11 +53,10 @@ suite "MCR visual replay layout capability":
     dirs["/plain"] = @[]
     check not detectVisualReplayAvailability("/plain", pathExists, readFile, readDir)
 
-    dirs["/visual-metadata"] = @[]
-    files["/visual-metadata/trace_metadata.json"] =
-      """{"capabilities":{"visualReplay":true}}"""
-    check detectVisualReplayAvailability(
-      "/visual-metadata", pathExists, readFile, readDir)
+    # M-REC-1.5 retired the legacy `trace_metadata.json` /
+    # `trace_db_metadata.json` sidecars that used to carry the
+    # `visualReplay` capability flag.  Detection is now driven entirely
+    # by the on-disk artefacts.
 
     dirs["/visual-artifacts"] = @["capture"]
     dirs["/visual-artifacts/capture"] = @[]

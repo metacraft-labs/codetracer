@@ -875,36 +875,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("parsing/evaluating program: duration: {:?}", duration);
 
     if interpreter.tracing {
-        let trace_path =
-            PathBuf::from(env::var("CODETRACER_DB_TRACE_PATH").unwrap_or("trace.json".to_string()));
-        let trace_folder = trace_path.parent().unwrap();
-        let trace_metadata_path = trace_folder.join("trace_metadata.json");
-        let trace_paths_path = trace_folder.join("trace_paths.json");
-
-        println!("store in:");
-        println!("  {trace_path:?} and");
-        println!("  {trace_metadata_path:?} and");
-        println!("  {trace_paths_path:?}");
-
-        interpreter
-            .tracer
-            .store_trace_metadata(&trace_metadata_path)
-            .unwrap();
-
-        interpreter
-            .tracer
-            .store_trace_paths(&trace_paths_path)
-            .unwrap();
-
-        // duration code copied from
-        // https://rust-lang-nursery.github.io/rust-cookbook/datetime/duration.html
-
-        let start = Instant::now();
-        interpreter.tracer.store_trace_events(&trace_path).unwrap();
-        let duration = start.elapsed();
+        // M-REC-1.5: the legacy 3-file trace output (trace.json +
+        // trace_metadata.json + trace_paths.json) is no longer accepted
+        // by any consumer in this repo.  small-lang depends on an
+        // upstream `runtime_tracing` crate that has not yet migrated to
+        // emit CTFS `.ct` containers, so for the moment we simply skip
+        // the trace-write step rather than producing data nothing can
+        // read.  Re-enable once `runtime_tracing` ships a CTFS writer.
         eprintln!(
-            "serializing and storing trace events: duration: {:?}",
-            duration
+            "small-lang: tracing output skipped — runtime_tracing has not yet \
+             been migrated to write CTFS `.ct` containers (M-REC-1.5)."
         );
     }
     // println!("{}", interpreter.value_repr(res));

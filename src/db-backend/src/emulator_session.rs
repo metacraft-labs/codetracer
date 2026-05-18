@@ -764,6 +764,12 @@ impl EmulatorReplaySession {
             meta: MetaDat {
                 version: 0,
                 flags: 0,
+                // Default-empty session before any trace is loaded; the
+                // real recording_id is populated by `load_ctfs`.  An
+                // empty string here intentionally fails the
+                // `is_canonical_uuid_v7` check should anything try to
+                // parse this as a real meta.dat payload.
+                recording_id: String::new(),
                 program: String::new(),
                 args: Vec::new(),
                 workdir: String::new(),
@@ -772,6 +778,8 @@ impl EmulatorReplaySession {
                 mcr: None,
                 replay_launch: None,
                 layout_snapshot: None,
+                filter_provenance: Vec::new(),
+                has_filter_provenance: false,
             },
             breakpoints: HashMap::new(),
             next_breakpoint_id: 1,
@@ -1795,6 +1803,7 @@ mod tests {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/local/bin/example".to_owned(),
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
@@ -1817,6 +1826,8 @@ mod tests {
             }),
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         };
         let dat = serialize_meta_dat(&meta);
 
@@ -1885,6 +1896,7 @@ mod tests {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/bin/ruby".to_owned(),
             args: vec!["script.rb".to_owned()],
             workdir: "/srv/proj".to_owned(),
@@ -1893,6 +1905,8 @@ mod tests {
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
@@ -2078,6 +2092,7 @@ mod tests {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/local/bin/hello".to_owned(),
             args: vec![],
             workdir: "/tmp/run".to_owned(),
@@ -2100,6 +2115,8 @@ mod tests {
             }),
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
@@ -2154,6 +2171,7 @@ mod tests {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/local/bin/hello".to_owned(),
             args: vec![],
             workdir: "/tmp/run".to_owned(),
@@ -2176,6 +2194,8 @@ mod tests {
             }),
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();
@@ -2389,6 +2409,7 @@ mod tests {
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/local/bin/hello".to_owned(),
             args: vec![],
             workdir: "/tmp/run".to_owned(),
@@ -2411,6 +2432,8 @@ mod tests {
             }),
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         };
         let dat = serialize_meta_dat(&meta);
         let dir = tempfile::tempdir().unwrap();

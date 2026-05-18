@@ -918,43 +918,23 @@ impl CTFSTraceReader {
     /// `events.log` and running `TraceProcessor::postprocess` to build
     /// the in-memory `Db`.
     ///
-    /// Trace metadata is read from one of two sources, in priority order:
-    ///   1. `meta.dat` — canonical binary format defined in
-    ///      `codetracer-specs/Trace-Files/CTFS-Binary-Format.md` §8.
-    ///      Produced by current MCR/Nim recorders and parsed via the
-    ///      pure-Rust [`meta_dat::parse_meta_dat`] reader (WASM-safe).
-    ///   2. `meta.json` — legacy JSON form retained for backward
-    ///      compatibility with traces from older recorders and existing
-    ///      test fixtures. Used only when `meta.dat` is absent.
-    ///
-    /// If `meta.dat` is present but malformed the error is propagated;
-    /// we deliberately do NOT fall through to `meta.json` in that case,
-    /// since silently masking a corrupted binary header would hide real
-    /// bugs in the writer.
-    ///
-    /// This is the original loading path. It will remain available for
-    /// backward compatibility with traces recorded before the seek-based
-    /// writer was introduced.
+    /// Trace metadata is read from `meta.dat` — the canonical binary
+    /// format defined in `codetracer-specs/Trace-Files/CTFS-Binary-Format.md`
+    /// §8.  M-REC-1.5 (pre-1.0) retired the legacy `meta.json` fallback;
+    /// the reader rejects any `.ct` container that does not carry a
+    /// `meta.dat`.
     fn open_old_format(ctfs: &mut CtfsReader) -> Result<Self, Box<dyn Error>> {
-        // 1. Read and parse trace metadata. Prefer the canonical binary
-        //    `meta.dat` payload; fall back to legacy `meta.json` only when
-        //    `meta.dat` is absent from the container.
-        let meta: codetracer_trace_types::TraceMetadata = match ctfs.read_file("meta.dat") {
-            Ok(bytes) => {
-                let parsed = meta_dat::parse_meta_dat(&bytes).map_err(|e| format!("failed to parse meta.dat: {e}"))?;
-                codetracer_trace_types::TraceMetadata {
-                    program: parsed.program,
-                    args: parsed.args,
-                    workdir: PathBuf::from(parsed.workdir),
-                }
-            }
-            Err(_) => {
-                // meta.dat is absent — this is an older trace that only
-                // shipped JSON metadata. Use the same deserialization path
-                // as before so legacy fixtures keep loading byte-identically.
-                let meta_bytes = ctfs.read_file("meta.json")?;
-                serde_json::from_slice(&meta_bytes)?
-            }
+        // 1. Read and parse trace metadata from the canonical `meta.dat`
+        //    payload.  M-REC-1.5 retired the legacy `meta.json` fallback.
+        let meta_bytes = ctfs
+            .read_file("meta.dat")
+            .map_err(|e| format!("missing or unreadable meta.dat: {e}"))?;
+        let parsed = meta_dat::parse_meta_dat(&meta_bytes).map_err(|e| format!("failed to parse meta.dat: {e}"))?;
+        let meta = codetracer_trace_types::TraceMetadata {
+            recording_id: parsed.recording_id,
+            program: parsed.program,
+            args: parsed.args,
+            workdir: PathBuf::from(parsed.workdir),
         };
 
         let workdir = if meta.workdir.as_os_str().is_empty() {
@@ -1270,18 +1250,42 @@ impl TraceReader for CTFSTraceReader {
 mod tests {
     use super::*;
 
-    /// Verify that a minimal .ct file with only `meta.json` can be opened
-    /// and produces an empty trace (zero steps, zero calls, etc.).
+    /// Canonical pinned test UUIDv7 (M-REC-1).  The embedded timestamp is
+    /// fictional; the byte layout passes `is_canonical_uuid_v7`.
+    const TEST_RECORDING_ID: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
+
+    /// Helper: build a syntactically valid v3 `meta.dat` payload with the
+    /// given program / args / workdir fields and no MCR/replay-launch
+    /// blocks.  Tests previously hand-wrote `meta.json` here — M-REC-1.5
+    /// dropped that fallback so the binary form is now the only option.
+    fn meta_dat_bytes(program: &str, args: &[&str], workdir: &str) -> Vec<u8> {
+        meta_dat::serialize_meta_dat(&meta_dat::MetaDat {
+            version: meta_dat::META_DAT_VERSION,
+            flags: 0,
+            recording_id: TEST_RECORDING_ID.to_owned(),
+            program: program.to_owned(),
+            args: args.iter().map(|s| (*s).to_owned()).collect(),
+            workdir: workdir.to_owned(),
+            recorder_id: "test".to_owned(),
+            paths: vec![],
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        })
+    }
+
+    /// Verify that a minimal .ct file with `meta.dat` can be opened and
+    /// produces an empty trace (zero steps, zero calls, etc.).
     #[test]
     fn test_ctfs_trace_reader_opens_minimal_ct_file() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("test.ct");
 
-        // Create a minimal CTFS container with just meta.json.
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/test","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
 
-        // Open with CTFSTraceReader
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
         assert_eq!(reader.step_count(), 0);
         assert_eq!(reader.call_count(), 0);
@@ -1296,8 +1300,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("no-events.ct");
 
-        let meta_json = br#"{"workdir":"/home/user","program":"/home/user/app","args":["--flag"]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
+        let dat = meta_dat_bytes("/home/user/app", &["--flag"], "/home/user");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
 
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
         assert_eq!(reader.step_count(), 0);
@@ -1311,8 +1315,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("fallback.ct");
 
-        let meta_json = br#"{"workdir":"","program":"/opt/bin/my_program","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
+        let dat = meta_dat_bytes("/opt/bin/my_program", &[], "");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
 
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
         assert_eq!(reader.workdir().to_str().unwrap(), "/opt/bin");
@@ -1337,14 +1341,14 @@ mod tests {
     }
 
     /// Verify that old-format detection works: a container with only
-    /// `meta.json` (no `steps.dat`) uses the old postprocessing path.
+    /// `meta.dat` (no `steps.dat`) uses the old postprocessing path.
     #[test]
     fn test_ctfs_old_format_detected_without_steps_dat() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("old-format.ct");
 
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/test","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
 
         // Old format should work fine (goes through postprocess path)
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
@@ -1362,9 +1366,8 @@ mod tests {
 
         // Create a container with steps.dat to trigger new-format detection.
         // The content doesn't matter — we just need the file to exist.
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/test","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json), ("steps.dat", b"placeholder")])
-            .unwrap();
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("steps.dat", b"placeholder")]).unwrap();
 
         let result = CTFSTraceReader::open(&ct_path);
         // Without the nim-reader feature, new-format should error; with it,
@@ -1531,8 +1534,8 @@ mod tests {
         // Build the .ct container
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("pipeline.ct");
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/hello.py","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json), ("events.log", &cbor_buf)]).unwrap();
+        let dat = meta_dat_bytes("/tmp/hello.py", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
 
         // Open with CTFSTraceReader (exercises the full old-format pipeline)
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
@@ -1636,17 +1639,17 @@ mod tests {
     #[test]
     fn test_is_new_format_detection() {
         let dir = tempfile::tempdir().unwrap();
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
 
         // Old format: no steps.dat
         let old_path = dir.path().join("old.ct");
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/test","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&old_path, &[("meta.json", meta_json)]).unwrap();
+        ctfs_container::write_minimal_ctfs(&old_path, &[("meta.dat", &dat)]).unwrap();
         let old_ctfs = CtfsReader::open(&old_path).unwrap();
         assert!(!is_new_format(&old_ctfs));
 
         // New format: has steps.dat
         let new_path = dir.path().join("new.ct");
-        ctfs_container::write_minimal_ctfs(&new_path, &[("meta.json", meta_json), ("steps.dat", b"data")]).unwrap();
+        ctfs_container::write_minimal_ctfs(&new_path, &[("meta.dat", &dat), ("steps.dat", b"data")]).unwrap();
         let new_ctfs = CtfsReader::open(&new_path).unwrap();
         assert!(is_new_format(&new_ctfs));
     }
@@ -1721,8 +1724,8 @@ mod tests {
         }
 
         let ct_path = dir.join("bench_trace.ct");
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/bench.py","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json), ("events.log", &cbor_buf)]).unwrap();
+        let dat = meta_dat_bytes("/tmp/bench.py", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
 
         ct_path
     }
@@ -1992,8 +1995,8 @@ mod tests {
         }
 
         let ct_path = dir.path().join("event_bench.ct");
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/main.py","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json), ("events.log", &cbor_buf)]).unwrap();
+        let dat = meta_dat_bytes("/tmp/main.py", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
 
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
         assert_eq!(reader.event_count(), 200);
@@ -2097,9 +2100,8 @@ mod tests {
         // Create a minimal new-format container with steps.dat to trigger
         // format detection. The actual content depends on the Nim writer's
         // output format.
-        let meta_json = br#"{"workdir":"/tmp","program":"/tmp/bench.py","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json), ("steps.dat", b"placeholder")])
-            .unwrap();
+        let dat = meta_dat_bytes("/tmp/bench.py", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("steps.dat", b"placeholder")]).unwrap();
 
         #[cfg(not(feature = "nim-reader"))]
         {
@@ -2160,35 +2162,44 @@ mod tests {
         }
     }
 
-    // ── meta.dat / meta.json fallback regression tests ─────────────────
+    // ── meta.dat metadata-loading tests ───────────────────────────────
     //
-    // These tests pin the dual-source metadata-loading behavior added in
-    // F5a Phase B: `open_old_format` prefers the canonical binary
-    // `meta.dat` file and only falls back to `meta.json` when `meta.dat`
-    // is absent. They use the in-memory `serialize_meta_dat` helper from
-    // the sibling module to construct valid binary fixtures so the test
-    // logic stays decoupled from any on-disk fixture files.
+    // These tests pin the canonical metadata-loading behavior:
+    // `open_old_format` loads from the binary `meta.dat` file inside the
+    // CTFS container.  M-REC-1.5 (pre-1.0) removed the legacy `meta.json`
+    // fallback, so any trace that lacks `meta.dat` is rejected outright.
 
-    /// A trace with `meta.dat` and no `meta.json` must load using the
-    /// binary metadata. This is the new code path that makes WASM
-    /// browser-replay viable for live MCR traces.
+    /// Helper: build a syntactically valid v3 [`meta_dat::MetaDat`] for
+    /// tests with the canonical pinned UUIDv7 recording_id.
+    fn test_meta_dat_v3(program: &str, args: Vec<String>, workdir: &str) -> meta_dat::MetaDat {
+        meta_dat::MetaDat {
+            version: meta_dat::META_DAT_VERSION,
+            flags: 0,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
+            program: program.to_owned(),
+            args,
+            workdir: workdir.to_owned(),
+            recorder_id: "test".to_owned(),
+            paths: vec![],
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        }
+    }
+
+    /// A trace with `meta.dat` loads using the canonical binary metadata.
     #[test]
     fn open_old_format_reads_meta_dat_when_present() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("meta-dat-only.ct");
 
-        let dat = meta_dat::serialize_meta_dat(&meta_dat::MetaDat {
-            version: meta_dat::META_DAT_VERSION,
-            flags: 0,
-            program: "/usr/bin/myprog".to_owned(),
-            args: vec!["--verbose".to_owned(), "input.txt".to_owned()],
-            workdir: "/srv/work".to_owned(),
-            recorder_id: "ruby".to_owned(),
-            paths: vec![],
-            mcr: None,
-            replay_launch: None,
-            layout_snapshot: None,
-        });
+        let dat = meta_dat::serialize_meta_dat(&test_meta_dat_v3(
+            "/usr/bin/myprog",
+            vec!["--verbose".to_owned(), "input.txt".to_owned()],
+            "/srv/work",
+        ));
 
         ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat)]).unwrap();
 
@@ -2196,27 +2207,29 @@ mod tests {
         assert_eq!(reader.workdir().to_str().unwrap(), "/srv/work");
     }
 
-    /// Existing traces that only ship `meta.json` must continue to load
-    /// byte-identically — this is the "no behavior change for legacy
-    /// traces" guarantee. Effectively a duplicate of
-    /// `test_ctfs_trace_reader_opens_minimal_ct_file` but framed as an
-    /// explicit fallback assertion so a future regression can't silently
-    /// erase the JSON path.
+    /// M-REC-1.5: a trace that lacks `meta.dat` is rejected.  Previously
+    /// such traces fell back to a JSON sidecar; that path is gone.
     #[test]
-    fn open_old_format_falls_back_to_meta_json_when_meta_dat_absent() {
+    fn open_old_format_rejects_trace_without_meta_dat() {
         let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("meta-json-only.ct");
+        let ct_path = dir.path().join("no-meta-dat.ct");
 
-        let meta_json = br#"{"workdir":"/legacy","program":"/legacy/app","args":["a","b"]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
+        // Container with only events.log (no meta.dat); used to fall back
+        // to `meta.json`, now an error.
+        let placeholder_events: &[u8] = b"";
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("events.log", placeholder_events)]).unwrap();
 
-        let reader = CTFSTraceReader::open(&ct_path).unwrap();
-        assert_eq!(reader.workdir().to_str().unwrap(), "/legacy");
+        let err = CTFSTraceReader::open(&ct_path)
+            .expect_err("open must fail when meta.dat is missing")
+            .to_string();
+        assert!(
+            err.contains("meta.dat"),
+            "expected error to mention meta.dat, got: {err}",
+        );
     }
 
     /// If `meta.dat` is present but corrupted, the open must error rather
-    /// than silently falling through to `meta.json`. Otherwise a
-    /// malformed binary header could mask real writer bugs.
+    /// than producing nonsense metadata.
     #[test]
     fn open_old_format_propagates_meta_dat_parse_errors() {
         let dir = tempfile::tempdir().unwrap();
@@ -2225,47 +2238,13 @@ mod tests {
         // Bytes too short to even contain the 8-byte header — guarantees
         // a `MetaDatError::TooShort` from the parser.
         let bad_dat = [0x00u8; 4];
-        let meta_json = br#"{"workdir":"/should-not-be-used","program":"/x","args":[]}"#;
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &bad_dat), ("meta.json", meta_json)]).unwrap();
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &bad_dat)]).unwrap();
 
         let result = CTFSTraceReader::open(&ct_path);
         let err = result.expect_err("open must fail on malformed meta.dat").to_string();
         assert!(
             err.contains("failed to parse meta.dat"),
             "expected meta.dat parse error, got: {err}",
-        );
-    }
-
-    /// When both `meta.dat` and `meta.json` are present (i.e. a
-    /// transitional trace shipped both forms), the binary file wins.
-    /// Verified by encoding distinct workdirs in each: if `meta.json`
-    /// were chosen we'd see the JSON workdir instead.
-    #[test]
-    fn open_old_format_prefers_meta_dat_over_meta_json() {
-        let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("both-present.ct");
-
-        let dat = meta_dat::serialize_meta_dat(&meta_dat::MetaDat {
-            version: meta_dat::META_DAT_VERSION,
-            flags: 0,
-            program: "/from-dat".to_owned(),
-            args: vec![],
-            workdir: "/from-dat-workdir".to_owned(),
-            recorder_id: "test".to_owned(),
-            paths: vec![],
-            mcr: None,
-            replay_launch: None,
-            layout_snapshot: None,
-        });
-        let meta_json = br#"{"workdir":"/from-json-workdir","program":"/from-json","args":[]}"#;
-
-        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("meta.json", meta_json)]).unwrap();
-
-        let reader = CTFSTraceReader::open(&ct_path).unwrap();
-        assert_eq!(
-            reader.workdir().to_str().unwrap(),
-            "/from-dat-workdir",
-            "binary meta.dat must win when both metadata forms are present",
         );
     }
 }

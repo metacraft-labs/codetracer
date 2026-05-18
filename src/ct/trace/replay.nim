@@ -27,7 +27,7 @@ import std / [options, os, osproc, strutils, strformat ],
 #     echo "ERROR: a trace folder not found inside multitrace"
 #     quit(1)
 
-#   let trace = importDbTrace(traceDir / "trace_metadata.json", NO_TRACE_ID, NO_PID, LangUnknown)
+#   let trace = importTrace(traceDir, NO_TRACE_ID, NO_PID, LangUnknown)
 #   if trace.isNil:
 #     echo fmt"ERROR: couldn't import the trace with name {traceDir.extractFilename} from the multitrace"
 #     quit(1)
@@ -161,7 +161,7 @@ proc replay*(
           # Folder containing a materialized CTFS bundle.
           "db"
         else:
-          # replay traces (RR/TTD) carry trace_db_metadata.json
+          # replay traces (RR/TTD) — metadata comes from meta.dat
           "rr"
       trace = importTrace(
         traceFolder,

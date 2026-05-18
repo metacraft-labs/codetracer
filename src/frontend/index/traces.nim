@@ -215,10 +215,13 @@ proc fallbackLiveSourceFolders(trace: Trace): seq[cstring] =
     result.addUniquePath(trace.workdir)
 
 proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
-  ## Materialized/self-contained traces can store source files under
-  ## ``trace/files`` using relative paths from ``trace_paths.json``.  In that
-  ## case the trace index's workspace source folder is not a valid root inside
-  ## the self-contained file store, so prefer the relative trace-path folders.
+  ## Materialized/self-contained traces store source files under
+  ## ``trace/files`` using relative paths from ``paths.json`` (the
+  ## runtime-materialized mirror of the CTFS internal ``paths.json``
+  ## file; pre-M-REC-1.5 the sidecar was named ``trace_paths.json``).
+  ## In that case the trace index's workspace source folder is not a
+  ## valid root inside the self-contained file store, so prefer the
+  ## relative trace-path folders.
   var sourceFolders: seq[cstring] = trace.sourceFolders
   if not trace.imported:
     if sourceFolders.len == 0:
@@ -226,7 +229,7 @@ proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
     return sourceFolders
 
   let (rawTracePaths, err) = await fsReadFileWithErr(
-    nodePath.join(trace.outputFolder, cstring"trace_paths.json"))
+    nodePath.join(trace.outputFolder, cstring"paths.json"))
   if not err.isNil:
     if sourceFolders.len == 0:
       sourceFolders = fallbackLiveSourceFolders(trace)
@@ -247,7 +250,7 @@ proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
           folder
       folders.addUniquePath(cstring(root))
   except:
-    warnPrint "failed to derive filesystem folders from trace_paths.json: ",
+    warnPrint "failed to derive filesystem folders from paths.json: ",
       getCurrentExceptionMsg()
 
   if folders.len > 0:
@@ -898,15 +901,17 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
     var buildArg = if response.filename.len > 0:
         response.filename
       else:
-        let (rawTracePaths, err) = await fsReadFileWithErr(nodePath.join(data.trace.outputFolder, cstring"trace_paths.json"))
+        let (rawTracePaths, err) = await fsReadFileWithErr(nodePath.join(data.trace.outputFolder, cstring"paths.json"))
         if not err.isNil:
           cstring""
         else:
           let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
           if tracePaths.len > 0:
             # TODO: add either entry/special source file, or current file as argument
-            # and do that in trace_db_metadata/sqlite OR in trace_paths being more special(first?)
-            # for now just assuming trace paths first file is useful for this goal
+            # and do that via the CTFS meta.dat / sqlite trace index, or by
+            # giving the first entry in `paths` (the runtime-materialized
+            # mirror of CTFS `paths.json`) a special status.
+            # For now just assume the first path is useful for this goal.
             tracePaths[0]
           else:
             cstring""

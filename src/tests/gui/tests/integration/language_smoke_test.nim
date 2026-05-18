@@ -94,15 +94,13 @@ proc isUsableTraceDir(dir: string): bool =
 
 proc findExistingTrace(programPattern: string): string =
   ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
-  ## metadata program field contains ``programPattern``.
+  ## directory name matches ``programPattern``.
   ##
-  ## Considers DB (``trace.bin``), rr (``rr/``), and CTFS (``.ct``) formats.
-  ## Checks ``trace_metadata.json`` first; falls back to ``trace_db_metadata.json``
-  ## (used by rr-based traces).
-  ##
-  ## CTFS-only traces (no external metadata file) cannot be matched by program
-  ## name because the metadata is embedded inside the ``.ct`` container.
-  ## These are skipped during search — the caller should re-record if needed.
+  ## M-REC-1.5: trace metadata lives in the CTFS ``meta.dat`` inside
+  ## ``trace.ct``; the legacy sidecar JSONs that this helper used to
+  ## inspect are retired.  As a lightweight fallback the heuristic
+  ## matches against the directory name (recorders name the directory
+  ## after the program).  Re-record if a finer match is needed.
   let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
   if not dirExists(baseDir):
     return ""
@@ -114,21 +112,7 @@ proc findExistingTrace(programPattern: string): string =
       continue
     if not isUsableTraceDir(path):
       continue
-    # Try both metadata file names (DB traces use trace_metadata.json,
-    # rr traces use trace_db_metadata.json).
-    var program = ""
-    for metaName in ["trace_metadata.json", "trace_db_metadata.json"]:
-      let metaPath = path / metaName
-      if not fileExists(metaPath):
-        continue
-      try:
-        let meta = parseFile(metaPath)
-        program = meta.getOrDefault("program").getStr("")
-        if program.len > 0:
-          break
-      except:
-        discard
-    if programPattern in program:
+    if programPattern in dirname:
       return path
   return ""
 
@@ -222,7 +206,7 @@ type
     name: string           ## Human-readable name (e.g. "Python")
     testProgram: string    ## Directory under test-programs/ (e.g. "py_sudoku_solver")
     entryFile: string      ## Entry file within the program dir (e.g. "main.py"), or "" for Nargo-style
-    programPattern: string ## Pattern to match in trace_metadata.json program field
+    programPattern: string ## Substring to match against the trace directory name (M-REC-1.5)
     sourcePattern: string  ## Substring to match in the editor's current file (e.g. "main.py", ".rb")
     solveFuncName: string  ## Expected function name in the calltrace (e.g. "solve_sudoku")
 

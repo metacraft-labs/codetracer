@@ -2352,8 +2352,9 @@ async fn handle_read_source_file(
 ///    read it directly.  This is the common case for DB traces (Python) where
 ///    sources are still at their original recording-time locations.
 ///
-/// 3. **Workdir-relative**: Resolve `file_path` against the `workdir` field
-///    from `trace_metadata.json` in the trace directory.
+/// 3. **Workdir-relative**: Resolve `file_path` against the `workdir`
+///    recorded in the trace's `meta.dat` (M-REC-1.5; previously read
+///    from the retired `trace_metadata.json` sidecar).
 ///
 /// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
 ///    parent (e.g. trace at `/tmp/foo/trace/`, source at
@@ -2381,14 +2382,12 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
             .map_err(|e| format!("failed to read {}: {e}", file_path_buf.display()));
     }
 
-    // Strategy 3: Try resolving against the workdir from trace_metadata.json.
-    let metadata_path = trace_dir.join("trace_metadata.json");
-    if metadata_path.exists()
-        && let Ok(metadata_str) = std::fs::read_to_string(&metadata_path)
-        && let Ok(metadata) = serde_json::from_str::<Value>(&metadata_str)
-        && let Some(workdir) = metadata.get("workdir").and_then(Value::as_str)
+    // Strategy 3: Try resolving against the workdir recorded in
+    // `meta.dat`.  M-REC-1.5 retired the JSON sidecar fallback.
+    if let Ok(meta) = crate::trace_metadata::read_trace_metadata(trace_dir)
+        && !meta.workdir.is_empty()
     {
-        let workdir_resolved = std::path::Path::new(workdir).join(relative);
+        let workdir_resolved = std::path::Path::new(&meta.workdir).join(relative);
         if workdir_resolved.exists() {
             return std::fs::read_to_string(&workdir_resolved)
                 .map_err(|e| format!("failed to read {}: {e}", workdir_resolved.display()));
@@ -3003,7 +3002,9 @@ mod tests {
 
     #[test]
     fn test_read_source_from_trace_dir_workdir_fallback() {
-        // Strategy 3: Resolve relative paths against the workdir from trace_metadata.json.
+        // Strategy 3: Resolve relative paths against the workdir from meta.dat.
+        // M-REC-1.5 retired the legacy trace_metadata.json sidecar; the
+        // fallback now reads the workdir out of the CTFS meta.dat.
         let tmp = std::env::temp_dir().join("ct-test-read-source-workdir");
         let _ = std::fs::remove_dir_all(&tmp);
         let trace_dir = tmp.join("trace");
@@ -3014,16 +3015,25 @@ mod tests {
         std::fs::create_dir_all(workdir.join("src")).unwrap();
         std::fs::write(workdir.join("src/app.py"), "import os").unwrap();
 
-        // Write trace_metadata.json with the workdir field.
-        let metadata = serde_json::json!({
-            "workdir": workdir.to_str().unwrap(),
-            "language": "python"
-        });
-        std::fs::write(
-            trace_dir.join("trace_metadata.json"),
-            serde_json::to_string(&metadata).unwrap(),
-        )
-        .unwrap();
+        // Build a minimal trace.ct with meta.dat carrying that workdir.
+        let meta = crate::meta_dat::MetaDat {
+            version: crate::meta_dat::META_DAT_VERSION,
+            flags: 0,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
+            program: "app.py".to_owned(),
+            args: vec![],
+            workdir: workdir.to_str().unwrap().to_owned(),
+            recorder_id: "test".to_owned(),
+            paths: vec![],
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        };
+        let dat = crate::meta_dat::serialize_meta_dat(&meta);
+        crate::meta_dat::write_minimal_ctfs(&trace_dir.join("trace.ct"), &[("meta.dat", &dat)])
+            .unwrap();
 
         let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "src/app.py");
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);

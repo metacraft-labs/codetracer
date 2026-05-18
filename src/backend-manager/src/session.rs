@@ -57,10 +57,10 @@ pub struct TraceSession {
     /// Source files involved in the trace.
     pub source_files: Vec<String>,
 
-    /// The program that was traced (from `trace_metadata.json`).
+    /// The program that was traced (from the CTFS `meta.dat`).
     pub program: String,
 
-    /// Working directory at the time of recording (from `trace_metadata.json`).
+    /// Working directory at the time of recording (from the CTFS `meta.dat`).
     pub workdir: String,
 }
 

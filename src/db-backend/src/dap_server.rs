@@ -1631,6 +1631,7 @@ mod tests {
         serialize_meta_dat(&MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/bin/example".to_owned(),
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
@@ -1653,6 +1654,8 @@ mod tests {
             }),
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         })
     }
 
@@ -1661,6 +1664,7 @@ mod tests {
         serialize_meta_dat(&MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
             program: "/usr/bin/ruby".to_owned(),
             args: vec!["script.rb".to_owned()],
             workdir: "/srv/proj".to_owned(),
@@ -1669,6 +1673,8 @@ mod tests {
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: Vec::new(),
+            has_filter_provenance: false,
         })
     }
 

@@ -458,15 +458,18 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
     # for now assume db-backend, otherwise empty
     if traceFolder.len > 0:
       var pathSet = JsAssoc[cstring, bool]{}
-      let tracePathsPath = $traceFolder / "trace_paths.json"
-      let (rawTracePaths, err) = await fsReadFileWithErr(cstring(tracePathsPath))
+      # M-REC-1.5: the runtime-materialized sidecar is `paths.json`
+      # (matches the CTFS internal-file name).  The legacy
+      # `trace_paths.json` is retired pre-1.0.
+      let runtimePathsPath = $traceFolder / "paths.json"
+      let (rawTracePaths, err) = await fsReadFileWithErr(cstring(runtimePathsPath))
       if err.isNil:
         let tracePaths = cast[seq[cstring]](JSON.parse(rawTracePaths))
         for path in tracePaths:
           pathSet[path] = true
       else:
         # leave pathSet empty
-        warnPrint "loadFilenames for self contained trace trying to read ", tracePathsPath, ":", err
+        warnPrint "loadFilenames for self contained trace trying to read ", runtimePathsPath, ":", err
 
       for path, _ in pathSet:
         res.add($path)

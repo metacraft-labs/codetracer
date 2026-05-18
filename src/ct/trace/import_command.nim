@@ -9,9 +9,9 @@ proc importTraceInPreparedFolder(traceZipPath: string, outputFolderFullPath: str
 #   let res = execProcess(unzipExe, args = @[traceZipPath, "-d", outputFolderFullPath], options={})
 #   echo "unzip: ", res
   zip.unzipIntoFolder(traceZipPath, outputFolderFullPath)
-  # Materialized traces are CTFS-only: a `.ct` container indicates the
-  # bundle is a materialized DB trace. Replay traces (RR/TTD) carry
-  # `trace_db_metadata.json` instead.
+  # M-REC-1.5: bundles must carry a CTFS `.ct` container; metadata comes
+  # from its `meta.dat`.  Materialized DB traces and RR/TTD replay
+  # traces alike now go through the same importTrace path.
   var hasCt = false
   for entry in walkDir(outputFolderFullPath):
     if entry.kind == pcFile and entry.path.endsWith(".ct"):

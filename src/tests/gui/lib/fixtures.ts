@@ -760,17 +760,20 @@ function importTraceFolder(traceFolder: string): number {
  * recording on demand.  Used by the BEAM (Elixir/Erlang) UI smoke specs that
  * receive bundles from `prepare-beam-fixtures.sh` in the recorder repo.
  *
- * The trace folder must contain `trace_metadata.json`. The folder is imported
- * via `ct host` to obtain a stable trace id, then Electron is launched with
- * `CODETRACER_TRACE_ID` so the GUI opens that specific trace.
+ * The trace folder must contain a CTFS `.ct` container (M-REC-1.5: the
+ * legacy `trace_metadata.json` sidecar was retired).  The folder is
+ * imported via `ct host` to obtain a stable trace id, then Electron is
+ * launched with `CODETRACER_TRACE_ID` so the GUI opens that specific
+ * trace.
  */
 async function launchTraceFolderElectron(traceFolderPath: string): Promise<LaunchResult> {
   setupLdLibraryPath();
   clearElectronSingletonLocks();
   const t0 = Date.now();
   const traceFolder = path.resolve(traceFolderPath);
-  if (!fs.existsSync(path.join(traceFolder, "trace_metadata.json"))) {
-    throw new Error(`trace folder is missing trace_metadata.json: ${traceFolder}`);
+  const hasCtFile = fs.readdirSync(traceFolder).some((n) => n.endsWith(".ct"));
+  if (!hasCtFile) {
+    throw new Error(`trace folder is missing a CTFS .ct container: ${traceFolder}`);
   }
 
   const { result: traceId, durationMs: importMs } = await timed(

@@ -104,6 +104,6 @@ suite "CTFS source materialization":
     ])
 
     check materializeCtfsSources(ctPath, outDir)
-    check readFile(outDir / "trace_paths.json").contains("/workspace/project/src/main.c")
+    check readFile(outDir / "paths.json").contains("/workspace/project/src/main.c")
     check readFile(outDir / "files" / "workspace/project/src/main.c") ==
       "int main(void) { return 0; }\n"

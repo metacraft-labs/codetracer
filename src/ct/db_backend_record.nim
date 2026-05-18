@@ -293,7 +293,7 @@ proc record(
     elif lang in {LangNoir, LangRustWasm, LangCppWasm}:
       if lang == LangNoir:
         # TODO: base the first arg: source folder for record symbols on
-        #   debuginfo or trace_paths.json
+        #   debuginfo or the CTFS meta.dat paths block
         # for noir for now "executable" is the noir folder
         recordSymbols(executable, outputFolder, lang)
       var vmPath = ""
@@ -385,14 +385,6 @@ proc record(
     calltraceMode = calltraceMode)
 
 
-proc fillTraceDbMetadataFile(path: string, traceId: int) =
-  let trace = trace_index.find(traceId, test=false)
-  if trace.isNil:
-    echo "error: trace with id ", traceId, " not found for filling trace metadata json file: stopping"
-    quit (1)
-  writeFile(path, JSON.encode(trace, pretty=true))
-
-
 proc exportRecord(
     program: string,
     recordArgs: seq[string],
@@ -400,15 +392,17 @@ proc exportRecord(
     exportZipPath: string,
     outputFolder: string,
     cleanupOutputFolder: bool) =
-  # let folder = codetracerTmpPath / changeFileEx(exportZipPath, "")
-
+  # M-REC-1.5: the legacy trace_db_metadata.json sidecar that used to be
+  # bundled into the export zip is gone — the CTFS container's meta.dat
+  # is the single source of trace metadata.  Online sharing protocol
+  # adjustments (M-REC-8) consume the metadata from the container.
+  #
   # outputFolder/
   #   < original files >
-  #   trace_db_metadata.json
+  #   trace.ct  (carries meta.dat with recording_id + program + args + workdir)
   #
   # -> zip -> <exportZipPath>
-
-  fillTraceDbMetadataFile(outputFolder / "trace_db_metadata.json", traceId)
+  discard traceId
 
   # (alexander):
   #   trying to find full path

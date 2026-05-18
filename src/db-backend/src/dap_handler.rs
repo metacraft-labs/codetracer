@@ -3035,6 +3035,7 @@ mod tests {
             }),
         ];
         let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
             workdir: PathBuf::from("/test/workdir"),
             program: "test".to_string(),
             args: vec![],
@@ -3075,6 +3076,7 @@ mod tests {
         tracer.register_return(NONE_VALUE);
 
         let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
             workdir: PathBuf::from("/test/workdir"),
             program: "example.small".to_string(),
             args: vec![],
@@ -3119,6 +3121,7 @@ mod tests {
             trace.extend(loop_steps.clone())
         }
         let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
             workdir: PathBuf::from("/test/workdir"),
             program: "test".to_string(),
             args: vec![],
@@ -3152,6 +3155,7 @@ mod tests {
         }
         let trace = events;
         let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_string(),
             workdir: PathBuf::from("/test/workdir"),
             program: "test".to_string(),
             args: vec![],

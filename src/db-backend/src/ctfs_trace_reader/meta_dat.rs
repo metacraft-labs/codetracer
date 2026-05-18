@@ -16,12 +16,14 @@
 //!
 //! ```text
 //! [4 bytes] magic "CTMD"  (0x43 0x54 0x4D 0x44)
-//! [2 bytes] version u16 little-endian (must be 2 — current)
+//! [2 bytes] version u16 little-endian (must be 3 — current)
 //! [2 bytes] flags u16 little-endian
 //!           bit 0       — FLAG_HAS_MCR_FIELDS
 //!           bit 1       — FLAG_HAS_REPLAY_LAUNCH_FIELDS (M-RLP-1, §6A.5)
 //!           bit 2       — FLAG_HAS_LAYOUT_SNAPSHOT (M-RLP-2, §6B.7)
-//!           bits 3..=15 — reserved (must be 0; readers reject if set)
+//!           bit 3       — FLAG_HAS_TRACE_FILTER_PROVENANCE (TF-M7, §7)
+//!           bits 4..=15 — reserved (must be 0; readers reject if set)
+//! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
 //!   ⤷ args_count × varint-prefixed UTF-8 string : args[i]
@@ -42,9 +44,24 @@
 //!     varint-prefixed UTF-8 string : tick_source_str
 //!     varint-prefixed UTF-8 string : atomic_mode_str
 //!     varint-prefixed UTF-8 string : start_time_str
-//!     varint-prefixed UTF-8 string : hook_profile               (v2+)
-//!     varint                       : hook_strategies_count      (v2+)
+//!     varint-prefixed UTF-8 string : hook_profile
+//!     varint                       : hook_strategies_count
 //!       ⤷ hook_strategies_count × varint-prefixed UTF-8 string : hook_strategies[i]
+//!
+//! if (flags & FLAG_HAS_REPLAY_LAUNCH_FIELDS) != 0:
+//!     u8 aslr_disabled
+//!
+//! if (flags & FLAG_HAS_LAYOUT_SNAPSHOT) != 0:
+//!     u64 LE layout_hash
+//!     varint fingerprint_len
+//!     bytes fingerprint[fingerprint_len]
+//!
+//! if (flags & FLAG_HAS_TRACE_FILTER_PROVENANCE) != 0:
+//!     varint trace_filter_count
+//!     trace_filter_count × {
+//!         varint-prefixed UTF-8 string : filter_path
+//!         32 raw bytes                 : sha256 of filter source
+//!     }
 //! ```
 //!
 //! Varints are unsigned LEB128 (max 10 bytes per value). All strings are
@@ -52,13 +69,15 @@
 //!
 //! ## Version history
 //!
-//! - **v1** — initial release (no `hook_profile` / `hook_strategies`).
-//!   Removed before any external consumer shipped. v1 traces are not
-//!   readable by this parser.
-//! - **v2** — appended `hook_profile` and `hook_strategies` inside the
-//!   MCR-fields block so `meta.dat` reaches parity with the legacy
-//!   `meta.json`. Matches Nim writer commit `2c28a0a` on
-//!   `codetracer-trace-format-nim`.
+//! - **v1** — initial release.  Retired with M-REC-1.5; not readable.
+//! - **v2** — added `hook_profile` and `hook_strategies` inside the
+//!   MCR-fields block.  Retired with M-REC-1.5; not readable.
+//! - **v3** — M-REC-1 (2026-05-18): prepended a required `recording_id`
+//!   UUIDv7 string before the existing `program` field, and added flag bit
+//!   3 (trace-filter provenance) to the bitmask.  Pre-1.0: no backcompat
+//!   shim — v1/v2 fixtures must be regenerated.  Spec:
+//!   `codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md`
+//!   M-REC-1 / M-REC-1.5.
 
 use std::error::Error;
 use std::fmt;
@@ -69,20 +88,18 @@ use std::fmt;
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
 /// The `meta.dat` format version emitted by this serializer and the
-/// current Nim writer (commit `2c28a0a` on `codetracer-trace-format-nim`).
+/// current Nim writer.
 ///
-/// The parser additionally accepts older versions enumerated in
-/// [`SUPPORTED_VERSIONS`] to keep historical fixtures loadable.
-pub const META_DAT_VERSION: u16 = 2;
+/// M-REC-1.5 retired v1 and v2 (pre-1.0, no backcompat).  The reader
+/// rejects any version not listed in [`SUPPORTED_VERSIONS`].
+pub const META_DAT_VERSION: u16 = 3;
 
 /// All `meta.dat` versions this reader can decode.
 ///
-/// v1 has been retired (the Nim writer no longer emits it), but we keep
-/// it in the supported set so that any in-tree dev fixtures recorded
-/// before the v2 rollout still load via the WASM/native readers without
-/// a hard error. The parser silently treats the absent v1 fields
-/// (`hook_profile`, `hook_strategies`) as empty/empty-list.
-pub const SUPPORTED_VERSIONS: &[u16] = &[1, 2];
+/// v1 and v2 were retired by M-REC-1.5 (pre-1.0; no backwards
+/// compatibility).  v3 (M-REC-1) added the required `recording_id`
+/// UUIDv7 string and trace-filter provenance flag bit.
+pub const SUPPORTED_VERSIONS: &[u16] = &[3];
 
 /// Flag bit 0 — when set, the MCR (Multi-process Concurrent Recording)
 /// fields are appended after the paths block.
@@ -99,11 +116,19 @@ pub const FLAG_HAS_REPLAY_LAUNCH_FIELDS: u16 = 1 << 1;
 /// drift; the WASM browser-replay path parses-and-ignores them.
 pub const FLAG_HAS_LAYOUT_SNAPSHOT: u16 = 1 << 2;
 
+/// Flag bit 3 — trace-filter provenance (TF-M7, spec §7).  When set, a
+/// trailing block records the active trace-filter chain: a varint count
+/// followed by `(varint-prefixed path, 32-byte sha256)` tuples.  The
+/// reader parses-and-stores the entries; consumers that don't care about
+/// filter provenance can ignore the field.
+pub const FLAG_HAS_TRACE_FILTER_PROVENANCE: u16 = 1 << 3;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
 /// writers introducing new flag bits force readers to upgrade explicitly.
-const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS | FLAG_HAS_REPLAY_LAUNCH_FIELDS | FLAG_HAS_LAYOUT_SNAPSHOT;
+const KNOWN_FLAGS_MASK: u16 =
+    FLAG_HAS_MCR_FIELDS | FLAG_HAS_REPLAY_LAUNCH_FIELDS | FLAG_HAS_LAYOUT_SNAPSHOT | FLAG_HAS_TRACE_FILTER_PROVENANCE;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -117,6 +142,9 @@ pub struct MetaDat {
     pub version: u16,
     /// Raw flag bits as parsed from the header.
     pub flags: u16,
+    /// Recording identifier (UUIDv7, canonical 36-char lowercase
+    /// hyphenated form, per M-REC-1 and RFC 9562).  Required in v3+.
+    pub recording_id: String,
     /// Program path or identifier, exactly as recorded.
     pub program: String,
     /// Command-line arguments passed to the recorded program.
@@ -135,6 +163,24 @@ pub struct MetaDat {
     /// Layout-snapshot fields (M-RLP-2). `Some` iff
     /// `flags & FLAG_HAS_LAYOUT_SNAPSHOT != 0`.
     pub layout_snapshot: Option<LayoutSnapshotFields>,
+    /// Trace-filter provenance entries (TF-M7).  Empty when the flag bit
+    /// is clear AND when the writer recorded a deliberately empty chain;
+    /// distinguish via [`MetaDat::has_filter_provenance`].
+    pub filter_provenance: Vec<FilterProvenanceEntry>,
+    /// `true` iff `FLAG_HAS_TRACE_FILTER_PROVENANCE` was set on the
+    /// header.  Distinguishes "no provenance recorded" (`false`) from
+    /// "provenance recorded but empty" (`true` with empty
+    /// `filter_provenance`).
+    pub has_filter_provenance: bool,
+}
+
+/// One entry in the trace-filter provenance block (TF-M7, spec §7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilterProvenanceEntry {
+    /// Filter source path as recorded.
+    pub path: String,
+    /// SHA-256 digest of the filter source.
+    pub sha256: [u8; 32],
 }
 
 /// Replay-launch metadata (M-RLP-1, spec §6A.5).
@@ -195,13 +241,10 @@ pub struct McrFields {
     /// Stringified start time (e.g. ISO-8601 form emitted by the writer).
     pub start_time_str: String,
     /// Name of the active MCR hook profile (e.g. `"default"`, `"dotnet"`,
-    /// `"pal_probe"`). Introduced in `meta.dat` v2; empty string when
-    /// parsing a v1 fixture that predates the field.
+    /// `"pal_probe"`).
     pub hook_profile: String,
     /// Identifiers of the hook strategies active during recording (e.g.
     /// `"ldpreload"`, `"seccomp_unotify"`, `"callsite_patch"`).
-    /// Introduced in `meta.dat` v2; empty vector when parsing a v1
-    /// fixture that predates the field.
     pub hook_strategies: Vec<String>,
 }
 
@@ -253,6 +296,12 @@ pub enum MetaDatError {
         /// Number of unconsumed bytes following the structured payload.
         extra: usize,
     },
+    /// The `recording_id` field is not a canonical UUIDv7 (M-REC-1).
+    /// Required in v3+: a missing or malformed id rejects the trace.
+    InvalidRecordingId {
+        /// The offending string value (lossy-truncated if oversized).
+        value: String,
+    },
 }
 
 impl fmt::Display for MetaDatError {
@@ -285,6 +334,10 @@ impl fmt::Display for MetaDatError {
             MetaDatError::TrailingBytes { extra } => {
                 write!(f, "meta.dat: {extra} trailing byte(s) after structured payload")
             }
+            MetaDatError::InvalidRecordingId { value } => write!(
+                f,
+                "meta.dat: invalid recording_id {value:?} (expected canonical lowercase hyphenated UUIDv7)",
+            ),
         }
     }
 }
@@ -375,6 +428,48 @@ fn write_string(s: &str, out: &mut Vec<u8>) {
     out.extend_from_slice(s.as_bytes());
 }
 
+// ── Recording-id validation ─────────────────────────────────────────────
+
+/// Validate a string is a canonical lowercase hyphenated UUIDv7 per
+/// RFC 9562 (36 chars: 8-4-4-4-12, version nibble = 0x7, variant top
+/// two bits = 10b).
+///
+/// Pre-1.0 the M-REC-1 spec requires that every `meta.dat` carries a
+/// syntactically valid `recording_id`; readers reject metadata that
+/// fails this check rather than silently accepting garbage.
+pub fn is_canonical_uuid_v7(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    // Hyphen positions follow the 8-4-4-4-12 canonical layout.
+    for &i in &[8usize, 13, 18, 23] {
+        if bytes[i] != b'-' {
+            return false;
+        }
+    }
+    for (idx, &b) in bytes.iter().enumerate() {
+        match idx {
+            8 | 13 | 18 | 23 => continue,
+            _ => match b {
+                b'0'..=b'9' | b'a'..=b'f' => {}
+                _ => return false,
+            },
+        }
+    }
+    // Version nibble is the first character of group 3 (offset 14).
+    if bytes[14] != b'7' {
+        return false;
+    }
+    // Variant: top two bits of byte at offset 19 must be 10b → first hex
+    // char in {8, 9, a, b}.
+    match bytes[19] {
+        b'8' | b'9' | b'a' | b'b' => {}
+        _ => return false,
+    }
+    true
+}
+
 // ── Public API ──────────────────────────────────────────────────────────
 
 /// Parse a binary `meta.dat` payload.
@@ -412,6 +507,13 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 
     let mut pos = 8usize;
 
+    // M-REC-1 (v3+): recording_id prepends the program field.  Required
+    // and validated; malformed ids reject the trace at parse time.
+    let recording_id = read_string(input, &mut pos)?;
+    if !is_canonical_uuid_v7(&recording_id) {
+        return Err(MetaDatError::InvalidRecordingId { value: recording_id });
+    }
+
     let program = read_string(input, &mut pos)?;
 
     let args_count_u64 = decode_varint(input, &mut pos)?;
@@ -443,23 +545,14 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         let tick_source_str = read_string(input, &mut pos)?;
         let atomic_mode_str = read_string(input, &mut pos)?;
         let start_time_str = read_string(input, &mut pos)?;
-        // v2+ appended hook_profile + hook_strategies at the tail of the
-        // MCR block. For older v1 fixtures the fields are absent — fall
-        // back to empty defaults so the parser still produces a usable
-        // McrFields struct rather than failing the whole load.
-        let (hook_profile, hook_strategies) = if version >= 2 {
-            let hook_profile = read_string(input, &mut pos)?;
-            let hook_strategies_count_u64 = decode_varint(input, &mut pos)?;
-            let hook_strategies_count = usize::try_from(hook_strategies_count_u64)
-                .map_err(|_| MetaDatError::StringTooLong(hook_strategies_count_u64))?;
-            let mut hook_strategies = Vec::with_capacity(hook_strategies_count);
-            for _ in 0..hook_strategies_count {
-                hook_strategies.push(read_string(input, &mut pos)?);
-            }
-            (hook_profile, hook_strategies)
-        } else {
-            (String::new(), Vec::new())
-        };
+        let hook_profile = read_string(input, &mut pos)?;
+        let hook_strategies_count_u64 = decode_varint(input, &mut pos)?;
+        let hook_strategies_count = usize::try_from(hook_strategies_count_u64)
+            .map_err(|_| MetaDatError::StringTooLong(hook_strategies_count_u64))?;
+        let mut hook_strategies = Vec::with_capacity(hook_strategies_count);
+        for _ in 0..hook_strategies_count {
+            hook_strategies.push(read_string(input, &mut pos)?);
+        }
         Some(McrFields {
             tick_source,
             total_threads,
@@ -532,6 +625,29 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         None
     };
 
+    // Trace-filter provenance (TF-M7).  varint count + (path string,
+    // raw 32-byte sha256) tuples.
+    let mut filter_provenance: Vec<FilterProvenanceEntry> = Vec::new();
+    let has_filter_provenance = flags & FLAG_HAS_TRACE_FILTER_PROVENANCE != 0;
+    if has_filter_provenance {
+        let count_u64 = decode_varint(input, &mut pos)?;
+        let count = usize::try_from(count_u64).map_err(|_| MetaDatError::StringTooLong(count_u64))?;
+        filter_provenance.reserve(count);
+        for _ in 0..count {
+            let path = read_string(input, &mut pos)?;
+            if input.len() - pos < 32 {
+                return Err(MetaDatError::StringEof {
+                    declared_len: 32,
+                    remaining: input.len() - pos,
+                });
+            }
+            let mut sha = [0u8; 32];
+            sha.copy_from_slice(&input[pos..pos + 32]);
+            pos += 32;
+            filter_provenance.push(FilterProvenanceEntry { path, sha256: sha });
+        }
+    }
+
     if pos != input.len() {
         return Err(MetaDatError::TrailingBytes {
             extra: input.len() - pos,
@@ -541,6 +657,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     Ok(MetaDat {
         version,
         flags,
+        recording_id,
         program,
         args,
         workdir,
@@ -549,6 +666,8 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         mcr,
         replay_launch,
         layout_snapshot,
+        filter_provenance,
+        has_filter_provenance,
     })
 }
 
@@ -581,7 +700,14 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     if meta.layout_snapshot.is_some() {
         flags |= FLAG_HAS_LAYOUT_SNAPSHOT;
     }
+    let emit_filter_provenance = meta.has_filter_provenance || !meta.filter_provenance.is_empty();
+    if emit_filter_provenance {
+        flags |= FLAG_HAS_TRACE_FILTER_PROVENANCE;
+    }
     out.extend_from_slice(&flags.to_le_bytes());
+
+    // M-REC-1: recording_id prepends the program field in v3+.
+    write_string(&meta.recording_id, &mut out);
 
     // Program / args / workdir / recorder_id / paths.
     write_string(&meta.program, &mut out);
@@ -609,9 +735,6 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         write_string(&mcr.tick_source_str, &mut out);
         write_string(&mcr.atomic_mode_str, &mut out);
         write_string(&mcr.start_time_str, &mut out);
-        // v2 trailing fields. We always emit them because the version
-        // header is set to METADAT_VERSION (currently 2); their presence
-        // is required by the v2 reader contract.
         write_string(&mcr.hook_profile, &mut out);
         encode_varint(mcr.hook_strategies.len() as u64, &mut out);
         for strategy in &mcr.hook_strategies {
@@ -631,6 +754,15 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
         out.extend_from_slice(&ls.layout_fingerprint);
     }
 
+    // Optional trace-filter provenance block (TF-M7).
+    if emit_filter_provenance {
+        encode_varint(meta.filter_provenance.len() as u64, &mut out);
+        for entry in &meta.filter_provenance {
+            write_string(&entry.path, &mut out);
+            out.extend_from_slice(&entry.sha256);
+        }
+    }
+
     out
 }
 
@@ -641,12 +773,18 @@ pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    /// Canonical lowercase hyphenated UUIDv7 used throughout the test suite
+    /// so every v3 fixture carries a syntactically valid `recording_id`.
+    /// Picked by hand — embedded timestamp is fictional, but byte-stable.
+    const TEST_UUID_V7: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
+
     /// Build a [`MetaDat`] with no optional MCR block and empty arg/path lists.
     /// Used as one of the round-trip fixtures (a) in the suite.
     fn fixture_minimal() -> MetaDat {
         MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
+            recording_id: TEST_UUID_V7.to_owned(),
             program: String::new(),
             args: vec![],
             workdir: String::new(),
@@ -655,6 +793,8 @@ mod tests {
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
         }
     }
 
@@ -664,6 +804,7 @@ mod tests {
         MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
+            recording_id: TEST_UUID_V7.to_owned(),
             program: "/usr/bin/ruby".to_owned(),
             args: vec!["script.rb".to_owned(), "--flag".to_owned(), "".to_owned()],
             workdir: "/home/user/proj".to_owned(),
@@ -675,6 +816,8 @@ mod tests {
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
         }
     }
 
@@ -684,6 +827,7 @@ mod tests {
         MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
+            recording_id: TEST_UUID_V7.to_owned(),
             program: "main".to_owned(),
             args: vec!["arg0".to_owned()],
             workdir: "/tmp/run".to_owned(),
@@ -710,6 +854,8 @@ mod tests {
             }),
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
         }
     }
 
@@ -767,14 +913,15 @@ mod tests {
     }
 
     /// Writer-compatibility test: byte-for-byte fixture hand-derived from
-    /// the format spec in `meta.dat`'s module-level docs.
+    /// the format spec in this module's docs.
     ///
     /// The fixture corresponds to the `MetaDat` value:
     ///
     /// ```text
     /// MetaDat {
-    ///     version: 2,
+    ///     version: 3,
     ///     flags: 0,
+    ///     recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
     ///     program: "hi",
     ///     args: ["a"],
     ///     workdir: "/w",
@@ -784,49 +931,42 @@ mod tests {
     /// }
     /// ```
     ///
-    /// Bytes (annotated):
-    /// ```text
-    /// 43 54 4D 44                    magic "CTMD"
-    /// 02 00                          version u16 LE = 2
-    /// 00 00                          flags u16 LE = 0
-    /// 02 68 69                       program: varint(2) "hi"
-    /// 01                             args_count = 1
-    /// 01 61                            args[0]: varint(1) "a"
-    /// 02 2F 77                       workdir: varint(2) "/w"
-    /// 01 72                          recorder_id: varint(1) "r"
-    /// 01                             paths_count = 1
-    /// 01 78                            paths[0]: varint(1) "x"
-    /// ```
-    ///
-    /// Note the MCR-block extension introduced in v2 (`hook_profile` +
-    /// `hook_strategies`) does not appear here because `flags = 0`, i.e.
-    /// no MCR-fields block is emitted.
-    ///
     /// This fixture is the contract between the Nim writer at
     /// `codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim`
     /// (`writeMetaDatToBuffer`) and this Rust reader. It is hand-derived
     /// from the format specification, NOT from
     /// [`serialize_meta_dat`], so it stays meaningful even if the Rust
     /// serializer drifts.
-    const WRITER_COMPAT_FIXTURE: &[u8] = &[
-        0x43, 0x54, 0x4D, 0x44, // magic "CTMD"
-        0x02, 0x00, // version u16 LE = 2
-        0x00, 0x00, // flags u16 LE = 0
-        0x02, 0x68, 0x69, // program "hi"
-        0x01, // args_count
-        0x01, 0x61, // args[0] "a"
-        0x02, 0x2F, 0x77, // workdir "/w"
-        0x01, 0x72, // recorder_id "r"
-        0x01, // paths_count
-        0x01, 0x78, // paths[0] "x"
-    ];
+    fn writer_compat_fixture_bytes() -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC); // "CTMD"
+        buf.extend_from_slice(&3u16.to_le_bytes()); // version
+        buf.extend_from_slice(&0u16.to_le_bytes()); // flags
+        encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
+        buf.extend_from_slice(TEST_UUID_V7.as_bytes());
+        encode_varint(2, &mut buf); // program "hi"
+        buf.extend_from_slice(b"hi");
+        encode_varint(1, &mut buf); // args_count
+        encode_varint(1, &mut buf); // args[0] "a"
+        buf.extend_from_slice(b"a");
+        encode_varint(2, &mut buf); // workdir "/w"
+        buf.extend_from_slice(b"/w");
+        encode_varint(1, &mut buf); // recorder_id "r"
+        buf.extend_from_slice(b"r");
+        encode_varint(1, &mut buf); // paths_count
+        encode_varint(1, &mut buf); // paths[0] "x"
+        buf.push(b'x');
+        buf
+    }
 
     #[test]
     fn writer_compatibility_fixture() {
-        let parsed = parse_meta_dat(WRITER_COMPAT_FIXTURE).expect("parse fixture");
+        let bytes = writer_compat_fixture_bytes();
+        let parsed = parse_meta_dat(&bytes).expect("parse fixture");
         let expected = MetaDat {
-            version: 2,
+            version: 3,
             flags: 0,
+            recording_id: TEST_UUID_V7.to_owned(),
             program: "hi".to_owned(),
             args: vec!["a".to_owned()],
             workdir: "/w".to_owned(),
@@ -835,6 +975,8 @@ mod tests {
             mcr: None,
             replay_launch: None,
             layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
         };
         assert_eq!(parsed, expected);
 
@@ -842,72 +984,46 @@ mod tests {
         // for the same input. If this fails, the serializer has drifted
         // from the canonical format.
         let serialized = serialize_meta_dat(&expected);
-        assert_eq!(serialized.as_slice(), WRITER_COMPAT_FIXTURE);
+        assert_eq!(serialized, bytes);
     }
 
-    /// Backward-compatibility: a v1 payload (predating the
-    /// `hook_profile` / `hook_strategies` MCR-block extension) must
-    /// still parse so any in-tree dev fixtures keep loading.  Mirrors
-    /// `WRITER_COMPAT_FIXTURE` byte-for-byte except for the version
-    /// field (`0x01 0x00` instead of `0x02 0x00`).
-    const V1_COMPAT_FIXTURE: &[u8] = &[
-        0x43, 0x54, 0x4D, 0x44, // magic "CTMD"
-        0x01, 0x00, // version u16 LE = 1 (legacy)
-        0x00, 0x00, // flags u16 LE = 0
-        0x02, 0x68, 0x69, // program "hi"
-        0x01, // args_count
-        0x01, 0x61, // args[0] "a"
-        0x02, 0x2F, 0x77, // workdir "/w"
-        0x01, 0x72, // recorder_id "r"
-        0x01, // paths_count
-        0x01, 0x78, // paths[0] "x"
-    ];
-
+    /// M-REC-1.5: legacy v1/v2 payloads must be rejected because pre-1.0
+    /// the spec drops backwards compatibility.
     #[test]
-    fn v1_payload_still_parses() {
-        let parsed = parse_meta_dat(V1_COMPAT_FIXTURE).expect("parse v1 fixture");
-        // version field round-trips so callers can detect legacy traces
-        // if they need to.
-        assert_eq!(parsed.version, 1);
-        assert_eq!(parsed.program, "hi");
-        assert_eq!(parsed.args, vec!["a".to_owned()]);
-        assert!(parsed.mcr.is_none());
-    }
-
-    #[test]
-    fn v1_with_mcr_block_treats_hook_fields_as_empty() {
-        // Build a v1 payload that has the MCR block but no v2 trailing
-        // fields. The parser should populate hook_profile = ""
-        // and hook_strategies = vec![] rather than reading garbage.
+    fn rejects_legacy_v1_payload() {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&1u16.to_le_bytes()); // version 1
-        buf.extend_from_slice(&FLAG_HAS_MCR_FIELDS.to_le_bytes());
-        encode_varint(0, &mut buf); // program: ""
-        encode_varint(0, &mut buf); // args_count: 0
-        encode_varint(0, &mut buf); // workdir: ""
-        encode_varint(0, &mut buf); // recorder_id: ""
-        encode_varint(0, &mut buf); // paths_count: 0
-                                    // MCR block (v1 layout — no hook fields).
-        encode_varint(1, &mut buf); // tick_source
-        encode_varint(2, &mut buf); // total_threads
-        encode_varint(0, &mut buf); // atomic_mode
-        encode_varint(0, &mut buf); // total_events
-        encode_varint(0, &mut buf); // total_checkpoints
-        encode_varint(0, &mut buf); // start_time_unix_us
-        encode_varint(0, &mut buf); // platform: ""
-        encode_varint(0, &mut buf); // tick_granularity: ""
-        encode_varint(0, &mut buf); // tick_source_str: ""
-        encode_varint(0, &mut buf); // atomic_mode_str: ""
-        encode_varint(0, &mut buf); // start_time_str: ""
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(1)));
+    }
 
-        let parsed = parse_meta_dat(&buf).expect("parse v1 with MCR");
-        assert_eq!(parsed.version, 1);
-        let mcr = parsed.mcr.expect("v1 mcr present");
-        assert_eq!(mcr.tick_source, 1);
-        assert_eq!(mcr.total_threads, 2);
-        assert_eq!(mcr.hook_profile, "");
-        assert!(mcr.hook_strategies.is_empty());
+    #[test]
+    fn rejects_legacy_v2_payload() {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(2)));
+    }
+
+    /// M-REC-1.5 end-to-end: the parser rejects a v3 trace whose
+    /// recording_id is not a canonical UUIDv7.
+    #[test]
+    fn rejects_invalid_recording_id() {
+        let bad = "not-a-valid-uuid";
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        encode_varint(bad.len() as u64, &mut buf);
+        buf.extend_from_slice(bad.as_bytes());
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::InvalidRecordingId { value }) => {
+                assert_eq!(value, bad);
+            }
+            other => panic!("expected InvalidRecordingId, got {other:?}"),
+        }
     }
 
     #[test]
@@ -923,14 +1039,14 @@ mod tests {
 
     #[test]
     fn rejects_bad_magic() {
-        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        let mut buf = writer_compat_fixture_bytes();
         buf[0] = 0xFF;
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::BadMagic));
     }
 
     #[test]
     fn rejects_unsupported_version() {
-        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        let mut buf = writer_compat_fixture_bytes();
         buf[4] = 99;
         buf[5] = 0;
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(99)));
@@ -938,16 +1054,16 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 3 is the lowest still-reserved flag; bits 0..=2 are now
+        // Bit 4 is the lowest still-reserved flag (bits 0..=3 are now
         // FLAG_HAS_MCR_FIELDS / FLAG_HAS_REPLAY_LAUNCH_FIELDS /
-        // FLAG_HAS_LAYOUT_SNAPSHOT respectively.
-        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
-        buf[6] = 0b0000_1000;
+        // FLAG_HAS_LAYOUT_SNAPSHOT / FLAG_HAS_TRACE_FILTER_PROVENANCE).
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6] = 0b0001_0000;
         buf[7] = 0;
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0000_1000);
-                assert_eq!(unknown_bits, 0b0000_1000);
+                assert_eq!(flags, 0b0001_0000);
+                assert_eq!(unknown_bits, 0b0001_0000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
@@ -957,7 +1073,7 @@ mod tests {
     fn parses_replay_launch_fields() {
         // FLAG_HAS_REPLAY_LAUNCH_FIELDS (bit 1) with `aslr_disabled = true`
         // appended as a single byte after the paths block.
-        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0b0000_0010;
         buf[7] = 0;
         buf.push(1u8);
@@ -969,7 +1085,7 @@ mod tests {
     #[test]
     fn parses_layout_snapshot_fields() {
         // FLAG_HAS_LAYOUT_SNAPSHOT (bit 2) with a hash + 3-byte fingerprint.
-        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0b0000_0100;
         buf[7] = 0;
         buf.extend_from_slice(&0xdead_beef_1234_5678u64.to_le_bytes());
@@ -987,13 +1103,31 @@ mod tests {
     }
 
     #[test]
-    fn roundtrips_replay_launch_and_layout_snapshot() {
-        // Build a fixture with both new blocks present, serialise, parse,
-        // and confirm byte-for-byte equality. Ensures the serializer
-        // writes flag bits + payloads matching the parser's expectations.
+    fn parses_trace_filter_provenance() {
+        // FLAG_HAS_TRACE_FILTER_PROVENANCE (bit 3) with one entry.
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6] = 0b0000_1000;
+        buf[7] = 0;
+        encode_varint(1, &mut buf); // count = 1
+        encode_varint(4, &mut buf); // path "abcd"
+        buf.extend_from_slice(b"abcd");
+        let sha = [0x42u8; 32];
+        buf.extend_from_slice(&sha);
+        let parsed = parse_meta_dat(&buf).expect("parse trace-filter provenance");
+        assert!(parsed.has_filter_provenance);
+        assert_eq!(parsed.filter_provenance.len(), 1);
+        assert_eq!(parsed.filter_provenance[0].path, "abcd");
+        assert_eq!(parsed.filter_provenance[0].sha256, sha);
+    }
+
+    #[test]
+    fn roundtrips_all_optional_blocks() {
+        // Build a fixture with all optional blocks present, serialise,
+        // parse, and confirm byte-for-byte equality.
         let original = MetaDat {
             version: META_DAT_VERSION,
-            flags: FLAG_HAS_REPLAY_LAUNCH_FIELDS | FLAG_HAS_LAYOUT_SNAPSHOT,
+            flags: FLAG_HAS_REPLAY_LAUNCH_FIELDS | FLAG_HAS_LAYOUT_SNAPSHOT | FLAG_HAS_TRACE_FILTER_PROVENANCE,
+            recording_id: TEST_UUID_V7.to_owned(),
             program: "p".to_owned(),
             args: vec![],
             workdir: "w".to_owned(),
@@ -1005,6 +1139,11 @@ mod tests {
                 layout_hash: 0x0102_0304_0506_0708,
                 layout_fingerprint: b"\xde\xad".to_vec(),
             }),
+            filter_provenance: vec![FilterProvenanceEntry {
+                path: "filters/foo.toml".to_owned(),
+                sha256: [0x33; 32],
+            }],
+            has_filter_provenance: true,
         };
         let bytes = serialize_meta_dat(&original);
         let parsed = parse_meta_dat(&bytes).expect("parse round-trip");
@@ -1013,14 +1152,16 @@ mod tests {
 
     #[test]
     fn rejects_truncated_string() {
-        // Header + program varint(5) but only 1 byte of "h" — the string
-        // extends past EOF.
-        let buf = vec![
-            0x43, 0x54, 0x4D, 0x44, // magic
-            0x02, 0x00, // version
-            0x00, 0x00, // flags
-            0x05, 0x68, // program: varint declares 5 bytes, only "h" follows
-        ];
+        // Header + recording_id + program varint(5) but only 1 byte of "h" — the
+        // string extends past EOF.
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
+        buf.extend_from_slice(TEST_UUID_V7.as_bytes());
+        encode_varint(5, &mut buf); // program varint(5)
+        buf.push(b'h'); // only 1 byte of declared 5
         match parse_meta_dat(&buf) {
             Err(MetaDatError::StringEof {
                 declared_len,
@@ -1036,23 +1177,19 @@ mod tests {
     #[test]
     fn rejects_invalid_utf8() {
         // Construct a payload where `program` is two bytes of invalid UTF-8.
-        let mut buf = vec![
-            0x43, 0x54, 0x4D, 0x44, // magic
-            0x02, 0x00, // version
-            0x00, 0x00, // flags
-            0x02, 0xFF, 0xFE, // program: two invalid UTF-8 bytes
-            0x00, // args_count = 0
-            0x00, // workdir ""
-            0x00, // recorder_id ""
-            0x00, // paths_count = 0
-        ];
-        // Just to be tidy, ensure we exhausted the buffer at parse end —
-        // not strictly needed since the UTF-8 error fires first.
-        let _ = &mut buf;
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
+        buf.extend_from_slice(TEST_UUID_V7.as_bytes());
+        let program_start = buf.len() + 1; // past the varint(2) byte
+        encode_varint(2, &mut buf); // program varint(2)
+        buf.extend_from_slice(&[0xFF, 0xFE]); // invalid UTF-8
+                                              // Remaining fields are best-effort — UTF-8 error fires first.
         match parse_meta_dat(&buf) {
             Err(MetaDatError::InvalidUtf8 { offset, .. }) => {
-                // Program string starts after 8-byte header + 1-byte length prefix.
-                assert_eq!(offset, 9);
+                assert_eq!(offset, program_start);
             }
             other => panic!("expected InvalidUtf8, got {other:?}"),
         }
@@ -1060,12 +1197,37 @@ mod tests {
 
     #[test]
     fn rejects_trailing_bytes() {
-        let mut buf = WRITER_COMPAT_FIXTURE.to_vec();
+        let mut buf = writer_compat_fixture_bytes();
         buf.extend_from_slice(&[0xAA, 0xBB]);
         match parse_meta_dat(&buf) {
             Err(MetaDatError::TrailingBytes { extra }) => assert_eq!(extra, 2),
             other => panic!("expected TrailingBytes, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn is_canonical_uuid_v7_validates_format() {
+        // Happy paths
+        assert!(is_canonical_uuid_v7(TEST_UUID_V7));
+        assert!(is_canonical_uuid_v7("01949fcc-7d92-7e9c-8000-000000000000"));
+        assert!(is_canonical_uuid_v7("ffffffff-ffff-7fff-bfff-ffffffffffff"));
+
+        // Wrong length
+        assert!(!is_canonical_uuid_v7(""));
+        assert!(!is_canonical_uuid_v7("01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbb")); // 35 chars
+        assert!(!is_canonical_uuid_v7("01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbbb")); // 37 chars
+
+        // Wrong version nibble (4 instead of 7)
+        assert!(!is_canonical_uuid_v7("01949fcc-7d92-4e9c-aaaa-bbbbbbbbbbbb"));
+
+        // Wrong variant nibble (c — only 8/9/a/b allowed)
+        assert!(!is_canonical_uuid_v7("01949fcc-7d92-7e9c-caaa-bbbbbbbbbbbb"));
+
+        // Missing a hyphen
+        assert!(!is_canonical_uuid_v7("01949fcc-7d92-7e9c-aaaa.bbbbbbbbbbbb"));
+
+        // Uppercase rejected (canonical form is lowercase)
+        assert!(!is_canonical_uuid_v7("01949FCC-7D92-7E9C-AAAA-BBBBBBBBBBBB"));
     }
 
     #[test]
@@ -1087,6 +1249,9 @@ mod tests {
             },
             MetaDatError::StringTooLong(u64::MAX),
             MetaDatError::TrailingBytes { extra: 5 },
+            MetaDatError::InvalidRecordingId {
+                value: "bad".to_owned(),
+            },
         ];
         for case in cases {
             let s = format!("{case}");

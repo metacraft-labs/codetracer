@@ -357,8 +357,14 @@ proc detectVisualReplayAvailability*(outputFolder: string;
                                      pathExists: PathExistsProc;
                                      readFile: ReadFileProc;
                                      readDir: ReadDirProc): bool =
-  for metaName in ["trace_metadata.json", "trace_db_metadata.json"]:
-    let metaPath = joinTracePath(outputFolder, metaName)
-    if pathExists(metaPath) and metadataAdvertisesVisualReplay(readFile(metaPath)):
-      return true
+  ## M-REC-1.5 retired the legacy ``trace_metadata.json`` /
+  ## ``trace_db_metadata.json`` JSON sidecars that historically carried
+  ## a ``visualReplay`` capability flag.  Detection now reduces to the
+  ## artefact-presence check; the CTFS ``meta.dat`` does not surface
+  ## frontend-specific capability bits today, so traces relying on the
+  ## legacy advertisement path must be regenerated.  ``readFile`` is
+  ## kept in the signature for forwards compatibility — once meta.dat
+  ## gains a capability slot, this proc will need it again — but is
+  ## unused today.
+  let _ = readFile
   traceHasVisualReplayArtifacts(outputFolder, pathExists, readDir)

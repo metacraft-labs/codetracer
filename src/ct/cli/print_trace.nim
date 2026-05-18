@@ -7,9 +7,8 @@
 ## - JSONL span manifests: parses and pretty-prints HTTP requests
 ## - Trace directories: scans for trace files within
 ##
-## Legacy 3-file materialized traces (trace.bin / trace.json +
-## trace_metadata.json + trace_paths.json) are no longer accepted — those
-## bundles must be regenerated as `.ct` containers per the CTFS migration.
+## Legacy sidecar bundles are no longer accepted (M-REC-1.5): all
+## metadata lives in the CTFS container's ``meta.dat``.
 
 import
   std/[os, json, strutils, strformat, options]
@@ -65,8 +64,7 @@ proc detectTraceType*(path: string): TraceType =
     return ttSpanManifest
 
   # Legacy 3-file bundle detection (kept only for the migration message).
-  if fileExists(path / "trace.bin") or fileExists(path / "trace.json") or
-      fileExists(path / "trace_metadata.json"):
+  if fileExists(path / "trace.bin") or fileExists(path / "trace.json"):
     return ttMaterialized
 
   return ttTraceDirectory
@@ -138,16 +136,14 @@ proc printSpanManifest(path: string, opts: PrintOptions) =
     echo fmt"Total: {count} requests"
 
 proc printMaterializedTrace(path: string, opts: PrintOptions) =
-  ## Stub: legacy 3-file materialized traces (trace.bin / trace.json +
-  ## trace_metadata.json + trace_paths.json) are no longer supported.
+  ## Stub: legacy materialized traces are no longer supported (M-REC-1.5).
   ## Materialized traces now live in `.ct` CTFS containers and are printed
   ## via `printMcrTrace`. This stub stays around so detection of legacy
   ## artefacts produces a helpful migration message rather than silently
   ## walking nonexistent files.
   discard opts
   echo fmt"Legacy materialized trace detected at: {path}"
-  echo "  Legacy 3-file bundles (trace.bin / trace.json + trace_metadata.json"
-  echo "  + trace_paths.json) are no longer accepted; the trace must be"
+  echo "  Legacy sidecar bundles are no longer accepted; the trace must be"
   echo "  regenerated as a CTFS `.ct` container (see"
   echo "  codetracer-specs/Trace-Files/CTFS-Migration-Guide.md)."
 

@@ -2,6 +2,19 @@ import std/[json, os, strutils, sequtils]
 
 import source_paths
 
+type
+  CtfsMetaDat* = object
+    ## Subset of the v3 ``meta.dat`` payload that the Nim importer
+    ## consumes.  Mirrors the fields used to populate the trace index.
+    ## M-REC-1.5 made this the canonical metadata source — legacy
+    ## ``trace_metadata.json`` and ``trace_db_metadata.json`` sidecars
+    ## are no longer accepted.
+    recordingId*: string
+    program*: string
+    workdir*: string
+    args*: seq[string]
+    paths*: seq[string]
+
 const
   CtfsMagic = [byte 0xC0, 0xDE, 0x72, 0xAC, 0xE2]
   Base40Alphabet = "\0" & "0123456789abcdefghijklmnopqrstuvwxyz./-"
@@ -205,8 +218,12 @@ proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string
       writeFile(outputPath, sourceBytes)
 
 proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
-  ## Extract source metadata from a CTFS .ct file into the legacy trace-folder
-  ## layout consumed by the current frontend: trace_paths.json plus files/.
+  ## Extract source metadata from a CTFS .ct file into the runtime
+  ## trace-folder layout consumed by the current frontend: a sibling
+  ## ``paths.json`` (M-REC-1.5: previously named ``trace_paths.json``)
+  ## plus a ``files/`` subdirectory.  The CTFS container itself is the
+  ## source of truth for both — this proc just unpacks it so the
+  ## existing frontend wiring keeps working without a full FFI reader.
   var reader: CtfsReader
   try:
     reader = openCtfs(ctFilePath)
@@ -217,7 +234,7 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   try:
     let pathsJson = reader.readCtfsFile("paths.json")
     if pathsJson.len > 0:
-      writeFile(outputFolder / "trace_paths.json", pathsJson)
+      writeFile(outputFolder / "paths.json", pathsJson)
       for pathNode in parseJson(pathsJson):
         if pathNode.kind == JString:
           paths.add pathNode.getStr()
@@ -229,7 +246,103 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     let filemapPaths = extractFilemapSources(reader, outputFolder)
     if filemapPaths.len > 0:
       paths = concat(paths, filemapPaths)
-      writeFile(outputFolder / "trace_paths.json", $(%paths))
+      writeFile(outputFolder / "paths.json", $(%paths))
       result = true
   except CatchableError as e:
     echo "ct host: warning: failed to extract CTFS portable sources: ", e.msg
+
+proc decodeVarintFromString(data: string, pos: var int): uint64 =
+  ## Decode a single LEB128 unsigned varint at ``pos`` in ``data``.
+  result = 0
+  var shift = 0
+  while pos < data.len:
+    let b = data[pos].ord
+    inc pos
+    result = result or (uint64(b and 0x7f) shl shift)
+    if (b and 0x80) == 0:
+      return
+    shift += 7
+    if shift >= 64:
+      raise newException(ValueError, "meta.dat varint overflow")
+  raise newException(ValueError, "meta.dat truncated varint")
+
+proc readVarStringFromMetaDat(data: string, pos: var int): string =
+  let len = int(decodeVarintFromString(data, pos))
+  if pos + len > data.len:
+    raise newException(ValueError, "meta.dat truncated string")
+  result = data[pos ..< pos + len]
+  pos += len
+
+proc parseCtfsMetaDat(data: string): CtfsMetaDat =
+  ## Parse the v3 ``meta.dat`` payload.  Only the fields the importer
+  ## consumes are decoded; the remainder of the block is left untouched.
+  ##
+  ## Wire format reference:
+  ## ``codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim``
+  ## (the canonical Nim writer).  This is a tightly-scoped reader
+  ## sufficient for M-REC-1.5; if more fields ever need surfacing here,
+  ## consider promoting the body to the shared trace-format-nim package.
+  const Magic: array[4, byte] = [byte 0x43, 0x54, 0x4D, 0x44]
+  const Version: uint16 = 3
+  const FlagHasMcrFields: uint16 = 1
+  const FlagHasReplayLaunchFields: uint16 = 2
+  const FlagHasLayoutSnapshot: uint16 = 4
+  const FlagHasTraceFilterProvenance: uint16 = 8
+
+  if data.len < 8:
+    raise newException(ValueError, "meta.dat too short")
+  for i in 0 ..< 4:
+    if byte(data[i].ord) != Magic[i]:
+      raise newException(ValueError, "meta.dat: bad magic")
+  let version = uint16(data[4].ord) or (uint16(data[5].ord) shl 8)
+  if version != Version:
+    raise newException(ValueError,
+      "meta.dat: unsupported version " & $version &
+      " (M-REC-1.5 retired v1/v2; expected " & $Version & ")")
+  let flags = uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
+
+  var pos = 8
+  let recordingId = readVarStringFromMetaDat(data, pos)
+  if recordingId.len != 36:
+    raise newException(ValueError,
+      "meta.dat: invalid recording_id (length " & $recordingId.len & ")")
+
+  let program = readVarStringFromMetaDat(data, pos)
+  let argsCount = int(decodeVarintFromString(data, pos))
+  var args = newSeqOfCap[string](argsCount)
+  for _ in 0 ..< argsCount:
+    args.add readVarStringFromMetaDat(data, pos)
+  let workdir = readVarStringFromMetaDat(data, pos)
+  discard readVarStringFromMetaDat(data, pos)  # recorder_id (unused here)
+  let pathsCount = int(decodeVarintFromString(data, pos))
+  var paths = newSeqOfCap[string](pathsCount)
+  for _ in 0 ..< pathsCount:
+    paths.add readVarStringFromMetaDat(data, pos)
+
+  # The MCR/replay-launch/layout-snapshot/trace-filter blocks are skipped:
+  # callers in ct/host don't need them.  We still keep this proc resilient
+  # by short-circuiting once the required fields are decoded.
+  discard flags
+  discard FlagHasMcrFields
+  discard FlagHasReplayLaunchFields
+  discard FlagHasLayoutSnapshot
+  discard FlagHasTraceFilterProvenance
+
+  CtfsMetaDat(
+    recordingId: recordingId,
+    program: program,
+    workdir: workdir,
+    args: args,
+    paths: paths,
+  )
+
+proc readCtfsMetaDat*(ctFilePath: string): CtfsMetaDat =
+  ## Read and parse the canonical ``meta.dat`` from a CTFS ``.ct`` file.
+  ## Raises ``ValueError`` if the file cannot be opened, the internal
+  ## ``meta.dat`` entry is absent, or the payload fails to parse.
+  let reader = openCtfs(ctFilePath)
+  let data = reader.readCtfsFile("meta.dat")
+  if data.len == 0:
+    raise newException(ValueError,
+      "meta.dat missing or empty in " & ctFilePath)
+  parseCtfsMetaDat(data)

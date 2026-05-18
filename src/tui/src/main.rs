@@ -190,33 +190,18 @@ impl App {
     }
 
     fn load_trace_from_folder(&self, folder: &str) -> Result<Trace, Box<dyn Error>> {
-        #[derive(serde::Deserialize)]
-        struct TraceMetadata {
-            program: String,
-            args: Vec<String>,
-            workdir: String,
-        }
-
-        let metadata_path = PathBuf::from(folder).join("trace_metadata.json");
-        let raw = std::fs::read_to_string(&metadata_path)?;
-        let metadata: TraceMetadata = serde_json::from_str(&raw)?;
-
-        Ok(Trace {
-            id: -1,
-            program: metadata.program,
-            args: metadata.args,
-            env: String::new(),
-            workdir: metadata.workdir,
-            output: String::new(),
-            source_folders: vec![folder.to_string()],
-            low_level_folder: String::new(),
-            compile_command: String::new(),
-            output_folder: folder.to_string(),
-            date: String::new(),
-            duration: String::new(),
-            lang: Lang::RustWasm, // TODO
-            imported: true,
-        })
+        // M-REC-1.5: the legacy `trace_metadata.json` sidecar that this
+        // function used to read is retired.  Folder-based trace
+        // loading needs to be rebuilt on top of the CTFS `meta.dat`
+        // reader; that integration is tracked alongside the broader
+        // TUI revamp.  For now, surface a structured error so callers
+        // know to use `--trace-id` / `--program` instead.
+        Err(format!(
+            "load_trace_from_folder({folder}): legacy trace_metadata.json sidecar \
+             retired in M-REC-1.5; folder-based loading needs a meta.dat reader. \
+             Use --trace-id or --program for now."
+        )
+        .into())
     }
 
     fn register_trace_in_db(&mut self) -> Result<(), Box<dyn Error>> {
