@@ -92,7 +92,6 @@ const
   ]
 
 package codeTracer:
-  usesImportPath "reprobuild/packages"
   uses:
     "nim >=1.6 <3.0"
     "node >=20"
