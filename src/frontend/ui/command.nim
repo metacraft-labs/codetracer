@@ -467,8 +467,9 @@ when defined(js):
       elif keyCode == ESC_KEY_CODE:
         self.resetCommandPalette()
       elif keyCode == TAB_KEY_CODE:
-        ev.preventDefault()
-        self.onTab())
+        if self.inputPlaceholder != "" and self.inputPlaceholder != self.inputValue:
+          ev.preventDefault()
+          self.onTab())
 
   proc tryMountIsoNimCommandPalettePanel*() =
     ## Mount the IsoNim Command Palette panel view into the
