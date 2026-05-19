@@ -120,6 +120,11 @@ mkShell {
     # zip
     # unzip
     libzip
+    # zstd: required at link time by codetracer_trace_writer_nim (transitive
+    # dep of tup-built recorder crates such as small-lang). The trace writer
+    # uses libzstd directly via -lzstd; without zstd in the dev shell the
+    # tup-sandboxed linker fails with `ld: cannot find -lzstd`.
+    zstd
     curl
 
     # for pgrep at least
@@ -271,17 +276,22 @@ mkShell {
     # copied case for libstdc++.so (needed by better-sqlite3) from
     # https://discourse.nixos.org/t/what-package-provides-libstdc-so-6/18707/4:
     # gcc.cc.lib ..
-    export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib";
+    export CT_LD_LIBRARY_PATH="${sqlite.out}/lib/:${pcre.out}/lib:${glib.out}/lib:${openssl.out}/lib:${gcc.cc.lib}/lib:${libzip.out}/lib:${zstd.out}/lib";
     export CODETRACER_LD_LIBRARY_PATH="$CT_LD_LIBRARY_PATH"
 
     # LIBRARY_PATH is the standard gcc/ld compile-time library search path
     # (distinct from LD_LIBRARY_PATH which is for runtime). This ensures that
-    # -lssl, -lcrypto, -lsqlite3, -lpcre, -lzip resolve during linking when
-    # Nim uses --dynlibOverride + --passL instead of runtime dlopen (see
+    # -lssl, -lcrypto, -lsqlite3, -lpcre, -lzip, -lzstd resolve during linking
+    # when Nim uses --dynlibOverride + --passL instead of runtime dlopen (see
     # src/Tuprules.tup DYNLIB_OVERRIDE_FLAGS). This is particularly important
     # for tup builds, which sanitize the environment and strip the Nix
     # wrapper's NIX_LDFLAGS variable.
-    export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${zlib.out}/lib${
+    #
+    # zstd is required because codetracer_trace_writer_nim (a transitive dep
+    # of tup-built recorder crates) links against libzstd via its build.rs
+    # (`cargo:rustc-link-lib=dylib=zstd`). Without zstd on LIBRARY_PATH the
+    # tup sandbox link step fails with `ld: cannot find -lzstd`.
+    export LIBRARY_PATH="${openssl.out}/lib:${sqlite.out}/lib:${pcre.out}/lib:${libzip.out}/lib:${zlib.out}/lib:${zstd.out}/lib${
       pkgs.lib.optionalString (!stdenv.isDarwin) ":${libbpf.out}/lib:${elfutils.out}/lib"
     }''${LIBRARY_PATH:+:$LIBRARY_PATH}";
 
