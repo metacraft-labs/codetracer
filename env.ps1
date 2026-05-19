@@ -498,6 +498,85 @@ function Ensure-NodeTooling {
   }
 }
 
+# Mirror of env.sh:600-601 — `ln -s node-packages/node_modules ./node_modules`.
+#
+# `scripts/build-once.sh` and other build scripts hard-code
+# `node_modules/.bin/webpack` relative to the repo root, but yarn installs the
+# JS deps under `node-packages/node_modules/`. On POSIX env.sh creates a
+# symlink. On Windows we use an NTFS junction (works without symlink privilege
+# and is transparent to all consumers, including bash and Node's CommonJS
+# resolver).
+#
+# Idempotent: re-running this is a no-op when the junction already exists and
+# points at the right target. If something else owns `node_modules` (a real
+# directory, a stale junction pointing elsewhere, or a symlink), we leave it
+# alone and emit a warning rather than risk destroying real state.
+function Ensure-NodeModulesJunction {
+  param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+  $repoNodeModules = Join-Path $RepoRoot "node_modules"
+  $packagesNodeModules = Join-Path (Join-Path $RepoRoot "node-packages") "node_modules"
+
+  if (-not (Test-Path -LiteralPath $packagesNodeModules -PathType Container)) {
+    # yarn install hasn't run yet — Ensure-NodeTooling handles that path. We
+    # skip silently because the junction target doesn't exist yet; a follow-up
+    # source of env.ps1 (after yarn install) will create the link.
+    return
+  }
+
+  $expectedTarget = [System.IO.Path]::GetFullPath($packagesNodeModules)
+
+  if (Test-Path -LiteralPath $repoNodeModules) {
+    try {
+      $existing = Get-Item -LiteralPath $repoNodeModules -Force -ErrorAction Stop
+    } catch {
+      Write-Warning "Could not stat '$repoNodeModules': $($_.Exception.Message). Skipping node_modules junction creation."
+      return
+    }
+
+    $isReparse = $false
+    try {
+      $isReparse = (([int]$existing.Attributes) -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0
+    } catch {}
+
+    if ($isReparse) {
+      $currentTarget = ""
+      try {
+        $currentTarget = [string]$existing.Target
+      } catch {}
+      if ([string]::IsNullOrWhiteSpace($currentTarget) -and $null -ne $existing.PSObject.Properties["LinkTarget"]) {
+        $currentTarget = [string]$existing.LinkTarget
+      }
+      if (-not [string]::IsNullOrWhiteSpace($currentTarget)) {
+        try {
+          $resolvedTarget = [System.IO.Path]::GetFullPath($currentTarget)
+        } catch {
+          $resolvedTarget = $currentTarget
+        }
+        if ($resolvedTarget.TrimEnd('\','/') -ieq $expectedTarget.TrimEnd('\','/')) {
+          # Already pointing at the right place — idempotent no-op.
+          return
+        }
+        Write-Warning "node_modules at '$repoNodeModules' is a reparse point pointing at '$resolvedTarget' (expected '$expectedTarget'). Leaving it in place; please remove it manually if you want env.ps1 to manage the junction."
+        return
+      }
+      Write-Warning "node_modules at '$repoNodeModules' is a reparse point but its target could not be resolved. Leaving it in place."
+      return
+    }
+
+    # Real directory or file — don't clobber.
+    Write-Warning "node_modules at '$repoNodeModules' already exists as a regular path. Skipping junction creation. Remove it and re-source env.ps1 to let the bootstrap manage the junction."
+    return
+  }
+
+  try {
+    New-Item -ItemType Junction -Path $repoNodeModules -Target $packagesNodeModules | Out-Null
+    Write-Host "Created node_modules junction: $repoNodeModules -> $packagesNodeModules"
+  } catch {
+    Write-Warning "Failed to create node_modules junction '$repoNodeModules' -> '$packagesNodeModules': $($_.Exception.Message)"
+  }
+}
+
 function Prepend-PathEntries {
   param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][AllowEmptyCollection()][string[]]$Entries)
   $existing = [Environment]::GetEnvironmentVariable("PATH")
@@ -634,6 +713,7 @@ $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 . "$windowsDir/ensure-vlang.ps1"
 . "$windowsDir/ensure-fpc.ps1"
 . "$windowsDir/ensure-zstd.ps1"
+. "$windowsDir/ensure-zlib.ps1"
 . "$windowsDir/ensure-llvm.ps1"
 
 $preferGitBash = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_PREFER_GIT_BASH" -Default $true
@@ -690,6 +770,8 @@ if ($doSync) {
   if (Test-BootstrapStepEnabled "VLANG") { Ensure-Vlang -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "FPC")   { Ensure-Fpc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "ZSTD") { Ensure-Zstd -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  # Ensure-Zlib must run after Ensure-Gcc (depends on mingw32-make + gcc).
+  if (Test-BootstrapStepEnabled "ZLIB") { Ensure-Zlib -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "LLVM") { Ensure-Llvm -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 2: Rust (no deps on other managed tools)
@@ -878,11 +960,20 @@ $fpcBinDir = Join-Path $fpcDir "bin/x86_64-win64"
 $zstdArch = ConvertTo-ZstdFileArch -Arch $arch
 $zstdDir = Join-Path $installRoot ("zstd\" + $toolchain["ZSTD_VERSION"] + "\zstd-v" + $toolchain["ZSTD_VERSION"] + "-" + $zstdArch)
 
+# zlib install layout is `$installRoot/zlib/<version>/{include,lib}/`. Both
+# subdirs must be added to the toolchain search paths so the MinGW linker can
+# resolve `-lz` (see `src/Tuprules.tup`'s WINDOWS_ZLIB_DIR pin) and so any
+# build that consults `LIBRARY_PATH`/`C_INCLUDE_PATH` finds the headers.
+$zlibDir = Join-Path $installRoot ("zlib\" + $toolchain["ZLIB_VERSION"])
+$zlibIncludeDir = Join-Path $zlibDir "include"
+$zlibLibDir = Join-Path $zlibDir "lib"
+
 $llvmTarget = ConvertTo-LlvmFileArch -Arch $arch
 $llvmDir = Join-Path $installRoot ("llvm\" + $toolchain["LLVM_VERSION"] + "\LLVM-" + $toolchain["LLVM_VERSION"] + "-" + $llvmTarget)
 $llvmBinDir = Join-Path $llvmDir "bin"
 
 Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
+Ensure-NodeModulesJunction -RepoRoot $repoRoot
 
 $msvcBlob = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsDir "export-msvc-env.ps1")
 foreach ($line in $msvcBlob) {
@@ -940,7 +1031,23 @@ function Resolve-ClExePath {
 [Environment]::SetEnvironmentVariable("VLANG_DIR", $vlangDir, "Process")
 [Environment]::SetEnvironmentVariable("FPC_DIR", $fpcDir, "Process")
 [Environment]::SetEnvironmentVariable("ZSTD_DIR", $zstdDir, "Process")
-[Environment]::SetEnvironmentVariable("LLVM_DIR", $llvmDir, "Process")
+[Environment]::SetEnvironmentVariable("ZLIB_DIR", $zlibDir, "Process")
+# Prepend the zlib lib dir to LIBRARY_PATH so the MinGW gcc linker finds
+# `libz.a` when codetracer's Nim build emits `-lz` via Tuprules.tup. PATH gets
+# the same dir below (mirrors how ZSTD_DIR is consumed downstream) for any
+# build that resolves runtime DLLs from the same install root layout.
+$existingLibraryPath = [Environment]::GetEnvironmentVariable("LIBRARY_PATH")
+if ([string]::IsNullOrWhiteSpace($existingLibraryPath)) {
+  [Environment]::SetEnvironmentVariable("LIBRARY_PATH", $zlibLibDir, "Process")
+} elseif ($existingLibraryPath -notlike "*$zlibLibDir*") {
+  [Environment]::SetEnvironmentVariable("LIBRARY_PATH", ($zlibLibDir + ";" + $existingLibraryPath), "Process")
+}
+$existingCIncludePath = [Environment]::GetEnvironmentVariable("C_INCLUDE_PATH")
+if ([string]::IsNullOrWhiteSpace($existingCIncludePath)) {
+  [Environment]::SetEnvironmentVariable("C_INCLUDE_PATH", $zlibIncludeDir, "Process")
+} elseif ($existingCIncludePath -notlike "*$zlibIncludeDir*") {
+  [Environment]::SetEnvironmentVariable("C_INCLUDE_PATH", ($zlibIncludeDir + ";" + $existingCIncludePath), "Process")
+}
 # LLVM_CONFIG and LLDB_LIB_PATH are used by the lldb-sys crate's build.rs
 # to locate the LLDB shared library and LLVM headers for FFI compilation.
 $llvmConfigExe = Join-Path $llvmBinDir "llvm-config.exe"
@@ -1068,7 +1175,8 @@ Prepend-PathEntries -Entries @(
   $ldcBinDir,
   $vlangBinDir,
   $fpcBinDir,
-  $llvmBinDir
+  $llvmBinDir,
+  $zlibLibDir
 )
 
 $ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" -Default $true
@@ -1134,6 +1242,7 @@ Write-Host "GCC_DIR=$gccDir"
 Write-Host "GO_DIR=$goDir"
 Write-Host "GOROOT=$env:GOROOT"
 Write-Host "ZSTD_DIR=$zstdDir"
+Write-Host "ZLIB_DIR=$zlibDir"
 Write-Host "LLVM_DIR=$llvmDir"
 Write-Host "WINDOWS_DIY_SHIMS_DIR=$shimsDir"
 Write-Host "CODETRACER_REPO_ROOT_PATH=$env:CODETRACER_REPO_ROOT_PATH"
