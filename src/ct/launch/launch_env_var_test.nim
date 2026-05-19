@@ -4,47 +4,42 @@
 ## The launch path in ``src/ct/launch/launch.nim`` and the Electron
 ## startup in ``src/frontend/index/args.nim`` both fail loudly if the
 ## legacy env var is still set in the spawned process's environment.
-## This test exercises the ``ct`` binary directly (no Electron) by
-## invoking the ``ct --help`` subcommand path with each env shape and
-## asserting the launcher's behaviour.
+## This test pins that contract at the source-of-truth level: the
+## guard now lives in a small public proc in
+## ``src/ct/launch/recording_id_env.nim`` so a helper subprocess can
+## import and invoke it directly — no inline mirror, no drift.
 ##
-## We use the ``ct list`` subcommand rather than ``--help`` because the
-## env-var guard sits in the ``StartupCommand.noCommand`` branch — i.e.
-## the bare-``ct`` invocation that Playwright uses to launch Electron.
-## Triggering that branch requires no subcommand at all and would spawn
-## Electron, which is hard to do in a headless unit test.  Instead we
-## compile a tiny helper that mirrors the exact guard logic from
-## ``launch.nim`` so the contract — "legacy var set → exit 1" — is
-## pinned at the source-of-truth level without needing the full ct
-## binary.
+## We still need a subprocess because the production guard calls
+## ``quit(1)`` and reads ``getEnv``, both of which are easier to set
+## up cleanly in a fresh child than to mock inside the test runner.
 ##
 ## Run with:
 ##   nim c -r --hints:off --warnings:off --mm:refc \
 ##       --nimcache:/tmp/ct-nim-cache/launch_env_var_test \
 ##       src/ct/launch/launch_env_var_test.nim
 
-import std/[os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import std/[os, osproc, streams, strtabs, strutils, unittest]
 
 # ---------------------------------------------------------------------------
-# Helper subprocess: a faithful re-implementation of the launch-path
-# guard.  Edit this in lockstep with ``launch.nim`` so a regression in
-# either direction surfaces in CI.
+# Helper subprocess: imports the production guard from
+# ``recording_id_env`` and exercises it.  No copy-paste — any change to
+# the guard surfaces here automatically.
 # ---------------------------------------------------------------------------
+
+const recordingIdEnvModuleDir = currentSourcePath().parentDir()
+  ## Absolute path to the directory holding ``recording_id_env.nim``,
+  ## baked into the test at compile time so the helper compiles
+  ## regardless of the cwd the test is invoked from.  Passed to ``nim
+  ## c`` as ``--path:`` so the helper can ``import recording_id_env``.
 
 const helperSrc = """
 import std/os
+import recording_id_env
 
 when isMainModule:
-  # M-REC-6 launcher guard, copied verbatim from
-  # ``src/ct/launch/launch.nim`` so a behavioural drift between the
-  # production code and the test is immediately visible during review.
-  if getEnv("CODETRACER_TRACE_ID", "").len > 0:
-    stderr.writeLine(
-      "error: CODETRACER_TRACE_ID is retired in favour of " &
-      "CODETRACER_RECORDING_ID (UUIDv7 recording-id).  " &
-      "Remove the legacy variable from the environment.")
-    quit(1)
-  let recId = getEnv("CODETRACER_RECORDING_ID", "")
+  refuseLegacyRecordingIdEnv(
+    proc (msg: string) = stderr.writeLine(msg))
+  let recId = getEnv(CurrentRecordingIdEnvVar, "")
   if recId.len > 0:
     echo "RECORDING_ID:" & recId
   else:
@@ -61,6 +56,7 @@ proc compileHelper(): string =
   writeFile(src, helperSrc)
   let bin = helperCache / "helper"
   let cmd = "nim c --hints:off --warnings:off --mm:refc " &
+            "--path:" & quoteShell(recordingIdEnvModuleDir) & " " &
             "--nimcache:" & quoteShell(helperCache / "nc") & " " &
             "--out:" & quoteShell(bin) & " " &
             quoteShell(src)

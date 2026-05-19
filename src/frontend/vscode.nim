@@ -164,13 +164,14 @@ when defined(ctInExtension):
         let lines = output.split(jsNl)
         if lines.len > 1:
           let traceIdLine = $lines[^2]
-          # M-REC-6: stdout-marker renamed to ``recordingId:``.  Payload
-          # is still treated as a recording id (UUIDv7 string).
+          # M-REC-6: stdout-marker renamed to ``recordingId:``; the
+          # payload is a UUIDv7 recording-id string (M-REC-2 / M-REC-3),
+          # so pass it through verbatim — no ``parseInt`` coercion.
           if traceIdLine.startsWith("recordingId:"):
-            let traceId = traceIdLine[("recordingId:").len .. ^1].parseInt
+            let recordingId = traceIdLine[("recordingId:").len .. ^1].strip()
             let res = await readCTOutput(
               codetracerExe.cstring,
-              @[cstring"trace-metadata", cstring(fmt"--id={traceId}")],
+              @[cstring"trace-metadata", cstring(fmt"--id={recordingId}")],
               isNixOS
             )
 
@@ -184,19 +185,21 @@ when defined(ctInExtension):
         output = JSON.stringify(outputResult.error)
       return cast[JsObject](output)
 
-    proc getTraceId(output: cstring): int =
+    proc extractRecordingId(output: cstring): string =
+      ## Pull the recording-id (UUIDv7 string) out of a ``ct record``
+      ## stdout dump.  Returns "" when the ``recordingId:`` marker is
+      ## absent — callers treat that as "no recording produced".
+      ##
+      ## M-REC-6: marker renamed to ``recordingId:``; payload is a
+      ## UUIDv7 string (M-REC-2 / M-REC-3) so we pass it through
+      ## without coercion.
       let outputString = $output
-      # M-REC-6: stdout-marker renamed to ``recordingId:``.  The body of
-      # this proc still ``parseInt``s the payload — it predates M-REC-2
-      # and is currently unused by callers; left intact so the file
-      # builds.  Future M-REC follow-up should retire it.
       let idx = outputString.find("recordingId:")
       if idx != NO_INDEX:
         let traceIdx = outputString.find(":", idx)
         if traceIdx != NO_INDEX:
-          let traceNumber = outputString[traceIdx + 1..^1]
-          return parseInt(traceNumber.strip())
-      return NO_INDEX
+          return outputString[traceIdx + 1..^1].strip()
+      return ""
 
     proc getFlowList*() {.async, exportc.}=
       discard
@@ -209,11 +212,11 @@ when defined(ctInExtension):
       )
 
       if outputResult.isOk:
-        let traceId = getTraceId(outputResult.value)
-        if traceId != NO_INDEX:
+        let recordingId = extractRecordingId(outputResult.value)
+        if recordingId.len > 0:
           let res = await readCTOutput(
             codetracerExe.cstring,
-            @[cstring"trace-metadata", cstring(fmt"--id={traceId}")],
+            @[cstring"trace-metadata", cstring(fmt"--id={recordingId}")],
             isNixOS
           )
 

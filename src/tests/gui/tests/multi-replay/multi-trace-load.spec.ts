@@ -72,14 +72,17 @@ async function getActiveIndex(page: import("@playwright/test").Page): Promise<nu
 async function getSessionTrace(
   page: import("@playwright/test").Page,
   sessionIndex: number,
-): Promise<{ id: number; program: string; outputFolder: string } | null> {
+): Promise<{ id: string; program: string; outputFolder: string } | null> {
+  // M-REC-2 / M-REC-3 / M-REC-6: ``trace.id`` is a UUIDv7 recording-id
+  // string; coerce to string rather than ``Number()`` so the raw id is
+  // preserved end-to-end.
   return page.evaluate((idx) => {
     const d = (window as any).data;
     const session = d?.sessions?.[idx];
     const trace = session?.trace;
     if (!trace) return null;
     return {
-      id: Number(trace.id ?? -1),
+      id: String(trace.id ?? ""),
       program: String(trace.program ?? ""),
       outputFolder: String(trace.outputFolder ?? ""),
     };
@@ -110,8 +113,11 @@ async function sessionHasTrace(
  */
 async function loadTraceIntoActiveSession(
   page: import("@playwright/test").Page,
-  traceId: number,
+  traceId: string | number,
 ): Promise<void> {
+  // M-REC-2 / M-REC-3 / M-REC-6: ``traceId`` is a UUIDv7 recording-id
+  // string assigned by the recorder.  Older MCR import paths still
+  // surface numeric ids; both go over the wire as-is.
   await page.evaluate((id) => {
     const d = (window as any).data;
     d.ipc.send("CODETRACER::load-recent-trace", { traceId: id });
@@ -663,7 +669,7 @@ test.describe("Multi-trace loading into sessions", () => {
     // ==================================================================
 
     // All three sessions should still have their traces in the data model.
-    const verifySession = async (idx: number, expectedId: number) => {
+    const verifySession = async (idx: number, expectedId: string) => {
       const trace = await getSessionTrace(ctPage, idx);
       expect(trace, `session ${idx} should still have its trace`).not.toBeNull();
       expect(trace!.id, `session ${idx} trace ID should match`).toBe(expectedId);

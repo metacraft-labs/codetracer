@@ -13,6 +13,7 @@ import
   ../stylus/[deploy, record, arb_node_utils],
   backends,
   electron,
+  recording_id_env,
   results,
   json_serialization
 
@@ -260,12 +261,9 @@ proc runInitial*(conf: CodetracerConf) =
       # ``CODETRACER_RECORDING_ID`` (UUIDv7 recording-id string).  Setting
       # both at once is a configuration error (the legacy name is gone,
       # not aliased): fail loudly rather than silently picking one.
-      if getEnv("CODETRACER_TRACE_ID", "").len > 0:
-        errorMessage(
-          "error: CODETRACER_TRACE_ID is retired in favour of " &
-          "CODETRACER_RECORDING_ID (UUIDv7 recording-id).  " &
-          "Remove the legacy variable from the environment.")
-        quit(1)
+      # Guard logic lives in ``recording_id_env`` so the launch path and
+      # ``launch_env_var_test`` share a single source of truth.
+      refuseLegacyRecordingIdEnv(proc (msg: string) = errorMessage(msg))
       var frontendArgs: seq[string] = @[]
       if conf.deepreview.len > 0:
         frontendArgs.add("--deepreview")

@@ -376,12 +376,15 @@ function cleanupCodetracerEnvVars(): void {
   delete process.env.CODETRACER_VISUAL_REPLAY_FAKE_PLAYER;
 }
 
-// Cache trace IDs by source path so multiple tests for the same program
-// don't re-record. This dramatically speeds up RR test suites where each
-// language has 5 tests sharing the same sourcePath.
-const recordingCache = new Map<string, number>();
+// Cache recording IDs by source path so multiple tests for the same
+// program don't re-record. This dramatically speeds up RR test suites
+// where each language has 5 tests sharing the same sourcePath.
+//
+// M-REC-2 / M-REC-3 / M-REC-6: the value is a UUIDv7 recording-id
+// string — not a numeric DB row id.
+const recordingCache = new Map<string, string>();
 
-function recordTestProgram(recordArg: string): number {
+function recordTestProgram(recordArg: string): string {
   const cached = recordingCache.get(recordArg);
   if (cached !== undefined) {
     console.log(`# reusing cached trace for ${recordArg} with id ${cached}`);
@@ -410,30 +413,30 @@ function recordTestProgram(recordArg: string): number {
 
   const lines = ctProcess.stdout.trim().split("\n");
   const lastLine = lines[lines.length - 1];
-  // M-REC-6: stdout marker renamed from "traceId:" to "recordingId:".
-  // The payload is a UUIDv7 string; the parseInt below is a pre-existing
-  // M-REC-2 hangover (test-side trace_folder layout cleanup is M-REC-7).
+  // M-REC-2 / M-REC-3 / M-REC-6: stdout marker is ``recordingId:`` and
+  // the payload is a UUIDv7 recording-id string.  Validate the shape
+  // lightly (non-empty after trimming) and pass it through verbatim —
+  // no ``Number()`` coercion.
   if (!lastLine.startsWith("recordingId:")) {
     throw new Error(`Unexpected last line of ct record: ${lastLine}`);
   }
-  const rawTraceId = lastLine.slice("recordingId:".length).trim();
-  const traceId = Number(rawTraceId);
-  if (isNaN(traceId)) {
-    throw new Error(`Could not parse trace id from: ${rawTraceId}`);
+  const recordingId = lastLine.slice("recordingId:".length).trim();
+  if (recordingId.length === 0) {
+    throw new Error(`Empty recording id from ct record output: ${lastLine}`);
   }
-  console.log(`# recorded trace for ${recordArg} with id ${traceId}`);
-  recordingCache.set(recordArg, traceId);
-  return traceId;
+  console.log(`# recorded trace for ${recordArg} with id ${recordingId}`);
+  recordingCache.set(recordArg, recordingId);
+  return recordingId;
 }
 
-function traceFolderForId(traceId: number): string {
+function traceFolderForId(recordingId: string): string {
   const dataHome =
     process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
-  return path.join(dataHome, "codetracer", `trace-${traceId}`);
+  return path.join(dataHome, "codetracer", `trace-${recordingId}`);
 }
 
-function markTraceVisualReplayCapable(traceId: number): void {
-  const gfxDir = path.join(traceFolderForId(traceId), "gfx_stream");
+function markTraceVisualReplayCapable(recordingId: string): void {
+  const gfxDir = path.join(traceFolderForId(recordingId), "gfx_stream");
   fs.mkdirSync(gfxDir, { recursive: true });
   fs.writeFileSync(path.join(gfxDir, "gfx_commands.dat"), "");
 }
@@ -687,7 +690,7 @@ async function launchTraceElectron(
           // M-REC-6: env-var renamed from CODETRACER_TRACE_ID.  Carries
           // the recording-id string the Electron index process picks up
           // in src/frontend/index/args.nim.
-          CODETRACER_RECORDING_ID: traceId.toString(),
+          CODETRACER_RECORDING_ID: traceId,
         }),
       }),
   );
@@ -880,7 +883,7 @@ async function launchTraceWeb(
     codetracerPath,
     [
       "host",
-      traceId.toString(),
+      traceId,
       `--port=${httpPort}`,
       `--backend-socket-port=${backendPort}`,
       `--frontend-socket=${backendPort}`,

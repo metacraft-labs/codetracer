@@ -97,14 +97,17 @@ async function getActiveIndex(page: import("@playwright/test").Page): Promise<nu
 async function getSessionTrace(
   page: import("@playwright/test").Page,
   sessionIndex: number,
-): Promise<{ id: number; program: string; outputFolder: string } | null> {
+): Promise<{ id: string; program: string; outputFolder: string } | null> {
+  // M-REC-2 / M-REC-3 / M-REC-6: ``trace.id`` is a UUIDv7 recording-id
+  // string; coerce to string (preserves the raw id even when older
+  // numeric MCR import ids slip through).
   return page.evaluate((idx) => {
     const d = (window as any).data;
     const session = d?.sessions?.[idx];
     const trace = session?.trace;
     if (!trace) return null;
     return {
-      id: Number(trace.id ?? -1),
+      id: String(trace.id ?? ""),
       program: String(trace.program ?? ""),
       outputFolder: String(trace.outputFolder ?? ""),
     };
@@ -125,10 +128,14 @@ async function sessionHasTrace(
 /**
  * Load a pre-recorded trace into the currently active session by sending
  * the `CODETRACER::load-recent-trace` IPC message.
+ *
+ * M-REC-2 / M-REC-3 / M-REC-6: ``traceId`` is the UUIDv7 recording-id
+ * string assigned by the recorder.  Numeric MCR-import ids are still
+ * accepted by older code paths; both go over the wire as-is.
  */
 async function loadTraceIntoActiveSession(
   page: import("@playwright/test").Page,
-  traceId: number,
+  traceId: string | number,
 ): Promise<void> {
   await page.evaluate((id) => {
     const d = (window as any).data;
