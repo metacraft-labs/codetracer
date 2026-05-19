@@ -4,6 +4,24 @@ import repro_dsl_stdlib
 
 const PublicResourceRoot = "src/public"
 
+# Windows: extra C/linker flags so the bundled libzip C sources compile under
+# MinGW UCRT (mirror of src/Tuprules.tup's NIM_WINDOWS_CFLAGS / DYNLIB_OVERRIDE_FLAGS
+# windows branch). zlib lives at the vendored DIY path because env.ps1 does not
+# yet install a system zlib; -Wno-implicit-function-declaration demotes the
+# getpid/unlink/mkstemp implicit-decl errors to warnings so MinGW's import
+# library can wire the names at link time.
+const
+  WindowsZlibRoot = "D:/metacraft-dev-deps/zlib/1.3.1"
+  WindowsExtraPassC = @[
+    "-I" & WindowsZlibRoot & "/include",
+    "-Wno-implicit-function-declaration",
+    "-Wno-error=implicit-function-declaration"
+  ]
+  WindowsExtraPassL = @[
+    "-L" & WindowsZlibRoot & "/lib",
+    "-lz"
+  ]
+
 const
   CtConfigHeader = """
 #ifndef REPROBUILD_CT_SUBSET_CONFIG_H
@@ -128,25 +146,53 @@ package codeTracer:
 
     template ctNative(outputPath, sourcePath, nimcachePath: string):
         BuildActionDef =
-      nim.c(
-        defines = NativeDefines,
-        mm = "refc",
-        hintsOff = true,
-        warningsOff = true,
-        disabledHints = DisabledNimHints,
-        disabledWarnings = DisabledCaseTransitionWarning,
-        debugInfo = true,
-        lineDirOn = true,
-        stacktraceOn = true,
-        linetraceOn = true,
-        boundChecksOn = true,
-        warningsOn = true,
-        hintsOn = true,
-        dynlibOverrides = NativeDynlibOverrides,
-        passL = NativePassL,
-        nimcache = nimcachePath,
-        output = outputPath,
-        source = sourcePath)
+      # Windows: drop the Linux/Nix dynlibOverride+passL set (no system
+      # libssl/libcrypto/libsqlite3/libpcre/libzip available on the DIY
+      # toolchain); pin -lz + zlib include/lib paths via passC/passL so the
+      # bundled libzip C sources compile (see WindowsExtraPassC/PassL above).
+      # The DSL output role for nim.c does NOT auto-append .exe on Windows;
+      # add it explicitly so the cache lookup and downstream consumers see the
+      # real file path emitted by the Nim compiler.
+      when defined(windows):
+        nim.c(
+          defines = NativeDefines,
+          mm = "refc",
+          hintsOff = true,
+          warningsOff = true,
+          disabledHints = DisabledNimHints,
+          disabledWarnings = DisabledCaseTransitionWarning,
+          debugInfo = true,
+          lineDirOn = true,
+          stacktraceOn = true,
+          linetraceOn = true,
+          boundChecksOn = true,
+          warningsOn = true,
+          hintsOn = true,
+          passC = WindowsExtraPassC,
+          passL = WindowsExtraPassL,
+          nimcache = nimcachePath,
+          output = outputPath & ".exe",
+          source = sourcePath)
+      else:
+        nim.c(
+          defines = NativeDefines,
+          mm = "refc",
+          hintsOff = true,
+          warningsOff = true,
+          disabledHints = DisabledNimHints,
+          disabledWarnings = DisabledCaseTransitionWarning,
+          debugInfo = true,
+          lineDirOn = true,
+          stacktraceOn = true,
+          linetraceOn = true,
+          boundChecksOn = true,
+          warningsOn = true,
+          hintsOn = true,
+          dynlibOverrides = NativeDynlibOverrides,
+          passL = NativePassL,
+          nimcache = nimcachePath,
+          output = outputPath,
+          source = sourcePath)
 
     template ctStylus(name: string): BuildActionDef =
       stylus(
