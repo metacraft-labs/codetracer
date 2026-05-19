@@ -7,9 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::time::Instant;
 
-use runtime_tracing::{
-    EventLogKind, Line, Tracer, TypeId, TypeKind, ValueRecord, NONE_TYPE_ID, NONE_VALUE,
+use codetracer_trace_types::{
+    EventLogKind, Line, Place, TypeId, TypeKind, ValueRecord, NONE_TYPE_ID, NONE_VALUE,
 };
+use codetracer_trace_writer_nim::trace_writer::TraceWriter;
+use codetracer_trace_writer_nim::{create_trace_writer, TraceEventsFileFormat};
 
 mod node;
 mod parser;
@@ -93,7 +95,7 @@ struct Interpreter {
     workdir: PathBuf,
 
     tracing: bool,
-    tracer: Tracer,
+    tracer: Box<dyn TraceWriter>,
 }
 
 // how would potential bytecode look like?
@@ -131,7 +133,11 @@ impl Interpreter {
 
             tracing,
             workdir: env::current_dir().unwrap(),
-            tracer: Tracer::new(&format!("{}", program_path.display()), &[]),
+            tracer: create_trace_writer(
+                &format!("{}", program_path.display()),
+                &[],
+                TraceEventsFileFormat::Ctfs,
+            ),
         }
     }
 
@@ -139,8 +145,18 @@ impl Interpreter {
     //     self.tracer.ensure_path_id(&self.workdir.join(&self.program_path)) // TODO dynamic path
     // }
 
-    fn on_start(&mut self) {
+    fn on_start(&mut self) -> Result<(), Box<dyn Error>> {
         if self.tracing {
+            // CTFS multi-stream container: the Nim writer derives the
+            // `.ct` filename from the program basename, so we just hand it
+            // a placeholder events-stream path inside the working directory
+            // (the actual on-disk artifact will be `<workdir>/<basename>.ct`).
+            let events_path = self.workdir.join("trace.bin");
+            self.tracer.set_workdir(&self.workdir);
+            self.tracer
+                .begin_writing_trace_events(&events_path)
+                .map_err(|e| -> Box<dyn Error> { format!("{e}").into() })?;
+
             self.tracer.start(
                 &self.workdir.join(&self.program_path),
                 Line(self.current_position.line as i64),
@@ -150,6 +166,22 @@ impl Interpreter {
             assert!(INT_TYPE_ID == self.tracer.ensure_type_id(TypeKind::Int, "Int"));
             assert!(BOOL_TYPE_ID == self.tracer.ensure_type_id(TypeKind::Bool, "Bool"));
         }
+        Ok(())
+    }
+
+    fn finish_tracing(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.tracing {
+            self.tracer
+                .finish_writing_trace_events()
+                .map_err(|e| -> Box<dyn Error> { format!("{e}").into() })?;
+            self.tracer
+                .write_meta_dat("small-lang")
+                .map_err(|e| -> Box<dyn Error> { format!("{e}").into() })?;
+            self.tracer
+                .close()
+                .map_err(|e| -> Box<dyn Error> { format!("{e}").into() })?;
+        }
+        Ok(())
     }
 
     fn on_step(&mut self, position: &Position) {
@@ -353,14 +385,14 @@ impl Interpreter {
                     elements: items
                         .iter()
                         .map(|item_value_id| ValueRecord::Cell {
-                            place: runtime_tracing::Place((*item_value_id) as i64),
+                            place: Place((*item_value_id) as i64),
                         })
                         .collect(),
                     is_slice: false,
                     type_id,
                 };
                 self.tracer.register_compound_value(
-                    runtime_tracing::Place(value_id as i64),
+                    Place(value_id as i64),
                     compound_value,
                 );
                 Ok(value_id)
@@ -424,7 +456,7 @@ impl Interpreter {
             self.interned_ints.insert(i, value_id);
             let value_record = self.convert_to_trace_value(&value);
             self.tracer
-                .register_cell_value(runtime_tracing::Place(value_id as i64), value_record);
+                .register_cell_value(Place(value_id as i64), value_record);
             value_id
         }
     }
@@ -481,7 +513,7 @@ impl Interpreter {
         let text = self.repr_many(args)?;
         println!("{}", text);
         self.tracer
-            .register_special_event(EventLogKind::Write, &text);
+            .register_special_event(EventLogKind::Write, "", &text);
         Ok(VOID_VALUE_ID)
     }
 
@@ -499,7 +531,7 @@ impl Interpreter {
             if let Value::String { text: path_text } = path {
                 let content_repr: String = self.value_repr(content_value_id);
                 self.tracer
-                    .register_special_event(EventLogKind::WriteFile, &content_repr);
+                    .register_special_event(EventLogKind::WriteFile, &path_text, &content_repr);
                 fs::write(path_text, &content_repr)?;
                 Ok(VOID_VALUE_ID)
             } else {
@@ -628,7 +660,7 @@ impl Interpreter {
         self.tracer.register_call(function_id, trace_args);
         for (name, value_id) in self.env[self.env.len() - 1].values.iter() {
             self.tracer
-                .register_variable(name, runtime_tracing::Place((*value_id) as i64));
+                .register_variable(name, Place((*value_id) as i64));
         }
 
         let mut result_value_id = VOID_VALUE_ID;
@@ -664,7 +696,7 @@ impl Interpreter {
                 if !dereferencing {
                     self.env[last_index].set(name, right_value_id);
                     self.tracer
-                        .register_variable(name, runtime_tracing::Place(right_value_id as i64));
+                        .register_variable(name, Place(right_value_id as i64));
                     Ok(right_value_id)
                 } else {
                     // (set-deref name value)
@@ -696,9 +728,9 @@ impl Interpreter {
                     if let Value::Vector { ref mut items } = self.values[c] {
                         items[i as usize] = right_value_id;
                         self.tracer.assign_compound_item(
-                            runtime_tracing::Place(c as i64),
+                            Place(c as i64),
                             i as usize,
-                            runtime_tracing::Place(right_value_id as i64),
+                            Place(right_value_id as i64),
                         );
                         Ok(right_value_id)
                     } else {
@@ -732,7 +764,7 @@ impl Interpreter {
                 self.env.push(EnvScope::new_internal_scope());
                 let loop_env_index = self.env.len() - 1;
                 let index_value_id = self.new_value_id();
-                let index_trace_value_id = runtime_tracing::Place(index_value_id as i64);
+                let index_trace_value_id = Place(index_value_id as i64);
                 for index in start..to {
                     self.values[index_value_id] = Value::Int { i: index };
                     let index_value_record = ValueRecord::Int {
@@ -868,25 +900,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     // println!("{:#?}", program2);
 
     let program_node = parse_program(&source).unwrap();
-    interpreter.on_start();
+    interpreter.on_start()?;
     let _res = interpreter.evaluate(&program_node).unwrap();
 
     let duration = start.elapsed();
     eprintln!("parsing/evaluating program: duration: {:?}", duration);
 
-    if interpreter.tracing {
-        // M-REC-1.5: the legacy 3-file trace output (trace.json +
-        // trace_metadata.json + trace_paths.json) is no longer accepted
-        // by any consumer in this repo.  small-lang depends on an
-        // upstream `runtime_tracing` crate that has not yet migrated to
-        // emit CTFS `.ct` containers, so for the moment we simply skip
-        // the trace-write step rather than producing data nothing can
-        // read.  Re-enable once `runtime_tracing` ships a CTFS writer.
-        eprintln!(
-            "small-lang: tracing output skipped — runtime_tracing has not yet \
-             been migrated to write CTFS `.ct` containers (M-REC-1.5)."
-        );
-    }
+    // Phase 3 of follow-up #254: small-lang now emits canonical v3 CTFS
+    // containers via the in-tree `codetracer_trace_writer_nim` writer,
+    // just like every other CodeTracer recorder.  The pre-2026-05 stub
+    // that skipped trace output (gated under M-REC-1.5) has been removed.
+    interpreter.finish_tracing()?;
     // println!("{}", interpreter.value_repr(res));
     // println!("values: raw: {:#?}", interpreter.values);
     // println!("values: repr: {:#?}", interpreter.values.iter()
