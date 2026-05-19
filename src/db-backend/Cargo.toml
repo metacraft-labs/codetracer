@@ -1,7 +1,10 @@
 [package]
 name = "replay-server"
 version = "0.1.0"
-edition = "2021"
+# edition 2024: src/paths.rs uses stabilized let-chains (`if let X = ... && Y`),
+# which require edition 2024 or later. The sibling `codetracer_trace_writer` /
+# `codetracer_trace_reader` crates are already on 2024.
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
