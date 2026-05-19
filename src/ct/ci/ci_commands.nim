@@ -284,10 +284,17 @@ proc ciExecCommand*(token, baseUrl: string, program: string,
       if cancelled:
         # Send SIGTERM, wait, then SIGKILL.
         echo "Run cancelled by server. Terminating child process..."
-        discard posix.kill(pid.cint, SIGTERM)
-        sleep(TermGracePeriodMs)
-        if running(process):
-          discard posix.kill(pid.cint, SIGKILL)
+        when defined(posix):
+          discard posix.kill(pid.cint, SIGTERM)
+          sleep(TermGracePeriodMs)
+          if running(process):
+            discard posix.kill(pid.cint, SIGKILL)
+        else:
+          # Windows: posix.kill / SIGKILL are not available. Use std/osproc
+          # which routes to TerminateProcess on Windows. There is no
+          # equivalent of the SIGTERM grace period — TerminateProcess is
+          # the only force-kill primitive available.
+          terminate(process)
         break
 
     if outputStream.atEnd():

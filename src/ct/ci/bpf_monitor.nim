@@ -278,8 +278,14 @@ proc startMonitor*(rootPid: int, scriptPath: string): BPFMonitor =
   # Set the stdout pipe to non-blocking mode so that ``pollEvents`` can
   # return immediately when no data is available.
   result.pipeFd = cint(outputHandle(result.process))
-  let flags = fcntl(result.pipeFd, F_GETFL)
-  discard fcntl(result.pipeFd, F_SETFL, flags or O_NONBLOCK)
+  when defined(posix):
+    let flags = fcntl(result.pipeFd, F_GETFL)
+    discard fcntl(result.pipeFd, F_SETFL, flags or O_NONBLOCK)
+  # On Windows, bpftrace is unavailable, so this code path is effectively
+  # dead — the monitor degrades gracefully. The fcntl/F_GETFL/O_NONBLOCK
+  # symbols come from `std/posix`, which only exposes them on POSIX
+  # systems. Pipe non-blocking on Windows would use SetNamedPipeHandleState,
+  # but there is no Windows BPF analogue to drive, so we skip the setup.
 
 # ---------------------------------------------------------------------------
 # Event parsing
@@ -557,43 +563,49 @@ proc pollEvents*(monitor: var BPFMonitor) =
   if not monitor.running:
     return
 
-  # Read raw bytes from the non-blocking pipe and split into lines.
-  # Any partial trailing line is kept in ``readBuf`` for the next call.
-  var buf: array[4096, char]
-  while true:
-    let n = posix.read(monitor.pipeFd, addr buf[0], buf.len)
-    if n > 0:
-      for i in 0 ..< n:
-        if buf[i] == '\n':
-          if monitor.readBuf.len > 0:
-            try:
-              parseBpfLine(monitor, monitor.readBuf)
-            except CatchableError as e:
-              echo fmt"Warning: failed to parse bpftrace line: {e.msg}"
-            monitor.readBuf.setLen(0)
-        else:
-          monitor.readBuf.add(buf[i])
-    elif n == 0:
-      # EOF -- pipe closed (bpftrace exited).
-      # Process any remaining partial line.
-      if monitor.readBuf.len > 0:
-        try:
-          parseBpfLine(monitor, monitor.readBuf)
-        except CatchableError:
-          discard
-        monitor.readBuf.setLen(0)
-      monitor.running = false
-      break
-    else:
-      # n < 0: check errno
-      let err = errno
-      if err == EAGAIN or err == EWOULDBLOCK:
-        # No data available right now -- return without blocking.
-        break
-      else:
-        # Unexpected error -- treat as pipe closed.
+  when defined(posix):
+    # Read raw bytes from the non-blocking pipe and split into lines.
+    # Any partial trailing line is kept in ``readBuf`` for the next call.
+    var buf: array[4096, char]
+    while true:
+      let n = posix.read(monitor.pipeFd, addr buf[0], buf.len)
+      if n > 0:
+        for i in 0 ..< n:
+          if buf[i] == '\n':
+            if monitor.readBuf.len > 0:
+              try:
+                parseBpfLine(monitor, monitor.readBuf)
+              except CatchableError as e:
+                echo fmt"Warning: failed to parse bpftrace line: {e.msg}"
+              monitor.readBuf.setLen(0)
+          else:
+            monitor.readBuf.add(buf[i])
+      elif n == 0:
+        # EOF -- pipe closed (bpftrace exited).
+        # Process any remaining partial line.
+        if monitor.readBuf.len > 0:
+          try:
+            parseBpfLine(monitor, monitor.readBuf)
+          except CatchableError:
+            discard
+          monitor.readBuf.setLen(0)
         monitor.running = false
         break
+      else:
+        # n < 0: check errno
+        let err = errno
+        if err == EAGAIN or err == EWOULDBLOCK:
+          # No data available right now -- return without blocking.
+          break
+        else:
+          # Unexpected error -- treat as pipe closed.
+          monitor.running = false
+          break
+  else:
+    # Windows: bpftrace is not available. `startMonitor` would have failed
+    # earlier in `findBpftrace`/the spawn step, but we keep the no-op so
+    # the surrounding ci_commands code can call `pollEvents` unconditionally.
+    monitor.running = false
 
 proc hasPendingEvents*(monitor: BPFMonitor): bool =
   ## Returns true if there are any buffered events waiting to be flushed.
@@ -635,26 +647,36 @@ proc stopMonitor*(monitor: var BPFMonitor) =
   if not monitor.running:
     return
 
-  let pid = processID(monitor.process)
-  # bpftrace runs under sudo, so we need to kill via sudo as well.
-  try:
-    discard posix.kill(pid.cint, SIGTERM)
-  except CatchableError:
-    discard
-
-  # Give bpftrace a short grace period to flush its output.
-  sleep(500)
-
-  if running(monitor.process):
+  when defined(posix):
+    let pid = processID(monitor.process)
+    # bpftrace runs under sudo, so we need to kill via sudo as well.
     try:
-      discard posix.kill(pid.cint, SIGKILL)
+      discard posix.kill(pid.cint, SIGTERM)
     except CatchableError:
       discard
 
-  # Switch the pipe back to blocking mode so we can drain all remaining
-  # output before the process exits.
-  let flags = fcntl(monitor.pipeFd, F_GETFL)
-  discard fcntl(monitor.pipeFd, F_SETFL, flags and (not O_NONBLOCK))
+    # Give bpftrace a short grace period to flush its output.
+    sleep(500)
+
+    if running(monitor.process):
+      try:
+        discard posix.kill(pid.cint, SIGKILL)
+      except CatchableError:
+        discard
+
+    # Switch the pipe back to blocking mode so we can drain all remaining
+    # output before the process exits.
+    let flags = fcntl(monitor.pipeFd, F_GETFL)
+    discard fcntl(monitor.pipeFd, F_SETFL, flags and (not O_NONBLOCK))
+  else:
+    # Windows: posix.kill / SIGTERM / SIGKILL / fcntl are unavailable.
+    # `std/osproc.terminate` routes to TerminateProcess on Windows, which
+    # is the only force-kill primitive available. There is no equivalent
+    # of the SIGTERM grace period.
+    try:
+      terminate(monitor.process)
+    except CatchableError:
+      discard
 
   # Drain remaining output using the blocking stream.
   try:
