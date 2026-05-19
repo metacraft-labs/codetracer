@@ -42,6 +42,35 @@ NIM_DANGER_FLAGS=\
 ROOT = $(TUP_CWD)/../../
 NIM_BIN = nim
 
+# Windows port: `libs/zip/zip/libzip.nim` compiles `libzip_all.c` directly on
+# Windows (the dynamic-libzip path is gated on `defined(unix)`), and that .c
+# file `#include`s `<zlib.h>`. MinGW UCRT does not ship zlib, and env.ps1 does
+# not yet install it, so the build vendors a zlib build under
+# D:/metacraft-dev-deps/zlib/<ver>/ — `non-nix-build/windows/ensure-zlib.ps1`
+# is the longer-term home for the bootstrap, but pinning the path here keeps
+# the change inside this repo (env.ps1's logic is currently fixed by user
+# contract). The path is matched to ensure-zstd's layout (version dir +
+# include/lib subdirs).
+ifeq (@(TUP_PLATFORM),win32)
+WINDOWS_ZLIB_DIR = D:/metacraft-dev-deps/zlib/1.3.1
+# `-Wno-implicit-function-declaration` and the matching `-Wno-error` are
+# needed because the bundled `libs/zip/zip/private/libzip_all.c` uses POSIX
+# helpers (`getpid`, `unlink`, `mkstemp`) that MinGW UCRT either renames
+# (`_getpid`) or omits, and GCC 14+ treats implicit declarations as errors
+# by default. Demoting back to a warning lets the call sites resolve to the
+# MinGW intrinsic via the linker's import-library wrappers (UCRT exports
+# `_getpid` etc. and gcc/ld will match the name at link time without the
+# header declaration).
+NIM_WINDOWS_CFLAGS = \
+--passC:"-I$(WINDOWS_ZLIB_DIR)/include" \
+--passC:"-Wno-implicit-function-declaration" \
+--passC:"-Wno-error=implicit-function-declaration" \
+--passL:"-L$(WINDOWS_ZLIB_DIR)/lib" \
+--passL:"-lz"
+else
+NIM_WINDOWS_CFLAGS =
+endif
+
 NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
 NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)
 NIM_DANGER  = $(NIM_BIN) $(NIM_DANGER_FLAGS)
@@ -52,11 +81,31 @@ else
 EXE_SUFFIX =
 endif
 
+# Windows rustc writes intermediate files (rmeta, symbols.o, linker-arguments)
+# into %LOCALAPPDATA%\Temp\rustc<random>\... — outside the cargo target dir but
+# legitimate temp scratch. Ignore them so tup doesn't fail the build over
+# transient compiler temp. Pattern matches `C:/Users/<user>/AppData/Local/Temp/rustc<random>/...`.
+WINDOWS_RUSTC_TMP_IGNORE = ([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]AppData[/\\]Local[/\\]Temp[/\\]rustc[^/\\]*[/\\].*
+
+# Cargo writes to CARGO_HOME (registry cache, git checkouts, package-cache
+# mutex) during build. tup considers these undeclared outputs. Allow writes
+# under either `~/.cargo` (user-default) or any path whose last segment is
+# `cargo` and contains the standard subdirs (covers env.ps1's managed
+# `D:/metacraft-dev-deps/cargo`).
+WINDOWS_CARGO_HOME_IGNORE = (([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]\.cargo[/\\].*|.+[/\\]\.?cargo[/\\](registry|git|\.crates.*|\.package-cache.*|\.global-cache.*|bin|env)([/\\].*)?|.+[/\\]\.?cargo[/\\]\.[^/\\]+)
+
 NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-z]:)?[/\\].*_linkerArgs\\.txt)$
-BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[/\\].*
-DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[/\\].*
-VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[/\\].*
-SMALL_LANG_CARGO_IGNORE_OUTPUTS = ^([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]small_lang_target[/\\].*
+# Cargo writes CACHEDIR.TAG (and other metadata) into a temp directory whose
+# name is `<target_dir><RANDOM>` (e.g. `db_backend_targetF5RTUl/`) while
+# preparing the target dir, then atomically renames it to `<target_dir>`.
+# The trailing-random-suffix variant must be included in the IGNORE pattern
+# or tup reports the transient writes as undeclared outputs. The patterns
+# below intentionally allow either `target/...` (final layout) or
+# `target<6-char-suffix>/...` (cargo's atomic-prep layout).
+BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+SMALL_LANG_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]small_lang_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 
 ifeq (@(TUP_PLATFORM),win32)
 CARGO_TARGET_BASE = C:/tmp/codetracer
@@ -170,6 +219,20 @@ js %f |> %B.js | $(NIM_SIDE_OUTPUTS_IGNORE)
 #   2. Works correctly with Nix, where libraries live in /nix/store paths
 #      that Nim's dlopen search heuristics can't find
 #   3. Matches the AppImage build (see appimage-scripts/build_with_nim.sh)
+ifeq (@(TUP_PLATFORM),win32)
+# Windows port: libs/zip/zip/libzip.nim's Windows branch compiles
+# libzip_all.c directly (rather than dynlibbing libzip), so we drop the
+# -lzip passL (no system libzip is available on the DIY toolchain) and
+# instead add -lz to satisfy the zlib symbols that libzip_all.c uses.
+# The zlib include + library paths come from $(NIM_WINDOWS_CFLAGS).
+# We also drop -lcrypto/-lssl/-lsqlite3/-lpcre because env.ps1 does not
+# ship those static libs; the Nim runtime falls back to dynlib loading
+# for these. The corresponding --dynlibOverride flags are also dropped
+# so that Nim restores its default dlopen path.
+DYNLIB_OVERRIDE_FLAGS = \
+$(NIM_WINDOWS_CFLAGS) \
+--passL:"-lz"
+else
 DYNLIB_OVERRIDE_FLAGS = \
 --dynlibOverride:libcrypto \
 --dynlibOverride:libssl \
@@ -181,6 +244,7 @@ DYNLIB_OVERRIDE_FLAGS = \
 --passL:"-lsqlite3" \
 --passL:"-lpcre" \
 --passL:"-lzip"
+endif
 
 !nim_c = |> ^ %f^ $(NIM_DEBUG)\
 -d:ssl \
@@ -240,6 +304,10 @@ c %f |> %B macro_sourcemap_%B.json | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 # rust
 export RUSTUP_HOME
+# CARGO_HOME must propagate so cargo writes to the managed install root
+# (e.g. D:/metacraft-dev-deps/cargo on Windows) instead of the user-level
+# default ~/.cargo, which tup doesn't allow as an undeclared output.
+export CARGO_HOME
 export PATH
 export LIB
 export LIBPATH
@@ -266,14 +334,30 @@ export C_INCLUDE_PATH
 # This avoids shell-quoting differences between Windows environments.
 RUST_WINDOWS_LINKER_CONFIG =
 
+# Windows port: the `nim-reader` default feature pulls in
+# `codetracer_trace_writer_nim` which links a Nim static archive
+# (`libcodetracer_trace_writer.a`) produced by a Linux/Nix toolchain in
+# the sibling `codetracer-trace-format-nim` repo. That archive is not yet
+# produced on Windows (the Nim ffi crate compiles its sources with gcc
+# and needs zstd headers/libs via pkg-config). Disabling default features
+# and re-enabling only `io-transport` + `syntax-highlight` keeps every
+# build target functional on Windows — only opening CTFS bundles in the
+# *new* steps.dat format will fail with a clean "feature not enabled"
+# error from `ctfs_trace_reader::open_new_format`.
+ifeq (@(TUP_PLATFORM),win32)
+DB_BACKEND_CARGO_FEATURES = --no-default-features --features io-transport,syntax-highlight
+else
+DB_BACKEND_CARGO_FEATURES =
+endif
+
 !rust_cargo_backend_manager = |> \
     cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/backend_manager_target && \
     cp $(CARGO_TARGET_BASE)/backend_manager_target/release/session-manager$(EXE_SUFFIX) %o |> %o | $(BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS)
 !debug_rust_cargo_db_backend = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_db_backend = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cargo build $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/release/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
 !rust_cargo_virtualization_layers = |> \
     cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/virtualization_layers_target && \
