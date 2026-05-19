@@ -36,25 +36,27 @@
     border-radius: 50%
     background-position: center
     background-repeat: no-repeat
-    background-size: 1em
+    font-size: inherit
 
     &.minimize
       background-image: WINDOW_MINIMIZE_ICON_PATH
       opacity: 1
-      background-position-y: 65%
+      background-size: 0.625em 0.125em
 
     &.restore
       background-image: WINDOW_RESTORE_ICON_PATH
       opacity: 1
+      background-size: 0.75em
 
     &.maximize
       background-image: WINDOW_MAXIMIZE_ICON_PATH
       opacity: 1
+      background-size: 0.75em
 
     &.close
       background-image: WINDOW_CLOSE_ICON_PATH
       opacity: 1
-      font-size: inherit !important
+      background-size: 0.65em
 
     &:hover
       opacity: 0.5;

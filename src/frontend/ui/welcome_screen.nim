@@ -353,7 +353,7 @@ proc recentFoldersView(self: WelcomeScreenComponent): VNode =
     tdiv(class = "recent-folders")
   ):
     tdiv(class = "recent-folders-title"):
-      text "RECENT FOLDERS"
+      text "Recent folders"
     tdiv(
       class = "recent-folders-list",
       onscroll = proc(ev: Event, tg: VNode) =
@@ -378,7 +378,7 @@ proc recentProjectsView(self: WelcomeScreenComponent): VNode =
     tdiv(class = "recent-traces")
   ):
     tdiv(class = "recent-traces-title"):
-      text "RECENT TRACES"
+      text "Recent traces"
     tdiv(
       class = "recent-traces-list",
       onscroll = proc(ev: Event, tg: VNode) =
@@ -431,7 +431,7 @@ proc renderOption(self: WelcomeScreenComponent, option: WelcomeScreenOption): VN
 
   buildHtml(
     button(
-      class = "ct-button-sm-tertiary",
+      class = "ct-button-md-tertiary",
       onmousedown = proc(ev: Event, tg: VNode) =
         ev.preventDefault(),
       onmouseup = proc(ev: Event, tg: VNode) =
@@ -870,7 +870,11 @@ proc welcomeScreenView(self: WelcomeScreenComponent): VNode =
     tdiv(class = "welcome-title"):
       tdiv(class = "welcome-text"):
         tdiv(class = "welcome-logo")
-        text "Welcome to CodeTracer IDE"
+        tdiv(class = "welcome-text-lines"):
+          tdiv(class = "welcome-text-line"):
+            text "Welcome to"
+          tdiv(class = "welcome-text-line"):
+            text "CodeTracer IDE"
       tdiv(class = "welcome-version"):
         text fmt"Version {CodeTracerVersionStr}"
     tdiv(class = "welcome-content"):

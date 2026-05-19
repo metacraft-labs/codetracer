@@ -4,11 +4,11 @@
 
   .window-menu
     align-items: start
-    height: 28px
+    height: 1.75em
 
     .minimize
-      background-position: bottom
-      background-position-y: 18px
+      background-position: center
+      background-position-y: 65%
 
 .welcome-screen-loading-overlay
   position: absolute
@@ -21,16 +21,16 @@
   display: flex
   align-items: center
   justify-content: center
+  font-family: "SpaceGrotesk"
 
   &-text
-    padding-left: 10px
+    padding-left: 0.625em
     color: white
-    font-size: x-large
-    font-style: italic
+    font-size: 1.5em
 
   .welcome-screen-loading-overlay-icon
-    width: 32px
-    height: 32px
+    width: 2em
+    height: 2em
     background-repeat: no-repeat
     background-position: center
     background-image: url("../../public/resources/welcome/loading_sign_dots_32.svg")
@@ -40,15 +40,17 @@
 
 .welcome-logo
   background-image: url('../../public/resources/shared/codetracer_welcome_logo.svg')
-  min-width: 62px
-  min-height: 62px
-  background-size: 62px 62px
+  width: 2.5em
+  height: 2.5em
+  min-width: 2.5em
+  min-height: 2.5em
+  background-size: 2.5em 2.5em
   background-position: center
-  margin-right: 12px
+  margin-right: 0.75em
   background-repeat: no-repeat
 
 .welcome-screen-wrapper
-  color: WELCOME_SCREEN_TEXT_COLOR;
+  color: colors-ui-text-primary-body;
   background-color: WELCOME_SCREEN_BACKGROUND_COLOR;
   height: 100vh;
   position: relative;
@@ -57,58 +59,64 @@
   display: flex;
   justify-content: center;
   align-items: center
-  border-radius: 8px
+  border-radius: 0.5em
+  font-family: "SpaceGrotesk"
 
   .welcome-screen
     position: relative
-    height: fit-content
-    background-color: gradien
-    width: 900px
-    padding: 48px
-    padding-bottom: 60px
-    background: WELCOME_SCREEN_BACKGROUND_COLOR
     display: flex
+    width: fit-content
+    padding: 3em
     flex-direction: column
-    border-radius: 12px
-    align-items: center
-    border: 1px solid LINE_STROKE
+    align-items: flex-start
+    gap: 3em
+    background: colors-ui-surface-canvas
+    border-radius: 0.75em
+    border: 0.0625em solid #4F4F4F
 
     &.welcome-screen-loading
       cursor: wait !important
 
     .welcome-title
       position: relative
-      font-family: "SpaceMono"
+      font-family: "SpaceGrotesk"
       text-align: start
       display: flex
       align-items: flex-end
       justify-content: space-between
-      color: WELCOME_SCREEN_TEXT_COLOR
-      width: -webkit-fill-available
+      color: colors-ui-text-primary-body
+      width: 100%
 
       .welcome-text
-        word-break: break-word
         display: flex
         align-items: center
         font-weight: BOLD_WEIGHT
-        width: 304px
-        font-size: 32px
-        line-height: 34px
-        letter-spacing: -0.32px
+        font-size: 2em
+        line-height: 1.0625
+        letter-spacing: -0.02em
+
+        .welcome-text-lines
+          display: flex
+          flex-direction: column
+
+        .welcome-text-line
+          white-space: nowrap
 
       .welcome-version
-        color: WELCOME_SCREEN_VERSION_TEXT_COLOR
-        font-size: 12px
-        font-family: "SpaceMono"
+        color: #C8C8C8
+        font-size: 0.75em
+        font-family: "SpaceGrotesk"
         font-weight: 400
         line-height: normal
         text-align: center
+        font-style: italic
 
     .welcome-content
       display: flex
       flex-direction: row
-      gap: 16px
-      width: -webkit-fill-available
+      gap: 1em
+      width: 100%
+      align-self: stretch
 
     .welcome-left-panel
       flex: 1
@@ -126,106 +134,61 @@
     .start-options
       position: relative
       display: flex
-      width: -webkit-fill-available
-      justify-content: space-between
+      justify-content: flex-start
+      gap: 0.5em
+      flex-wrap: nowrap
+      white-space: nowrap
 
-      .start-option
-        position: relative
-        right: 0
-        display: flex
-        cursor: pointer
-        justify-content: center
-        font-family: "SpaceMono"
-
-        &.hovered
-          opacity: 1
+      button
+        font-family: "SpaceGrotesk"
+        flex-shrink: 0
 
       .inactive-start-option
-        opacity: 0.2
+        opacity: 0.5
         pointer-events: none
-
-        &.hovered
-          color: inherit
-          opacity: 0.2
-
-      .start-option-icon
-        width: 100px
-        height: 100px
-        background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON
-        background-repeat: no-repeat
-        background-position: center
-
-        &.hovered
-          background-image: WELCOME_SCREEN_OPTIONS_RECORD_ICON_HOVERED
-          opacity: 1
-
-      .start-option-name
-        text-align: center
-        font-size: 14px
-        font-weight: BOLD_WEIGHT
-        letter-spacing: -0.14px
-        line-height: 18px
-        background-color: ACTIVE_ROW
-        display: flex
-        align-items: center
-        color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR
-        justify-content: center
-        white-space: nowrap
-        padding: 6px
-        padding-left: 14px
-        padding-right: 14px
-        border-radius: 6px
-
-        &.hovered
-          // color: WELCOME_SCREEN_OPTIONS_TEXT_COLOR_HOVERED
-          // background-color: PRIMARY_BASE
-          outline: 1px solid SEARCH_STROKE
-          opacity: 1
 
     // Recent traces styles - in welcome-right-panel
     .recent-traces
       position: relative
-      width: -webkit-fill-available
-      background-color: SECONDARY_BASE
-      border-radius: 6px
-      padding: 8px
-      margin-top: 48px
-      margin-bottom: 48px
-      padding-right: 0px
+      width: 100%
+      background-color: colors-ui-surface-panel
+      border-radius: 0.375em
+      padding: 1em
       overflow: visible
 
     .recent-traces-title
       text-align: start
-      font-size: 18px
+      font-size: 0.875em
       font-weight: BOLD_WEIGHT
-      line-height: 18px
-      letter-spacing: -0.18px
-      font-family: "SpaceMono"
-      margin-bottom: 6px
+      line-height: 1.125em
+      letter-spacing: -0.01em
+      font-family: "SpaceGrotesk"
+      margin-bottom: 0.375em
+      color: #E8E8E8
 
     .recent-traces-list
-      max-height: 172px
+      max-height: 10.75em
       overflow-y: auto
       overflow-x: visible
       // Allow tooltips to overflow - they use position: absolute and high z-index
       clip-path: none
 
       .empty-state-message
-        padding: 16px 8px
+        padding: 1em 0.5em
         display: flex
         flex-direction: column
-        gap: 8px
+        gap: 0.5em
 
         .empty-state-welcome
-          font-size: 16px
+          font-size: 1em
           font-weight: 600
-          font-family: "SpaceMono"
-          color: PRIMARY_TEXT_COLOR
+          font-family: "SpaceGrotesk"
+          color: colors-ui-text-primary-body
 
         .empty-state-text
-          font-size: 13px
-          font-family: "SpaceMono"
-          color: #888888
+          font-size: 0.8125em
+          font-family: "SpaceGrotesk"
+          color: #C8C8C8
           line-height: 1.5
 
       .recent-trace-container
@@ -234,20 +197,20 @@
         justify-content: space-between
 
       .recent-trace
-        color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-        background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
-        height: 28px
-        margin-top: 2px
-        margin-bottom: 6px
+        color: colors-ui-text-primary-label
+        background-color: colors-ui-surface-primary-default
+        height: 1.75em
+        margin-top: 0.125em
+        margin-bottom: 0.375em
         display: flex
         position: relative
         text-align: left
-        border-radius: 4px
-        width: -webkit-fill-available
+        border-radius: 0.25em
+        width: 100%
 
         &:hover
           cursor: pointer
-          background-color: PRIMARY_BASE
+          background-color: colors-ui-surface-primary-default-hover
 
           .recent-trace-tooltip
             opacity: 1
@@ -262,26 +225,26 @@
           min-width: 0
 
           .separate-bar
-            border-color: WELCOME_SCREEN_SEPARATE_BAR_COLOR
+            border-color: colors-ui-border-secondary
 
           .recent-trace-title-time
-            margin-left: 8px
-            margin-right: 8px
-            font-size: 12px
-            font-family: "SpaceMono"
-            line-height: 18px
-            color: #888888
+            margin-left: 0.5em
+            margin-right: 0.5em
+            font-size: 0.75em
+            font-family: "SpaceGrotesk"
+            line-height: 1.125em
+            color: colors-ui-text-primary-label
             white-space: nowrap
-            min-width: 90px
+            min-width: 5.625em
 
           .recent-trace-title-content
-            margin-left: 8px
-            margin-right: 8px
-            font-size: 14px
+            margin-left: 0.5em
+            margin-right: 0.5em
+            font-size: 0.875em
             font-weight: BOLD_WEIGHT
-            font-family: "SpaceMono"
-            line-height: 18px
-            letter-spacing: -0.14px
+            font-family: "SpaceGrotesk"
+            line-height: 1.125em
+            letter-spacing: -0.01em
             position: relative
             overflow: hidden
             white-space: nowrap
@@ -292,18 +255,18 @@
           position: fixed
           background-color: #1B1B1B
           color: #f3f3f3
-          padding: 8px 12px
-          font-size: 12px
-          font-family: "SpaceMono"
-          border-radius: 4px
+          padding: 0.5em 0.75em
+          font-size: 0.75em
+          font-family: "SpaceGrotesk"
+          border-radius: 0.25em
           white-space: pre-line
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4)
+          box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.4)
           opacity: 0
           visibility: hidden
           transition: opacity 0.2s ease, visibility 0.2s ease
           pointer-events: none
           z-index: 1000
-          max-width: 400px
+          max-width: 25em
           line-height: 1.4
           // Position will be set via JavaScript on hover
           // Fallback positioning for when JS isn't setting it
@@ -314,44 +277,42 @@
     // Recent folders styles - in welcome-left-panel
     .recent-folders
       position: relative
-      width: -webkit-fill-available
-      background-color: SECONDARY_BASE
-      border-radius: 6px
-      padding: 8px
-      margin-top: 48px
-      margin-bottom: 48px
-      padding-right: 0px
+      width: 100%
+      background-color: colors-ui-surface-panel
+      border-radius: 0.375em
+      padding: 1em
 
     .recent-folders-title
       text-align: start
-      font-size: 18px
+      font-size: 0.875em
       font-weight: BOLD_WEIGHT
-      line-height: 18px
-      letter-spacing: -0.18px
-      font-family: "SpaceMono"
-      margin-bottom: 6px
+      line-height: 1.125em
+      letter-spacing: -0.01em
+      font-family: "SpaceGrotesk"
+      margin-bottom: 0.375em
+      color: #E8E8E8
 
     .recent-folders-list
-      max-height: 172px
+      max-height: 10.75em
       overflow-y: scroll
       overflow-x: visible
 
       .empty-state-message
-        padding: 16px 8px
+        padding: 1em 0.5em
         display: flex
         flex-direction: column
-        gap: 8px
+        gap: 0.5em
 
         .empty-state-welcome
-          font-size: 16px
+          font-size: 1em
           font-weight: 600
-          font-family: "SpaceMono"
-          color: PRIMARY_TEXT_COLOR
+          font-family: "SpaceGrotesk"
+          color: colors-ui-text-primary-body
 
         .empty-state-text
-          font-size: 13px
-          font-family: "SpaceMono"
-          color: #888888
+          font-size: 0.8125em
+          font-family: "SpaceGrotesk"
+          color: #C8C8C8
           line-height: 1.5
 
       .recent-folder-container
@@ -360,29 +321,29 @@
         justify-content: space-between
 
       .recent-folder
-        color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-        background-color: WELCOME_SCREEN_RECENT_PROJECT_BACKGROUND_COLOR
-        height: 28px
-        margin-top: 2px
-        margin-bottom: 6px
+        color: colors-ui-text-primary-label
+        background-color: colors-ui-surface-primary-default
+        height: 1.75em
+        margin-top: 0.125em
+        margin-bottom: 0.375em
         display: flex
         position: relative
         text-align: left
-        border-radius: 4px
-        width: -webkit-fill-available
+        border-radius: 0.25em
+        width: 100%
 
         &:hover
           cursor: pointer
-          background-color: PRIMARY_BASE
+          background-color: colors-ui-surface-primary-default-hover
 
         .recent-folder-name
-          margin-left: 8px
-          margin-right: 8px
-          font-size: 14px
+          margin-left: 0.5em
+          margin-right: 0.5em
+          font-size: 0.875em
           font-weight: BOLD_WEIGHT
-          font-family: "SpaceMono"
-          line-height: 18px
-          letter-spacing: -0.14px
+          font-family: "SpaceGrotesk"
+          line-height: 1.125em
+          letter-spacing: -0.01em
           position: relative
           overflow: hidden
           white-space: nowrap
@@ -402,30 +363,30 @@
 
     .new-record-screen-content
       position: relative
-      width: 700px
-      background: WELCOME_SCREEN_BACKGROUND_COLOR
-      border: 1px solid LINE_STROKE
-      border-radius: 12px
-      padding: 48px
-      padding-bottom: 60px
+      width: 43.75em
+      background: colors-ui-surface-primary-default
+      border: none
+      border-radius: 0.75em
+      padding: 3em
+      padding-bottom: 3.75em
 
       .welcome-logo
-        min-width: 40px
-        max-width: 40px
-        min-height: 40px
-        background-size: 40px 40px
+        min-width: 2.5em
+        max-width: 2.5em
+        min-height: 2.5em
+        background-size: 2.5em 2.5em
 
     .new-record-title
       position: relative
-      font-size: 32px
-      font-family: "SpaceMono"
+      font-size: 2em
+      font-family: "SpaceGrotesk"
       font-weight: BOLD_WEIGHT
       text-align: start
       width: 100%
-      letter-spacing: -0.32px
-      line-height: 32px
-      margin-bottom: 32px
-      margin-top: 32px
+      letter-spacing: -0.02em
+      line-height: 1
+      margin-bottom: 2em
+      margin-top: 2em
 
     .new-record-form
 
@@ -433,11 +394,11 @@
         display: flex;
         align-items: center;
         flex-direction: column;
-        margin-top: 5px
+        margin-top: 0.3125em
 
         .form-validation-row
-          height: 16px;
-          font-size: 14px;
+          height: 1em;
+          font-size: 0.875em;
           position: relative;
           width: 100%;
           text-indent: 13vw;
@@ -449,11 +410,11 @@
           width: 100%
           display: flex
           align-items: center
-          margin-bottom: 16px
+          margin-bottom: 1em
 
         .checkmark
           position: relative
-          margin-right: 8px !important
+          margin-right: 0.5em !important
           top: 0 !important
 
         label
@@ -461,10 +422,10 @@
           position: relative
           width: fit-content
           text-align: left
-          color: NEW_RECORD_LABEL_COLOR
-          font-family: "SpaceMono"
+          color: colors-ui-text-primary-label
+          font-family: "SpaceGrotesk"
           font-weight: bold
-          font-size: 14px
+          font-size: 0.875em
           font-weight: 400
 
         // input
@@ -537,27 +498,27 @@
       display: flex
       align-items: center
       justify-content: center
-      margin-bottom: 16px
-      border-radius: 6px
-      padding: 8px
+      margin-bottom: 1em
+      border-radius: 0.375em
+      padding: 0.5em
 
       &.empty
         outline: none
 
       &.in-progress
-        outline: 1px solid NOTIFICATION_INFO_COLOR
+        outline: 0.0625em solid NOTIFICATION_INFO_COLOR
 
       &.failed
-        outline: 1px solid NOTIFICATION_ERROR_COLOR
+        outline: 0.0625em solid NOTIFICATION_ERROR_COLOR
 
       &.success
-        outline: 1px solid NOTIFICATION_SUCCESS_COLOR
+        outline: 0.0625em solid NOTIFICATION_SUCCESS_COLOR
 
       .new-record-result
         position: relative
         width: 100%
         text-align: center
-        font-family: "SpaceMono"
+        font-family: "SpaceGrotesk"
         display: flex
         align-items: center
 
@@ -566,12 +527,12 @@
 
         .new-record-status-icon
           position: relative
-          width: 24px
-          height: 24px
+          width: 1.5em
+          height: 1.5em
           background-repeat: no-repeat
-          background-size: 18px 18px
+          background-size: 1.125em 1.125em
           background-position: center
-          margin-right: 4px
+          margin-right: 0.25em
 
           &.in-progress
             background-image: url("../../public/resources/welcome/loading_sign_dots_128.svg")
@@ -588,63 +549,71 @@
           text-align: center
           position: relative
           width: 100%
-          height: 30px
-          font-family: "SpaceMono"
-          font-size: 20px
+          height: 1.875em
+          font-family: "SpaceGrotesk"
+          font-size: 1.25em
 
 .online-functionality-buttons
   display: flex
-  padding-right: 2px
+  padding-right: 0.5em
 
   .recent-trace-buttons
-    margin-left: 8px
-    margin-top: 2px
-    margin-bottom: 6px
-    height: 28px
-    width: 28px
-    background-color: DEBUG_BUTTON_BORDER_COLOR
-    border-radius: 4px
+    margin-left: 0.5em
+    margin-top: 0.125em
+    margin-bottom: 0.375em
+    height: 1.75em
+    width: 1.75em
+    background-color: colors-ui-surface-primary-tertiary
+    border-radius: 0.25em
     cursor: pointer
-  upload
+
     &:hover
-      outline: 1px solid WELCOME_SCREEN_SEPARATE_BAR_COLOR
+      background-color: colors-ui-surface-primary-tertiary-hover
 
     &:active
-      background-color: DEBUG_BUTTON_ACTIVE_BACKGROUND
+      background-color: colors-ui-surface-primary-tertiary-hover
 
     &.trace-info-button-active
-      background-color: WELCOME_SCREEN_ACTIVE_BACKGROUND
+      background-color: colors-ui-surface-action-primary
+
+  #upload-button
+    background-color: colors-ui-surface-primary-default
+    border-radius: 0.5em
+    border: none
+
+    &:hover
+      background-color: colors-ui-surface-primary-default-hover
 
   .recent-trace-buttons-image
     background-repeat: no-repeat
-    background-size: 16px 16px
+    background-size: 0.75em 0.75em
     background-position: center
-    height: 28px
+    height: 1.75em
 
   .progress-circle
-    width: 20px
-    height: 20px
+    width: 1.25em
+    height: 1.25em
     border-radius: 50%
     position: absolute
     background-image: conic-gradient(#6B6B6B 0% 0%, #2C2C2C 0% 100%)
     background-size: auto
     z-index: 1
-    transform: translate(4px, 4px)
+    transform: translate(0.25em, 0.25em)
 
   .inner-circle
-    width: 14px
-    height: 14px
+    width: 0.875em
+    height: 0.875em
     border-radius: 50%
-    background-color: ACTIVE_ROW
+    background-color: colors-ui-surface-primary-tertiary
     position: absolute
     z-index: 2
-    transform: translate(7px, 7px)
+    transform: translate(0.4375em, 0.4375em)
 
   #progress-bar
     position: relative
 
   #trace-upload-button
-    background-image: WELCOME_SCREEN_UPLOAD_BUTTON
+    background-image: url("../../public/resources/welcome/welcome_screen_upload_button.svg")
 
   #trace-copy-button
     background-image: WELCOME_SCREEN_COPY_BUTTON
@@ -661,14 +630,14 @@
   .welcome-path-active
     opacity: 1
     visibility: visible
-    height: 24px
-    left: calc(100% + 8px)
+    height: 1.5em
+    left: calc(100% + 0.5em)
     position: absolute
     width: fit-content
 
     &:after
       top: 18%
-      left: -14px
+      left: -0.875em
       border-color: transparent TOOLTIP_BACKGROUND transparent transparent !important
 
 .recent-trace-container
@@ -684,45 +653,45 @@
 .recent-transactions
   display: flex
   text-align: left
-  font-size: 18px
+  font-size: 1.125em
   font-weight: 700
-  background-color: SECONDARY_BASE
-  border-radius: 6px
-  padding: 16px
+  background-color: colors-ui-surface-panel
+  border-radius: 0.375em
+  padding: 1em
   flex-direction: column
 
 .table-column-names
   display: flex
   text-align: left
   justify-content: space-between
-  font-size: 14px
+  font-size: 0.875em
   font-weight: 400
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
 
   #tx-hash
-    width: 118px
+    width: 7.375em
   #tx-status
-    width: 72px
-    padding-left: 4px
+    width: 4.5em
+    padding-left: 0.25em
   #tx-from
-    width: 120px
+    width: 7.5em
   #tx-to
-    width: 124px
+    width: 7.75em
   #tx-when
-    width: 60px
+    width: 3.75em
   #tx-action
-    width: 50px
+    width: 3.125em
     text-align: end
 
 .recent-transactions-container
   display: flex
   justify-content: space-between
-  font-size: 14px
+  font-size: 0.875em
   font-style: normal
   font-weight: 400
 
 .recent-transactions
-  max-height: 360px
+  max-height: 22.5em
   overflow: scroll
 
 .recent-transaction
@@ -730,9 +699,9 @@
   justify-content: space-between
   text-align: center
   align-items: center
-  width: -webkit-fill-available
-  color: WELCOME_SCREEN_RECENT_TRACE_COLOR
-  font-family: "SpaceMono"
+  width: 100%
+  color: colors-ui-text-primary-label
+  font-family: "SpaceGrotesk"
 
   #tx-success
     color: STATUS_SUCCESS
@@ -741,24 +710,24 @@
     color: STATUS_UNSUCCESS
 
 .action-transaction-button
-  margin-left: 8px
-  margin-top: 2px
-  margin-bottom: 6px
-  height: 28px
-  width: 28px
+  margin-left: 0.5em
+  margin-top: 0.125em
+  margin-bottom: 0.375em
+  height: 1.75em
+  width: 1.75em
   background-color: DEBUG_BUTTON_BORDER_COLOR
-  border-radius: 4px
+  border-radius: 0.25em
   cursor: pointer
   background-image: RECENT_TRANSACTION_ACTION_BUTTON
   background-repeat: no-repeat
   background-position: center
-  min-width: 28px
+  min-width: 1.75em
 
 .recent-transaction-title
-  margin-bottom: 16px
+  margin-bottom: 1em
 
 .transactions
-  margin-bottom: 0px !important
+  margin-bottom: 0 !important
 
 .stylus-content
-  width: 850px !important
+  width: 53.125em !important
