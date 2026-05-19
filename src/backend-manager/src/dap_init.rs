@@ -281,17 +281,54 @@ pub async fn run_dap_init(
     // struct expects `traceFolder`, `program`, `pid`, and optionally
     // `ctRRWorkerExe` for RR-based traces.
     //
-    // The `trace_file` field tells replay-server which events file to load.
-    // Python/Ruby/WASM recorders produce `trace.bin` (binary CBOR+zstd),
-    // while some older or test fixtures use `trace.json`.  We probe the
-    // trace directory and prefer `.bin` when present.
+    // The `trace_file` field tells replay-server which events file to
+    // load.  Probe in priority order — but bypass the CTFS probe when
+    // the bundle is clearly a replay-worker recording (`rr/` directory
+    // for Linux RR or `ttd-trace-manifest.json` for Windows TTD)
+    // because for those recorders the `.ct` file is a metadata-only
+    // sidecar (the M-REC-1.5 meta.dat wrapper) and the actual replay
+    // payload lives in the `rr/` directory / `.run` file.  Treating
+    // the metadata `.ct` as the trace file would route those bundles
+    // through the MCR debugserver path and fail with "ct-mcr binary
+    // not found".
+    //
+    //   1. `trace.bin`              (legacy materialized binary)
+    //   2. `<program>.ct` CTFS      (current materialized convention —
+    //                                only when not a replay-worker bundle)
+    //   3. `trace.json`             (legacy JSON; default fallback so
+    //                                the error path reports a canonical
+    //                                name)
+    //
+    // For CTFS we send the actual filename rather than a hard-coded
+    // `trace.ct` because recorders such as the Ruby native gem name
+    // the container after the recorded program (`ruby.ct`,
+    // `noir_test.ct`, etc.).
     //
     // Reference: codetracer/src/replay-server/src/dap.rs — `LaunchRequestArguments`
     let trace_folder_str = trace_folder.to_string_lossy().to_string();
 
-    // Detect the trace events file: prefer trace.bin over trace.json.
+    // Replay-worker bundles (RR, TTD) carry a metadata-only `.ct`
+    // sidecar that must NOT be advertised as the trace file.
+    let is_replay_worker_bundle = trace_folder.join("rr").is_dir()
+        || trace_folder.join("ttd-trace-manifest.json").is_file();
+
+    let ctfs_file = if is_replay_worker_bundle {
+        None
+    } else {
+        std::fs::read_dir(trace_folder)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"))
+            .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()))
+    };
+
     let trace_file = if trace_folder.join("trace.bin").is_file() {
         "trace.bin"
+    } else if let Some(ct_name) = ctfs_file.as_deref() {
+        ct_name
     } else {
         "trace.json"
     };

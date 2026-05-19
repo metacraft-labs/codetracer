@@ -887,17 +887,28 @@ fn find_nargo() -> Option<PathBuf> {
     None
 }
 
-/// Finds the `codetracer-ruby-recorder` script.
+/// Finds a Ruby recorder launcher capable of producing a CTFS `.ct`
+/// container.
 ///
 /// Search order:
-/// 1. `CODETRACER_RUBY_RECORDER_PATH` environment variable
-/// 2. PATH (via `which`)
-/// 3. Relative to CARGO_MANIFEST_DIR at the known repo location
+/// 1. `CODETRACER_RUBY_RECORDER_PATH` environment variable.
+/// 2. The native gem launcher (`codetracer-ruby-recorder`) via PATH —
+///    it is the only Ruby recorder that emits a `.ct` bundle the
+///    backend-manager's `read_trace_metadata` can read (M-REC-1.5
+///    retired the JSON sidecar fallback).
+/// 3. The native gem launcher at its in-repo location, provided the
+///    Rust `.so` extension has been built.  We probe for the `.so`
+///    explicitly because the launcher script otherwise silently
+///    falls back to an event-less mode that produces no `.ct` and
+///    breaks downstream session tests.
+/// 4. As a last resort, the pure-Ruby recorder — kept around so dev
+///    environments that haven't run `just build-extension` still get
+///    a usable diagnostic when the daemon refuses the bundle.
 ///
-/// When `REQUIRE_REAL_RECORDINGS=1` is set and the recorder is not found,
+/// When `REQUIRE_REAL_RECORDINGS=1` is set and no recorder is found,
 /// this function panics instead of returning `None`.
 fn find_ruby_recorder() -> Option<PathBuf> {
-    // Explicit environment variable override.
+    // 1. Explicit environment variable override.
     if let Ok(path) = std::env::var("CODETRACER_RUBY_RECORDER_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() && p.is_file() {
@@ -905,10 +916,11 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
     }
 
-    // Check PATH for the pure Ruby recorder (the native extension .so is
-    // not compiled during cargo test, so we use the pure Ruby version).
+    // 2. Native gem launcher on PATH.  This is the production path —
+    //    the launcher loads `codetracer_ruby_recorder.so` from the
+    //    gem and emits a CTFS container the daemon can read.
     if let Ok(output) = std::process::Command::new("which")
-        .arg("codetracer-pure-ruby-recorder")
+        .arg("codetracer-ruby-recorder")
         .output()
         && output.status.success()
     {
@@ -918,17 +930,46 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
     }
 
-    // Check relative to CARGO_MANIFEST_DIR (session-manager crate).
-    // Use the pure Ruby recorder since the native Rust extension .so is
-    // not compiled during cargo test.
+    // 3. In-repo native gem launcher.  Only return it if the
+    //    accompanying `.so` is actually built — otherwise the
+    //    launcher silently emits no trace and the test fails with a
+    //    confusing "trace_metadata missing" error several layers
+    //    away.  See codetracer-ruby-recorder/CLAUDE.md ("just
+    //    build-extension").
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let relative_locations = [
-        // Sibling repo (workspace layout)
+    let native_launcher_paths = [
+        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
+        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
+    ];
+    let native_so_relative = "../ext/native_tracer/target/release/codetracer_ruby_recorder.so";
+    for loc in native_launcher_paths {
+        let launcher = manifest_dir.join(loc);
+        if !launcher.exists() {
+            continue;
+        }
+        // The launcher lives in `bin/` of the gem; the `.so` it
+        // expects lives in `<gem>/ext/native_tracer/target/release/`.
+        // Probe the relative location so we don't return a stub.
+        let launcher_dir = launcher.parent().unwrap_or(&launcher);
+        let so_path = launcher_dir.join(native_so_relative);
+        if so_path.exists() {
+            return Some(launcher.canonicalize().unwrap_or(launcher));
+        }
+    }
+
+    // 4. Last-resort fallback to the pure-Ruby recorder.  It only
+    //    writes legacy JSON sidecars; sessions opened against its
+    //    output will fail with "no .ct found" — that is the
+    //    intentional signal that `just build-extension` needs to run.
+    //    Until the pure-Ruby gem grows its own CTFS writer (follow-up
+    //    #254 Phase 2), keep the fallback for offline / sandboxed
+    //    environments where building the native extension is not
+    //    possible.
+    let pure_ruby_paths = [
         "../../../codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
-        // Legacy submodule
         "../../libs/codetracer-ruby-recorder/gems/codetracer-pure-ruby-recorder/bin/codetracer-pure-ruby-recorder",
     ];
-    for loc in relative_locations {
+    for loc in pure_ruby_paths {
         let path = manifest_dir.join(loc);
         if path.exists() {
             return Some(path.canonicalize().unwrap_or(path));
@@ -937,9 +978,9 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 
     if require_real_recordings() {
         panic!(
-            "REQUIRE_REAL_RECORDINGS is set but codetracer-ruby-recorder was not found \
+            "REQUIRE_REAL_RECORDINGS is set but no Ruby recorder was found \
              in PATH or at expected repository locations.  Set CODETRACER_RUBY_RECORDER_PATH \
-             or ensure the recorder is on PATH."
+             or run `just build-extension` in codetracer-ruby-recorder."
         );
     }
     None
@@ -952,10 +993,12 @@ fn find_ruby_recorder() -> Option<PathBuf> {
 /// and VariableName trace events -- enough to exercise navigation and
 /// event-loading pipelines.
 ///
-/// `nargo trace` requires `--out-dir <DIR>` and produces:
-///   - `trace.json`          -- array of `TraceLowLevelEvent` entries
-///   - `trace_metadata.json` -- `{"workdir": ..., "program": ..., "args": []}`
-///   - `trace_paths.json`    -- array of source file paths
+/// `nargo trace` requires `--out-dir <DIR>` and produces a single
+/// CTFS `<package>.ct` container with internal `events.log`,
+/// `meta.dat` (UUIDv7 `recording_id`, M-REC-1) and `paths.dat`
+/// streams.  Legacy `trace.json` / `trace_metadata.json` /
+/// `trace_paths.json` sidecars are no longer emitted — see
+/// `codetracer-specs/Trace-Files/CTFS-Migration-Guide.md`.
 ///
 /// Reference: `nargo trace --help`
 fn create_noir_recording(test_dir: &Path, log_path: &Path) -> Result<PathBuf, String> {
@@ -1016,44 +1059,34 @@ fn create_noir_recording(test_dir: &Path, log_path: &Path) -> Result<PathBuf, St
         ));
     }
 
-    // Verify that the expected trace files were produced.
-    let trace_json = trace_dir.join("trace.json");
-    if !trace_json.exists() {
-        return Err(format!(
-            "nargo trace did not produce trace.json in {}",
-            trace_dir.display()
-        ));
-    }
+    // Verify that the expected CTFS container was produced.
+    // The Nim multi-stream writer derives the file basename from the
+    // package name; for our `noir_test` package it is `noir_test.ct`.
+    // Fall back to scanning the directory for any `.ct` file to remain
+    // robust against future changes in the basename convention.
+    let ct_file = std::fs::read_dir(&trace_dir)
+        .map_err(|e| format!("read_dir {}: {e}", trace_dir.display()))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"));
 
-    let trace_metadata = trace_dir.join("trace_metadata.json");
-    if !trace_metadata.exists() {
-        return Err(format!(
-            "nargo trace did not produce trace_metadata.json in {}",
-            trace_dir.display()
-        ));
-    }
-
-    let trace_paths = trace_dir.join("trace_paths.json");
-    if !trace_paths.exists() {
-        return Err(format!(
-            "nargo trace did not produce trace_paths.json in {}",
-            trace_dir.display()
-        ));
-    }
+    let ct_path = match ct_file {
+        Some(p) => p,
+        None => {
+            return Err(format!(
+                "nargo trace did not produce a .ct CTFS container in {}",
+                trace_dir.display()
+            ));
+        }
+    };
 
     log_line(
         log_path,
         &format!(
-            "Noir trace created successfully at {} (trace.json={} bytes, \
-             trace_metadata.json={} bytes, trace_paths.json={} bytes)",
+            "Noir trace created successfully at {} ({}={} bytes)",
             trace_dir.display(),
-            std::fs::metadata(&trace_json).map(|m| m.len()).unwrap_or(0),
-            std::fs::metadata(&trace_metadata)
-                .map(|m| m.len())
-                .unwrap_or(0),
-            std::fs::metadata(&trace_paths)
-                .map(|m| m.len())
-                .unwrap_or(0),
+            ct_path.display(),
+            std::fs::metadata(&ct_path).map(|m| m.len()).unwrap_or(0),
         ),
     );
 
@@ -1116,12 +1149,12 @@ y = compute(x)
 puts "Result: #{y}"
 "#;
 
-/// Creates a real Ruby trace recording by running the pure-Ruby recorder.
+/// Creates a real Ruby trace recording by running the native gem
+/// (`codetracer-ruby-recorder`).
 ///
 /// Writes a Ruby test program (`RUBY_TEST_PROGRAM`) to `test_dir/test.rb`,
 /// runs `ruby <recorder> -o <trace_dir> <program>`, and returns the trace
-/// directory containing `trace.json`, `trace_metadata.json`, and
-/// `trace_paths.json`.
+/// directory containing a `.ct` CTFS container (M-REC-1, M-REC-1.5).
 ///
 /// The recorder does not copy source files into the trace directory, so this
 /// function also creates a `files/` subdirectory mirroring the source path
@@ -1153,12 +1186,18 @@ fn create_ruby_recording(
         ),
     );
 
-    // 3. Run the recorder: `ruby <recorder> -o <trace_dir> <program>`
+    // 3. Run the recorder: `ruby <recorder> -o <trace_dir> <program>`.
+    //    The native gem writes a CTFS `.ct` container; the daemon's
+    //    `read_trace_metadata` reads metadata from the embedded
+    //    `meta.dat`.  We pass `CODETRACER_TRACE_FORMAT=ctfs` for
+    //    symmetry with the db-backend tracepoint tests even though
+    //    the native recorder ignores it (it is hard-pinned to CTFS).
     let output = std::process::Command::new("ruby")
         .arg(recorder_path)
         .arg("-o")
         .arg(&trace_dir)
         .arg(&program_path)
+        .env("CODETRACER_TRACE_FORMAT", "ctfs")
         .output()
         .map_err(|e| format!("failed to run ruby recorder: {e}"))?;
 
@@ -1174,16 +1213,20 @@ fn create_ruby_recording(
         ));
     }
 
-    // 4. Verify that the expected trace files were produced.
-    for name in ["trace.json", "trace_metadata.json", "trace_paths.json"] {
-        let file_path = trace_dir.join(name);
-        if !file_path.exists() {
-            return Err(format!(
-                "ruby recorder did not produce {name} in {}",
-                trace_dir.display()
-            ));
-        }
-    }
+    // 4. Verify that a CTFS `.ct` container was produced.
+    let ct_file = std::fs::read_dir(&trace_dir)
+        .map_err(|e| format!("read_dir {}: {e}", trace_dir.display()))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "ct"));
+    let ct_path = ct_file.ok_or_else(|| {
+        format!(
+            "ruby recorder did not produce a *.ct CTFS container in {}.  \
+             This usually means the native extension `.so` is not built — \
+             run `just build-extension` in codetracer-ruby-recorder.",
+            trace_dir.display()
+        )
+    })?;
 
     // 5. Copy the source file into `files/` for self-containedness.
     //    The recorder does not do this automatically, but db-backend expects
@@ -1205,18 +1248,10 @@ fn create_ruby_recording(
     log_line(
         log_path,
         &format!(
-            "Ruby trace created successfully at {} (trace.json={} bytes, \
-             trace_metadata.json={} bytes, trace_paths.json={} bytes)",
+            "Ruby trace created successfully at {} ({}={} bytes)",
             trace_dir.display(),
-            std::fs::metadata(trace_dir.join("trace.json"))
-                .map(|m| m.len())
-                .unwrap_or(0),
-            std::fs::metadata(trace_dir.join("trace_metadata.json"))
-                .map(|m| m.len())
-                .unwrap_or(0),
-            std::fs::metadata(trace_dir.join("trace_paths.json"))
-                .map(|m| m.len())
-                .unwrap_or(0),
+            ct_path.display(),
+            std::fs::metadata(&ct_path).map(|m| m.len()).unwrap_or(0),
         ),
     );
 
@@ -14285,13 +14320,16 @@ async fn run_cli_command(
 // Fallback verification test
 // ---------------------------------------------------------------------------
 
-/// Verifies that the `trace_db_metadata.json` fallback works end-to-end
-/// through the daemon's DAP protocol.
+/// Verifies that the daemon opens an RR recording when the legacy
+/// `trace_metadata.json` sidecar is absent, by reading metadata from
+/// the canonical `trace.ct` / `meta.dat` (M-REC-1, M-REC-1.5).
 ///
-/// This test explicitly asserts that `trace_metadata.json` does NOT exist
-/// (confirming the bridge has been removed) and that the daemon still
-/// correctly reads metadata from `trace_db_metadata.json`, including the
-/// integer `lang` field for language detection.
+/// Pre-1.0 the daemon's `read_trace_metadata` only accepts the CTFS
+/// container; the historical JSON sidecars
+/// (`trace_metadata.json` / `trace_db_metadata.json` /
+/// `trace_paths.json`) are no longer consulted.  This test pins that
+/// behaviour by asserting `trace_metadata.json` is absent and that
+/// `ct/open-trace` + `ct/trace-info` still succeed end-to-end.
 #[tokio::test]
 async fn test_rr_trace_opens_without_trace_metadata_json() {
     let (test_dir, log_path) = setup_test_dir("rr_trace_opens_without_trace_metadata_json");
@@ -14307,23 +14345,27 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
             }
         };
 
-        // Create an RR recording.  Since the bridge has been removed,
-        // only trace_db_metadata.json should exist.
+        // Create an RR recording.  ct-rr-support emits a CTFS
+        // `trace.ct` container with `meta.dat` and a legacy
+        // `trace_db_metadata.json` sidecar (kept for ct-native-replay
+        // shell tooling); the daemon reads metadata exclusively from
+        // `meta.dat` after M-REC-1.5.
         let trace_dir = create_rr_recording(&test_dir, &ct_rr_support, &log_path)?;
 
-        // Explicitly verify the bridge is absent.
+        // Explicitly verify the legacy bridge file is absent.
         let simple_meta = trace_dir.join("trace_metadata.json");
         assert!(
             !simple_meta.exists(),
             "trace_metadata.json should NOT exist (bridge removed), but found at {}",
             simple_meta.display()
         );
-        let db_meta = trace_dir.join("trace_db_metadata.json");
+        // The canonical metadata source must exist.
+        let ct_path = trace_dir.join("trace.ct");
         assert!(
-            db_meta.exists(),
-            "trace_db_metadata.json should exist (produced by ct-rr-support record)"
+            ct_path.exists(),
+            "trace.ct should exist (canonical metadata container; M-REC-1.5)"
         );
-        log_line(&log_path, "confirmed: only trace_db_metadata.json exists");
+        log_line(&log_path, "confirmed: trace.ct exists, no trace_metadata.json");
 
         // Start daemon and query trace info via DAP.
         let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();

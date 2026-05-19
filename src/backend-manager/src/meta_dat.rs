@@ -30,9 +30,28 @@ use std::path::Path;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// Canonical meta.dat format version: v3 (M-REC-1).  M-REC-1.5 retired
-/// v1/v2.
+/// Canonical meta.dat format version: v3 (M-REC-1, 2026-05-18).
+///
+/// Pre-1.0, CodeTracer enforces a strict no-backcompat policy on the
+/// trace format: every recorder is required to track the current
+/// `meta.dat` version, and old fixtures must be regenerated whenever
+/// the version is bumped.  See
+/// `codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md`
+/// § 3 and the M-REC-1 / M-REC-1.5 milestones for the rationale.
+///
+/// Concretely this means [`SUPPORTED_META_DAT_VERSIONS`] is a
+/// singleton `&[3]`; any v1/v2 payload encountered in the wild is a
+/// stale build artefact (e.g. an out-of-date
+/// `libcodetracer_trace_writer.a` static library) and must be
+/// rebuilt rather than worked around at the reader.
 pub const META_DAT_VERSION: u16 = 3;
+
+/// The set of `meta.dat` versions this parser accepts on read.  Kept
+/// as a slice (rather than a single constant) so callers that surface
+/// "unsupported version" errors can enumerate the accepted set in
+/// diagnostics; the slice is intentionally a singleton, mirroring
+/// [`META_DAT_VERSION`].
+pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[3];
 
 const FLAG_HAS_MCR_FIELDS: u16 = 1 << 0;
 const FLAG_HAS_REPLAY_LAUNCH_FIELDS: u16 = 1 << 1;
@@ -259,7 +278,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
         return Err(MetaDatError::BadMagic);
     }
     let version = u16::from_le_bytes([input[4], input[5]]);
-    if version != META_DAT_VERSION {
+    if !SUPPORTED_META_DAT_VERSIONS.contains(&version) {
         return Err(MetaDatError::UnsupportedVersion(version));
     }
     let flags = u16::from_le_bytes([input[6], input[7]]);
@@ -272,6 +291,10 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     }
 
     let mut pos = 8usize;
+    // v3 (M-REC-1) prepends a canonical UUIDv7 `recording_id` directly
+    // after the flags word.  Pre-1.0, the parser only accepts v3, so
+    // this read is unconditional — there is no v2-shaped layout to
+    // fall back to.
     let recording_id = read_string(input, &mut pos)?;
     if !is_canonical_uuid_v7(&recording_id) {
         return Err(MetaDatError::InvalidRecordingId {
@@ -562,6 +585,44 @@ fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
     ]))
 }
 
+/// Probe the size of an internal file in a CTFS container without
+/// resolving its data blocks.  Returns `Ok(Some(size))` when the
+/// entry table carries a non-zero matching entry, `Ok(None)` if the
+/// file is not present, and `Err` when the container header is
+/// malformed.
+///
+/// Used by `trace_metadata::read_trace_metadata` to derive a
+/// `total_events` proxy from the size of the materialized `steps.dat`
+/// stream when `meta.dat::mcr::total_events` is unavailable
+/// (currently the case for the Nim multi-stream writer, which only
+/// fills the MCR block for native MCR recordings).
+pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u64>, String> {
+    if data.len() < 16 {
+        return Err(format!("CTFS file too short ({} bytes)", data.len()));
+    }
+    if data[0..5] != CTFS_MAGIC {
+        return Err("not a valid CTFS file (bad magic)".to_string());
+    }
+    let version = data[5];
+    if !matches!(version, 2 | 3 | 4) {
+        return Err(format!("unsupported CTFS version {version}"));
+    }
+    let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")?;
+    let encoded_name = base40_encode(file_name);
+
+    let mut entry_off = 16usize;
+    for _ in 0..max_entries {
+        let size = read_u64_le(data, entry_off).ok_or("truncated CTFS entry size")?;
+        let _map_block = read_u64_le(data, entry_off + 8).ok_or("truncated CTFS entry mapBlock")?;
+        let entry_name = read_u64_le(data, entry_off + 16).ok_or("truncated CTFS entry name")?;
+        if entry_name == encoded_name && size > 0 {
+            return Ok(Some(size));
+        }
+        entry_off += 24;
+    }
+    Ok(None)
+}
+
 /// Locate the bytes of an internal file inside a CTFS container.
 ///
 /// Returns the file content on success.  Errors carry a string with
@@ -760,15 +821,60 @@ mod tests {
         assert_eq!(parsed, original);
     }
 
+    /// Pre-1.0, the parser must reject every non-v3 payload — including
+    /// v2, which is the most recent retired version (M-REC-1.5 took it
+    /// out of circulation).  Any stale v2 payload encountered in the
+    /// wild signals an out-of-date build artefact (typically a stale
+    /// `libcodetracer_trace_writer.a`) and rebuilding the recorder is
+    /// the only correct fix.
     #[test]
     fn rejects_v2_payload() {
+        // Minimal v2 body: program, args=0, workdir, recorder_id, paths=0.
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
         buf.extend_from_slice(&2u16.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
+        // program
+        let program = "/bin/v2";
+        encode_varint(program.len() as u64, &mut buf);
+        buf.extend_from_slice(program.as_bytes());
+        // args count 0
+        encode_varint(0, &mut buf);
+        // workdir
+        let workdir = "/tmp";
+        encode_varint(workdir.len() as u64, &mut buf);
+        buf.extend_from_slice(workdir.as_bytes());
+        // recorder_id
+        let recorder_id = "ct-test/v2";
+        encode_varint(recorder_id.len() as u64, &mut buf);
+        buf.extend_from_slice(recorder_id.as_bytes());
+        // paths count 0
+        encode_varint(0, &mut buf);
+
         assert_eq!(
             parse_meta_dat(&buf),
             Err(MetaDatError::UnsupportedVersion(2))
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_versions() {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(
+            parse_meta_dat(&buf),
+            Err(MetaDatError::UnsupportedVersion(1))
+        );
+
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&META_DAT_MAGIC);
+        buf.extend_from_slice(&99u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(
+            parse_meta_dat(&buf),
+            Err(MetaDatError::UnsupportedVersion(99))
         );
     }
 

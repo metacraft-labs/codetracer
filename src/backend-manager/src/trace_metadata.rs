@@ -112,6 +112,12 @@ fn detect_language(program: &str) -> String {
         "ts" => "typescript",
         "java" => "java",
         "pas" | "pp" => "pascal",
+        // Noir source files (https://noir-lang.org/) — needed for
+        // `nargo trace` output language detection.  The Noir tracer
+        // stores the package name (e.g. `noir_test`, no extension) in
+        // `meta.dat::program`, so the source-path fallback in
+        // `read_trace_metadata` is the only hint that surfaces.
+        "nr" => "noir",
         _ => "unknown",
     }
     .to_string()
@@ -150,15 +156,70 @@ pub fn read_trace_metadata(trace_dir: &Path) -> Result<TraceMetadata, TraceMetad
         }
     })?;
 
-    let language = detect_language(&parsed.program);
-    let total_events = parsed.mcr.as_ref().map(|m| m.total_events).unwrap_or(0);
+    // Language detection: try the program path first.  When it does
+    // not carry a recognised extension (e.g. compiled RR binaries like
+    // `rust_flow_test`, or the Ruby native gem which stores the
+    // interpreter name `"ruby"`), fall back to inspecting the
+    // recorded source paths so we still surface a useful answer.
+    let mut language = detect_language(&parsed.program);
+    if language == "unknown" {
+        for path in &parsed.paths {
+            let candidate = detect_language(path);
+            if candidate != "unknown" {
+                language = candidate;
+                break;
+            }
+        }
+    }
+
+    // `total_events` should ideally come from `meta.dat::mcr::total_events`,
+    // but the current Nim multi-stream writer only fills the MCR block
+    // for native MCR recordings — materialized traces (Noir, Ruby
+    // native, JS, Python, …) leave it empty.  As a stand-in we probe
+    // the CTFS container for the byte size of the materialized event
+    // streams (`steps.dat`, then `events.log` for the old format).
+    // The size is a coarse proxy for event count, but it is non-zero
+    // whenever the recorder produced any events, which is enough to
+    // satisfy the daemon's "has the trace got events?" contract.
+    let total_events = if let Some(mcr) = parsed.mcr.as_ref() {
+        mcr.total_events
+    } else {
+        meta_dat::ctfs_internal_file_size(&bytes, "steps.dat")
+            .ok()
+            .flatten()
+            .or_else(|| {
+                meta_dat::ctfs_internal_file_size(&bytes, "events.log")
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or(0)
+    };
+
+    // Program surfacing: recorders that store the interpreter name
+    // (Ruby native gem → `"ruby"`, JS recorder → `"node"`, …) leave
+    // the daemon without a usable script identity.  When the
+    // `meta.dat::program` does not look like a path (no `/`, no `\`,
+    // no file extension) but the trace recorded at least one source
+    // file, surface that source path instead so MCP clients and
+    // tests have a real script reference.  The recorder-supplied
+    // value is still preserved in `meta.dat`; only the
+    // user-facing `program` is rewritten.
+    let program = if !parsed.paths.is_empty()
+        && !parsed.program.contains('/')
+        && !parsed.program.contains('\\')
+        && Path::new(&parsed.program).extension().is_none()
+    {
+        parsed.paths[0].clone()
+    } else {
+        parsed.program
+    };
 
     Ok(TraceMetadata {
         recording_id: parsed.recording_id,
         language,
         total_events,
         source_files: parsed.paths,
-        program: parsed.program,
+        program,
         workdir: parsed.workdir,
     })
 }
