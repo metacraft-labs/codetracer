@@ -202,12 +202,14 @@ fn binary_path() -> PathBuf {
     if path.ends_with("deps") {
         path.pop();
     }
-    // Try the new name first, fall back to the old one.
-    let new_name = path.join("session-manager");
+    // Try the new name first, fall back to the old one. The platform
+    // executable suffix (`.exe` on Windows) must be appended or the
+    // `.exists()` probe — and the eventual spawn — fails.
+    let new_name = path.join(format!("session-manager{}", std::env::consts::EXE_SUFFIX));
     if new_name.exists() {
         return new_name;
     }
-    path.push("backend-manager");
+    path.push(format!("backend-manager{}", std::env::consts::EXE_SUFFIX));
     path
 }
 
@@ -241,24 +243,27 @@ fn find_db_backend() -> Option<PathBuf> {
     if target_dir.ends_with("deps") {
         target_dir.pop();
     }
-    // Try new name first, then legacy.
+    // Try new name first, then legacy. Append the platform executable
+    // suffix (`.exe` on Windows) so the probe matches the real binary.
     for name in ["replay-server", "db-backend"] {
-        let same_target = target_dir.join(name);
+        let same_target = target_dir.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX));
         if same_target.exists() {
             return Some(same_target);
         }
     }
 
     // Check the db-backend crate's target directories relative to
-    // CARGO_MANIFEST_DIR.
+    // CARGO_MANIFEST_DIR. The platform executable suffix (`.exe` on
+    // Windows) is appended so the probe matches the real binary.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let exe = std::env::consts::EXE_SUFFIX;
     let relative_locations = [
-        "../db-backend/target/debug/replay-server",
-        "../db-backend/target/release/replay-server",
-        "../db-backend/target/debug/db-backend",
-        "../db-backend/target/release/db-backend",
+        format!("../db-backend/target/debug/replay-server{exe}"),
+        format!("../db-backend/target/release/replay-server{exe}"),
+        format!("../db-backend/target/debug/db-backend{exe}"),
+        format!("../db-backend/target/release/db-backend{exe}"),
     ];
-    for loc in relative_locations {
+    for loc in &relative_locations {
         let path = manifest_dir.join(loc);
         if path.exists() {
             return Some(path.canonicalize().unwrap_or(path));
@@ -1236,11 +1241,22 @@ fn create_ruby_recording(
     //    The recorder does not do this automatically, but db-backend expects
     //    source files to be available under `<trace_dir>/files/<abs_path>` for
     //    the `read_source_file` MCP tool and source display.
+    //
+    //    The absolute-path root must be stripped cross-platform: a bare
+    //    `strip_prefix("/")` only matches a Unix leading slash, so on
+    //    Windows the absolute (`\\?\D:\...`) path survived unchanged and
+    //    `files/`-join discarded the `files/` prefix — the copy then ran
+    //    source-onto-itself and failed with a sharing violation.
     if let Ok(canonical) = program_path.canonicalize() {
-        let stripped = canonical
-            .strip_prefix("/")
-            .unwrap_or(canonical.as_path());
-        let files_dest = trace_dir.join("files").join(stripped);
+        use std::path::Component;
+        let mut stripped = std::path::PathBuf::new();
+        for component in canonical.components() {
+            match component {
+                Component::Prefix(_) | Component::RootDir => {}
+                other => stripped.push(other.as_os_str()),
+            }
+        }
+        let files_dest = trace_dir.join("files").join(&stripped);
         if let Some(parent) = files_dest.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create files dir: {e}"))?;

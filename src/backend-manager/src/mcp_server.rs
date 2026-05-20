@@ -2366,15 +2366,41 @@ async fn handle_read_source_file(
 /// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
 ///    parent (e.g. trace at `/tmp/foo/trace/`, source at
 ///    `/tmp/foo/program/src/main.py`).
+/// Strip the root of an absolute path so it can be re-rooted under another
+/// directory (e.g. a trace's `files/` embed dir).
+///
+/// A bare `.strip_prefix('/')` only handles Unix absolute paths; a Windows
+/// absolute path (`C:\dir\file`) has no leading `/`, and joining it onto
+/// another directory would discard that directory entirely. Walk the
+/// `Path` components instead and drop the leading `Prefix`/`RootDir`
+/// components (`C:` and `\` on Windows, `/` on Unix), keeping the rest as
+/// a relative path. The result is always a relative path.
+fn strip_path_root(file_path: &str) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut relative = std::path::PathBuf::new();
+    for component in std::path::Path::new(file_path).components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => {}
+            other => relative.push(other.as_os_str()),
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        std::path::PathBuf::from(file_path)
+    } else {
+        relative
+    }
+}
+
 fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
     let trace_dir = std::path::Path::new(trace_path);
 
-    // Strip the leading `/` from absolute paths so the join works correctly.
-    let relative = file_path.strip_prefix('/').unwrap_or(file_path);
+    // Strip the absolute-path root (Unix `/` or Windows `C:\`) so the
+    // `files/` join nests instead of escaping back to an absolute path.
+    let relative = strip_path_root(file_path);
 
     // Strategy 1: Check the trace's files/ subdirectory (RR traces embed source copies here).
     let files_dir = trace_dir.join("files");
-    let embedded_path = files_dir.join(relative);
+    let embedded_path = files_dir.join(&relative);
     if embedded_path.exists() {
         return std::fs::read_to_string(&embedded_path)
             .map_err(|e| format!("failed to read {}: {e}", embedded_path.display()));
@@ -2394,7 +2420,7 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
     if let Ok(meta) = crate::trace_metadata::read_trace_metadata(trace_dir)
         && !meta.workdir.is_empty()
     {
-        let workdir_resolved = std::path::Path::new(&meta.workdir).join(relative);
+        let workdir_resolved = std::path::Path::new(&meta.workdir).join(&relative);
         if workdir_resolved.exists() {
             return std::fs::read_to_string(&workdir_resolved)
                 .map_err(|e| format!("failed to read {}: {e}", workdir_resolved.display()));
@@ -2404,7 +2430,7 @@ fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<Strin
     // Strategy 4: Try the trace directory's parent (e.g. trace at /tmp/foo/trace/,
     // source at /tmp/foo/program/src/main.py).
     if let Some(parent) = trace_dir.parent() {
-        let parent_resolved = parent.join(relative);
+        let parent_resolved = parent.join(&relative);
         if parent_resolved.exists() {
             return std::fs::read_to_string(&parent_resolved)
                 .map_err(|e| format!("failed to read {}: {e}", parent_resolved.display()));
@@ -3292,10 +3318,12 @@ mod tests {
         std::fs::create_dir_all(&source_dir).unwrap();
         std::fs::write(source_dir.join("lib.py"), "# disk version").unwrap();
 
-        // Also embed it under files/.
+        // Also embed it under files/, at the same `files/`-relative
+        // location `read_source_from_trace_dir` derives — strip the
+        // absolute-path root cross-platform (Unix `/` or Windows `C:\`).
         let abs_source = source_dir.join("lib.py");
-        let relative = abs_source.to_str().unwrap().strip_prefix('/').unwrap();
-        let embedded = trace_dir.join("files").join(relative);
+        let relative = strip_path_root(abs_source.to_str().unwrap());
+        let embedded = trace_dir.join("files").join(&relative);
         std::fs::create_dir_all(embedded.parent().unwrap()).unwrap();
         std::fs::write(&embedded, "# embedded version").unwrap();
 
