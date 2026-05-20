@@ -1,4 +1,4 @@
-{ ... }:
+{ inputs, ... }:
 {
   perSystem =
     {
@@ -13,6 +13,7 @@
         default = import ./main.nix {
           inherit
             pkgs
+            inputs
             self'
             inputs'
             config

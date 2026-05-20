@@ -74,6 +74,9 @@ build-hmr-fixture:
 test-hmr-fixture: build-hmr-fixture
   cd src/tests/gui && ./node_modules/.bin/playwright test --config ../hmr_fixture/playwright.config.ts
 
+test-reprobuild-macos-smoke:
+  ./ci/reprobuild/macos-smoke.sh
+
 # End-to-end HMR test against the actual ct binary. Requires
 # `just build` (or `just build-once`) to have produced the
 # HMR-enabled renderer at src/build-debug/bin/ct. Tests:

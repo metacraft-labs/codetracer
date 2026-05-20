@@ -1,5 +1,6 @@
 {
   pkgs,
+  inputs,
   inputs',
   self',
   config,
@@ -338,6 +339,11 @@ mkShell {
 
     export CODETRACER_PREFIX=$ROOT_PATH/src/build-debug
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+    export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
+    export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
+    export BLAKE3_PREFIX=${pkgs.libblake3}
+    export RUNQUOTA_SRC=${inputs.runquota}
+    export XXHASH_PREFIX=${pkgs.xxHash}
     export PATH=$ROOT_PATH/src/build-debug/bin:$PATH
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
     export CODETRACER_DEV_TOOLS=0
