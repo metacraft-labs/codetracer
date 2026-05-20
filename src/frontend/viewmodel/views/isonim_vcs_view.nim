@@ -217,6 +217,36 @@ proc changedFilesHeaderText(vm: VCSVM): string =
   else:
     ""
 
+proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
+                             index: int; file: VCSFileRow): auto =
+  ## Render a single changed-file row.  Extracted into its own proc so the
+  ## ``onclick`` closure captures the per-row ``index``/``path`` through
+  ## proc parameters — a guaranteed-fresh binding per call.  A bare
+  ## ``for``-loop-body ``let`` is not a reliable closure-capture boundary
+  ## in Nim (all rows would otherwise share the final loop value, so every
+  ## file row would select the last file).
+  let rowIndex = index
+  let rowPath = file.path
+  ui(r):
+    tdiv(class = fileRowClass(file.selected),
+         onclick = proc() =
+           callbacks.invokeSelectFile(rowIndex, rowPath)):
+      span(class = "vcs-file-status " & statusClass(file.status)):
+        text statusLabel(file.status)
+      span(class = "vcs-file-name"):
+        text file.baseName
+      if file.additions > 0 or file.deletions > 0:
+        span(class = "vcs-file-stats"):
+          if file.additions > 0:
+            span(class = "vcs-stat-added"):
+              text "+" & $file.additions
+          if file.deletions > 0:
+            span(class = "vcs-stat-deleted"):
+              text "-" & $file.deletions
+      if file.coverageText.len > 0:
+        span(class = "vcs-file-coverage"):
+          text file.coverageText
+
 proc renderChangedFiles[R](r: R; vm: VCSVM;
                            callbacks: VCSCallbacks): auto =
   var list: typeof(r.createElement("div"))
@@ -234,28 +264,7 @@ proc renderChangedFiles[R](r: R; vm: VCSVM;
     r.appendRenderedChild(list, empty)
   else:
     for i, file in vm.changedFiles.val:
-      let index = i
-      let path = file.path
-      let row = ui(r):
-        tdiv(class = fileRowClass(file.selected),
-             onclick = proc() =
-               callbacks.invokeSelectFile(index, path)):
-          span(class = "vcs-file-status " & statusClass(file.status)):
-            text statusLabel(file.status)
-          span(class = "vcs-file-name"):
-            text file.baseName
-          if file.additions > 0 or file.deletions > 0:
-            span(class = "vcs-file-stats"):
-              if file.additions > 0:
-                span(class = "vcs-stat-added"):
-                  text "+" & $file.additions
-              if file.deletions > 0:
-                span(class = "vcs-stat-deleted"):
-                  text "-" & $file.deletions
-          if file.coverageText.len > 0:
-            span(class = "vcs-file-coverage"):
-              text file.coverageText
-      r.appendRenderedChild(list, row)
+      r.appendRenderedChild(list, renderChangedFileRow(r, callbacks, i, file))
   panel
 
 proc renderHunkToolbar[R](r: R; vm: VCSVM;

@@ -1039,6 +1039,16 @@ type
     newStart*: int
     newCount*: int
     lines*: seq[DeepReviewDiffLineEntry]
+    ## Context-expansion: extra source lines revealed by clicking the
+    ## "Expand N lines" rows that bracket the hunk.  ``expandedAbove``
+    ## holds lines immediately above ``newStart`` (in file order) and
+    ## ``expandedBelow`` lines immediately after the hunk's last line.
+    ## ``canExpandAbove`` / ``canExpandBelow`` indicate whether any more
+    ## source lines remain to be revealed in that direction.
+    expandedAbove*: seq[DeepReviewDiffLineEntry]
+    expandedBelow*: seq[DeepReviewDiffLineEntry]
+    canExpandAbove*: bool
+    canExpandBelow*: bool
 
   DeepReviewUnifiedFileEntry* = object
     fileIndex*: int
@@ -1112,7 +1122,11 @@ proc `==`*(a, b: DeepReviewHunkEntry): bool {.noSideEffect.} =
     a.oldCount == b.oldCount and
     a.newStart == b.newStart and
     a.newCount == b.newCount and
-    a.lines == b.lines
+    a.lines == b.lines and
+    a.expandedAbove == b.expandedAbove and
+    a.expandedBelow == b.expandedBelow and
+    a.canExpandAbove == b.canExpandAbove and
+    a.canExpandBelow == b.canExpandBelow
 
 proc `==`*(a, b: DeepReviewUnifiedFileEntry): bool {.noSideEffect.} =
   a.fileIndex == b.fileIndex and

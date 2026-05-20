@@ -29,6 +29,10 @@ const DeepReviewUnifiedDiffClass* = "deepreview-unified-diff"
 const DeepReviewUnifiedEmptyText* = "No files to display."
 const DeepReviewCalltraceClass* = "deepreview-calltrace"
 
+const DeepReviewExpandStep* = 10
+  ## Number of context lines revealed per click of an "Expand" row.
+  ## Mirrors ``EXPAND_STEP`` in ``ui/deepreview.nim``.
+
 type
   DeepReviewCallbacks* = object
     onSelectFile*: proc(index: int)
@@ -39,6 +43,8 @@ type
     onSelectHunk*: proc(fileIdx, hunkIdx: int)
     onCopySelectedHunks*: proc()
     onClearSelectedHunks*: proc()
+    onExpandAbove*: proc(fileIdx, hunkIdx: int)
+    onExpandBelow*: proc(fileIdx, hunkIdx: int)
     afterDynamicRender*: proc()
 
 proc editorId*(componentId: int): string =
@@ -194,22 +200,23 @@ template renderHeaderImpl(r, vm, callbacks: untyped): untyped =
       span(class = "deepreview-commit"):
         text "Commit: " & vm.commitDisplay.val
       if vm.traceContexts.val.len > 0:
-        select(ref = traceSelect,
-               class = "deepreview-trace-select",
-               onchange = proc() =
-                 let selectedId = readControlInt(
-                   r, traceSelect, vm.selectedTraceContextId.val)
-                 if callbacks.onSetTraceContext != nil:
-                   callbacks.onSetTraceContext(selectedId)):
-          for ctx in vm.traceContexts.val:
-            let ctxId = ctx.id
-            let ctxLabel = ctx.label
-            if ctxId == vm.selectedTraceContextId.val:
-              option(value = $ctxId, selected = "selected"):
-                text ctxLabel
-            else:
-              option(value = $ctxId):
-                text ctxLabel
+        tdiv(class = "deepreview-trace-selector"):
+          select(ref = traceSelect,
+                 class = "deepreview-trace-select",
+                 onchange = proc() =
+                   let selectedId = readControlInt(
+                     r, traceSelect, vm.selectedTraceContextId.val)
+                   if callbacks.onSetTraceContext != nil:
+                     callbacks.onSetTraceContext(selectedId)):
+            for ctx in vm.traceContexts.val:
+              let ctxId = ctx.id
+              let ctxLabel = ctx.label
+              if ctxId == vm.selectedTraceContextId.val:
+                option(value = $ctxId, selected = "selected"):
+                  text ctxLabel
+              else:
+                option(value = $ctxId):
+                  text ctxLabel
       if not vm.glEmbedded.val:
         tdiv(class = "deepreview-mode-toggle"):
           button(class = modeButtonClass(vm.viewMode.val == drpvmFullFiles),
@@ -285,10 +292,147 @@ when defined(js):
                      callbacks: DeepReviewCallbacks): isonim_dom.Element =
     renderSlidersImpl(r, vm, callbacks)
 
+template renderUnifiedContextLineImpl(r, line: untyped): untyped =
+  ## Render one already-revealed context (expanded) diff line.
+  let lineContentVal = line.content
+  let oldLineVal = line.oldLine
+  let newLineVal = line.newLine
+  ui(r):
+    tdiv(class = lineClass("context") & " deepreview-expanded-context"):
+      span(class = "deepreview-unified-gutter-old"):
+        if oldLineVal > 0:
+          text $oldLineVal
+      span(class = "deepreview-unified-gutter-new"):
+        if newLineVal > 0:
+          text $newLineVal
+      span(class = "deepreview-unified-line-content"):
+        text lineContentVal
+
+proc renderUnifiedContextLine(r: MockRenderer;
+                              line: DeepReviewDiffLineEntry): MockNode =
+  renderUnifiedContextLineImpl(r, line)
+
+when defined(js):
+  proc renderUnifiedContextLine(r: WebRenderer;
+                                line: DeepReviewDiffLineEntry):
+                                isonim_dom.Element =
+    renderUnifiedContextLineImpl(r, line)
+
+template renderUnifiedDiffLineImpl(r, line: untyped): untyped =
+  ## Render one hunk diff line (added/removed/context) with optional
+  ## inline Omniscience flow values.
+  let lineTypeVal = line.lineType
+  let lineContentVal = line.content
+  let oldLineVal = line.oldLine
+  let newLineVal = line.newLine
+  let valuesVal = line.values
+  ui(r):
+    tdiv(class = lineClass(lineTypeVal)):
+      span(class = "deepreview-unified-gutter-old"):
+        if lineTypeVal != "added" and oldLineVal > 0:
+          text $oldLineVal
+      span(class = "deepreview-unified-gutter-new"):
+        if lineTypeVal != "removed" and newLineVal > 0:
+          text $newLineVal
+      span(class = "deepreview-unified-line-content"):
+        text lineContentVal
+      if valuesVal.len > 0:
+        span(class = "deepreview-flow-values"):
+          for value in valuesVal:
+            let nameVal = value.name
+            let valueVal = value.value
+            let truncatedVal = value.truncated
+            span(class = "flow-parallel-value"):
+              span(class = "flow-parallel-value-name"):
+                text "<" & nameVal & ">"
+              span(class = "flow-parallel-value-box flow-parallel-value-before-only"):
+                text valueVal & (if truncatedVal: "..." else: "")
+
+proc renderUnifiedDiffLine(r: MockRenderer;
+                           line: DeepReviewDiffLineEntry): MockNode =
+  renderUnifiedDiffLineImpl(r, line)
+
+when defined(js):
+  proc renderUnifiedDiffLine(r: WebRenderer;
+                             line: DeepReviewDiffLineEntry):
+                             isonim_dom.Element =
+    renderUnifiedDiffLineImpl(r, line)
+
+template renderUnifiedHunkImpl(r, hunk, fileIdx, hunkIdx, hunkSelected,
+                               callbacks: untyped): untyped =
+  ## Render a single hunk.  Extracted into a proc so the per-hunk
+  ## ``onclick`` closures capture ``fileIdx`` / ``hunkIdx`` through proc
+  ## parameters — a guaranteed-fresh binding.  A bare ``for``-loop-body
+  ## ``let`` is not a reliable closure-capture boundary in Nim, so inline
+  ## hunk handlers would otherwise all target the last hunk.
+  ##
+  ## The diff/context line children are appended with explicit
+  ## ``r.appendChild`` calls (plain Nim ``for`` loops outside the ``ui``
+  ## block).  A bare proc-call as a ``for``-loop body *inside* a ``ui``
+  ## block is dropped by the IsoNim DSL macro, so the rows would never
+  ## render — surfaced by the context-expansion E2E tests.
+  let capturedFileIdx = fileIdx
+  let capturedHunkIdx = hunkIdx
+  var hunkRoot: typeof(r.createElement("div"))
+  let hunkNode = ui(r):
+    tdiv(ref = hunkRoot, class = hunkClass(hunkSelected)):
+      tdiv(class = "deepreview-unified-hunk-header hunk-header-selectable",
+           onclick = proc() =
+             if callbacks.onSelectHunk != nil:
+               callbacks.onSelectHunk(capturedFileIdx, capturedHunkIdx)):
+        if hunkSelected:
+          span(class = "hunk-selection-indicator"):
+            text "selected"
+        text hunkHeaderText(hunk)
+      # "Expand above" row — reveals context lines preceding the hunk.
+      if hunk.canExpandAbove:
+        tdiv(class = "deepreview-expand-row deepreview-expand-row-above",
+             onclick = proc() =
+               if callbacks.onExpandAbove != nil:
+                 callbacks.onExpandAbove(capturedFileIdx, capturedHunkIdx)):
+          span(class = "deepreview-expand-icon"):
+            text "..."
+          span(class = "deepreview-expand-label"):
+            text "Expand " & $DeepReviewExpandStep & " lines"
+  # Already-revealed context lines above the hunk.
+  for line in hunk.expandedAbove:
+    r.appendChild(hunkRoot, renderUnifiedContextLine(r, line))
+  # The hunk's own diff lines.
+  for line in hunk.lines:
+    r.appendChild(hunkRoot, renderUnifiedDiffLine(r, line))
+  # Already-revealed context lines below the hunk.
+  for line in hunk.expandedBelow:
+    r.appendChild(hunkRoot, renderUnifiedContextLine(r, line))
+  # "Expand below" row — reveals context lines following the hunk.
+  if hunk.canExpandBelow:
+    let expandBelowRow = ui(r):
+      tdiv(class = "deepreview-expand-row deepreview-expand-row-below",
+           onclick = proc() =
+             if callbacks.onExpandBelow != nil:
+               callbacks.onExpandBelow(capturedFileIdx, capturedHunkIdx)):
+        span(class = "deepreview-expand-icon"):
+          text "..."
+        span(class = "deepreview-expand-label"):
+          text "Expand " & $DeepReviewExpandStep & " lines"
+    r.appendChild(hunkRoot, expandBelowRow)
+  hunkNode
+
+proc renderUnifiedHunk(r: MockRenderer; hunk: DeepReviewHunkEntry;
+                       fileIdx, hunkIdx: int; hunkSelected: bool;
+                       callbacks: DeepReviewCallbacks): MockNode =
+  renderUnifiedHunkImpl(r, hunk, fileIdx, hunkIdx, hunkSelected, callbacks)
+
+when defined(js):
+  proc renderUnifiedHunk(r: WebRenderer; hunk: DeepReviewHunkEntry;
+                         fileIdx, hunkIdx: int; hunkSelected: bool;
+                         callbacks: DeepReviewCallbacks): isonim_dom.Element =
+    renderUnifiedHunkImpl(r, hunk, fileIdx, hunkIdx, hunkSelected, callbacks)
+
 template renderUnifiedDiffImpl(r, vm, callbacks: untyped): untyped =
   let selected = vm.selectedHunks.val
-  ui(r):
-    tdiv(class = DeepReviewUnifiedDiffClass):
+  var diffRoot: typeof(r.createElement("div"))
+  let panel = ui(r):
+    tdiv(ref = diffRoot, class = DeepReviewUnifiedDiffClass):
       if vm.hunkToolbarVisible.val:
         tdiv(class = "hunk-toolbar"):
           span(class = "hunk-toolbar-count"):
@@ -309,67 +453,36 @@ template renderUnifiedDiffImpl(r, vm, callbacks: untyped): untyped =
       if vm.unifiedFiles.val.len == 0:
         tdiv(class = "deepreview-unified-empty"):
           text DeepReviewUnifiedEmptyText
-      for file in vm.unifiedFiles.val:
-        let fileIndexVal = file.fileIndex
-        let filePathVal = file.path
-        let fileStatusVal = file.diffStatus
-        let fileAddedVal = file.linesAdded
-        let fileRemovedVal = file.linesRemoved
-        let fileHunks = file.hunks
-        tdiv(class = "deepreview-unified-file",
-             `data-file-index` = $fileIndexVal):
-          tdiv(class = "deepreview-unified-file-header"):
-            if fileStatusVal.len > 0:
-              span(class = "deepreview-diff-status" &
-                           diffStatusCssClass(fileStatusVal)):
-                text fileStatusVal
-            span(class = "deepreview-unified-file-path"):
-              text filePathVal
-            if fileAddedVal > 0 or fileRemovedVal > 0:
-              span(class = "deepreview-unified-file-stats"):
-                span(class = "deepreview-unified-additions"):
-                  text "+" & $fileAddedVal
-                span(class = "deepreview-unified-deletions"):
-                  text "-" & $fileRemovedVal
-          for hunkIdx, hunk in fileHunks:
-            let capturedFileIdx = fileIndexVal
-            let capturedHunkIdx = hunkIdx
-            let hunkSelected = isHunkSelected(selected, capturedFileIdx, capturedHunkIdx)
-            tdiv(class = hunkClass(hunkSelected)):
-              tdiv(class = "deepreview-unified-hunk-header hunk-header-selectable",
-                   onclick = proc() =
-                     if callbacks.onSelectHunk != nil:
-                       callbacks.onSelectHunk(capturedFileIdx, capturedHunkIdx)):
-                if hunkSelected:
-                  span(class = "hunk-selection-indicator"):
-                    text "selected"
-                text hunkHeaderText(hunk)
-              for line in hunk.lines:
-                let lineTypeVal = line.lineType
-                let lineContentVal = line.content
-                let oldLineVal = line.oldLine
-                let newLineVal = line.newLine
-                let valuesVal = line.values
-                tdiv(class = lineClass(lineTypeVal)):
-                  span(class = "deepreview-unified-gutter-old"):
-                    if lineTypeVal != "added" and oldLineVal > 0:
-                      text $oldLineVal
-                  span(class = "deepreview-unified-gutter-new"):
-                    if lineTypeVal != "removed" and newLineVal > 0:
-                      text $newLineVal
-                  span(class = "deepreview-unified-line-content"):
-                    text lineContentVal
-                  if valuesVal.len > 0:
-                    span(class = "deepreview-flow-values"):
-                      for value in valuesVal:
-                        let nameVal = value.name
-                        let valueVal = value.value
-                        let truncatedVal = value.truncated
-                        span(class = "flow-parallel-value"):
-                          span(class = "flow-parallel-value-name"):
-                            text "<" & nameVal & ">"
-                          span(class = "flow-parallel-value-box flow-parallel-value-before-only"):
-                            text valueVal & (if truncatedVal: "..." else: "")
+  for file in vm.unifiedFiles.val:
+    let fileIndexVal = file.fileIndex
+    let filePathVal = file.path
+    let fileStatusVal = file.diffStatus
+    let fileAddedVal = file.linesAdded
+    let fileRemovedVal = file.linesRemoved
+    var hunkHost: typeof(r.createElement("div"))
+    let fileNode = ui(r):
+      tdiv(ref = hunkHost, class = "deepreview-unified-file",
+           `data-file-index` = $fileIndexVal):
+        tdiv(class = "deepreview-unified-file-header"):
+          if fileStatusVal.len > 0:
+            span(class = "deepreview-diff-status" &
+                         diffStatusCssClass(fileStatusVal)):
+              text fileStatusVal
+          span(class = "deepreview-unified-file-path"):
+            text filePathVal
+          if fileAddedVal > 0 or fileRemovedVal > 0:
+            span(class = "deepreview-unified-file-stats"):
+              span(class = "deepreview-unified-additions"):
+                text "+" & $fileAddedVal
+              span(class = "deepreview-unified-deletions"):
+                text "-" & $fileRemovedVal
+    for hunkIdx, hunk in file.hunks:
+      let hunkSelected = isHunkSelected(selected, fileIndexVal, hunkIdx)
+      r.appendChild(hunkHost,
+                    renderUnifiedHunk(r, hunk, fileIndexVal, hunkIdx,
+                                      hunkSelected, callbacks))
+    r.appendChild(diffRoot, fileNode)
+  panel
 
 proc renderUnifiedDiff(r: MockRenderer; vm: DeepReviewVM;
                        callbacks: DeepReviewCallbacks): MockNode =

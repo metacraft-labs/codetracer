@@ -238,6 +238,27 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()
     quit(1)
 
+proc layoutContainsContentId(config: js; contentId: int): bool {.importjs:
+  """(function(config, contentId) {
+    const target = Number(contentId);
+    const walk = (node) => {
+      if (!node) return false;
+      const state = node.componentState || {};
+      if (node.type === 'component' && Number(state.content) === target) {
+        return true;
+      }
+      if (Array.isArray(node.content)) {
+        for (const child of node.content) {
+          if (walk(child)) return true;
+        }
+      }
+      return false;
+    };
+    return walk((config && config.root) || config);
+  })(#, #)""".}
+  ## Recursively check whether a GoldenLayout config tree contains a
+  ## component panel with the given `componentState.content` ordinal.
+
 proc isValidLayoutConfig(config: js): bool =
   ## Check if a layout config has the minimum required structure for GoldenLayout.
   ## This helps detect corrupt or incompatible layout files from different branches.
@@ -249,6 +270,16 @@ proc isValidLayoutConfig(config: js): bool =
     return false
   let rootType = root["type"]
   if rootType.isNil:
+    return false
+  # A debug-mode `default_layout.json` must contain the Filesystem panel.
+  # The DeepReview standalone mode renders only the VCS / DeepReview /
+  # calltrace panels; if that layout ever leaks into `default_layout.json`
+  # (e.g. a `--deepreview` launch followed by an ordinary `ct` trace
+  # launch) the ordinary debug session would come up missing its
+  # filesystem / editor / event-log / state / terminal panels.  Treat a
+  # layout without the Filesystem panel as incompatible so the loader
+  # resets it to the bundled default.
+  if not layoutContainsContentId(config, ord(Content.Filesystem)):
     return false
   # Basic structure looks valid
   return true

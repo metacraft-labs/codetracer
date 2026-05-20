@@ -148,6 +148,14 @@ proc openCallViewer*(panel: GoldenContentItem, path: cstring, name: cstring, edi
 
 proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
   # kout layoutConfig.toJs
+  # DeepReview is a transient standalone mode whose layout contains only
+  # the VCS / DeepReview / calltrace panels.  Persisting it would clobber
+  # the user's real debug `default_layout.json`, so the next ordinary
+  # `ct` trace launch would come up missing the filesystem / editor /
+  # event-log / state / terminal / scratchpad panels.  Never persist the
+  # DeepReview layout.
+  if data.deepReviewActive:
+    return
   let isEditMode = data.ui.mode == EditMode
   ipc.send "CODETRACER::save-config", js{
     name: cstring"default_layout",

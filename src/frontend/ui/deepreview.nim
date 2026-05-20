@@ -605,7 +605,42 @@ proc legacyLineValuesToVm(file: DeepReviewFileData; lineNum: int):
       truncated: value.truncated,
     ))
 
-proc legacyHunkToVm(file: DeepReviewFileData; hunk: DeepReviewHunk):
+proc sourceContentLines(file: DeepReviewFileData): seq[string] =
+  ## Split the file's full source text into 1-based lines (index 0 unused
+  ## by callers — they treat element ``i`` as source line ``i + 1``).
+  ## Returns an empty seq when the export did not include source content.
+  if file.isNil or file.sourceContent.isNil:
+    return @[]
+  let s = $file.sourceContent
+  if s.len == 0:
+    return @[]
+  result = s.split('\n')
+
+proc hunkLastNewLine(hunk: DeepReviewHunk): int =
+  ## The last line number on the new side of a hunk.  Prefer the explicit
+  ## ``newStart``/``newCount`` range; fall back to the maximum ``newLine``
+  ## seen across the hunk's lines when the count is missing.
+  result = hunk.newStart + hunk.newCount - 1
+  for line in hunk.lines:
+    if line.newLine > result:
+      result = line.newLine
+
+proc expandedContextLine(lines: seq[string]; lineNum: int):
+    DeepReviewDiffLineEntry =
+  ## Build a context (unchanged) diff line for a 1-based source line.
+  let content =
+    if lineNum >= 1 and lineNum <= lines.len: lines[lineNum - 1]
+    else: ""
+  DeepReviewDiffLineEntry(
+    lineType: "context",
+    content: content,
+    oldLine: lineNum,
+    newLine: lineNum,
+    values: @[],
+  )
+
+proc legacyHunkToVm(self: DeepReviewComponent; file: DeepReviewFileData;
+                    hunk: DeepReviewHunk; fileIdx, hunkIdx: int):
     DeepReviewHunkEntry =
   result = DeepReviewHunkEntry(
     oldStart: hunk.oldStart,
@@ -628,7 +663,38 @@ proc legacyHunkToVm(file: DeepReviewFileData; hunk: DeepReviewHunk):
           @[],
     ))
 
-proc legacyUnifiedFilesToVm(drData: DeepReviewData):
+  # Context expansion: reveal extra source lines above/below the hunk.
+  # The expansion counts accumulate as the user clicks the "Expand"
+  # rows; the actual revealed range is clamped to the available source.
+  let srcLines = sourceContentLines(file)
+  if srcLines.len == 0:
+    # No source content — cannot expand context.
+    result.canExpandAbove = false
+    result.canExpandBelow = false
+    return
+
+  self.ensureExpansionState()
+  let aboveCount = self.expandAbove.getExpand(fileIdx, hunkIdx)
+  let belowCount = self.expandBelow.getExpand(fileIdx, hunkIdx)
+
+  # Lines above the hunk: [hunk.newStart - aboveCount .. hunk.newStart - 1].
+  let aboveEnd = hunk.newStart - 1
+  let aboveStart = max(1, aboveEnd - aboveCount + 1)
+  if aboveCount > 0 and aboveEnd >= 1:
+    for lineNum in aboveStart .. aboveEnd:
+      result.expandedAbove.add(expandedContextLine(srcLines, lineNum))
+  result.canExpandAbove = (aboveEnd - aboveCount) >= 1
+
+  # Lines below the hunk: [lastNew + 1 .. lastNew + belowCount].
+  let lastNew = hunkLastNewLine(hunk)
+  let belowStart = lastNew + 1
+  let belowEnd = min(srcLines.len, lastNew + belowCount)
+  if belowCount > 0 and belowStart <= srcLines.len:
+    for lineNum in belowStart .. belowEnd:
+      result.expandedBelow.add(expandedContextLine(srcLines, lineNum))
+  result.canExpandBelow = (lastNew + belowCount + 1) <= srcLines.len
+
+proc legacyUnifiedFilesToVm(self: DeepReviewComponent; drData: DeepReviewData):
     seq[DeepReviewUnifiedFileEntry] =
   result = @[]
   if drData.isNil:
@@ -637,8 +703,8 @@ proc legacyUnifiedFilesToVm(drData: DeepReviewData):
     if file.diff.isNil or file.diff.hunks.len == 0:
       continue
     var hunks: seq[DeepReviewHunkEntry] = @[]
-    for hunk in file.diff.hunks:
-      hunks.add(legacyHunkToVm(file, hunk))
+    for hunkIdx, hunk in file.diff.hunks:
+      hunks.add(legacyHunkToVm(self, file, hunk, fileIdx, hunkIdx))
     result.add(DeepReviewUnifiedFileEntry(
       fileIndex: fileIdx,
       path: safeStr(file.path),
@@ -732,7 +798,7 @@ proc syncLegacyDeepReviewIntoVM*(self: DeepReviewComponent) =
     self.selectedExecutionIndex, self.selectedFlowCount(),
     self.selectedFunctionKey())
   vm.setIterationState(self.selectedIteration, self.selectedMaxIterations())
-  vm.setUnifiedFiles(legacyUnifiedFilesToVm(drData))
+  vm.setUnifiedFiles(legacyUnifiedFilesToVm(self, drData))
   vm.setCallNodes(legacyCallNodesToVm(drData))
 
 proc requestDeepReviewPanelRefresh*(self: DeepReviewComponent) =
@@ -921,6 +987,20 @@ proc selectDeepReviewHunk(self: DeepReviewComponent; fileIdx, hunkIdx: int) =
   self.toggleDrHunkSelection(fileIdx, hunkIdx)
   self.syncLegacyDeepReviewIntoVM()
 
+proc expandDeepReviewAbove(self: DeepReviewComponent; fileIdx, hunkIdx: int) =
+  ## Reveal another EXPAND_STEP lines of context above a hunk.
+  self.ensureExpansionState()
+  let current = self.expandAbove.getExpand(fileIdx, hunkIdx)
+  self.expandAbove.setExpand(fileIdx, hunkIdx, current + EXPAND_STEP)
+  self.syncLegacyDeepReviewIntoVM()
+
+proc expandDeepReviewBelow(self: DeepReviewComponent; fileIdx, hunkIdx: int) =
+  ## Reveal another EXPAND_STEP lines of context below a hunk.
+  self.ensureExpansionState()
+  let current = self.expandBelow.getExpand(fileIdx, hunkIdx)
+  self.expandBelow.setExpand(fileIdx, hunkIdx, current + EXPAND_STEP)
+  self.syncLegacyDeepReviewIntoVM()
+
 proc clearSelectedDeepReviewHunks(self: DeepReviewComponent) =
   self.clearDrHunkSelection()
   self.syncLegacyDeepReviewIntoVM()
@@ -971,6 +1051,10 @@ proc tryMountIsoNimDeepReviewPanel*(componentId: int) =
         component.syncLegacyDeepReviewIntoVM(),
       onClearSelectedHunks: proc() =
         component.clearSelectedDeepReviewHunks(),
+      onExpandAbove: proc(fileIdx, hunkIdx: int) =
+        component.expandDeepReviewAbove(fileIdx, hunkIdx),
+      onExpandBelow: proc(fileIdx, hunkIdx: int) =
+        component.expandDeepReviewBelow(fileIdx, hunkIdx),
       afterDynamicRender: proc() =
         component.afterDeepReviewDynamicRender(),
     )
