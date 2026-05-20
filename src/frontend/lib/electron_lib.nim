@@ -193,7 +193,14 @@ when defined(ctIndex) or defined(ctTest) or
 
 var nodePath*: NodePath
 
-when defined(ctRenderer):
+when defined(ctRenderer) and not defined(ctInCentralExtensionContext):
+  # In a renderer / webview the host HTML defines the `inElectron` and
+  # `loadScripts` globals via an inline <script> before the bundle loads,
+  # so we import them.  The VS Code central extension context
+  # (`-d:ctInCentralExtensionContext`, used for ct_vscode.js) has no HTML
+  # host — importing the globals there yields a `ReferenceError:
+  # inElectron is not defined` that aborts extension activation — so it
+  # falls through to the plain-`var` branch below.
   var inElectron* {.importc.}: bool
   var loadScripts* {.importc.}: bool
 else:

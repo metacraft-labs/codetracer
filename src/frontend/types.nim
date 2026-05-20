@@ -2164,8 +2164,15 @@ when defined(ctRenderer):
     ## the resolved high-level location).
     discard data.services.editor.onExpansionResponse(data.services.editor, value))
 
-  var domwindow {.importc: "window".}: JsObject
-  domwindow.data = data
+  # Expose the global `data` object on `window` as a debugging aid in the
+  # renderer / webview.  The VS Code central extension context
+  # (`-d:ctInCentralExtensionContext`, used for ct_vscode.js) runs in a
+  # Node.js extension host with no `window` global, so dereferencing it here
+  # at module-init time throws `ReferenceError: window is not defined` and
+  # aborts extension activation.  Skip the debug hook in that context.
+  when not defined(ctInCentralExtensionContext):
+    var domwindow {.importc: "window".}: JsObject
+    domwindow.data = data
 
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
