@@ -771,6 +771,22 @@ pub trait TraceReader: std::fmt::Debug + Send {
             }
         }
 
+        // On Windows, paths are case-insensitive and the drive letter is
+        // commonly cased differently by different toolchains — e.g. Rust's
+        // `canonicalize` yields `D:\...` while the Erlang/Elixir BEAM
+        // `filename` module emits `d:/...`. Compare the query against every
+        // stored path with both separators and case folded so a breakpoint
+        // set via one casing still resolves against the trace's other.
+        #[cfg(windows)]
+        {
+            let folded = normalized.to_lowercase();
+            for (stored_path, id) in self.path_entries_iter() {
+                if !stored_path.is_empty() && stored_path.replace('\\', "/").to_lowercase() == folded {
+                    return Some(id);
+                }
+            }
+        }
+
         let abs_path = std::path::Path::new(path);
         let workdir = self.workdir();
 
