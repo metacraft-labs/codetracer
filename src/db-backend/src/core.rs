@@ -11,12 +11,12 @@ use std::path::PathBuf;
 use std::str;
 
 use crate::paths::CODETRACER_PATHS;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 // use crate::event::Event;
 #[cfg(unix)]
 use crate::task::to_task_kind_text;
-use crate::task::{gen_task_id, EventId, TaskId, TaskKind};
+use crate::task::{EventId, TaskId, TaskKind, gen_task_id};
 
 // hopefully impossible for normal PID-s, as they start
 // from 1 for init?

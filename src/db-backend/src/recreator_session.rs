@@ -18,11 +18,11 @@ use serde::Deserialize;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
+#[cfg(windows)]
+use crate::paths::CODETRACER_PATHS;
 use crate::paths::log_path_for;
 #[cfg(unix)]
 use crate::paths::recreator_socket_path;
-#[cfg(windows)]
-use crate::paths::CODETRACER_PATHS;
 use crate::query::{
     ReplayQuery, TtdTracepointEvalMode, TtdTracepointEvalRequest, TtdTracepointEvalResponseEnvelope,
     TtdTracepointFunctionCallRequest, TtdTracepointValueClass,
@@ -30,7 +30,7 @@ use crate::query::{
 use crate::replay::ReplaySession;
 use crate::task::{
     Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
-    LocationWithSourcemap, ProgramEvent, VariableWithRecord, NO_STEP_ID,
+    LocationWithSourcemap, NO_STEP_ID, ProgramEvent, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};

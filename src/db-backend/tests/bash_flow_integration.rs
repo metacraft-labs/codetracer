@@ -12,7 +12,7 @@ mod test_harness;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use test_harness::{run_db_flow_test, FlowTestConfig, Language};
+use test_harness::{FlowTestConfig, Language, run_db_flow_test};
 
 fn get_bash_source_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -48,7 +48,9 @@ fn create_bash_flow_config() -> FlowTestConfig {
 #[test]
 fn test_bash_flow_integration() {
     if test_harness::find_bash_recorder().is_none() {
-        eprintln!("SKIPPED: Bash recorder not found (set CODETRACER_BASH_RECORDER_PATH or check out codetracer-shell-recorders)");
+        eprintln!(
+            "SKIPPED: Bash recorder not found (set CODETRACER_BASH_RECORDER_PATH or check out codetracer-shell-recorders)"
+        );
         return;
     }
 

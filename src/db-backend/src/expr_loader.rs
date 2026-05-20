@@ -1,7 +1,7 @@
 use crate::{
     lang::Lang,
     task::{
-        Branch, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, Position, NO_BRANCH_ID, NO_POSITION,
+        Branch, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, NO_BRANCH_ID, NO_POSITION, Position,
     },
 };
 use codetracer_trace_types::Line;
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "syntax-highlight")]
 use tree_sitter::{Node, Parser, Tree}; // Language,
 #[cfg(feature = "syntax-highlight")]
-use tree_sitter_traversal2::{traverse_tree, Order};
+use tree_sitter_traversal2::{Order, traverse_tree};
 
 #[cfg(feature = "syntax-highlight")]
 #[derive(Debug, Clone)]
@@ -1616,7 +1616,7 @@ impl ExprLoader {
                 match parent_kind {
                     "function_item" | "function_signature_item" | "mod_item" => return false,
                     "use_declaration" | "use_wildcard" | "use_list" | "scoped_use_list" | "use_as_clause" => {
-                        return false
+                        return false;
                     }
                     "type_identifier" | "scoped_type_identifier" => return false,
                     _ => {}
@@ -2230,7 +2230,7 @@ impl ExprLoader {
                     for (name, fn_start, fn_end) in fn_list {
                         if fn_start.0 <= line.0
                             && line.0 <= fn_end.0
-                            && (best.is_none() || (fn_end.0 - fn_start.0) < (best.unwrap().2 .0 - best.unwrap().1 .0))
+                            && (best.is_none() || (fn_end.0 - fn_start.0) < (best.unwrap().2.0 - best.unwrap().1.0))
                         {
                             best = Some((name, *fn_start, *fn_end));
                         }

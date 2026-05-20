@@ -6,8 +6,8 @@ use codetracer_trace_types::{EventLogKind, StepId, TypeKind};
 use log::error;
 
 use crate::task::{
-    DbEventKind, ProgramEvent, Stop, StringAndValueTuple, TableData, TableRow, TableUpdate, TraceValues,
-    UpdateTableArgs, EVENT_KINDS_COUNT,
+    DbEventKind, EVENT_KINDS_COUNT, ProgramEvent, Stop, StringAndValueTuple, TableData, TableRow, TableUpdate,
+    TraceValues, UpdateTableArgs,
 };
 
 #[derive(Debug, Default, Clone)]

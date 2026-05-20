@@ -5,9 +5,9 @@ use std::fmt;
 #[cfg(all(feature = "io-transport", unix))]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -27,13 +27,13 @@ use crate::task::{
     FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
     SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
+use crate::transport_endpoint::DapEndpoint;
 #[cfg(not(windows))]
 use crate::transport_endpoint::unix_socket_path_for_pid;
 #[cfg(windows)]
 use crate::transport_endpoint::windows_named_pipe_path_for_pid;
-use crate::transport_endpoint::DapEndpoint;
 
-use crate::ctfs_trace_reader::{ctfs_container::CtfsReader, CTFSTraceReader};
+use crate::ctfs_trace_reader::{CTFSTraceReader, ctfs_container::CtfsReader};
 use crate::trace_reader::TraceReader;
 
 use crate::transport::DapTransport;
@@ -1639,9 +1639,9 @@ where
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::ctfs_trace_reader::ctfs_container::{write_minimal_ctfs, CtfsReader};
+    use crate::ctfs_trace_reader::ctfs_container::{CtfsReader, write_minimal_ctfs};
     use crate::ctfs_trace_reader::meta_dat::{
-        serialize_meta_dat, McrFields, MetaDat, FLAG_HAS_MCR_FIELDS, META_DAT_VERSION,
+        FLAG_HAS_MCR_FIELDS, META_DAT_VERSION, McrFields, MetaDat, serialize_meta_dat,
     };
 
     /// Build a `meta.dat` payload with the `FlagHasMcrFields` bit set.

@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{find_polkavm_flow_test, find_polkavm_recorder, Language, TestRecording};
+use test_harness::{Language, TestRecording, find_polkavm_flow_test, find_polkavm_recorder};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))

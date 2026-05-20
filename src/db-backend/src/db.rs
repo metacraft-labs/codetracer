@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
 
 use codetracer_trace_types::{
-    CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, Place, StepId, TypeId, TypeKind,
-    TypeRecord, TypeSpecificInfo, ValueRecord, VariableId, NO_KEY,
+    CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, NO_KEY, PathId, Place, StepId, TypeId,
+    TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
 };
 use log::{error, info, warn};
 
@@ -19,7 +19,7 @@ use crate::lang::Lang;
 use crate::replay::ReplaySession;
 use crate::task::{
     Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
-    LoadHistoryArg, Location, ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION,
+    LoadHistoryArg, Location, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, ProgramEvent, RRTicks, VariableWithRecord,
 };
 use crate::trace_reader::TraceReader;
 use crate::value::{Type, Value, ValueRecordWithType};
@@ -1252,11 +1252,7 @@ impl MaterializedReplaySession {
         let steps: Vec<DbStep> = if forward {
             let slice = self.reader.steps_from(self.step_id);
             // Skip the current step itself.
-            if slice.len() > 1 {
-                slice[1..].to_vec()
-            } else {
-                vec![]
-            }
+            if slice.len() > 1 { slice[1..].to_vec() } else { vec![] }
         } else {
             let all = self.reader.steps_from(StepId(0));
             let end = self.step_id.0 as usize;
@@ -1675,7 +1671,7 @@ impl ReplaySession for MaterializedReplaySession {
 
     fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
         let step_id = StepId(event.direct_location_rr_ticks); // currently using this field
-                                                              // for compat with rr/gdb core support
+        // for compat with rr/gdb core support
         self.jump_to(step_id)?;
         Ok(true)
     }

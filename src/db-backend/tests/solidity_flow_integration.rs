@@ -23,7 +23,7 @@ mod test_harness;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use test_harness::{find_evm_recorder, run_db_flow_test, FlowTestConfig, Language};
+use test_harness::{FlowTestConfig, Language, find_evm_recorder, run_db_flow_test};
 
 fn get_solidity_source_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

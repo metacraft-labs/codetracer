@@ -6,7 +6,7 @@ use crate::{
     replay::ReplaySession,
     task::StringAndValueTuple,
     tracepoint_interpreter::Instruction,
-    value::{to_ct_value, Type, Value, ValueRecordWithType},
+    value::{Type, Value, ValueRecordWithType, to_ct_value},
 };
 
 use super::{BinaryOperatorFunctions, Bytecode, UnaryOperatorFunctions};

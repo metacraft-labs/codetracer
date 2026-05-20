@@ -17,7 +17,7 @@
 mod test_harness;
 
 use std::path::PathBuf;
-use test_harness::{find_ct_rr_support, is_replay_backend_available, Language, TestRecording};
+use test_harness::{Language, TestRecording, find_ct_rr_support, is_replay_backend_available};
 
 fn get_lean_source_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

@@ -28,7 +28,7 @@
 //! socket-path computation, both of which are crate-local.
 
 use db_backend::paths::{
-    recreator_socket_path, reserve_run_id_for_recording, resolve_run_id_for_worker, CODETRACER_RUN_ID_ENV,
+    CODETRACER_RUN_ID_ENV, recreator_socket_path, reserve_run_id_for_recording, resolve_run_id_for_worker,
 };
 use std::process::Command;
 

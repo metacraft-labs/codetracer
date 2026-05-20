@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use alloc::alloc::{alloc as sys_alloc, dealloc as sys_dealloc, realloc as sys_realloc, Layout};
+use alloc::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc, realloc as sys_realloc};
 use core::ffi::{c_char, c_int, c_void};
 use core::mem::{align_of, size_of};
 use core::ptr::null_mut;

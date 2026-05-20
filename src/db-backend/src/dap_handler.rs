@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 use std::path::Path;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 
 use codetracer_trace_types::{
-    CallKey, EventLogKind, FullValueRecord, Line, PathId, StepId, TypeKind, VariableId, NO_KEY,
+    CallKey, EventLogKind, FullValueRecord, Line, NO_KEY, PathId, StepId, TypeKind, VariableId,
 };
 
 use crate::calltrace::Calltrace;
@@ -20,7 +20,7 @@ use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::in_memory_trace_reader::InMemoryTraceReader;
-use crate::lang::{lang_from_context, Lang};
+use crate::lang::{Lang, lang_from_context};
 use crate::macro_sourcemap::{self, MacroSourceMapCollection, UpdateExpansionArgs};
 use crate::program_search_tool::ProgramSearchTool;
 use crate::recreator_session::{RecreatorArgs, RecreatorReplaySession};
@@ -35,13 +35,13 @@ use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CalltraceLoadArgs,
     CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
     FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
-    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, Notification, NotificationKind,
-    ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation,
-    StepArg, Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate,
-    UpdateTableArgs, Variable, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID,
+    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, NO_ADDRESS, NO_INDEX, NO_PATH,
+    NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg,
+    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId,
+    TracepointResults, TracepointResultsAggregate, UpdateTableArgs, Variable,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
-use crate::value::{to_ct_value, Type, Value};
+use crate::value::{Type, Value, to_ct_value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
@@ -747,17 +747,17 @@ impl Handler {
         // expanded children count not used here: we add actual children
         let mut call = self.reader.to_call(db_call, &mut self.expr_loader);
         let mut count = 1; // our call
-                           // TODO: on depth/count limit
-                           // generate something like Calls non-expanded/limited
-                           // similar to old isHiddenChildren / isHiddenSiblings
-                           // in commented out nim calltrace user interface code
-                           // instead of nothing, otherwise we're giving
-                           // WRONG info which is misleading
-                           //
-                           // e.g. we might stop after the 2nd child of a call
-                           //   with 4 children and then the interface would lead us
-                           //   to think it has exactly 2 calls, instead of
-                           //   2 calls and possibly non-loaded/non-expanded others more
+        // TODO: on depth/count limit
+        // generate something like Calls non-expanded/limited
+        // similar to old isHiddenChildren / isHiddenSiblings
+        // in commented out nim calltrace user interface code
+        // instead of nothing, otherwise we're giving
+        // WRONG info which is misleading
+        //
+        // e.g. we might stop after the 2nd child of a call
+        //   with 4 children and then the interface would lead us
+        //   to think it has exactly 2 calls, instead of
+        //   2 calls and possibly non-loaded/non-expanded others more
         if depth < depth_limit && db_call.key.0 >= 0 {
             for child_call_id in &db_call.children_keys {
                 assert!(child_call_id.0 >= 0);
@@ -1020,7 +1020,7 @@ impl Handler {
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::Materialized {
             let step_id = StepId(location.rr_ticks.0); // using this field
-                                                       // for compat with rr/gdb core support
+            // for compat with rr/gdb core support
             self.replay.jump_to(step_id)?;
             self.step_id = self.replay.current_step_id();
         } else {
@@ -2683,14 +2683,14 @@ mod tests {
     use crate::ctfs_trace_reader::CTFSTraceReader;
     use crate::lang;
     use crate::task;
-    use crate::task::{gen_task_id, GlobalCallLineIndex};
+    use crate::task::{GlobalCallLineIndex, gen_task_id};
     use crate::trace_processor::TraceProcessor;
     use clap::error::Result;
     // use event_db::{IndexInSingleTable, SingleTableId};
     // use futures::stream::Iter;
     use codetracer_trace_types::{
-        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, StepId, StepRecord, TraceLowLevelEvent, TraceMetadata,
-        TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, NONE_VALUE,
+        CallRecord, FieldTypeRecord, FunctionId, FunctionRecord, NONE_VALUE, StepId, StepRecord, TraceLowLevelEvent,
+        TraceMetadata, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
     };
     use codetracer_trace_writer::non_streaming_trace_writer::NonStreamingTraceWriter;
     use codetracer_trace_writer::trace_writer::TraceWriter;

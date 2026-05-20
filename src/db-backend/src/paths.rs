@@ -182,7 +182,7 @@ pub fn resolve_run_id_for_worker() -> String {
 #[allow(clippy::expect_used)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{reserve_run_id_for_recording, resolve_run_id_for_worker, run_dir_for, CODETRACER_RUN_ID_ENV};
+    use super::{CODETRACER_RUN_ID_ENV, reserve_run_id_for_recording, resolve_run_id_for_worker, run_dir_for};
 
     /// M-REC-11: run_id widens from `usize` to `&str`; the directory
     /// name still uses the `run-` prefix, but the suffix is now the

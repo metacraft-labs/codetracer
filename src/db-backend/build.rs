@@ -289,10 +289,7 @@ fn link_shared_windows(objects: &[PathBuf], out_dir: &Path) -> PathBuf {
 
     let gcc = resolve_gcc_windows();
     let mut cmd = Command::new(&gcc);
-    cmd.arg("-shared")
-        .arg("-static-libgcc")
-        .arg("-o")
-        .arg(&dll_arg);
+    cmd.arg("-shared").arg("-static-libgcc").arg("-o").arg(&dll_arg);
     for obj in objects {
         cmd.arg(strip_unc_prefix(obj));
     }
@@ -639,20 +636,24 @@ fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
     // nim/gcc inherited from the parent process PATH. We pass POSIX-
     // style script paths because Git Bash mishandles Windows UNC
     // (\\?\D:\...) paths that `canonicalize()` returns on Windows.
-    let status = if cfg!(target_os = "windows") {
+    //
+    // We use a compile-time `cfg!` branch rather than a runtime check
+    // because `to_bash_posix_path` is only compiled on Windows; a
+    // runtime `if cfg!(target_os = "windows")` would still type-check
+    // the Windows arm on Linux and fail to resolve the function.
+    #[cfg(target_os = "windows")]
+    let status = {
         let script_path = emulator_dir.join(script_name);
         let posix_arg = to_bash_posix_path(&script_path);
-        Command::new("bash")
-            .arg(&posix_arg)
-            .status()
-    } else {
-        Command::new("direnv")
-            .arg("exec")
-            .arg(&recorder_root)
-            .arg("bash")
-            .arg(emulator_dir.join(script_name))
-            .status()
+        Command::new("bash").arg(&posix_arg).status()
     };
+    #[cfg(not(target_os = "windows"))]
+    let status = Command::new("direnv")
+        .arg("exec")
+        .arg(&recorder_root)
+        .arg("bash")
+        .arg(emulator_dir.join(script_name))
+        .status();
 
     match status {
         Ok(s) if s.success() => {}
@@ -698,10 +699,7 @@ fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
 #[cfg(target_os = "windows")]
 fn to_bash_posix_path(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "/");
-    let trimmed = s
-        .strip_prefix("//?/")
-        .or_else(|| s.strip_prefix("//./"))
-        .unwrap_or(&s);
+    let trimmed = s.strip_prefix("//?/").or_else(|| s.strip_prefix("//./")).unwrap_or(&s);
     // Drive-letter form (C:/foo) → /c/foo
     if trimmed.len() >= 2 && trimmed.as_bytes()[1] == b':' {
         let drive = trimmed.as_bytes()[0].to_ascii_lowercase() as char;

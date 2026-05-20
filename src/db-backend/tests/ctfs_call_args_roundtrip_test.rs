@@ -15,7 +15,7 @@
 #![cfg(feature = "nim-reader")]
 
 use codetracer_trace_types::{Line, TypeId, TypeKind, ValueRecord};
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::trace_reader::TraceReader;
 use std::path::Path;

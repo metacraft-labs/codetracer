@@ -1,4 +1,4 @@
-use db_backend::dap::{from_json, to_json, DapMessage, ProtocolMessage, Response};
+use db_backend::dap::{DapMessage, ProtocolMessage, Response, from_json, to_json};
 use serde_json::json;
 
 #[test]

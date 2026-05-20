@@ -5,8 +5,8 @@ use log::{info, warn};
 use num_bigint::BigInt;
 
 use codetracer_trace_types::{
-    CallKey, FullValueRecord, FunctionId, FunctionRecord, PathId, Place, StepId, TypeId, TypeKind, TypeRecord,
-    TypeSpecificInfo, ValueRecord, VariableId, NO_KEY,
+    CallKey, FullValueRecord, FunctionId, FunctionRecord, NO_KEY, PathId, Place, StepId, TypeId, TypeKind, TypeRecord,
+    TypeSpecificInfo, ValueRecord, VariableId,
 };
 
 use crate::db::{CellChange, DbCall, DbRecordEvent, DbStep, EndOfProgram, NEXT_INTERNAL_STEP_OVERS_LIMIT};

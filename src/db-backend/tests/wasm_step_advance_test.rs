@@ -33,7 +33,7 @@ use ct_dap_client::types::launch::LaunchRequestArguments;
 use serde_json::json;
 
 mod test_harness;
-use test_harness::{find_wazero, Language, TestRecording};
+use test_harness::{Language, TestRecording, find_wazero};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))

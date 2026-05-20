@@ -321,7 +321,10 @@ impl fmt::Display for MetaDatError {
             ),
             MetaDatError::VarintEof => write!(f, "meta.dat: unexpected end of input while reading varint"),
             MetaDatError::VarintTooLong => write!(f, "meta.dat: varint exceeds 10-byte LEB128 maximum"),
-            MetaDatError::StringEof { declared_len, remaining } => write!(
+            MetaDatError::StringEof {
+                declared_len,
+                remaining,
+            } => write!(
                 f,
                 "meta.dat: string of declared length {declared_len} extends past end of input ({remaining} bytes remain)",
             ),
@@ -1186,7 +1189,7 @@ mod tests {
         let program_start = buf.len() + 1; // past the varint(2) byte
         encode_varint(2, &mut buf); // program varint(2)
         buf.extend_from_slice(&[0xFF, 0xFE]); // invalid UTF-8
-                                              // Remaining fields are best-effort — UTF-8 error fires first.
+        // Remaining fields are best-effort — UTF-8 error fires first.
         match parse_meta_dat(&buf) {
             Err(MetaDatError::InvalidUtf8 { offset, .. }) => {
                 assert_eq!(offset, program_start);

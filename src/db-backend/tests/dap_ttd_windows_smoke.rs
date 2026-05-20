@@ -1,11 +1,11 @@
 use db_backend::dap::{self, DapClient, DapMessage, LaunchRequestArguments};
 use db_backend::lang::Lang;
 use db_backend::task::{
-    RunTracepointsArg, SearchValue, Stop, TableArgs, TraceSession, Tracepoint, TracepointMode, UpdateTableArgs,
-    EVENT_KINDS_COUNT,
+    EVENT_KINDS_COUNT, RunTracepointsArg, SearchValue, Stop, TableArgs, TraceSession, Tracepoint, TracepointMode,
+    UpdateTableArgs,
 };
 use db_backend::transport::DapTransport;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::io::BufReader;

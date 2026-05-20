@@ -30,7 +30,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{find_evm_recorder, Language, TestRecording};
+use test_harness::{Language, TestRecording, find_evm_recorder};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
@@ -46,11 +46,7 @@ fn get_solidity_source_path() -> PathBuf {
 fn evm_recorder_repo_dir() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dir = manifest_dir.join("../../../codetracer-evm-recorder");
-    if dir.join(".envrc").exists() {
-        Some(dir)
-    } else {
-        None
-    }
+    if dir.join(".envrc").exists() { Some(dir) } else { None }
 }
 
 /// Check if `solc` (Solidity compiler) is available on PATH, via `SOLC_PATH`,

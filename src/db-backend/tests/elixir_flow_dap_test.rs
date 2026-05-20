@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use ct_dap_client::{
+    DapStdioClient,
     test_support::{BreakpointCheck, FlowTestRunner, MultiBreakpointTestConfig},
     types::LaunchRequestArguments,
-    DapStdioClient,
 };
 
 mod test_harness;
-use test_harness::{find_beam_recorder, find_elixir_flow_test, Language, TestRecording};
+use test_harness::{Language, TestRecording, find_beam_recorder, find_elixir_flow_test};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))

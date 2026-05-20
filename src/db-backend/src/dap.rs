@@ -4,7 +4,7 @@ use crate::dap_error::DapError;
 use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
 use crate::task::{self, CtUpdatedTableResponseBody, Location};
 use crate::transport::DapResult;
-use serde::{de::DeserializeOwned, de::Error as SerdeError, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as SerdeError};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -438,10 +438,10 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
     use std::rc::Rc;
 
-    use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
+    use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
     use web_sys::{
-        js_sys::{self, Function},
         MessageEvent,
+        js_sys::{self, Function},
     };
 
     use crate::dap_server::Ctx;

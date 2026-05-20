@@ -16,7 +16,7 @@ use std::error::Error;
 use codetracer_trace_types::{StepId, TypeKind};
 use log::info;
 use tree_sitter::{Node, Parser};
-use tree_sitter_traversal2::{traverse, Order};
+use tree_sitter_traversal2::{Order, traverse};
 
 use crate::lang::Lang;
 use crate::replay::ReplaySession;

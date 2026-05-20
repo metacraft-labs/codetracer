@@ -26,7 +26,7 @@
 
 use codetracer_trace_types::{Line, TypeId, TypeKind, ValueRecord};
 use codetracer_trace_writer_nim::{
-    trace_writer::TraceWriter, NimTraceReaderHandle, NimTraceWriter, TraceEventsFileFormat,
+    NimTraceReaderHandle, NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter,
 };
 use std::path::Path;
 use std::time::Instant;

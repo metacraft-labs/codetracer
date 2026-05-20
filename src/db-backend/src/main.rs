@@ -15,7 +15,7 @@ use chrono::Local;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use log::{error, info};
-use std::fs::{create_dir_all, remove_file, File};
+use std::fs::{File, create_dir_all, remove_file};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::symlink as symlink_path;
@@ -58,7 +58,7 @@ mod transport;
 mod transport_endpoint;
 mod value;
 
-use crate::paths::{run_dir_for, CODETRACER_PATHS};
+use crate::paths::{CODETRACER_PATHS, run_dir_for};
 
 /// The replay server: a DAP-based replay backend for materialized-trace languages
 /// (Ruby, Python, JS, shell, Wasm, etc.) as opposed to rr/gdb-based replay

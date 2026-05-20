@@ -1,7 +1,7 @@
 use std::error::Error;
 
 // use log::info;
-use codetracer_trace_types::{CallKey, StepId, NO_KEY};
+use codetracer_trace_types::{CallKey, NO_KEY, StepId};
 
 use crate::db::{DbCall, EndOfProgram};
 use crate::distinct_vec::DistinctVec;

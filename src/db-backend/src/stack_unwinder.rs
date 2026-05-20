@@ -643,12 +643,12 @@ mod tests {
         assert_eq!(dwarf_to_mcr_index(Register(1)), Some(3)); // rdx (note swap)
         assert_eq!(dwarf_to_mcr_index(Register(2)), Some(2)); // rcx
         assert_eq!(dwarf_to_mcr_index(Register(3)), Some(1)); // rbx (note swap)
-                                                              // rsi/rdi/rbp/rsp
+        // rsi/rdi/rbp/rsp
         assert_eq!(dwarf_to_mcr_index(Register(4)), Some(4)); // rsi
         assert_eq!(dwarf_to_mcr_index(Register(5)), Some(5)); // rdi
         assert_eq!(dwarf_to_mcr_index(Register(6)), Some(6)); // rbp
         assert_eq!(dwarf_to_mcr_index(Register(7)), Some(7)); // rsp
-                                                              // r8..=r15 pass-through.
+        // r8..=r15 pass-through.
         assert_eq!(dwarf_to_mcr_index(Register(8)), Some(8));
         assert_eq!(dwarf_to_mcr_index(Register(15)), Some(15));
         // Return address column = 16 -> rip slot 16.
@@ -773,11 +773,11 @@ mod tests {
         // main's frame
         mem.insert(a, 0); // saved RBP = 0 (top sentinel)
         mem.insert(a + 8, 0); // RA = 0 (top sentinel) — walk stops
-                              // here cleanly.
-                              // compute's frame
+        // here cleanly.
+        // compute's frame
         mem.insert(b, a); // saved RBP = main's rbp
         mem.insert(b + 8, 0x40105a); // RA back into main (after `call compute`)
-                                     // add's frame
+        // add's frame
         mem.insert(c, b); // saved RBP = compute's rbp
         mem.insert(c + 8, 0x40103a); // RA back into compute (after `call add`)
 

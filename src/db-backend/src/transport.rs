@@ -44,8 +44,8 @@ mod browser_transport {
     use super::*;
     use serde_wasm_bindgen::to_value;
     use wasm_bindgen::JsCast;
-    use web_sys::js_sys;
     use web_sys::DedicatedWorkerGlobalScope;
+    use web_sys::js_sys;
 
     /// A transport that posts messages to the worker's main thread.
     pub struct BrowserTransport {

@@ -12,7 +12,7 @@
 //! re-emit the container via `write_minimal_ctfs`, preserving every
 //! other internal file byte-for-byte.
 
-use db_backend::ctfs_trace_reader::ctfs_container::{write_minimal_ctfs, CtfsReader};
+use db_backend::ctfs_trace_reader::ctfs_container::{CtfsReader, write_minimal_ctfs};
 
 /// Decode `cp0.mem` into a flat list of `(address, bytes)` regions.
 /// Mirrors the layout `_ct_full_snapshot_walk` writes in

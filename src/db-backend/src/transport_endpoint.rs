@@ -56,7 +56,7 @@ fn sanitize_windows_pipe_name(raw_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{endpoint_instance_name, unix_socket_path_for_pid, windows_named_pipe_path_for_pid, DapEndpoint};
+    use super::{DapEndpoint, endpoint_instance_name, unix_socket_path_for_pid, windows_named_pipe_path_for_pid};
     use std::path::Path;
 
     #[test]

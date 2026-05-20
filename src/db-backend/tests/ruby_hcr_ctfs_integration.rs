@@ -16,7 +16,7 @@
 mod test_harness;
 
 use std::path::PathBuf;
-use test_harness::{find_ruby_recorder, DapStdioTestClient, FlowData, Language, TestRecording};
+use test_harness::{DapStdioTestClient, FlowData, Language, TestRecording, find_ruby_recorder};
 
 /// Line number in main.rb where `value = compute(counter)` lives.
 const COMPUTE_CALL_LINE: u32 = 20;

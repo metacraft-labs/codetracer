@@ -14,7 +14,7 @@ mod test_harness;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use test_harness::{run_db_flow_test, FlowTestConfig, Language};
+use test_harness::{FlowTestConfig, Language, run_db_flow_test};
 
 /// Returns the path to the Noir project directory (not a single source file).
 ///

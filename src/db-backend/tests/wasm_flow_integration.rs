@@ -15,7 +15,7 @@ mod test_harness;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use test_harness::{find_wazero, run_db_flow_test, FlowTestConfig, Language};
+use test_harness::{FlowTestConfig, Language, find_wazero, run_db_flow_test};
 
 /// Returns the path to the WASM test program Cargo project directory.
 ///

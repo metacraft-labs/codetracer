@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use ct_dap_client::test_support::FlowTestRunner;
 
 mod test_harness;
-use test_harness::{find_solana_flow_test, find_solana_recorder, Language, TestRecording};
+use test_harness::{Language, TestRecording, find_solana_flow_test, find_solana_recorder};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))

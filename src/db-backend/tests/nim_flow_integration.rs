@@ -12,7 +12,7 @@ mod test_harness;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use test_harness::{
-    find_ct_rr_support, is_command_available, is_replay_backend_available, run_flow_test, FlowTestConfig, Language,
+    FlowTestConfig, Language, find_ct_rr_support, is_command_available, is_replay_backend_available, run_flow_test,
 };
 
 fn get_nim_source_path() -> PathBuf {

@@ -54,17 +54,17 @@ use std::path::Path;
 use std::sync::Once;
 
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
-use crate::ctfs_trace_reader::meta_dat::{parse_meta_dat, MetaDat};
+use crate::ctfs_trace_reader::meta_dat::{MetaDat, parse_meta_dat};
 use crate::db::DbRecordEvent;
 use crate::dwarf_index::{DwarfIndex, PcInfo};
 use crate::emulator_ffi;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::ReplaySession;
-use crate::stack_unwinder::{StackUnwinder, MCR_REG_COUNT};
+use crate::stack_unwinder::{MCR_REG_COUNT, StackUnwinder};
 use crate::task::{
     Action, Breakpoint, Call, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg,
-    Location, ProgramEvent, RRTicks, VariableWithRecord, NO_ADDRESS, NO_EVENT, NO_POSITION,
+    Location, NO_ADDRESS, NO_EVENT, NO_POSITION, ProgramEvent, RRTicks, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -1626,11 +1626,7 @@ impl ReplaySession for EmulatorReplaySession {
                 // retaining the pointer.
                 let rc =
                     unsafe { emulator_ffi::mcrReadMemory(addr, buf.as_mut_ptr(), buf.len() as std::os::raw::c_int) };
-                if rc == 0 {
-                    Ok(())
-                } else {
-                    Err(())
-                }
+                if rc == 0 { Ok(()) } else { Err(()) }
             },
             MAX_CALLSTACK_FRAMES,
         );
@@ -1792,7 +1788,7 @@ impl ReplaySession for EmulatorReplaySession {
 mod tests {
     use super::*;
     use crate::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
-    use crate::ctfs_trace_reader::meta_dat::{serialize_meta_dat, McrFields, FLAG_HAS_MCR_FIELDS, META_DAT_VERSION};
+    use crate::ctfs_trace_reader::meta_dat::{FLAG_HAS_MCR_FIELDS, META_DAT_VERSION, McrFields, serialize_meta_dat};
 
     /// Build a synthetic CTFS payload with the `FlagHasMcrFields` bit set
     /// and a plausible meta block. We don't need real checkpoint streams

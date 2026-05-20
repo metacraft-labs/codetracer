@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use codetracer_trace_types::{CallKey, Line, StepId, TypeKind, TypeRecord, TypeSpecificInfo, NO_KEY};
+use codetracer_trace_types::{CallKey, Line, NO_KEY, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
 use log::{error, info, warn};
 
 use crate::{
     db::DbRecordEvent,
     expr_loader::ExprLoader,
-    lang::{lang_from_context, Lang},
+    lang::{Lang, lang_from_context},
     nim_mangling,
     replay::ReplaySession,
     task::{
@@ -16,7 +16,7 @@ use crate::{
         FlowUpdateState, FlowUpdateStateKind, FlowViewUpdate, Iteration, Location, Loop, LoopId, LoopIterationSteps,
         Position, RRTicks, StepCount, TraceKind,
     },
-    value::{to_ct_value, Value, ValueRecordWithType},
+    value::{Value, ValueRecordWithType, to_ct_value},
 };
 
 const STEP_COUNT_LIMIT: usize = 10000;
