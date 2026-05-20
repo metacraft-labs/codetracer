@@ -957,6 +957,16 @@ pub struct FlowStep {
     pub line: i64,
     pub variables: Vec<String>,
     pub before_values: HashMap<String, serde_json::Value>,
+    /// Values of variables AFTER this step executes. Populated retroactively
+    /// by `flow_preloader.rs` from the next step's `before_values`. Useful for
+    /// asserting on the result of an assignment that happens at this step.
+    pub after_values: HashMap<String, serde_json::Value>,
+    /// Loop iteration index for this step (0-based; -1 / 0 when outside
+    /// a loop, depending on the recorder).
+    pub iteration: i64,
+    /// Recorder step id / rr_ticks for this step, useful for locating the
+    /// step that corresponds to a specific stop event.
+    pub rr_ticks: i64,
 }
 
 impl FlowData {
@@ -1003,10 +1013,28 @@ impl FlowData {
                 }
             }
 
+            let mut after_values = HashMap::new();
+            if let Some(av) = step_json.get("afterValues").and_then(|v| v.as_object()) {
+                for (var_name, value) in av {
+                    after_values.insert(var_name.clone(), value.clone());
+                }
+            }
+
+            // FlowStep.iteration is a newtype around i64 in db-backend; its
+            // JSON encoding is the raw integer (Iteration is `#[serde(transparent)]`
+            // via the newtype macro).
+            let iteration = step_json.get("iteration").and_then(|v| v.as_i64()).unwrap_or(0);
+
+            // FlowStep.rrTicks similarly serializes as a raw integer newtype.
+            let rr_ticks = step_json.get("rrTicks").and_then(|v| v.as_i64()).unwrap_or(0);
+
             steps.push(FlowStep {
                 line,
                 variables,
                 before_values,
+                after_values,
+                iteration,
+                rr_ticks,
             });
         }
 

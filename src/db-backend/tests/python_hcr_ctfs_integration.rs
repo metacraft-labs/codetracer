@@ -175,56 +175,97 @@ fn record_hcr_trace(
     })
 }
 
-/// Extract the integer value of a variable named `var_name` from flow data.
-/// Returns `None` if the variable is not found or its value is not loaded.
-fn extract_var_value(flow: &FlowData, var_name: &str) -> Option<i64> {
-    flow.values
+/// Extract `var_name` as it stands immediately AFTER the breakpoint stop.
+///
+/// Why this exists: the DAP `request_flow` call uses `FlowMode::Call`, which
+/// returns the flow window for the enclosing function call. For top-level
+/// Python code, the enclosing "call" is the `<module>` body, so the returned
+/// flow contains every loop iteration of the program. `FlowData::values`
+/// collapses to the LAST write for each variable across all iterations, which
+/// returns the wrong iteration's value for an HCR-style test that breaks at a
+/// specific iteration.
+///
+/// To get the value computed by the assignment AT THE STOP, we:
+///   1. Locate the flow step whose `rr_ticks` equals the stop's `rr_ticks`
+///      (this is the step at the breakpoint line for the current iteration).
+///   2. Walk forward through subsequent steps and return the first
+///      `before_values[var_name]` value that *differs from the stop step's
+///      before-value* (or is the first populated value if the stop step
+///      didn't have one yet). That captures the value of `var_name` once
+///      the assignment at the breakpoint has actually executed: the very
+///      next step that records `var_name` does so as its `before_values`.
+///
+/// We must not filter by `iteration` index, because Python's recorder marks
+/// steps inside the called `compute()` body with that callee's own loop
+/// iteration (effectively 0), which interleaves with the `<module>` loop's
+/// iteration tagging. We therefore use the value-changed signal as the
+/// primary cue and fall back to the stop step's `after_values` if no later
+/// step records the variable.
+///
+/// JS/Ruby HCR tests don't need this because their recorders produce a
+/// per-loop-iteration call key, so `FlowMode::Call` returns just the current
+/// iteration's steps and `FlowData::values` already holds the right value.
+fn extract_var_value_at_stop(flow: &FlowData, var_name: &str, stop_rr_ticks: i64) -> Option<i64> {
+    let stop_idx = flow.steps.iter().position(|s| s.rr_ticks == stop_rr_ticks)?;
+
+    let stop_before = flow.steps[stop_idx]
+        .before_values
+        .get(var_name)
+        .filter(|v| FlowData::is_value_loaded(v))
+        .and_then(FlowData::extract_int_value);
+
+    for step in flow.steps.iter().skip(stop_idx + 1) {
+        if let Some(v) = step
+            .before_values
+            .get(var_name)
+            .filter(|v| FlowData::is_value_loaded(v))
+            .and_then(FlowData::extract_int_value)
+        {
+            // Skip values that are identical to the stop step's pre-assignment
+            // reading — those represent unrelated reads of the still-stale
+            // variable before our assignment executes. Once we see a fresh
+            // value, we've captured the result of the assignment.
+            if Some(v) != stop_before {
+                return Some(v);
+            }
+        }
+    }
+
+    // Fallback: `after_values` on the stop step itself (populated by
+    // flow_preloader.rs from the next step's `before_values`).
+    flow.steps[stop_idx]
+        .after_values
         .get(var_name)
         .filter(|v| FlowData::is_value_loaded(v))
         .and_then(FlowData::extract_int_value)
+        .or(stop_before)
 }
 
-// ROOT CAUSE (2026-05-20): The test design predates the current
-// `FlowMode::Call` semantics in flow_preloader.rs and gets a misleading
-// `value=36` (compute(12) under v2 = 12*3) when it expects `value=6`
-// (compute(3) under v1 = 3*2) for the pre-reload assertion.
+// Notes on Python `FlowMode::Call` semantics
+// -----------------------------------------
+// The DAP `request_flow` helper requests `FlowMode::Call`, which returns the
+// flow window of the enclosing function call. For top-level Python code (the
+// `<module>` body), the "call" spans the whole script execution, so the
+// returned flow contains all 12 loop iterations of the HCR program.
+// `FlowData::values` collapses per-iteration writes by taking the last write
+// per variable; for this multi-iteration scope that yields iteration 12's
+// value, not the iteration we stopped at.
 //
-// What actually happens:
-//   * The Python recorder produces a 154-step trace covering all 12 loop
-//     iterations of the HCR program (verified with `ct-print --events`).
-//     The breakpoint at `main.py:22` (the `value = mymodule.compute(counter)`
-//     call site) has 12 matching step entries, one per iteration.
-//   * `continue_to_breakpoint()` × 3 correctly stops the replay at hit #3
-//     (the iteration where counter=3) — the test's own log line confirms
-//     `Pre-reload stop at /tmp/.../main.py:22 (step 3)`.
-//   * `client.request_flow(pre_loc)` with `FlowMode::Call` then loads the
-//     flow window for the enclosing function call.  Since the breakpoint
-//     fires inside `<module>` (the top-level Python script body), the
-//     enclosing call IS the entire program, so the returned flow contains
-//     ALL 152 steps across all 12 iterations.
-//   * `FlowData::from_event_body` builds `flow.values` by iterating the
-//     steps in order and `values.insert(name, …)` overwrites earlier
-//     entries.  The final `value` in the map is from iteration 12 (v2),
-//     i.e. 36 — not iteration 3's 6 that the test asserts.
+// JavaScript and Ruby HCR tests don't hit this because their recorders bound
+// each loop iteration in a way that makes `FlowMode::Call` return only the
+// current iteration's steps (Node wraps modules in an implicit function;
+// Ruby's `load` cycle similarly bounds the scope).
 //
-// The other two HCR tests (JavaScript, Ruby) pass because their recorders
-// produce per-call flow scopes — the call is bounded by an explicit
-// function frame, not the top-level module body.  Python's recorder treats
-// `<module>` as a single call that spans the whole execution.
+// We work around this on the test side via `extract_var_value_at_stop`,
+// which locates the flow step matching the stop's `rr_ticks` and then walks
+// forward until it finds a step recording `value` whose reading differs from
+// the stop step's stale pre-assignment value. That gives us the value
+// computed by the assignment at the stop, regardless of how many other
+// iterations the enclosing-call flow includes.
 //
-// Two possible real fixes, both outside this test's scope:
-//   (1) DAP layer: window FlowMode::Call by call-key rather than function
-//       body when the call is `<module>`, so each loop iteration yields a
-//       distinct flow window.  This is a load-bearing semantic decision —
-//       the GUI's flow view relies on the current "whole call" semantics
-//       for non-loop code.
-//   (2) Recorder: emit a per-iteration synthetic frame for HCR programs so
-//       each `compute(counter)` call site has its own call key.  Would
-//       require coordination with the Python recorder spec.
-//
-// Per repo policy (no #[ignore], no silent skips, no weakened assertions),
-// the test stays failing until the upstream decision lands.  Resolution is
-// tracked separately from this db-backend session.
+// A potential follow-up is to teach `FlowMode::Call` to bound by call key in
+// addition to call entry, so loop iterations within `<module>` yield
+// independent flow windows. That is out of scope for this test.
 #[test]
 fn test_python_hcr_ctfs_integration() {
     // -- Guard: skip if the CTFS-emitting recorder or Python 3.10+ unavailable --
@@ -285,30 +326,49 @@ fn test_python_hcr_ctfs_integration() {
     }
 
     let pre_loc = pre_reload_location.unwrap();
-    println!("Requesting pre-reload flow data...");
+    let pre_loc_rr_ticks = pre_loc.rr_ticks.0;
+    println!(
+        "Requesting pre-reload flow data (stop rr_ticks={})...",
+        pre_loc_rr_ticks
+    );
     let pre_flow = client.request_flow(pre_loc).expect("failed to request pre-reload flow");
 
-    // Verify pre-reload value: compute(3) = 6 (v1: n*2)
+    // Verify pre-reload value: compute(3) = 6 (v1: n*2). We use
+    // `extract_var_value_at_stop` because the Python `<module>` call key
+    // spans all 12 loop iterations (see the module-level note above).
     println!("Pre-reload flow has {} steps", pre_flow.steps.len());
-    if let Some(actual) = extract_var_value(&pre_flow, "value") {
-        assert_eq!(
-            actual, PRE_RELOAD_EXPECTED_VALUE,
-            "pre-reload: expected value={} (v1: 3*2), got {}",
-            PRE_RELOAD_EXPECTED_VALUE, actual
-        );
-        println!("Pre-reload check PASSED: value = {} (v1: 3*2)", actual);
-    } else {
-        // The variable might not be loaded yet at step position; check counter instead
-        println!(
-            "Pre-reload: 'value' not found in flow data (variables: {:?}). \
-             Checking 'counter' as fallback...",
-            pre_flow.all_variables
-        );
-        if let Some(counter_val) = extract_var_value(&pre_flow, "counter") {
-            assert_eq!(counter_val, 3, "pre-reload: expected counter=3, got {}", counter_val);
-            println!("Pre-reload fallback PASSED: counter = 3");
-        }
-    }
+    let pre_value = extract_var_value_at_stop(&pre_flow, "value", pre_loc_rr_ticks).unwrap_or_else(|| {
+        panic!(
+            "pre-reload: could not locate `value` for stop step rr_ticks={} (variables seen: {:?})",
+            pre_loc_rr_ticks, pre_flow.all_variables
+        )
+    });
+    assert_eq!(
+        pre_value, PRE_RELOAD_EXPECTED_VALUE,
+        "pre-reload: expected value={} (v1: 3*2), got {}",
+        PRE_RELOAD_EXPECTED_VALUE, pre_value
+    );
+    println!("Pre-reload check PASSED: value = {} (v1: 3*2)", pre_value);
+
+    // Cross-check `counter` at the stop: it must equal 3 (1-based iteration 3).
+    let pre_counter = pre_flow
+        .steps
+        .iter()
+        .find(|s| s.rr_ticks == pre_loc_rr_ticks)
+        .and_then(|s| s.before_values.get("counter"))
+        .and_then(FlowData::extract_int_value)
+        .unwrap_or_else(|| {
+            panic!(
+                "pre-reload: stop step {} not found or `counter` missing",
+                pre_loc_rr_ticks
+            )
+        });
+    assert_eq!(
+        pre_counter, 3,
+        "pre-reload: expected counter=3 at stop, got {}",
+        pre_counter
+    );
+    println!("Pre-reload counter cross-check PASSED: counter = 3");
 
     // -- Post-reload: continue to step 9 (hit #9 total, so 6 more hits) --
     let mut post_reload_location = None;
@@ -324,31 +384,49 @@ fn test_python_hcr_ctfs_integration() {
     }
 
     let post_loc = post_reload_location.unwrap();
-    println!("Requesting post-reload flow data...");
+    let post_loc_rr_ticks = post_loc.rr_ticks.0;
+    println!(
+        "Requesting post-reload flow data (stop rr_ticks={})...",
+        post_loc_rr_ticks
+    );
     let post_flow = client
         .request_flow(post_loc)
         .expect("failed to request post-reload flow");
 
-    // Verify post-reload value: compute(9) = 27 (v2: n*3)
+    // Verify post-reload value: compute(9) = 27 (v2: n*3).
     println!("Post-reload flow has {} steps", post_flow.steps.len());
-    if let Some(actual) = extract_var_value(&post_flow, "value") {
-        assert_eq!(
-            actual, POST_RELOAD_EXPECTED_VALUE,
-            "post-reload: expected value={} (v2: 9*3), got {}",
-            POST_RELOAD_EXPECTED_VALUE, actual
-        );
-        println!("Post-reload check PASSED: value = {} (v2: 9*3)", actual);
-    } else {
-        println!(
-            "Post-reload: 'value' not found in flow data (variables: {:?}). \
-             Checking 'counter' as fallback...",
-            post_flow.all_variables
-        );
-        if let Some(counter_val) = extract_var_value(&post_flow, "counter") {
-            assert_eq!(counter_val, 9, "post-reload: expected counter=9, got {}", counter_val);
-            println!("Post-reload fallback PASSED: counter = 9");
-        }
-    }
+    let post_value = extract_var_value_at_stop(&post_flow, "value", post_loc_rr_ticks).unwrap_or_else(|| {
+        panic!(
+            "post-reload: could not locate `value` for stop step rr_ticks={} (variables seen: {:?})",
+            post_loc_rr_ticks, post_flow.all_variables
+        )
+    });
+    assert_eq!(
+        post_value, POST_RELOAD_EXPECTED_VALUE,
+        "post-reload: expected value={} (v2: 9*3), got {}",
+        POST_RELOAD_EXPECTED_VALUE, post_value
+    );
+    println!("Post-reload check PASSED: value = {} (v2: 9*3)", post_value);
+
+    // Cross-check `counter` at the stop: it must equal 9.
+    let post_counter = post_flow
+        .steps
+        .iter()
+        .find(|s| s.rr_ticks == post_loc_rr_ticks)
+        .and_then(|s| s.before_values.get("counter"))
+        .and_then(FlowData::extract_int_value)
+        .unwrap_or_else(|| {
+            panic!(
+                "post-reload: stop step {} not found or `counter` missing",
+                post_loc_rr_ticks
+            )
+        });
+    assert_eq!(
+        post_counter, 9,
+        "post-reload: expected counter=9 at stop, got {}",
+        post_counter
+    );
+    println!("Post-reload counter cross-check PASSED: counter = 9");
 
     println!("\nPython HCR CTFS integration test completed successfully!");
 }

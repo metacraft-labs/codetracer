@@ -1,4 +1,15 @@
 # Codebase insights
+- 2026-05-20: `FlowMode::Call` returns the whole enclosing function call's step
+  window. For top-level Python code (the `<module>` body) the "call" spans
+  the entire script execution, so requesting flow at a breakpoint inside a
+  for-loop in `<module>` returns every iteration's steps. `FlowData::values`
+  collapses by last-write-wins, which yields the LAST iteration's value, not
+  the iteration where the breakpoint actually fired. JS (Node module wrapper)
+  and Ruby (`load` semantics) implicitly bound the scope per iteration so
+  their HCR tests don't hit this. `tests/python_hcr_ctfs_integration.rs`
+  works around it via `extract_var_value_at_stop` which locates the step
+  matching the stop's `rr_ticks` and walks forward to the first changed
+  `before_values[var_name]`.
 - 2026-05-04: `nix develop` and direnv can disagree when `.direnv/flake-profile-*`
   is stale. The current dev shell includes `ourPkgs.sui`; an older cached
   direnv profile may still enter successfully because it references forc/miden/
