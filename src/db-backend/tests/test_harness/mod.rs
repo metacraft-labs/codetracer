@@ -1398,6 +1398,112 @@ pub fn is_command_available(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Decide whether the recorder's `.envrc` dev shell should be entered via
+/// `direnv exec` before invoking BEAM tooling.
+///
+/// The dev-shell hop only helps when the recorder repo ships a Nix-flake
+/// `.envrc` *and* `direnv` can actually evaluate it: that is, the env is
+/// allowed (`direnv allow` was run) and the `use flake` directive resolves.
+/// On a Windows checkout there is no Nix, so `direnv exec` against the
+/// flake `.envrc` always errors ("`.envrc` is blocked" / flake eval
+/// failure) and would mask the BEAM tools that are already provisioned
+/// directly on `PATH`.
+///
+/// Probe with `direnv exec <repo> cmd /c exit` (Windows) / `... true`
+/// (Unix): a zero exit means direnv really can hand us the dev shell.
+fn should_use_recorder_direnv(recorder_repo: &Path) -> bool {
+    if !recorder_repo.join(".envrc").exists() || !is_command_available("direnv") {
+        return false;
+    }
+    let probe = if cfg!(windows) {
+        vec!["exec", recorder_repo.to_str().unwrap_or("."), "cmd", "/c", "exit"]
+    } else {
+        vec!["exec", recorder_repo.to_str().unwrap_or("."), "true"]
+    };
+    Command::new("direnv")
+        .args(&probe)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Resolve a bare command name to a concrete executable path, searching
+/// the supplied `PATH` value and honoring Windows executable extensions.
+///
+/// Rust's `Command::new("foo")` delegates to the OS process launcher,
+/// which on Windows only appends `.exe` — it will NOT find `foo.bat` /
+/// `foo.cmd` (the form scoop/Elixir installs ship `elixir`, `elixirc`,
+/// `mix` as). Searching `PATHEXT` ourselves lets the BEAM tooling launch
+/// uniformly on Windows and Unix. Returns `None` when nothing matches,
+/// in which case callers fall back to the bare name.
+fn resolve_program(program: &str, search_path: &std::ffi::OsStr) -> Option<PathBuf> {
+    // An explicit path (contains a separator) is used verbatim.
+    if program.contains('/') || program.contains('\\') {
+        let p = PathBuf::from(program);
+        return p.is_file().then_some(p);
+    }
+
+    #[cfg(windows)]
+    let exts: Vec<String> = {
+        let raw = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+        // Try the real Windows executable extensions FIRST: scoop's Elixir
+        // ships both `elixirc` (a Unix shell script — "not a valid Win32
+        // application") and `elixirc.bat` (the launchable one) in the same
+        // directory, so a bare-name match must lose to the `.bat`. The
+        // empty extension is appended last so an already-suffixed name or a
+        // genuine extensionless `.exe` still resolves.
+        raw.split(';')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase())
+            .chain(std::iter::once(String::new()))
+            .collect()
+    };
+    #[cfg(not(windows))]
+    let exts: Vec<String> = vec![String::new()];
+
+    for dir in env::split_paths(search_path) {
+        for ext in &exts {
+            let candidate = dir.join(format!("{program}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Build a `Command` to run `program` (a BEAM tool name like `mix`,
+/// `elixirc`, `erlc`), resolving it via `resolve_program` and routing a
+/// resolved Windows `.bat`/`.cmd` launcher through `cmd /c`.
+///
+/// Rust's own `.bat` launch path (>= 1.77) mangles the inherited BEAM
+/// tool environment so that `elixir.bat` fails to locate `erl.exe`; a
+/// plain `cmd /c` reproduces the working shell behavior. Arguments added
+/// by the caller via `.args(...)` land after the launcher, exactly where
+/// `cmd /c` expects them. Falls back to the bare name when nothing
+/// resolves.
+fn batch_command(program: &str, search_path: &std::ffi::OsStr) -> Command {
+    match resolve_program(program, search_path) {
+        Some(path) => {
+            let is_batch = matches!(
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase())
+                    .as_deref(),
+                Some("bat") | Some("cmd")
+            );
+            if cfg!(windows) && is_batch {
+                let mut c = Command::new("cmd");
+                c.arg("/c").arg(path);
+                c
+            } else {
+                Command::new(path)
+            }
+        }
+        None => Command::new(program),
+    }
+}
+
 /// Source `scripts/detect-siblings.sh` and read back the named env var.
 ///
 /// `detect-siblings.sh` knows how to locate sibling repos via repo-managed
@@ -1505,7 +1611,10 @@ pub fn find_beam_recorder() -> Option<PathBuf> {
     }
 
     for binary_name in ["codetracer-beam-recorder", "codetracer-elixir-recorder"] {
-        if let Some(path) = find_on_path(binary_name) {
+        // Append the platform executable suffix (`.exe` on Windows) so the
+        // PATH lookup finds the real binary.
+        let exe_name = format!("{}{}", binary_name, std::env::consts::EXE_SUFFIX);
+        if let Some(path) = find_on_path(&exe_name) {
             return Some(path);
         }
     }
@@ -1513,7 +1622,13 @@ pub fn find_beam_recorder() -> Option<PathBuf> {
     let repo = find_beam_recorder_repo()?;
     for binary_name in ["codetracer-beam-recorder", "codetracer-elixir-recorder"] {
         for profile in ["debug", "release"] {
-            let candidate = repo.join(format!("target/{}/{}", profile, binary_name));
+            // `target/<profile>/<name>` carries the `.exe` suffix on Windows.
+            let candidate = repo.join(format!(
+                "target/{}/{}{}",
+                profile,
+                binary_name,
+                std::env::consts::EXE_SUFFIX
+            ));
             if candidate.is_file() {
                 return Some(safe_canonicalize(&candidate));
             }
@@ -3723,8 +3838,9 @@ fn record_elixir_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
 
     let recorder_bin_dir_arg = recorder.parent().map(|p| p.display().to_string()).unwrap_or_default();
 
+    let use_direnv = should_use_recorder_direnv(&recorder_repo);
     let run_in_recorder_shell = |program: &str, args: &[&str], cwd: &Path| -> Result<std::process::Output, String> {
-        let mut command = if recorder_repo.join(".envrc").exists() && is_command_available("direnv") {
+        let mut command = if use_direnv {
             let mut cmd = Command::new("direnv");
             cmd.arg("exec")
                 .arg(&recorder_repo)
@@ -3736,7 +3852,10 @@ fn record_elixir_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
                 .arg(program);
             cmd
         } else {
-            Command::new(program)
+            // Resolve `.bat`/`.cmd` BEAM tools (scoop's `elixirc`, `mix`, …)
+            // that the OS launcher would otherwise miss on Windows, and
+            // route batch launchers through `cmd /c`.
+            batch_command(program, &path_with_recorder)
         };
 
         command
@@ -3802,7 +3921,7 @@ fn record_elixir_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     ];
 
     let output = {
-        let mut command = if recorder_repo.join(".envrc").exists() && is_command_available("direnv") {
+        let mut command = if should_use_recorder_direnv(&recorder_repo) {
             let mut cmd = Command::new("direnv");
             cmd.arg("exec")
                 .arg(&recorder_repo)
@@ -3814,7 +3933,13 @@ fn record_elixir_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
                 .arg("mix");
             cmd
         } else {
-            Command::new("mix")
+            // `mix` is a `.bat`/`.cmd` on Windows. Route it through
+            // `cmd /c` rather than letting Rust launch the `.bat`
+            // directly: Rust >= 1.77's own batch invocation path mangles
+            // the BEAM tool environment enough that `elixir.bat` cannot
+            // find `erl.exe`, whereas a plain `cmd /c` reproduces the
+            // working interactive behavior.
+            batch_command("mix", &path_with_recorder)
         };
 
         command
@@ -3876,9 +4001,10 @@ fn record_erlang_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     // Run the given program inside the recorder repo's dev shell when one is
     // available — matches the Elixir helper for parity (BEAM tools may live in
     // the recorder's nix shell rather than the codetracer dev shell).
+    let use_direnv = should_use_recorder_direnv(&recorder_repo);
     let run_in_recorder_shell = |program: &str, args: &[&str], cwd: &Path| -> Result<std::process::Output, String> {
         let recorder_bin_dir_arg = recorder.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        let mut command = if recorder_repo.join(".envrc").exists() && is_command_available("direnv") {
+        let mut command = if use_direnv {
             let mut cmd = Command::new("direnv");
             cmd.arg("exec")
                 .arg(&recorder_repo)
@@ -3890,7 +4016,9 @@ fn record_erlang_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
                 .arg(program);
             cmd
         } else {
-            Command::new(program)
+            // Resolve `.bat`/`.cmd` BEAM tools the OS launcher would miss
+            // on Windows and route batch launchers through `cmd /c`.
+            batch_command(program, &path_with_recorder)
         };
 
         command
@@ -3948,7 +4076,7 @@ fn record_erlang_trace(source_path: &Path, trace_dir: &Path) -> Result<(), Strin
     ];
 
     let output = {
-        let mut command = if recorder_repo.join(".envrc").exists() && is_command_available("direnv") {
+        let mut command = if should_use_recorder_direnv(&recorder_repo) {
             let recorder_bin_dir_arg = recorder.parent().map(|p| p.display().to_string()).unwrap_or_default();
             let mut cmd = Command::new("direnv");
             cmd.arg("exec")

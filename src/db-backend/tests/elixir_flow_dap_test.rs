@@ -5,7 +5,7 @@
 //! ct-dap-client's FlowTestRunner.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use ct_dap_client::{
@@ -64,7 +64,15 @@ fn e2e_codetracer_elixir_run_to_entry_stack_dap() {
         .as_ref()
         .and_then(|source| source.path.as_deref())
         .unwrap_or("");
-    assert_eq!(path, source_file.to_str().unwrap());
+    // Compare as `Path`, not as raw strings: on Windows the recorder
+    // stores native `\` separators while `source_file` was built with a
+    // literal `/` in its last component, and `Path` equality is
+    // separator-insensitive there.
+    assert_eq!(
+        Path::new(path),
+        source_file.as_path(),
+        "run-to-entry stack frame should point at the Elixir source file",
+    );
     assert!(
         top.line > 0,
         "run-to-entry should land on a real Elixir source line, got {:?}",

@@ -35,7 +35,7 @@ fn test_ctfs_call_args_roundtrip() {
 
     // ── Write side ─────────────────────────────────────────────────
     {
-        let mut writer = NimTraceWriter::new("call_args_test", TraceEventsFileFormat::Ctfs);
+        let mut writer = NimTraceWriter::new("call_args_test", &[], TraceEventsFileFormat::Ctfs);
 
         // The Nim multi-stream backend is selected by the file name's
         // .ct extension.  set_workdir + begin_writing_trace_metadata is
