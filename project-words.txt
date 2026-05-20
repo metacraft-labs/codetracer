@@ -171,3 +171,10 @@ Ctfs
 regs
 fsbase
 fdebug
+ringbuf
+vswhere
+tinygo
+winget
+asyncio
+doctests
+deepreview

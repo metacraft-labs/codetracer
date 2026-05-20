@@ -105,7 +105,6 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-SMALL_LANG_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]small_lang_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 
 ifeq (@(TUP_PLATFORM),win32)
 CARGO_TARGET_BASE = C:/tmp/codetracer
@@ -362,6 +361,3 @@ endif
 !rust_cargo_virtualization_layers = |> \
     cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/virtualization_layers_target && \
     cp $(CARGO_TARGET_BASE)/virtualization_layers_target/release/virtualization-layers$(EXE_SUFFIX) %o |> %o | $(VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS)
-!rust_cargo_small_lang = |> \
-    cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/small_lang_target && \
-    cp $(CARGO_TARGET_BASE)/small_lang_target/release/small-lang$(EXE_SUFFIX) %o |> %o | $(SMALL_LANG_CARGO_IGNORE_OUTPUTS)

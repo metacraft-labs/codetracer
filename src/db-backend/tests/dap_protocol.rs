@@ -3,14 +3,14 @@ use serde_json::json;
 
 #[test]
 fn test_parse_initialize_request() {
-    let json_text = r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"small-lang"}}"#;
+    let json_text = r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"noir"}}"#;
     let message = from_json(json_text).expect("valid message");
     match message {
         DapMessage::Request(req) => {
             assert_eq!(req.base.seq, 1);
             assert_eq!(req.command, "initialize");
             // println!("{:?}", req);
-            assert_eq!(req.arguments["adapterID"], "small-lang");
+            assert_eq!(req.arguments["adapterID"], "noir");
         }
         _ => panic!("expected request"),
     }

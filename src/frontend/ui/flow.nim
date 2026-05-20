@@ -580,7 +580,6 @@ let KEYWORDS: array[Lang, JsAssoc[cstring, bool]] = [
   emptyKeywords,  # LangNoir
   emptyKeywords,  # LangRustWasm
   emptyKeywords,  # LangCppWasm
-  emptyKeywords,  # LangSmall
   emptyKeywords,  # LangPythonDb
   emptyKeywords,  # LangUnknown
   emptyKeywords,  # LangBash

@@ -32,7 +32,6 @@ proc toLang*(lang: string): Lang =
     "asm": LangAsm,
     "nr": LangNoir,
     "noir": LangNoir,
-    "small": LangSmall,
     "rust-wasm": LangRustWasm,
     "rustwasm": LangRustWasm,
     "cpp-wasm": LangCppWasm,
@@ -72,7 +71,7 @@ proc toLang*(lang: cstring): Lang =
 let SUPPORTED_LANGS* = @[
   LangC, LangCpp, LangRust, LangNim, LangGo,
   LangPascal, LangFortran, LangD, LangCrystal, LangLean, LangAda,
-  LangRubyDb, LangNoir, LangSmall,
+  LangRubyDb, LangNoir,
   LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
   LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
   LangSolana, LangElixir, LangErlang
@@ -101,7 +100,6 @@ proc getExtension*(lang: Lang): string =
     "nr",     # LangNoir
     "rs",     # LangRustWasm
     "cpp",    # LangCppWasm
-    "small",  # LangSmall
     "py",     # LangPythonDb
     "",       # LangUnknown
     "sh",     # LangBash

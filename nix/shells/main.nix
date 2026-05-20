@@ -121,9 +121,9 @@ mkShell {
     # unzip
     libzip
     # zstd: required at link time by codetracer_trace_writer_nim (transitive
-    # dep of tup-built recorder crates such as small-lang). The trace writer
-    # uses libzstd directly via -lzstd; without zstd in the dev shell the
-    # tup-sandboxed linker fails with `ld: cannot find -lzstd`.
+    # dep of tup-built recorder crates). The trace writer uses libzstd directly
+    # via -lzstd; without zstd in the dev shell the tup-sandboxed linker fails
+    # with `ld: cannot find -lzstd`.
     zstd
     curl
 

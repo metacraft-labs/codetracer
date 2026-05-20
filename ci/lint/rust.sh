@@ -43,19 +43,6 @@ cargo clippy -- -D warnings
 
 popd
 
-echo '###############################################################################'
-echo 'Checking small-lang'
-echo '###############################################################################'
-
-pushd src/small-lang
-
-# threat warnings as errors here!
-env RUSTFLAGS="-D warnings" cargo check --release
-
-# TODO: check how to fix it in CI : cargo clippy -- -D warnings
-
-popd
-
 ###############################################################################
 
 pushd src/tui

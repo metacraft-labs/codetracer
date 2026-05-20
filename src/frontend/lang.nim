@@ -28,7 +28,6 @@ proc toLang*(lang: cstring): Lang =
     s: LangAsm,
     lua: LangLua,
     nr: LangNoir,
-    small: LangSmall,
     noir: LangNoir,
     sol: LangSolidity,
     masm: LangMasm,
@@ -74,7 +73,6 @@ proc toJsLang*(lang: Lang): cstring =
     cstring"python", cstring"ruby", cstring"ruby",
     cstring"javascript", cstring"lua", cstring"assembler", cstring"noir",
     cstring"rust", cstring"cpp",
-    cstring"small",
     cstring"python",
     cstring"unknown",
     cstring"bash",
@@ -104,7 +102,7 @@ proc toSet(names: seq[cstring]): JsAssoc[cstring, bool] =
 let SUPPORTED_LANGS* = @[
   LangC, LangCpp, LangRust, LangNim, LangGo,
   LangPascal, LangFortran, LangD, LangCrystal, LangLean, LangAda,
-  LangRubyDb, LangNoir, LangRustWasm, LangCppWasm, LangSmall,
+  LangRubyDb, LangNoir, LangRustWasm, LangCppWasm,
   LangSolidity, LangMasm, LangSway, LangMove, LangPolkavm,
   LangCairo, LangCircom, LangLeo, LangTolk, LangAiken, LangCadence,
   LangSolana, LangElixir, LangErlang
@@ -138,7 +136,6 @@ let RESERVED_NAMES*: array[Lang, JsAssoc[cstring, bool]] = [
   toSet(@[]),  # LangNoir
   toSet(@[]),  # LangRustWasm
   toSet(@[]),  # LangCppWasm
-  toSet(@[]),  # LangSmall
   toSet(@[]),  # LangPythonDb
   toSet(@[]),  # LangUnknown
   toSet(@[]),  # LangBash
@@ -182,7 +179,6 @@ proc getExtension*(lang: Lang): cstring =
     "nr",     # LangNoir
     "rs",     # LangRustWasm
     "cpp",    # LangCppWasm
-    "small",  # LangSmall
     "py",     # LangPythonDb
     "",       # LangUnknown
     "sh",     # LangBash
@@ -233,7 +229,6 @@ proc fromPath*(path: cstring): Lang =
     "asm": LangAsm,
     "s": LangAsm,
     "nr": LangNoir,
-    "small": LangSmall,
     "sol": LangSolidity,
     "masm": LangMasm,
     "sw": LangSway,

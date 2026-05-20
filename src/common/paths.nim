@@ -128,7 +128,6 @@ let
     when not defined(js): findTool("ruby") else: codetracerPrefix / "bin" / "ruby")
   rubyRecorderPath* = when not defined(js): findTool("codetracer-ruby-recorder") else: codetracerPrefix / "bin" / "codetracer-ruby-recorder"
 
-  smallExe* = codetracerPrefix / "bin" / "small-lang"
   noirExe* = env.get(
     "CODETRACER_NOIR_EXE_PATH",
     when defined(js):

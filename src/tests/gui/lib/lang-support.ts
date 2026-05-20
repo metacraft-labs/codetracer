@@ -10,7 +10,6 @@ const DB_BASED_EXTENSIONS = new Set([
   "py",    // PythonDb
   "rb",    // RubyDb
   "nr",    // Noir
-  "small", // Small
   "wasm",  // RustWasm / CppWasm
   "sol",   // Solidity / EVM recorder
   "masm",  // Miden / MASM recorder

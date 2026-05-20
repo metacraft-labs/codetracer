@@ -28,7 +28,6 @@ pub enum Lang {
     Noir,
     RustWasm,
     CppWasm,
-    Small,
     PythonDb,
     Unknown,
     Bash,

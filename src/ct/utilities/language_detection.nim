@@ -77,7 +77,6 @@ const LANGS = {
   "py": LangPythonDb,
   "rb": LangRubyDb, # default for ruby for now
   "nr": LangNoir,
-  "small": LangSmall,
   "wasm": LangRustWasm, # TODO: can be Cpp or other as well, maybe pass
     # explicitly or check trace/other debug info?
   "sol": LangSolidity,

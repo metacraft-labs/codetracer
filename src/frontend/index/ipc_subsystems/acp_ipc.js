@@ -1230,7 +1230,6 @@ var taskProcessExe_1593835560 = HEX2F_1493172340(HEX2F_1493172340(linksPath_1593
 var python3Path_1593835561 = HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("python3"));
 var rubyExe_1593835562 = get_1409286161(makeNimstrLit("CODETRACER_RUBY_EXE_PATH"), HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("ruby")));
 var rubyRecorderPath_1593835563 = get_1409286161(makeNimstrLit("CODETRACER_RUBY_RECORDER_PATH"), HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("codetracer-pure-ruby-recorder")));
-var smallExe_1593835564 = HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("small-lang"));
 var noirExe_1593835565 = get_1409286161(makeNimstrLit("CODETRACER_NOIR_EXE_PATH"), HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("nargo")));
 var wazeroExe_1593835566 = get_1409286161(makeNimstrLit("CODETRACER_WASM_VM_PATH"), HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("wazero")));
 var dbBackendExe_1593835567 = HEX2F_1493172340(HEX2F_1493172340(linksPath_1593835553, makeNimstrLit("bin")), makeNimstrLit("db-backend"));

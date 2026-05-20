@@ -101,8 +101,6 @@ proc recordDb(
   case lang:
     of LangRubyDb:
       startArgs = @[rubyRecorderPath, "--out-dir", fmt"{traceFolder}", program]
-    of LangSmall:
-      startArgs = @[program, "--tracing"]
     of LangRustWasm, LangCppWasm:
       var vmArgs = @["run"]
       if stylusTrace.len > 0:
@@ -334,8 +332,6 @@ proc record(
         echo fmt"error: recorder binary not found for {lang}. Set the corresponding CODETRACER_*_RECORDER_PATH env var or ensure the binary is on PATH."
         quit(1)
       return recordDb(lang, recorderExe, executable, args, backend, outputFolder, stylusTrace, traceId)
-    elif lang == LangSmall:
-      return recordDb(LangSmall, smallExe, executable, args, backend, outputFolder, stylusTrace, traceId)
     elif lang == LangPythonDb:
       var activationPathResolved = pythonActivationPath
       if activationPathResolved.len > 0:

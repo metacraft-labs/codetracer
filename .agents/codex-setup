@@ -17,7 +17,3 @@ popd || exit
 pushd src/tui || exit
 cargo build
 popd || exit
-
-pushd src/small-lang || exit
-cargo build
-popd || exit

@@ -112,20 +112,6 @@ static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
     m.insert(Lang::RustWasm, rust_node_names);
 
     m.insert(
-        Lang::Small,
-        NodeNames {
-            if_conditions: vec!["if_expression".to_string()],
-            else_conditions: vec!["else_clause".to_string()],
-            loops: vec!["\"loop\"".to_string()],
-            branches_body: vec!["block".to_string()],
-            branches: vec!["block".to_string()],
-            functions: vec!["defun".to_string()],
-            values: vec!["symbol".to_string()],
-            comments: vec!["".to_string()],
-        },
-    );
-
-    m.insert(
         Lang::PythonDb,
         NodeNames {
             if_conditions: vec!["if_statement".to_string(), "match_statement".to_string()],
@@ -588,8 +574,6 @@ impl ExprLoader {
                 Lang::Noir
             } else if extension == "rb" {
                 Lang::Ruby
-            } else if extension == "small" {
-                Lang::Small
             } else if extension == "c" {
                 Lang::C
             } else if extension == "cpp" || extension == "cc" {
@@ -1991,18 +1975,6 @@ impl ExprLoader {
                 self.processed_files.get_mut(path).unwrap().comment_lines.push(start);
             }
         }
-        // } else if lang == Lang::Small {
-        //     // info!("node kind {:?}", node.kind().to_string());
-        //     if node.kind() == "list" {
-        //         if let Some(name_node) = &node.child(1) {
-        //             let name = self.extract_expr(name_node, path, self.get_first_line(name_node).0 as usize);
-        //             // info!("name ::::::::::: {name}");
-        //             if name == "loop" {
-        //                 self.register_loop(start, end, path);
-        //             }
-        //         }
-        //     }
-        // }
         Ok(())
     }
 

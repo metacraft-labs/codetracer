@@ -43,7 +43,6 @@ pub enum Lang {
     Noir,
     RustWasm,
     CppWasm,
-    Small,
     PythonDb,
     Unknown,
     // Shell languages: not in the Nim frontend enum, kept here for

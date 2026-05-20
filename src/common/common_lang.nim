@@ -34,25 +34,24 @@ type
     LangNoir,     # 18
     LangRustWasm, # 19
     LangCppWasm,  # 20
-    LangSmall,    # 21
-    LangPythonDb, # 22
-    LangUnknown,  # 23
-    LangBash,     # 24 — internal only (tree-sitter support in db-backend)
-    LangZsh,      # 25 — internal only (tree-sitter support in db-backend)
-    LangSolidity, # 26
-    LangMasm,     # 27
-    LangSway,     # 28
-    LangMove,     # 29
-    LangPolkavm,  # 30
-    LangCairo,    # 31
-    LangCircom,   # 32
-    LangLeo,      # 33
-    LangTolk,     # 34
-    LangAiken,    # 35
-    LangCadence,  # 36
-    LangSolana,   # 37
-    LangElixir,   # 38
-    LangErlang    # 39
+    LangPythonDb, # 21
+    LangUnknown,  # 22
+    LangBash,     # 23 — internal only (tree-sitter support in db-backend)
+    LangZsh,      # 24 — internal only (tree-sitter support in db-backend)
+    LangSolidity, # 25
+    LangMasm,     # 26
+    LangSway,     # 27
+    LangMove,     # 28
+    LangPolkavm,  # 29
+    LangCairo,    # 30
+    LangCircom,   # 31
+    LangLeo,      # 32
+    LangTolk,     # 33
+    LangAiken,    # 34
+    LangCadence,  # 35
+    LangSolana,   # 36
+    LangElixir,   # 37
+    LangErlang    # 38
 
 var CURRENT_LANG*: Lang = LangUnknown ## The current lang in the codetraces session
 
@@ -63,15 +62,14 @@ proc isVMLang*(lang: Lang): bool =
 var USES_MATERIALIZED_TRACES*: array[Lang, bool] = [
   #C     Cpp    Rust   Nim    Go     Pascal Fortrn D      Crystl Lean   Julia  Ada
   false, false, false, false, false, false, false, false, false, false, false, false,
-  #Py    Ruby   RubyDb JS     Lua    Asm    Noir   RsWasm CppWsm Small  PyDb   Unknwn
-  false, false, false, false, false, false, false, false, false, false, false, false,
+  #Py    Ruby   RubyDb JS     Lua    Asm    Noir   RsWasm CppWsm PyDb   Unknwn
+  false, false, false, false, false, false, false, false, false, false, false,
   #Bash  Zsh    Sol    Masm   Sway   Move   Polka  Cairo  Circom Leo    Tolk   Aiken  Cadnce Solana Elixir Erlang
   false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false
 ]
 
 USES_MATERIALIZED_TRACES[LangRubyDb] = true
 USES_MATERIALIZED_TRACES[LangNoir] = true
-USES_MATERIALIZED_TRACES[LangSmall] = true
 USES_MATERIALIZED_TRACES[LangRustWasm] = true
 USES_MATERIALIZED_TRACES[LangCppWasm] = true
 USES_MATERIALIZED_TRACES[LangPythonDb] = true
@@ -105,7 +103,7 @@ proc toCLang*(lang: Lang): string =
     "c", "cpp", "rust", "nim", "go", "pascal",
     "fortran", "d", "crystal", "lean", "julia", "ada",
     "python", "ruby", "ruby", "javascript", "lua", "assembly", "noir",
-    "rust", "c++", "small", "python", "unknown",
+    "rust", "c++", "python", "unknown",
     "bash", "zsh", "solidity", "masm", "sway", "move",
     "polkavm", "cairo", "circom", "leo", "tolk", "aiken", "cadence",
     "solana", "elixir", "erlang"
@@ -119,7 +117,7 @@ proc toName*(lang: Lang): string =
        "Fortran", "D", "Crystal", "Lean", "Julia", "Ada",
        "Python", "Ruby", "Ruby(db)", "Javascript", "Lua", "assembly language", "Noir",
        "Rust(wasm)", "C++(wasm)",
-       "Small", "Python(db)", "unknown",
+       "Python(db)", "unknown",
        "Bash", "Zsh", "Solidity", "MASM/Miden", "Sway", "Move",
        "PolkaVM", "Cairo", "Circom", "Leo", "Tolk", "Aiken", "Cadence",
        "Solana", "Elixir", "Erlang"

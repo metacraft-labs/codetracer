@@ -193,9 +193,6 @@ squashfs-root/
 # trace.c: rr/gdb instrumentation-related:
 raw_calltrace_*
 
-# small-lang
-example.txt
-
 # Linux distribution packages:
 deb-single-codetracer-bin-codetracer
 

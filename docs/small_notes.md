@@ -12,11 +12,6 @@
 db-backend/rr gdb backend:
   graph/explain; maybe plan; eventually resolve in later days/weeks?;
 
-small-lang:
-  ok# fix flow/eventually others
-  ok# maybe merge?
-  .. eventually start on value tracking
-
 Others:
   Planning/documenting: talk with Stan? Maybe event flow/step view/others?
   Tooling: editors/others
