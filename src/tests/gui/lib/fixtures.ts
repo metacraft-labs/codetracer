@@ -124,6 +124,34 @@ if (isWindows && !process.env.CODETRACER_PYTHON_INTERPRETER && !process.env.CODE
   }
 }
 
+// On Windows, `ct record` for Python traces uses the `codetracer-python-recorder`
+// console script, which it discovers on PATH (src/common/paths.nim:
+// `pythonRecorderExe = findTool("codetracer-python-recorder")`).  The recorder
+// is a PyO3/maturin package installed into the codetracer-python-recorder
+// sibling repo's virtualenv.  When that venv is present, prepend its
+// Scripts/ directory to PATH so the recorder resolves, and point the
+// interpreter env vars at the venv Python (the venv has the recorder module
+// importable, which the bare system Python does not).
+if (isWindows) {
+  const pyRecorderVenvScripts = path.join(
+    codetracerInstallDir, "..", "codetracer-python-recorder", ".venv", "Scripts",
+  );
+  const pyRecorderExe = path.join(pyRecorderVenvScripts, "codetracer-python-recorder.exe");
+  const pyRecorderVenvPython = path.join(pyRecorderVenvScripts, "python.exe");
+  if (fs.existsSync(pyRecorderExe)) {
+    const pathSep = path.delimiter;
+    const currentPath = process.env.PATH ?? "";
+    if (!currentPath.split(pathSep).includes(pyRecorderVenvScripts)) {
+      process.env.PATH = `${pyRecorderVenvScripts}${pathSep}${currentPath}`;
+    }
+    // The recorder must be imported by the same interpreter that ships it.
+    if (fs.existsSync(pyRecorderVenvPython)) {
+      process.env.CODETRACER_PYTHON_INTERPRETER = pyRecorderVenvPython;
+      process.env.CODETRACER_PYTHON_EXE_PATH = pyRecorderVenvPython;
+    }
+  }
+}
+
 // On Windows, detect Ruby and the pure-Ruby recorder so that `ct record`
 // can trace Ruby programs.
 if (isWindows) {

@@ -20,7 +20,11 @@ import * as path from "node:path";
 import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures";
 import { LayoutPage } from "../page-objects/layout_page";
 
-const repoRoot = path.resolve(__dirname, "../..");
+// This spec lives at src/tests/gui/tests/ — four levels below the codetracer
+// repo root.  (The suite moved from the old one-level-deep tsc-ui-tests/ and
+// this constant was not updated, so the codetracer-beam-recorder sibling
+// lookup and the target/ fixture dir resolved under src/tests/ instead.)
+const repoRoot = path.resolve(__dirname, "../../../..");
 const elixirOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "elixir-canonical-flow");
 const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "erlang-canonical-flow");
 
@@ -90,10 +94,19 @@ function prepareBeamFixtures(): { elixirDir: string; erlangDir: string } {
   return { elixirDir: elixirOutDir, erlangDir: erlangOutDir };
 }
 
-const { elixirDir } = prepareBeamFixtures();
-
-test.use({ sourcePath: elixirDir, launchMode: "trace-folder" });
+// The Elixir CTFS bundle directory is a deterministic path, so test.use()
+// can reference it up front.  The actual recording (which shells out to the
+// codetracer-beam-recorder sibling) is performed in beforeAll() rather than
+// at module scope: a throw at module-evaluation time aborts Playwright's
+// collection of the *entire* suite, whereas a throw inside beforeAll fails
+// only this spec.  This still fails loudly per the M15 design — it just
+// contains the blast radius to the BEAM specs.
+test.use({ sourcePath: elixirOutDir, launchMode: "trace-folder" });
 test.setTimeout(180_000);
+
+test.beforeAll(() => {
+  prepareBeamFixtures();
+});
 
 test("e2e_playwright_elixir_trace_smoke", async ({ ctPage }) => {
   await readyOnEntry(ctPage);
