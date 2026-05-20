@@ -33,6 +33,36 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Mark the current process (and any ct-native-replay it spawns) as running
+/// inside a CodeTracer integration test.
+///
+/// `ct-native-replay` enforces a daily replay-count quota for the free-tier
+/// license policy (`DEFAULT_FREE_TIER_DAILY_LIMIT = 5`).  Once that quota is
+/// reached the worker exits with status 3 emitting a `daily_replay_limit_reached`
+/// JSON line on stderr.  The db-backend logs the failure but never propagates
+/// it to the DAP client, so the test deadlocks waiting for a `stopped` event
+/// that the worker will never send.
+///
+/// The CLI exposes `CODETRACER_IN_UI_TEST=1` (see
+/// `codetracer-native-backend/src/licensing/cli.rs::skip_daily_replay_limit_for_ui_tests`)
+/// as the supported bypass for headless integration tests.  This helper sets
+/// the variable unconditionally before the harness spawns ct-native-replay or
+/// the db-backend; both child processes inherit it.
+///
+/// Idempotent — safe to call from every entry point in this module.
+fn ensure_replay_license_bypass() {
+    // SAFETY: integration tests are single-process at the OS level by the
+    // time this runs (each `cargo nextest` test binary is its own process),
+    // and the bypass is process-wide by design.  We always set the variable
+    // because the cost of an extra write is negligible compared with the
+    // cost of a 350s hang when the quota has been silently exhausted.
+    // Edition 2024 marks `set_var` unsafe to call out the inherent race with
+    // threads observing the env at the same time; here we are still in the
+    // single-threaded test bootstrap before any worker has spawned, and the
+    // value we write is process-static, so the unsafe block is sound.
+    unsafe { env::set_var("CODETRACER_IN_UI_TEST", "1") };
+}
+
 /// Canonicalize a path, stripping the Windows `\\?\` UNC prefix if present.
 ///
 /// Rust's `std::fs::canonicalize` on Windows returns extended-length paths
@@ -236,6 +266,14 @@ impl TestRecording {
         version_label: &str,
         ct_rr_support: &Path,
     ) -> Result<Self, String> {
+        // `ct-native-replay record` increments the daily-replay-limit counter
+        // even on its `record` subcommand path (the counter is incremented on
+        // every replay-worker spawn, see codetracer-native-backend/src/licensing).
+        // We must announce ourselves as a test before invoking it, otherwise
+        // the harness silently drains the free-tier quota and later tests
+        // exit 3 with `daily_replay_limit_reached`.
+        ensure_replay_license_bypass();
+
         let temp_dir = std::env::temp_dir().join(format!(
             "flow_test_{}_{}_{}",
             language.extension(),
@@ -1081,6 +1119,12 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 /// 3. Common development locations relative to CARGO_MANIFEST_DIR
 /// 4. Home directory locations
 pub fn find_ct_rr_support() -> Option<PathBuf> {
+    // Tests calling `find_ct_rr_support` are about to spawn ct-native-replay
+    // (directly or via db-backend) and would otherwise deadlock when the
+    // free-tier daily replay quota is exhausted.  See
+    // `ensure_replay_license_bypass` for the gory details.
+    ensure_replay_license_bypass();
+
     // Highest priority: explicit env var override.
     // Used by cross-repo test scripts to communicate the binary location.
     for var_name in &["CT_NATIVE_REPLAY_PATH", "CT_RR_SUPPORT_PATH"] {

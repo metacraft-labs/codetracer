@@ -596,6 +596,22 @@ fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<P
         return Some(trace_folder.to_path_buf());
     }
 
+    // Legacy rr trace: a directory `rr/` inside the trace folder means this
+    // was produced by `ct-native-replay record` (no --backend mcr). Since
+    // M-REC-1.5/M-REC-11 the recorder now drops a CTFS metadata sidecar
+    // (`trace.ct`) into the same folder; that file carries only the recording
+    // manifest, NOT the recorder streams the MCR debugserver expects.  If we
+    // routed such a folder through the `.ct` branch below, ct-native-replay
+    // would treat the sidecar as an MCR container, spawn the MCR debugserver,
+    // and immediately fail with `ct-mcr binary not found`. We therefore check
+    // for the rr subdirectory first and prefer it whenever it exists — MCR
+    // recordings never produce a sibling `rr/` directory, so this disambiguates
+    // safely without affecting genuine MCR traces.
+    let legacy_rr_path = trace_folder.join("rr");
+    if legacy_rr_path.is_dir() {
+        return Some(legacy_rr_path);
+    }
+
     let explicit_trace_path = trace_folder.join(trace_file);
 
     // MCR traces in a directory: check if trace_file resolves to a .ct file
@@ -639,7 +655,6 @@ fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<P
         }
     }
 
-    let legacy_rr_path = trace_folder.join("rr");
     if legacy_rr_path.exists() {
         Some(legacy_rr_path)
     } else {
