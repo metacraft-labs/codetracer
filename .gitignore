@@ -42,6 +42,11 @@ result-man
 docs/book/book
 docs/book/src/generated/
 src/index.js
+src/index.js.map
+src/subwindow.js
+src/subwindow.js.map
+src/server_index.js
+src/server_index.js.map
 src/common/paths.js
 src/common/paths_test
 ui.js

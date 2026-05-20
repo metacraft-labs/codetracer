@@ -20,11 +20,16 @@ include_rules
 : ui.js |> cp %f %o |> public/ui.js
 : helpers.js |> cp %f %o |> src/helpers.js
 
-# preserve (symlink-based rules, not available on Windows)
-ifneq (@(TUP_PLATFORM),win32)
-: foreach *.json *.yaml   |> !tup_preserve |>
+# Copy the Electron entry HTML from frontend/ up into the build variant root
+# so the renderer can `loadFile(index.html)` (paths inside index.html are
+# resolved relative to the variant root).  `!tup_preserve` copies a source
+# file into the variant tree; it works on every platform — Windows included,
+# see the resource Tupfiles under public/resources/* — so these rules are no
+# longer gated behind `ifneq win32`.  Note the input/output relative paths
+# must differ (frontend/index.html -> index.html): a same-relative-path
+# `!tup_preserve` from this parent Tupfile triggers a Tup "generated node
+# already exists as a normal file" conflict against the variant-mirrored
+# source copy.  The default config/layout files therefore need no rule here —
+# they already reach build-debug/config/ via the variant source mirror.
 : frontend/index.html |> !tup_preserve |> index.html
 : frontend/subwindow.html |> !tup_preserve |> subwindow.html
-: config/default_layout.json |> !tup_preserve |> config/default_layout.json
-: config/default_config.yaml |> !tup_preserve |> config/default_config.yaml
-endif
