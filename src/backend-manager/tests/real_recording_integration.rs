@@ -561,7 +561,11 @@ async fn open_trace(
         .await
         .map_err(|e| format!("write ct/open-trace: {e}"))?;
 
-    let resp = timeout(Duration::from_secs(60), dap_read(client))
+    // Replay-server cold-start (db-backend launch + initial DAP handshake)
+    // can comfortably exceed 60s under nextest contention; 120s gives
+    // headroom without masking a true regression. Pre-#254 this timeout
+    // produced flaky failures on test_real_rr_navigate_* under CI load.
+    let resp = timeout(Duration::from_secs(120), dap_read(client))
         .await
         .map_err(|_| "timeout waiting for ct/open-trace response".to_string())?
         .map_err(|e| format!("read ct/open-trace response: {e}"))?;
