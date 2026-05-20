@@ -233,6 +233,22 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-trace-fo
 	_ct_detect_summary "codetracer-trace-format (FFI library available)"
 fi
 
+# --- codetracer-trace-format-nim ---
+# The wazero binary built with CGO links dynamically against
+# `libcodetracer_trace_writer.so` (the Nim-built FFI surface from
+# codetracer-trace-format-nim, distinct from the Rust trace-format crate
+# above). The Nix builder bakes an RPATH into wazero pointing at the
+# build-time output path, but once the build's nix-store output is
+# garbage-collected (or in dev shells that swap that output for a sibling
+# checkout) the binary fails with `libcodetracer_trace_writer.so: cannot
+# open shared object file`. Export the sibling repo's library directory so
+# the dynamic loader can resolve it. The Nim build drops the artefact at
+# the repo root next to the .nimble manifest (`nim c --app:lib -o:...`).
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -f "$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim/libcodetracer_trace_writer.so" ]; then
+	export LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim:${LD_LIBRARY_PATH:-}"
+	_ct_detect_summary "codetracer-trace-format-nim (Nim FFI library available for wazero)"
+fi
+
 # --- Blockchain / VM recorder siblings ---
 # Each blockchain recorder builds a binary at target/release/codetracer-<name>-recorder.
 # We only prepend to PATH — no env var overrides — so `ct` uses the same findTool
