@@ -87,6 +87,22 @@ endif
 # transient compiler temp. Pattern matches `C:/Users/<user>/AppData/Local/Temp/rustc<random>/...`.
 WINDOWS_RUSTC_TMP_IGNORE = ([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]AppData[/\\]Local[/\\]Temp[/\\]rustc[^/\\]*[/\\].*
 
+# The `codetracer_trace_writer_nim` crate's build.rs compiles a Nim static
+# library. Two kinds of side writes happen outside the cargo target dir:
+#
+#   1. Nim emits per-module `.c`/`.obj` scratch into a nimcache that build.rs
+#      deliberately keeps in a short path under the system temp dir
+#      (`<temp>/ctnw/<hash>/...`) — a deep nimcache under the cargo OUT_DIR
+#      makes Nim's C compiler fall back to relative paths and fail with C1083.
+#   2. build.rs first runs `nimble install --depsOnly -y` to resolve the Nim
+#      sources' nimble dependencies; on a fresh checkout nimble installs the
+#      `requires` packages into the global nimble store (`~/.nimble/pkgs2`,
+#      with download scratch under `~/.nimble/...`).
+#
+# Both are legitimate transient/dependency scratch, not build outputs, so tup
+# must ignore writes anywhere under a `ctnw` directory or a `.nimble` dir.
+NIM_FFI_CACHE_IGNORE = (([A-Za-z]:)?[/\\].*[/\\]ctnw[/\\].*|([A-Za-z]:)?[/\\].*[/\\]\.nimble[/\\].*)
+
 # Cargo writes to CARGO_HOME (registry cache, git checkouts, package-cache
 # mutex) during build. tup considers these undeclared outputs. Allow writes
 # under either `~/.cargo` (user-default) or any path whose last segment is
@@ -103,7 +119,7 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 # below intentionally allow either `target/...` (final layout) or
 # `target<6-char-suffix>/...` (cargo's atomic-prep layout).
 BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
 VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 
 ifeq (@(TUP_PLATFORM),win32)
@@ -333,21 +349,19 @@ export C_INCLUDE_PATH
 # This avoids shell-quoting differences between Windows environments.
 RUST_WINDOWS_LINKER_CONFIG =
 
-# Windows port: the `nim-reader` default feature pulls in
-# `codetracer_trace_writer_nim` which links a Nim static archive
-# (`libcodetracer_trace_writer.a`) produced by a Linux/Nix toolchain in
-# the sibling `codetracer-trace-format-nim` repo. That archive is not yet
-# produced on Windows (the Nim ffi crate compiles its sources with gcc
-# and needs zstd headers/libs via pkg-config). Disabling default features
-# and re-enabling only `io-transport` + `syntax-highlight` keeps every
-# build target functional on Windows — only opening CTFS bundles in the
-# *new* steps.dat format will fail with a clean "feature not enabled"
-# error from `ctfs_trace_reader::open_new_format`.
-ifeq (@(TUP_PLATFORM),win32)
-DB_BACKEND_CARGO_FEATURES = --no-default-features --features io-transport,syntax-highlight
-else
+# The `nim-reader` default feature pulls in `codetracer_trace_writer_nim`,
+# which compiles the Nim FFI library from the sibling
+# `codetracer-trace-format-nim` repo at build time. db-backend needs it to
+# open CTFS bundles in the *new* steps.dat format (which every materialized
+# DB trace now uses); without it `ctfs_trace_reader::open_new_format` fails
+# with a "nim-reader feature is not enabled" error.
+#
+# Windows builds it like every other platform: the crate's build.rs emits
+# MSVC-ABI Nim objects via `--cc:vcc`, takes its `zstd.h` from the
+# `zstd-sys` dependency (built from source with the active toolchain), and
+# runs `nimble install --depsOnly -y` to resolve the Nim sources' nimble
+# dependencies before invoking `nim c`. Default features apply everywhere.
 DB_BACKEND_CARGO_FEATURES =
-endif
 
 !rust_cargo_backend_manager = |> \
     cargo build $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/backend_manager_target && \
