@@ -30,7 +30,7 @@ use std::path::PathBuf;
 
 use codetracer_trace_types::TraceLowLevelEvent;
 use db_backend::ctfs_trace_reader::ctfs_container::write_minimal_ctfs;
-use db_backend::ctfs_trace_reader::meta_dat::{serialize_meta_dat, MetaDat, META_DAT_VERSION};
+use db_backend::ctfs_trace_reader::meta_dat::{META_DAT_VERSION, MetaDat, serialize_meta_dat};
 
 /// The committed Stylus fixture directory.
 fn fixture_dir() -> PathBuf {
@@ -43,8 +43,7 @@ fn rebuild_stylus_ctfs_fixture() {
     let dir = fixture_dir();
 
     // 1. Load the committed recorded event stream.
-    let events_json = std::fs::read_to_string(dir.join("trace.events.json"))
-        .expect("read committed trace.events.json");
+    let events_json = std::fs::read_to_string(dir.join("trace.events.json")).expect("read committed trace.events.json");
     let events: Vec<TraceLowLevelEvent> =
         serde_json::from_str(&events_json).expect("parse trace.events.json as TraceLowLevelEvent array");
     assert!(!events.is_empty(), "recorded event stream must be non-empty");
@@ -107,10 +106,5 @@ fn rebuild_stylus_ctfs_fixture() {
     .expect("write stylus .ct fixture");
 
     let size = std::fs::metadata(&ct_path).expect("stat .ct fixture").len();
-    eprintln!(
-        "wrote {} ({} bytes, {} events)",
-        ct_path.display(),
-        size,
-        events.len()
-    );
+    eprintln!("wrote {} ({} bytes, {} events)", ct_path.display(), size, events.len());
 }

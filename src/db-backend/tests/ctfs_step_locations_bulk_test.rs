@@ -44,7 +44,7 @@ fn build_synthetic_trace(workdir: &Path, name: &str) -> std::path::PathBuf {
     let trace_path = workdir.join(name);
     let ct_path = workdir.join(format!("{name}.ct"));
 
-    let mut writer = NimTraceWriter::new(name, &[], TraceEventsFileFormat::Ctfs);
+    let mut writer = NimTraceWriter::new(name, TraceEventsFileFormat::Ctfs);
     writer.set_workdir(workdir);
     writer.begin_writing_trace_metadata(&trace_path).unwrap();
     writer.finish_writing_trace_metadata().unwrap();
