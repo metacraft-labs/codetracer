@@ -631,6 +631,37 @@
           p.distutils
         ]);
 
+        darwin-lzma-native-sed = pkgs.writeShellScriptBin "sed" ''
+          if [ "$1" = "-i" ] && [ "''${2-}" = "" ]; then
+            shift 2
+            exec ${pkgs.gnused}/bin/sed -i "$@"
+          fi
+
+          exec ${pkgs.gnused}/bin/sed "$@"
+        '';
+
+        darwin-lzma-native-cxx = pkgs.writeShellScriptBin "clang++" ''
+          dir=$PWD
+          while [ "$dir" != "/" ]; do
+            header="$dir/node_modules/node-addon-api/napi.h"
+            if [ -f "$header" ]; then
+              ${pkgs.gnused}/bin/sed -i \
+                's/static const napi_typedarray_type unknown_array_type = static_cast<napi_typedarray_type>(-1);/static const napi_typedarray_type unknown_array_type = napi_int8_array;/' \
+                "$header"
+              break
+            fi
+            dir=$(dirname "$dir")
+          done
+
+          exec ${stdenv.cc}/bin/c++ "$@"
+        '';
+
+        darwin-lzma-native-clang = pkgs.runCommand "darwin-lzma-native-clang" { } ''
+          mkdir -p $out/bin
+          ln -s ${darwin-lzma-native-cxx}/bin/clang++ $out/bin/clang++
+          ln -s ${darwin-lzma-native-cxx}/bin/clang++ $out/bin/c++
+        '';
+
         node-modules-derivation =
           let
             project =
@@ -649,6 +680,11 @@
             nativeBuildInputs = [
               pkgs.typescript
               yarn-python3
+            ]
+            ++ pkgs.lib.optionals stdenv.isDarwin [
+              darwin-lzma-native-sed
+              darwin-lzma-native-clang
+              pkgs.darwin.cctools
             ];
             buildInputs = oldAttrs.buildInputs ++ [
               yarn-python3

@@ -83,9 +83,6 @@ mkShell {
     ripgrep
     universal-ctags
 
-    # Tup builds
-    tup
-
     # Make alternative
     # https://github.com/casey/just
     just
@@ -208,7 +205,8 @@ mkShell {
 
     glibc_multi
 
-    # Tup builds use FUSE-backed file monitoring on Linux.
+    # Tup depends on Linux/FUSE support and does not currently build on Darwin.
+    tup
     fuse
 
     # for pgrep at least
