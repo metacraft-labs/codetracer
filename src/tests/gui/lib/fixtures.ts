@@ -31,6 +31,7 @@ import { _electron, chromium } from "playwright";
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
 import { requiresRR } from "./lang-support";
+import { ensureDefaultLayout, restoreUserLayout } from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
   LIMIT_SMALL_RECORDING_MS,
@@ -1284,6 +1285,16 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
       await use();
       // Kill any backend processes that may have leaked from this worker.
       killStrayCodetracerProcesses();
+      // Restore the user's pre-test layout backup, if any.  Tests in this
+      // worker overwrote ~/.config/codetracer/default_layout.json on every
+      // ctPage launch via ensureDefaultLayout(); the matching restore call
+      // here puts the original back so a developer's interactive session
+      // is not disturbed by the test run.
+      try {
+        restoreUserLayout();
+      } catch (ex) {
+        console.warn(`fixtures: restoreUserLayout failed: ${(ex as Error).message}`);
+      }
       // Killing Electron with SIGKILL leaves Playwright's internal CDP
       // pipe handles open, preventing the worker from exiting.  Force
       // exit after a brief delay so test results can still be reported.
@@ -1318,6 +1329,22 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
       testInfo,
     ) => {
       let result: LaunchResult;
+
+      // Ensure each test starts with the bundled default layout.  Earlier
+      // tests in the same worker may have mutated the saved layout
+      // (e.g. auto-hide pin-to-edge, build/problems panel pop-out, layout
+      // resilience).  Without this reset, that mutated layout persists
+      // via ~/.config/codetracer/default_layout.json and subsequent tests
+      // see a stale layout that may be missing the components they
+      // require (filesystem, state, etc.).
+      try {
+        ensureDefaultLayout(codetracerInstallDir);
+      } catch (ex) {
+        // Non-fatal: a missing bundled layout file would surface as a
+        // launch-time error anyway.  Log and continue so the test still
+        // produces a meaningful failure.
+        console.warn(`fixtures: ensureDefaultLayout failed: ${(ex as Error).message}`);
+      }
 
       const needsRR = sourcePath ? requiresRR(sourcePath) : false;
       const recordingLimit = needsRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
