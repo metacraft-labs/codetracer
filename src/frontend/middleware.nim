@@ -95,7 +95,6 @@ when not defined(ctInExtension):
       ctRRWorkerExe: rrWorkerPath,
       restoreLocation: restoreLocation
     })
-    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
 
   proc newOperationHandler*(viewsApi: MediatorWithSubscribers, operation: NewOperation) =
     data.status.currentOperation = operation.name

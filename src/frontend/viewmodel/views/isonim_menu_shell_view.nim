@@ -155,7 +155,8 @@ template renderMenuShellImpl(
             tabindex = "0",
             onblur = proc() = callbacks.invokeNavBlur(),
             onmousedown = proc() = callbacks.invokeNavMouseDown()):
-          tdiv(
+          button(
+              class = "ct-button-image-md-secondary ct-button-no-border",
               id = MenuRootId,
               onclick = proc() = callbacks.invokeToggle()):
             tdiv(id = "menu-logo-img"):

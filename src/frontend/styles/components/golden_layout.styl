@@ -113,9 +113,9 @@
   background-color: colors-ui-surface-primary-default
 
 .lm_title
-  color: HEADER_PANEL_COLOR !important
+  color: colors-ui-text-primary-disabled !important
   // font-family: sans-serif !important
-  font-weight: 500 !important
+  font-weight: 400 !important
   overflow: hidden
   white-space: nowrap
   text-overflow: ellipsis
@@ -126,6 +126,7 @@
 
 .lm_active
   background-color: colors-ui-surface-panel !important
+  color: colors-ui-text-primary-label !important
   //border-radius: 2px
   border-top-left-radius: 0.36em
   border-top-right-radius: 0.36em
@@ -165,7 +166,7 @@
     transform: translate(0em, 0.25625em)
 
 .lm_header .lm_active .lm_title
-  color: HEADER_ACTIVE_PANEL_TEXT_COLOR !important
+  color: colors-ui-text-primary-label !important
 
 .lm_header .lm_controls
   height: 100% !important
@@ -175,7 +176,7 @@
   // Secondary button style — matches [class*="-button-"][class*="-secondary"] in button.styl
   opacity: 1 !important
   background-color: colors-ui-surface-primary-default !important
-  border: 0.03125em solid colors-ui-border-primary !important
+  border: 0.03125em solid colors-ui-border-tertiary !important
   border-radius: 0.375em !important
   background-position: center !important
   background-repeat: no-repeat !important

@@ -12,7 +12,7 @@
   --ct-gutter-highlight-size: 0.8em
   --ct-gutter-breakpoint-right: 1.05em
   --ct-gutter-trace-right: 0.6em
-  margin-left: 0.125em
+  margin-left: 0
   border-bottom-left-radius: 0.375em
 
 .margin-view-overlays
@@ -45,11 +45,13 @@
 .monaco-editor .margin-view-overlays .codicon.codicon-folding-manual-expanded,
 .monaco-editor .margin-view-overlays .codicon.codicon-folding-manual-collapsed,
 .monaco-editor .margin-view-overlays .codicon.alwaysShowFoldIcons
+  font-size: 0.8em !important
   color: LINE_NUMBERS_TEXT_COLOR !important
   opacity: 1 !important
   display: inline-flex !important
   align-items: center
   justify-content: center
+  transform: translateX(15%)
   width: 100%
   position: relative
   z-index: 7
@@ -862,7 +864,7 @@
   text-align: right !important
   font-family: "SpaceMono"
   line-height: inherit
-  font-size: inherit !important
+  font-size: 0.875rem !important
   margin-top: 0em !important
   padding-top: 0.0625em !important
   padding-right: 0 !important
@@ -884,8 +886,8 @@
   background-image: HIGHLIGHT_LINE_ARROW
   background-repeat: no-repeat
   background-position: center
-  background-size: contain
-  transform: translateY(-50%)
+  background-size: 0.47em
+  transform: translate(-40%, -40%)
   z-index: 0
 
 .inline-expanded-value-view

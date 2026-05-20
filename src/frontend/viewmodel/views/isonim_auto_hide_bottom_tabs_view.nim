@@ -21,7 +21,7 @@ type
 
 const
   AutoHideBottomTabsClass* = "auto-hide-bottom-tabs"
-  AutoHideBottomTabClass* = "auto-hide-strip-tab"
+  AutoHideBottomTabClass* = "auto-hide-bottom-tab"
 
 proc invokeSelect(callbacks: AutoHideBottomTabsCallbacks; index: int) =
   if not callbacks.onSelect.isNil:
@@ -33,7 +33,7 @@ proc renderBottomTab(
     index: int;
     callbacks: AutoHideBottomTabsCallbacks): MockNode =
   ui(r):
-    tdiv(
+    button(
         class = AutoHideBottomTabClass,
         onclick = proc() = callbacks.invokeSelect(index)):
       text tab.title
@@ -45,7 +45,7 @@ when defined(js):
       index: int;
       callbacks: AutoHideBottomTabsCallbacks): isonim_dom.Element =
     ui(r):
-      tdiv(
+      button(
           class = AutoHideBottomTabClass,
           onclick = proc() = callbacks.invokeSelect(index)):
         text tab.title

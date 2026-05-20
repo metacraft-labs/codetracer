@@ -284,31 +284,31 @@ export class LayoutPage extends BasePage {
   private programStateTabsCache: ProgramStateTab[] = [];
 
   runToEntryButton(): Locator {
-    return this.page.locator("#run-to-entry-debug, #run-to-entry-image");
+    return this.page.locator("#run-to-entry-image");
   }
   continueButton(): Locator {
-    return this.page.locator("#continue-debug, #continue-image");
+    return this.page.locator("#continue-image");
   }
   reverseContinueButton(): Locator {
-    return this.page.locator("#reverse-continue-debug, #reverse-continue-image");
+    return this.page.locator("#reverse-continue-image");
   }
   stepOutButton(): Locator {
-    return this.page.locator("#step-out-debug, #step-out-image");
+    return this.page.locator("#step-out-image");
   }
   reverseStepOutButton(): Locator {
-    return this.page.locator("#reverse-step-out-debug, #reverse-step-out-image");
+    return this.page.locator("#reverse-step-out-image");
   }
   stepInButton(): Locator {
-    return this.page.locator("#step-in-debug, #step-in-image");
+    return this.page.locator("#step-in-image");
   }
   reverseStepInButton(): Locator {
-    return this.page.locator("#reverse-step-in-debug, #reverse-step-in-image");
+    return this.page.locator("#reverse-step-in-image");
   }
   nextButton(): Locator {
-    return this.page.locator("#next-debug, #next-image");
+    return this.page.locator("#next-image");
   }
   reverseNextButton(): Locator {
-    return this.page.locator("#reverse-next-debug, #reverse-next-image");
+    return this.page.locator("#reverse-next-image");
   }
 
   async eventLogTabs(forceReload = false): Promise<EventLogTab[]> {

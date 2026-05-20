@@ -146,7 +146,7 @@
   width: unquote("min(40em, calc(100vw - 2em))")
   max-width: unquote("calc(100vw - 2em)")
   border-radius: 1em
-  border: 0.0625em solid colors-ui-border-primary
+  border: 0.0625em solid colors-ui-border-tertiary
   background: colors-ui-surface-canvas
   color: colors-ui-text-primary-body
   z-index: TRACE_LOG_EDITOR_Z_INDEX + 7
@@ -155,6 +155,8 @@
   overflow: hidden
   box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
   top: 100%
+  font-size: 0.875rem
+  font-family: "SpaceGrotesk"
 
 .dropdown-list
   display: flex
@@ -162,7 +164,7 @@
   width: 100%
   margin: 0 !important
   padding: 0
-  background: colors-ui-surface-primary-default-hover
+  background: colors-ui-surface-base-raised
 
   .dropdown-list-item
     width: fit-content
@@ -176,12 +178,10 @@
       align-items: center
       gap: 0.625em
       color: colors-ui-text-primary-body
-      font-family: "SpaceMono"
-      font-size: 1em
       line-height: 1.15
 
     .ct-checkmark
-      --ct-checkmark-size: 1.3em
+      --ct-checkmark-size: 1rem
       --ct-checkmark-border: rgba(255, 255, 255, 0.22)
       --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
       --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
@@ -195,7 +195,7 @@
   grid-template-columns: 9em minmax(0, 1fr)
   align-items: stretch
   min-height: 2em
-  border-top: 0.0625em solid colors-ui-divider-primary
+  border-top: 0.0625em solid colors-ui-border-tertiary
 
   &:first-child
     border-top: none
@@ -204,11 +204,11 @@
   display: flex
   justify-content: start
   gap: 0.25em
-  padding: 0 1.25em
+  padding: 0 0.5rem
   background: colors-ui-surface-canvas
   align-items: center
   min-height: 2.4em
-  border-bottom: 0.0625em solid colors-ui-border-primary
+  border-bottom: 0.0625em solid colors-ui-border-tertiary
 
   .ct-tab
     flex: 0 0 auto
@@ -240,7 +240,7 @@
         position: absolute
         left: 0
         right: 0
-        bottom: -0.0625em
+        bottom: -0.25em
         height: 0.125em
         border-radius: 999em
         background: colors-ui-border-action
@@ -256,13 +256,13 @@
     min-height: 2.75em
     align-items: center
     font-family: "SpaceMono"
-    font-size: 1em
+    font-size: 0.75rem
     line-height: 1.1
     color: colors-ui-text-primary-body
 
     .data-tables-footer-info
       margin-right: 0
-      gap: 0.375em
+      gap: 0.25em
       align-items: center
       font-variant-numeric: tabular-nums
 
@@ -277,7 +277,7 @@
       max-width: 4.5em
       height: 1.75em
       max-height: 1.75em
-      margin: 0 0.75em
+      margin: 0em 0em !important
       padding: 0 0.75em
       border-radius: 0.5em
       border: 0.03125em solid transparent
@@ -543,3 +543,8 @@ label
     .paging-collapse
       color: red
       flex-basis: 20%
+
+.dt-empty
+  font-family: "SpaceGrotesk"
+  padding-left: 0.5em
+  padding-top: 1em
