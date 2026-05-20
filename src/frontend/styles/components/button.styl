@@ -94,10 +94,10 @@ button
   max-height: 1.75em
 
 [class*="ct-button-image-sm-"]
-  width: 1.5em
-  max-width: 1.5em
-  height: 1.5em
-  max-height: 1.5em
+  width: 1.25em
+  max-width: 1.25em
+  height: 1.25em
+  max-height: 1.25em
 
 #next-image
   background-image: ct-images-next
@@ -161,8 +161,9 @@ button
   background-size: 1em auto !important
 
   &.open
-    background-image: ct-images-layout-tab-active !important
+    // background-image: ct-images-layout-tab-active !important
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+    border: 0.0625em solid colors-ui-surface-action-primary !important
 
 #close-element
   background-image: ct-images-close-button
@@ -197,7 +198,7 @@ button
 
 #value-history
   background-image: ct-images-value-history-toggle
-  background-size: 0.75em 0.75em !important
+  background-size: 0.6em 0.6em !important
 
   &:hover > .custom-tooltip
     opacity: 1

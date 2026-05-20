@@ -22,7 +22,11 @@
     gap: 0.5em
     align-items: center
     justify-content: center
+    align-self: flex-start
     order: 3
+
+    .separate-bar
+      margin-top: 0.4em
 
   .debug-finished-background
     background-color: BACKGROUND_COLOR
@@ -40,7 +44,7 @@
   cursor: pointer
 
   .menu-button-svg
-    width: 1.75em
+    width: 1.325em
     height: 1.75em
     border-radius: 50%
     background-position: center
@@ -50,6 +54,7 @@
     &.minimize
       background-image: WINDOW_MINIMIZE_ICON_PATH
       opacity: 1
+      background-position: center
       background-position-y: 65%
 
     &.restore
@@ -144,7 +149,7 @@
     top: 2.1rem
     margin-left: 6px
     background: colors-ui-surface-canvas
-    border: 0.0625em solid colors-ui-border-primary
+    border: 0.0625em solid colors-ui-border-tertiary
     border-radius: 0.75em
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
 
@@ -308,11 +313,8 @@
     min-width: 12em
     padding: 0
     background: colors-ui-surface-canvas
-    border: 0.0625em solid colors-ui-border-primary
-    border-top-left-radius: 0
-    border-top-right-radius: 0.75em
-    border-bottom-left-radius: 0.75em
-    border-bottom-right-radius: 0.75em
+    border: 0.0625em solid colors-ui-border-tertiary
+    border-radius: 0.75em
     box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
     overflow: hidden
 

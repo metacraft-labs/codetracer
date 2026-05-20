@@ -2718,10 +2718,8 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
   if step.position == self.flow.loops[step.loop].first:
     if not self.viewZones.hasKey(step.position - 1):
       self.createLoopViewZones(step.loop)
-    let loopFirst = self.flow.loops[step.loop].first
-    if self.flowLoops.hasKey(loopFirst) and
-        self.flowLoops[loopFirst].sliderDom.isNil:
-      self.makeSlider(loopFirst)
+    if not self.sliderWidgets.hasKey(step.position):
+      self.makeSlider(self.flow.loops[step.loop].first)
 
   # check if there is a register for loop step cells
   let stepLoopCells = self.flowLines[step.position].stepLoopCells
@@ -3949,28 +3947,17 @@ proc makeSliderDom(self: FlowComponent, position: int): Node =
   if domCheck.isNil:
     let childDom = self.makeLoopSliderChildDom(position, includeEmptyText = true)
 
-    sliderDom = vnodeToDom(childVNode, KaraxInstance())
-    dom.appendChild(sliderDom)
+    dom.appendChild(childDom)
 
-  dom.applyStyle(leftStyle)
-  sliderDom.applyStyle(style)
-
-  if self.flowLines.hasKey(position):
-    self.flowLines[position].sliderDom = dom
-  self.flowLoops[position].sliderDom = sliderDom
+  self.flowLoops[position].sliderDom = dom.childNodes[0]
 
   return dom
 
 proc addSliderWidget(self: FlowComponent, position:int) =
+  let id = &"flow-slider-widget-{position}"
   let dom = makeSliderDom(self, position)
-  let parentDom = self.flowLoops[position].flowDom
 
-  echo "#### THIS IS THE PARENTDOM and DOM"
-  kout dom
-  kout parentDom
-
-  if not parentDom.isNil and dom.parentNode != parentDom:
-    parentDom.appendChild(dom)
+  self.flowLoops[position].flowDom.appendChild(dom)
 
 proc resizeEditorHandler(self:FlowComponent, position: int) =
   # get new monaco editor config
@@ -4076,7 +4063,7 @@ proc makeSlider(self: FlowComponent, position: int) =
         "max": loop.iteration
       },
       "behaviour": cstring"drag-tap",
-      "connect": @[true, false],
+      "connect": [true, false],
       "step": 1,
     })
 
@@ -4085,8 +4072,8 @@ proc makeSlider(self: FlowComponent, position: int) =
       let loopIteration = Math.floor(unencoded[0])
       let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
 
-    # if self.data.ui.activeFocus != self:
-    #   self.data.ui.activeFocus = self
+      # if self.data.ui.activeFocus != self:
+      #   self.data.ui.activeFocus = self
 
       if activeStep.stepCount != NO_STEP_COUNT:
         self.flowLoops[position].loopStep = activeStep
@@ -4101,10 +4088,10 @@ proc makeSlider(self: FlowComponent, position: int) =
       # Maybe later on add to all of the EventLog components?
       cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
 
-  let elementSlider = cast[JsObject](element).noUiSlider
-  elementSlider.on(cstring"slide", onUpdate)
-  if not self.inExtension:
-    setEditorResizeObserver(self, position)
+    let elementSlider = cast[JsObject](element).noUiSlider
+    elementSlider.on(cstring"slide", onUpdate)
+    if not self.inExtension:
+      setEditorResizeObserver(self, position)
 
 proc resizeLineSlider(self: FlowComponent, position: int) =
   let editor = self.editorUI.monacoEditor

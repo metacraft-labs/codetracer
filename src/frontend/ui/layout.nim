@@ -230,12 +230,12 @@ proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   ## This intentionally preserves the legacy class names and labels used by
   ## the auto-hide GUI specs while keeping the dropdown on the direct-DOM path.
   result = kdom.document.createElement("div")
-  result.class = cstring"layout-dropdown hidden"
+  result.class = cstring"layout-dropdown menu-node-container hidden"
   result.id = cstring"layout-dropdown-toggle"
 
   template appendDropdownItem(label: cstring, body: untyped) =
     let item = kdom.document.createElement("div")
-    item.class = cstring"layout-dropdown-node"
+    item.class = cstring"ct-menu-item"
     item.innerHTML = label
     item.addEventListener(cstring"click", proc(e {.inject.}: Event) =
       body
@@ -869,6 +869,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   {.emit: """
     if (!`initialLayout`.dimensions) `initialLayout`.dimensions = {};
     `initialLayout`.dimensions.borderGrabWidth = 8;
+    `initialLayout`.dimensions.headerHeight = `data`.ui.fontSize * 2;
   """.}
   layout.loadLayout(initialLayout)
   enforceMinStackWidth(layout)

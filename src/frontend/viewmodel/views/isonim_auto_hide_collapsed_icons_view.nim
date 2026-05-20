@@ -41,7 +41,7 @@ proc renderCollapsedIcon(
     index: int;
     callbacks: AutoHideCollapsedIconCallbacks): MockNode =
   ui(r):
-    tdiv(
+    button(
         class = AutoHideCollapsedIconClass,
         title = icon.title,
         onclick = proc() = callbacks.invokeSelect(index)):
@@ -54,7 +54,7 @@ when defined(js):
       index: int;
       callbacks: AutoHideCollapsedIconCallbacks): isonim_dom.Element =
     ui(r):
-      tdiv(
+      button(
           class = AutoHideCollapsedIconClass,
           title = icon.title,
           onclick = proc() = callbacks.invokeSelect(index)):

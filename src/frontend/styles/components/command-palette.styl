@@ -100,15 +100,15 @@
 
   #command-results
     width: 100%
+    font-size: 0.875em
     max-height: 18em
     overflow-y: auto
     overflow-x: hidden
     background-color: colors-ui-surface-raised
-    border: 0.03125em solid colors-ui-border-primary
+    border: 0.0625em solid colors-ui-border-tertiary
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
-    margin-top: 0
-    border-bottom-left-radius: 0.75em
-    border-bottom-right-radius: 0.75em
+    margin-top: 0.25rem
+    border-radius: 0.75em
     overflow: hidden
 
     .command-result:last-child
@@ -117,8 +117,8 @@
   .command-results-open
     margin-top: 0
 
-  .command-results-empty
-    min-height: 2.75em
+  .command-result.empty
+      font-family: "SpaceGrotesk"
 
   .command-result
     gap: 0.75em

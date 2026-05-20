@@ -181,116 +181,90 @@ when defined(js):
         tdiv(class = "separate-bar"):
           discard
         # -- History navigation --
-        button(id = "history-back-debug",
+        button(id = "history-back-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "history-back")):
-          img(src = "public/resources/debug/history_back_black.svg",
-              height = "20px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "History back"
-        button(id = "history-forward-debug",
+        button(id = "history-forward-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "history-forward")):
-          img(src = "public/resources/debug/history_forward_black.svg",
-              height = "20px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "History forward"
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse next / Next --
-        button(ref = revNextBtn, id = "reverse-next-debug",
+        button(ref = revNextBtn, id = "reverse-next-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-next")):
-          img(src = "public/resources/debug/reverse_next_dark.svg",
-              height = "20px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Reverse next (Shift-F10)"
-        button(ref = nextBtn, id = "next-debug",
+        button(ref = nextBtn, id = "next-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "next")):
-          img(src = "public/resources/debug/next_dark.svg",
-              height = "20px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Next (F10)"
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse step-in / Step-in --
-        button(ref = revStepInBtn, id = "reverse-step-in-debug",
+        button(ref = revStepInBtn, id = "reverse-step-in-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-step-in")):
-          img(src = "public/resources/debug/reverse_step-in_dark.svg",
-              height = "14px", width = "16px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Reverse step in (Shift-F11)"
-        button(ref = stepInBtn, id = "step-in-debug",
+        button(ref = stepInBtn, id = "step-in-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "step-in")):
-          img(src = "public/resources/debug/step-in_dark.svg",
-              height = "14px", width = "16px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Step in (F11)"
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse step-out / Step-out --
-        button(ref = revStepOutBtn, id = "reverse-step-out-debug",
+        button(ref = revStepOutBtn, id = "reverse-step-out-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-step-out")):
-          img(src = "public/resources/debug/reverse_step-out_dark.svg",
-              height = "14px", width = "16px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Reverse step out (Shift-F12)"
-        button(ref = stepOutBtn, id = "step-out-debug",
+        button(ref = stepOutBtn, id = "step-out-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "step-out")):
-          img(src = "public/resources/debug/step-out_dark.svg",
-              height = "14px", width = "16px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Step out (F12)"
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse continue / Continue --
-        button(ref = revContBtn, id = "reverse-continue-debug",
+        button(ref = revContBtn, id = "reverse-continue-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-continue")):
-          img(src = "public/resources/debug/reverse_continue_dark.svg",
-              height = "16px", width = "28px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Reverse continue (Shift-F8)"
-        button(ref = contBtn, id = "continue-debug",
+        button(ref = contBtn, id = "continue-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "continue")):
-          img(src = "public/resources/debug/continue_dark.svg",
-              height = "16px", width = "28px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Continue (F8)"
         tdiv(class = "separate-bar"):
           discard
         # -- Run to entry --
-        button(id = "run-to-entry-debug",
+        button(id = "run-to-entry-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "run-to-entry")):
-          img(src = "public/resources/debug/run_to_entry_dark.svg",
-              height = "20px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Run to entry"
         tdiv(class = "separate-bar"):
           discard
         # -- Reset operation --
-        button(id = "reset-operation-debug",
+        button(id = "reset-operation-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "reset-operation")):
-          img(src = "public/resources/debug/reset_operation_dark.svg",
-              height = "16px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Reset operation"
         tdiv(class = "separate-bar"):
           discard
         # -- Run tests --
-        button(id = "run-tests-debug",
+        button(id = "run-tests-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "run-tests")):
-          img(src = "public/resources/shared/run_test_img.svg",
-              height = "12px", width = "18px", class = "debug-button-svg")
           tdiv(class = "custom-tooltip"):
             text "Record and replay tests in a new window"
         tdiv(class = "separate-bar"):
