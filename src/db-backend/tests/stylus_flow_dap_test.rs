@@ -75,6 +75,25 @@ fn find_fixture_ct_file(fixture_dir: &Path) -> Result<PathBuf, String> {
 /// initializes, and reaches `run-to-entry` cleanly — the breakpoint flow
 /// path lives in `test_stylus_flow_integration` and runs against a freshly
 /// recorded trace.
+//
+// ROOT CAUSE (2026-05-20): The committed `tests/fixtures/stylus-fund-trace/`
+// directory does not exist in the repository.  When the test was originally
+// authored the directory held a legacy 3-file bundle that was retired in the
+// 2026-05 convention compliance pass (see codetracer-specs CTFS-Migration-
+// Guide §3e).  The CTFS replacement was never produced because the
+// regeneration script (`tests/fixtures/regenerate-stylus-fixture.sh`)
+// requires off-machine prerequisites: a running Arbitrum devnode at
+// `http://localhost:8547` (e.g. nitro-testnode), `cargo-stylus`, and `cast`
+// (Foundry) on PATH.  None of those are available in the dev-shell / CI
+// sandbox this session runs in.
+//
+// The test correctly panics with a clear regeneration instruction.
+// Until an Arbitrum-capable host runs the regen script and commits the
+// resulting `<program>.ct` into the fixture directory, this test will
+// keep bailing.  Per repo policy (no #[ignore], no silent skips, no
+// weakened assertions), the failure stays visible and the test stays
+// authoritative.  Resolution: run regen on an Arbitrum-capable host
+// and commit the produced fixture.
 #[test]
 fn stylus_flow_dap_loads_ctfs_fixture() {
     let db_backend = find_db_backend();

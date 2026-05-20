@@ -34,7 +34,7 @@ mod test_harness;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use test_harness::{find_wazero, record_stylus_wasm_trace, DapStdioTestClient};
+use test_harness::{DapStdioTestClient, find_wazero, record_stylus_wasm_trace};
 
 use codetracer_trace_types::{EventLogKind, RecordEvent, TraceLowLevelEvent, TraceMetadata};
 
@@ -599,6 +599,18 @@ fn test_stylus_trace_analysis() {
 /// CTFS-only; if the fixture is missing or only contains the legacy 3-file
 /// JSON bundle, regenerate it via
 /// `src/db-backend/tests/fixtures/regenerate-stylus-fixture.sh`.
+//
+// ROOT CAUSE (2026-05-20): Same blocker as `stylus_flow_dap_loads_ctfs_fixture`
+// in tests/stylus_flow_dap_test.rs.  The CTFS fixture directory
+// `tests/fixtures/stylus-fund-trace/` does not exist in the repository, and
+// regenerating it requires an Arbitrum devnode at `http://localhost:8547`,
+// `cargo-stylus`, and `cast` (Foundry) — all off-machine for this dev shell.
+// The test bails at the `assert!(has_ct, ...)` check with the correct
+// regeneration directive.  Resolution: produce the fixture on an Arbitrum-
+// capable host (run `regenerate-stylus-fixture.sh`) and commit the resulting
+// `<program>.ct` next to the regen script.  No reader-side workaround is
+// acceptable because the CTFS migration removed the legacy 3-file path on
+// purpose (see codetracer-specs Trace-Files/CTFS-Migration-Guide §3e).
 #[test]
 fn test_stylus_dap_trace() {
     // Use STYLUS_TRACE_DIR env var if set, otherwise fall back to the committed fixture.

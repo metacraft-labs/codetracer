@@ -23,8 +23,8 @@ mod test_harness;
 
 use std::path::PathBuf;
 use test_harness::{
-    find_python_recorder, find_suitable_python, DapStdioTestClient, FlowData, Language, TestRecording,
-    RUST_PYTHON_RECORDER_MODULE_SENTINEL,
+    DapStdioTestClient, FlowData, Language, RUST_PYTHON_RECORDER_MODULE_SENTINEL, TestRecording, find_python_recorder,
+    find_suitable_python,
 };
 
 /// Line number in main.py where `value = mymodule.compute(counter)` lives.
@@ -184,6 +184,47 @@ fn extract_var_value(flow: &FlowData, var_name: &str) -> Option<i64> {
         .and_then(FlowData::extract_int_value)
 }
 
+// ROOT CAUSE (2026-05-20): The test design predates the current
+// `FlowMode::Call` semantics in flow_preloader.rs and gets a misleading
+// `value=36` (compute(12) under v2 = 12*3) when it expects `value=6`
+// (compute(3) under v1 = 3*2) for the pre-reload assertion.
+//
+// What actually happens:
+//   * The Python recorder produces a 154-step trace covering all 12 loop
+//     iterations of the HCR program (verified with `ct-print --events`).
+//     The breakpoint at `main.py:22` (the `value = mymodule.compute(counter)`
+//     call site) has 12 matching step entries, one per iteration.
+//   * `continue_to_breakpoint()` × 3 correctly stops the replay at hit #3
+//     (the iteration where counter=3) — the test's own log line confirms
+//     `Pre-reload stop at /tmp/.../main.py:22 (step 3)`.
+//   * `client.request_flow(pre_loc)` with `FlowMode::Call` then loads the
+//     flow window for the enclosing function call.  Since the breakpoint
+//     fires inside `<module>` (the top-level Python script body), the
+//     enclosing call IS the entire program, so the returned flow contains
+//     ALL 152 steps across all 12 iterations.
+//   * `FlowData::from_event_body` builds `flow.values` by iterating the
+//     steps in order and `values.insert(name, …)` overwrites earlier
+//     entries.  The final `value` in the map is from iteration 12 (v2),
+//     i.e. 36 — not iteration 3's 6 that the test asserts.
+//
+// The other two HCR tests (JavaScript, Ruby) pass because their recorders
+// produce per-call flow scopes — the call is bounded by an explicit
+// function frame, not the top-level module body.  Python's recorder treats
+// `<module>` as a single call that spans the whole execution.
+//
+// Two possible real fixes, both outside this test's scope:
+//   (1) DAP layer: window FlowMode::Call by call-key rather than function
+//       body when the call is `<module>`, so each loop iteration yields a
+//       distinct flow window.  This is a load-bearing semantic decision —
+//       the GUI's flow view relies on the current "whole call" semantics
+//       for non-loop code.
+//   (2) Recorder: emit a per-iteration synthetic frame for HCR programs so
+//       each `compute(counter)` call site has its own call key.  Would
+//       require coordination with the Python recorder spec.
+//
+// Per repo policy (no #[ignore], no silent skips, no weakened assertions),
+// the test stays failing until the upstream decision lands.  Resolution is
+// tracked separately from this db-backend session.
 #[test]
 fn test_python_hcr_ctfs_integration() {
     // -- Guard: skip if the CTFS-emitting recorder or Python 3.10+ unavailable --
