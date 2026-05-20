@@ -26,17 +26,29 @@ function Ensure-Fpc {
   }
 
   New-Item -ItemType Directory -Force -Path $fpcVersionRoot | Out-Null
-  $asset = "fpc-$version.i386-win32.cross.x86_64-win64.zip"
-  $downloadUrl = "https://sourceforge.net/projects/freepascal/files/Win32/$version/$asset/download"
+  # FreePascal ships its Windows distribution as an Inno Setup installer
+  # .exe — there is no .zip on SourceForge (the old code downloaded a
+  # non-existent .zip; SourceForge's project/files/.../download URL
+  # served an HTML interstitial that then failed Expand-Archive).
+  # Download the installer via the direct mirror host and run it silently.
+  $asset = "fpc-$version.i386-win32.cross.x86_64-win64.exe"
+  $downloadUrl = "https://downloads.sourceforge.net/project/freepascal/Win32/$version/$asset"
 
-  $tempZip = Join-Path $env:TEMP "fpc-$version-x86_64-win64.zip"
-  Download-File -Url $downloadUrl -OutFile $tempZip
+  $tempInstaller = Join-Path $env:TEMP "fpc-$version-x86_64-win64.exe"
+  Download-File -Url $downloadUrl -OutFile $tempInstaller
 
   try {
     Ensure-CleanDirectory -Path $fpcVersionRoot
-    Expand-Archive -Path $tempZip -DestinationPath $fpcVersionRoot -Force
+    # Inno Setup silent install: /VERYSILENT + /SP- + /SUPPRESSMSGBOXES
+    # keep it non-interactive; /DIR sets our deterministic install root.
+    $innoArgs = @("/VERYSILENT", "/SP-", "/SUPPRESSMSGBOXES", "/NORESTART",
+                  "/NOICONS", "/DIR=$fpcVersionRoot")
+    $proc = Start-Process -FilePath $tempInstaller -ArgumentList $innoArgs -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+      throw "FreePascal installer exited with code $($proc.ExitCode)."
+    }
   } finally {
-    Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempInstaller -Force -ErrorAction SilentlyContinue
   }
 
   # The zip may extract into a nested directory; try to locate fpc.exe.

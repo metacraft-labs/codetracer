@@ -600,6 +600,22 @@ function Resolve-GitBashBinDir {
     (Join-Path ${env:ProgramFiles(x86)} "Git\usr\bin")
   )
 
+  # Also derive candidates from wherever `git` actually resolves on PATH.
+  # The fixed Program Files paths above miss non-standard installs (scoop,
+  # winget, portable Git). Without this, `WINDOWS_DIY_GIT_BASH_BIN` stays
+  # empty and `Get-Command bash` later resolves to WSL's System32 bash,
+  # which cannot open `D:/...` Windows paths (it needs `/mnt/d/...`).
+  $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+  if ($null -ne $gitCmd -and -not [string]::IsNullOrWhiteSpace($gitCmd.Source)) {
+    $gitExeDir = Split-Path -Parent $gitCmd.Source   # ...\cmd or ...\bin
+    $gitRoot = Split-Path -Parent $gitExeDir         # install root
+    foreach ($root in @($gitRoot, (Split-Path -Parent $gitRoot))) {
+      if ([string]::IsNullOrWhiteSpace($root)) { continue }
+      $candidates += (Join-Path $root "bin")
+      $candidates += (Join-Path $root "usr\bin")
+    }
+  }
+
   foreach ($candidate in $candidates) {
     if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
     $bashExe = Join-Path $candidate "bash.exe"
@@ -995,6 +1011,16 @@ foreach ($line in $msvcBlob) {
   }
 }
 
+# Put the Visual Studio Installer directory on PATH so child build
+# processes (cargo's cc-rs, MSYS2 sub-builds such as the nargo bootstrap,
+# etc.) can resolve a bare `vswhere.exe` — several toolchains invoke it
+# without a full path and otherwise fail with "'vswhere.exe' is not
+# recognized".
+$vsInstallerDir = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer"
+if (Test-Path -LiteralPath (Join-Path $vsInstallerDir "vswhere.exe") -PathType Leaf) {
+  Prepend-PathEntries -Entries @($vsInstallerDir)
+}
+
 function Resolve-ClExePath {
   $cmd = Get-Command cl.exe -ErrorAction SilentlyContinue
   if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
@@ -1185,7 +1211,13 @@ if ($ensureParser) {
   if ($null -eq $bash) {
     throw "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=1 but 'bash' is not available on PATH."
   }
-  & $bash.Source (Join-Path (Split-Path -Parent $windowsDir) "ensure_tree_sitter_nim_parser.sh")
+  # Pass a forward-slash path: bash reads `\m`, `\c`, ... in a `D:\...`
+  # argument as escape sequences and strips the separators, so the script
+  # path arrived mangled (`D:metacraftcodetracer...sh: No such file`) and
+  # parser regeneration was silently skipped. MSYS/Git bash opens a
+  # `D:/...` path fine.
+  $tsParserScript = (Join-Path (Split-Path -Parent $windowsDir) "ensure_tree_sitter_nim_parser.sh") -replace '\\', '/'
+  & $bash.Source $tsParserScript
 }
 
 & (Join-Path $windowsDir "setup-codetracer-runtime-env.ps1") -RepoRoot $repoRoot

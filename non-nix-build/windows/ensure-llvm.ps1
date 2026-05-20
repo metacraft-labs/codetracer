@@ -19,9 +19,14 @@ function Ensure-Llvm {
 
   $version = $Toolchain["LLVM_VERSION"]
   $llvmTarget = ConvertTo-LlvmFileArch -Arch $Arch
-  $asset = "LLVM-$version-$llvmTarget.tar.xz"
+  # Upstream publishes the Windows toolchain tarball as
+  # `clang+llvm-<ver>-<target>.tar.xz` (the `LLVM-<ver>-<target>.tar.xz`
+  # name never existed — only the `LLVM-<ver>-win64.exe` installer uses
+  # the `LLVM-` prefix). The archive's top-level directory matches the
+  # asset stem, so $extractDir must use the same `clang+llvm-` prefix.
+  $asset = "clang+llvm-$version-$llvmTarget.tar.xz"
   $llvmVersionRoot = Join-Path $Root "llvm/$version"
-  $extractDir = Join-Path $llvmVersionRoot "LLVM-$version-$llvmTarget"
+  $extractDir = Join-Path $llvmVersionRoot "clang+llvm-$version-$llvmTarget"
   $clangExe = Join-Path $extractDir "bin/clang.exe"
 
   # Also check for a system LLVM installed via winget or standard paths.

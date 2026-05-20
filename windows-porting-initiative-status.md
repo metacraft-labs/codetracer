@@ -1,7 +1,66 @@
 # Windows Porting Initiative Status
 
-Last updated: 2026-03-15
+Last updated: 2026-05-20
 Owner: Codetracer engineering
+
+## Current State — 2026-05-20 (Windows parity audit)
+
+> The sections below this one (dated 2026-02 / 2026-03) are **historical**.
+> They describe the earlier Tup-centric `non-nix-build/windows/` bootstrap.
+> The canonical Windows dev environment is now the comprehensive
+> `codetracer/env.ps1` plus the per-toolchain `non-nix-build/windows/ensure-*.ps1`
+> scripts. Read this section first; treat the older steps as background.
+
+### Canonical Windows setup
+
+- `. .\env.ps1` from the `codetracer` repo root provisions and wires the
+  full toolchain: MSVC (via `export-msvc-env.ps1`), Nim, Rust, Cap'n Proto,
+  Tup, Node, Go, LDC, V, GNAT, zstd, zlib, TTD/WinDbg/CDB.
+- Sibling repos source it: `codetracer-native-backend/env.ps1` wraps it;
+  `codetracer-native-recorder` Justfile `[windows]` recipes expect it.
+- Skip a broken/unneeded step with `WINDOWS_DIY_SKIP_<STEP>=1`.
+
+### Verified working on x64 (2026-05-20)
+
+- `codetracer-native-recorder` — `just test-windows`: all suites pass
+  (ringbuf, COW snapshots via VEH, Win32 API hooks, runtime injection).
+- `db-backend` — `cargo build` with **default features** succeeds
+  (`io-transport,syntax-highlight,nim-reader`), including the Nim MCR
+  emulator DLL and the Nim trace-writer static library.
+- Headless DAP transport — stdio tests 2/2, Windows named-pipe tests 8/8.
+- `db-backend` unit tests — 181/183 (the 2 failures only need `ruby` on
+  PATH; they panic instead of skipping when it is absent).
+
+### Regressions found and fixed this session
+
+- `codetracer_trace_writer_nim/build.rs` was Unix-only (linked a prebuilt
+  `.a`, emitted `-lm` + `pkg-config`). It now compiles the Nim static
+  library itself, cross-platform, with `--nimMainPrefix` so its Nim
+  runtime symbols do not collide with the MCR emulator's.
+- `ensure-fpc.ps1` — FreePascal ships a Windows installer `.exe`, not a
+  `.zip`; the SourceForge `/download` URL served an HTML interstitial.
+  Now downloads the installer and runs it silently.
+- `ensure-llvm.ps1` — used the non-existent `LLVM-<ver>-<target>.tar.xz`
+  asset name; corrected to `clang+llvm-<ver>-<target>.tar.xz`.
+- `env.ps1` — passed a backslash Windows path to bash, mangling it and
+  silently skipping tree-sitter-nim parser regeneration; now passes a
+  forward-slash path. Also now puts the VS Installer dir on PATH so child
+  build processes can resolve a bare `vswhere.exe`.
+- `codetracer-trace-format-nim` — evicted 6 committed build-output
+  binaries from the index (see `codetracer-specs/Planned-Work/MCR-Repo-History-Cleanup.md`).
+- `codetracer-python-recorder` — restored the Windows env (`env.ps1`,
+  `env.sh`, `non-nix-build/windows/`) from the `windows-first-class-support`
+  branch onto `main`.
+
+### Known remaining gaps
+
+- `ensure-nargo.ps1` — Noir source build completes but emits no
+  `nargo.exe`; needs Noir-specific debugging (Noir is off the critical
+  path, so the env can proceed with `WINDOWS_DIY_SKIP_NARGO=1`).
+- Recorders without a Windows path: `codetracer-wasm-recorder` (Unix
+  Makefile/zig/tinygo), `codetracer-shell-recorders` (bash/zsh launchers).
+  `codetracer-js-recorder` is plausibly buildable but undocumented.
+- GUI/Playwright tests not yet exercised on Windows in this audit.
 
 ## AMD64 (x64) Migration — 2026-03-15
 
