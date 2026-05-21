@@ -17,22 +17,28 @@
  *   7. Wait for GL to rebuild.
  *   8. Verify ALL panel content matches what we recorded in step 2/3.
  *
- * ## Known issues found by this test
+ * ## Historical note
  *
- * 1. After `createNewSession -> switchSession` for the empty session,
- *    `data.ui.layout` is null — GoldenLayout was NOT rebuilt for the
- *    empty session. The `initLayout` call in `restoreSessionLayout`
- *    either fails silently or the conditions are not met.
+ * From 2026-05-01 to 2026-05-21 this test was failing and the original
+ * author hypothesized the bug was `data.ui.layout == null` after
+ * createNewSession (with a related JS error about setting `active` on
+ * null). That diagnosis was wrong: the underlying switchSession /
+ * restoreSessionLayout / GL rebuild flow works correctly.
  *
- * 2. Clicking a tab to switch sessions causes a JS error:
- *    `Cannot set properties of null (setting 'active')`.
- *    This prevents `switchSession` from completing, leaving the UI
- *    in a broken state where the active session index does not change
- *    and the original session's panels are not restored.
+ * The real bug (fixed in commit 3fdbc21d) lived in the test's own JS
+ * probing code: `currentRRTicks()` reads
+ * `window.data.services.debugger.location.rrTicks`, but the
+ * multi-replay forwarders at src/frontend/types.nim are Nim templates
+ * — compile-time-only constructs that produce no runtime JS property.
+ * So `window.data.services` was always `undefined`; `currentRRTicks()`
+ * always returned -1; `waitForRRTicksChange(page, -1)` waited for an
+ * impossible condition (after >= 0 && after !== before). The same
+ * gap silently affected several other tests' diagnostic reads.
  *
- * The tab bar DOM DOES correctly render 2 tabs. The issue is in the
- * switchSession/restoreSessionLayout
- * flow when handling transitions involving empty (no-trace) sessions.
+ * The fix installs Object.defineProperty getters/setters on
+ * `window.data` for every forwarded field, resolving to
+ * `sessions[activeSessionIndex].<field>` at access time so they
+ * track session switches automatically.
  */
 
 import { test, expect } from "../../lib/fixtures";
