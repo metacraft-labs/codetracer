@@ -660,7 +660,7 @@ base.describe("Observability M29 local materialized manifest browser acceptance"
           const d = (window as any).data;
           const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
           return {
-            id: Number(trace?.id ?? -1),
+            recordingId: String(trace?.recordingId ?? ""),
             program: String(trace?.program ?? ""),
             outputFolder: String(trace?.outputFolder ?? ""),
           };
@@ -694,9 +694,21 @@ base.describe("Observability M29 local materialized manifest browser acceptance"
         for (const snippet of fixture.requiredSourceSnippets) {
           expect(sourceText).toContain(snippet);
         }
-        expect(traceMetadata.id).toBeGreaterThan(0);
+        // M-REC-7: the recording identity is a canonical UUIDv7
+        // (`recording_id`) and the on-disk folder is the bare UUID — the
+        // pre-1.0 numeric `id` and `trace-<n>` folder prefix were retired.
+        expect(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+            traceMetadata.recordingId,
+          ),
+          `${fixture.label} trace recording id should be a canonical UUIDv7`,
+        ).toBe(true);
         expect(traceMetadata.program).toContain(fixture.programFragment);
-        expect(traceMetadata.outputFolder).toContain("trace-");
+        expect(
+          fs.existsSync(traceMetadata.outputFolder),
+          `${fixture.label} trace output folder should exist on disk`,
+        ).toBe(true);
+        expect(path.basename(traceMetadata.outputFolder)).toBe(traceMetadata.recordingId);
       } finally {
         if (ctProcess?.pid) {
           killProcessTree(ctProcess.pid);

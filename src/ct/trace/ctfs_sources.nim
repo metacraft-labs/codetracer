@@ -217,6 +217,43 @@ proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string
       createDir(outputPath.parentDir)
       writeFile(outputPath, sourceBytes)
 
+proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
+  ## Decode the CTFS v4 interning-table path list (``paths.dat`` +
+  ## ``paths.off``) written by the current trace writer
+  ## (``codetracer-trace-format-nim``'s ``InterningTable`` /
+  ## ``VariableRecordTable``).
+  ##
+  ## Layout:
+  ##   * ``paths.off`` — a FixedRecordTable of ``N+1`` little-endian u64
+  ##     cumulative byte offsets into ``paths.dat`` (offset[0] is always
+  ##     0; offset[i+1] - offset[i] is the length of record ``i``).
+  ##   * ``paths.dat`` — the raw UTF-8 path bytes, concatenated.
+  ##
+  ## Returns an empty seq when the container predates the v4 format
+  ## (no ``paths.dat``); the caller falls back to ``paths.json``.
+  result = @[]
+  var datBytes, offBytes: string
+  try:
+    datBytes = reader.readCtfsFile("paths.dat")
+    offBytes = reader.readCtfsFile("paths.off")
+  except CatchableError:
+    return @[]
+  if offBytes.len < 16 or offBytes.len mod 8 != 0:
+    # Need at least two offsets (the leading 0 plus one record end) to
+    # describe a single path.
+    return @[]
+  let offsetCount = offBytes.len div 8
+  var offsets = newSeq[uint64](offsetCount)
+  for i in 0 ..< offsetCount:
+    offsets[i] = readU64Le(offBytes, i * 8)
+  for i in 0 ..< offsetCount - 1:
+    let startOff = int(offsets[i])
+    let endOff = int(offsets[i + 1])
+    if startOff > endOff or endOff > datBytes.len:
+      raise newException(ValueError, "CTFS paths.dat offset out of range")
+    if endOff > startOff:
+      result.add datBytes[startOff ..< endOff]
+
 proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   ## Extract source metadata from a CTFS .ct file into the runtime
   ## trace-folder layout consumed by the current frontend: a sibling
@@ -241,6 +278,21 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
       result = true
   except CatchableError:
     discard
+
+  # CTFS v4 containers replace the legacy JSON ``paths.json`` internal
+  # file with the binary ``paths.dat`` + ``paths.off`` interning table.
+  # When the JSON form is absent, decode the binary table so the
+  # frontend still gets a ``paths.json`` sidecar and the bundled
+  # ``files/`` payload is materialised below.
+  if not result:
+    try:
+      let interningPaths = extractInterningTablePaths(reader)
+      if interningPaths.len > 0:
+        paths = interningPaths
+        writeFile(outputFolder / "paths.json", $(%paths))
+        result = true
+    except CatchableError as e:
+      echo "ct host: warning: failed to decode CTFS paths.dat: ", e.msg
 
   try:
     let filemapPaths = extractFilemapSources(reader, outputFolder)

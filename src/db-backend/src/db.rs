@@ -1333,8 +1333,26 @@ impl ReplaySession for MaterializedReplaySession {
     }
 
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>> {
-        // For event-only traces (no steps), keep step_id at the default.
-        if self.reader.step_count() > 0 {
+        // "Run to entry" means stop at the program's entry point — the
+        // first recorded call. Some recorders (notably the BEAM recorder)
+        // emit leading scaffolding steps that precede every call: the
+        // trace writer's synthetic `start()` anchor plus per-thread
+        // bookkeeping steps. Those steps carry `call_key == NO_KEY`, so
+        // landing on step 0 leaves the debugger in a frame with no
+        // function, an `<unknown>` location, and — critically — an empty
+        // call trace (`call_key_for_step(0)` returns `NO_KEY`, so
+        // `Calltrace::jump_to` builds nothing).
+        //
+        // Prefer the entry step of the first call when the trace has
+        // calls; this is the genuine program entry point. Well-formed
+        // materialised traces whose call 0 already begins at step 0
+        // (e.g. the Python/Ruby/JS recorders) are unaffected — the
+        // first call's `step_id` is 0 for them. Fall back to step 0 for
+        // call-less step traces.
+        if self.reader.call_count() > 0 {
+            let entry_step = self.reader.call(CallKey(0)).map(|call| call.step_id).unwrap_or(StepId(0));
+            self.step_id_jump(entry_step);
+        } else if self.reader.step_count() > 0 {
             self.step_id_jump(StepId(0));
         }
         Ok(())

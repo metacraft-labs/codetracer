@@ -720,7 +720,7 @@ async function exerciseLocalMcrManifestBrowserAcceptance(
       const d = (window as any).data;
       const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
       return {
-        id: Number(trace?.id ?? -1),
+        recordingId: String(trace?.recordingId ?? ""),
         program: String(trace?.program ?? ""),
         outputFolder: String(trace?.outputFolder ?? ""),
       };
@@ -739,8 +739,17 @@ async function exerciseLocalMcrManifestBrowserAcceptance(
       `"branch": "reserve_from_primary_bin"`,
     );
 
-    expect(traceMetadata.id).toBeGreaterThan(0);
-    expect(traceMetadata.outputFolder).toContain("trace-");
+    // M-REC-7: the recording identity is a canonical UUIDv7
+    // (`recording_id`) and the on-disk folder is the bare UUID — the
+    // pre-1.0 numeric `id` and `trace-<n>` folder prefix were retired.
+    expect(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        traceMetadata.recordingId,
+      ),
+      "trace recording id should be a canonical UUIDv7",
+    ).toBe(true);
+    expect(fs.existsSync(traceMetadata.outputFolder), "trace output folder should exist on disk").toBe(true);
+    expect(path.basename(traceMetadata.outputFolder)).toBe(traceMetadata.recordingId);
   } finally {
     if (ctProcess?.pid) {
       killProcessTree(ctProcess.pid);

@@ -190,12 +190,20 @@ proc normalizeImportedTracePaths(tempDir: string) =
   ## Local manifest imports copy companion files into a transient trace folder.
   ## Make `paths.json` point at the self-contained files/ payload so the
   ## imported trace remains browsable after the manifest temp directory is
-  ## gone.  M-REC-1.5: the file name was `trace_paths.json` pre-1.0; the
-  ## new name matches the CTFS internal-file name (`paths.json`) and the
-  ## legacy sidecar is no longer accepted.
-  let runtimePathsPath = tempDir / "paths.json"
+  ## gone.  M-REC-1.5: the canonical CTFS-internal name is `paths.json`; the
+  ## legacy `runtime_tracing` materialized layout (Python/Ruby/JS recorders)
+  ## still ships a `trace_paths.json` sidecar.  We accept whichever is
+  ## present as the input and rewrite BOTH names so the frontend (reads
+  ## `paths.json`) and consumers of the legacy sidecar see the same
+  ## self-contained relative paths.
+  let canonicalPathsPath = tempDir / "paths.json"
+  let legacyPathsPath = tempDir / "trace_paths.json"
+  let runtimePathsPath =
+    if fileExists(canonicalPathsPath): canonicalPathsPath
+    elif fileExists(legacyPathsPath): legacyPathsPath
+    else: canonicalPathsPath
   if not fileExists(runtimePathsPath):
-    writeFile(runtimePathsPath, "[]")
+    writeFile(canonicalPathsPath, "[]")
     return
 
   var rawPaths: seq[string] = @[]
@@ -235,7 +243,14 @@ proc normalizeImportedTracePaths(tempDir: string) =
     else:
       normalizedPaths.add(rawPath)
 
-  writeFile(runtimePathsPath, $(%normalizedPaths))
+  # Write the normalized, self-contained path list under the canonical
+  # name. Also refresh the legacy `trace_paths.json` sidecar when the
+  # imported folder shipped one, so tooling that still reads the old
+  # name sees the same relative payload paths.
+  let normalizedJson = $(%normalizedPaths)
+  writeFile(canonicalPathsPath, normalizedJson)
+  if fileExists(legacyPathsPath):
+    writeFile(legacyPathsPath, normalizedJson)
 
 proc importCtFile(ctFilePath: string): string =
   ## M-REC-2: returns the UUIDv7 recording-id assigned by importTrace.
@@ -562,19 +577,33 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   # trace container by the `.ct` extension, so expose such a payload as
   # `trace.ct` — the trace then flows through the normal CTFS path and
   # the calltrace/state panels populate.
+  #
+  # The 5-byte magic alone is NOT sufficient to identify a CTFS
+  # container: the legacy `runtime_tracing` capnp binary format
+  # (emitted as `trace.bin` by e.g. the Python recorder) shares the
+  # same 5-byte `C0 DE 72 AC E2` prefix but uses version byte 0x00,
+  # whereas a real CTFS container declares version 2..4 at offset 5.
+  # Copying a capnp-binary `trace.bin` to `trace.ct` makes the
+  # db-backend's `is_codetracer_ctfs_file` reject it (unsupported CTFS
+  # version) and wrongly fall through to the rr replay-worker path.
+  # Require a genuine CTFS version byte before the rename.
   const ctfsMagic = "\xC0\xDE\x72\xAC\xE2"
+  const ctfsVersionMin = 2'u8
+  const ctfsVersionMax = 4'u8
   if not fileExists(outputFolder / "trace.ct"):
     for payloadName in ["trace.bin", "trace.json"]:
       let payloadPath = outputFolder / payloadName
       if fileExists(payloadPath):
-        var head = ""
+        var isCtfsContainer = false
         try:
           let content = readFile(payloadPath)
-          if content.len >= ctfsMagic.len:
-            head = content[0 ..< ctfsMagic.len]
+          if content.len > ctfsMagic.len and
+              content[0 ..< ctfsMagic.len] == ctfsMagic:
+            let version = uint8(content[ctfsMagic.len])
+            isCtfsContainer = version >= ctfsVersionMin and version <= ctfsVersionMax
         except CatchableError:
-          head = ""
-        if head == ctfsMagic:
+          isCtfsContainer = false
+        if isCtfsContainer:
           copyFile(payloadPath, outputFolder / "trace.ct")
           echo "ct host: materialized payload ", payloadName,
             " is a CTFS container — exposed as trace.ct"

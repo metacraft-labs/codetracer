@@ -296,10 +296,14 @@ export class LayoutPage extends BasePage {
         const m = idAttr.match(/(\d)/);
         if (m) tab.idNumber = parseInt(m[1], 10);
         tab.filePath = (await tab.root.getAttribute("data-label")) ?? "";
-        const fileNameMatch = tab.filePath.match(/([^/]+)$/);
-        tab.fileName = fileNameMatch ? fileNameMatch[1] : "";
-        const tabButtonMatch = tab.filePath.match(/[^/]*\/(?!\/)(?:.(?!\/))+$/);
-        tab.tabButtonText = tabButtonMatch ? tabButtonMatch[0] : tab.fileName;
+        // Split on both POSIX and Windows path separators: editor tab
+        // labels carry native absolute paths, so a `/`-only match would
+        // treat a whole `D:\repo\src\canonical_flow.erl` path as a single
+        // segment and report the full path as the file name.
+        const segments = tab.filePath.split(/[/\\]/).filter(Boolean);
+        tab.fileName = segments[segments.length - 1] ?? "";
+        tab.tabButtonText =
+          segments.length >= 2 ? segments.slice(-2).join("/") : tab.fileName;
         tabs.push(tab);
       }
       this.editorTabsCache = tabs;

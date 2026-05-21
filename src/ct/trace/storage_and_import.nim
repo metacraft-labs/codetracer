@@ -237,6 +237,18 @@ proc importTrace*(
   if dirExists(traceFolder / "files"):
     if traceFolder != outputFolder:
       copyDir(traceFolder / "files", outputFolder / "files")
+      # The self-contained ``files/`` payload is only browsable if the
+      # frontend can map trace path indices onto it.  ``importTraceFolder``
+      # / ``importCtFile`` run ``materializeCtfsSources`` +
+      # ``normalizeImportedTracePaths`` against ``traceFolder`` *before*
+      # this import, leaving a ``paths.json`` whose entries are relative
+      # to ``files/``.  Carry that sidecar into ``outputFolder`` so
+      # ``loadFilenames`` finds it next to the copied ``files/`` payload
+      # — without it the frontend falls back to the absolute recorder-
+      # side paths and fails to open bundled sources on another machine.
+      if fileExists(traceFolder / "paths.json") and
+          not fileExists(outputFolder / "paths.json"):
+        copyFile(traceFolder / "paths.json", outputFolder / "paths.json")
   elif selfContained and downloadUrl == "":
     # for now assuming if no `files/` dir already,
     # it happens on the original machine
