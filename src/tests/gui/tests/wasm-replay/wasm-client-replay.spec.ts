@@ -441,13 +441,13 @@ test.describe("WASM client-side replay -- MCR (CTFS .ct) trace", () => {
   test("CTFS container loads and threads respond for MCR trace", async ({
     page,
   }) => {
-    // MCR portable traces contain raw recording data that the WASM CTFS
-    // reader can open but cannot materialize into steps (they need the
-    // MCR debugserver for replay). This test verifies that:
+    // MCR (CTFS .ct) traces are routed through the in-process WASM
+    // EmulatorReplaySession (Browser-Replay spec F5c-3). This test
+    // verifies that:
     //   1. The .ct file is accepted by the CTFS reader (magic bytes match)
     //   2. The DAP protocol initializes correctly
     //   3. The threads request returns a valid thread
-    //   4. The stackTrace returns empty (0 materialized steps) without crash
+    //   4. The stackTrace returns the emulator's synthesised root frame
     const result = await runReplayTest(page, baseUrl, {
       traceFolder: "trace",
       files: MCR_TRACE_FILES.join(","),
@@ -463,12 +463,20 @@ test.describe("WASM client-side replay -- MCR (CTFS .ct) trace", () => {
     expect(result.threads.threads.length).toBeGreaterThanOrEqual(1);
     expect(result.threads.threads[0].id).toBe(1);
 
-    // Stack trace at entry will be empty for MCR portable traces (no
-    // materialized steps). This is expected -- the trace was recorded by
-    // the MCR native recorder and would need the MCR debugserver to replay.
+    // Per the Browser-Replay F5c-3 acceptance contract, the
+    // EmulatorReplaySession surfaces "≥1 non-empty frame" for an MCR
+    // trace: a single root frame synthesised from meta.program even when
+    // no checkpoint stream is bundled. The frame must carry a non-empty
+    // function name and a sensible source path.
     expect(result.stackTrace).toBeDefined();
     expect(result.stackTrace.stackFrames).toBeDefined();
-    // 0 materialized steps means 0 stack frames at entry.
-    expect(result.stackTrace.totalFrames).toBe(0);
+    expect(result.stackTrace.stackFrames.length).toBeGreaterThanOrEqual(1);
+    expect(result.stackTrace.totalFrames).toBeGreaterThanOrEqual(1);
+    const rootFrame = result.stackTrace.stackFrames[0];
+    expect(rootFrame.name, "synthesised root frame must have a name").toBeTruthy();
+    expect(
+      rootFrame.source?.path,
+      "synthesised root frame must have a source path",
+    ).toBeTruthy();
   });
 });
