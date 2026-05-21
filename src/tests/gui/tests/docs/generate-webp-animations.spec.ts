@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test, expect, loadedEventLog, readyOnEntryTest } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
+import { retry } from "../../lib/retry-helpers";
+import { TraceLogPanel } from "../../page-objects/panes/editor/trace-log-panel";
 
 test.describe("generate faithful webp animations", () => {
   test.describe.configure({ mode: "serial" });
@@ -71,30 +73,44 @@ test.describe("generate faithful webp animations", () => {
 
     test("capture tracepoint animation", async ({ ctPage }) => {
       /**
-       * TODO: Fix gutter interaction for tracepoints.
-       *
-       * Challenge: programmatically clicking the Monaco editor's gutter (margin) to set
-       * a tracepoint has proven unreliable with standard CSS selectors in this
-       * GoldenLayout + Electron environment.
-       *
-       * Recommended approach for next developer:
-       * 1. Use LayoutPage objects to locate the active editor's bounding box.
-       * 2. Use `ctPage.mouse.click(x, y)` with absolute coordinates calculated from
-       *    the editor's position and an appropriate horizontal offset for the gutter.
-       * 3. Verify the tracepoint "dot" appears before proceeding to the TRACEPOINT tab.
+       * A left-click on the Monaco gutter sets a *breakpoint*, not a
+       * tracepoint (see `lineActionClick` in src/frontend/ui/editor.nim).
+       * Tracepoints are created through `toggleTrace` — exposed to tests as
+       * the `window.toggleTracepoint` helper and wrapped by the editor
+       * page object's `openTrace`.  `toggleTrace` mounts an inline trace
+       * view-zone in the editor (the `.trace` panel keyed
+       * `#edit-trace-<id>-<line>`), NOT a separate "TRACEPOINT" GoldenLayout
+       * tab — so the proof a tracepoint was set is that the inline
+       * `TraceLogPanel` becomes visible.
        */
       await readyOnEntryTest(ctPage);
-      await ctPage.waitForTimeout(5000);
 
-      // Click a line to set a tracepoint
-      const line = ctPage.locator(".monaco-editor .margin-view-overlays .line-numbers").filter({ hasText: "14" }).first();
-      await line.click({ force: true });
-      await ctPage.waitForTimeout(1000);
+      const layout = new LayoutPage(ctPage);
+      await layout.waitForTraceLoaded();
+      await layout.waitForEditorLoaded();
 
-      // Focus the tracepoint component
-      const tracepointTab = ctPage.locator(".lm_tab", { hasText: "TRACEPOINT" });
-      await tracepointTab.waitFor({ state: "visible", timeout: 30_000 });
-      await tracepointTab.click();
+      // The noir flow recording's entry source is `main.nr`; select that
+      // editor explicitly rather than relying on tab ordering.
+      let editor: Awaited<ReturnType<typeof layout.editorTabs>>[number] | undefined;
+      await retry(async () => {
+        const tabs = await layout.editorTabs();
+        editor = tabs.find((t) =>
+          t.tabButtonText.toLowerCase().includes("main.nr"),
+        ) ?? tabs[0];
+        return editor !== undefined;
+      }, { maxAttempts: 60, delayMs: 1000 });
+      await editor!.clickTab();
+      await expect(editor!.root.locator(".monaco-editor")).toBeVisible({
+        timeout: 30_000,
+      });
+
+      // Set a tracepoint on line 14 (`println(i + 1)` inside the loop) via
+      // the supported tracepoint API and confirm its inline trace panel
+      // mounted.
+      const traceLine = 14;
+      await editor!.openTrace(traceLine);
+      const tracePanel = new TraceLogPanel(editor!, traceLine);
+      await tracePanel.root.waitFor({ state: "visible", timeout: 30_000 });
       await ctPage.waitForTimeout(2000);
     });
   });

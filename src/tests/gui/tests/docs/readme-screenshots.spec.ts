@@ -65,8 +65,11 @@ test.describe("README animations", () => {
   test("omniscience", async ({ ctPage }) => {
     const { editor } = await setup(ctPage);
 
-    // Show flow decorations
-    await editor.lineByNumber(8).root.click();
+    // Show flow decorations.  Select line 8 of the source via the gutter
+    // -anchored resolver — Monaco does not put a `data-line-number` on its
+    // `.view-line` divs, and a left-click on the gutter itself would set a
+    // breakpoint rather than select the line.
+    await editor.clickSourceLine(8);
     await expect(ctPage.locator(".flow-parallel-value-box, .flow-inline-value-box").first()).toBeVisible({ timeout: 30000 });
 
     // Scrub the iteration slider

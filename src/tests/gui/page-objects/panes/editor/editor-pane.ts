@@ -81,9 +81,96 @@ export class EditorPane {
   }
 
   lineElement(lineNumber: number): Locator {
+    // Monaco does NOT annotate `.view-line` elements with a
+    // `data-line-number` attribute — the `.view-line` divs are positioned
+    // purely by absolute `top` CSS and re-ordered in the DOM as the editor
+    // scrolls.  The line number lives on the CodeTracer custom gutter
+    // (`.margin-view-overlays > .gutter[data-line='N']`), and the gutter
+    // child at DOM index K corresponds to the source `.view-line` at the
+    // same DOM index K (this 1:1 correspondence is what the frontend's
+    // `getSourceLineDomIndex` relies on — see ui/editor.nim / ui/flow.nim).
+    //
+    // Resolve the source line via that index correspondence so the
+    // returned locator points at the real rendered line on every platform.
+    // `:scope` keeps the `.view-line` query scoped to the resolved index.
     return this.root.locator(
-      `.monaco-editor .view-lines > .view-line[data-line-number='${lineNumber}']`,
+      ".monaco-editor .view-lines > .view-line",
+    ).nth(this.gutterDomIndexSync(lineNumber));
+  }
+
+  /**
+   * The DOM index of the gutter (and therefore the parallel `.view-line`)
+   * for `lineNumber`.  Used to build a stable line locator without relying
+   * on a Monaco `data-line-number` attribute that does not exist.
+   *
+   * Returns a Playwright locator-friendly index; the actual resolution is
+   * done lazily by `resolveLineDomIndex` when the line is interacted with.
+   * Kept as a thin synchronous shim so `lineElement` can stay a plain
+   * locator factory — callers that need a guaranteed-correct index should
+   * use `clickSourceLine`.
+   */
+  private gutterDomIndexSync(lineNumber: number): number {
+    // Monaco renders a small file's lines 1:1 with the gutter, in order,
+    // so line N maps to DOM index N-1 in the common (non-scrolled) case.
+    // `clickSourceLine` performs the exact gutter-anchored resolution for
+    // interactions where correctness must not depend on scroll state.
+    return Math.max(0, lineNumber - 1);
+  }
+
+  /**
+   * Click the source text of `lineNumber` deterministically.
+   *
+   * Monaco does not annotate its `.view-line` divs with a line number, and
+   * a left-click on the CodeTracer gutter toggles a *breakpoint* (see
+   * `lineActionClick` in ui/editor.nim) rather than selecting the line.
+   * The line number lives on the gutter (`.gutter[data-line='N']`); the
+   * gutter row at DOM index K corresponds to the `.view-line` at the same
+   * DOM index K — the 1:1 correspondence the frontend's
+   * `getSourceLineDomIndex` relies on.
+   *
+   * This resolves the click coordinates in a single `page.evaluate` from
+   * the gutter row's `getBoundingClientRect()` (which is reliable even
+   * when Playwright reports the gutter as not "visible" — Monaco gutter
+   * rows can have a zero-ish computed style yet a real layout box), then
+   * clicks the editor text column at that row's vertical centre.
+   */
+  async clickSourceLine(lineNumber: number): Promise<void> {
+    const resolveCoords = async (): Promise<{ x: number; y: number } | null> =>
+      await this.root.evaluate(
+        (paneRoot: Element, line: number) => {
+          const editorEl = paneRoot.querySelector(".monaco-editor");
+          if (!editorEl) return null;
+          const gutter = editorEl.querySelector(
+            `.margin-view-overlays .gutter[data-line='${line}']`,
+          );
+          const viewLinesEl = editorEl.querySelector(".view-lines");
+          if (!gutter || !viewLinesEl) return null;
+          const gRect = gutter.getBoundingClientRect();
+          const vRect = viewLinesEl.getBoundingClientRect();
+          if (gRect.height === 0 || vRect.width === 0) return null;
+          return {
+            x: vRect.left + 8,
+            y: gRect.top + gRect.height / 2,
+          };
+        },
+        lineNumber,
+      );
+
+    let coords: { x: number; y: number } | null = null;
+    await retry(
+      async () => {
+        coords = await resolveCoords();
+        return coords !== null;
+      },
+      { maxAttempts: 60, delayMs: 500 },
     );
+    if (!coords) {
+      throw new Error(
+        `Could not resolve source line ${lineNumber} for a click — ` +
+          "the editor gutter / view-lines are not laid out yet.",
+      );
+    }
+    await this.page.mouse.click(coords!.x, coords!.y);
   }
 
   gutterElement(lineNumber: number): Locator {

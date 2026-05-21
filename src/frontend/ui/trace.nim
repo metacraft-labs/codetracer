@@ -1317,6 +1317,18 @@ proc resizeEditorHandler(self: TraceComponent) =
 proc setEditorResizeObserver(self: TraceComponent) =
   let activeEditor = "\"" & self.data.services.editor.active & "\""
   let editorDom = jq(cstring(fmt"[data-label={activeEditor}]"))
+  # `jq` (document.querySelector) returns null when no element carries the
+  # active editor's `data-label` — e.g. when a tracepoint is created before
+  # the editor component DOM has been mounted/labelled, or when the active
+  # editor path contains characters that do not round-trip through the
+  # attribute selector.  Calling `ResizeObserver.observe(null)` throws a
+  # `TypeError` ("parameter 1 is not of type 'Element'"), which aborts
+  # `toggleTrace`/`finishTraceDomMount` and leaves the TRACEPOINT panel
+  # unmounted.  Skip wiring the observer in that case — `finishTraceDomMount`
+  # re-invokes this proc on later mounts (it is gated on `resizeObserver`
+  # being nil), so the observer is installed once the editor DOM exists.
+  if editorDom.isNil:
+    return
   let resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
     for entry in entries:
       # let timeout =
