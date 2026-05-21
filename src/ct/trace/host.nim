@@ -1,9 +1,10 @@
 import
-  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient ],
+  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   ctfs_sources,
   source_paths,
+  ../utilities/language_detection,
   ../online_sharing/mcr_enrichment
 
 
@@ -454,6 +455,143 @@ proc findMaterializedTraceFolder(path: string): string =
     return fullPath
   ""
 
+proc dirHasLegacyMaterializedTrace(dir: string): bool =
+  ## A legacy `runtime_tracing` materialized trace folder carries
+  ## `trace_metadata.json` plus a `trace.json` or `trace.bin` payload.
+  ## The CTFS reader (`db-backend`) still opens these via its
+  ## `from_events` path — see `dap_server.rs` "legacy runtime_tracing
+  ## materialized trace" branch — even though the CTFS-only import
+  ## machinery (M-REC-1.5) does not.  `ct host` therefore must be able
+  ## to register such a folder so the hostable materialized-artifact
+  ## flow (Observability M29/M34) keeps working for these traces.
+  if not fileExists(dir / "trace_metadata.json"):
+    return false
+  fileExists(dir / "trace.json") or fileExists(dir / "trace.bin")
+
+proc findLegacyMaterializedTraceFolder(path: string): string =
+  ## Resolve `path` to a directory holding a legacy materialized trace
+  ## (`trace_metadata.json` + `trace.json`/`trace.bin`).  Mirrors
+  ## `findMaterializedTraceFolder` but for the pre-CTFS sidecar layout.
+  if path.len == 0:
+    return ""
+  let fullPath = try:
+      expandFilename(expandTilde(path))
+    except OSError:
+      expandTilde(path)
+  let isDir = try: dirExists(fullPath) except OSError: false
+  if isDir:
+    if dirHasLegacyMaterializedTrace(fullPath):
+      return fullPath
+    for entry in walkDir(fullPath):
+      if entry.kind in {pcDir, pcLinkToDir} and
+          dirHasLegacyMaterializedTrace(entry.path):
+        return entry.path
+  ""
+
+proc importLegacyMaterializedFolder(traceFolderPath: string): string =
+  ## Register a legacy `runtime_tracing` materialized trace folder
+  ## (`trace_metadata.json` + `trace.json`/`trace.bin` + `trace_paths.json`)
+  ## into `trace_index.db` so `ct host` can serve it.
+  ##
+  ## M-REC-1.5 retired the JSON-sidecar path inside `importTrace`, which
+  ## reads metadata from a CTFS `meta.dat`.  Legacy materialized traces
+  ## have no `.ct` container, so they cannot go through that path — but
+  ## the db-backend's replay engine still opens them.  We bridge the gap
+  ## here: copy the folder under `<codetracerTraceDir>/<recording_id>/`
+  ## and `recordTrace` it with the metadata read from the JSON sidecars.
+  ##
+  ## Returns the assigned UUIDv7 recording-id.
+  let fullPath = try:
+      expandFilename(expandTilde(traceFolderPath))
+    except OSError:
+      expandTilde(traceFolderPath)
+
+  var program = ""
+  var args: seq[string] = @[]
+  var workdir = ""
+  let metaPath = fullPath / "trace_metadata.json"
+  try:
+    let meta = parseJson(readFile(metaPath))
+    if meta.kind == JObject:
+      if meta.hasKey("program") and meta["program"].kind == JString:
+        program = meta["program"].getStr()
+      if meta.hasKey("workdir") and meta["workdir"].kind == JString:
+        workdir = meta["workdir"].getStr()
+      if meta.hasKey("args") and meta["args"].kind == JArray:
+        for a in meta["args"]:
+          if a.kind == JString:
+            args.add(a.getStr())
+  except CatchableError as e:
+    echo "ct host: error: failed to parse ", metaPath, ": ", e.msg
+    quit(1)
+  if workdir.len == 0:
+    workdir = program.parentDir
+
+  var paths: seq[string] = @[]
+  let pathsPath = fullPath / "trace_paths.json"
+  if fileExists(pathsPath):
+    try:
+      let pathsJson = parseJson(readFile(pathsPath))
+      if pathsJson.kind == JArray:
+        for p in pathsJson:
+          if p.kind == JString:
+            paths.add(p.getStr())
+    except CatchableError as e:
+      echo "ct host: warning: failed to parse ", pathsPath, ": ", e.msg
+
+  var lang = LangUnknown
+  for p in paths:
+    let detected = detectLangFromPath(p, isWasm = false)
+    if detected != LangUnknown:
+      lang = detected
+      break
+  if lang == LangUnknown:
+    lang = detectLangFromPath(program, isWasm = false)
+
+  let recordingId = trace_index.newID(test = false)
+  let outputFolder = recordingFolder(codetracerTraceDir, recordingId)
+  createDir(outputFolder)
+  # Self-contained copy: the manifest's temp directory is removed once
+  # `ct host` finishes importing, so the trace must survive on its own.
+  copyDirContents(fullPath, outputFolder)
+  normalizeImportedTracePaths(outputFolder)
+
+  var sourceFolderSet = initHashSet[string]()
+  for p in paths:
+    if p.len > 0 and isAbsolute(p):
+      sourceFolderSet.incl(p.parentDir)
+  var sourceFolders = ""
+  for folder in sourceFolderSet:
+    if sourceFolders.len > 0:
+      sourceFolders.add(" ")
+    sourceFolders.add(folder)
+
+  let trace = trace_index.recordTrace(
+    recordingId,
+    program = program,
+    args = args,
+    compileCommand = "",
+    env = "",
+    workdir = workdir,
+    lang = lang,
+    sourceFolders = sourceFolders,
+    lowLevelFolder = "",
+    outputFolder = outputFolder,
+    test = false,
+    imported = true,
+    shellID = -1,
+    rrPid = NO_PID,
+    exitCode = -1,
+    calltrace = true,
+    calltraceMode = CalltraceMode.FullRecord,
+    fileId = "")
+  if trace.isNil:
+    echo "ct host: error: failed to register legacy materialized trace from ",
+      traceFolderPath
+    quit(1)
+  echo "ct host: registered legacy materialized trace from ", traceFolderPath
+  result = trace.recordingId
+
 proc applyReplayStartEnv(start: HostStartCoordinates) =
   if start.traceId.len > 0:
     putEnv("CODETRACER_START_TRACE_ID", start.traceId)
@@ -709,13 +847,20 @@ proc importMaterializedStorageObject(
     else:
       writeMaterializedStorageArtifactToTemp(obj, owner, options, label)
   let traceFolder = findMaterializedTraceFolder(path)
-  if traceFolder.len == 0:
-    raise newException(ValueError,
-      label & " is not a hostable CodeTracer trace folder or .ct artifact")
-  if traceFolder.endsWith(".ct"):
-    importCtFile(traceFolder)
-  else:
-    importTraceFolder(traceFolder)
+  if traceFolder.len > 0:
+    if traceFolder.endsWith(".ct"):
+      return importCtFile(traceFolder)
+    else:
+      return importTraceFolder(traceFolder)
+  # The storage download writes the materialized payload plus its
+  # support files (trace_metadata.json, trace_paths.json, sources) into
+  # a temp directory; `path` is the payload file itself, so probe its
+  # parent for the legacy `runtime_tracing` materialized layout.
+  let legacyFolder = findLegacyMaterializedTraceFolder(path.parentDir)
+  if legacyFolder.len > 0:
+    return importLegacyMaterializedFolder(legacyFolder)
+  raise newException(ValueError,
+    label & " is not a hostable CodeTracer trace folder or .ct artifact")
 
 proc selectedSegment(segments: JsonNode, start: HostStartCoordinates): JsonNode =
   let requestedGeid = parseUintOrZero(start.geid)
@@ -829,12 +974,21 @@ proc resolveSharedManifest(
       raise newException(ValueError, "materialized_artifact manifest missing artifact")
     let path = resolveLocalReference(artifactNode.jsonString(["uri", "path", "object_id"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
-    if traceFolder.len == 0:
-      result.recordingId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact", source)
-    elif traceFolder.endsWith(".ct"):
-      result.recordingId = importCtFile(traceFolder)
+    if traceFolder.len > 0:
+      if traceFolder.endsWith(".ct"):
+        result.recordingId = importCtFile(traceFolder)
+      else:
+        result.recordingId = importTraceFolder(traceFolder)
     else:
-      result.recordingId = importTraceFolder(traceFolder)
+      # No CTFS container present: fall back to a legacy `runtime_tracing`
+      # materialized folder (trace_metadata.json + trace.json/trace.bin)
+      # before reaching for the storage-protocol path, so a local
+      # materialized_artifact manifest works without --storage-base-url.
+      let legacyFolder = findLegacyMaterializedTraceFolder(path)
+      if legacyFolder.len > 0:
+        result.recordingId = importLegacyMaterializedFolder(legacyFolder)
+      else:
+        result.recordingId = importMaterializedStorageObject(artifactNode, storageOptions, "materialized artifact", source)
     result.start = readReplayStart(source.jsonField(["replay_start", "replayStart"]))
     if result.start.traceId.len == 0 and result.start.materializedMomentId.len == 0:
       result.start = manifestStart
@@ -888,12 +1042,17 @@ proc resolveRecordingManifest(
       raise newException(ValueError, "materialized_trace manifest has no local artifacts")
     let path = resolveLocalReference(artifact.jsonString(["artifactKey", "artifact_key"]), manifestPath, manifestKey)
     let traceFolder = findMaterializedTraceFolder(path)
-    if traceFolder.len == 0:
-      result.recordingId = importMaterializedStorageObject(artifact, storageOptions, "materialized artifact")
-    elif traceFolder.endsWith(".ct"):
-      result.recordingId = importCtFile(traceFolder)
+    if traceFolder.len > 0:
+      if traceFolder.endsWith(".ct"):
+        result.recordingId = importCtFile(traceFolder)
+      else:
+        result.recordingId = importTraceFolder(traceFolder)
     else:
-      result.recordingId = importTraceFolder(traceFolder)
+      let legacyFolder = findLegacyMaterializedTraceFolder(path)
+      if legacyFolder.len > 0:
+        result.recordingId = importLegacyMaterializedFolder(legacyFolder)
+      else:
+        result.recordingId = importMaterializedStorageObject(artifact, storageOptions, "materialized artifact")
     result.start = readReplayStart(artifact.jsonField(["replayStart", "replay_start"]))
     if result.start.materializedMomentId.len == 0:
       result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
