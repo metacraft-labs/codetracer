@@ -44,16 +44,6 @@ window.monacoServicesReady = (async () => {
 })();
 
 import { GoldenLayout, VirtualLayout, LayoutManager, LayoutConfig, ItemConfig } from 'golden-layout';
-// Bundle GoldenLayout's stylesheet through webpack's style-loader so the
-// layout is styled regardless of whether the `public/third_party/
-// golden-layout/dist` static copy is present.  index.html / server_index
-// also <link> these files, but that copy is a POSIX symlink into
-// node_modules that a Windows checkout (core.symlinks=false) materializes
-// as a 40-byte text stub — the <link> then 404s and GoldenLayout renders
-// unstyled (inactive tab headers collapse to zero width / unclickable).
-// Importing the CSS here makes the styling self-contained in the bundle.
-import 'golden-layout/dist/css/goldenlayout-base.css';
-import 'golden-layout/dist/css/themes/goldenlayout-light-theme.css';
 window.GoldenLayout = GoldenLayout;
 window.VirtualLayout = VirtualLayout;
 window.LayoutManager = LayoutManager;
