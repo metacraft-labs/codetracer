@@ -1950,12 +1950,34 @@ mod tests {
         );
     }
 
-    /// Containers without any `meta.dat` (legacy `meta.json`-only
-    /// traces) must not be classified as MCR. The helper has to be
-    /// tolerant of missing metadata so callers can fall through to the
-    /// JSON fallback path without seeing spurious errors.
+    /// A `.ct` container with no metadata files at all must not be
+    /// classified as MCR — the helper has to be tolerant of missing
+    /// metadata so callers can fall through to their normal open path
+    /// without seeing spurious errors.
     #[test]
-    fn is_mcr_ctfs_container_handles_missing_meta_dat() {
+    fn is_mcr_ctfs_container_handles_no_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("empty.ct");
+
+        // Provide a single placeholder file so the CTFS container is
+        // valid but carries neither `meta.dat` nor `meta.json`.
+        write_minimal_ctfs(&ct_path, &[("t00000000000", b"")]).unwrap();
+
+        let mut ctfs = read_ctfs(&ct_path);
+        assert!(
+            !is_mcr_ctfs_container(&mut ctfs),
+            "a .ct with no metadata must not classify as MCR",
+        );
+    }
+
+    /// A legacy `.ct` container with only `meta.json` and no binary
+    /// `meta.dat` must be classified as MCR. The materialised DB layout
+    /// never used a JSON metadata file (it predates M-REC-1.5), so the
+    /// mere presence of a parseable `meta.json` in a `.ct` container is
+    /// a definitive MCR indicator. This mirrors the recorder's own
+    /// `trace_reader.nim::readMetadata` meta.dat → meta.json fallback.
+    #[test]
+    fn is_mcr_ctfs_container_classifies_legacy_meta_json_as_mcr() {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("legacy.ct");
 
@@ -1964,8 +1986,8 @@ mod tests {
 
         let mut ctfs = read_ctfs(&ct_path);
         assert!(
-            !is_mcr_ctfs_container(&mut ctfs),
-            "missing meta.dat must not classify as MCR (fall-through to legacy reader)",
+            is_mcr_ctfs_container(&mut ctfs),
+            "legacy meta.json-only container must classify as MCR (fall-through path)",
         );
     }
 
