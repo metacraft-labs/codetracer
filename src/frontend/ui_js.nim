@@ -871,6 +871,21 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
     data.ui.commandPalette.interpreter.commandsPrepared.add(
       fuzzysort.prepare(key))
 
+proc collectFilesystemFilePaths(node: CodetracerFile, acc: var seq[cstring]) =
+  ## Walk a loaded filesystem tree and collect the paths of leaf files.
+  if node.isNil:
+    return
+  if node.children.len == 0:
+    # Leaf node — a file (folders always have children, or are empty
+    # roots).  Use the original path; skip synthetic group nodes whose
+    # path is blank (e.g. the "source folders" root).
+    let p = node.original.path
+    if p.len > 0:
+      acc.add(p)
+  else:
+    for child in node.children:
+      collectFilesystemFilePaths(child, acc)
+
 proc refreshCommandPaletteFileIndex*(data: Data) =
   if data.isNil or data.ui.isNil:
     return
@@ -879,10 +894,28 @@ proc refreshCommandPaletteFileIndex*(data: Data) =
 
   data.ui.commandPalette.interpreter.files = JsAssoc[cstring, cstring]{}
   data.ui.commandPalette.interpreter.filesPrepared = @[]
-  for path in data.services.debugger.paths:
+
+  proc addPath(path: cstring) =
+    if path.len == 0:
+      return
+    if data.ui.commandPalette.interpreter.files.hasKey(path):
+      return
     data.ui.commandPalette.interpreter.files[path] = path
     data.ui.commandPalette.interpreter.filesPrepared.add(
       fuzzysort.prepare(path))
+
+  # Primary source: the debugger's filename list (sent by the backend
+  # via the `filenames` event).  Some DB-trace backends (e.g. the Noir
+  # materialized path) do not emit that event, so also harvest the file
+  # paths from the loaded filesystem tree — the same tree the Files
+  # panel renders — so Ctrl+P file search works for those traces too.
+  for path in data.services.debugger.paths:
+    addPath(path)
+  if not data.services.editor.isNil and not data.services.editor.filesystem.isNil:
+    var fsPaths: seq[cstring] = @[]
+    collectFilesystemFilePaths(data.services.editor.filesystem, fsPaths)
+    for path in fsPaths:
+      addPath(path)
 
 proc followMouse(event: dom.Event) =
   # dont support ancient IE
@@ -1695,6 +1728,10 @@ proc onFilesystemLoaded(
     folders=CodetracerFile)) =
   data.services.editor.filesystem = response.folders
   filesystem.refreshIsoNimFilesystemPanel()
+  # Keep the Ctrl+P file index in sync with the freshly-loaded tree;
+  # DB-trace backends that never emit the `filenames` event rely on this
+  # to populate command-palette file search.
+  data.refreshCommandPaletteFileIndex()
   data.redraw()
 
 proc onFilesystemCategoryLoaded(

@@ -240,43 +240,66 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   return { ...env, ...extra };
 }
 
-function resolveChromiumPath(): string {
-  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
-    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+function resolveChromiumPath(): string | undefined {
+  const explicit = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (explicit && fs.existsSync(explicit)) {
+    return explicit;
   }
 
-  const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (!browsersDir) {
-    throw new Error("PLAYWRIGHT_BROWSERS_PATH is required for this GUI test");
+  // Candidate browser caches: the explicit env var, then Playwright's
+  // default install location.  Returning `undefined` when none yield a
+  // chromium lets `chromium.launch()` fall back to its bundled browser
+  // rather than throwing — the GUI test still runs on machines that did
+  // not set $PLAYWRIGHT_BROWSERS_PATH.
+  const candidateDirs: string[] = [];
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    candidateDirs.push(process.env.PLAYWRIGHT_BROWSERS_PATH);
+  }
+  const homeDir = os.homedir();
+  if (homeDir) {
+    candidateDirs.push(
+      process.platform === "win32"
+        ? path.join(homeDir, "AppData", "Local", "ms-playwright")
+        : path.join(homeDir, ".cache", "ms-playwright"),
+    );
   }
 
-  const chromiumDir = fs
-    .readdirSync(browsersDir)
-    .filter((dir) => dir.startsWith("chromium-") && !dir.includes("headless"))
-    .sort()
-    .pop();
-  if (!chromiumDir) {
-    throw new Error(`no chromium-* directory found in ${browsersDir}`);
-  }
-
-  const chromiumBase = path.join(browsersDir, chromiumDir);
-  if (process.platform === "win32") {
-    const chromeSubdir = fs
-      .readdirSync(chromiumBase)
-      .find((dir) => dir.startsWith("chrome-win"));
-    if (!chromeSubdir) {
-      throw new Error(`no chrome-win* directory found in ${chromiumBase}`);
+  for (const browsersDir of candidateDirs) {
+    if (!fs.existsSync(browsersDir)) {
+      continue;
     }
-    return path.join(chromiumBase, chromeSubdir, "chrome.exe");
+    const chromiumDir = fs
+      .readdirSync(browsersDir)
+      .filter((dir) => dir.startsWith("chromium-") && !dir.includes("headless"))
+      .sort()
+      .pop();
+    if (!chromiumDir) {
+      continue;
+    }
+    const chromiumBase = path.join(browsersDir, chromiumDir);
+    if (process.platform === "win32") {
+      const chromeSubdir = fs
+        .readdirSync(chromiumBase)
+        .find((dir) => dir.startsWith("chrome-win"));
+      if (chromeSubdir) {
+        const exe = path.join(chromiumBase, chromeSubdir, "chrome.exe");
+        if (fs.existsSync(exe)) {
+          return exe;
+        }
+      }
+    } else {
+      const chromeSubdir = fs
+        .readdirSync(chromiumBase)
+        .find((dir) => dir.startsWith("chrome-linux"));
+      if (chromeSubdir) {
+        const exe = path.join(chromiumBase, chromeSubdir, "chrome");
+        if (fs.existsSync(exe)) {
+          return exe;
+        }
+      }
+    }
   }
-
-  const chromeSubdir = fs
-    .readdirSync(chromiumBase)
-    .find((dir) => dir.startsWith("chrome-linux"));
-  if (!chromeSubdir) {
-    throw new Error(`no chrome-linux* directory found in ${chromiumBase}`);
-  }
-  return path.join(chromiumBase, chromeSubdir, "chrome");
+  return undefined;
 }
 
 function expectRequiredPath(label: string, filePath: string): void {
