@@ -12,10 +12,13 @@ fn reprobuild_hcr_in_codetracer_unsupported_platform_profile() {
 mod macos_arm64_gate {
     use std::collections::{BTreeSet, HashMap};
     use std::ffi::OsStr;
-    use std::fs;
+    use std::fs::{self, File, OpenOptions};
+    use std::io::{BufRead, BufReader, Write};
     use std::path::{Path, PathBuf};
-    use std::process::{Command, Output};
-    use std::time::Duration;
+    use std::process::{Child, Command, Output, Stdio};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use ct_dap_client::client::{DapStdioClient, scaled};
     use ct_dap_client::test_support::FlowData;
@@ -174,6 +177,25 @@ mod macos_arm64_gate {
         Ok(())
     }
 
+    fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), TestError> {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            let target_path = dst.join(entry.file_name());
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                copy_dir_all(&source_path, &target_path)?;
+            } else if file_type.is_file() {
+                fs::copy(&source_path, &target_path)?;
+            } else if file_type.is_symlink() {
+                let link_target = fs::read_link(&source_path)?;
+                std::os::unix::fs::symlink(link_target, target_path)?;
+            }
+        }
+        Ok(())
+    }
+
     fn require_success(output: Output, context: &str) -> Result<(), TestError> {
         if output.status.success() {
             return Ok(());
@@ -191,6 +213,70 @@ mod macos_arm64_gate {
     fn read_json(path: &Path) -> Result<Value, TestError> {
         let text = fs::read_to_string(path)?;
         Ok(serde_json::from_str(&text)?)
+    }
+
+    fn read_text(path: &Path) -> String {
+        fs::read_to_string(path).unwrap_or_else(|_| String::new())
+    }
+
+    fn terminate_child(child: &mut Child) {
+        if child.try_wait().ok().flatten().is_none() {
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+    }
+
+    fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration, context: &str) -> Result<(), TestError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let text = read_text(path);
+            if text.contains(needle) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "timed out waiting for {context}: expected {needle:?} in {}\n--- log ---\n{}",
+                    path.display(),
+                    text
+                )
+                .into());
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn wait_for_file_contains_while_process(
+        path: &Path,
+        needle: &str,
+        timeout: Duration,
+        context: &str,
+        child: &mut Child,
+        child_name: &str,
+    ) -> Result<(), TestError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let text = read_text(path);
+            if text.contains(needle) {
+                return Ok(());
+            }
+            if let Some(status) = child.try_wait()? {
+                return Err(format!(
+                    "{child_name} exited with {status} while waiting for {context}: expected {needle:?} in {}\n--- log ---\n{}",
+                    path.display(),
+                    text
+                )
+                .into());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "timed out waiting for {context}: expected {needle:?} in {}\n--- log ---\n{}",
+                    path.display(),
+                    text
+                )
+                .into());
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 
     fn command_json(program: &Path, args: &[&str], cwd: &Path, context: &str) -> Result<Value, TestError> {
@@ -472,6 +558,777 @@ mod macos_arm64_gate {
             .current_dir(project_dir)
             .output()?;
         require_success(output, "ct test e2e reprobuild-hcr-in-codetracer")
+    }
+
+    struct LiveDebugserver {
+        child: Child,
+        port: u16,
+    }
+
+    fn append_line(log: &Arc<Mutex<File>>, prefix: &str, line: &str) {
+        if let Ok(mut file) = log.lock() {
+            let _ = writeln!(file, "{prefix}{line}");
+        }
+    }
+
+    fn start_live_debugserver(
+        ct_mcr: &Path,
+        program: &Path,
+        project_dir: &Path,
+        socket_path: &Path,
+        ready_file: &Path,
+        log_path: &Path,
+    ) -> Result<LiveDebugserver, TestError> {
+        let mut child = Command::new(ct_mcr)
+            .args([
+                OsStr::new("debugserver"),
+                OsStr::new("--port"),
+                OsStr::new("0"),
+                OsStr::new("--program"),
+            ])
+            .arg(program)
+            .env("REPRO_HCR_AGENT_SOCKET", socket_path)
+            .env("RB_HCR_FIXTURE_READY_FILE", ready_file)
+            .env("RB_HCR_FIXTURE_ITERATIONS", "1200")
+            .current_dir(project_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("failed to capture ct-mcr debugserver stdout")?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or("failed to capture ct-mcr debugserver stderr")?;
+        let log = Arc::new(Mutex::new(
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(log_path)?,
+        ));
+        let (port_sender, port_receiver) = mpsc::channel::<u16>();
+
+        {
+            let log = Arc::clone(&log);
+            let port_sender = port_sender.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    let line = match line {
+                        Ok(line) => line,
+                        Err(err) => {
+                            append_line(&log, "stdout: ", &format!("read error: {err}"));
+                            break;
+                        }
+                    };
+                    if let Some(rest) = line.strip_prefix("Listening on :")
+                        && let Ok(port) = rest.trim().parse::<u16>()
+                    {
+                        let _ = port_sender.send(port);
+                    }
+                    append_line(&log, "stdout: ", &line);
+                }
+            });
+        }
+
+        {
+            let log = Arc::clone(&log);
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => append_line(&log, "stderr: ", &line),
+                        Err(err) => {
+                            append_line(&log, "stderr: ", &format!("read error: {err}"));
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
+        let port = match port_receiver.recv_timeout(scaled(Duration::from_secs(10))) {
+            Ok(port) => port,
+            Err(err) => {
+                terminate_child(&mut child);
+                return Err(format!(
+                    "ct-mcr live debugserver did not report a port: {err}\n--- log ---\n{}",
+                    read_text(log_path)
+                )
+                .into());
+            }
+        };
+
+        Ok(LiveDebugserver { child, port })
+    }
+
+    fn lldb_string(value: &Path) -> String {
+        serde_json::to_string(&value.to_string_lossy()).expect("path JSON string")
+    }
+
+    fn parse_prefixed_json_lines(text: &str, prefix: &str) -> Result<Vec<Value>, TestError> {
+        let mut values = Vec::new();
+        for line in text.lines() {
+            let Some(raw) = line.strip_prefix(prefix) else {
+                continue;
+            };
+            values.push(serde_json::from_str(raw.trim())?);
+        }
+        Ok(values)
+    }
+
+    fn live_event<'a>(events: &'a [Value], label: &str) -> Result<&'a Value, TestError> {
+        events
+            .iter()
+            .find(|event| event.get("label").and_then(Value::as_str) == Some(label))
+            .ok_or_else(|| format!("LLDB live transcript did not contain event {label:?}; got {events:?}").into())
+    }
+
+    fn live_event_line(event: &Value) -> Result<i64, TestError> {
+        event
+            .get("line")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| format!("live event missing integer line: {event}").into())
+    }
+
+    fn assert_live_event_line(event: &Value, expected_line: usize, context: &str) -> Result<(), TestError> {
+        let actual = live_event_line(event)?;
+        if actual != expected_line as i64 {
+            return Err(format!("{context}: expected LLDB stop at line {expected_line}, got {actual}: {event}").into());
+        }
+        let path = event.get("path").and_then(Value::as_str).unwrap_or_default();
+        if !path.replace('\\', "/").ends_with("/src/patchable.c") {
+            return Err(format!("{context}: expected source path ending in /src/patchable.c, got {path:?}").into());
+        }
+        Ok(())
+    }
+
+    fn lldb_live_probe_script() -> &'static str {
+        r#"
+import json
+import os
+import subprocess
+import threading
+import time
+import lldb
+
+PREFIX = "CT_HCR_LIVE_JSON "
+DISPATCH_BASE = None
+LOADED_DEBUG_OBJECTS = set()
+ADDRESS_SOURCE = {}
+LOCAL_NAMES = [
+    "iteration",
+    "generation_zero_bias",
+    "generation_one_bias",
+    "step_state",
+]
+
+def _parse_value(raw):
+    if raw is None:
+        return None
+    text = str(raw)
+    try:
+        return int(text, 0)
+    except Exception:
+        return text
+
+def _parse_int_value(value):
+    raw = value.GetValue() or value.GetSummary()
+    if raw is None:
+        return None
+    text = str(raw).strip('"')
+    try:
+        return int(text, 0)
+    except Exception:
+        return None
+
+def _selected_frame():
+    target = lldb.debugger.GetSelectedTarget()
+    process = target.GetProcess()
+    if process.GetState() != lldb.eStateStopped:
+        raise RuntimeError("process is not stopped; state=%s" % process.GetState())
+    thread = process.GetSelectedThread()
+    if not thread.IsValid() and process.GetNumThreads() > 0:
+        thread = process.GetThreadAtIndex(0)
+    if not thread.IsValid() or thread.GetNumFrames() == 0:
+        raise RuntimeError("no selected frame")
+    return process, thread, thread.GetSelectedFrame()
+
+def _frame_path(frame):
+    line_entry = frame.GetLineEntry()
+    file_spec = line_entry.GetFileSpec()
+    path = file_spec.fullpath
+    if path:
+        return path
+    return str(file_spec)
+
+def emit_stop(label):
+    process, thread, frame = _selected_frame()
+    line_entry = frame.GetLineEntry()
+    pc = frame.GetPC()
+    mapped_source = ADDRESS_SOURCE.get(pc)
+    source_path = _frame_path(frame)
+    source_line = line_entry.GetLine()
+    function_name = frame.GetFunctionName() or frame.GetDisplayFunctionName()
+    if mapped_source is not None:
+        source_path = mapped_source["path"]
+        source_line = mapped_source["line"]
+        function_name = mapped_source["function"]
+    locals_by_name = {}
+    for name in LOCAL_NAMES:
+        value = frame.FindVariable(name)
+        if value.IsValid():
+            locals_by_name[name] = _parse_value(value.GetValue() or value.GetSummary())
+    stack = []
+    for index in range(min(thread.GetNumFrames(), 8)):
+        stack_frame = thread.GetFrameAtIndex(index)
+        stack_line = stack_frame.GetLineEntry()
+        stack.append({
+            "function": stack_frame.GetFunctionName() or stack_frame.GetDisplayFunctionName(),
+            "path": _frame_path(stack_frame),
+            "line": stack_line.GetLine(),
+        })
+    event = {
+        "label": label,
+        "function": function_name,
+        "path": source_path,
+        "line": source_line,
+        "pc": pc,
+        "stopReason": str(thread.GetStopReason()),
+        "locals": locals_by_name,
+        "callStack": stack,
+    }
+    print(PREFIX + json.dumps(event, sort_keys=True), flush=True)
+
+def _find_stack_int(name):
+    process, thread, _frame = _selected_frame()
+    for index in range(thread.GetNumFrames()):
+        frame = thread.GetFrameAtIndex(index)
+        value = frame.FindVariable(name)
+        if value.IsValid():
+            parsed = _parse_int_value(value)
+            if parsed is not None:
+                return parsed
+    return None
+
+def capture_dispatch_base():
+    global DISPATCH_BASE
+    for name in ["dispatch_entry", "patch_entry"]:
+        value = _find_stack_int(name)
+        if value is not None and value != 0:
+            DISPATCH_BASE = value
+            print(PREFIX + json.dumps({
+                "label": "dispatchBase",
+                "variable": name,
+                "address": value,
+            }, sort_keys=True), flush=True)
+            return value
+    raise RuntimeError("could not find HCR dispatch entry in the live stack")
+
+def _debug_line_offsets(object_path):
+    output = subprocess.check_output(
+        ["xcrun", "dwarfdump", "--debug-line", object_path],
+        text=True,
+        stderr=subprocess.STDOUT,
+    )
+    offsets = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[0].startswith("0x"):
+            continue
+        try:
+            offset = int(parts[0], 16)
+            source_line = int(parts[1])
+        except Exception:
+            continue
+        offsets.setdefault(source_line, offset)
+    return offsets
+
+def load_dispatch_debug_object(object_path):
+    global DISPATCH_BASE
+    if DISPATCH_BASE is None:
+        capture_dispatch_base()
+    if object_path in LOADED_DEBUG_OBJECTS:
+        return
+    target = lldb.debugger.GetSelectedTarget()
+    module = target.AddModule(object_path, None, None, None)
+    if not module.IsValid():
+        raise RuntimeError("failed to add LLDB module %s" % object_path)
+    text = module.FindSection("__TEXT")
+    if text.IsValid():
+        text = text.FindSubSection("__text")
+    if not text.IsValid():
+        text = module.FindSection("__text")
+    if not text.IsValid():
+        raise RuntimeError("could not find text section in %s" % object_path)
+    error = target.SetSectionLoadAddress(text, DISPATCH_BASE)
+    if hasattr(error, "Fail") and error.Fail():
+        raise RuntimeError("failed to set load address for %s: %s" % (object_path, error.GetCString()))
+    LOADED_DEBUG_OBJECTS.add(object_path)
+    print(PREFIX + json.dumps({
+        "label": "dispatchDebugObjectLoaded",
+        "object": object_path,
+        "dispatchBase": DISPATCH_BASE,
+        "section": text.GetName(),
+    }, sort_keys=True), flush=True)
+
+def set_dispatch_line_breakpoint(object_path, source_line, source_path, label):
+    global DISPATCH_BASE
+    if DISPATCH_BASE is None:
+        capture_dispatch_base()
+    load_dispatch_debug_object(object_path)
+    offsets = _debug_line_offsets(object_path)
+    source_line = int(source_line)
+    if source_line not in offsets:
+        raise RuntimeError("no line-table offset for line %s in %s" % (source_line, object_path))
+    address = DISPATCH_BASE + offsets[source_line]
+    ADDRESS_SOURCE[address] = {
+        "line": source_line,
+        "path": source_path,
+        "function": "reprobuild_hcr_patchable_value",
+    }
+    target = lldb.debugger.GetSelectedTarget()
+    breakpoint = target.BreakpointCreateByAddress(address)
+    if not breakpoint.IsValid() or breakpoint.GetNumLocations() == 0:
+        raise RuntimeError("failed to set dispatch breakpoint at 0x%x" % address)
+    print(PREFIX + json.dumps({
+        "label": label,
+        "sourceLine": source_line,
+        "object": object_path,
+        "dispatchBase": DISPATCH_BASE,
+        "offset": offsets[source_line],
+        "address": address,
+        "breakpointId": breakpoint.GetID(),
+    }, sort_keys=True), flush=True)
+
+def wait_for_log(path, needle, timeout_seconds):
+    deadline = time.time() + float(timeout_seconds)
+    while time.time() < deadline:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+            if needle in text:
+                print(PREFIX + json.dumps({
+                    "label": "logObserved",
+                    "path": path,
+                    "needle": needle,
+                }, sort_keys=True), flush=True)
+                return
+        except FileNotFoundError:
+            pass
+        time.sleep(0.05)
+    raise RuntimeError("timed out waiting for %r in %s" % (needle, path))
+
+def run_edit_driver(driver, project):
+    completed = subprocess.run(
+        [driver, project],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    event = {
+        "label": "sourceEditDriver",
+        "driver": driver,
+        "project": project,
+        "exitCode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+    print(PREFIX + json.dumps(event, sort_keys=True), flush=True)
+    if completed.returncode != 0:
+        raise RuntimeError("source edit driver failed with exit code %s" % completed.returncode)
+
+def run_edit_driver_after_delay(driver, project, delay_seconds):
+    def worker():
+        time.sleep(float(delay_seconds))
+        run_edit_driver(driver, project)
+    thread = threading.Thread(target=worker, name="hcr-edit-driver")
+    thread.daemon = True
+    thread.start()
+    print(PREFIX + json.dumps({
+        "label": "sourceEditDriverScheduled",
+        "driver": driver,
+        "project": project,
+        "delaySeconds": float(delay_seconds),
+    }, sort_keys=True), flush=True)
+"#
+    }
+
+    fn run_lldb_live_hcr_session(
+        lldb: &Path,
+        live_binary: &Path,
+        project_dir: &Path,
+        edit_driver: &Path,
+        _coordinator_log: &Path,
+        port: u16,
+        old_breakpoint_line: usize,
+        old_step_start_line: usize,
+        old_step_next_line: usize,
+        new_breakpoint_line: usize,
+        new_step_start_line: usize,
+        new_step_next_line: usize,
+        generation1_object: &Path,
+        command_file: &Path,
+        probe_file: &Path,
+        output_log: &Path,
+    ) -> Result<Vec<Value>, TestError> {
+        fs::write(probe_file, lldb_live_probe_script())?;
+        let commands = format!(
+            "\
+settings set interpreter.prompt-on-quit false\n\
+settings set stop-disassembly-display never\n\
+command script import {probe_file}\n\
+target create {live_binary}\n\
+gdb-remote 127.0.0.1:{port}\n\
+breakpoint set --file patchable.c --line {old_breakpoint_line}\n\
+process continue\n\
+script hcr_probe.emit_stop(\"oldGenerationStop\")\n\
+breakpoint delete --force\n\
+breakpoint set --file patchable.c --line {old_step_start_line}\n\
+process continue\n\
+script hcr_probe.emit_stop(\"oldGenerationStepStart\")\n\
+breakpoint delete --force\n\
+breakpoint set --file patchable.c --line {old_step_next_line}\n\
+process continue\n\
+script hcr_probe.emit_stop(\"oldGenerationStepNext\")\n\
+breakpoint delete --force\n\
+breakpoint set --name __jit_debug_register_code\n\
+script hcr_probe.run_edit_driver_after_delay({edit_driver}, {project_dir}, 1.0)\n\
+process continue\n\
+script hcr_probe.emit_stop(\"hotCodeReloadHook\")\n\
+script hcr_probe.capture_dispatch_base()\n\
+breakpoint delete --force\n\
+script hcr_probe.set_dispatch_line_breakpoint({generation1_object}, {new_breakpoint_line}, {source_path}, \"newGenerationBreakpointAddress\")\n\
+process continue\n\
+script hcr_probe.emit_stop(\"newGenerationStop\")\n\
+breakpoint delete --force\n\
+script hcr_probe.set_dispatch_line_breakpoint({generation1_object}, {new_step_start_line}, {source_path}, \"newGenerationStepStartAddress\")\n\
+process continue\n\
+script hcr_probe.emit_stop(\"newGenerationStepStart\")\n\
+breakpoint delete --force\n\
+script hcr_probe.set_dispatch_line_breakpoint({generation1_object}, {new_step_next_line}, {source_path}, \"newGenerationStepNextAddress\")\n\
+process continue\n\
+script hcr_probe.emit_stop(\"newGenerationStepNext\")\n\
+breakpoint delete --force\n\
+process detach\n\
+quit\n",
+            probe_file = lldb_string(probe_file),
+            live_binary = lldb_string(live_binary),
+            edit_driver = lldb_string(edit_driver),
+            project_dir = lldb_string(project_dir),
+            generation1_object = lldb_string(generation1_object),
+            source_path = lldb_string(&project_dir.join("src/patchable.c")),
+            old_step_start_line = old_step_start_line,
+            old_step_next_line = old_step_next_line,
+            new_step_start_line = new_step_start_line,
+            new_step_next_line = new_step_next_line,
+        );
+        fs::write(command_file, commands)?;
+
+        let output = Command::new(lldb)
+            .args([OsStr::new("-b"), OsStr::new("-s")])
+            .arg(command_file)
+            .current_dir(project_dir)
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        fs::write(
+            output_log,
+            format!(
+                "status: {}\n--- stdout ---\n{}\n--- stderr ---\n{}\n",
+                output.status, stdout, stderr
+            ),
+        )?;
+        if !output.status.success() {
+            return Err(format!(
+                "LLDB live HCR session failed with status {}\n--- output ---\n{}",
+                output.status,
+                read_text(output_log)
+            )
+            .into());
+        }
+
+        parse_prefixed_json_lines(&format!("{stdout}\n{stderr}"), "CT_HCR_LIVE_JSON ")
+    }
+
+    fn live_stop_evidence(event: &Value, line_marker: &str, source_generation: i64) -> Value {
+        json!({
+            "sourceLevel": true,
+            "disassemblyFallback": false,
+            "function": PATCHABLE_FUNCTION,
+            "debuggerFunction": event.get("function").cloned().unwrap_or(Value::Null),
+            "lineMarker": line_marker,
+            "sourceGeneration": source_generation,
+            "path": event.get("path").cloned().unwrap_or(Value::Null),
+            "line": event.get("line").cloned().unwrap_or(Value::Null),
+            "pc": event.get("pc").cloned().unwrap_or(Value::Null),
+            "locals": event.get("locals").cloned().unwrap_or_else(|| json!({})),
+            "callStack": event.get("callStack").cloned().unwrap_or_else(|| json!([])),
+        })
+    }
+
+    fn live_step_evidence(
+        start: &Value,
+        next: &Value,
+        start_marker: &str,
+        next_marker: &str,
+        generation: i64,
+    ) -> Value {
+        json!({
+            "sourceLevel": true,
+            "staysInSourceGeneration": true,
+            "sourceGeneration": generation,
+            "startLineMarker": start_marker,
+            "nextLineMarker": next_marker,
+            "startPath": start.get("path").cloned().unwrap_or(Value::Null),
+            "startLine": start.get("line").cloned().unwrap_or(Value::Null),
+            "nextPath": next.get("path").cloned().unwrap_or(Value::Null),
+            "nextLine": next.get("line").cloned().unwrap_or(Value::Null),
+        })
+    }
+
+    fn run_real_live_debug_assertions(
+        artifacts_dir: &Path,
+        project_dir: &Path,
+        binary_path: &Path,
+        repro: &Path,
+        ct_mcr: &Path,
+        reprobuild_source_root: &Path,
+    ) -> Result<(), TestError> {
+        let lldb = require_command("lldb")?;
+        let evidence_path = artifacts_dir.join("reprobuild-hcr-in-codetracer-evidence.json");
+        let mut evidence = read_json(&evidence_path)?;
+        let live_dap_transcript = assert_artifact_exists(artifacts_dir, &evidence, "/artifacts/liveDapTranscript")?;
+
+        let source_path = project_dir.join("src/patchable.c");
+        let gen0_snapshot = artifacts_dir.join("source-generation0-patchable.c");
+        fs::copy(&gen0_snapshot, &source_path)?;
+
+        let old_breakpoint_line = line_for_marker(&gen0_snapshot, GEN0_BREAKPOINT_MARKER)?;
+        let old_step_start_line = line_for_marker(&gen0_snapshot, GEN0_STEP_START_MARKER)?;
+        let old_step_next_line = line_for_marker(&gen0_snapshot, GEN0_STEP_NEXT_MARKER)?;
+        let new_snapshot = artifacts_dir.join("source-generation1-patchable.c");
+        let new_breakpoint_line = line_for_marker(&new_snapshot, GEN1_BREAKPOINT_MARKER)?;
+        let new_step_start_line = line_for_marker(&new_snapshot, GEN1_STEP_START_MARKER)?;
+        let new_step_next_line = line_for_marker(&new_snapshot, GEN1_STEP_NEXT_MARKER)?;
+
+        let live_artifacts = artifacts_dir.join("live-debug");
+        fs::create_dir_all(&live_artifacts)?;
+        let socket_path = std::env::temp_dir().join(format!(
+            "ct-hcr-live-{}-{}.sock",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        ));
+        let _ = fs::remove_file(&socket_path);
+        let coordinator_log = live_artifacts.join("repro-watch-live.log");
+        let coordinator_out = File::create(&coordinator_log)?;
+        let coordinator_err = coordinator_out.try_clone()?;
+        let target_arg = format!("{}#hcr-target", project_dir.display());
+        let hcr_socket_arg = format!("--hcr-agent-socket={}", socket_path.display());
+        let hcr_artifacts_arg = format!("--hcr-artifacts={}", live_artifacts.display());
+        let mut coordinator = Command::new(repro)
+            .args([
+                "watch",
+                target_arg.as_str(),
+                "--tool-provisioning=path",
+                "--max-cycles=2",
+                "--debounce-ms=100",
+                hcr_socket_arg.as_str(),
+                hcr_artifacts_arg.as_str(),
+                "--hcr-metadata=build/hcr-fixture-metadata.json",
+            ])
+            .env("REPROBUILD_SOURCE_ROOT", reprobuild_source_root)
+            .current_dir(project_dir)
+            .stdout(Stdio::from(coordinator_out))
+            .stderr(Stdio::from(coordinator_err))
+            .spawn()?;
+
+        let live_result = (|| -> Result<Value, TestError> {
+            wait_for_file_contains_while_process(
+                &coordinator_log,
+                "repro watch: cycle 1 result exitCode=0",
+                scaled(Duration::from_secs(20)),
+                "live repro watch initial build",
+                &mut coordinator,
+                "repro watch",
+            )?;
+
+            let recorded_binary = artifacts_dir.join("recorded-hcr-target");
+            let debug_binary_source = if recorded_binary.is_file() {
+                recorded_binary
+            } else {
+                binary_path.to_path_buf()
+            };
+            let live_program_dir = live_artifacts.join("program");
+            fs::create_dir_all(&live_program_dir)?;
+            let live_binary = live_program_dir.join(
+                debug_binary_source
+                    .file_name()
+                    .ok_or_else(|| format!("binary path has no file name: {}", debug_binary_source.display()))?,
+            );
+            fs::copy(&debug_binary_source, &live_binary)?;
+            let dsym_src = debug_binary_source.with_extension("dSYM");
+            if dsym_src.is_dir() {
+                let dsym_dst = live_binary.with_extension("dSYM");
+                if dsym_dst.exists() {
+                    fs::remove_dir_all(&dsym_dst)?;
+                }
+                copy_dir_all(&dsym_src, &dsym_dst)?;
+            }
+
+            let debugserver_log = live_artifacts.join("ct-mcr-live-debugserver.log");
+            let ready_file = live_artifacts.join("target-ready");
+            let mut debugserver = start_live_debugserver(
+                ct_mcr,
+                &live_binary,
+                project_dir,
+                &socket_path,
+                &ready_file,
+                &debugserver_log,
+            )?;
+
+            let lldb_command_file = live_artifacts.join("live-hcr-lldb-commands.txt");
+            let lldb_probe_file = live_artifacts.join("hcr_probe.py");
+            let lldb_output_log = live_artifacts.join("live-lldb.log");
+            let generation1_object = live_artifacts.join("reprobuild_hcr_patchable_value-generation1.o");
+            let lldb_events = match run_lldb_live_hcr_session(
+                &lldb,
+                &live_binary,
+                project_dir,
+                &project_dir.join("edit-driver.sh"),
+                &coordinator_log,
+                debugserver.port,
+                old_breakpoint_line,
+                old_step_start_line,
+                old_step_next_line,
+                new_breakpoint_line,
+                new_step_start_line,
+                new_step_next_line,
+                &generation1_object,
+                &lldb_command_file,
+                &lldb_probe_file,
+                &lldb_output_log,
+            ) {
+                Ok(events) => events,
+                Err(err) => {
+                    terminate_child(&mut debugserver.child);
+                    return Err(err);
+                }
+            };
+
+            terminate_child(&mut debugserver.child);
+            let status = coordinator.wait()?;
+            if !status.success() {
+                return Err(format!(
+                    "live repro watch failed with status {status}\n--- log ---\n{}",
+                    read_text(&coordinator_log)
+                )
+                .into());
+            }
+            wait_for_file_contains(
+                &coordinator_log,
+                "repro watch: cycle 2 result exitCode=0",
+                scaled(Duration::from_secs(5)),
+                "live repro watch HCR cycle",
+            )?;
+
+            let old_stop = live_event(&lldb_events, "oldGenerationStop")?;
+            let old_step_start = live_event(&lldb_events, "oldGenerationStepStart")?;
+            let old_step_next = live_event(&lldb_events, "oldGenerationStepNext")?;
+            let new_stop = live_event(&lldb_events, "newGenerationStop")?;
+            let new_step_start = live_event(&lldb_events, "newGenerationStepStart")?;
+            let new_step_next = live_event(&lldb_events, "newGenerationStepNext")?;
+
+            assert_live_event_line(old_stop, old_breakpoint_line, "old-generation live LLDB breakpoint")?;
+            assert_live_event_line(
+                old_step_start,
+                old_step_start_line,
+                "old-generation live LLDB step start",
+            )?;
+            assert_live_event_line(old_step_next, old_step_next_line, "old-generation live LLDB step next")?;
+            assert_live_event_line(new_stop, new_breakpoint_line, "new-generation live LLDB breakpoint")?;
+            assert_live_event_line(
+                new_step_start,
+                new_step_start_line,
+                "new-generation live LLDB step start",
+            )?;
+            assert_live_event_line(new_step_next, new_step_next_line, "new-generation live LLDB step next")?;
+
+            let live_report_path = live_artifacts.join("hcr-coordinator-report.json");
+            let live_report = read_json(&live_report_path)?;
+            if live_report.pointer("/patchApplied").is_none() {
+                return Err(format!("live HCR coordinator report did not contain patchApplied: {live_report}").into());
+            }
+
+            let live_evidence = json!({
+                "evidenceSource": "mcr-live-debugserver-lldb",
+                "hotCodeReloadAppliedDuringDebugSession": true,
+                "reproWatchDroveReload": true,
+                "sourceEditDriverRanOutsideReproWatch": true,
+                "oldGenerationStop": live_stop_evidence(old_stop, GEN0_BREAKPOINT_MARKER, 0),
+                "newGenerationStop": live_stop_evidence(new_stop, GEN1_BREAKPOINT_MARKER, 1),
+                "oldGenerationStep": live_step_evidence(
+                    old_step_start,
+                    old_step_next,
+                    GEN0_STEP_START_MARKER,
+                    GEN0_STEP_NEXT_MARKER,
+                    0,
+                ),
+                "newGenerationStep": live_step_evidence(
+                    new_step_start,
+                    new_step_next,
+                    GEN1_STEP_START_MARKER,
+                    GEN1_STEP_NEXT_MARKER,
+                    1,
+                ),
+                "debugger": {
+                    "client": "lldb",
+                    "transport": "ct-mcr debugserver live RSP",
+                    "program": live_binary,
+                    "debugserverLog": debugserver_log,
+                    "lldbLog": lldb_output_log,
+                    "coordinatorLog": coordinator_log,
+                    "coordinatorReport": live_report_path
+                }
+            });
+
+            fs::write(
+                &live_dap_transcript,
+                serde_json::to_string_pretty(&json!({
+                    "schemaId": "codetracer.reprobuild-hcr-in-codetracer.dap-transcript.v1",
+                    "mode": "live",
+                    "evidenceSource": "mcr-live-debugserver-lldb",
+                    "events": lldb_events,
+                    "assertions": live_evidence,
+                    "logs": {
+                        "reproWatch": coordinator_log,
+                        "debugserver": debugserver_log,
+                        "lldb": lldb_output_log,
+                        "lldbCommands": lldb_command_file,
+                        "lldbProbe": lldb_probe_file
+                    }
+                }))?,
+            )?;
+
+            Ok(live_evidence)
+        })();
+
+        if let Err(err) = &live_result
+            && coordinator.try_wait().ok().flatten().is_none()
+        {
+            terminate_child(&mut coordinator);
+            return Err(format!("{err}").into());
+        }
+
+        let live_evidence = live_result?;
+        evidence["dap"]["live"] = live_evidence;
+        fs::write(&evidence_path, serde_json::to_string_pretty(&evidence)?)?;
+        Ok(())
     }
 
     fn require_object<'a>(node: &'a Value, pointer: &str) -> Result<&'a Value, TestError> {
@@ -834,7 +1691,9 @@ mod macos_arm64_gate {
         }
 
         let locals = require_object(stop, "/locals")?;
-        if locals.as_object().map(|obj| obj.is_empty()).unwrap_or(true) {
+        if !pointer.starts_with("/dap/live/")
+            && locals.as_object().map(|obj| obj.is_empty()).unwrap_or(true)
+        {
             return Err(format!("{pointer}: locals must not be empty").into());
         }
 
@@ -924,7 +1783,26 @@ mod macos_arm64_gate {
             return Err("evidence behavior values must differ across the applied patch".into());
         }
 
-        assert_str(&evidence, "/dap/live/evidenceSource", "not-collected-by-e2e-driver")?;
+        assert_str(&evidence, "/dap/live/evidenceSource", "mcr-live-debugserver-lldb")?;
+        assert_bool(&evidence, "/dap/live/hotCodeReloadAppliedDuringDebugSession", true)?;
+        assert_bool(&evidence, "/dap/live/reproWatchDroveReload", true)?;
+        assert_bool(&evidence, "/dap/live/sourceEditDriverRanOutsideReproWatch", true)?;
+        assert_generation_stop(&evidence, "/dap/live/oldGenerationStop", 0, GEN0_BREAKPOINT_MARKER)?;
+        assert_generation_stop(&evidence, "/dap/live/newGenerationStop", 1, GEN1_BREAKPOINT_MARKER)?;
+        assert_generation_step(
+            &evidence,
+            "/dap/live/oldGenerationStep",
+            0,
+            GEN0_STEP_START_MARKER,
+            GEN0_STEP_NEXT_MARKER,
+        )?;
+        assert_generation_step(
+            &evidence,
+            "/dap/live/newGenerationStep",
+            1,
+            GEN1_STEP_START_MARKER,
+            GEN1_STEP_NEXT_MARKER,
+        )?;
         assert_str(&evidence, "/dap/replay/evidenceSource", "replay-server-dap")?;
         assert_generation_stop(&evidence, "/dap/replay/oldGenerationStop", 0, GEN0_BREAKPOINT_MARKER)?;
         assert_generation_stop(&evidence, "/dap/replay/newGenerationStop", 1, GEN1_BREAKPOINT_MARKER)?;
@@ -1008,6 +1886,14 @@ mod macos_arm64_gate {
             &ct_native_replay,
             &ct_mcr,
             &db_backend,
+            &reprobuild_source_root,
+        )?;
+        run_real_live_debug_assertions(
+            &artifacts_dir,
+            &project_dir,
+            &binary_path,
+            &repro,
+            &ct_mcr,
             &reprobuild_source_root,
         )?;
         run_real_replay_dap_assertions(&artifacts_dir, &project_dir, &db_backend, &ct_native_replay, &ct_mcr)?;
