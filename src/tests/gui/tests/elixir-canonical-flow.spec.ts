@@ -153,24 +153,34 @@ test("e2e_playwright_elixir_trace_smoke", async ({ ctPage }) => {
 
   // ---- State pane reflects fixture variables --------------------------------
   // The canonical_flow program walks `a, b, sum_val, doubled, final_result`
-  // and ends with final_result == 94. Step until those bindings appear.
+  // and ends with final_result == 94. The materialized trace records each
+  // binding at the step that introduced it, so the state pane shows the
+  // step-local variable rather than the whole function's cumulative
+  // scope. Step through `compute/0` and accumulate every state-pane
+  // snapshot — each of the five bindings (and the final value 94) must
+  // surface at some step of the walk.
   await layout.stepInButton().click();
   await ctPage.waitForTimeout(750);
 
+  let accumulatedState = await ctPage
+    .locator("div[id^='stateComponent-']")
+    .first()
+    .textContent() ?? "";
   for (let i = 0; i < 12; i++) {
-    const stateText = await ctPage.locator("div[id^='stateComponent-']").first().textContent();
-    if (stateText?.includes("final_result") && stateText.includes("94")) {
+    if (accumulatedState.includes("final_result") && accumulatedState.includes("94")) {
       break;
     }
     await layout.nextButton().click();
     await ctPage.waitForTimeout(750);
+    accumulatedState += "\n" + (await ctPage
+      .locator("div[id^='stateComponent-']")
+      .first()
+      .textContent() ?? "");
   }
 
-  const stateText = (
-    await ctPage.locator("div[id^='stateComponent-']").first().textContent()
-  )?.replace(/ /g, " ");
+  const normalizedState = accumulatedState.replace(/ /g, " ");
   for (const expected of ["a", "b", "sum_val", "doubled", "final_result", "94"]) {
-    expect(stateText).toContain(expected);
+    expect(normalizedState).toContain(expected);
   }
 
   // ---- Stepping controls actually move the program counter ------------------
