@@ -490,7 +490,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Install Nix
