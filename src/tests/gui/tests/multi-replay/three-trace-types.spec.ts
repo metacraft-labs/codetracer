@@ -131,12 +131,15 @@ async function sessionHasTrace(
  * the `CODETRACER::load-recent-trace` IPC message.
  *
  * M-REC-2 / M-REC-3 / M-REC-6: ``traceId`` is the UUIDv7 recording-id
- * string assigned by the recorder.  Numeric MCR-import ids are still
- * accepted by older code paths; both go over the wire as-is.
+ * string assigned by the recorder.  Both the DB-trace path
+ * (``recordTestProgram``) and the MCR-import path (``importMcrTrace*``)
+ * now return UUIDv7 strings — the legacy numeric form was retired in
+ * M-REC-2 and is no longer accepted by ``trace_index.find`` on the
+ * renderer side.
  */
 async function loadTraceIntoActiveSession(
   page: import("@playwright/test").Page,
-  traceId: string | number,
+  traceId: string,
 ): Promise<void> {
   await page.evaluate((id) => {
     const d = (window as any).data;
@@ -198,11 +201,20 @@ async function switchToSession(
 /**
  * Import an MCR portable .ct trace into the CodeTracer database by
  * spawning `ct host --trace-path=<file> --port=<unused>` and capturing
- * the "imported as trace id NNN" line. The process is killed immediately
- * after the trace ID is captured (we only need the DB import, not the
- * web server).
+ * the "imported as trace id <uuid>" line.  The process is killed
+ * immediately after the trace ID is captured (we only need the DB
+ * import, not the web server).
+ *
+ * M-REC-2/3: `ct host` assigns a UUIDv7 *string* recording id, not the
+ * pre-1.0 integer id.  We match the canonical 8-4-4-4-12 hex form
+ * rather than `\d+`, which previously captured only the leading digits
+ * of the UUID (e.g. "019" from "019e4843-...") and produced a bogus
+ * integer recording-id that `trace_index.find` could never resolve —
+ * causing the renderer's `assignTrace` poll to exhaust its 60-attempt
+ * budget and `sessionHasTrace(ctPage, 2)` to never become true.  Mirrors
+ * the proven pattern in `lib/fixtures.ts` (importTraceFolder).
  */
-function importMcrTrace(ctFilePath: string): number {
+function importMcrTrace(ctFilePath: string): string {
   if (!fs.existsSync(ctFilePath)) {
     throw new Error(`MCR trace file not found: ${ctFilePath}`);
   }
@@ -232,9 +244,11 @@ function importMcrTrace(ctFilePath: string): number {
   // The process may have been killed by timeout or may have exited after
   // we got what we need. Parse stdout for the trace ID regardless.
   const allOutput = (ctProcess.stdout ?? "") + "\n" + (ctProcess.stderr ?? "");
-  const match = allOutput.match(/imported as trace id\s+(\d+)/);
+  const match = allOutput.match(
+    /imported as trace id\s+([0-9a-fA-F-]{36})/,
+  );
   if (match) {
-    const traceId = Number(match[1]);
+    const traceId = match[1];
     console.log(`# imported MCR trace from ${ctFilePath} as id ${traceId}`);
     return traceId;
   }
@@ -248,11 +262,14 @@ function importMcrTrace(ctFilePath: string): number {
 }
 
 /**
- * Async version of MCR trace import that spawns ct host, captures the trace ID
- * from output, then kills the process. This avoids the spawnSync timeout issue
- * where the process keeps running as a server.
+ * Async version of MCR trace import that spawns `ct host`, captures the
+ * trace ID from output, then kills the process.  This avoids the
+ * spawnSync timeout issue where the process keeps running as a server.
+ *
+ * M-REC-2/3: returns the UUIDv7 *string* recording id.  See
+ * ``importMcrTrace`` for the regex rationale.
  */
-function importMcrTraceAsync(ctFilePath: string): Promise<number> {
+function importMcrTraceAsync(ctFilePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(ctFilePath)) {
       reject(new Error(`MCR trace file not found: ${ctFilePath}`));
@@ -289,13 +306,15 @@ function importMcrTraceAsync(ctFilePath: string): Promise<number> {
       }
     }, 60_000);
 
+    const uuidV7Pattern = /imported as trace id\s+([0-9a-fA-F-]{36})/;
+
     const checkOutput = () => {
       const allOutput = stdout + "\n" + stderr;
-      const match = allOutput.match(/imported as trace id\s+(\d+)/);
+      const match = allOutput.match(uuidV7Pattern);
       if (match && !resolved) {
         resolved = true;
         clearTimeout(killTimeout);
-        const traceId = Number(match[1]);
+        const traceId = match[1];
         console.log(`# imported MCR trace from ${ctFilePath} as id ${traceId}`);
         // Kill the ct host process since we only needed the import.
         child.kill("SIGTERM");
@@ -327,9 +346,9 @@ function importMcrTraceAsync(ctFilePath: string): Promise<number> {
         clearTimeout(killTimeout);
         // Check one more time in case output arrived before exit.
         const allOutput = stdout + "\n" + stderr;
-        const match = allOutput.match(/imported as trace id\s+(\d+)/);
+        const match = allOutput.match(uuidV7Pattern);
         if (match) {
-          resolve(Number(match[1]));
+          resolve(match[1]);
         } else {
           reject(new Error(
             `ct host exited with code ${code} without producing trace ID.\n` +
