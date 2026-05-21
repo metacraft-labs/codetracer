@@ -218,7 +218,11 @@ async function expectCaptionChrome(page: Page): Promise<void> {
   await expect(toolbarHost).toBeVisible({ timeout: 10_000 });
   const toolbar = toolbarHost.locator(".isonim-debug-controls");
   await expect(toolbar).toBeVisible({ timeout: 10_000 });
-  await expect(toolbar.locator("button")).toHaveCount(13, { timeout: 10_000 });
+  // The IsoNim debug-controls toolbar renders 14 buttons: history
+  // back/forward, reverse-next/next, reverse-step-in/step-in,
+  // reverse-step-out/step-out, reverse-continue/continue, run-to-entry,
+  // reset-operation, run-tests, and the MCR jump-to-live button.
+  await expect(toolbar.locator("button")).toHaveCount(14, { timeout: 10_000 });
 
   await retryAction(async () => {
     const menuBox = await menu.boundingBox();
