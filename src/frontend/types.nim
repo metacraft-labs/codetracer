@@ -2565,4 +2565,15 @@ proc toEnum*(langType: string, i: int, n: defaultstring): Value =
   discard
 
 proc baseName*(a: cstring): cstring =
-  cast[seq[cstring]](a.toJs.split(cstring"/"))[^1]
+  ## Last path segment of ``a``.  Handles both POSIX (``/``) and Windows
+  ## (``\``) separators: a `/`-only split returns the entire string for
+  ## an absolute Windows path (``D:\repo\src\main.nr``), so normalize
+  ## backslashes to forward slashes before splitting.
+  let normalized = cast[cstring](a.toJs.split(cstring"\\").join(cstring"/"))
+  let parts = cast[seq[cstring]](normalized.toJs.split(cstring"/"))
+  if parts.len == 0:
+    return a
+  result = parts[^1]
+  if result.len == 0 and parts.len >= 2:
+    # Trailing separator (e.g. ``foo/bar/``) — use the segment before it.
+    result = parts[^2]
