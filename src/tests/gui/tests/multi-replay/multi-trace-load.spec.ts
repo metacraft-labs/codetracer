@@ -73,16 +73,16 @@ async function getSessionTrace(
   page: import("@playwright/test").Page,
   sessionIndex: number,
 ): Promise<{ id: string; program: string; outputFolder: string } | null> {
-  // M-REC-2 / M-REC-3 / M-REC-6: ``trace.id`` is a UUIDv7 recording-id
-  // string; coerce to string rather than ``Number()`` so the raw id is
-  // preserved end-to-end.
+  // M-REC-3: the trace identity field is ``recordingId`` (a UUIDv7
+  // string).  The legacy ``id`` field is a numeric-row hangover that is
+  // empty on the data model — prefer recordingId, fall back to id.
   return page.evaluate((idx) => {
     const d = (window as any).data;
     const session = d?.sessions?.[idx];
     const trace = session?.trace;
     if (!trace) return null;
     return {
-      id: String(trace.id ?? ""),
+      id: String(trace.recordingId ?? trace.id ?? ""),
       program: String(trace.program ?? ""),
       outputFolder: String(trace.outputFolder ?? ""),
     };
