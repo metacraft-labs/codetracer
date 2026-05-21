@@ -711,16 +711,12 @@ mod macos_arm64_gate {
     fn lldb_live_probe_script() -> &'static str {
         r#"
 import json
-import os
 import subprocess
 import threading
 import time
 import lldb
 
 PREFIX = "CT_HCR_LIVE_JSON "
-DISPATCH_BASE = None
-LOADED_DEBUG_OBJECTS = set()
-ADDRESS_SOURCE = {}
 LOCAL_NAMES = [
     "iteration",
     "generation_zero_bias",
@@ -771,14 +767,9 @@ def emit_stop(label):
     process, thread, frame = _selected_frame()
     line_entry = frame.GetLineEntry()
     pc = frame.GetPC()
-    mapped_source = ADDRESS_SOURCE.get(pc)
     source_path = _frame_path(frame)
     source_line = line_entry.GetLine()
     function_name = frame.GetFunctionName() or frame.GetDisplayFunctionName()
-    if mapped_source is not None:
-        source_path = mapped_source["path"]
-        source_line = mapped_source["line"]
-        function_name = mapped_source["function"]
     locals_by_name = {}
     for name in LOCAL_NAMES:
         value = frame.FindVariable(name)
@@ -805,105 +796,25 @@ def emit_stop(label):
     }
     print(PREFIX + json.dumps(event, sort_keys=True), flush=True)
 
-def _find_stack_int(name):
-    process, thread, _frame = _selected_frame()
-    for index in range(thread.GetNumFrames()):
-        frame = thread.GetFrameAtIndex(index)
-        value = frame.FindVariable(name)
-        if value.IsValid():
-            parsed = _parse_int_value(value)
-            if parsed is not None:
-                return parsed
-    return None
-
-def capture_dispatch_base():
-    global DISPATCH_BASE
-    for name in ["dispatch_entry", "patch_entry"]:
-        value = _find_stack_int(name)
-        if value is not None and value != 0:
-            DISPATCH_BASE = value
-            print(PREFIX + json.dumps({
-                "label": "dispatchBase",
-                "variable": name,
-                "address": value,
-            }, sort_keys=True), flush=True)
-            return value
-    raise RuntimeError("could not find HCR dispatch entry in the live stack")
-
-def _debug_line_offsets(object_path):
-    output = subprocess.check_output(
-        ["xcrun", "dwarfdump", "--debug-line", object_path],
-        text=True,
-        stderr=subprocess.STDOUT,
-    )
-    offsets = {}
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) < 2 or not parts[0].startswith("0x"):
-            continue
-        try:
-            offset = int(parts[0], 16)
-            source_line = int(parts[1])
-        except Exception:
-            continue
-        offsets.setdefault(source_line, offset)
-    return offsets
-
-def load_dispatch_debug_object(object_path):
-    global DISPATCH_BASE
-    if DISPATCH_BASE is None:
-        capture_dispatch_base()
-    if object_path in LOADED_DEBUG_OBJECTS:
-        return
+def assert_latest_breakpoint_resolved(label):
     target = lldb.debugger.GetSelectedTarget()
-    module = target.AddModule(object_path, None, None, None)
-    if not module.IsValid():
-        raise RuntimeError("failed to add LLDB module %s" % object_path)
-    text = module.FindSection("__TEXT")
-    if text.IsValid():
-        text = text.FindSubSection("__text")
-    if not text.IsValid():
-        text = module.FindSection("__text")
-    if not text.IsValid():
-        raise RuntimeError("could not find text section in %s" % object_path)
-    error = target.SetSectionLoadAddress(text, DISPATCH_BASE)
-    if hasattr(error, "Fail") and error.Fail():
-        raise RuntimeError("failed to set load address for %s: %s" % (object_path, error.GetCString()))
-    LOADED_DEBUG_OBJECTS.add(object_path)
-    print(PREFIX + json.dumps({
-        "label": "dispatchDebugObjectLoaded",
-        "object": object_path,
-        "dispatchBase": DISPATCH_BASE,
-        "section": text.GetName(),
-    }, sort_keys=True), flush=True)
-
-def set_dispatch_line_breakpoint(object_path, source_line, source_path, label):
-    global DISPATCH_BASE
-    if DISPATCH_BASE is None:
-        capture_dispatch_base()
-    load_dispatch_debug_object(object_path)
-    offsets = _debug_line_offsets(object_path)
-    source_line = int(source_line)
-    if source_line not in offsets:
-        raise RuntimeError("no line-table offset for line %s in %s" % (source_line, object_path))
-    address = DISPATCH_BASE + offsets[source_line]
-    ADDRESS_SOURCE[address] = {
-        "line": source_line,
-        "path": source_path,
-        "function": "reprobuild_hcr_patchable_value",
-    }
-    target = lldb.debugger.GetSelectedTarget()
-    breakpoint = target.BreakpointCreateByAddress(address)
+    count = target.GetNumBreakpoints()
+    if count == 0:
+        raise RuntimeError("no breakpoint exists for %s" % label)
+    breakpoint = target.GetBreakpointAtIndex(count - 1)
     if not breakpoint.IsValid() or breakpoint.GetNumLocations() == 0:
-        raise RuntimeError("failed to set dispatch breakpoint at 0x%x" % address)
+        raise RuntimeError("breakpoint for %s did not resolve to a location" % label)
+    locations = []
+    for index in range(breakpoint.GetNumLocations()):
+        location = breakpoint.GetLocationAtIndex(index)
+        load_address = location.GetAddress().GetLoadAddress(target)
+        if load_address == lldb.LLDB_INVALID_ADDRESS or load_address < 0x1000:
+            raise RuntimeError("breakpoint for %s resolved to invalid load address 0x%x" % (label, load_address))
+        locations.append(load_address)
     print(PREFIX + json.dumps({
         "label": label,
-        "sourceLine": source_line,
-        "object": object_path,
-        "dispatchBase": DISPATCH_BASE,
-        "offset": offsets[source_line],
-        "address": address,
         "breakpointId": breakpoint.GetID(),
+        "locations": locations,
     }, sort_keys=True), flush=True)
 
 def wait_for_log(path, needle, timeout_seconds):
@@ -972,7 +883,6 @@ def run_edit_driver_after_delay(driver, project, delay_seconds):
         new_breakpoint_line: usize,
         new_step_start_line: usize,
         new_step_next_line: usize,
-        generation1_object: &Path,
         command_file: &Path,
         probe_file: &Path,
         output_log: &Path,
@@ -982,6 +892,7 @@ def run_edit_driver_after_delay(driver, project, delay_seconds):
             "\
 settings set interpreter.prompt-on-quit false\n\
 settings set stop-disassembly-display never\n\
+settings set plugin.jit-loader.gdb.enable on\n\
 command script import {probe_file}\n\
 target create {live_binary}\n\
 gdb-remote 127.0.0.1:{port}\n\
@@ -1001,17 +912,19 @@ breakpoint set --name __jit_debug_register_code\n\
 script hcr_probe.run_edit_driver_after_delay({edit_driver}, {project_dir}, 1.0)\n\
 process continue\n\
 script hcr_probe.emit_stop(\"hotCodeReloadHook\")\n\
-script hcr_probe.capture_dispatch_base()\n\
 breakpoint delete --force\n\
-script hcr_probe.set_dispatch_line_breakpoint({generation1_object}, {new_breakpoint_line}, {source_path}, \"newGenerationBreakpointAddress\")\n\
+breakpoint set --file patchable.c --line {new_breakpoint_line}\n\
+script hcr_probe.assert_latest_breakpoint_resolved(\"newGenerationBreakpointResolved\")\n\
 process continue\n\
 script hcr_probe.emit_stop(\"newGenerationStop\")\n\
 breakpoint delete --force\n\
-script hcr_probe.set_dispatch_line_breakpoint({generation1_object}, {new_step_start_line}, {source_path}, \"newGenerationStepStartAddress\")\n\
+breakpoint set --file patchable.c --line {new_step_start_line}\n\
+script hcr_probe.assert_latest_breakpoint_resolved(\"newGenerationStepStartResolved\")\n\
 process continue\n\
 script hcr_probe.emit_stop(\"newGenerationStepStart\")\n\
 breakpoint delete --force\n\
-script hcr_probe.set_dispatch_line_breakpoint({generation1_object}, {new_step_next_line}, {source_path}, \"newGenerationStepNextAddress\")\n\
+breakpoint set --file patchable.c --line {new_step_next_line}\n\
+script hcr_probe.assert_latest_breakpoint_resolved(\"newGenerationStepNextResolved\")\n\
 process continue\n\
 script hcr_probe.emit_stop(\"newGenerationStepNext\")\n\
 breakpoint delete --force\n\
@@ -1021,8 +934,6 @@ quit\n",
             live_binary = lldb_string(live_binary),
             edit_driver = lldb_string(edit_driver),
             project_dir = lldb_string(project_dir),
-            generation1_object = lldb_string(generation1_object),
-            source_path = lldb_string(&project_dir.join("src/patchable.c")),
             old_step_start_line = old_step_start_line,
             old_step_next_line = old_step_next_line,
             new_step_start_line = new_step_start_line,
@@ -1195,7 +1106,6 @@ quit\n",
             let lldb_command_file = live_artifacts.join("live-hcr-lldb-commands.txt");
             let lldb_probe_file = live_artifacts.join("hcr_probe.py");
             let lldb_output_log = live_artifacts.join("live-lldb.log");
-            let generation1_object = live_artifacts.join("reprobuild_hcr_patchable_value-generation1.o");
             let lldb_events = match run_lldb_live_hcr_session(
                 &lldb,
                 &live_binary,
@@ -1209,7 +1119,6 @@ quit\n",
                 new_breakpoint_line,
                 new_step_start_line,
                 new_step_next_line,
-                &generation1_object,
                 &lldb_command_file,
                 &lldb_probe_file,
                 &lldb_output_log,
@@ -1691,9 +1600,7 @@ quit\n",
         }
 
         let locals = require_object(stop, "/locals")?;
-        if !pointer.starts_with("/dap/live/")
-            && locals.as_object().map(|obj| obj.is_empty()).unwrap_or(true)
-        {
+        if !pointer.starts_with("/dap/live/") && locals.as_object().map(|obj| obj.is_empty()).unwrap_or(true) {
             return Err(format!("{pointer}: locals must not be empty").into());
         }
 
