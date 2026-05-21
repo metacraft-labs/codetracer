@@ -521,6 +521,18 @@ impl DapStdioClient {
         Ok(state)
     }
 
+    /// Send standard DAP `reverseContinue` over stdio and return the
+    /// CodeTracer move state from the matching `ct/complete-move` event.
+    pub fn dap_reverse_continue(&mut self) -> Result<MoveState, BoxError> {
+        self.dap_step("reverseContinue")
+    }
+
+    /// Send standard DAP `stepBack` over stdio and return the CodeTracer
+    /// move state from the matching `ct/complete-move` event.
+    pub fn dap_step_back(&mut self) -> Result<MoveState, BoxError> {
+        self.dap_step("stepBack")
+    }
+
     // === Low-level send/receive ===
 
     /// Send a DAP request with the given command and arguments.
