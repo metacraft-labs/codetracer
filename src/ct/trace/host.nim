@@ -556,6 +556,30 @@ proc importLegacyMaterializedFolder(traceFolderPath: string): string =
   copyDirContents(fullPath, outputFolder)
   normalizeImportedTracePaths(outputFolder)
 
+  # Some "materialized" trace folders ship a `trace.bin` that is in fact a
+  # CTFS container (it carries the CTFS magic `C0 DE 72 AC E2`), just
+  # under a non-`.ct` name.  The db-backend's replay engine resolves the
+  # trace container by the `.ct` extension, so expose such a payload as
+  # `trace.ct` — the trace then flows through the normal CTFS path and
+  # the calltrace/state panels populate.
+  const ctfsMagic = "\xC0\xDE\x72\xAC\xE2"
+  if not fileExists(outputFolder / "trace.ct"):
+    for payloadName in ["trace.bin", "trace.json"]:
+      let payloadPath = outputFolder / payloadName
+      if fileExists(payloadPath):
+        var head = ""
+        try:
+          let content = readFile(payloadPath)
+          if content.len >= ctfsMagic.len:
+            head = content[0 ..< ctfsMagic.len]
+        except CatchableError:
+          head = ""
+        if head == ctfsMagic:
+          copyFile(payloadPath, outputFolder / "trace.ct")
+          echo "ct host: materialized payload ", payloadName,
+            " is a CTFS container — exposed as trace.ct"
+          break
+
   var sourceFolderSet = initHashSet[string]()
   for p in paths:
     if p.len > 0 and isAbsolute(p):
