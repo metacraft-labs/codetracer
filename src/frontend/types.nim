@@ -2173,6 +2173,72 @@ when defined(ctRenderer):
   when not defined(ctInCentralExtensionContext):
     var domwindow {.importc: "window".}: JsObject
     domwindow.data = data
+    # ---------------------------------------------------------------------
+    # JS-accessible forwarding properties for the multi-replay templates.
+    #
+    # The Nim templates above (``services``, ``ui``, ``dapApi``, ``trace``,
+    # ``status``, ``viewsApi``, ``startOptions``, ``connection``, ``network``,
+    # ``pointList``, ``sourcemap``, ``minRRTicks``, ``maxRRTicks``,
+    # ``asyncSendCache``) forward ``data.<field>`` to
+    # ``data.sessions[data.activeSessionIndex].<field>``.  Nim templates are
+    # substituted at compile time, so they only work for Nim call sites — the
+    # generated JS Data object has no such property.
+    #
+    # Playwright e2e tests (``page.evaluate``) and other JS-side consumers
+    # (diagnostics, the storybook host, third-party panels) routinely read
+    # ``window.data.services``/``window.data.ui``/``window.data.activeSession``.
+    # Without these getters those reads return ``undefined`` and tests silently
+    # observe stale values (``rrTicks`` reads ``-1`` forever after a session
+    # switch, ``data.ui.layout`` looks ``null``, etc.).
+    #
+    # Define an enumerable getter for every forwarded field plus a convenience
+    # ``activeSession`` getter that returns the active ``ReplaySession``.  We
+    # mirror only the fields that have a JS-side reader; updates from JS still
+    # need to go through Nim accessors.
+    {.emit: """
+    (function(d) {
+      if (!d || typeof Object.defineProperty !== "function") return;
+      function defineForward(name) {
+        if (Object.prototype.hasOwnProperty.call(d, name)) return;
+        Object.defineProperty(d, name, {
+          configurable: true,
+          enumerable: true,
+          get: function() {
+            var sessions = d.sessions;
+            if (!sessions) return undefined;
+            var idx = d.activeSessionIndex | 0;
+            if (idx < 0 || idx >= sessions.length) return undefined;
+            return sessions[idx][name];
+          },
+          set: function(value) {
+            var sessions = d.sessions;
+            if (!sessions) return;
+            var idx = d.activeSessionIndex | 0;
+            if (idx < 0 || idx >= sessions.length) return;
+            sessions[idx][name] = value;
+          }
+        });
+      }
+      [
+        "trace", "minRRTicks", "maxRRTicks", "status", "startOptions",
+        "dapApi", "asyncSendCache", "services", "viewsApi", "ui",
+        "connection", "network", "pointList", "sourcemap"
+      ].forEach(defineForward);
+      if (!Object.prototype.hasOwnProperty.call(d, "activeSession")) {
+        Object.defineProperty(d, "activeSession", {
+          configurable: true,
+          enumerable: true,
+          get: function() {
+            var sessions = d.sessions;
+            if (!sessions) return undefined;
+            var idx = d.activeSessionIndex | 0;
+            if (idx < 0 || idx >= sessions.length) return undefined;
+            return sessions[idx];
+          }
+        });
+      }
+    })(`data`);
+    """.}
 
   method register*(self: Component, api: MediatorWithSubscribers) {.base.} =
     self.api = api
