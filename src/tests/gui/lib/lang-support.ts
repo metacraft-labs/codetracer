@@ -45,6 +45,16 @@ export function isDbBased(sourcePath: string): boolean {
   const resolvedPath = path.resolve(sourcePath);
 
   if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
+    // A folder that already contains a `.ct` CTFS container is a
+    // pre-recorded trace (e.g. the BEAM canonical_flow fixtures recorded
+    // by codetracer-beam-recorder, or any materialized trace bundle).
+    // It is opened via `launchMode: "trace-folder"` and never needs an
+    // RR recording pass — treat it as DB-based.
+    for (const entry of fs.readdirSync(resolvedPath)) {
+      if (entry.toLowerCase().endsWith(".ct")) {
+        return true;
+      }
+    }
     for (const marker of Object.keys(DB_BASED_FOLDER_MARKERS)) {
       if (fs.existsSync(path.join(resolvedPath, marker))) {
         return DB_BASED_FOLDER_MARKERS[marker];

@@ -103,6 +103,71 @@ if (-not [string]::IsNullOrWhiteSpace($ctagsExe)) {
   [Environment]::SetEnvironmentVariable("CODETRACER_CTAGS_EXE_PATH", $ctagsExe, "Process")
 }
 
+# ---------------------------------------------------------------------------
+# Per-language recorder toolchains.
+#
+# The GUI Playwright suite records real Ruby/Elixir/Erlang programs. On
+# Windows these toolchains are not on the default PATH, so `ct record`
+# (Ruby) and the codetracer-beam-recorder fixture script (Elixir/Erlang)
+# cannot find their interpreters. We discover the toolchains that the
+# Windows DIY bootstrap installed (MSYS2 MinGW Ruby, scoop-managed Elixir
+# and Erlang) and put their bin directories on PATH plus, for Ruby, set
+# CODETRACER_RUBY_EXE_PATH so `src/common/paths.nim` resolves it directly.
+# ---------------------------------------------------------------------------
+$languageToolchainBins = @()
+
+# Ruby: prefer the MSYS2 MinGW build installed by the DIY bootstrap.
+$rubyExe = [Environment]::GetEnvironmentVariable("CODETRACER_RUBY_EXE_PATH")
+if ([string]::IsNullOrWhiteSpace($rubyExe) -or (-not (Test-Path -LiteralPath $rubyExe -PathType Leaf))) {
+  $rubyExe = $null
+  # The DIY bootstrap installs an MSYS2 MinGW Ruby under the install root
+  # (the same MSYS2 tree used for the tup/mingw toolchain).
+  $installRoot = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_INSTALL_ROOT")
+  if (-not [string]::IsNullOrWhiteSpace($installRoot)) {
+    $candidate = Join-Path $installRoot "msys2\msys64\mingw64\bin\ruby.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      $rubyExe = $candidate
+    }
+  }
+  if ($null -eq $rubyExe) {
+    $fromPath = Get-Command ruby -ErrorAction SilentlyContinue
+    if ($null -ne $fromPath -and -not [string]::IsNullOrWhiteSpace($fromPath.Source)) {
+      $rubyExe = $fromPath.Source
+    }
+  }
+}
+if (-not [string]::IsNullOrWhiteSpace($rubyExe) -and (Test-Path -LiteralPath $rubyExe -PathType Leaf)) {
+  [Environment]::SetEnvironmentVariable("CODETRACER_RUBY_EXE_PATH", $rubyExe, "Process")
+  $languageToolchainBins += (Split-Path -Parent $rubyExe)
+}
+
+# Pure-Ruby recorder script (codetracer-ruby-recorder sibling repo). The
+# recorder is a bare Ruby script invoked as `ruby <script>`, so it cannot
+# be discovered through findExe; export its absolute path explicitly.
+$rubyRecorder = [Environment]::GetEnvironmentVariable("CODETRACER_RUBY_RECORDER_PATH")
+if ([string]::IsNullOrWhiteSpace($rubyRecorder) -or (-not (Test-Path -LiteralPath $rubyRecorder -PathType Leaf))) {
+  $rubyRecorderCandidate = Join-Path (Split-Path -Parent $resolvedRepoRoot) `
+    "codetracer-ruby-recorder\gems\codetracer-pure-ruby-recorder\bin\codetracer-pure-ruby-recorder"
+  if (Test-Path -LiteralPath $rubyRecorderCandidate -PathType Leaf) {
+    [Environment]::SetEnvironmentVariable("CODETRACER_RUBY_RECORDER_PATH", $rubyRecorderCandidate, "Process")
+  }
+}
+
+# Elixir + Erlang: scoop installs them under scoop\apps\<name>\current.
+foreach ($beam in @(
+  @{ Name = "elixir";  Probe = "elixir.bat" },
+  @{ Name = "erlang";  Probe = "erl.exe" }
+)) {
+  $scoopApp = Join-Path ([Environment]::GetEnvironmentVariable("USERPROFILE")) `
+    ("scoop\apps\" + $beam.Name + "\current")
+  foreach ($binDir in @($scoopApp, (Join-Path $scoopApp "bin"))) {
+    if ((Test-Path -LiteralPath $binDir -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $binDir $beam.Probe) -PathType Leaf)) {
+      $languageToolchainBins += $binDir
+    }
+  }
+}
+
 $currentPath = [Environment]::GetEnvironmentVariable("PATH")
 $prefix = @()
 if (Test-Path -LiteralPath $buildDebugBinDir -PathType Container) {
@@ -110,6 +175,11 @@ if (Test-Path -LiteralPath $buildDebugBinDir -PathType Container) {
 }
 if (Test-Path -LiteralPath $repoNodeModulesBinDir -PathType Container) {
   $prefix += $repoNodeModulesBinDir
+}
+foreach ($binDir in $languageToolchainBins) {
+  if (-not ($prefix -contains $binDir)) {
+    $prefix += $binDir
+  }
 }
 if ($prefix.Count -gt 0) {
   [Environment]::SetEnvironmentVariable("PATH", (($prefix -join ";") + ";" + $currentPath), "Process")

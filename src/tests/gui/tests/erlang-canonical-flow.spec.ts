@@ -57,7 +57,10 @@ function resolveRecorderRepo(): string {
 function prepareBeamFixtures(): { erlangDir: string } {
   const recorderRepo = resolveRecorderRepo();
   const script = path.join(recorderRepo, "scripts", "prepare-beam-fixtures.sh");
-  const result = childProcess.spawnSync(script, [elixirOutDir, erlangOutDir], {
+  // The fixture generator is a bash script. On Windows a `.sh` path is not
+  // directly executable, so invoke it through `bash` (present on PATH via
+  // the dev shell on every platform the suite runs on).
+  const result = childProcess.spawnSync("bash", [script, elixirOutDir, erlangOutDir], {
     cwd: recorderRepo,
     encoding: "utf-8",
     stdio: "pipe",

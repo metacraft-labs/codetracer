@@ -825,7 +825,7 @@ async function launchTraceElectron(
  * recorder-bundle) tests that want to drive the GUI against a CTFS trace
  * produced offline rather than recording on demand.
  */
-function importTraceFolder(traceFolder: string): number {
+function importTraceFolder(traceFolder: string): string {
   const ctProcess = childProcess.spawnSync(
     codetracerPath,
     ["host", "--trace-path", traceFolder, "0", "--port=0", "--idle-timeout=1ms"],
@@ -842,7 +842,13 @@ function importTraceFolder(traceFolder: string): number {
   );
 
   const output = `${ctProcess.stdout ?? ""}\n${ctProcess.stderr ?? ""}`;
-  const match = output.match(/imported as trace id\s+(\d+)/);
+  // M-REC-2/3: `ct host` assigns a UUIDv7 *string* recording id, not the
+  // pre-1.0 integer id.  Match the canonical 8-4-4-4-12 hex form rather
+  // than `\d+`, which previously captured only the leading digits of the
+  // UUID (e.g. "019" from "019e4843-...") and produced a bogus integer.
+  const match = output.match(
+    /imported as trace id\s+([0-9a-fA-F-]{36})/,
+  );
   if (!match) {
     throw new Error(
       `ct host did not import trace folder: error=${ctProcess.error}; status=${ctProcess.status}; signal=${ctProcess.signal}\n` +
@@ -850,10 +856,7 @@ function importTraceFolder(traceFolder: string): number {
     );
   }
 
-  const traceId = Number(match[1]);
-  if (isNaN(traceId)) {
-    throw new Error(`Could not parse imported trace id from: ${match[1]}`);
-  }
+  const traceId = match[1];
   console.log(`# imported trace folder ${traceFolder} with id ${traceId}`);
   return traceId;
 }
