@@ -6,16 +6,32 @@
 : third_party/tippy.js/tippy.css |> !tup_preserve |> %f
 : third_party/monaco-editor/min |> !tup_preserve |> %f
 : third_party/@exuanbo |> !tup_preserve |> %f
-# GoldenLayout: copy the stylesheet files individually rather than the
-# whole `dist` directory.  `third_party/golden-layout/dist` is a POSIX
-# symlink into node_modules; Tup's `!tup_preserve` cannot mirror a
-# directory symlink on Windows (it fails trying to CopyFile the reparse
-# point).  Globbing the specific CSS files works through the symlink /
-# junction on every platform, and the CSS is all index.html /
-# server_index.ejs actually <link> from this path — the GoldenLayout JS
-# is delivered by the webpack bundle.
-: foreach third_party/golden-layout/dist/css/*.css |> !tup_preserve |> %f
-: foreach third_party/golden-layout/dist/css/themes/*.css |> !tup_preserve |> %f
+# GoldenLayout: mirror the whole `dist` directory as a single opaque
+# entity.  `third_party/golden-layout/dist` is a POSIX symlink into
+# `node_modules/golden-layout/dist` — on Linux a /nix/store path, on
+# Windows a real NTFS directory junction that env.ps1's
+# `Ensure-GoldenLayoutAsset` installs (the bare Windows checkout
+# materializes the symlink as a 40-byte text stub, which the activation
+# script replaces with a junction so the build can traverse it).
+#
+# Why this is a whole-directory `!tup_preserve` rule rather than a
+# per-file `foreach`/glob: Tup's parser-stage directory-ID lookup does
+# NOT traverse symlinks whose targets escape the tup-managed tree
+# (here, into `/nix/store`).  Any rule whose source path has components
+# *inside* the symlinked directory — `dist/css/*.css`,
+# `dist/css/goldenlayout-base.css`, etc. — fails parsing with
+# `Failed to find directory ID for dir '...'`.  This is exactly how
+# the sibling rules for `third_party/monaco-editor/min`,
+# `third_party/@exuanbo`, `third_party/mousetrap`, etc. work: they
+# name the symlinked subdirectory itself as the input and let Tup
+# treat it as a single leaf, never enumerating inside it.
+#
+# `!tup_preserve` on the whole `dist` symlink produces a corresponding
+# symlink at `build-debug/public/third_party/golden-layout/dist` that
+# points back into the source tree, so the runtime `<link>` references
+# in `frontend/index.html` and `frontend/server_index.ejs` resolve to
+# the real GoldenLayout stylesheets on every platform.
+: third_party/golden-layout/dist |> !tup_preserve |> %f
 : third_party/mousetrap |> !tup_preserve |> %f
 : third_party/vex-js |> !tup_preserve |> %f
 : third_party/xterm |> !tup_preserve |> %f
