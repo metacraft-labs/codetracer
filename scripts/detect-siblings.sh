@@ -115,6 +115,43 @@ elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-bac
 	_ct_detect_summary "codetracer-rr-backend (ct-rr-support available, legacy)"
 fi
 
+# --- codetracer-native-recorder (ct-mcr / Multi-Core Recorder) ---
+# Exports CODETRACER_CT_MCR_CMD pointing at the built `ct_cli` binary, which is
+# the same binary that ships as `ct-mcr` in production builds (the user-facing
+# command name).  The recorder repo's Justfile builds the binary in-place at
+# `ct_cli/ct_cli` (see codetracer-native-recorder/Justfile: `build-ct-mcr`).
+#
+# Why this matters: ct-native-replay (codetracer-native-backend) spawns the
+# MCR debugserver via `ct-mcr` for `.ct` traces, and `ct host` invokes
+# `ct-mcr export --portable` when importing MCR portable traces.  Both code
+# paths look up the binary in this order:
+#   1. $CODETRACER_CT_MCR_CMD (env var, exported here)
+#   2. sibling-to-binary (`ct-mcr` next to the calling executable)
+#   3. PATH search (`ct-mcr` or `ct_cli`)
+# Without this block, the only path that resolves in a dev shell is (3) via
+# PATH — but the binary is named `ct_cli`, not `ct-mcr`, so the Nim caller
+# in `src/ct/online_sharing/mcr_enrichment.nim` (which only searches for
+# `ct-mcr`) misses it.  Exporting the env var sidesteps both naming and
+# location concerns.
+#
+# Also prepend the binary's directory to PATH so the Rust `find_ct_mcr` in
+# codetracer-native-backend (which accepts either `ct-mcr` or `ct_cli`)
+# always finds it via the same PATH lookup end users get.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_cli/ct_cli" ]; then
+	export CODETRACER_CT_MCR_CMD="$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_cli/ct_cli"
+	export PATH="$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_cli:$PATH"
+	_ct_detect_summary "codetracer-native-recorder (ct-mcr available as ct_cli)"
+elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native-recorder" ]; then
+	# Repo is present but ct_cli has not been built yet.  Surface a hint
+	# rather than failing silently — tests that need ct-mcr (browser
+	# MCR replay, three-trace-types, mcr_enrichment portable traces) will
+	# otherwise fail with a confusing "ct-mcr binary not found" deep
+	# inside the replay worker.
+	echo "  WARNING: codetracer-native-recorder present but ct_cli not built." >&2
+	echo "    Run: cd $_CT_WORKSPACE_ROOT/codetracer-native-recorder && just build-ct-mcr" >&2
+	_ct_detect_summary "codetracer-native-recorder (repo present, ct_cli not built)"
+fi
+
 # --- codetracer-native-test-programs ---
 # Exports: CODETRACER_NATIVE_TEST_PROGRAMS_PATH
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native-test-programs" ]; then
