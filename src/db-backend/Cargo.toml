@@ -47,6 +47,16 @@ chrono = "0.4.41"
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2.100", optional = true }
+
+# uuid is pulled transitively by codetracer_trace_types with the `v7`
+# feature. Since uuid 1.23 the `v7` generator no longer implies a
+# randomness backend: on wasm32 it needs `RngImp`, which is only
+# compiled in when one of `rng-getrandom` / `rng-rand` / `js` is on.
+# We depend on uuid directly with `js` so Cargo's feature unification
+# enables the browser RNG for the whole graph in the browser-transport
+# build (the dependency is otherwise unused here and stays inert for
+# native builds, where browser-transport is off).
+uuid = { version = "1.10", default-features = false, optional = true, features = ["js"] }
 web-sys = { version = "0.3", optional = true, features = [
   "DedicatedWorkerGlobalScope",
   "WorkerGlobalScope",
@@ -200,4 +210,7 @@ browser-transport = [
   "dep:web-sys",
   "dep:console_error_panic_hook",
   "dep:wasm-logger",
+  # Enable uuid's wasm RNG backend (RngImp) so `Uuid::now_v7` in
+  # codetracer_trace_types links on wasm32.
+  "dep:uuid",
 ]

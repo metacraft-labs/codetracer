@@ -656,8 +656,69 @@ pub fn setup_from_vfs(
         }
     }
 
-    Err("setup_from_vfs: no CTFS (.ct) container found in VFS \
-         (legacy trace_metadata.json / trace.bin / trace.json sidecars are no longer supported)"
+    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
+    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS `.ct`
+    // container.  External recorders that have not adopted the CTFS
+    // writer still emit this — the Noir recorder (`nargo trace`) is the
+    // live example.  The native `try_open_trace` path already handles
+    // this format; the browser path must too, otherwise client-side WASM
+    // replay of a Noir trace fails after `configurationDone` (the handler
+    // is never constructed, so `threads`/`stackTrace` return nothing).
+    let json_candidates = [
+        join_vfs(trace_folder, "trace.json"),
+        trace_folder.to_string(),
+    ];
+    for candidate in &json_candidates {
+        if !crate::vfs::vfs_exists(candidate) || !candidate.ends_with("trace.json") {
+            continue;
+        }
+        let json_bytes = match crate::vfs::vfs_read(candidate) {
+            Some(b) => b,
+            None => continue,
+        };
+        info!("setup_from_vfs: detected legacy materialized trace.json at VFS path {candidate:?}");
+        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> =
+            serde_json::from_slice(&json_bytes).map_err(|e| {
+                format!("failed to parse legacy trace.json at {candidate:?}: {e}")
+            })?;
+        // Workdir: prefer `trace_metadata.json` alongside `trace.json` in
+        // the VFS, else fall back to the trace folder.
+        let meta_vfs = join_vfs(trace_folder, "trace_metadata.json");
+        let workdir = crate::vfs::vfs_read(&meta_vfs)
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| {
+                v.get("workdir")
+                    .and_then(|w| w.as_str())
+                    .map(PathBuf::from)
+            })
+            .unwrap_or_else(|| PathBuf::from(trace_folder));
+        let ctfs_reader = CTFSTraceReader::from_events(events, &workdir)?;
+        info!(
+            "setup_from_vfs: legacy materialized trace loaded: {} steps, {} calls, {} events",
+            ctfs_reader.step_count(),
+            ctfs_reader.call_count(),
+            ctfs_reader.event_count(),
+        );
+        let reader: Arc<dyn TraceReader> = Arc::new(ctfs_reader);
+        let mut handler = Handler::construct_with_reader(
+            TraceKind::Materialized,
+            RecreatorArgs {
+                name: thread_name.to_string(),
+                ..RecreatorArgs::default()
+            },
+            reader,
+            false,
+        );
+        handler.raw_diff_index = raw_diff_index;
+        if for_launch {
+            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+        }
+        handler.initialized = true;
+        return Ok(handler);
+    }
+
+    Err("setup_from_vfs: no CTFS (.ct) container or legacy trace.json \
+         found in VFS"
         .into())
 }
 
@@ -1264,7 +1325,11 @@ pub fn handle_message_browser(
             // VFS-aware lookups. Materialized traces are CTFS-only.
             {
                 let folder = ctx.launch_trace_folder.to_string_lossy().to_string();
-                let candidates = ["trace.ct"];
+                // `trace.ct` is the canonical CTFS container; `trace.json`
+                // is the legacy `runtime_tracing` materialized layout still
+                // emitted by some recorders (e.g. `nargo trace`).  Probe
+                // both so client-side WASM replay works for either.
+                let candidates = ["trace.ct", "trace.json"];
                 for name in &candidates {
                     let vfs_path = if folder.is_empty() {
                         (*name).to_string()
@@ -1321,7 +1386,7 @@ pub fn handle_message_browser(
         DapMessage::Request(req) => {
             // All other requests are dispatched to the handler if it is
             // initialized. If not, the request is dropped with a warning.
-            if let Some(ref mut h) = handler {
+            if let Some(h) = handler {
                 if h.initialized {
                     if let Err(e) = handle_request(h, req.clone(), sender.clone()) {
                         warn!("handle_message_browser: request {} error: {e}", req.command);

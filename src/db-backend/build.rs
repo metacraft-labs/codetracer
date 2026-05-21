@@ -711,26 +711,115 @@ fn to_bash_posix_path(p: &Path) -> String {
 
 /// Read the Nim stdlib include path written by build_*_api.sh, with a
 /// best-effort fallback to `nim dump` if the marker file is missing.
+/// Returns `true` when `dir` is a usable Nim stdlib include directory,
+/// i.e. it actually contains `nimbase.h` (the header every generated C
+/// file `#include`s). A path that fails this check is unusable even if
+/// it is non-empty — the emulator's `build_wasm_api.sh` has historically
+/// written a stale/wrong `.nim_lib_path` (e.g. `<nim>/nim/lib` instead of
+/// `<nim>/lib`), and silently trusting it makes the wasm build fail deep
+/// inside cc-rs with `'nimbase.h' file not found`.
+fn nim_lib_dir_is_valid(dir: &Path) -> bool {
+    !dir.as_os_str().is_empty() && dir.join("nimbase.h").is_file()
+}
+
+/// Derive the Nim stdlib include directory from the `nim` executable.
+/// `nim` lives at `<nim-root>/bin/nim[.exe]`, and `nimbase.h` sits in
+/// `<nim-root>/lib`. This is the canonical layout of every Nim
+/// distribution and does not depend on `nim dump` emitting a `lib:` line
+/// (newer Nim releases do not).
+fn nim_lib_from_executable() -> Option<PathBuf> {
+    let nim_exe = which_nim()?;
+    let bin_dir = nim_exe.parent()?;
+    let nim_root = bin_dir.parent()?;
+    let lib = nim_root.join("lib");
+    if nim_lib_dir_is_valid(&lib) {
+        Some(lib)
+    } else {
+        None
+    }
+}
+
+/// Locate the `nim` executable on PATH (cross-platform: tries `nim` and,
+/// on Windows, `nim.exe`).
+fn which_nim() -> Option<PathBuf> {
+    let path_var = env::var_os("PATH")?;
+    let names: &[&str] = if cfg!(windows) {
+        &["nim.exe", "nim"]
+    } else {
+        &["nim"]
+    };
+    for dir in env::split_paths(&path_var) {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 fn read_nim_lib_path(c_dir: &Path) -> PathBuf {
+    // 1. Trust the `.nim_lib_path` marker only when it points at a
+    //    directory that actually holds `nimbase.h`.
     let marker = c_dir.join(".nim_lib_path");
     if let Ok(s) = std::fs::read_to_string(&marker) {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
+            let candidate = PathBuf::from(trimmed);
+            if nim_lib_dir_is_valid(&candidate) {
+                return candidate;
+            }
+            println!(
+                "cargo:warning=db-backend build.rs: ignoring stale .nim_lib_path \
+                 (no nimbase.h at {}); re-deriving from the nim executable",
+                candidate.display()
+            );
         }
     }
 
-    let output = Command::new("nim")
-        .arg("dump")
-        .output()
-        .expect("nim not on PATH and .nim_lib_path missing");
-    for line in String::from_utf8_lossy(&output.stderr).lines() {
-        if let Some(rest) = line.strip_prefix("lib: ") {
-            return PathBuf::from(rest.trim());
+    // 2. Ask `nim` itself. `nim dump` prints its search paths on stdout
+    //    (and a few hints on stderr). Older releases emit an explicit
+    //    `lib: <dir>` line; newer ones only list the per-package search
+    //    dirs (`<root>/lib/pure`, `<root>/lib/core`, ...). We accept
+    //    either: a direct `lib:` value, or any listed path whose
+    //    ancestors include a `<root>/lib` directory holding `nimbase.h`.
+    if let Ok(output) = Command::new("nim").arg("dump").output() {
+        let mut combined = String::new();
+        combined.push_str(&String::from_utf8_lossy(&output.stdout));
+        combined.push('\n');
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        for line in combined.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("lib: ") {
+                let candidate = PathBuf::from(rest.trim());
+                if nim_lib_dir_is_valid(&candidate) {
+                    return candidate;
+                }
+            }
+            // Walk up each listed path looking for a `<root>/lib`
+            // directory that actually contains `nimbase.h`.
+            let mut probe = Path::new(line);
+            while let Some(parent) = probe.parent() {
+                if parent.file_name().map(|n| n == "lib").unwrap_or(false)
+                    && nim_lib_dir_is_valid(parent)
+                {
+                    return parent.to_path_buf();
+                }
+                probe = parent;
+            }
         }
     }
+
+    // 3. Derive `<nim-root>/lib` from the `nim` executable location —
+    //    the canonical layout, independent of `nim dump` output format.
+    if let Some(lib) = nim_lib_from_executable() {
+        return lib;
+    }
+
     panic!(
-        "could not determine Nim stdlib include path; \
-         re-run the emulator build script to populate .nim_lib_path"
+        "could not determine Nim stdlib include path: no valid \
+         .nim_lib_path marker, `nim dump` did not reveal a lib dir with \
+         nimbase.h, and could not locate `nim` on PATH"
     );
 }

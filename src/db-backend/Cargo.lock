@@ -1419,6 +1419,7 @@ dependencies = [
  "tree-sitter-tolk",
  "tree-sitter-tracepoint",
  "tree-sitter-traversal2",
+ "uuid",
  "vfs",
  "wasm-bindgen",
  "wasm-logger",

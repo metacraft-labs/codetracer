@@ -35,7 +35,7 @@ use core::ffi::c_int;
 /// exceptions; on the web we trap into JavaScript so the error
 /// surfaces through the host's normal exception path instead of an
 /// opaque wasm trap.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn exit(_status: c_int) -> ! {
     wasm_bindgen::throw_str("ct-mcr: Nim runtime called exit() — fatal emulator error");
 }

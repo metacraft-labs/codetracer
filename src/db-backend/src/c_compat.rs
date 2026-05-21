@@ -46,12 +46,12 @@ unsafe fn payload_size(p: *mut u8) -> usize {
     (p as *mut usize).sub(1).read()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn malloc(size: usize) -> *mut c_void {
     unsafe { alloc_with_header(size) as *mut c_void }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn free(ptr: *mut c_void) {
     unsafe {
         if ptr.is_null() {
@@ -70,7 +70,7 @@ pub extern "C" fn free(ptr: *mut c_void) {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn realloc(ptr: *mut c_void, new_size: usize) -> *mut c_void {
     unsafe {
         if ptr.is_null() {
@@ -112,7 +112,7 @@ pub extern "C" fn realloc(ptr: *mut c_void, new_size: usize) -> *mut c_void {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn calloc(nmemb: usize, size: usize) -> *mut c_void {
     match nmemb.checked_mul(size) {
         Some(len) => unsafe {
@@ -126,17 +126,17 @@ pub extern "C" fn calloc(nmemb: usize, size: usize) -> *mut c_void {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn fprintf(_stream: *mut c_void, _fmt: *const c_char, _arg: *const c_void) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `fprintf`");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn fclose(_stream: *mut c_void) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `fclose`");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn snprintf(buf: *mut c_char, n: usize, _fmt: *const c_char, _arg: usize) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `sprintf`");
 }
@@ -147,12 +147,12 @@ pub struct va_list__dummy {
     _priv: [u8; 0],
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn vsnprintf(buf: *mut c_char, n: usize, _fmt: *const c_char, _ap: *mut va_list__dummy) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn abort() -> ! {
     wasm_bindgen::throw_str("abort");
 }
@@ -162,12 +162,12 @@ unsafe fn cstr_prefix_len(mut p: *const u8, limit: usize) -> usize {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn clock() -> c_int {
     {
         // js_sys::Date::now() -> f64 milliseconds since epoch
@@ -184,18 +184,18 @@ fn write_host(_s: &str, _stream: *mut c_void) {
 }
 
 /// int fputc(int c, FILE *stream)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn fputc(c: c_int, stream: *mut c_void) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
 /// int fputs(const char *s, FILE *stream)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn fputs(s: *const c_char, stream: *mut c_void) -> c_int {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn fdopen(fd: c_int, _mode: *const c_char) -> *mut c_void {
     unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
 }
