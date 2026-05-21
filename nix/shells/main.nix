@@ -173,6 +173,10 @@ mkShell {
 
     # Nim 2.2.x — the primary compiler (provides nim and nim2)
     ourPkgs.nim-codetracer
+    # nimble is required at build time by codetracer_trace_writer_nim's
+    # build.rs to resolve the Nim FFI library's `.nimble` deps before
+    # `nim c` runs.
+    nimble
 
     # TODO: uncomment when nim-devel builds from source work in nix
     # ourPkgs.nim-devel
