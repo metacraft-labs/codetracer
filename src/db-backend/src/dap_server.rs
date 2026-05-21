@@ -923,22 +923,10 @@ fn is_codetracer_ctfs_file(path: &Path) -> bool {
 /// `meta.dat` is treated as "not classifiable as MCR" rather than an
 /// error so the caller can fall through to its normal open path.
 fn is_mcr_ctfs_container(ctfs: &mut CtfsReader) -> bool {
-    // Preferred path: the binary `meta.dat` carries an explicit
-    // `FLAG_HAS_MCR_FIELDS` bit.
+    // The binary `meta.dat` carries an explicit `FLAG_HAS_MCR_FIELDS`
+    // bit. Legacy `meta.json` sidecars are no longer supported.
     if let Ok(bytes) = ctfs.read_file("meta.dat") {
         if let Ok(meta) = crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&bytes) {
-            return meta.mcr.is_some();
-        }
-    }
-    // Legacy fallback: older MCR `.ct` containers (produced before the
-    // recorder switched to binary `meta.dat`) store a JSON `meta.json`
-    // sidecar instead. A `meta.json` only ever describes an MCR trace —
-    // the materialised DB layout never used a JSON metadata file — so
-    // its mere presence (parseable as the documented schema) classifies
-    // the container as MCR. This mirrors the recorder's own
-    // `trace_reader.nim::readMetadata` meta.dat → meta.json fallback.
-    if let Ok(bytes) = ctfs.read_file("meta.json") {
-        if let Ok(meta) = crate::ctfs_trace_reader::meta_dat::parse_meta_json(&bytes) {
             return meta.mcr.is_some();
         }
     }

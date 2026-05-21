@@ -54,7 +54,7 @@ use std::path::Path;
 use std::sync::Once;
 
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
-use crate::ctfs_trace_reader::meta_dat::{MetaDat, parse_meta_dat, parse_meta_json};
+use crate::ctfs_trace_reader::meta_dat::{MetaDat, parse_meta_dat};
 use crate::db::DbRecordEvent;
 use crate::dwarf_index::{DwarfIndex, PcInfo};
 use crate::emulator_ffi;
@@ -809,28 +809,18 @@ impl EmulatorReplaySession {
     pub fn new_from_ctfs_bytes(bytes: Vec<u8>) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::from_bytes(bytes).map_err(|e| ctfs_error(format!("CTFS parse failed: {e}")))?;
 
-        // Preferred path: binary `meta.dat`. Legacy MCR `.ct` containers
-        // (recorded before the recorder switched to `meta.dat`) instead
-        // ship a JSON `meta.json` sidecar — fall back to that, mirroring
-        // the recorder's own `trace_reader.nim::readMetadata`. A
-        // `meta.json` only ever describes an MCR trace.
-        let meta = match ctfs.read_file("meta.dat") {
-            Ok(meta_bytes) => {
-                parse_meta_dat(&meta_bytes).map_err(|e| ctfs_error(format!("meta.dat parse failed: {e}")))?
-            }
-            Err(meta_dat_err) => {
-                let meta_json_bytes = ctfs.read_file("meta.json").map_err(|json_err| {
-                    ctfs_error(format!(
-                        "CTFS container has neither meta.dat ({meta_dat_err}) nor meta.json ({json_err})"
-                    ))
-                })?;
-                parse_meta_json(&meta_json_bytes).map_err(|e| ctfs_error(format!("meta.json parse failed: {e}")))?
-            }
-        };
+        // CTFS containers must carry a binary `meta.dat`. Legacy
+        // `meta.json` sidecars are no longer supported (M-REC era
+        // retirement of legacy formats).
+        let meta_bytes = ctfs
+            .read_file("meta.dat")
+            .map_err(|e| ctfs_error(format!("CTFS container has no meta.dat: {e}")))?;
+        let meta =
+            parse_meta_dat(&meta_bytes).map_err(|e| ctfs_error(format!("meta.dat parse failed: {e}")))?;
 
         if meta.mcr.is_none() {
             return Err(ctfs_error(
-                "EmulatorReplaySession requires an MCR trace (meta.dat with FLAG_HAS_MCR_FIELDS, or a meta.json sidecar)",
+                "EmulatorReplaySession requires an MCR trace (meta.dat with FLAG_HAS_MCR_FIELDS)",
             ));
         }
 
