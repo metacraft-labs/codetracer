@@ -476,7 +476,20 @@ function recordTestProgram(recordArg: string): string {
 function traceFolderForId(recordingId: string): string {
   const dataHome =
     process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
-  return path.join(dataHome, "codetracer", `trace-${recordingId}`);
+  // M-REC-7: the on-disk recording folder name is the bare UUIDv7
+  // recording id — the pre-M-REC-7 `trace-<id>` prefix was retired
+  // (see src/common/paths.nim `recordingFolder`).  Fall back to the
+  // legacy prefixed name only if the bare folder is absent, so older
+  // local recordings keep working.
+  const bare = path.join(dataHome, "codetracer", recordingId);
+  if (fs.existsSync(bare)) {
+    return bare;
+  }
+  const legacy = path.join(dataHome, "codetracer", `trace-${recordingId}`);
+  if (fs.existsSync(legacy)) {
+    return legacy;
+  }
+  return bare;
 }
 
 function markTraceVisualReplayCapable(recordingId: string): void {
