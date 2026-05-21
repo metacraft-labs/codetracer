@@ -1303,9 +1303,8 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let mut results = Vec::new();
-        // for now simples to redo them every time: TODO possible optimizations
-        self.clear_breakpoints()?;
         if let Some(path) = args.source.path.clone() {
+            self.clear_breakpoints_for_source(&path)?;
             let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
                 bps.into_iter().map(|b| b.line).collect()
             } else {
@@ -1405,6 +1404,25 @@ impl Handler {
                 self.replay.delete_breakpoint(breakpoint)?;
             }
         }
+        Ok(())
+    }
+
+    pub fn clear_breakpoints_for_source(&mut self, source_path: &str) -> Result<(), Box<dyn Error>> {
+        let keys = self
+            .breakpoints
+            .keys()
+            .filter(|(path, _line)| path == source_path)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for key in keys {
+            if let Some(breakpoints) = self.breakpoints.remove(&key) {
+                for breakpoint in breakpoints {
+                    self.replay.delete_breakpoint(&breakpoint)?;
+                }
+            }
+        }
+
         Ok(())
     }
 

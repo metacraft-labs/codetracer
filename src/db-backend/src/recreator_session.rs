@@ -33,6 +33,15 @@ use crate::task::{
     LocationWithSourcemap, NO_STEP_ID, ProgramEvent, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
+
+fn replay_query_timeout() -> Duration {
+    std::env::var("CODETRACER_REPLAY_QUERY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(10))
+}
 use codetracer_trace_types::{TypeKind, TypeRecord, TypeSpecificInfo};
 
 #[cfg(unix)]
@@ -207,7 +216,7 @@ impl ReplayWorker {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if let Ok(stream) = UnixStream::connect(&socket_path) {
-                stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+                stream.set_read_timeout(Some(replay_query_timeout()))?;
                 self.stream = Some(stream);
                 eprintln!("[rr-worker] socket connected");
                 return Ok(());
@@ -449,7 +458,10 @@ impl ReplayWorker {
         let mut reader = BufReader::new(self.stream.as_mut().expect("valid receiving stream"));
         reader.read_line(&mut res).map_err(|e| {
             if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
-                format!("dispatch_replay_query timed out (10s) waiting for worker response to: {raw_json}")
+                format!(
+                    "dispatch_replay_query timed out ({:?}) waiting for worker response to: {raw_json}",
+                    replay_query_timeout()
+                )
             } else {
                 format!("dispatch_replay_query IO error: {e}")
             }

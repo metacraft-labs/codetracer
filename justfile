@@ -202,6 +202,92 @@ test-reprobuild-hcr-mcr-dap:
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
     --test reprobuild_hcr_mcr_dap_test -- --nocapture
 
+test-reprobuild-hcr-in-codetracer:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+    echo "Error: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR; got $(uname -s) $(uname -m)." >&2
+    exit 2
+  fi
+
+  command -v repro >/dev/null || {
+    echo "Error: repro is required on PATH. Run this target inside the CodeTracer Nix dev shell." >&2
+    exit 1
+  }
+
+  repo_root="$(git rev-parse --show-toplevel)"
+
+  resolve_sibling_repo() {
+    local repo_name="$1"
+    local override_var="$2"
+    local override_value="${!override_var:-}"
+
+    if [ -n "$override_value" ]; then
+      printf '%s\n' "$override_value"
+      return 0
+    fi
+    if [ -d "$repo_root/../$repo_name" ]; then
+      (cd "$repo_root/../$repo_name" && pwd)
+      return 0
+    fi
+    if [ -d "$repo_root/../../$repo_name" ]; then
+      (cd "$repo_root/../../$repo_name" && pwd)
+      return 0
+    fi
+
+    printf '%s\n' "$repo_root/../$repo_name"
+  }
+
+  reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
+  if [ -z "$reprobuild_root" ] && [ -n "${REPROBUILD_SOURCE_ROOT:-}" ] && [[ "$REPROBUILD_SOURCE_ROOT" != /nix/store/* ]]; then
+    reprobuild_root="$REPROBUILD_SOURCE_ROOT"
+  fi
+  if [ -z "$reprobuild_root" ]; then
+    reprobuild_root="$(resolve_sibling_repo reprobuild CODETRACER_REPROBUILD_REPO_PATH)"
+  fi
+  if [ ! -d "$reprobuild_root/libs/repro_hcr_agent" ]; then
+    echo "Error: REPROBUILD_SOURCE_ROOT or CODETRACER_REPROBUILD_REPO_PATH must point to the Reprobuild source tree: $reprobuild_root" >&2
+    exit 1
+  fi
+  export REPROBUILD_SOURCE_ROOT="$reprobuild_root"
+  export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
+
+  native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH)"
+  if [ -z "${CT_NATIVE_REPLAY_PATH:-}" ] && [ -z "${CT_NATIVE_REPLAY_BIN:-}" ] && [ -z "${CODETRACER_CT_NATIVE_REPLAY_CMD:-}" ] && [ -x "$native_backend/target/debug/ct-native-replay" ]; then
+    export CT_NATIVE_REPLAY_PATH="$native_backend/target/debug/ct-native-replay"
+    export CT_NATIVE_REPLAY_BIN="$CT_NATIVE_REPLAY_PATH"
+    export CODETRACER_CT_NATIVE_REPLAY_CMD="$CT_NATIVE_REPLAY_PATH"
+  fi
+
+  native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH)"
+  if [ -z "${CODETRACER_CT_MCR_CMD:-}" ] && [ -x "$native_recorder/ct_cli/ct_cli" ]; then
+    export CODETRACER_CT_MCR_CMD="$native_recorder/ct_cli/ct_cli"
+  fi
+  if [ -z "${LLDB_LIB_PATH:-}" ]; then
+    for candidate in /nix/store/*lldb*/lib; do
+      if [ -e "$candidate/liblldb.dylib" ]; then
+        export LLDB_LIB_PATH="$candidate"
+        break
+      fi
+    done
+  fi
+  if [ -n "${LLDB_LIB_PATH:-}" ]; then
+    export DYLD_LIBRARY_PATH="$LLDB_LIB_PATH${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+  fi
+
+  mkdir -p "$repo_root/build/test-bin"
+  nim c -d:ssl -d:useOpenssl3 --mm:refc --threads:on \
+    --path:src --path:src/ct --path:src/common --path:src/langs \
+    --path:src/frontend --path:src/frontend/viewmodel \
+    --nimcache:"${TMPDIR:-/tmp}/ct-nim-cache/reprobuild_hcr_ct" \
+    --out:"$repo_root/build/test-bin/ct" src/ct/codetracer.nim
+  export PATH="$repo_root/build/test-bin:$PATH"
+
+  cd src/db-backend
+  cargo test --offline --no-default-features --features io-transport,syntax-highlight \
+    --test reprobuild_hcr_in_codetracer_test -- --nocapture
+
 # End-to-end HMR test against the actual ct binary. Requires
 # `just build` (or `just build-once`) to have produced the
 # HMR-enabled renderer at src/build-debug/bin/ct. Tests:
