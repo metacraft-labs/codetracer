@@ -38,10 +38,15 @@ export class StatusBar {
         const tokens = raw.split("#");
         if (tokens.length > 1) {
           const pathAndLine = tokens[0];
-          const pathAndLineTokens = pathAndLine.split(":");
-          if (pathAndLineTokens.length > 1) {
-            const path = pathAndLineTokens[0];
-            const line = parseInt(pathAndLineTokens[1], 10);
+          // Split on the LAST colon: the location text is
+          // ``<path>:<line>`` and on Windows ``<path>`` itself contains
+          // a drive-letter colon (e.g. ``D:\repo\src\main.nr:17``).  A
+          // naive ``split(":")[0/1]`` would yield ``"D"`` / the rest of
+          // the path and never parse the line number.
+          const lastColon = pathAndLine.lastIndexOf(":");
+          if (lastColon > 0) {
+            const path = pathAndLine.slice(0, lastColon);
+            const line = parseInt(pathAndLine.slice(lastColon + 1), 10);
             if (!isNaN(line)) {
               result = { path, line };
               return true;

@@ -413,7 +413,11 @@ export class LayoutPage extends BasePage {
       for (const r of roots) {
         const idAttr = (await r.getAttribute("id")) ?? "";
         const filePath = (await r.getAttribute("data-label")) ?? "";
-        const segments = filePath.split("/").filter(Boolean);
+        // Split on both POSIX and Windows path separators: editor tab
+        // labels carry native absolute paths, so a `/`-only split would
+        // treat a whole `D:\repo\src\main.nr` path as a single segment
+        // and report the full path as the file name.
+        const segments = filePath.split(/[/\\]/).filter(Boolean);
         const fileName = segments[segments.length - 1] ?? "";
         const tabButtonText =
           segments.length >= 2

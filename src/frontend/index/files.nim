@@ -94,9 +94,16 @@ proc loadFile(
   if path.len == 0:
     return res
 
-  let strippedPath = path.stripLastChar(cstring"/")
-  let subParts = strippedPath.split(cstring"/")
-  let name = subParts[^1]
+  # Derive the display name (basename) from the path.  Using Node's
+  # ``path.basename`` makes this correct on every platform — the previous
+  # ``split("/")[^1]`` form returned the *entire* path on Windows, where
+  # path separators are backslashes, so the Files tree showed full
+  # absolute paths instead of file/folder names.  ``stripLastChar`` keeps
+  # a trailing-separator-tolerant input for ``basename``.
+  let strippedPath = path.stripLastChar(cstring"/").stripLastChar(cstring"\\")
+  var name = nodePath.basename(strippedPath)
+  if name.len == 0:
+    name = strippedPath
 
   if cast[bool](data.isDirectory()):
     if not selfContained and shouldSkipIndexedDirectory(realPath):

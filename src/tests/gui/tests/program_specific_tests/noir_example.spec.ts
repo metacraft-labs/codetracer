@@ -110,6 +110,7 @@ test.describe("noir example — basic layout", () => {
 
     const mainNr = await filesystem.nodeByPath(
       "source folders",
+      "noir_example",
       "src",
       "main.nr",
     );
@@ -141,6 +142,7 @@ test.describe("noir example — basic layout", () => {
 
     const mainNr = await filesystem.nodeByPath(
       "source folders",
+      "noir_example",
       "src",
       "main.nr",
     );

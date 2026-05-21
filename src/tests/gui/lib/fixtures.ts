@@ -440,18 +440,33 @@ function recordTestProgram(recordArg: string): string {
     );
   }
 
-  const lines = ctProcess.stdout.trim().split("\n");
-  const lastLine = lines[lines.length - 1];
   // M-REC-2 / M-REC-3 / M-REC-6: stdout marker is ``recordingId:`` and
   // the payload is a UUIDv7 recording-id string.  Validate the shape
   // lightly (non-empty after trimming) and pass it through verbatim —
   // no ``Number()`` coercion.
-  if (!lastLine.startsWith("recordingId:")) {
-    throw new Error(`Unexpected last line of ct record: ${lastLine}`);
+  //
+  // The marker is NOT reliably the last line: `ct record` first replays
+  // the traced program's own stdout (which may end with a trailing
+  // separator/banner line, e.g. the sudoku board followed by a row of
+  // dashes) and only then prints the `recordingId:` marker.  Depending on
+  // stdout flush ordering between the child program and `ct` the marker
+  // can be followed by trailing program output.  Scan every line for the
+  // marker rather than assuming it is last.
+  const lines = ctProcess.stdout.trim().split(/\r?\n/);
+  const markerLine = [...lines]
+    .reverse()
+    .find((line) => line.trimStart().startsWith("recordingId:"));
+  if (markerLine === undefined) {
+    throw new Error(
+      `No 'recordingId:' marker in ct record output:\n${ctProcess.stdout}`,
+    );
   }
-  const recordingId = lastLine.slice("recordingId:".length).trim();
+  const recordingId = markerLine
+    .trimStart()
+    .slice("recordingId:".length)
+    .trim();
   if (recordingId.length === 0) {
-    throw new Error(`Empty recording id from ct record output: ${lastLine}`);
+    throw new Error(`Empty recording id from ct record output: ${markerLine}`);
   }
   console.log(`# recorded trace for ${recordArg} with id ${recordingId}`);
   recordingCache.set(recordArg, recordingId);
@@ -552,51 +567,80 @@ function makeCleanEnv(
 }
 
 /**
- * Resolves the chromium executable path from $PLAYWRIGHT_BROWSERS_PATH.
+ * Resolves the chromium executable path for the web-mode browser fixture.
  *
- * On Linux, looks for chrome-linux directory with chrome binary.
- * On Windows, looks for chrome-win directory with chrome.exe binary.
+ * Priority:
+ *   1. $PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH — explicit override.
+ *   2. $PLAYWRIGHT_BROWSERS_PATH — scan for the installed chromium revision
+ *      (the nix dev shell provides browsers here).
+ *   3. Playwright's default install cache (`~/AppData/Local/ms-playwright`
+ *      on Windows, `~/.cache/ms-playwright` on Linux) — this is where
+ *      `npx playwright install` puts browsers when no env var is set.
+ *   4. `undefined` — let `chromium.launch()` use its own bundled-browser
+ *      discovery. Returning `undefined` (rather than throwing) keeps the
+ *      web-mode fixture working on machines that did not set
+ *      $PLAYWRIGHT_BROWSERS_PATH, matching the graceful fallback in
+ *      `playwright.config.ts`'s `resolveChromiumExecutable()`.
  */
-function resolveChromiumPath(): string {
-  const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (!browsersDir) {
-    throw new Error(
-      "expected $PLAYWRIGHT_BROWSERS_PATH env var to be set: can't find browser without it",
-    );
-  }
-  const chromiumDir = fs
-    .readdirSync(browsersDir)
-    .filter((d: string) => d.startsWith("chromium-") && !d.includes("headless"))
-    .sort()
-    .pop();
-  if (!chromiumDir) {
-    throw new Error(`no chromium-* directory found in ${browsersDir}`);
+function resolveChromiumPath(): string | undefined {
+  const explicit = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (explicit && fs.existsSync(explicit)) {
+    return explicit;
   }
 
-  const chromiumBase = path.join(browsersDir, chromiumDir);
-
-  if (isWindows) {
-    const chromeSubdir = fs
-      .readdirSync(chromiumBase)
-      .find((d: string) => d.startsWith("chrome-win"));
-    if (!chromeSubdir) {
-      throw new Error(
-        `no chrome-win* directory found in ${chromiumBase}`,
-      );
+  const candidateDirs: string[] = [];
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    candidateDirs.push(process.env.PLAYWRIGHT_BROWSERS_PATH);
+  }
+  // Playwright's default browser cache location.
+  const homeDir = os.homedir();
+  if (homeDir) {
+    if (isWindows) {
+      candidateDirs.push(path.join(homeDir, "AppData", "Local", "ms-playwright"));
+    } else {
+      candidateDirs.push(path.join(homeDir, ".cache", "ms-playwright"));
     }
-    return path.join(chromiumBase, chromeSubdir, "chrome.exe");
   }
 
-  // Linux (and fallback for other Unix-like systems)
-  const chromeSubdir = fs
-    .readdirSync(chromiumBase)
-    .find((d: string) => d.startsWith("chrome-linux"));
-  if (!chromeSubdir) {
-    throw new Error(
-      `no chrome-linux* directory found in ${chromiumBase}`,
-    );
+  for (const browsersDir of candidateDirs) {
+    if (!fs.existsSync(browsersDir)) {
+      continue;
+    }
+    const chromiumDir = fs
+      .readdirSync(browsersDir)
+      .filter((d: string) => d.startsWith("chromium-") && !d.includes("headless"))
+      .sort()
+      .pop();
+    if (!chromiumDir) {
+      continue;
+    }
+    const chromiumBase = path.join(browsersDir, chromiumDir);
+    if (isWindows) {
+      const chromeSubdir = fs
+        .readdirSync(chromiumBase)
+        .find((d: string) => d.startsWith("chrome-win"));
+      if (chromeSubdir) {
+        const exe = path.join(chromiumBase, chromeSubdir, "chrome.exe");
+        if (fs.existsSync(exe)) {
+          return exe;
+        }
+      }
+    } else {
+      const chromeSubdir = fs
+        .readdirSync(chromiumBase)
+        .find((d: string) => d.startsWith("chrome-linux"));
+      if (chromeSubdir) {
+        const exe = path.join(chromiumBase, chromeSubdir, "chrome");
+        if (fs.existsSync(exe)) {
+          return exe;
+        }
+      }
+    }
   }
-  return path.join(chromiumBase, chromeSubdir, "chrome");
+
+  // Nothing discovered — let chromium.launch() fall back to its bundled
+  // browser. This is not an error: Playwright ships its own chromium.
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -40,12 +40,34 @@ import { retry } from "../../lib/retry-helpers";
 // `.../src/tests/src/build-debug/bin/ct` that resolve to ENOENT.
 // ---------------------------------------------------------------------------
 
+const isWindows = process.platform === "win32";
+
 const currentDir = path.resolve();
 const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const codetracerPath = process.env.CODETRACER_E2E_CT_PATH ??
-  path.join(codetracerPrefix, "bin", "ct");
+  path.join(codetracerPrefix, "bin", ctBinaryName);
+
+// On Windows, `ct.exe` spawns Electron as a child process (no execv),
+// which prevents Playwright from connecting via CDP.  Launch Electron
+// directly (mirroring lib/fixtures.ts) and pass the build-variant root
+// so it picks up package.json / index.js.
+const electronExePath: string | null = (() => {
+  if (!isWindows) return null;
+  for (const p of [
+    path.join(codetracerInstallDir, "node-packages", "node_modules", "electron", "dist", "electron.exe"),
+    path.join(codetracerInstallDir, "node_modules", "electron", "dist", "electron.exe"),
+  ]) {
+    try {
+      if (require("node:fs").existsSync(p)) return p;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+})();
 
 // ---------------------------------------------------------------------------
 // Environment detection
@@ -110,7 +132,15 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_TRACE_ID;
   delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
-  delete env.CODETRACER_PREFIX;
+  // On Windows the Electron binary is launched directly (its exe is not
+  // inside build-debug/), so the Nim code cannot derive the prefix from
+  // getAppDir() — CODETRACER_PREFIX must be set explicitly.  Elsewhere
+  // ct derives it from its own location, so the var is removed.
+  if (isWindows && electronExePath) {
+    env.CODETRACER_PREFIX = codetracerPrefix;
+  } else {
+    delete env.CODETRACER_PREFIX;
+  }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
 
@@ -135,7 +165,7 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   return env;
 }
 
-function recordTestProgram(sourcePath: string): number {
+function recordTestProgram(sourcePath: string): string {
   const fullPath = path.isAbsolute(sourcePath)
     ? sourcePath
     : path.join(testProgramsPath, sourcePath);
@@ -149,6 +179,7 @@ function recordTestProgram(sourcePath: string): number {
       stdio: "pipe",
       encoding: "utf-8",
       timeout: 30_000,
+      windowsHide: true,
     },
   );
 
@@ -158,18 +189,38 @@ function recordTestProgram(sourcePath: string): number {
     );
   }
 
-  const lines = ctProcess.stdout.trim().split("\n");
-  const lastLine = lines[lines.length - 1];
-  // M-REC-6: stdout marker renamed from "traceId:" to "recordingId:".
-  // The Number() cast below is a pre-existing M-REC-2 hangover (test-side
-  // trace_folder layout cleanup is M-REC-7's deliverable).
-  if (!lastLine.startsWith("recordingId:")) {
-    throw new Error(`Unexpected ct record output: ${lastLine}`);
+  // M-REC-6: stdout marker is "recordingId:" carrying a UUIDv7 string.
+  // The marker is not reliably the last line — the traced program's own
+  // stdout may flush a trailing banner after it — so scan every line.
+  // It is a recording-id *string*; never coerce it through Number().
+  const lines = ctProcess.stdout.trim().split(/\r?\n/);
+  const markerLine = [...lines]
+    .reverse()
+    .find((line) => line.trimStart().startsWith("recordingId:"));
+  if (markerLine === undefined) {
+    throw new Error(`Unexpected ct record output: ${ctProcess.stdout}`);
   }
-  return Number(lastLine.slice("recordingId:".length).trim());
+  const recordingId = markerLine.trimStart().slice("recordingId:".length).trim();
+  if (recordingId.length === 0) {
+    throw new Error(`Empty recording id from ct record output: ${markerLine}`);
+  }
+  return recordingId;
 }
 
 function killProcessTree(pid: number): void {
+  if (isWindows) {
+    // Windows has no pgrep / process-group signals: taskkill /T kills
+    // the whole tree rooted at `pid`.
+    try {
+      childProcess.execSync(`taskkill /PID ${pid} /T /F`, {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      // already dead
+    }
+    return;
+  }
   let childPids: number[] = [];
   try {
     const output = childProcess
@@ -220,14 +271,21 @@ const test = base.extend<{
     const traceId = recordTestProgram("py_console_logs/main.py");
     console.log(`# launching Electron for trace ${traceId}`);
 
+    // On Windows, launch the Electron binary directly with the build
+    // variant root as its app argument; ct.exe would fork Electron as a
+    // child and Playwright could not attach.  Elsewhere, launch ct.
+    const launchExe = (isWindows && electronExePath) ? electronExePath : codetracerPath;
+    const launchArgs = (isWindows && electronExePath) ? [codetracerPrefix] : [];
+
     const app = await _electron.launch({
-      executablePath: codetracerPath,
+      executablePath: launchExe,
       cwd: codetracerInstallDir,
-      args: [],
+      args: launchArgs,
       env: makeCleanEnv({
         CODETRACER_CALLER_PID: process.pid.toString(),
-        // M-REC-6: env-var renamed from CODETRACER_TRACE_ID.
-        CODETRACER_RECORDING_ID: traceId.toString(),
+        // M-REC-6: env-var renamed from CODETRACER_TRACE_ID.  The
+        // recording id is a UUIDv7 string — pass it through verbatim.
+        CODETRACER_RECORDING_ID: traceId,
       }),
     });
 
@@ -678,7 +736,7 @@ test.describe("Cross-window interaction", () => {
       const trace = session?.trace;
       if (!trace) return null;
       return {
-        id: Number(trace.id ?? -1),
+        id: String(trace.id ?? ""),
         program: String(trace.program ?? ""),
       };
     });
@@ -724,7 +782,7 @@ test.describe("Cross-window interaction", () => {
       const trace = session?.trace;
       if (!trace) return null;
       return {
-        id: Number(trace.id ?? -1),
+        id: String(trace.id ?? ""),
         program: String(trace.program ?? ""),
       };
     });
@@ -798,7 +856,7 @@ test.describe("Cross-window interaction", () => {
         const session = d?.sessions?.[0];
         const trace = session?.trace;
         if (!trace) return null;
-        return { id: Number(trace.id ?? -1) };
+        return { id: String(trace.id ?? "") };
       });
       expect(trace0After).not.toBeNull();
       expect(trace0After!.id).toBe(trace0!.id);
@@ -809,7 +867,7 @@ test.describe("Cross-window interaction", () => {
       const trace0After = await page.evaluate(() => {
         const d = (window as any).data;
         const session = d?.sessions?.[0];
-        return session?.trace ? { id: Number(session.trace.id ?? -1) } : null;
+        return session?.trace ? { id: String(session.trace.id ?? "") } : null;
       });
       expect(trace0After).not.toBeNull();
       expect(trace0After!.id).toBe(trace0!.id);
@@ -820,7 +878,7 @@ test.describe("Cross-window interaction", () => {
     const trace1After = await page.evaluate(() => {
       const d = (window as any).data;
       const session = d?.sessions?.[1];
-      return session?.trace ? { id: Number(session.trace.id ?? -1) } : null;
+      return session?.trace ? { id: String(session.trace.id ?? "") } : null;
     });
     expect(trace1After).not.toBeNull();
     expect(trace1After!.id).toBe(secondTraceId);

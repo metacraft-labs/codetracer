@@ -399,6 +399,84 @@ fn setup(
         }
     }
 
+    // Legacy `runtime_tracing` materialized layout: a `trace.json` file
+    // (a JSON-encoded `Vec<TraceLowLevelEvent>`) instead of a CTFS
+    // `.ct` container.  External recorders that have not yet adopted the
+    // CTFS writer still emit this — the Noir recorder (`nargo trace`)
+    // being the live example.  Treat it exactly like a materialized
+    // trace by decoding the events and running the same postprocessing
+    // pipeline `CTFSTraceReader::open()` uses, rather than wrongly
+    // falling through to the rr/MCR replay-worker path below.
+    let legacy_json_path = {
+        let direct = trace_folder.join("trace.json");
+        if direct.is_file() {
+            Some(direct)
+        } else if trace_folder.is_file()
+            && trace_folder.file_name().map(|n| n == "trace.json").unwrap_or(false)
+        {
+            Some(trace_folder.to_path_buf())
+        } else {
+            None
+        }
+    };
+    if let Some(json_path) = legacy_json_path {
+        info!(
+            "detected legacy runtime_tracing materialized trace: {}",
+            json_path.display()
+        );
+        let json_bytes = std::fs::read(&json_path)?;
+        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> =
+            serde_json::from_slice(&json_bytes).map_err(|e| {
+                format!(
+                    "failed to parse legacy trace.json at {}: {e}",
+                    json_path.display()
+                )
+            })?;
+        // Workdir: prefer `trace_metadata.json` next to `trace.json`,
+        // else fall back to the trace folder itself.
+        let meta_workdir = json_path
+            .parent()
+            .map(|d| d.join("trace_metadata.json"))
+            .filter(|p| p.is_file())
+            .and_then(|p| std::fs::read(&p).ok())
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| {
+                v.get("workdir")
+                    .and_then(|w| w.as_str())
+                    .map(|s| PathBuf::from(s))
+            });
+        let workdir = meta_workdir.unwrap_or_else(|| {
+            json_path
+                .parent()
+                .map(|d| d.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
+        let reader = CTFSTraceReader::from_events(events, &workdir)?;
+        info!(
+            "legacy materialized trace loaded: {} steps, {} calls, {} events",
+            reader.step_count(),
+            reader.call_count(),
+            reader.event_count(),
+        );
+        let reader: Arc<dyn TraceReader> = Arc::new(reader);
+        let mut handler = Handler::construct_with_reader(
+            TraceKind::Materialized,
+            RecreatorArgs {
+                name: thread_name.to_string(),
+                ..RecreatorArgs::default()
+            },
+            reader,
+            false,
+        );
+        handler.raw_diff_index = raw_diff_index;
+        handler.load_macro_sourcemaps(trace_folder);
+        if for_launch {
+            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+        }
+        handler.initialized = true;
+        return Ok(handler);
+    }
+
     info!("not a CTFS materialized trace; trying replay-worker (MCR / rr / TTD .run) path");
     eprintln!("[db-backend setup] trying rr trace path");
     if let Some(path) = resolve_replay_trace_path(trace_folder, trace_file) {

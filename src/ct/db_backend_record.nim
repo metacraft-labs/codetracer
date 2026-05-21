@@ -685,6 +685,16 @@ proc main*(): Trace =
     # ``recordingId:`` to remove the "trace_id" overload across our
     # subprocess plumbing.  The payload is still a UUIDv7 string.
     echo fmt"recordingId:{traceId}"
+    # The recorder runs the traced program as a child with
+    # ``poParentStreams``, so the child writes directly to our inherited
+    # stdout while our own ``echo`` output goes through Nim's buffered
+    # ``stdout`` File.  On Windows, when the parent process exits while
+    # this buffer still holds the marker lines, the pipe can be torn down
+    # before the C runtime's atexit flush completes — the caller then
+    # sees truncated output ending at the traced program's last line and
+    # never receives the ``recordingId:`` marker.  Flush explicitly so
+    # the marker is durably on the pipe before we return/exit.
+    flushFile(stdout)
     return trace
   except CatchableError as e:
     if shouldSendEvents and sendAdditionalEvents:

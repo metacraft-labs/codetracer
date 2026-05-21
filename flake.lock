@@ -2268,11 +2268,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1774612733,
+        "lastModified": 1779313947,
         "narHash": "sha256-sfBJqzD3AqY5szcGnj2fMK0CTDNVwOhJ+vXYWO5joqA=",
         "owner": "metacraft-labs",
         "repo": "noir",
-        "rev": "35105c0da4cd401a8253bef1414258acee059f30",
+        "rev": "334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2",
         "type": "github"
       },
       "original": {

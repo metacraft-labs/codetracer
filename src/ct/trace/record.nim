@@ -199,17 +199,34 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
   # echo exCode
   for line in lines:
     echo line
+  # Flush the relayed recorder output (which ends with the
+  # ``recordingId:`` marker) so it durably reaches our caller before
+  # ``ct`` exits — see the matching note in ``db_backend_record.nim``.
+  flushFile(stdout)
 
   if exCode == 0:
-    let lastLine = lines[^1]
     # M-REC-6: stdout marker renamed from ``traceId:`` to
     # ``recordingId:`` to stop overloading "trace_id" with our local
     # recording identity.  The payload is still a UUIDv7 string.  Both
     # the writer (in ``record.nim`` / ``db_backend_record.nim``) and
     # every reader in the tree flip atomically — there is no legacy
     # ``traceId:`` parser path.
-    if lastLine.startsWith("recordingId:"):
-      let traceId = lastLine[("recordingId:").len .. ^1].strip
+    #
+    # The marker is NOT reliably the last line of the recorder's output:
+    # ``db-backend-record`` runs the traced program as a child whose
+    # stdout is merged in via ``poStdErrToStdOut``.  When the traced
+    # program prints a trailing banner/separator (e.g. the sudoku board
+    # followed by a row of dashes) the child's final flush can land
+    # *after* the ``recordingId:`` marker.  Scan every captured line for
+    # the marker (last occurrence wins) rather than assuming ``lines[^1]``
+    # — the old ``lines[^1]`` form also crashed outright when the
+    # recorder produced no output at all.
+    var markerLine = ""
+    for line in lines:
+      if line.startsWith("recordingId:"):
+        markerLine = line
+    if markerLine.len > 0:
+      let traceId = markerLine[("recordingId:").len .. ^1].strip
       result = trace_index.find(traceId, test=false)
 
       if withDiff.len > 0:
