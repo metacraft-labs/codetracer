@@ -336,7 +336,13 @@ test:
 # On Linux, uses a virtual display (Xvfb) — same as CI.
 # On Windows, no virtual display is needed; Electron runs natively.
 # For visible windows on your desktop, use `just test-gui-visible` instead.
-test-gui *args:
+#
+# `build-once` runs as a prereq so the rebuilt frontend + replay-server are
+# fresh before tests launch — without this, db-backend / Nim frontend / Tup
+# changes that haven't been compiled silently produce stale-binary test
+# failures (see task #317 + the May 19→20 staleness incident that produced
+# the "ct-mcr binary not found" Cluster B failure).
+test-gui *args: build-once
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
@@ -365,7 +371,8 @@ test-gui *args:
 # Run GUI tests with windows visible on the current desktop session.
 # On Linux, requires a running display server ($DISPLAY must be set).
 # On Windows, always works (no $DISPLAY needed).
-test-gui-visible *args:
+# `build-once` is a prereq for the same reason as `test-gui` (task #317).
+test-gui-visible *args: build-once
   #!/usr/bin/env bash
   set -e
   case "$(uname -s)" in
