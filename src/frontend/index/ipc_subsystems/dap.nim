@@ -70,8 +70,14 @@ proc sendDapForSession*(sessionId: int, message: JsObject) =
     return
 
   # Switch the BM to the requested session when necessary.
-  # sessionId 0 is the default / single-session case — no switch needed.
-  if sessionId != currentDapSessionId and sessionId != 0:
+  #
+  # The routing decision is keyed solely on the target sessionId vs the
+  # one the BM is currently serving.  Earlier code special-cased
+  # `sessionId == 0` and skipped the switch, which mis-targeted the
+  # default session whenever a non-zero session had previously been
+  # selected on the BM (issue #327).  The routing must be symmetric:
+  # session 0 needs the same switch logic as any other session.
+  if sessionId != currentDapSessionId:
     let selectMsg = js{
       "type": cstring"request",
       "command": cstring"ct/select-replay",

@@ -135,7 +135,12 @@ proc createNewSession*(data: Data) =
   ## a new tab backed by its own ReplaySession.
   let sessionId = data.sessions.len
   var session = newReplaySession(ReplaySessionId(sessionId))
-  session.dapApi = DapApi()
+  # M8/issue #327: tag the per-session DapApi with the session index so
+  # outgoing DAP requests carry the correct `sessionId` field and the
+  # main-process router in ipc_subsystems/dap.nim can switch the Backend
+  # Manager to the right replay.  Defaulting to 0 here would make every
+  # non-default session impersonate session 0 on the wire.
+  session.dapApi = DapApi(sessionId: sessionId)
   session.viewsApi = setupSinglePageViewsApi(
     cstring("single-page-frontend-to-views-" & $sessionId))
   session.services = Services(
