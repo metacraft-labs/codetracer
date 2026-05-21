@@ -577,6 +577,65 @@ function Ensure-NodeModulesJunction {
   }
 }
 
+# Materialize the `src/public/third_party/golden-layout/dist` directory
+# symlink as a real NTFS junction on Windows.
+#
+# That entry is a POSIX symlink into `node_modules/golden-layout/dist`.
+# With `core.symlinks=false` — the norm for a Windows checkout without
+# the symlink privilege — git materializes it as a 40-byte text-file
+# stub.  The Tup rule then globs `.../dist/css/*.css` and finds nothing,
+# so `build-debug/public/third_party/golden-layout/dist/css/` is empty
+# and the `<link>` to `goldenlayout-base.css` from index.html /
+# server_index.ejs 404s.  GoldenLayout then renders unstyled and every
+# inactive tab header collapses to zero width (becoming unclickable).
+#
+# Replacing the stub with a directory junction lets Tup's per-file glob
+# traverse into the real CSS, exactly as a resolved POSIX symlink would
+# on Linux.  Junctions need no symlink privilege.  (A directory copy is
+# avoided so the source tree stays clean; `git status` shows the
+# junction as a divergent entry, expected Windows build-tooling noise.)
+function Ensure-GoldenLayoutAsset {
+  param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+  $linkPath = Join-Path $RepoRoot "src/public/third_party/golden-layout/dist"
+  $linkDir = Split-Path -Parent $linkPath
+  $target = [System.IO.Path]::GetFullPath(
+    (Join-Path $linkDir "../../../../node_modules/golden-layout/dist"))
+
+  if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+    return
+  }
+
+  if (Test-Path -LiteralPath $linkPath -PathType Container) {
+    $item = Get-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item) {
+      $isReparse = $false
+      try {
+        $isReparse = (([int]$item.Attributes) -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0
+      } catch {}
+      if ($isReparse) {
+        # Already a junction/symlink directory — idempotent no-op.
+        return
+      }
+    }
+  }
+
+  if (Test-Path -LiteralPath $linkPath) {
+    try {
+      Remove-Item -LiteralPath $linkPath -Force -Recurse -ErrorAction Stop
+    } catch {
+      Write-Warning "Could not remove golden-layout stub '$linkPath': $($_.Exception.Message)"
+      return
+    }
+  }
+  try {
+    New-Item -ItemType Junction -Path $linkPath -Target $target -ErrorAction Stop | Out-Null
+    Write-Host "Created golden-layout junction: $linkPath -> $target"
+  } catch {
+    Write-Warning "Failed to create golden-layout junction '$linkPath' -> '$target': $($_.Exception.Message)"
+  }
+}
+
 function Prepend-PathEntries {
   param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][AllowEmptyCollection()][string[]]$Entries)
   $existing = [Environment]::GetEnvironmentVariable("PATH")
@@ -990,6 +1049,7 @@ $llvmBinDir = Join-Path $llvmDir "bin"
 
 Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
 Ensure-NodeModulesJunction -RepoRoot $repoRoot
+Ensure-GoldenLayoutAsset -RepoRoot $repoRoot
 
 $msvcBlob = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $windowsDir "export-msvc-env.ps1")
 foreach ($line in $msvcBlob) {

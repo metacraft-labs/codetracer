@@ -6,7 +6,16 @@
 : third_party/tippy.js/tippy.css |> !tup_preserve |> %f
 : third_party/monaco-editor/min |> !tup_preserve |> %f
 : third_party/@exuanbo |> !tup_preserve |> %f
-: third_party/golden-layout/dist |> !tup_preserve |> %f
+# GoldenLayout: copy the stylesheet files individually rather than the
+# whole `dist` directory.  `third_party/golden-layout/dist` is a POSIX
+# symlink into node_modules; Tup's `!tup_preserve` cannot mirror a
+# directory symlink on Windows (it fails trying to CopyFile the reparse
+# point).  Globbing the specific CSS files works through the symlink /
+# junction on every platform, and the CSS is all index.html /
+# server_index.ejs actually <link> from this path — the GoldenLayout JS
+# is delivered by the webpack bundle.
+: foreach third_party/golden-layout/dist/css/*.css |> !tup_preserve |> %f
+: foreach third_party/golden-layout/dist/css/themes/*.css |> !tup_preserve |> %f
 : third_party/mousetrap |> !tup_preserve |> %f
 : third_party/vex-js |> !tup_preserve |> %f
 : third_party/xterm |> !tup_preserve |> %f
