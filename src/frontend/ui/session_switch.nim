@@ -140,7 +140,17 @@ proc createNewSession*(data: Data) =
   # main-process router in ipc_subsystems/dap.nim can switch the Backend
   # Manager to the right replay.  Defaulting to 0 here would make every
   # non-default session impersonate session 0 on the wire.
-  session.dapApi = DapApi(sessionId: sessionId)
+  #
+  # Issue #329: also propagate the Electron IPC bridge so the new
+  # session's DapApi can actually send requests.  `DapApi.sendCtRequest`
+  # (in src/frontend/dap.nim) calls `dap.ipc.send(...)`; with `.ipc`
+  # nil the very first DAP request from the new session would throw an
+  # NPE in the renderer.  `configureMiddleware` only wires `.ipc` onto
+  # session 0's DapApi at startup, so every later session needs the
+  # reference copied here.  `data.ipc` is the singleton Electron IPC
+  # renderer instance (assigned at module init in renderer.nim — well
+  # before the user can press "+"), so it is safe to copy.
+  session.dapApi = DapApi(sessionId: sessionId, ipc: data.ipc)
   session.viewsApi = setupSinglePageViewsApi(
     cstring("single-page-frontend-to-views-" & $sessionId))
   session.services = Services(

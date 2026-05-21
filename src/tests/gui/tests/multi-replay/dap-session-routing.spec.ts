@@ -88,6 +88,30 @@ async function getDapApiSessionId(
   }, sessionIndex);
 }
 
+/**
+ * Issue #329 helper: check that the per-session `DapApi.ipc` is wired to
+ * the same Electron IPC renderer instance as `data.ipc`.  Returns one of
+ *   - "ok"                 : ipc is the shared singleton, ready to send
+ *   - "missing-dap-api"    : the session has no DapApi at all
+ *   - "ipc-nil"            : DapApi exists but `.ipc` was never set
+ *   - "ipc-mismatch"       : DapApi.ipc is set but does NOT point at
+ *                            data.ipc (would indicate a stray reference)
+ */
+async function getDapApiIpcStatus(
+  page: import("@playwright/test").Page,
+  sessionIndex: number,
+): Promise<string> {
+  return page.evaluate((idx) => {
+    const d = (window as any).data;
+    const session = d?.sessions?.[idx];
+    if (!session || !session.dapApi) return "missing-dap-api";
+    const ipc = session.dapApi.ipc;
+    if (ipc === null || ipc === undefined) return "ipc-nil";
+    if (ipc !== d.ipc) return "ipc-mismatch";
+    return "ok";
+  }, sessionIndex);
+}
+
 // ---------------------------------------------------------------------------
 // Suite
 // ---------------------------------------------------------------------------
@@ -188,5 +212,71 @@ test.describe("DAP session routing (issue #327)", () => {
     expect(shouldSelectReplay(0, 0)).toBe(false);
     expect(shouldSelectReplay(1, 1)).toBe(false);
     expect(shouldSelectReplay(2, 2)).toBe(false);
+  });
+
+  /**
+   * Regression test for issue #329: every session's `DapApi.ipc` must be
+   * wired to the Electron IPC renderer.
+   *
+   * The bug
+   * -------
+   * `configureMiddleware` (src/frontend/ui_js.nim) is called once at
+   * startup with `data.dapApi` resolving through the active-session
+   * forwarder to session 0.  It sets `data.dapApi.ipc = data.ipc` for
+   * session 0 only.
+   *
+   * `createNewSession` (src/frontend/ui/session_switch.nim) constructs
+   * a fresh `DapApi(sessionId: N)` per new tab.  Before the #329 fix
+   * the `.ipc` field was left nil, so `DapApi.sendCtRequest` — which
+   * unconditionally calls `dap.ipc.send(...)` — would throw an NPE on
+   * the very first DAP request issued from the new session.
+   *
+   * What this test asserts
+   * ----------------------
+   *   1. Session 0's DapApi.ipc points at `data.ipc` (the shared
+   *      Electron IPC singleton).  This is the baseline established by
+   *      `configureMiddleware`.
+   *   2. After creating session 1 via "+", its DapApi.ipc also points
+   *      at the same `data.ipc` instance.  Pre-fix this would be
+   *      "ipc-nil".
+   *   3. Session 2 (added after another "+" click) also has `.ipc`
+   *      wired — guarding against fixes that only handle the first
+   *      additional session.
+   */
+  test("every session's DapApi.ipc is wired to the Electron IPC bridge (issue #329)", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+
+    await layout.waitForTraceLoaded();
+    await layout.waitForAllComponentsLoaded();
+
+    await retry(
+      async () => (await getSessionCount(ctPage)) >= 1,
+      { maxAttempts: 30, delayMs: 1000 },
+    );
+
+    // Session 0: configureMiddleware should have wired .ipc.
+    expect(await getDapApiIpcStatus(ctPage, 0)).toBe("ok");
+
+    // Create session 1 via the "+" button.
+    await ctPage.locator(".session-tab-add").click();
+    await retry(
+      async () => (await getSessionCount(ctPage)) === 2,
+      { maxAttempts: 30, delayMs: 500 },
+    );
+
+    // Pre-fix this returned "ipc-nil" because createNewSession built a
+    // bare `DapApi(sessionId: 1)` with no `.ipc`.
+    expect(await getDapApiIpcStatus(ctPage, 1)).toBe("ok");
+
+    // Create session 2 to guard against single-session fixes.
+    await ctPage.locator(".session-tab-add").click();
+    await retry(
+      async () => (await getSessionCount(ctPage)) === 3,
+      { maxAttempts: 30, delayMs: 500 },
+    );
+
+    expect(await getDapApiIpcStatus(ctPage, 0)).toBe("ok");
+    expect(await getDapApiIpcStatus(ctPage, 1)).toBe("ok");
+    expect(await getDapApiIpcStatus(ctPage, 2)).toBe("ok");
   });
 });
