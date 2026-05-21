@@ -98,10 +98,7 @@ impl CTFSTraceReader {
     /// then wrongly fall through to the rr/MCR replay-worker path), we
     /// run the very same postprocessing pipeline `open()` uses so the
     /// resulting reader is indistinguishable from a CTFS-loaded one.
-    pub fn from_events(
-        events: Vec<TraceLowLevelEvent>,
-        workdir: &Path,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn from_events(events: Vec<TraceLowLevelEvent>, workdir: &Path) -> Result<Self, Box<dyn Error>> {
         let mut db = Db::new(&workdir.to_path_buf());
         let mut processor = TraceProcessor::new(&mut db);
         processor.postprocess(&events)?;

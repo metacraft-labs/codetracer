@@ -136,11 +136,7 @@ fn command_output_text(program: &Path, args: &[&str], cwd: &Path) -> String {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             if output.status.success() {
-                if stdout.is_empty() {
-                    stderr
-                } else {
-                    stdout
-                }
+                if stdout.is_empty() { stderr } else { stdout }
             } else {
                 format!("unavailable (status {}; stderr: {stderr})", output.status)
             }

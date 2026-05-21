@@ -411,9 +411,7 @@ fn setup(
         let direct = trace_folder.join("trace.json");
         if direct.is_file() {
             Some(direct)
-        } else if trace_folder.is_file()
-            && trace_folder.file_name().map(|n| n == "trace.json").unwrap_or(false)
-        {
+        } else if trace_folder.is_file() && trace_folder.file_name().map(|n| n == "trace.json").unwrap_or(false) {
             Some(trace_folder.to_path_buf())
         } else {
             None
@@ -425,13 +423,8 @@ fn setup(
             json_path.display()
         );
         let json_bytes = std::fs::read(&json_path)?;
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> =
-            serde_json::from_slice(&json_bytes).map_err(|e| {
-                format!(
-                    "failed to parse legacy trace.json at {}: {e}",
-                    json_path.display()
-                )
-            })?;
+        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
+            .map_err(|e| format!("failed to parse legacy trace.json at {}: {e}", json_path.display()))?;
         // Workdir: prefer `trace_metadata.json` next to `trace.json`,
         // else fall back to the trace folder itself.
         let meta_workdir = json_path
@@ -440,11 +433,7 @@ fn setup(
             .filter(|p| p.is_file())
             .and_then(|p| std::fs::read(&p).ok())
             .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| {
-                v.get("workdir")
-                    .and_then(|w| w.as_str())
-                    .map(|s| PathBuf::from(s))
-            });
+            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(|s| PathBuf::from(s)));
         let workdir = meta_workdir.unwrap_or_else(|| {
             json_path
                 .parent()
