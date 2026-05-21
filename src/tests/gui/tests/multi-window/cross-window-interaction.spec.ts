@@ -29,6 +29,12 @@ import {
 import { _electron } from "playwright";
 
 import { retry } from "../../lib/retry-helpers";
+// Side-effect import: lib/fixtures.ts performs language-recorder
+// discovery at module load (Python interpreter / recorder, Ruby, etc.)
+// and records the results on process.env.  This spec defines its own
+// `test` fixture and `recordTestProgram`, so without importing fixtures
+// that discovery never runs and `ct record` cannot find the recorders.
+import "../../lib/fixtures";
 
 // ---------------------------------------------------------------------------
 // Path constants (duplicated from fixtures.ts -- these are not exported)
@@ -736,7 +742,10 @@ test.describe("Cross-window interaction", () => {
       const trace = session?.trace;
       if (!trace) return null;
       return {
-        id: String(trace.id ?? ""),
+        // M-REC-3: the trace identity field is `recordingId` (a UUIDv7
+        // string); `id` is a legacy numeric-row hangover that is empty
+        // on the data model. Prefer recordingId, fall back to id.
+        id: String(trace.recordingId ?? trace.id ?? ""),
         program: String(trace.program ?? ""),
       };
     });
@@ -782,7 +791,10 @@ test.describe("Cross-window interaction", () => {
       const trace = session?.trace;
       if (!trace) return null;
       return {
-        id: String(trace.id ?? ""),
+        // M-REC-3: the trace identity field is `recordingId` (a UUIDv7
+        // string); `id` is a legacy numeric-row hangover that is empty
+        // on the data model. Prefer recordingId, fall back to id.
+        id: String(trace.recordingId ?? trace.id ?? ""),
         program: String(trace.program ?? ""),
       };
     });
@@ -856,7 +868,7 @@ test.describe("Cross-window interaction", () => {
         const session = d?.sessions?.[0];
         const trace = session?.trace;
         if (!trace) return null;
-        return { id: String(trace.id ?? "") };
+        return { id: String(trace.recordingId ?? trace.id ?? "") };
       });
       expect(trace0After).not.toBeNull();
       expect(trace0After!.id).toBe(trace0!.id);
@@ -867,7 +879,9 @@ test.describe("Cross-window interaction", () => {
       const trace0After = await page.evaluate(() => {
         const d = (window as any).data;
         const session = d?.sessions?.[0];
-        return session?.trace ? { id: String(session.trace.id ?? "") } : null;
+        return session?.trace
+        ? { id: String(session.trace.recordingId ?? session.trace.id ?? "") }
+        : null;
       });
       expect(trace0After).not.toBeNull();
       expect(trace0After!.id).toBe(trace0!.id);
@@ -878,7 +892,9 @@ test.describe("Cross-window interaction", () => {
     const trace1After = await page.evaluate(() => {
       const d = (window as any).data;
       const session = d?.sessions?.[1];
-      return session?.trace ? { id: String(session.trace.id ?? "") } : null;
+      return session?.trace
+        ? { id: String(session.trace.recordingId ?? session.trace.id ?? "") }
+        : null;
     });
     expect(trace1After).not.toBeNull();
     expect(trace1After!.id).toBe(secondTraceId);
