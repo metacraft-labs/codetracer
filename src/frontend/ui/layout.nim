@@ -405,16 +405,25 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
       tab.setTitle(state.label)
 
+      # Editor tab labels carry native absolute paths.  Split on both `/`
+      # and `\` so a Windows path (`D:\repo\src\main.nr`) renders as the
+      # `src/main.nr` tail instead of the whole path.  The split is done
+      # with a literal JS regex in an `{.emit.}` block: a Nim `cstring`
+      # backslash literal round-trips as a two-character JS string, so
+      # `split("\\")` would never match a single separator (see the
+      # matching note in `types.baseName`).
+      var labelTokens: seq[cstring]
+      {.emit: """
+      `labelTokens` = (`state`.label || "").split(/[\\/]/);
+      """.}
       if not ($state.label).startsWith("event:"):
-        let tokens = state.label.split(cstring"/")
-        tab.titleElement.innerHTML = if tokens.len > 1:
-            tokens[^2] & cstring"/" & tokens[^1]
+        tab.titleElement.innerHTML = if labelTokens.len > 1:
+            labelTokens[^2] & cstring"/" & labelTokens[^1]
           else:
-            tokens[^1]
+            labelTokens[^1]
       else:
-        let tokens = state.label.split(cstring"/")
-        tab.titleElement.innerHTML = if tokens.len > 1:
-            tokens[0] & tokens[^1]
+        tab.titleElement.innerHTML = if labelTokens.len > 1:
+            labelTokens[0] & labelTokens[^1]
           else:
             state.label
 

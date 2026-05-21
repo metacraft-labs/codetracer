@@ -2567,13 +2567,21 @@ proc toEnum*(langType: string, i: int, n: defaultstring): Value =
 proc baseName*(a: cstring): cstring =
   ## Last path segment of ``a``.  Handles both POSIX (``/``) and Windows
   ## (``\``) separators: a `/`-only split returns the entire string for
-  ## an absolute Windows path (``D:\repo\src\main.nr``), so normalize
-  ## backslashes to forward slashes before splitting.
-  let normalized = cast[cstring](a.toJs.split(cstring"\\").join(cstring"/"))
-  let parts = cast[seq[cstring]](normalized.toJs.split(cstring"/"))
-  if parts.len == 0:
-    return a
-  result = parts[^1]
-  if result.len == 0 and parts.len >= 2:
-    # Trailing separator (e.g. ``foo/bar/``) — use the segment before it.
-    result = parts[^2]
+  ## an absolute Windows path (``D:\repo\src\main.nr``).
+  ##
+  ## The split is done with a JS regex written in a raw ``{.emit.}`` block.
+  ## A Nim ``cstring`` backslash literal (``cstring"\\"``) round-trips
+  ## through Nim's JS codegen as the *two-character* JS string ``"\\\\"``,
+  ## so ``"D:\repo".split("\\\\")`` (split on two backslashes) never
+  ## matches a single path separator and the whole path is returned —
+  ## which is exactly the bug this proc was meant to fix.  Splitting with
+  ## a literal regex ``/[\\/]/`` in emitted JS avoids the escaping
+  ## ambiguity entirely.
+  var lastSegment: cstring
+  {.emit: """
+  {
+    var parts = (`a` || "").split(/[\\/]/).filter(function (s) { return s.length > 0; });
+    `lastSegment` = parts.length > 0 ? parts[parts.length - 1] : `a`;
+  }
+  """.}
+  result = lastSegment
