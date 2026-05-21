@@ -251,12 +251,101 @@ macro defineMenu(code: untyped): untyped =
   ## MenuNode(
   ##   kind: MenuFolder, name: "menu", elements: @[
   ##     MenuNode(kind: MenuElement, name: name, action: action, enabled: true)])
+  ##
+  ## NOTE: this macro USED to call `registerMenu(m)` inside its
+  ## expansion.  That ran BEFORE any runtime post-processing
+  ## (launch-config injection, per-language View items), which silently
+  ## stripped those dynamic additions on macOS where the application
+  ## menu is owned by the OS.  The fix is to keep this macro pure
+  ## (just emit the `MenuNode`) and call `registerMenu` once at the END
+  ## of `webTechMenu`, after every dynamic mutation has happened.
   let menuNode = defineMenuImpl(code[0])[0]
   result = quote do:
-    var m = `menuNode`
-    when defined(ctmacos):
-      registerMenu(m)
-    m
+    `menuNode`
+
+proc makeMenuElement(label: cstring, action: ClientAction): MenuNode =
+  ## Convenience constructor for a leaf View-menu item.  Mirrors the
+  ## `MenuElement` shape produced by `defineMenuImpl` so the dynamic
+  ## items round-trip the same way through `getCommands`, the IsoNim
+  ## menu component, and the macOS Menu.setApplicationMenu bridge.
+  MenuNode(
+    kind: MenuElement,
+    name: label,
+    action: action,
+    actionData: nil,
+    enabled: true,
+    elements: @[],
+    isBeforeNextSubGroup: false,
+    menuOs: ord(MenuNodeOSAny),
+    role: cstring""
+  )
+
+proc nimSpecificViewItems(data: Data): seq[MenuNode] =
+  ## Per-language View-menu items shown when a Nim trace is loaded.
+  ## Wired through `appendLanguageSpecificViewItems` from `webTechMenu`
+  ## so the four entries appear in the View folder on every supported
+  ## OS (Linux uses the in-app MenuComponent; macOS uses the native
+  ## application menu via `registerMenu`).
+  result = @[
+    makeMenuElement(cstring"View Generated C Source", aViewGeneratedCSource),
+    makeMenuElement(cstring"View Disassembly", aViewDisassembly),
+    makeMenuElement(cstring"Trace Macro at Cursor", aTraceMacroAtCursor),
+    makeMenuElement(cstring"Trace Static Block at Cursor",
+      aTraceStaticBlockAtCursor)
+  ]
+
+proc effectiveTraceLang(data: Data): Lang =
+  ## Resolve the language of the currently loaded trace defensively.
+  ##
+  ## `data.trace.lang` is the canonical signal, but historically the
+  ## importer (storage_and_import.importTrace) classified some rr/ttd
+  ## recordings as `LangUnknown` when `meta.paths` did not lead with
+  ## a recognisable source file.  Fall back to deriving the language
+  ## from the trace's `program` filename extension so the menu still
+  ## reflects reality on traces that were recorded before that
+  ## upstream classifier fix landed.
+  if data.trace.isNil:
+    return LangUnknown
+  if data.trace.lang != LangUnknown:
+    return data.trace.lang
+  let program = $data.trace.program
+  if program.len == 0:
+    return LangUnknown
+  let dot = program.rfind('.')
+  if dot < 0 or dot == program.len - 1:
+    return LangUnknown
+  # Keep the extension whitelist minimal — every entry below has a
+  # matching `nimSpecificViewItems` / future per-language item set
+  # so a wrong fallback never surfaces wrong menu items.
+  let ext = program.substr(dot + 1).toLowerAscii()
+  case ext
+  of "nim": LangNim
+  else:     LangUnknown
+
+proc appendLanguageSpecificViewItems(menu: MenuNode, data: Data) =
+  ## Append items that depend on `data.trace.lang` (or nothing if no
+  ## trace is loaded yet) to the View folder.  Each language registers
+  ## its own item set via a small dispatcher; for now only Nim has any.
+  ##
+  ## We mutate the View folder in place so the resulting MenuNode tree
+  ## stays a single source of truth for the IsoNim menu component
+  ## (Linux) and the macOS Menu.setApplicationMenu bridge.
+  if menu.isNil or seqIsNil(menu.elements):
+    return
+  let lang = effectiveTraceLang(data)
+  let items =
+    case lang
+    of LangNim: nimSpecificViewItems(data)
+    else: @[]
+  if items.len == 0:
+    return
+  for element in menu.elements:
+    if element.kind == MenuFolder and element.name == cstring"View":
+      if seqIsNil(element.elements):
+        element.elements = @[]
+      for item in items:
+        element.elements.add(item)
+      return
 
 proc webTechMenu(data: Data, program: cstring): MenuNode =
   let config = data.config
@@ -501,6 +590,12 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element.elements.insert(launchFolder, 0)
           break
 
+    # Inject language-specific View-menu items AFTER any other dynamic
+    # mutation (currently: launch configs).  Doing this before the
+    # macOS `registerMenu` call below is critical: macOS owns the
+    # application menu, and any items not present at registration time
+    # silently never appear in the OS menu bar.
+    appendLanguageSpecificViewItems(result, data)
   else:
     result = defineMenu:
       folder program:
@@ -533,6 +628,14 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         # generated automatically
         macfolder "Help", "help"
         macexclude_element "Exit CodeTracer", aExit, true
+
+  # Register the (possibly mutated) menu with the macOS native menu
+  # bar.  Previously `defineMenu`'s macro expansion did this BEFORE
+  # any runtime injection ran, which meant launch configs and the new
+  # per-language View items never reached macOS users.  See the
+  # comment on `defineMenu` for the rationale.
+  when defined(ctmacos):
+    registerMenu(result)
 
 
 proc update*(self: Data, build: bool = false) =
@@ -2978,6 +3081,23 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = data.showRecordNewTraceDialog(),
   proc(actionData: JsObject) = data.recordFromLaunchConfig(actionData),
   proc(actionData: JsObject) = createNewSession(data), # aNewTraceTab
+  # Language-specific View items.  The real implementations live
+  # behind the Nim langserver / sourcemap flow (S3/S6/S7) and are not
+  # all wired up yet — for now they surface a non-fatal info toast so
+  # the action is observable.  The menu shape is the contract these
+  # entries protect; behaviour will land in follow-up milestones.
+  proc(actionData: JsObject) = # aViewGeneratedCSource
+    data.viewsApi.successMessage(
+      cstring"View Generated C Source is not yet wired up"),
+  proc(actionData: JsObject) = # aViewDisassembly
+    data.viewsApi.successMessage(
+      cstring"View Disassembly is not yet wired up"),
+  proc(actionData: JsObject) = # aTraceMacroAtCursor
+    data.viewsApi.successMessage(
+      cstring"Trace Macro at Cursor is not yet wired up"),
+  proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
+    data.viewsApi.successMessage(
+      cstring"Trace Static Block at Cursor is not yet wired up"),
 ]
 
 data.actions = actions

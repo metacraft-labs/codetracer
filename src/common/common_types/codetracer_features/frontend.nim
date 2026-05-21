@@ -182,7 +182,15 @@ type
     aOpenTraceInNewTab,  # Open existing trace in a new session tab
     aRecordNewTrace,     # Show record new trace dialog
     aRecordFromLaunch,   # Record using launch.json configuration
-    aNewTraceTab         # Open a new empty session tab
+    aNewTraceTab,        # Open a new empty session tab
+    # Language-specific View-menu actions (currently Nim-only — see
+    # `nimSpecificViewItems` in src/frontend/ui_js.nim).  Appended at
+    # the end of the enum on purpose so existing ordinal-based menu
+    # array layouts (the `actions` array in ui_js.nim) stay stable.
+    aViewGeneratedCSource,    # View the C source generated for the current Nim file
+    aViewDisassembly,         # View disassembly of the current binary
+    aTraceMacroAtCursor,      # Trace macro expansion at the editor cursor
+    aTraceStaticBlockAtCursor # Trace `static:` block at the editor cursor
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

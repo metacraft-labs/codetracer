@@ -205,20 +205,34 @@ proc importTrace*(
   var lang = langArg
 
   if lang == LangUnknown:
-    for path in paths:
-      # `program` from trace_metadata
-      let isWasm = program.extractFilename.split(".")[^1] == "wasm" # Check if language is wasm
-      let traceLang = detectLangFromPath(path, isWasm)
-      if traceLang != LangUnknown:
-        # for now assume this is used only for db traces
-        # and that C/C++/Rust there can come only from wasm targets currently
-        if traceLang == LangRust:
-          lang = if traceKind == "db": LangRustWasm else: LangRust
-        elif traceLang in {LangC, LangCpp}:
-          lang = if traceKind == "db": LangCppWasm else: traceLang
-        else:
-          lang = traceLang
-        break # for now assume the first detected lang is ok
+    # The CTFS `meta.dat` stores both the recorded `program` argument
+    # (the path the user typed to `ct record`, e.g.
+    # `path/to/main.nim`) and the list of source paths actually
+    # captured during the recording.  The pre-M-REC-1.5 code only
+    # consulted `meta.paths`; that left rr/ttd recordings of
+    # compiled-language traces classified as `LangUnknown` whenever
+    # the captured source list happened to start with a path whose
+    # extension is unknown to `detectLangFromPath` — `program` itself
+    # was never used.  Probe `program` first so the visible
+    # "what was recorded" identifier always seeds detection, then
+    # fall back to scanning the captured paths exactly as before.
+    let isWasm = program.extractFilename.split(".")[^1] == "wasm"
+    var detectedLang = detectLangFromPath(program, isWasm)
+    if detectedLang == LangUnknown:
+      for path in paths:
+        let p = detectLangFromPath(path, isWasm)
+        if p != LangUnknown:
+          detectedLang = p
+          break
+    if detectedLang != LangUnknown:
+      # for now assume this is used only for db traces
+      # and that C/C++/Rust there can come only from wasm targets currently
+      if detectedLang == LangRust:
+        lang = if traceKind == "db": LangRustWasm else: LangRust
+      elif detectedLang in {LangC, LangCpp}:
+        lang = if traceKind == "db": LangCppWasm else: detectedLang
+      else:
+        lang = detectedLang
 
   if dirExists(traceFolder / "files"):
     if traceFolder != outputFolder:
