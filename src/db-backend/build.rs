@@ -497,12 +497,18 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
 
     let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
     let mut cmd = Command::new(cc);
-    cmd.arg("-shared").arg("-fPIC").arg("-o").arg(&so_path);
+    if cfg!(target_os = "macos") {
+        cmd.arg("-dynamiclib").arg("-o").arg(&so_path);
+    } else {
+        cmd.arg("-shared").arg("-fPIC").arg("-o").arg(&so_path);
+    }
     for obj in objects {
         cmd.arg(obj);
     }
-    cmd.arg("-pthread")
-        .arg(format!("-Wl,--version-script,{}", version_script.display()));
+    cmd.arg("-pthread");
+    if !cfg!(target_os = "macos") {
+        cmd.arg(format!("-Wl,--version-script,{}", version_script.display()));
+    }
     let status = cmd.status().expect("invoke linker");
     assert!(status.success(), "failed linking {}", so_path.display());
     so_path
@@ -810,13 +816,11 @@ fn read_nim_lib_path(c_dir: &Path) -> PathBuf {
             }
         }
     }
-
     // 3. Derive `<nim-root>/lib` from the `nim` executable location —
     //    the canonical layout, independent of `nim dump` output format.
     if let Some(lib) = nim_lib_from_executable() {
         return lib;
     }
-
     panic!(
         "could not determine Nim stdlib include path: no valid \
          .nim_lib_path marker, `nim dump` did not reveal a lib dir with \

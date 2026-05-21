@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
@@ -101,8 +101,11 @@ impl DapStdioClient {
         db_backend_bin: &Path,
         extra_envs: &[(&str, &str)],
     ) -> Result<Self, BoxError> {
-        let license_iso_dir =
-            std::env::temp_dir().join(format!("ct_dap_license_iso_{}", std::process::id()));
+        let license_iso_dir = if cfg!(unix) {
+            PathBuf::from(format!("/tmp/ctd{}", std::process::id()))
+        } else {
+            std::env::temp_dir().join(format!("ct_dap_license_iso_{}", std::process::id()))
+        };
         let _ = std::fs::create_dir_all(&license_iso_dir);
         let mut command = Command::new(db_backend_bin);
         command
@@ -370,6 +373,26 @@ impl DapStdioClient {
         Ok(event.body)
     }
 
+    /// Load locals at the current stop using CodeTracer's DAP extension.
+    pub fn load_locals(&mut self) -> Result<Value, BoxError> {
+        self.send_request(
+            "ct/load-locals",
+            json!({
+                "rrTicks": 0,
+                "countBudget": 1000,
+                "minCountLimit": 0,
+                "lang": 0,
+                "watchExpressions": [],
+                "depthLimit": -1,
+            }),
+        )?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
+        if !resp.success {
+            return Err(format!("ct/load-locals failed: {:?}", resp.message).into());
+        }
+        Ok(resp.body)
+    }
+
     // === Tracepoints ===
 
     /// Run tracepoints and collect results.
@@ -418,6 +441,29 @@ impl DapStdioClient {
         }
         let result: StackTraceResult = serde_json::from_value(resp.body)?;
         Ok(result)
+    }
+
+    /// Request the DAP scopes for a stack frame.
+    pub fn scopes(&mut self, frame_id: i64) -> Result<Value, BoxError> {
+        self.send_request("scopes", json!({ "frameId": frame_id }))?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
+        if !resp.success {
+            return Err(format!("scopes failed: {:?}", resp.message).into());
+        }
+        Ok(resp.body)
+    }
+
+    /// Request the DAP variables for a variables reference.
+    pub fn variables(&mut self, variables_reference: i64) -> Result<Value, BoxError> {
+        self.send_request(
+            "variables",
+            json!({ "variablesReference": variables_reference }),
+        )?;
+        let resp = self.recv_response(scaled(Duration::from_secs(10)))?;
+        if !resp.success {
+            return Err(format!("variables failed: {:?}", resp.message).into());
+        }
+        Ok(resp.body)
     }
 
     // === Navigation ===

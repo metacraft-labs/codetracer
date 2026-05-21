@@ -103,6 +103,50 @@ pub struct FlowStep {
     pub before_values: HashMap<String, Value>,
 }
 
+fn parse_dap_int(value: &str) -> Option<i64> {
+    let trimmed = value.trim().trim_matches('"');
+    if let Ok(parsed) = trimmed.parse::<i64>() {
+        return Some(parsed);
+    }
+
+    let mut start = None;
+    for (index, ch) in trimmed.char_indices() {
+        if ch == '-' || ch.is_ascii_digit() {
+            start = Some(index);
+            break;
+        }
+    }
+    let start = start?;
+    let end = trimmed[start..]
+        .char_indices()
+        .find_map(|(offset, ch)| {
+            if offset > 0 && !ch.is_ascii_digit() {
+                Some(start + offset)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(trimmed.len());
+    trimmed[start..end].parse::<i64>().ok()
+}
+
+fn normalize_dap_source_name(name: &str) -> String {
+    if let Some((base, suffix)) = name.rsplit_once("_p") {
+        if !base.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+            return base.to_string();
+        }
+    }
+
+    let Some((base, suffix)) = name.rsplit_once('_') else {
+        return name.to_string();
+    };
+    if !base.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        base.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 impl FlowData {
     /// Parse the ct/updated-flow event body into FlowData.
     pub fn from_event_body(body: &Value) -> Result<Self, BoxError> {
@@ -324,6 +368,63 @@ impl FlowTestRunner {
 
         // 5. Verify
         self.verify_flow_results(config, &flow)?;
+
+        Ok(())
+    }
+
+    /// Run to the configured breakpoint and verify locals via CodeTracer's DAP variables extension.
+    pub fn run_and_verify_dap_variables(&mut self, config: &FlowTestConfig) -> Result<(), BoxError> {
+        self.client
+            .set_breakpoints(&config.source_file, &[config.breakpoint_line])?;
+
+        let move_state = self.client.dap_continue()?;
+        println!(
+            "Stopped at {}:{}",
+            move_state.location.path, move_state.location.line
+        );
+
+        let locals = self.client.load_locals()?;
+        let local_list = locals
+            .get("locals")
+            .and_then(Value::as_array)
+            .ok_or("ct/load-locals response did not contain a locals array")?;
+
+        let mut values = HashMap::new();
+        for local in local_list {
+            let Some(name) = local.get("expression").and_then(Value::as_str) else {
+                continue;
+            };
+            let value = local.get("value").cloned().unwrap_or(Value::Null);
+            values.insert(name.to_string(), value.clone());
+            values.entry(normalize_dap_source_name(name)).or_insert(value);
+        }
+
+        for expected in &config.expected_variables {
+            if !values.contains_key(expected) {
+                return Err(format!(
+                    "DAP variables did not include expected variable {expected:?}; got {:?}",
+                    values.keys().collect::<Vec<_>>()
+                )
+                .into());
+            }
+        }
+
+        for (name, expected) in &config.expected_values {
+            let actual = values
+                .get(name)
+                .ok_or_else(|| format!("DAP variables did not include expected value {name:?}"))?;
+            let actual_int = FlowData::extract_int_value(actual)
+                .or_else(|| parse_dap_int(&actual.to_string()))
+                .ok_or_else(|| {
+                format!("DAP variable {name:?} value {actual:?} was not an integer")
+            })?;
+            if actual_int != *expected {
+                return Err(format!(
+                    "DAP variable {name:?} value mismatch: expected {expected}, got {actual_int} ({actual:?})"
+                )
+                .into());
+            }
+        }
 
         Ok(())
     }

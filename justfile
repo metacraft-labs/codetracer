@@ -77,6 +77,127 @@ test-hmr-fixture: build-hmr-fixture
 test-reprobuild-macos-smoke:
   ./ci/reprobuild/macos-smoke.sh
 
+test-reprobuild-hcr-mcr-dap:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+    echo "Error: test-reprobuild-hcr-mcr-dap requires macOS arm64; got $(uname -s) $(uname -m)." >&2
+    exit 2
+  fi
+
+  command -v repro >/dev/null || {
+    echo "Error: repro is required on PATH. Run this target inside the CodeTracer Nix dev shell." >&2
+    exit 1
+  }
+
+  repo_root="$(git rev-parse --show-toplevel)"
+  lock_backup=""
+
+  resolve_sibling_repo() {
+    local repo_name="$1"
+    local override_var="$2"
+    local override_value="${!override_var:-}"
+
+    if [ -n "$override_value" ]; then
+      printf '%s\n' "$override_value"
+      return 0
+    fi
+    if [ -d "$repo_root/../$repo_name" ]; then
+      (cd "$repo_root/../$repo_name" && pwd)
+      return 0
+    fi
+    if [ -d "$repo_root/../../$repo_name" ]; then
+      (cd "$repo_root/../../$repo_name" && pwd)
+      return 0
+    fi
+
+    printf '%s\n' "$repo_root/../$repo_name"
+  }
+
+  reprobuild_sibling_root="$(resolve_sibling_repo reprobuild CODETRACER_REPROBUILD_REPO_PATH)"
+  reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
+  if [ -z "$reprobuild_root" ] && [ -n "${REPROBUILD_SOURCE_ROOT:-}" ] && [[ "$REPROBUILD_SOURCE_ROOT" != /nix/store/* ]]; then
+    reprobuild_root="$REPROBUILD_SOURCE_ROOT"
+  fi
+  if [ -z "$reprobuild_root" ] && [ -d "$reprobuild_sibling_root/libs/repro_hcr_agent" ]; then
+    reprobuild_root="$reprobuild_sibling_root"
+  fi
+  if [ -z "$reprobuild_root" ]; then
+    reprobuild_root="${REPROBUILD_SOURCE_ROOT:-$reprobuild_sibling_root}"
+  fi
+  if [ ! -d "$reprobuild_root/libs/repro_hcr_agent" ]; then
+    echo "Error: REPROBUILD_SOURCE_ROOT or CODETRACER_REPROBUILD_REPO_PATH must point to the Reprobuild source tree: $reprobuild_root" >&2
+    exit 1
+  fi
+  export REPROBUILD_SOURCE_ROOT="$reprobuild_root"
+  export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
+
+  native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH)"
+  if [ ! -d "$native_backend" ]; then
+    echo "Error: CODETRACER_NATIVE_BACKEND_REPO_PATH must point to the codetracer-native-backend sibling repo: $native_backend" >&2
+    exit 1
+  fi
+  native_replay="$native_backend/target/debug/ct-native-replay"
+  if [ -z "${LLDB_LIB_PATH:-}" ]; then
+    lldb_out="$(nix build --no-link --print-out-paths nixpkgs#lldb)"
+    export LLDB_LIB_PATH="$lldb_out/lib"
+  fi
+  if [ ! -x "$native_replay" ]; then
+    echo "Building ct-native-replay in $native_backend"
+    if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then
+      lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"
+      libcxx_dev="$(nix build --no-link --print-out-paths nixpkgs#libcxx.dev)"
+      export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"
+      export CXXFLAGS="-isystem $libcxx_dev/include/c++/v1 ${CXXFLAGS:-}"
+    fi
+    (cd "$native_backend" && cargo build --bin ct-native-replay)
+  fi
+  if [ ! -x "$native_replay" ]; then
+    echo "Error: ct-native-replay was not built at $native_replay; check CODETRACER_NATIVE_BACKEND_REPO_PATH" >&2
+    exit 1
+  fi
+
+  native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH)"
+  if [ ! -d "$native_recorder" ]; then
+    echo "Error: CODETRACER_NATIVE_RECORDER_REPO_PATH must point to the codetracer-native-recorder sibling repo: $native_recorder" >&2
+    exit 1
+  fi
+  ct_mcr="$native_recorder/ct_cli/ct_cli"
+  if [ ! -x "$ct_mcr" ]; then
+    echo "Building ct-mcr in $native_recorder"
+    nix develop "$native_recorder" --command bash -lc \
+      "cd '$native_recorder' && just build-ct-mcr"
+  fi
+  if [ ! -x "$ct_mcr" ]; then
+    echo "Error: ct-mcr was not built at $ct_mcr; check CODETRACER_NATIVE_RECORDER_REPO_PATH" >&2
+    exit 1
+  fi
+
+  mcr_path_dir="$(mktemp -d "${TMPDIR:-/tmp}/codetracer-m3-ct-mcr.XXXXXX")"
+  cleanup() {
+    rm -rf "$mcr_path_dir"
+    if [ -n "$lock_backup" ] && [ -f "$lock_backup" ]; then
+      cp "$lock_backup" "$repo_root/src/db-backend/Cargo.lock"
+      rm -f "$lock_backup"
+    fi
+  }
+  trap cleanup EXIT
+  ln -sf "$ct_mcr" "$mcr_path_dir/ct-mcr"
+
+  export CT_NATIVE_REPLAY_PATH="$native_replay"
+  export CT_NATIVE_REPLAY_BIN="$native_replay"
+  export CODETRACER_CT_NATIVE_REPLAY_CMD="$native_replay"
+  export CODETRACER_CT_MCR_CMD="$ct_mcr"
+  export PATH="$mcr_path_dir:$native_backend/target/debug:$PATH"
+  export DYLD_LIBRARY_PATH="$LLDB_LIB_PATH${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+
+  cd src/db-backend
+  lock_backup="$(mktemp "${TMPDIR:-/tmp}/codetracer-m3-cargo-lock.XXXXXX")"
+  cp Cargo.lock "$lock_backup"
+  cargo test --offline --no-default-features --features io-transport,syntax-highlight \
+    --test reprobuild_hcr_mcr_dap_test -- --nocapture
+
 # End-to-end HMR test against the actual ct binary. Requires
 # `just build` (or `just build-once`) to have produced the
 # HMR-enabled renderer at src/build-debug/bin/ct. Tests:
