@@ -139,20 +139,26 @@ test-reprobuild-hcr-mcr-dap:
     exit 1
   fi
   native_replay="$native_backend/target/debug/ct-native-replay"
+  if [ -z "${LLVM_CONFIG:-}" ]; then
+    llvm_dev="$(nix build --no-link --print-out-paths nixpkgs#llvm.dev)"
+    export LLVM_CONFIG="$llvm_dev/bin/llvm-config"
+  fi
   if [ -z "${LLDB_LIB_PATH:-}" ]; then
     lldb_out="$(nix build --no-link --print-out-paths nixpkgs#lldb)"
     export LLDB_LIB_PATH="$lldb_out/lib"
   fi
-  if [ ! -x "$native_replay" ]; then
-    echo "Building ct-native-replay in $native_backend"
-    if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then
-      lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"
-      libcxx_dev="$(nix build --no-link --print-out-paths nixpkgs#libcxx.dev)"
-      export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"
-      export CXXFLAGS="-isystem $libcxx_dev/include/c++/v1 ${CXXFLAGS:-}"
-    fi
-    (cd "$native_backend" && cargo build --bin ct-native-replay)
+  if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then
+    lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"
+    export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"
   fi
+  if [ "$(uname -s)" = "Darwin" ]; then
+    libcxx_dev="$(nix build --no-link --print-out-paths nixpkgs#libcxx.dev)"
+    export CXXFLAGS="-isystem $libcxx_dev/include/c++/v1 ${CXXFLAGS:-}"
+    export CC="clang"
+    export CXX="clang++"
+  fi
+  echo "Building ct-native-replay in $native_backend"
+  (cd "$native_backend" && cargo build --bin ct-native-replay)
   if [ ! -x "$native_replay" ]; then
     echo "Error: ct-native-replay was not built at $native_replay; check CODETRACER_NATIVE_BACKEND_REPO_PATH" >&2
     exit 1
@@ -164,11 +170,9 @@ test-reprobuild-hcr-mcr-dap:
     exit 1
   fi
   ct_mcr="$native_recorder/ct_cli/ct_cli"
-  if [ ! -x "$ct_mcr" ]; then
-    echo "Building ct-mcr in $native_recorder"
-    nix develop "$native_recorder" --command bash -lc \
-      "cd '$native_recorder' && just build-ct-mcr"
-  fi
+  echo "Building ct-mcr in $native_recorder"
+  nix develop "$native_recorder" --command bash -lc \
+    "unset LLVM_CONFIG LLDB_LIB_PATH LLDB_ADDITIONAL_INCLUDE_DIRS CXXFLAGS CC CXX; cd '$native_recorder' && just build-ct-mcr"
   if [ ! -x "$ct_mcr" ]; then
     echo "Error: ct-mcr was not built at $ct_mcr; check CODETRACER_NATIVE_RECORDER_REPO_PATH" >&2
     exit 1

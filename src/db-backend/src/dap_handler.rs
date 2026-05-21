@@ -1313,34 +1313,53 @@ impl Handler {
             };
 
             for line in lines {
-                if let Err(e) = self.add_breakpoint(SourceLocation {
+                let source = Some(dap_types::Source {
+                    name: args.source.name.clone(),
+                    path: Some(path.clone()),
+                    source_reference: args.source.source_reference,
+                    presentation_hint: None,
+                    origin: None,
+                    sources: None,
+                    adapter_data: None,
+                    checksums: None,
+                });
+                match self.add_breakpoint(SourceLocation {
                     path: path.clone(),
                     line: line as usize,
                 }) {
-                    warn!("failed to set breakpoint at {}:{}: {}", path, line, e);
+                    Ok(breakpoint) => {
+                        results.push(dap_types::Breakpoint {
+                            id: Some(breakpoint.id),
+                            verified: breakpoint.enabled,
+                            message: None,
+                            source,
+                            line: Some(line),
+                            column: None,
+                            end_line: None,
+                            end_column: None,
+                            instruction_reference: None,
+                            offset: None,
+                            reason: None,
+                        });
+                    }
+                    Err(e) => {
+                        let message = format!("failed to set breakpoint at {path}:{line}: {e}");
+                        warn!("{message}");
+                        results.push(dap_types::Breakpoint {
+                            id: None,
+                            verified: false,
+                            message: Some(message),
+                            source,
+                            line: Some(line),
+                            column: None,
+                            end_line: None,
+                            end_column: None,
+                            instruction_reference: None,
+                            offset: None,
+                            reason: Some("failed".to_string()),
+                        });
+                    }
                 }
-                results.push(dap_types::Breakpoint {
-                    id: None,
-                    verified: true,
-                    message: None,
-                    source: Some(dap_types::Source {
-                        name: args.source.name.clone(),
-                        path: Some(path.clone()),
-                        source_reference: args.source.source_reference,
-                        presentation_hint: None,
-                        origin: None,
-                        sources: None,
-                        adapter_data: None,
-                        checksums: None,
-                    }),
-                    line: Some(line),
-                    column: None,
-                    end_line: None,
-                    end_column: None,
-                    instruction_reference: None,
-                    offset: None,
-                    reason: None,
-                });
             }
         } else {
             let lines = args
@@ -1373,11 +1392,11 @@ impl Handler {
         Ok(())
     }
 
-    pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<(), Box<dyn Error>> {
+    pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<Breakpoint, Box<dyn Error>> {
         let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
         let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
-        entry.push(breakpoint);
-        Ok(())
+        entry.push(breakpoint.clone());
+        Ok(breakpoint)
     }
 
     pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {

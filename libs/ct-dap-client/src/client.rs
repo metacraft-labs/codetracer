@@ -64,6 +64,38 @@ use crate::types::*;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+fn validate_set_breakpoints_body(body: &Value, expected_count: usize) -> Result<(), BoxError> {
+    let breakpoints = body
+        .get("breakpoints")
+        .and_then(Value::as_array)
+        .ok_or("setBreakpoints response did not contain a breakpoints array")?;
+    if breakpoints.len() != expected_count {
+        return Err(format!(
+            "setBreakpoints returned {} breakpoints, expected {}: {}",
+            breakpoints.len(),
+            expected_count,
+            body
+        )
+        .into());
+    }
+
+    let unresolved = breakpoints
+        .iter()
+        .enumerate()
+        .filter(|(_, bp)| bp.get("verified").and_then(Value::as_bool) != Some(true))
+        .map(|(index, bp)| format!("#{index}: {bp}"))
+        .collect::<Vec<_>>();
+    if !unresolved.is_empty() {
+        return Err(format!(
+            "setBreakpoints returned unresolved breakpoints: {}",
+            unresolved.join(", ")
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 /// A DAP client that communicates with db-backend over stdio.
 pub struct DapStdioClient {
     child: Child,
@@ -294,6 +326,21 @@ impl DapStdioClient {
                     received_events.push(e.event);
                 }
                 Ok(Ok(DapMessage::Response(r))) => {
+                    if !r.success {
+                        let stderr = self.recent_stderr(20);
+                        let mut msg = format!(
+                            "Received failed response while waiting for 'stopped': command={} request_seq={} message={:?}",
+                            r.command, r.request_seq, r.message
+                        );
+                        if !stderr.is_empty() {
+                            msg.push_str(&format!(
+                                "\n  db-backend stderr (last {} lines):\n    {}",
+                                stderr.len(),
+                                stderr.join("\n    ")
+                            ));
+                        }
+                        return Err(msg.into());
+                    }
                     received_events.push(format!(
                         "response(seq={}, cmd={})",
                         r.request_seq, r.command
@@ -333,6 +380,7 @@ impl DapStdioClient {
         if !resp.success {
             return Err(format!("setBreakpoints failed: {:?}", resp.message).into());
         }
+        validate_set_breakpoints_body(&resp.body, lines.len())?;
         Ok(resp.body)
     }
 
@@ -637,5 +685,41 @@ impl DapStdioClient {
         let current = self.seq;
         self.seq += 1;
         current
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::validate_set_breakpoints_body;
+
+    #[test]
+    fn validates_verified_set_breakpoints_response() {
+        let body = json!({
+            "breakpoints": [
+                { "verified": true, "line": 9, "id": 1 },
+                { "verified": true, "line": 13, "id": 2 }
+            ]
+        });
+
+        validate_set_breakpoints_body(&body, 2).expect("verified breakpoints should pass");
+    }
+
+    #[test]
+    fn rejects_unresolved_set_breakpoints_response() {
+        let body = json!({
+            "breakpoints": [
+                { "verified": true, "line": 9, "id": 1 },
+                { "verified": false, "line": 13, "message": "no resolved locations" }
+            ]
+        });
+
+        let err = validate_set_breakpoints_body(&body, 2)
+            .expect_err("unresolved breakpoints should fail");
+        assert!(
+            err.to_string().contains("unresolved breakpoints"),
+            "unexpected error: {err}"
+        );
     }
 }
