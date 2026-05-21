@@ -33,6 +33,75 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Per-read timeout for blocking DAP socket reads in the test harness.
+///
+/// The DAP server may hang silently if a child component (replay-worker,
+/// ct-native-replay) crashes or exhausts its free-tier replay quota.  Without a
+/// per-read timeout the harness blocks indefinitely inside `read_line` and the
+/// test eventually fails with a 350-second SIGTERM from nextest — by that
+/// point all stderr context is gone.
+///
+/// `read_until_event` / `read_until_response` have an *outer* timeout that
+/// only runs between complete DAP messages, so it cannot interrupt a blocking
+/// read.  We therefore install a per-read timeout on the underlying socket so
+/// that any single `read_line` / `read_exact` returns `WouldBlock` /
+/// `TimedOut` if no data arrives within the budget.
+///
+/// 30 seconds is generous: typical DAP responses arrive in well under a second
+/// and even cold replay-worker startup completes within 10–20 s.  Tests that
+/// legitimately need a longer per-read budget can override the default by
+/// setting `CODETRACER_DAP_READ_TIMEOUT_SECS` in their environment.
+fn dap_read_timeout() -> Duration {
+    const DEFAULT_DAP_READ_TIMEOUT_SECS: u64 = 30;
+    env::var("CODETRACER_DAP_READ_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(DEFAULT_DAP_READ_TIMEOUT_SECS))
+}
+
+/// Convert an error from `read_dap_message_from_reader` into a clear,
+/// diagnostic test-harness error.
+///
+/// When the per-read socket timeout (`SO_RCVTIMEO`) fires, the underlying I/O
+/// error varies by OS and by which Rust release surfaces the error:
+///   * Linux usually reports `WouldBlock` whose `Display` is
+///     `"Resource temporarily unavailable (os error 11)"` — i.e. `EAGAIN`.
+///   * macOS and some other Unixes report `TimedOut`
+///     (`"Operation timed out"`).
+///   * The error originates inside `serde_json::Error::custom`, so the
+///     `ErrorKind` is lost by the time it reaches us — we only have the
+///     string.
+///
+/// We therefore detect the timeout by string matching, including the EAGAIN
+/// spelling.  Anything that matches is rewritten to a diagnostic message that
+/// points the developer at the most common root causes; everything else is
+/// passed through verbatim with a generic prefix.
+fn explain_dap_read_error(err: impl std::fmt::Display) -> String {
+    let msg = err.to_string();
+    let lower = msg.to_ascii_lowercase();
+    let is_timeout = lower.contains("timed out")
+        || lower.contains("timedout")
+        || lower.contains("would block")
+        // Linux + glibc surface SO_RCVTIMEO expiry as EAGAIN here.
+        || lower.contains("resource temporarily unavailable")
+        || lower.contains("os error 11")
+        || lower.contains("os error 35") // EAGAIN on macOS / *BSD
+        || lower.contains("os error 60"); // ETIMEDOUT on macOS / *BSD
+    if is_timeout {
+        format!(
+            "DAP read timeout after {}s while reading message from db-backend — likely causes: \
+             replay-worker crashed (check stderr above), daily replay quota exhausted \
+             (set CODETRACER_IN_UI_TEST=1), or DAP server deadlock. \
+             Original I/O error: {}",
+            dap_read_timeout().as_secs(),
+            msg
+        )
+    } else {
+        format!("error reading message: {}", msg)
+    }
+}
+
 /// Mark the current process (and any ct-native-replay it spawns) as running
 /// inside a CodeTracer integration test.
 ///
@@ -488,7 +557,22 @@ impl DapTestClient {
             .set_nonblocking(false)
             .map_err(|e| format!("failed to set stream to blocking: {}", e))?;
 
-        let reader = BufReader::new(stream.try_clone().unwrap());
+        // Per-read timeout on the socket: without this, a blocking `read_line`
+        // inside `read_dap_message_from_reader` hangs the entire test process
+        // until nextest SIGTERMs it after 350 s, swallowing every diagnostic.
+        //
+        // We clone the stream first so the writer half retains its original
+        // (no-timeout) blocking semantics — sends should never need a timeout
+        // here.  See `dap_read_timeout` for budget rationale and the env-var
+        // override.
+        let reader_stream = stream
+            .try_clone()
+            .map_err(|e| format!("failed to clone reader stream: {}", e))?;
+        reader_stream
+            .set_read_timeout(Some(dap_read_timeout()))
+            .map_err(|e| format!("failed to set DAP read timeout: {}", e))?;
+
+        let reader = BufReader::new(reader_stream);
         let writer = stream;
 
         Ok(DapTestClient {
@@ -618,7 +702,10 @@ impl DapTestClient {
                     }
                 }
                 Err(e) => {
-                    return Err(format!("error reading message: {}", e));
+                    // `explain_dap_read_error` rewrites the underlying timeout
+                    // error into a diagnostic pointing at likely root causes
+                    // (replay-worker crash, daily quota, DAP deadlock).
+                    return Err(explain_dap_read_error(e));
                 }
             }
         }
@@ -640,7 +727,7 @@ impl DapTestClient {
                     }
                 }
                 Err(e) => {
-                    return Err(format!("error reading message: {}", e));
+                    return Err(explain_dap_read_error(e));
                 }
             }
         }
