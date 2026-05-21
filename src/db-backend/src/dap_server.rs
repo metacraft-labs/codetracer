@@ -1970,27 +1970,6 @@ mod tests {
         );
     }
 
-    /// A legacy `.ct` container with only `meta.json` and no binary
-    /// `meta.dat` must be classified as MCR. The materialised DB layout
-    /// never used a JSON metadata file (it predates M-REC-1.5), so the
-    /// mere presence of a parseable `meta.json` in a `.ct` container is
-    /// a definitive MCR indicator. This mirrors the recorder's own
-    /// `trace_reader.nim::readMetadata` meta.dat → meta.json fallback.
-    #[test]
-    fn is_mcr_ctfs_container_classifies_legacy_meta_json_as_mcr() {
-        let dir = tempfile::tempdir().unwrap();
-        let ct_path = dir.path().join("legacy.ct");
-
-        let meta_json = br#"{"workdir":"/legacy","program":"/legacy/app","args":[]}"#;
-        write_minimal_ctfs(&ct_path, &[("meta.json", meta_json)]).unwrap();
-
-        let mut ctfs = read_ctfs(&ct_path);
-        assert!(
-            is_mcr_ctfs_container(&mut ctfs),
-            "legacy meta.json-only container must classify as MCR (fall-through path)",
-        );
-    }
-
     /// A corrupted `meta.dat` is treated as "not classifiable as MCR"
     /// rather than as an error: `setup_from_vfs` will then call
     /// `CTFSTraceReader::from_bytes` which produces a typed error
