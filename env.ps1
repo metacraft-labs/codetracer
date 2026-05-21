@@ -577,36 +577,56 @@ function Ensure-NodeModulesJunction {
   }
 }
 
-# Materialize the `src/public/third_party/golden-layout/dist` directory
-# symlink as a real NTFS junction on Windows.
+# Materialize the GoldenLayout CSS directory inside the *build output*
+# so the runtime `<link>` references resolve on Windows.
 #
-# That entry is a POSIX symlink into `node_modules/golden-layout/dist`.
-# With `core.symlinks=false` — the norm for a Windows checkout without
-# the symlink privilege — git materializes it as a 40-byte text-file
-# stub.  The Tup rule then globs `.../dist/css/*.css` and finds nothing,
-# so `build-debug/public/third_party/golden-layout/dist/css/` is empty
-# and the `<link>` to `goldenlayout-base.css` from index.html /
-# server_index.ejs 404s.  GoldenLayout then renders unstyled and every
-# inactive tab header collapses to zero width (becoming unclickable).
+# `src/public/third_party/golden-layout/dist` is a git mode-120000 POSIX
+# symlink into `node_modules/golden-layout/dist`.  On a Windows checkout
+# with `core.symlinks=false` it materializes as a ~44-byte text-file
+# stub.  The Tup rule `: third_party/golden-layout/dist |> !tup_preserve
+# |> %f` treats that stub as a single opaque leaf — exactly the way the
+# sibling `third_party/monaco-editor/min`, `@exuanbo`, `mousetrap`,
+# `vex-js`, and `xterm` stubs are handled.  This MUST stay a plain-file
+# stub in the source tree: if it is materialized as a real directory
+# (junction or directory symlink) Tup's scanner registers `dist` as a
+# directory node and the leaf `!tup_preserve` rule then fails with
+# "Attempting to insert '.../dist' as a generated node when it already
+# exists as a different type (directory)".  We therefore DO NOT touch
+# the source stub here.
 #
-# Replacing the stub with a directory junction lets Tup's per-file glob
-# traverse into the real CSS, exactly as a resolved POSIX symlink would
-# on Linux.  Junctions need no symlink privilege.  (A directory copy is
-# avoided so the source tree stays clean; `git status` shows the
-# junction as a divergent entry, expected Windows build-tooling noise.)
+# Tup `!tup_preserve` copies that stub verbatim to
+# `build-debug/public/third_party/golden-layout/dist`, so the build
+# output also ends up with a useless text stub and the `<link>` to
+# `goldenlayout-base.css` from index.html / server_index.ejs 404s,
+# leaving GoldenLayout unstyled (collapsed, unclickable tab headers).
+#
+# The fix: after Tup has produced the build tree, replace the build-only
+# stub with a real directory symlink into the actual
+# `node_modules/golden-layout/dist`.  This is a build-output-only change
+# — the tup-scanned source tree stays a plain stub, so the leaf rule
+# keeps parsing cleanly on every platform.  A directory symlink is
+# preferred (resolves with relative `<link>` paths exactly like a Linux
+# symlink); a junction is the fallback when the symlink privilege is
+# unavailable.  When the build output does not exist yet (first shell
+# activation before any `tup upd`), this is a silent no-op and the next
+# activation after a build installs the link.
 function Ensure-GoldenLayoutAsset {
   param([Parameter(Mandatory = $true)][string]$RepoRoot)
 
-  $linkPath = Join-Path $RepoRoot "src/public/third_party/golden-layout/dist"
-  $linkDir = Split-Path -Parent $linkPath
   $target = [System.IO.Path]::GetFullPath(
-    (Join-Path $linkDir "../../../../node_modules/golden-layout/dist"))
-
+    (Join-Path $RepoRoot "node_modules/golden-layout/dist"))
   if (-not (Test-Path -LiteralPath $target -PathType Container)) {
     return
   }
 
-  if (Test-Path -LiteralPath $linkPath -PathType Container) {
+  $buildDistParent = Join-Path $RepoRoot "src/build-debug/public/third_party/golden-layout"
+  if (-not (Test-Path -LiteralPath $buildDistParent -PathType Container)) {
+    # Build output not produced yet — nothing to fix up.
+    return
+  }
+  $linkPath = Join-Path $buildDistParent "dist"
+
+  if (Test-Path -LiteralPath $linkPath) {
     $item = Get-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue
     if ($null -ne $item) {
       $isReparse = $false
@@ -618,21 +638,29 @@ function Ensure-GoldenLayoutAsset {
         return
       }
     }
-  }
-
-  if (Test-Path -LiteralPath $linkPath) {
+    # Plain Tup-preserved stub (or stale dir) — replace it.
     try {
-      Remove-Item -LiteralPath $linkPath -Force -Recurse -ErrorAction Stop
+      if (($null -ne $item) -and $item.PSIsContainer -and -not $isReparse) {
+        Remove-Item -LiteralPath $linkPath -Force -Recurse -ErrorAction Stop
+      } else {
+        Remove-Item -LiteralPath $linkPath -Force -ErrorAction Stop
+      }
     } catch {
-      Write-Warning "Could not remove golden-layout stub '$linkPath': $($_.Exception.Message)"
+      Write-Warning "Could not remove golden-layout build stub '$linkPath': $($_.Exception.Message)"
       return
     }
   }
+
   try {
-    New-Item -ItemType Junction -Path $linkPath -Target $target -ErrorAction Stop | Out-Null
-    Write-Host "Created golden-layout junction: $linkPath -> $target"
+    New-Item -ItemType SymbolicLink -Path $linkPath -Target $target -ErrorAction Stop | Out-Null
+    Write-Host "Linked golden-layout CSS into build output: $linkPath -> $target"
   } catch {
-    Write-Warning "Failed to create golden-layout junction '$linkPath' -> '$target': $($_.Exception.Message)"
+    try {
+      New-Item -ItemType Junction -Path $linkPath -Target $target -ErrorAction Stop | Out-Null
+      Write-Host "Linked golden-layout CSS into build output (junction): $linkPath -> $target"
+    } catch {
+      Write-Warning "Failed to link golden-layout CSS into build output '$linkPath' -> '$target': $($_.Exception.Message)"
+    }
   }
 }
 
