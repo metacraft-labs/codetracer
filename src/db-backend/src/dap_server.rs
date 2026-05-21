@@ -479,9 +479,7 @@ fn setup(
         let direct = trace_folder.join("trace.bin");
         if direct.is_file() {
             Some(direct)
-        } else if trace_folder.is_file()
-            && trace_folder.file_name().map(|n| n == "trace.bin").unwrap_or(false)
-        {
+        } else if trace_folder.is_file() && trace_folder.file_name().map(|n| n == "trace.bin").unwrap_or(false) {
             Some(trace_folder.to_path_buf())
         } else {
             None
@@ -725,10 +723,7 @@ pub fn setup_from_vfs(
     // this format; the browser path must too, otherwise client-side WASM
     // replay of a Noir trace fails after `configurationDone` (the handler
     // is never constructed, so `threads`/`stackTrace` return nothing).
-    let json_candidates = [
-        join_vfs(trace_folder, "trace.json"),
-        trace_folder.to_string(),
-    ];
+    let json_candidates = [join_vfs(trace_folder, "trace.json"), trace_folder.to_string()];
     for candidate in &json_candidates {
         if !crate::vfs::vfs_exists(candidate) || !candidate.ends_with("trace.json") {
             continue;
@@ -738,20 +733,14 @@ pub fn setup_from_vfs(
             None => continue,
         };
         info!("setup_from_vfs: detected legacy materialized trace.json at VFS path {candidate:?}");
-        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> =
-            serde_json::from_slice(&json_bytes).map_err(|e| {
-                format!("failed to parse legacy trace.json at {candidate:?}: {e}")
-            })?;
+        let events: Vec<codetracer_trace_types::TraceLowLevelEvent> = serde_json::from_slice(&json_bytes)
+            .map_err(|e| format!("failed to parse legacy trace.json at {candidate:?}: {e}"))?;
         // Workdir: prefer `trace_metadata.json` alongside `trace.json` in
         // the VFS, else fall back to the trace folder.
         let meta_vfs = join_vfs(trace_folder, "trace_metadata.json");
         let workdir = crate::vfs::vfs_read(&meta_vfs)
             .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| {
-                v.get("workdir")
-                    .and_then(|w| w.as_str())
-                    .map(PathBuf::from)
-            })
+            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from(trace_folder));
         let ctfs_reader = CTFSTraceReader::from_events(events, &workdir)?;
         info!(

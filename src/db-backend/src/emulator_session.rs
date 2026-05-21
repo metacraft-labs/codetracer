@@ -824,8 +824,7 @@ impl EmulatorReplaySession {
                         "CTFS container has neither meta.dat ({meta_dat_err}) nor meta.json ({json_err})"
                     ))
                 })?;
-                parse_meta_json(&meta_json_bytes)
-                    .map_err(|e| ctfs_error(format!("meta.json parse failed: {e}")))?
+                parse_meta_json(&meta_json_bytes).map_err(|e| ctfs_error(format!("meta.json parse failed: {e}")))?
             }
         };
 

@@ -1350,7 +1350,11 @@ impl ReplaySession for MaterializedReplaySession {
         // first call's `step_id` is 0 for them. Fall back to step 0 for
         // call-less step traces.
         if self.reader.call_count() > 0 {
-            let entry_step = self.reader.call(CallKey(0)).map(|call| call.step_id).unwrap_or(StepId(0));
+            let entry_step = self
+                .reader
+                .call(CallKey(0))
+                .map(|call| call.step_id)
+                .unwrap_or(StepId(0));
             self.step_id_jump(entry_step);
         } else if self.reader.step_count() > 0 {
             self.step_id_jump(StepId(0));

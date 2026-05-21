@@ -738,22 +738,14 @@ fn nim_lib_from_executable() -> Option<PathBuf> {
     let bin_dir = nim_exe.parent()?;
     let nim_root = bin_dir.parent()?;
     let lib = nim_root.join("lib");
-    if nim_lib_dir_is_valid(&lib) {
-        Some(lib)
-    } else {
-        None
-    }
+    if nim_lib_dir_is_valid(&lib) { Some(lib) } else { None }
 }
 
 /// Locate the `nim` executable on PATH (cross-platform: tries `nim` and,
 /// on Windows, `nim.exe`).
 fn which_nim() -> Option<PathBuf> {
     let path_var = env::var_os("PATH")?;
-    let names: &[&str] = if cfg!(windows) {
-        &["nim.exe", "nim"]
-    } else {
-        &["nim"]
-    };
+    let names: &[&str] = if cfg!(windows) { &["nim.exe", "nim"] } else { &["nim"] };
     for dir in env::split_paths(&path_var) {
         for name in names {
             let candidate = dir.join(name);
@@ -807,9 +799,7 @@ fn read_nim_lib_path(c_dir: &Path) -> PathBuf {
             // directory that actually contains `nimbase.h`.
             let mut probe = Path::new(line);
             while let Some(parent) = probe.parent() {
-                if parent.file_name().map(|n| n == "lib").unwrap_or(false)
-                    && nim_lib_dir_is_valid(parent)
-                {
+                if parent.file_name().map(|n| n == "lib").unwrap_or(false) && nim_lib_dir_is_valid(parent) {
                     return parent.to_path_buf();
                 }
                 probe = parent;

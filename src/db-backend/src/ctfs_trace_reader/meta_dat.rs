@@ -716,12 +716,7 @@ pub fn parse_meta_json(input: &[u8]) -> Result<MetaDat, Box<dyn Error>> {
         .as_object()
         .ok_or_else(|| -> Box<dyn Error> { "meta.json: top-level value is not a JSON object".into() })?;
 
-    let str_field = |key: &str| -> String {
-        obj.get(key)
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string()
-    };
+    let str_field = |key: &str| -> String { obj.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string() };
     let u64_field = |key: &str| -> u64 { obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
 
     let recording_id = {
@@ -748,11 +743,7 @@ pub fn parse_meta_json(input: &[u8]) -> Result<MetaDat, Box<dyn Error>> {
     let args = obj
         .get("args")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
     // `recordingBackend` is the newer field; older traces only carry
