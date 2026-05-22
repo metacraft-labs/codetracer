@@ -66,6 +66,7 @@ package codetracerReprobuildHcrMcrDap:
         paths = @[
           reproRoot / "libs" / "blake3" / "src",
           reproRoot / "libs" / "gxhash" / "src",
+          reproRoot / "libs" / "repro_core" / "src",
           reproRoot / "libs" / "repro_hcr_agent" / "src",
           reproRoot / "libs" / "repro_hcr_linker" / "src",
           reproRoot / "libs" / "repro_hcr_linkgraph" / "src",

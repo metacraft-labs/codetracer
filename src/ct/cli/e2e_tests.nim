@@ -439,7 +439,8 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
       },
       "mcr": {
         "recordedAgentProtocolBytes": true,
-        "codePatchEventRecorded": true
+        "codePatchEventRecorded": true,
+        "strictReplayRequired": true
       },
       "replay": {
         "nativeReplayPath": true,

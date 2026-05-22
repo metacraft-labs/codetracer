@@ -1679,6 +1679,7 @@ quit\n",
 
         assert_bool(&evidence, "/mcr/recordedAgentProtocolBytes", true)?;
         assert_bool(&evidence, "/mcr/codePatchEventRecorded", true)?;
+        assert_bool(&evidence, "/mcr/strictReplayRequired", true)?;
         assert_bool(&evidence, "/replay/nativeReplayPath", true)?;
         assert_bool(&evidence, "/replay/coordinatorResentPatches", false)?;
         assert_bool(&evidence, "/replay/patchReconstructedFromRecordedEffects", true)?;

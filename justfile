@@ -158,7 +158,11 @@ test-reprobuild-hcr-mcr-dap:
     export CXX="clang++"
   fi
   echo "Building ct-native-replay in $native_backend"
-  (cd "$native_backend" && cargo build --bin ct-native-replay)
+  if [ "$(uname -s)" = "Darwin" ]; then
+    (cd "$native_backend" && just build-mcr)
+  else
+    (cd "$native_backend" && cargo build --bin ct-native-replay)
+  fi
   if [ ! -x "$native_replay" ]; then
     echo "Error: ct-native-replay was not built at $native_replay; check CODETRACER_NATIVE_BACKEND_REPO_PATH" >&2
     exit 1
@@ -169,10 +173,13 @@ test-reprobuild-hcr-mcr-dap:
     echo "Error: CODETRACER_NATIVE_RECORDER_REPO_PATH must point to the codetracer-native-recorder sibling repo: $native_recorder" >&2
     exit 1
   fi
-  ct_mcr="$native_recorder/ct_cli/ct_cli"
   echo "Building ct-mcr in $native_recorder"
   nix develop "$native_recorder" --command bash -lc \
     "unset LLVM_CONFIG LLDB_LIB_PATH LLDB_ADDITIONAL_INCLUDE_DIRS CXXFLAGS CC CXX; cd '$native_recorder' && just build-ct-mcr"
+  ct_mcr="$native_recorder/ct_cli/ct_cli"
+  if [ "$(uname -s)" = "Darwin" ] && [ -x "$native_recorder/ct_cli/ct_cli-debug" ]; then
+    ct_mcr="$native_recorder/ct_cli/ct_cli-debug"
+  fi
   if [ ! -x "$ct_mcr" ]; then
     echo "Error: ct-mcr was not built at $ct_mcr; check CODETRACER_NATIVE_RECORDER_REPO_PATH" >&2
     exit 1
@@ -254,6 +261,9 @@ test-reprobuild-hcr-in-codetracer:
   export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
 
   native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH)"
+  if [ "$(uname -s)" = "Darwin" ] && [ -z "${CT_NATIVE_REPLAY_PATH:-}" ] && [ -z "${CT_NATIVE_REPLAY_BIN:-}" ] && [ -z "${CODETRACER_CT_NATIVE_REPLAY_CMD:-}" ] && [ -x "$native_backend/target/debug/ct-native-replay" ]; then
+    (cd "$native_backend" && just sign-macos-binary)
+  fi
   if [ -z "${CT_NATIVE_REPLAY_PATH:-}" ] && [ -z "${CT_NATIVE_REPLAY_BIN:-}" ] && [ -z "${CODETRACER_CT_NATIVE_REPLAY_CMD:-}" ] && [ -x "$native_backend/target/debug/ct-native-replay" ]; then
     export CT_NATIVE_REPLAY_PATH="$native_backend/target/debug/ct-native-replay"
     export CT_NATIVE_REPLAY_BIN="$CT_NATIVE_REPLAY_PATH"
@@ -261,6 +271,9 @@ test-reprobuild-hcr-in-codetracer:
   fi
 
   native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH)"
+  if [ -z "${CODETRACER_CT_MCR_CMD:-}" ] && [ "$(uname -s)" = "Darwin" ] && [ -x "$native_recorder/ct_cli/ct_cli-debug" ]; then
+    export CODETRACER_CT_MCR_CMD="$native_recorder/ct_cli/ct_cli-debug"
+  fi
   if [ -z "${CODETRACER_CT_MCR_CMD:-}" ] && [ -x "$native_recorder/ct_cli/ct_cli" ]; then
     export CODETRACER_CT_MCR_CMD="$native_recorder/ct_cli/ct_cli"
   fi
