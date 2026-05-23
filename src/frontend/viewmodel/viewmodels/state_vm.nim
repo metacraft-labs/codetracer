@@ -12,10 +12,10 @@
 ## - `currentVariables`: the variable list for the active tab
 ## - `isLoading`: whether the store is currently fetching data
 ##
-## Runtime data loading is still driven by the legacy StateComponent
-## mediator path so language-specific locals requests keep the same
-## behaviour as the pre-IsoNim UI; the VM displays the mirrored store
-## data and owns presentation state such as the active tab/expansion.
+## Runtime data loading is owned by this VM. The legacy StateComponent
+## still mirrors backend responses into the shared store, but debugger
+## moves in headless/app-VM sessions must be enough to request fresh locals
+## without relying on component side effects.
 ##
 ## Usage:
 ##   let vm = createStateVM(store)
@@ -182,5 +182,10 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
       codeStateLine: codeStateLine,
       disposeProc: dispose,
     )
+
+    createEffect proc() =
+      let dbg = store.debugger.val
+      let watches = watchExpressions.val
+      store.requestLocals(dbg.rrTicks, watchExpressions = watches)
 
     vm

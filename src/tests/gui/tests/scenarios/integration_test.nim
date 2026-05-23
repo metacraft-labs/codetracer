@@ -27,10 +27,10 @@ import isonim/viewmodel
 import backend/backend_service
 import backend/mock_backend
 import backend/dap_commands
+import app/app_vm
 import store/types
 import store/replay_data_store
 import store/request_tracker
-import session_vm
 import viewmodels/[state_vm, calltrace_vm, debug_controls_vm,
                       event_log_vm, flow_vm, shell_vm, timeline_vm]
 
@@ -63,7 +63,8 @@ suite "Integration: debugger move loads locals and calltrace":
     ## both the locals panel and calltrace panel request data.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # The auto-load effects fire on creation (no rrTicks guard).
@@ -105,7 +106,8 @@ suite "Integration: locals update when debugger steps":
     ## state panel to request fresh locals for the new position.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Initial position -- triggers first locals request.
@@ -140,7 +142,8 @@ suite "Integration: locals update when debugger steps":
     ## as the store processes a locals request.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Before any move, loading is idle.
@@ -170,7 +173,8 @@ suite "Integration: tab switching shows correct variables":
     ## locals, globals, and watches tabs in the state panel.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Populate locals and globals in the store.
       session.store.locals.locals.val = @[
@@ -210,7 +214,8 @@ suite "Integration: tab switching shows correct variables":
     ## data changes, even without a tab switch.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.stateVM.currentVariables.val.len == 0
 
@@ -246,7 +251,8 @@ suite "Integration: calltrace double-click triggers navigation":
     ## one sends a jump command to the backend.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Populate calltrace data in the store.
@@ -292,7 +298,8 @@ suite "Integration: calltrace double-click triggers navigation":
     ## or send any unexpected commands.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.calltrace.lines.val = @[
@@ -323,7 +330,8 @@ suite "Integration: debug controls reflect debugger state":
     ## and all step/continue controls are enabled.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Default state is dsIdle.
       check session.debugControlsVM.canStepForward.val == true
@@ -339,7 +347,8 @@ suite "Integration: debug controls reflect debugger state":
     ## and the status should show "Stepping...".
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set timeline range so backward stepping is valid.
@@ -379,7 +388,8 @@ suite "Integration: debug controls reflect debugger state":
     ## recording, no step actions are available.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       var dbg = session.store.debugger.val
       dbg.status = dsFinished
@@ -397,7 +407,8 @@ suite "Integration: debug controls reflect debugger state":
     ## Verifies that the step action actually reaches the mock backend.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       mock.clearReceivedCommands()
@@ -423,7 +434,8 @@ suite "Integration: watch expression triggers reload":
     ## should trigger a new requestLocals call.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Position the debugger so the auto-load guard passes.
@@ -453,7 +465,8 @@ suite "Integration: watch expression triggers reload":
     ## request so stale watch results are cleared.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Position the debugger.
@@ -492,7 +505,8 @@ suite "Integration: cross-VM coordination":
     ## effects in a single reactive cycle.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set up calltrace viewport.
@@ -523,7 +537,8 @@ suite "Integration: cross-VM coordination":
     ## 4. New data is requested for the new position
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       session.calltraceVM.setViewportHeight(20)
       drain()
 
@@ -599,7 +614,8 @@ suite "Integration: all ViewModel commands are valid DAP commands":
     ## are in the valid DAP command set.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Move debugger to trigger auto-load effects in EventLogVM,
@@ -618,7 +634,8 @@ suite "Integration: all ViewModel commands are valid DAP commands":
     ## the resulting commands are valid DAP strings.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let store = createReplayDataStore(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let store = app.session.store
       drain()
 
       for dir in StepDirection:
@@ -646,7 +663,8 @@ suite "Integration: all ViewModel commands are valid DAP commands":
     ## seek, submitInput) and verify all commands are valid.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Populate event log rows for doubleClickRow.

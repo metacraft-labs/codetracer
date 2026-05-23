@@ -1,35 +1,34 @@
 import std/[sequtils, tables, unittest]
 
 import ../../../../frontend/viewmodel/viewmodels/visual_replay_layout
-import ../../../../common/types
 
 suite "MCR visual replay layout capability":
   test "test_visual_replay_capability_drives_layout":
     let nonVisual = defaultLayoutForVisualReplayCapability(false)
-    check not nonVisual.layoutContainsContentId(ord(Content.FrameViewer))
-    check not nonVisual.layoutContainsContentId(ord(Content.PixelHistory))
-    check not nonVisual.layoutContainsContentId(ord(Content.ShaderDebug))
-    check nonVisual.layoutContainsContentId(ord(Content.State))
-    check nonVisual.layoutContainsContentId(ord(Content.Calltrace))
-    check nonVisual.layoutContainsContentId(ord(Content.EventLog))
-    check nonVisual.layoutContainsContentId(ord(Content.TerminalOutput))
+    check not nonVisual.layoutContainsContentId(FrameViewerContentId)
+    check not nonVisual.layoutContainsContentId(PixelHistoryContentId)
+    check not nonVisual.layoutContainsContentId(ShaderDebugContentId)
+    check nonVisual.layoutContainsContentId(StateContentId)
+    check nonVisual.layoutContainsContentId(CalltraceContentId)
+    check nonVisual.layoutContainsContentId(EventLogContentId)
+    check nonVisual.layoutContainsContentId(TerminalOutputContentId)
 
     let visual = defaultLayoutForVisualReplayCapability(true)
-    check visual.layoutContainsContentId(ord(Content.FrameViewer))
-    check visual.layoutContainsContentId(ord(Content.PixelHistory))
-    check visual.layoutContainsContentId(ord(Content.ShaderDebug))
-    check visual.layoutContainsContentId(ord(Content.State))
-    check visual.layoutContainsContentId(ord(Content.Calltrace))
-    check visual.layoutContainsContentId(ord(Content.EventLog))
-    check visual.layoutContainsContentId(ord(Content.TerminalOutput))
+    check visual.layoutContainsContentId(FrameViewerContentId)
+    check visual.layoutContainsContentId(PixelHistoryContentId)
+    check visual.layoutContainsContentId(ShaderDebugContentId)
+    check visual.layoutContainsContentId(StateContentId)
+    check visual.layoutContainsContentId(CalltraceContentId)
+    check visual.layoutContainsContentId(EventLogContentId)
+    check visual.layoutContainsContentId(TerminalOutputContentId)
 
     let ids = visual.contentIdsInLayout()
-    check ids.find(ord(Content.FrameViewer)) >= 0
-    check ids.count(ord(Content.FrameViewer)) == 1
-    check ids.find(ord(Content.PixelHistory)) >= 0
-    check ids.count(ord(Content.PixelHistory)) == 1
-    check ids.find(ord(Content.ShaderDebug)) >= 0
-    check ids.count(ord(Content.ShaderDebug)) == 1
+    check ids.find(FrameViewerContentId) >= 0
+    check ids.count(FrameViewerContentId) == 1
+    check ids.find(PixelHistoryContentId) >= 0
+    check ids.count(PixelHistoryContentId) == 1
+    check ids.find(ShaderDebugContentId) >= 0
+    check ids.count(ShaderDebugContentId) == 1
 
   test "metadata and artifact detection distinguish visual sessions":
     check metadataAdvertisesVisualReplay("""{"capabilities":{"visualReplay":true}}""")

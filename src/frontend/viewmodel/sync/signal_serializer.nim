@@ -70,6 +70,7 @@ proc toJson*(state: SessionState): JsonNode =
   %*{
     "connectionStatus": state.connectionStatus.toJson,
     "debugSessionMode": state.debugSessionMode.toJson,
+    "lastLiveDebugSessionMode": state.lastLiveDebugSessionMode.toJson,
     "recordingHeadRRTicks": % state.recordingHeadRRTicks,
     "recordingHeadLoadingState": state.recordingHeadLoadingState.toJson,
   }
@@ -156,6 +157,7 @@ proc parseDebugSessionMode*(s: string): DebugSessionMode =
   ## Parse a DebugSessionMode from its string representation.
   case s
   of "liveMcr": liveMcr
+  of "liveMaterialized": liveMaterialized
   of "historicalFromLive": historicalFromLive
   else: completedReplay
 
@@ -181,6 +183,8 @@ proc parseSessionState*(j: JsonNode): SessionState =
     connectionStatus: parseConnectionStatus(j["connectionStatus"].getStr),
     debugSessionMode: parseDebugSessionMode(
       j{"debugSessionMode"}.getStr($completedReplay)),
+    lastLiveDebugSessionMode: parseDebugSessionMode(
+      j{"lastLiveDebugSessionMode"}.getStr($completedReplay)),
     recordingHeadRRTicks:
       j{"recordingHeadRRTicks"}.getBiggestInt.uint64,
     recordingHeadLoadingState: parseLoadingState(

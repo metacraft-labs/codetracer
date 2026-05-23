@@ -249,14 +249,23 @@ proc recordInternal(exe: string, args: seq[string], withDiff: string, storeTrace
       echo "ERROR: maybe something wrong with record; couldn't read trace id after recording"
       quit(1)
 
-proc nativeReplayTraceKindForHost(): string =
-  ## Keep Linux/macOS on RR while routing Windows native recordings to TTD.
-  when defined(windows):
-    "ttd"
-  elif defined(macosx):
-    "rr"  # MCR backend in ct-native-replay handles macOS via --backend mcr
+proc nativeRecordingBackendForHost(requested: string): string =
+  ## MCR is the default native recorder. Linux can explicitly select RR,
+  ## Windows can explicitly select TTD, and macOS always uses MCR.
+  let normalized = requested.toLowerAscii.strip
+  when defined(macosx):
+    "mcr"
+  elif defined(windows):
+    if normalized == "ttd": "ttd" else: "mcr"
+  elif defined(linux):
+    if normalized == "rr": "rr" else: "mcr"
   else:
-    "rr"
+    "mcr"
+
+proc nativeReplayTraceKindForBackend(backend: string): string =
+  ## The replay/import layer still treats native MCR CTFS recordings as the
+  ## native replay-worker family rather than materialized DB traces.
+  if backend == "ttd": "ttd" else: "rr"
 
 proc record*(lang: string,
              outputFolder: string,
@@ -264,6 +273,7 @@ proc record*(lang: string,
              stylusTrace: string,
              address: string,
              socketPath: string,
+             recordBackend: string,
              withDiff: string,
              storeTraceFolderForPid: int,
              upload: bool,
@@ -393,10 +403,16 @@ proc record*(lang: string,
   else:
     let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
     if ctConfig.rrBackend.enabled:
-      let traceKind = nativeReplayTraceKindForHost()
+      let nativeBackend = nativeRecordingBackendForHost(recordBackend)
+      let traceKind = nativeReplayTraceKindForBackend(nativeBackend)
+      var nativeArgs =
+        pargs.concat(@["--trace-kind", traceKind,
+                       "--rr-support-path", ctConfig.rrBackend.path])
+      if nativeBackend == "mcr":
+        nativeArgs = nativeArgs.concat(@["--backend", "mcr"])
       return recordInternal(
         dbBackendRecordExe,
-        pargs.concat(@["--trace-kind", traceKind, "--rr-support-path", ctConfig.rrBackend.path]),
+        nativeArgs,
         withDiff,
         storeTraceFolderForPid,
         upload)

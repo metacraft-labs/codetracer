@@ -27,11 +27,12 @@ when defined(js):
 
 import std/[json, options, strutils, asyncdispatch, osproc, os, streams]
 
-import isonim/core/[signals, computation]
+import isonim/core/[signals, computation, async_compat]
 
 import backend/stdio_backend
 import store/[replay_data_store, types]
 import session_vm
+import app/app_vm
 import viewmodels/[state_vm, calltrace_vm]
 
 type
@@ -40,8 +41,10 @@ type
     ## Provides synchronous action methods for integration testing.
     backend*: DapStdioBackend
       ## The DAP stdio transport to the replay-server child process.
+    app*: AppViewModel
+      ## The app-level ViewModel graph owned by this headless session.
     session*: SessionViewModel
-      ## The full ViewModel layer (all VMs + shared store).
+      ## Convenience alias for app.session (all panel VMs + shared store).
     tracePath*: string
       ## Filesystem path to the trace folder being replayed.
     replayServerBin*: string
@@ -62,6 +65,7 @@ proc drain() =
   except ValueError:
     # "No handles or timers registered" — nothing to drain.
     discard
+  drainCallbacks()
 
 proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
                                     completeMoveEvent: JsonNode) =
@@ -169,13 +173,14 @@ proc newHeadlessDebugSession*(tracePath: string;
   # "ct/complete-move" event that carries the actual source location.
   discard backend.waitForEvent("stopped")
 
-  # 6. Create the ViewModel layer with the stdio backend as the service
+  # 6. Create the app ViewModel layer with the stdio backend as the service
   let backendService = backend.toBackendService()
-  let session = createSessionVM(backendService)
+  let app = createAppViewModel(backendService)
 
   result = HeadlessDebugSession(
     backend: backend,
-    session: session,
+    app: app,
+    session: app.session,
     tracePath: tracePath,
     replayServerBin: replayServerBin,
   )
@@ -722,5 +727,5 @@ proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode] =
 
 proc close*(s: HeadlessDebugSession) =
   ## Shut down the session: dispose VMs, disconnect backend, kill process.
-  s.session.dispose()
+  s.app.dispose()
   s.backend.close()

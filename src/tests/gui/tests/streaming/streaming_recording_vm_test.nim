@@ -12,7 +12,7 @@ import std/[json, sequtils, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
-import session_vm
+import app/app_vm
 import store/types
 import viewmodels/calltrace_vm
 import viewmodels/replay_lifecycle_vm
@@ -39,11 +39,12 @@ proc makeVariable(name, value: string): Variable =
     children: @[],
   )
 
-proc seedStreamingSession(): tuple[session: SessionViewModel,
+proc seedStreamingSession(): tuple[app: AppViewModel,
                                    lifecycle: ReplayLifecycleVM,
                                    mock: MockBackendService] =
   let mock = newMockBackendService(autoRespond = true)
-  let session = createSessionVM(mock.toBackendService())
+  let app = createAppViewModel(mock.toBackendService())
+  let session = app.session
   let lifecycle = createReplayLifecycleVM(session.store)
 
   lifecycle.configureReplay(rdmDesktop, rtkMaterialized,
@@ -77,13 +78,14 @@ proc seedStreamingSession(): tuple[session: SessionViewModel,
   ]
   drain()
 
-  (session, lifecycle, mock)
+  (app, lifecycle, mock)
 
 suite "StreamingRecordingVM":
 
   test "captures all three burst_activity phases":
-    createRoot proc(dispose: proc()) =
-      let (session, lifecycle, _) = seedStreamingSession()
+    createRoot proc(teardown: proc()) =
+      let (app, lifecycle, _) = seedStreamingSession()
+      let session = app.session
       for i in 0 ..< 3:
         lifecycle.recordStreamingPhase()
       check lifecycle.completedStreamingPhases.val == 3
@@ -95,21 +97,25 @@ suite "StreamingRecordingVM":
         if line.name == "burst_activity":
           inc burstCount
       check burstCount == 3
-      dispose()
+      app.dispose()
+      teardown()
 
   test "calltrace shows burst_activity and compute_fibonacci":
-    createRoot proc(dispose: proc()) =
-      let (session, _, _) = seedStreamingSession()
+    createRoot proc(teardown: proc()) =
+      let (app, _, _) = seedStreamingSession()
+      let session = app.session
       let visible = session.calltraceVM.visibleLines.val
       check visible.anyIt(it.name == "burst_activity")
       check visible.anyIt(it.name == "compute_fibonacci")
       session.calltraceVM.setSearchQuery("compute_fibonacci")
       check session.calltraceVM.highlightedMatches.val.len == 3
-      dispose()
+      app.dispose()
+      teardown()
 
   test "calltrace activation dispatches navigation to main.py":
-    createRoot proc(dispose: proc()) =
-      let (session, _, mock) = seedStreamingSession()
+    createRoot proc(teardown: proc()) =
+      let (app, _, mock) = seedStreamingSession()
+      let session = app.session
       let beforeJump = mock.receivedCommands.len
       session.calltraceVM.doubleClickEntry(0)
       drain()
@@ -118,22 +124,26 @@ suite "StreamingRecordingVM":
       check mock.receivedCommands[^1].args["path"].getStr ==
         "py_streaming_test/main.py"
       check session.editorVM.activeFileName.val == "py_streaming_test/main.py"
-      dispose()
+      app.dispose()
+      teardown()
 
   test "compute_fibonacci variables are available through StateVM":
-    createRoot proc(dispose: proc()) =
-      let (session, _, _) = seedStreamingSession()
+    createRoot proc(teardown: proc()) =
+      let (app, _, _) = seedStreamingSession()
+      let session = app.session
       let vars = session.stateVM.currentVariables.val
       check vars.anyIt(it.name == "n")
       check vars.anyIt(it.name == "a")
       check vars.anyIt(it.name == "b")
-      dispose()
+      app.dispose()
+      teardown()
 
   test "streaming failure records a lifecycle error":
-    createRoot proc(dispose: proc()) =
-      let (_, lifecycle, _) = seedStreamingSession()
+    createRoot proc(teardown: proc()) =
+      let (app, lifecycle, _) = seedStreamingSession()
       lifecycle.failReplay("stream disconnected")
       check lifecycle.stage.val == rlsError
       check lifecycle.errorMessage.val == "stream disconnected"
       check lifecycle.isReady.val == false
-      dispose()
+      app.dispose()
+      teardown()

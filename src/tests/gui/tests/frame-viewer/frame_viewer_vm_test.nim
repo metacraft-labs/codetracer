@@ -11,9 +11,6 @@ import viewmodels/frame_viewer_vm
 import viewmodels/pixel_history_vm
 import viewmodels/shader_debug_vm
 import viewmodels/visual_replay_client
-import views/isonim_pixel_history_view
-import views/isonim_shader_debug_view
-import isonim/testing/mock_dom
 
 type
   FakeVisualReplayClient = ref object
@@ -419,26 +416,25 @@ suite "PixelHistoryVM":
   test "test_pixel_history_vm_loads_entries":
     let fake = makeFakeClient()
     let vm = createPixelHistoryVM(fake.client)
-    let r = MockRenderer()
 
     vm.loadPixelHistory(12, 34, 1)
     drain()
-    let panel = renderPixelHistoryPanel(r, vm)
 
     check fake.pixelHistoryRequests == @[PixelHistoryPixel(x: 12, y: 34, frame: 1)]
     check vm.entries.val.len == 2
+    check vm.selectedPixel.val == some(PixelHistoryPixel(x: 12, y: 34, frame: 1))
+    check vm.loading.val == false
+    check vm.error.val == ""
     check vm.entries.val[0].postColor.r == 1.0
+    check vm.entries.val[0].drawCallIndex == 1
+    check vm.entries.val[0].geid == 101'u64
     check vm.entries.val[0].testStatus.depth == "pass"
     check vm.entries.val[0].testStatus.blend == "applied"
     check vm.entries.val[1].shaderOutput.g == 1.0
+    check vm.entries.val[1].drawCallIndex == 2
+    check vm.entries.val[1].geid == 102'u64
     check vm.entries.val[1].testStatus.depth == "failed"
     check vm.entries.val[1].testStatus.cull == "pass"
-    check panel.textContent.contains("Draw 1")
-    check panel.textContent.contains("GEID 101")
-    check panel.textContent.contains("Depth pass")
-    check panel.textContent.contains("Draw 2")
-    check panel.textContent.contains("GEID 102")
-    check panel.textContent.contains("Depth failed")
 
     vm.dispose()
 
@@ -448,13 +444,10 @@ suite "PixelHistoryVM":
       let mock = newMockBackendService(autoRespond = true)
       let store = createReplayDataStore(mock.toBackendService())
       let vm = createPixelHistoryVM(fake.client, store)
-      let r = MockRenderer()
 
       vm.loadPixelHistory(10, 20, 0)
       drain()
-      let panel = renderPixelHistoryPanel(r, vm)
-      let entries = panel.children[^1].children
-      entries[1].fireEvent("click")
+      vm.selectEntry(1)
 
       check vm.selectedEntry.val == some(1)
       check mock.receivedCommands.len == 1
@@ -486,11 +479,9 @@ suite "ShaderDebugVM":
   test "test_shader_debug_vm_steps_interpreter_trace":
     let fake = makeFakeClient()
     let vm = createShaderDebugVM(fake.client)
-    let r = MockRenderer()
 
     vm.loadFromPixel(12, 34, 1, some(210'u64))
     drain()
-    let firstPanel = renderShaderDebugPanel(r, vm)
 
     check fake.shaderDebugRequests.len == 1
     check fake.shaderDebugRequests[0].x == 12
@@ -503,8 +494,7 @@ suite "ShaderDebugVM":
     check vm.currentSourceLine() == 2
     check vm.currentStep().get.variables[0].name == "v_uv"
     check vm.currentStep().get.registers[0].value == "input.v_uv"
-    check firstPanel.textContent.contains("OpLoad %v_uv")
-    check firstPanel.textContent.contains("v_uv")
+    check vm.currentStep().get.instruction == "OpLoad %v_uv"
 
     vm.stepForward()
     check vm.currentStepIndex.val == 1

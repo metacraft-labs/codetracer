@@ -63,6 +63,7 @@ proc editorHostId*(index: int; hostId: string = ""): string =
 # rendering and Playwright tests can locate the editor.
 
 template renderEditorContainerImpl(r, index, path,
+                                    cursorKind,
                                     isExpansion, expansionDepth,
                                     hostId: untyped):
                                     untyped =
@@ -70,6 +71,7 @@ template renderEditorContainerImpl(r, index, path,
     tdiv(id = editorHostId(index, hostId),
          class = editorClass(isExpansion, expansionDepth),
          `data-label` = path,
+         `data-execution-cursor-kind` = cursorKind,
          tabindex = "2"):
       discard
 
@@ -82,8 +84,8 @@ proc renderEditorContainer*(r: MockRenderer; vm: EditorVM;
                             isExpansion: bool; expansionDepth: int;
                             hostId: string = ""): MockNode =
   ## Mock-renderer overload — used by headless tests.
-  discard vm
-  renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth, hostId)
+  renderEditorContainerImpl(r, index, path, vm.executionCursorKind.val,
+                            isExpansion, expansionDepth, hostId)
 
 proc renderEditorPanel*(r: MockRenderer; vm: EditorVM;
                         index: int; path: string;
@@ -98,8 +100,8 @@ when defined(js):
                               isExpansion: bool;
                               expansionDepth: int;
                               hostId: string = ""): isonim_dom.Element =
-    discard vm
-    renderEditorContainerImpl(r, index, path, isExpansion, expansionDepth, hostId)
+    renderEditorContainerImpl(r, index, path, vm.executionCursorKind.val,
+                              isExpansion, expansionDepth, hostId)
 
   proc renderEditorPanel*(r: WebRenderer; vm: EditorVM;
                           index: int; path: string;

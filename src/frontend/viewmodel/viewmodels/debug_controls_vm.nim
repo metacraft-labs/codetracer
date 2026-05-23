@@ -176,7 +176,7 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       let dbg = store.debugger.val
       let tl = store.timeline.val
       let session = store.session.val
-      session.debugSessionMode != liveMcr and
+      session.debugSessionMode notin {liveMcr, liveMaterialized} and
         dbg.status == dsIdle and dbg.rrTicks > tl.minRRTicks
 
     # Derived: continue is possible when the debugger is idle.
@@ -187,7 +187,8 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
     let canReverseContinue = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       let session = store.session.val
-      session.debugSessionMode != liveMcr and dbg.status == dsIdle
+      session.debugSessionMode notin {liveMcr, liveMaterialized} and
+        dbg.status == dsIdle
 
     # Derived: the debugger is running if it is stepping or running.
     let isRunning = createMemo[bool] proc(): bool =
@@ -208,6 +209,7 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       case store.session.val.debugSessionMode
       of completedReplay: ""
       of liveMcr: "Live MCR"
+      of liveMaterialized: "Live recording"
       of historicalFromLive: "Historical replay"
 
     let recordingHeadText = createMemo[string] proc(): string =
@@ -220,12 +222,12 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
         "Head: " & $session.recordingHeadRRTicks
 
     let showJumpToLive = createMemo[bool] proc(): bool =
-      store.session.val.debugSessionMode in {liveMcr, historicalFromLive}
+      store.session.val.debugSessionMode == historicalFromLive
 
     let canJumpToLive = createMemo[bool] proc(): bool =
       let session = store.session.val
       let dbg = store.debugger.val
-      session.debugSessionMode in {liveMcr, historicalFromLive} and
+      session.debugSessionMode == historicalFromLive and
         session.recordingHeadLoadingState != lsLoading and
         session.recordingHeadLoadingState != lsError and
         session.recordingHeadRRTicks > 0'u64 and

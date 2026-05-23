@@ -58,14 +58,22 @@ proc recordWithCtRrSupport(
     traceFolder: string,
     # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
     recordingId: string,
-    traceKind: string): Trace =
+    traceKind: string,
+    nativeBackend: string = ""): Trace =
 
   createDir(traceFolder)
+  let outputArg =
+    if nativeBackend == "mcr":
+      traceFolder / "trace"
+    else:
+      traceFolder
+  var recordArgs = @["record"]
+  if nativeBackend.len > 0:
+    recordArgs = recordArgs.concat(@["--backend", nativeBackend])
+  recordArgs = recordArgs.concat(@["-o", outputArg, program]).concat(args)
   let process = startProcess(
     ctRRSupportExe,
-    args = @[
-      "record", "-o", traceFolder, program
-    ].concat(args),
+    args = recordArgs,
     options = {poEchoCmd, poParentStreams}
   )
   let code = waitForExit(process)
@@ -359,7 +367,8 @@ proc record(
         args,
         outputFolder,
         traceId,
-        traceKind)
+        traceKind,
+        backend)
     else:
       echo fmt"ERROR: unsupported trace kind {traceKind}"
       quit(1)

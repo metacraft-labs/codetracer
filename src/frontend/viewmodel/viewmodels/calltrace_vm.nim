@@ -185,7 +185,7 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
       "rrTicks": line.rrTicks,
       "callstackDepth": line.location.callstackDepth,
     }
-    discard vm.store.backend.send("ct/calltrace-jump", args)
+    vm.store.requestHistoricalNavigation("ct/calltrace-jump", args)
 
 proc setSearchQuery*(vm: CalltraceVM; query: string) =
   ## Update the search query. Sends the query to the backend via

@@ -63,7 +63,7 @@ proc seek*(vm: TimelineVM; tick: uint64) =
   ## Navigate to the given tick in the recording.
   ## Sends a seek command to the backend.
   let args = %*{"rrTicks": tick}
-  discard vm.store.backend.send("ct/timeline-seek", args)
+  vm.store.requestHistoricalNavigation("ct/timeline-seek", args)
 
 proc zoom*(vm: TimelineVM; level: float) =
   ## Set the zoom level. Values below 0.1 are clamped.

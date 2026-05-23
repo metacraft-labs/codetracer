@@ -7,11 +7,18 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types import
   RecentTraceRecord, RecentFolderRecord, WelcomeStartOptionRecord,
-  WelcomeScreenMode, wsmWelcome, wsmNewRecord, wsmOnlineTrace, wsmEdit
+  WelcomeScreenMode, wsmWelcome, wsmNewRecord, wsmOnlineTrace, wsmEdit,
+  RecordBackendAvailability, RecordBackendChoice, RecordHostPlatform,
+  RecordTargetKind,
+  rhpLinux, rhpMacos, rhpWindows, rhpOther,
+  recordBackendMcr, recordBackendRr, recordBackendTtd,
+  recordTargetAuto, recordTargetNative, recordTargetMaterializedLive,
+  recordTargetMaterializedReplayOnly
 from ../viewmodel/viewmodels/welcome_screen_vm import
   WelcomeScreenVM, NewRecordFormState, createWelcomeScreenVM, setRecentTraces,
   setRecentFolders, setStartOptions, setMode, updateNewRecord,
-  syncLoadingState,
+  syncLoadingState, setRecordBackendAvailability, recordBackendWireName,
+  recordBackendChoiceFromWireName,
   setOnlineTraceInput
 from ../viewmodel/viewmodels/welcome_screen_vm import optionKey, NO_LOADING_RECORDING
 when defined(js):
@@ -41,12 +48,35 @@ proc toStrings(args: seq[cstring]): seq[string] =
   for arg in args:
     result.add(safeStr(arg))
 
+proc currentRecordHostPlatform(): RecordHostPlatform =
+  when defined(windows):
+    rhpWindows
+  elif defined(macosx):
+    rhpMacos
+  elif defined(linux):
+    rhpLinux
+  else:
+    rhpOther
+
+proc parseRecordBackend(value: cstring): RecordBackendChoice =
+  recordBackendChoiceFromWireName(safeStr(value))
+
+proc parseRecordTargetKind(value: cstring): RecordTargetKind =
+  case safeStr(value)
+  of "recordTargetNative": recordTargetNative
+  of "recordTargetMaterializedLive": recordTargetMaterializedLive
+  of "recordTargetMaterializedReplayOnly": recordTargetMaterializedReplayOnly
+  else: recordTargetAuto
+
 proc newDefaultRecordForm(): NewTraceRecord =
   NewTraceRecord(
     defaultOutputFolder: true,
     status: RecordStatus(kind: RecordInit),
     args: @[],
     executable: cstring"",
+    languageHint: cstring"",
+    targetKind: cstring"recordTargetAuto",
+    recordBackend: cstring"mcr",
     formValidator: RecordScreenFormValidator(
       validExecutable: true,
       invalidExecutableMessage: cstring(""),
@@ -161,6 +191,13 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
     (not self.data.isNil and not self.data.config.isNil and
      self.data.config.traceSharing.enabled)
   if not self.data.isNil:
+    welcomeScreenVMInstance.setRecordBackendAvailability(
+      RecordBackendAvailability(
+        nativeBackendInstalled:
+          (not self.data.config.isNil and self.data.config.rrBackend.enabled),
+        hostPlatform: currentRecordHostPlatform(),
+      ))
+
     var traces: seq[RecentTraceRecord] = @[]
     for trace in self.data.recentTraces:
       traces.add(legacyTraceRecord(trace))
@@ -183,12 +220,18 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
       form.workDir = ""
       form.outputFolder = ""
       form.defaultOutputFolder = true
+      form.languageHint = ""
+      form.targetKind = recordTargetAuto
+      form.backendChoice = recordBackendMcr
     else:
       form.executable = safeStr(self.newRecord.executable)
       form.args = toStrings(self.newRecord.args)
       form.workDir = safeStr(self.newRecord.workDir)
       form.outputFolder = safeStr(self.newRecord.outputFolder)
       form.defaultOutputFolder = self.newRecord.defaultOutputFolder
+      form.languageHint = safeStr(self.newRecord.languageHint)
+      form.targetKind = parseRecordTargetKind(self.newRecord.targetKind)
+      form.backendChoice = parseRecordBackend(self.newRecord.recordBackend)
   )
   if self.newDownload.isNil:
     welcomeScreenVMInstance.setOnlineTraceInput("")
@@ -347,6 +390,11 @@ when defined(js):
               required: self.newRecord.formValidator.requiredFields[cstring("outputFolder")]}
           )
         self.syncLegacyWelcomeScreenIntoVM(),
+      onRecordBackendChange: proc(backend: RecordBackendChoice) =
+        if not self.newRecord.isNil:
+          self.newRecord.recordBackend =
+            cstring(recordBackendWireName(backend))
+        self.syncLegacyWelcomeScreenIntoVM(),
       onToggleDefaultOutputFolder: proc() =
         if not self.newRecord.isNil:
           self.newRecord.defaultOutputFolder = not self.newRecord.defaultOutputFolder
@@ -365,6 +413,7 @@ when defined(js):
               args: prepareArgs(self),
               options: js{ cwd: workDir },
               projectOnly: false,
+              recordBackend: self.newRecord.recordBackend,
             }
         ),
       onShowWelcome: proc() =

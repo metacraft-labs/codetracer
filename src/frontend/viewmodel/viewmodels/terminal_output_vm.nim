@@ -117,7 +117,7 @@ proc jumpToEvent*(vm: TerminalOutputVM; eventIndex: int) =
           "eventIndex": eventIndex,
           "rrTicks": fragment.rrTicks,
         }
-        discard vm.store.backend.send("ct/event-jump", args)
+        vm.store.requestHistoricalNavigation("ct/event-jump", args)
         return
 
 # ---------------------------------------------------------------------------

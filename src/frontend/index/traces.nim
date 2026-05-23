@@ -760,7 +760,8 @@ proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
 
   mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
 
-proc onRecordWithLaunchConfig*(sender: js, response: jsobject(configIndex=int)) {.async.} =
+proc onRecordWithLaunchConfig*(sender: js,
+    response: jsobject(configIndex=int, recordBackend=cstring)) {.async.} =
   ## Execute recording with a specific launch configuration
   infoPrint "onRecordWithLaunchConfig called with index: ", $response.configIndex
   infoPrint "workspaceFolder: ", $data.workspaceFolder
@@ -787,6 +788,8 @@ proc onRecordWithLaunchConfig*(sender: js, response: jsobject(configIndex=int)) 
 
   # Build record arguments
   var recordArgs = @[config.program]
+  if not response.recordBackend.isNil and response.recordBackend.len > 0:
+    recordArgs = @[cstring"--backend", response.recordBackend].concat(recordArgs)
   for arg in config.args:
     recordArgs.add(arg)
 
@@ -907,10 +910,17 @@ proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
 proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
   await initEditModeForFolder(sender, response.folder)
 
-proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstring], options=JsObject, projectOnly=bool)) {.async.}=
+proc onNewRecord*(sender: js,
+    response: jsobject(filename=cstring, args=seq[cstring], options=JsObject,
+                       projectOnly=bool, recordBackend=cstring)) {.async.}=
   infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly
   # TODO fix replay
   var recordArgs = response.args
+  let recordBackendArgs =
+    if not response.recordBackend.isNil and response.recordBackend.len > 0:
+      @[cstring"--backend", response.recordBackend]
+    else:
+      newSeq[cstring]()
   if not data.trace.lang.usesMaterializedTraces:
     var buildArg = if response.filename.len > 0:
         response.filename
@@ -968,10 +978,11 @@ proc onNewRecord*(sender: js, response: jsobject(filename=cstring, args=seq[cstr
       mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring("index: build error: " & $JSON.stringify(buildProcessResult.error))}
       return
 
-  infoPrint "index: record with args: ", recordArgs
+  let finalRecordArgs = recordBackendArgs.concat(recordArgs)
+  infoPrint "index: record with args: ", finalRecordArgs
   let processResult = await startProcess(
     codetracerExe,
-    @[cstring"record"].concat(recordArgs),
+    @[cstring"record"].concat(finalRecordArgs),
     response.options)
 
   if processResult.isOk:

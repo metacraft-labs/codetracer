@@ -29,6 +29,7 @@ import types, request_tracker
 const
   LiveMcrGetRecordingHeadCommand* = "ct/mcr-get-recording-head"
   LiveMcrRestoreAtCommand* = "ct/mcr-restore-at"
+  LiveRecordingRestoreAtCommand* = "ct/live-restore-at"
   LiveMcrStepCommand* = "ct/mcr-live-step"
   SeekToGeidCommand* = "ct/seek-to-geid"
 
@@ -130,7 +131,40 @@ proc setSessionMode*(store: ReplayDataStore; mode: DebugSessionMode) =
   ## Update only the debug-session mode, preserving connection/head state.
   var session = store.session.val
   session.debugSessionMode = mode
+  if mode in {liveMcr, liveMaterialized}:
+    session.lastLiveDebugSessionMode = mode
   store.session.val = session
+
+proc isLiveSessionMode*(mode: DebugSessionMode): bool =
+  mode in {liveMcr, liveMaterialized}
+
+proc historicalModeTarget*(mode: DebugSessionMode): bool =
+  mode.isLiveSessionMode or mode == historicalFromLive
+
+proc rememberedLiveMode(session: SessionState): DebugSessionMode =
+  if session.lastLiveDebugSessionMode in {liveMcr, liveMaterialized}:
+    session.lastLiveDebugSessionMode
+  elif session.debugSessionMode in {liveMcr, liveMaterialized}:
+    session.debugSessionMode
+  else:
+    liveMcr
+
+proc enterHistoricalModeForNavigation*(store: ReplayDataStore) =
+  ## Mark a live recording session as browsing recorded history. Completed
+  ## replay sessions stay completed replay: there is no live head to return to.
+  var session = store.session.val
+  if session.debugSessionMode in {liveMcr, liveMaterialized}:
+    session.lastLiveDebugSessionMode = session.debugSessionMode
+    session.debugSessionMode = historicalFromLive
+    store.session.val = session
+
+proc requestHistoricalNavigation*(store: ReplayDataStore; command: string;
+                                  args: JsonNode) =
+  ## Send a navigation command that targets a recorded moment. When invoked
+  ## from a live session, the UI enters historical mode immediately; the
+  ## backend's complete-move event will refresh the exact debugger position.
+  store.enterHistoricalModeForNavigation()
+  discard store.backend.send(command, args)
 
 proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
   ## Mirror a backend recording-head update into session and timeline state.
@@ -585,7 +619,7 @@ proc requestLiveToolbarAction*(store: ReplayDataStore; actionId: string) =
 proc requestSeekToGeid*(store: ReplayDataStore; geid: uint64) =
   ## Ask the backend to move the source/debugger position to a graphics event.
   ## The follow-up complete-move event is expected to refresh debugger state.
-  discard store.backend.send(SeekToGeidCommand, %*{"geid": geid})
+  store.requestHistoricalNavigation(SeekToGeidCommand, %*{"geid": geid})
 
 proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
                        jumpToLive: bool = false) =
@@ -600,16 +634,22 @@ proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
   store.requestTracker.markPending(key, argsStr)
   store.setDebuggerSnapshot(store.debugger.val.rrTicks, dsStepping)
 
+  let liveMode = store.session.val.rememberedLiveMode
+  let restoreCommand =
+    if liveMode == liveMaterialized: LiveRecordingRestoreAtCommand
+    else: LiveMcrRestoreAtCommand
   let args = %*{"rrTicks": rrTicks, "jumpToLive": jumpToLive}
-  let fut = store.backend.send(LiveMcrRestoreAtCommand, args)
+  let fut = store.backend.send(restoreCommand, args)
   let s = store
   fut.onComplete(
     onSuccess = proc() =
       s.requestTracker.markComplete(key)
 
       var session = s.session.val
+      if not jumpToLive and session.debugSessionMode in {liveMcr, liveMaterialized}:
+        session.lastLiveDebugSessionMode = session.debugSessionMode
       session.debugSessionMode =
-        if jumpToLive: liveMcr else: historicalFromLive
+        if jumpToLive: session.rememberedLiveMode else: historicalFromLive
       if jumpToLive and session.recordingHeadRRTicks < rrTicks:
         session.recordingHeadRRTicks = rrTicks
       s.session.val = session

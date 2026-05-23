@@ -1,8 +1,9 @@
 ## Headless tests for M2 visual replay player lifecycle orchestration.
 
-import std/[asyncdispatch, unittest]
+import std/unittest
 
 import isonim/core/async_compat
+import vm_test_helpers
 
 import ../../../../frontend/index/visual_replay_player
 
@@ -60,8 +61,7 @@ suite "Visual replay player lifecycle":
         newCompletedFuture(probeUrls.len >= 2),
       sleep: proc(ms: int): PlatformFuture[void] =
         sleepCalls.add(ms)
-        result = newFuture[void]("fake visual replay sleep")
-        result.complete())
+        newCompletedFuture())
 
     let lifecycle = createVisualReplayPlayerLifecycle(
       "/tmp/trace.ct",
@@ -69,7 +69,7 @@ suite "Visual replay player lifecycle":
       readinessAttempts = 3,
       readinessDelayMs = 7)
 
-    let result = waitFor lifecycle.start()
+    let result = waitForTest lifecycle.start(completedDepsOnly = true)
 
     check result.ok
     check result.url == "http://127.0.0.1:41237"

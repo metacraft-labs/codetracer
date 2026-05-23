@@ -1520,6 +1520,9 @@ proc newDefaultRecordFormForRenderer(): NewTraceRecord =
     status: RecordStatus(kind: RecordInit),
     args: @[],
     executable: cstring"",
+    languageHint: cstring"",
+    targetKind: cstring"recordTargetAuto",
+    recordBackend: cstring"mcr",
     formValidator: RecordScreenFormValidator(
       validExecutable: true,
       invalidExecutableMessage: cstring"",

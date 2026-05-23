@@ -14,7 +14,7 @@ import std/[json, os, strutils, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
-import session_vm
+import app/app_vm
 import store/types
 import viewmodels/calltrace_vm
 import viewmodels/replay_lifecycle_vm
@@ -54,9 +54,10 @@ proc makeVariable(name, value: string): Variable =
   )
 
 proc seedBrowserReplay(config: BrowserReplayConfig) =
-  createRoot proc(dispose: proc()) =
+  createRoot proc(teardown: proc()) =
     let mock = newMockBackendService(autoRespond = true)
-    let session = createSessionVM(mock.toBackendService())
+    let app = createAppViewModel(mock.toBackendService())
+    let session = app.session
     let lifecycle = createReplayLifecycleVM(session.store)
 
     lifecycle.configureReplay(
@@ -109,7 +110,8 @@ proc seedBrowserReplay(config: BrowserReplayConfig) =
     check mock.receivedCommands.len == beforeJump + 1
     check mock.receivedCommands[^1].command == "ct/calltrace-jump"
     check mock.receivedCommands[^1].args["path"].getStr == config.sourcePath
-    dispose()
+    app.dispose()
+    teardown()
 
 suite "BrowserReplayVM - materialized DB trace":
 
@@ -127,16 +129,18 @@ suite "BrowserReplayVM - materialized DB trace":
     ))
 
   test "materialized browser mode flag is distinct from MCR":
-    createRoot proc(dispose: proc()) =
+    createRoot proc(teardown: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       let lifecycle = createReplayLifecycleVM(session.store)
       lifecycle.configureReplay(rdmWeb, rtkMaterialized,
                                 "py_sudoku_solver/main.py", "solve_sudoku")
       check lifecycle.isBrowserReplay.val == true
       check lifecycle.isMaterializedBrowserReplay.val == true
       check lifecycle.isMcrBrowserReplay.val == false
-      dispose()
+      app.dispose()
+      teardown()
 
 suite "BrowserReplayVM - MCR trace":
 
@@ -154,13 +158,15 @@ suite "BrowserReplayVM - MCR trace":
     ))
 
   test "MCR browser mode flag is distinct from materialized":
-    createRoot proc(dispose: proc()) =
+    createRoot proc(teardown: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       let lifecycle = createReplayLifecycleVM(session.store)
       lifecycle.configureReplay(rdmWeb, rtkMcr,
                                 "c_sudoku_solver/main.c", "main")
       check lifecycle.isBrowserReplay.val == true
       check lifecycle.isMcrBrowserReplay.val == true
       check lifecycle.isMaterializedBrowserReplay.val == false
-      dispose()
+      app.dispose()
+      teardown()

@@ -159,7 +159,7 @@ proc jumpToEntry*(vm: TraceLogVM; index: int) =
     "path": entry.path,
     "line": entry.line,
   }
-  discard vm.store.backend.send("ct/event-jump", args)
+  vm.store.requestHistoricalNavigation("ct/event-jump", args)
 
 # ---------------------------------------------------------------------------
 # Factory

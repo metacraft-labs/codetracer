@@ -8,6 +8,7 @@
 ## - Scroll position
 ## - Whether the flow overlay is visible
 ## - Whether the breakpoint gutter is visible
+## - Whether the current execution cursor is live or historical
 ##
 ## Derives:
 ## - `activeFileName`: the file name for the currently active tab,
@@ -38,6 +39,7 @@ type
     ##
     ## Derived memos:
     ##   activeFileName       — file name from the store's debugger location
+    ##   executionCursorKind  — semantic cursor kind for live/historical stops
     ##
     ## The store reference is kept for deriving state from the debugger.
     store*: ReplayDataStore
@@ -52,6 +54,7 @@ type
 
     # -- Derived state --
     activeFileName*: Memo[string]
+    executionCursorKind*: Memo[string]
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -113,6 +116,17 @@ proc createEditorVM*(store: ReplayDataStore): EditorVM =
     let activeFileName = createMemo[string] proc(): string =
       store.debugger.val.location.file
 
+    let executionCursorKind = createMemo[string] proc(): string =
+      case store.session.val.debugSessionMode
+      of liveMcr:
+        "live-mcr"
+      of liveMaterialized:
+        "live-recording"
+      of historicalFromLive:
+        "historical"
+      of completedReplay:
+        "replay"
+
     EditorVM(
       store: store,
       activeTabIndex: activeTabIndex,
@@ -122,5 +136,6 @@ proc createEditorVM*(store: ReplayDataStore): EditorVM =
       showFlowOverlay: showFlowOverlay,
       showBreakpointGutter: showBreakpointGutter,
       activeFileName: activeFileName,
+      executionCursorKind: executionCursorKind,
       disposeProc: dispose,
     )

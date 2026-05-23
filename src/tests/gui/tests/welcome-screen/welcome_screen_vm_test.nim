@@ -30,7 +30,7 @@
 ## explicitly-excluded ``integration/real_backend_test.nim`` /
 ## ``integration/language_smoke_test.nim`` paths.)
 
-import std/[options, unittest]
+import std/[json, options, unittest]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
 import backend/mock_backend
@@ -509,6 +509,39 @@ suite "WelcomeScreenVM — launch_config":
       check mock.commandCount("ct/launch-config") == 1
       dispose()
 
+  test "native launch configs enter live MCR mode when native backend is installed":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      vm.setRecordBackendAvailability(RecordBackendAvailability(
+        nativeBackendInstalled: true,
+        hostPlatform: rhpLinux,
+      ))
+      vm.setLaunchConfigs(@[
+        makeLaunchEntry("c-app", "C app", "c", "examples/c/main.c"),
+      ])
+      vm.selectLaunchConfig("c-app")
+      check vm.launchSelectedConfig()
+      drain()
+      let cmd = mock.findCommand("ct/launch-config")
+      check cmd.isSome
+      if cmd.isSome:
+        check cmd.get.args["recordBackend"].getStr == "mcr"
+        check cmd.get.args["startsLive"].getBool == true
+      check store.session.val.debugSessionMode == liveMcr
+      dispose()
+
+  test "loading a recent trace is replay mode only":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      store.setSessionMode(liveMcr)
+      vm.loadRecentTrace("018f25ea-3d65-7000-8000-000000000001")
+      drain()
+      check mock.commandCount("ct/load-recent-trace") == 1
+      check store.session.val.debugSessionMode == completedReplay
+      dispose()
+
   test "launchSelectedConfig returns false with no selection":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
@@ -643,4 +676,97 @@ suite "WelcomeScreenVM — new_record_form":
       drain()
       check dispatched == true
       check mock.commandCount("ct/new-record") == 1
+      dispose()
+
+  test "native backend choices are shown only when native backend is installed":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      vm.setRecordExecutable("/tmp/main.c")
+      vm.setRecordBackendAvailability(RecordBackendAvailability(
+        nativeBackendInstalled: false,
+        hostPlatform: rhpLinux,
+      ))
+      check vm.recordBackendOptions.val.len == 0
+      check vm.showRecordBackendChoice.val == false
+      check vm.newRecordSessionMode.val == completedReplay
+
+      vm.setRecordBackendAvailability(RecordBackendAvailability(
+        nativeBackendInstalled: true,
+        hostPlatform: rhpLinux,
+      ))
+      check vm.showRecordBackendChoice.val == true
+      check vm.recordBackendOptions.val.len == 2
+      check vm.recordBackendOptions.val[0].backend == recordBackendMcr
+      check vm.recordBackendOptions.val[1].backend == recordBackendRr
+      check vm.newRecordSessionMode.val == liveMcr
+      dispose()
+
+  test "RR and TTD native choices record replay-only sessions":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      vm.setRecordExecutable("/tmp/main.rs")
+      vm.setRecordBackendAvailability(RecordBackendAvailability(
+        nativeBackendInstalled: true,
+        hostPlatform: rhpWindows,
+      ))
+      check vm.recordBackendOptions.val.len == 2
+      check vm.recordBackendOptions.val[0].backend == recordBackendMcr
+      check vm.recordBackendOptions.val[1].backend == recordBackendTtd
+
+      vm.setRecordBackendChoice(recordBackendTtd)
+      check vm.newRecordSessionMode.val == completedReplay
+      check vm.submitNewRecord()
+      drain()
+      let cmd = mock.findCommand("ct/new-record")
+      check cmd.isSome
+      if cmd.isSome:
+        check cmd.get.args["recordBackend"].getStr == "ttd"
+        check cmd.get.args["startsLive"].getBool == false
+      check store.session.val.debugSessionMode == completedReplay
+      dispose()
+
+  test "macOS native recordings are always MCR live sessions":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      vm.setRecordExecutable("/tmp/app")
+      vm.setRecordBackendAvailability(RecordBackendAvailability(
+        nativeBackendInstalled: true,
+        hostPlatform: rhpMacos,
+      ))
+      check vm.recordBackendOptions.val.len == 1
+      check vm.showRecordBackendChoice.val == false
+      check vm.newRecordSessionMode.val == liveMcr
+      dispose()
+
+  test "materialized recorders start live except blockchain-style recorders":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+
+      vm.setRecordExecutable("/tmp/fib.py")
+      check vm.recordBackendOptions.val.len == 0
+      check vm.newRecordSessionMode.val == liveMaterialized
+      check vm.submitNewRecord()
+      drain()
+      var cmd = mock.findCommand("ct/new-record")
+      check cmd.isSome
+      if cmd.isSome:
+        check cmd.get.args["recordBackend"].getStr == "db"
+        check cmd.get.args["startsLive"].getBool == true
+      check store.session.val.debugSessionMode == liveMaterialized
+
+      mock.clearReceivedCommands()
+      vm.setRecordExecutable("/tmp/contract.sol")
+      check vm.newRecordSessionMode.val == completedReplay
+      check vm.submitNewRecord()
+      drain()
+      cmd = mock.findCommand("ct/new-record")
+      check cmd.isSome
+      if cmd.isSome:
+        check cmd.get.args["recordBackend"].getStr == "db"
+        check cmd.get.args["startsLive"].getBool == false
+      check store.session.val.debugSessionMode == completedReplay
       dispose()

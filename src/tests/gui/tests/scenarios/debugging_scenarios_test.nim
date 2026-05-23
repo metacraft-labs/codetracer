@@ -35,10 +35,10 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 import backend/backend_service
 import backend/mock_backend
+import app/app_vm
 import store/types
 import store/replay_data_store
 import store/request_tracker
-import session_vm
 import viewmodels/[
   state_vm,
   calltrace_vm,
@@ -90,7 +90,8 @@ suite "Scenario 1: Step through a function and inspect variables":
     ##   rrTicks 300 → line 8, locals: x=43, msg="hello", result=true
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # The auto-load effect fires on creation at rrTicks=0.
@@ -180,7 +181,8 @@ suite "Scenario 2: Reverse step preserves state":
     ##   rrTicks 200 → line 5, x=10 (even earlier)
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # 1. Debugger at line 10, rrTicks 500.
@@ -236,7 +238,8 @@ suite "Scenario 2: Reverse step preserves state":
     ## correctly when stepping backward through different files.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(500'u64, "main.py", 20)
@@ -268,7 +271,8 @@ suite "Scenario 3: Calltrace viewport loading on scroll":
     ## hasMoreAbove / hasMoreBelow signals reflect the position.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set up a large calltrace (1000 entries total).
@@ -324,7 +328,8 @@ suite "Scenario 3: Calltrace viewport loading on scroll":
     ## subset of calltrace lines for the current viewport.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Populate store with lines [80..129] (50 entries).
       var lines: seq[CallLine] = @[]
@@ -363,7 +368,8 @@ suite "Scenario 4: Breakpoint hit in loop shows correct iteration":
     ## rrTicks 3000 → counter=3, value=6
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # 1. First breakpoint hit: counter=1, value=2.
@@ -428,7 +434,8 @@ suite "Scenario 4: Breakpoint hit in loop shows correct iteration":
     ## reflects the debugger's rrTicks at each breakpoint hit.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(1000'u64, "loop.py", 20)
@@ -463,7 +470,8 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       # Use autoRespond = false so futures do NOT complete immediately,
       # simulating a slow backend where requests stay "in flight".
       let mock = newMockBackendService(autoRespond = false)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # The auto-load effect fires on creation at rrTicks=0.
@@ -507,7 +515,8 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
     ## send a duplicate calltrace section request while one is pending.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 1)
@@ -558,7 +567,8 @@ suite "Scenario 6: Watch expression lifecycle":
     ## 3. Response includes the watch result
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Position the debugger so auto-load fires.
@@ -584,7 +594,8 @@ suite "Scenario 6: Watch expression lifecycle":
     ## request that does not include the removed expression.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)
@@ -614,7 +625,8 @@ suite "Scenario 6: Watch expression lifecycle":
     ## is silently rejected and does not trigger a reload.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)
@@ -638,7 +650,8 @@ suite "Scenario 6: Watch expression lifecycle":
     ## is silently rejected and does not trigger a reload.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)
@@ -669,7 +682,8 @@ suite "Scenario 7: Debug controls state machine":
     ## Verifies the initial idle state allows all debug actions.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # 1. Initially idle.
       check session.debugControlsVM.canStepForward.val == true
@@ -685,7 +699,8 @@ suite "Scenario 7: Debug controls state machine":
     ## all step/continue actions.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # 2. Step command sent — status transitions to Stepping.
@@ -709,7 +724,8 @@ suite "Scenario 7: Debug controls state machine":
     ## correctly shows "Finished".
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # 4. Set status to Finished.
       var dbg = session.store.debugger.val
@@ -728,7 +744,8 @@ suite "Scenario 7: Debug controls state machine":
     ## Verifies that dsError disables all debug actions.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # 5. Set status to Error.
       var dbg = session.store.debugger.val
@@ -748,7 +765,8 @@ suite "Scenario 7: Debug controls state machine":
     ## is past the minimum rrTicks in the timeline.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Set timeline range.
       var tl = session.store.timeline.val
@@ -776,7 +794,8 @@ suite "Scenario 7: Debug controls state machine":
     ## Verifies the dsRunning state (used for continue commands).
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       var dbg = session.store.debugger.val
       dbg.status = dsRunning
@@ -807,7 +826,8 @@ suite "Scenario 8: Cross-VM consistency after move":
     ## - FlowVM sends flow data request
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set up calltrace viewport so its effect will fire.
@@ -854,7 +874,8 @@ suite "Scenario 8: Cross-VM consistency after move":
     ## locals data in the store correspond to the same position.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       session.calltraceVM.setViewportHeight(20)
       drain()
 
@@ -906,7 +927,8 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
     ## has not actually changed.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # The auto-load effect fires on creation at rrTicks=0.
@@ -937,7 +959,8 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
     ## rrTicks value does not trigger signal updates or new requests.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)
@@ -960,7 +983,8 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
     ## trigger a fresh request, in contrast to the no-op case above.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)
@@ -982,7 +1006,8 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
     ## when the debugger position has not changed.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       session.calltraceVM.setViewportHeight(20)
       drain()
 

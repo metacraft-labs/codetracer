@@ -91,7 +91,7 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
       "eventId": event.eventId,
       "line": event.line,
     }
-    discard vm.store.backend.send("ct/event-jump", args)
+    vm.store.requestHistoricalNavigation("ct/event-jump", args)
 
 proc nextPage*(vm: EventLogVM) =
   ## Advance to the next page, clamped to totalPages - 1.

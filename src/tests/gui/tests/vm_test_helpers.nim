@@ -64,3 +64,4 @@ proc drain*() =
     except ValueError:
       # "No handles or timers registered in dispatcher" — nothing to drain.
       discard
+    drainCallbacks()

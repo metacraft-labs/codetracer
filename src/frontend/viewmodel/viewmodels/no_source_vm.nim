@@ -133,7 +133,7 @@ proc jumpBack*(vm: NoSourceVM) =
     "previousPath": history.previousPath,
     "action": history.action,
   }
-  discard vm.store.backend.send("ct/history-jump", args)
+  vm.store.requestHistoricalNavigation("ct/history-jump", args)
 
 # ---------------------------------------------------------------------------
 # Factory

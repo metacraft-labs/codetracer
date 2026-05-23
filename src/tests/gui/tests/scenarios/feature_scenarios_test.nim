@@ -34,13 +34,10 @@
 import std/[json, unittest, options, sets]
 import vm_test_helpers
 import isonim/core/[signals, computation, owner]
-import isonim/viewmodel
-import backend/backend_service
 import backend/mock_backend
 import store/types
 import store/replay_data_store
-import store/request_tracker
-import session_vm
+import app/app_vm
 import viewmodels/[
   state_vm,
   calltrace_vm,
@@ -77,12 +74,14 @@ proc countCommands(mock: MockBackendService; command: string): int =
     if rc.command == command:
       inc result
 
-proc makeStoreWithMock(autoRespond: bool = true):
-    tuple[store: ReplayDataStore, mock: MockBackendService] =
-  ## Create a ReplayDataStore backed by a MockBackendService.
+proc makeAppWithMock(autoRespond: bool = true):
+    tuple[app: AppViewModel, store: ReplayDataStore, mock: MockBackendService] =
+  ## Create an app-level ViewModel backed by a MockBackendService.
   let mock = newMockBackendService(autoRespond = autoRespond)
-  let store = createReplayDataStore(mock.toBackendService())
-  (store, mock)
+  let app = createAppViewModel(mock.toBackendService())
+  drain()
+  mock.clearReceivedCommands()
+  (app, app.session.store, mock)
 
 # ===========================================================================
 # 1. Event Log Navigation
@@ -94,8 +93,8 @@ suite "Event Log: row selection and navigation":
     ## Simulates a developer clicking a row in the event log.
     ## The selected row should update to the clicked index.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.eventLogVM
 
       # Initially no row is selected.
       check vm.selectedRow.val.isNone
@@ -117,8 +116,8 @@ suite "Event Log: row selection and navigation":
   test "selecting a row then clearing restores no-selection state":
     ## Developer clicks a row, then clicks elsewhere to deselect.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.eventLogVM
 
       vm.selectRow(some(3))
       check vm.selectedRow.val == some(3)
@@ -134,8 +133,8 @@ suite "Event Log: row selection and navigation":
     ## to the corresponding source location. The backend should receive
     ## a ct/event-jump command with the event's ID and line number.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.eventLogVM
       drain()
 
       # Populate realistic event rows.
@@ -164,8 +163,8 @@ suite "Event Log: row selection and navigation":
   test "double-click on first and last rows works correctly":
     ## Boundary check: the first and last rows should both be navigable.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.eventLogVM
       drain()
 
       vm.eventRows.val = @[
@@ -203,8 +202,8 @@ suite "Event Log: row selection and navigation":
     ## When the debugger steps to a new execution point, the event log
     ## should automatically request fresh data for that position.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.eventLogVM
       drain()
 
       # Move debugger to trigger the auto-load effect.
@@ -223,8 +222,8 @@ suite "Event Log: row selection and navigation":
     ## The auto-load effect should pass along pagination and sort state
     ## so the backend returns the correct slice of events.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.eventLogVM
       drain()
 
       # Configure page 2 with custom page size and sort.
@@ -255,8 +254,8 @@ suite "Event Log: row selection and navigation":
     ## Simulates paging through a large event log.
     ## With 200 events and page size 50, there are 4 pages (0..3).
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.eventLogVM
 
       vm.totalEventCount.val = 200
 
@@ -289,8 +288,8 @@ suite "Event Log: row selection and navigation":
   test "pagination clamped at last page":
     ## Cannot go past the last page.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.eventLogVM
 
       vm.totalEventCount.val = 120
       # 120 / 50 = 3 pages (0, 1, 2).
@@ -306,8 +305,8 @@ suite "Event Log: row selection and navigation":
     ## Setting a search query resets pagination to page 0 so the user
     ## sees results from the beginning.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.eventLogVM
       drain()
 
       vm.totalEventCount.val = 200
@@ -333,8 +332,8 @@ suite "Event Log: row selection and navigation":
   test "sort by column sends new request with toggled direction":
     ## Clicking a column header to sort, then clicking again to reverse.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.eventLogVM
       drain()
 
       # Sort by column 2 (ascending by default).
@@ -357,8 +356,8 @@ suite "Event Log: row selection and navigation":
   test "empty event log has zero total pages":
     ## Edge case: no events loaded.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.eventLogVM
 
       check vm.totalEventCount.val == 0
       check vm.totalPages.val == 0
@@ -380,8 +379,8 @@ suite "Flow: mode switching and iteration control":
     ## request with the updated mode, allowing the developer to see
     ## flow at a different granularity.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.flowVM
       drain()
 
       # Position the debugger so the auto-load guard passes.
@@ -411,8 +410,8 @@ suite "Flow: mode switching and iteration control":
   test "switching through all three flow modes":
     ## Exercise all mode transitions: fmCall -> fmLine -> fmFunction -> fmCall.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.flowVM
 
       check vm.flowMode.val == fmCall
 
@@ -431,8 +430,8 @@ suite "Flow: mode switching and iteration control":
     ## A loop with 10 iterations should allow selection 0..9.
     ## Attempts to go out of range are clamped.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.flowVM
 
       vm.iterationCount.val = 10
       check vm.totalIterations.val == 10
@@ -464,8 +463,8 @@ suite "Flow: mode switching and iteration control":
     ## the selected iteration should be clamped automatically when
     ## the user tries to select beyond the new range.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.flowVM
 
       vm.iterationCount.val = 20
       vm.selectIteration(15)
@@ -484,8 +483,8 @@ suite "Flow: mode switching and iteration control":
     ## Moving the debugger to a new position should trigger a flow
     ## data request with the new rrTicks.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.flowVM
       drain()
 
       var dbg = store.debugger.val
@@ -504,8 +503,8 @@ suite "Flow: mode switching and iteration control":
     ## ct/flow-jump command to the backend with the step index,
     ## current mode, and iteration.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.flowVM
       drain()
 
       # Set up mode and iteration context.
@@ -530,8 +529,8 @@ suite "Flow: mode switching and iteration control":
   test "hover step sets and clears correctly":
     ## Moving the mouse over flow steps should update the hover state.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.flowVM
 
       check vm.hoveredStep.val.isNone
 
@@ -550,8 +549,8 @@ suite "Flow: mode switching and iteration control":
   test "toggle raw values switches display mode":
     ## Developers can toggle between formatted and raw value display.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.flowVM
 
       check vm.showRawValues.val == false
       vm.toggleRawValues()
@@ -565,8 +564,8 @@ suite "Flow: mode switching and iteration control":
     ## If the debugger has not yet moved (rrTicks == 0), no flow
     ## request should be sent.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
-      let vm = createFlowVM(store)
+      let (app, store, mock) = makeAppWithMock()
+      let vm = app.session.flowVM
       drain()
 
       # rrTicks is 0 by default -- no request should fire.
@@ -584,8 +583,8 @@ suite "PointList: breakpoint and tracepoint management":
   test "selecting a point updates the selection signal":
     ## Developer clicks a breakpoint in the point list.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       check vm.selectedPoint.val.isNone
 
@@ -600,8 +599,8 @@ suite "PointList: breakpoint and tracepoint management":
   test "editing mode tracks which point is being edited":
     ## Developer starts inline editing on a point, then stops.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       # Start editing point 2.
       vm.startEditing(2)
@@ -621,8 +620,8 @@ suite "PointList: breakpoint and tracepoint management":
     ## Developer edits a point, then immediately starts editing a
     ## different one without explicitly stopping.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       vm.startEditing(1)
       check vm.editingPoint.val == some(1)
@@ -639,8 +638,8 @@ suite "PointList: breakpoint and tracepoint management":
     ## Selecting a different point while editing does not stop editing,
     ## and stopping editing does not change selection.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       # Start editing point 3.
       vm.startEditing(3)
@@ -663,8 +662,8 @@ suite "PointList: breakpoint and tracepoint management":
   test "clearing selection when nothing is selected is a no-op":
     ## Edge case: clearing already-cleared selection.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       check vm.selectedPoint.val.isNone
       vm.selectPoint(none(int))
@@ -675,8 +674,8 @@ suite "PointList: breakpoint and tracepoint management":
   test "stop editing when not editing is a no-op":
     ## Edge case: calling stopEditing without startEditing.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       check vm.editingPoint.val.isNone
       vm.stopEditing()
@@ -688,8 +687,8 @@ suite "PointList: breakpoint and tracepoint management":
     ## Simulates a developer rapidly interacting with the point list:
     ## edit -> select different -> edit new -> stop.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createPointListVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.pointListVM
 
       vm.startEditing(0)
       check vm.editingPoint.val == some(0)
@@ -729,8 +728,8 @@ suite "Scratchpad: value tracking and comparison":
     ## popups; each click ends in `vm.addValue(...)`.  The panel
     ## should reflect the values in arrival order.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createScratchpadVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.scratchpadVM
 
       check vm.entries.val.len == 0
 
@@ -749,8 +748,8 @@ suite "Scratchpad: value tracking and comparison":
     ## The per-row close button drops the matching entry.  Indices
     ## shift as expected.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createScratchpadVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.scratchpadVM
 
       vm.addValue(ScratchpadValueEntry(expression: "a", valueText: "1"))
       vm.addValue(ScratchpadValueEntry(expression: "b", valueText: "2"))
@@ -767,8 +766,8 @@ suite "Scratchpad: value tracking and comparison":
     ## Starting a fresh debugging session should clear every pinned
     ## entry so the panel does not accumulate stale rows.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createScratchpadVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.scratchpadVM
 
       for i in 0 ..< 5:
         vm.addValue(ScratchpadValueEntry(
@@ -786,8 +785,8 @@ suite "Scratchpad: value tracking and comparison":
     ## the panel resolves it through the cached `CtLoadLocalsResponse`
     ## payload and pins the matching value.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createScratchpadVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.scratchpadVM
 
       vm.setLocals(@[
         ScratchpadValueEntry(expression: "i", valueText: "3"),
@@ -809,8 +808,8 @@ suite "Scratchpad: value tracking and comparison":
     ## Stress test: many sequential pins should not corrupt the
     ## entry list.
     createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createScratchpadVM(store)
+      let (app, store, _) = makeAppWithMock()
+      let vm = app.session.scratchpadVM
 
       for i in 0 ..< 20:
         vm.addValue(ScratchpadValueEntry(
@@ -834,11 +833,13 @@ suite "Multi-session: independent debugger state":
     ## session 2.
     createRoot proc(dispose: proc()) =
       let mock1 = newMockBackendService(autoRespond = true)
-      let session1 = createSessionVM(mock1.toBackendService())
+      let app1 = createAppViewModel(mock1.toBackendService())
+      let session1 = app1.session
       drain()
 
       let mock2 = newMockBackendService(autoRespond = true)
-      let session2 = createSessionVM(mock2.toBackendService())
+      let app2 = createAppViewModel(mock2.toBackendService())
+      let session2 = app2.session
       drain()
 
       # Move debugger in session 1 to main.py:42.
@@ -859,10 +860,12 @@ suite "Multi-session: independent debugger state":
     ## Setting locals in session 1 should not appear in session 2.
     createRoot proc(dispose: proc()) =
       let mock1 = newMockBackendService(autoRespond = true)
-      let session1 = createSessionVM(mock1.toBackendService())
+      let app1 = createAppViewModel(mock1.toBackendService())
+      let session1 = app1.session
 
       let mock2 = newMockBackendService(autoRespond = true)
-      let session2 = createSessionVM(mock2.toBackendService())
+      let app2 = createAppViewModel(mock2.toBackendService())
+      let session2 = app2.session
 
       # Set locals in session 1.
       session1.store.updateLocals(@[
@@ -893,11 +896,13 @@ suite "Multi-session: independent debugger state":
     ## in session 2's backend.
     createRoot proc(dispose: proc()) =
       let mock1 = newMockBackendService(autoRespond = true)
-      let session1 = createSessionVM(mock1.toBackendService())
+      let app1 = createAppViewModel(mock1.toBackendService())
+      let session1 = app1.session
       drain()
 
       let mock2 = newMockBackendService(autoRespond = true)
-      let session2 = createSessionVM(mock2.toBackendService())
+      let app2 = createAppViewModel(mock2.toBackendService())
+      let session2 = app2.session
       drain()
 
       mock2.clearReceivedCommands()
@@ -918,10 +923,12 @@ suite "Multi-session: independent debugger state":
     ## Adding a watch in session 1 should not appear in session 2.
     createRoot proc(dispose: proc()) =
       let mock1 = newMockBackendService(autoRespond = true)
-      let session1 = createSessionVM(mock1.toBackendService())
+      let app1 = createAppViewModel(mock1.toBackendService())
+      let session1 = app1.session
 
       let mock2 = newMockBackendService(autoRespond = true)
-      let session2 = createSessionVM(mock2.toBackendService())
+      let app2 = createAppViewModel(mock2.toBackendService())
+      let session2 = app2.session
 
       session1.stateVM.addWatch("counter * 2")
       session2.stateVM.addWatch("total + tax")
@@ -938,11 +945,13 @@ suite "Multi-session: independent debugger state":
     ## One session in stepping state, another idle.
     createRoot proc(dispose: proc()) =
       let mock1 = newMockBackendService(autoRespond = true)
-      let session1 = createSessionVM(mock1.toBackendService())
+      let app1 = createAppViewModel(mock1.toBackendService())
+      let session1 = app1.session
       drain()
 
       let mock2 = newMockBackendService(autoRespond = true)
-      let session2 = createSessionVM(mock2.toBackendService())
+      let app2 = createAppViewModel(mock2.toBackendService())
+      let session2 = app2.session
       drain()
 
       # Session 1: step forward (enters dsStepping).
@@ -966,7 +975,8 @@ suite "Debugger: continue and breakpoint operations":
     ## Developer presses Continue (F5) to run until the next breakpoint.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       mock.clearReceivedCommands()
@@ -984,7 +994,8 @@ suite "Debugger: continue and breakpoint operations":
     ## breakpoint hit.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set timeline range and debugger past the start.
@@ -1010,7 +1021,8 @@ suite "Debugger: continue and breakpoint operations":
     ## Developer presses Step In (F11) to enter a function call.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       mock.clearReceivedCommands()
@@ -1027,7 +1039,8 @@ suite "Debugger: continue and breakpoint operations":
     ## Developer presses Step Out (Shift+F11) to return to caller.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       mock.clearReceivedCommands()
@@ -1044,7 +1057,8 @@ suite "Debugger: continue and breakpoint operations":
     ## Developer presses Reverse Step to go back one execution step.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set timeline so backward step is allowed.
@@ -1071,7 +1085,8 @@ suite "Debugger: continue and breakpoint operations":
     ## commands should be sent in the correct order.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set up timeline range.
@@ -1119,7 +1134,8 @@ suite "Debugger: continue and breakpoint operations":
     ## continue commands should be sent.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Mark debugger as finished.
@@ -1146,7 +1162,8 @@ suite "Debugger: continue and breakpoint operations":
     ## Same as above but for the error state.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       var dbg = session.store.debugger.val
@@ -1168,7 +1185,8 @@ suite "Debugger: continue and breakpoint operations":
     ## should be rejected (double-click protection).
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Initiate a step.
@@ -1202,7 +1220,8 @@ suite "Editor: multi-file navigation and state":
     ## active file name.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Start at main.py:10.
@@ -1227,7 +1246,8 @@ suite "Editor: multi-file navigation and state":
     ## send a navigation command with that file's location.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Populate calltrace with entries in different files.
@@ -1263,7 +1283,8 @@ suite "Editor: multi-file navigation and state":
     ## Developer clicks in the editor at a specific position.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Default cursor position.
       check session.editorVM.cursorLine.val == 1
@@ -1285,7 +1306,8 @@ suite "Editor: multi-file navigation and state":
     ## Edge case: attempting to set cursor below line/column 1.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       session.editorVM.setCursor(-5, 0)
       check session.editorVM.cursorLine.val == 1   # Clamped to 1.
@@ -1297,7 +1319,8 @@ suite "Editor: multi-file navigation and state":
     ## Developer opens multiple files and switches between them.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.editorVM.activeTabIndex.val == 0
 
@@ -1320,7 +1343,8 @@ suite "Editor: multi-file navigation and state":
     ## the active tab index left by one.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       session.editorVM.switchTab(3)
       check session.editorVM.activeTabIndex.val == 3
@@ -1335,7 +1359,8 @@ suite "Editor: multi-file navigation and state":
     ## Edge case: switching to a negative tab index.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       session.editorVM.switchTab(-1)
       check session.editorVM.activeTabIndex.val == 0
@@ -1346,7 +1371,8 @@ suite "Editor: multi-file navigation and state":
     ## Developer toggles the flow overlay on the editor.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.editorVM.showFlowOverlay.val == false
 
@@ -1362,7 +1388,8 @@ suite "Editor: multi-file navigation and state":
     ## Developer toggles the breakpoint gutter visibility.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Gutter is visible by default.
       check session.editorVM.showBreakpointGutter.val == true
@@ -1380,7 +1407,8 @@ suite "Editor: multi-file navigation and state":
     ## multiple source files in a web application.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       let files = [
@@ -1423,7 +1451,8 @@ suite "Full workflow: record -> replay -> debug":
     ## 12. Cleanup
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       # Set up calltrace viewport.
@@ -1592,7 +1621,8 @@ suite "Full workflow: record -> replay -> debug":
     ## all panels stay consistent at each position.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       session.calltraceVM.setViewportHeight(20)
       drain()
 
@@ -1627,7 +1657,8 @@ suite "Full workflow: record -> replay -> debug":
     ## and watches should show the right data source for each.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Populate both locals and globals.
       session.store.locals.locals.val = @[
@@ -1671,7 +1702,8 @@ suite "Full workflow: record -> replay -> debug":
     ## Developer clicks on the timeline at a specific tick to jump there.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
       drain()
 
       mock.clearReceivedCommands()
@@ -1690,7 +1722,8 @@ suite "Full workflow: record -> replay -> debug":
     ## Developer zooms in and pans the timeline.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.timelineVM.zoomLevel.val == 1.0
 
@@ -1712,7 +1745,8 @@ suite "Full workflow: record -> replay -> debug":
     ## Developer hovers over the timeline at various positions.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.timelineVM.hoveredTick.val.isNone
 
@@ -1732,7 +1766,8 @@ suite "Full workflow: record -> replay -> debug":
     ## Developer searches for a function name in the calltrace.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       # Populate calltrace with various function names.
       session.store.calltrace.lines.val = @[
@@ -1772,7 +1807,8 @@ suite "Full workflow: record -> replay -> debug":
     ## state panel's tree view.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.stateVM.expandedPaths.val.len == 0
 
@@ -1798,7 +1834,8 @@ suite "Full workflow: record -> replay -> debug":
     ## Developer uses keyboard to navigate the variable tree.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let session = createSessionVM(mock.toBackendService())
+      let app = createAppViewModel(mock.toBackendService())
+      let session = app.session
 
       check session.stateVM.selectedPath.val == ""
 

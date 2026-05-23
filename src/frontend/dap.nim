@@ -124,6 +124,7 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtShellEval: "ct/shell-eval",
   CtMcrGetRecordingHead: "ct/mcr-get-recording-head",
   CtMcrRestoreAt: "ct/mcr-restore-at",
+  CtLiveRestoreAt: "ct/live-restore-at",
   CtMcrLiveStep: "ct/mcr-live-step",
   CtSeekToGeid: "ct/seek-to-geid",
 ]

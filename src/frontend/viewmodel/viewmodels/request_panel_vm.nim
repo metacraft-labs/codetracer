@@ -243,7 +243,7 @@ proc jumpToHandler*(vm: RequestPanelVM; index: int) =
     "url": req.url,
     "httpMethod": req.httpMethod,
   }
-  discard vm.store.backend.send("ct/seek-to-geid", args)
+  vm.store.requestHistoricalNavigation("ct/seek-to-geid", args)
 
 # ---------------------------------------------------------------------------
 # Factory

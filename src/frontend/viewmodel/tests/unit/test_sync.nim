@@ -90,6 +90,7 @@ suite "Signal serialization round-trips":
     let state = SessionState(
       connectionStatus: csConnected,
       debugSessionMode: historicalFromLive,
+      lastLiveDebugSessionMode: liveMaterialized,
       recordingHeadRRTicks: 4096'u64,
       recordingHeadLoadingState: lsLoading,
     )
@@ -97,6 +98,7 @@ suite "Signal serialization round-trips":
     let parsed = parseSessionState(j)
     check parsed.connectionStatus == csConnected
     check parsed.debugSessionMode == historicalFromLive
+    check parsed.lastLiveDebugSessionMode == liveMaterialized
     check parsed.recordingHeadRRTicks == 4096'u64
     check parsed.recordingHeadLoadingState == lsLoading
 
@@ -226,6 +228,7 @@ suite "applySignalUpdate":
         SessionState(
           connectionStatus: csConnected,
           debugSessionMode: liveMcr,
+          lastLiveDebugSessionMode: liveMcr,
           recordingHeadRRTicks: 512'u64,
           recordingHeadLoadingState: lsIdle,
         ).toJson)
@@ -233,6 +236,7 @@ suite "applySignalUpdate":
 
       check store.session.val.connectionStatus == csConnected
       check store.session.val.debugSessionMode == liveMcr
+      check store.session.val.lastLiveDebugSessionMode == liveMcr
       check store.session.val.recordingHeadRRTicks == 512'u64
       check store.session.val.recordingHeadLoadingState == lsIdle
       dispose()

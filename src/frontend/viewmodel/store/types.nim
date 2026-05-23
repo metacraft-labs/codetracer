@@ -41,12 +41,47 @@ type
     sdReverseStepOut
 
   DebugSessionMode* = enum
-    ## Whether the debugger controls target a finished replay or a live MCR
-    ## session. ``historicalFromLive`` means the user restored into already
-    ## recorded history while the live recording head is still tracked.
+    ## Whether the debugger controls target a finished replay or a live
+    ## recording session. ``historicalFromLive`` means the user restored into
+    ## already recorded history while the live recording head is still tracked.
     completedReplay
     liveMcr
+    liveMaterialized
     historicalFromLive
+
+  RecordHostPlatform* = enum
+    ## Host platform used to decide which native replay recorder choices can
+    ## be shown for new recordings.
+    rhpLinux
+    rhpMacos
+    rhpWindows
+    rhpOther
+
+  RecordTargetKind* = enum
+    ## Coarse target family selected or inferred on the new-record surface.
+    recordTargetAuto
+    recordTargetNative
+    recordTargetMaterializedLive
+    recordTargetMaterializedReplayOnly
+
+  RecordBackendChoice* = enum
+    ## Recorder/backend requested for a new recording.
+    recordBackendMcr
+    recordBackendRr
+    recordBackendTtd
+    recordBackendMaterialized
+
+  RecordBackendOption* = object
+    ## One selectable recorder/backend choice in the new-record UI.
+    backend*: RecordBackendChoice
+    label*: string
+    description*: string
+
+  RecordBackendAvailability* = object
+    ## Capabilities supplied by the app shell. Native choices are shown only
+    ## when the native backend is installed and the target is native.
+    nativeBackendInstalled*: bool
+    hostPlatform*: RecordHostPlatform
 
   Location* = object
     ## Source-code position.
@@ -66,6 +101,7 @@ type
     ## Top-level session information.
     connectionStatus*: ConnectionStatus
     debugSessionMode*: DebugSessionMode
+    lastLiveDebugSessionMode*: DebugSessionMode
     recordingHeadRRTicks*: uint64
     recordingHeadLoadingState*: LoadingState
 

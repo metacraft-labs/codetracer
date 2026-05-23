@@ -53,6 +53,7 @@ type WelcomeScreenCallbacks* = object
   onRecordArgsChange*: proc(args: seq[string])
   onRecordWorkDirChange*: proc(path: string)
   onRecordOutputFolderChange*: proc(path: string)
+  onRecordBackendChange*: proc(backend: RecordBackendChoice)
   onToggleDefaultOutputFolder*: proc()
   onSubmitNewRecord*: proc()
   onShowWelcome*: proc()
@@ -298,7 +299,8 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
 
 proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                              callbacks: WelcomeScreenCallbacks): MockNode =
-  var execInput, argsInput, workDirInput, outputInput, checkbox: MockNode
+  var execInput, argsInput, workDirInput, outputInput, backendSelect,
+      checkbox: MockNode
   let panel = ui(r):
     tdiv(class = WelcomeScreenWrapperClass):
       tdiv(class = "window-menu"):
@@ -329,6 +331,22 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                       class = "ct-input-form ct-fill-available",
                       placeholder = "Command line arguments",
                       value = vm.newRecord.val.args.join(" "))
+            if vm.showRecordBackendChoice.val:
+              tdiv(class = "new-record-form-row record-backend-row"):
+                select(ref = backendSelect,
+                       class = "ct-input-form record-backend-select"):
+                  for opt in vm.recordBackendOptions.val:
+                    let backendValue = opt.backend.recordBackendWireName
+                    let backendLabel = opt.label
+                    let isSelected =
+                      opt.backend == vm.newRecord.val.backendChoice
+                    if isSelected:
+                      option(value = backendValue,
+                             selected = "selected"):
+                        text backendLabel
+                    else:
+                      option(value = backendValue):
+                        text backendLabel
             tdiv(class = "new-record-form-row"):
               tdiv(class = "new-record-input-row"):
                 input(ref = workDirInput,
@@ -384,6 +402,7 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
   let captureArgs = argsInput
   let captureWorkDir = workDirInput
   let captureOutput = outputInput
+  let captureBackend = backendSelect
   let captureCheckbox = checkbox
   r.addEventListener(execInput, "input", proc() =
     let v = captureExec.attributes.getOrDefault("value", "")
@@ -406,6 +425,13 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
     vm.setRecordOutputFolder(v)
     if callbacks.onRecordOutputFolderChange != nil:
       callbacks.onRecordOutputFolderChange(v))
+  if not captureBackend.isNil:
+    r.addEventListener(captureBackend, "change", proc() =
+      let backend = recordBackendChoiceFromWireName(
+        captureBackend.attributes.getOrDefault("value", "mcr"))
+      vm.setRecordBackendChoice(backend)
+      if callbacks.onRecordBackendChange != nil:
+        callbacks.onRecordBackendChange(backend))
   r.addEventListener(captureCheckbox, "change", proc() =
     vm.toggleDefaultOutputFolder()
     if callbacks.onToggleDefaultOutputFolder != nil:
@@ -601,6 +627,7 @@ when defined(js):
       isonim_dom.Element =
     var execInput, argsInput, workDirInput, outputInput, checkbox:
       isonim_dom.Element
+    var backendSelect: isonim_dom.Element
     let panel = ui(r):
       tdiv(class = WelcomeScreenWrapperClass):
         tdiv(class = "window-menu"):
@@ -631,6 +658,22 @@ when defined(js):
                         class = "ct-input-form ct-fill-available",
                         placeholder = "Command line arguments",
                         value = vm.newRecord.val.args.join(" "))
+              if vm.showRecordBackendChoice.val:
+                tdiv(class = "new-record-form-row record-backend-row"):
+                  select(ref = backendSelect,
+                         class = "ct-input-form record-backend-select"):
+                    for opt in vm.recordBackendOptions.val:
+                      let backendValue = opt.backend.recordBackendWireName
+                      let backendLabel = opt.label
+                      let isSelected =
+                        opt.backend == vm.newRecord.val.backendChoice
+                      if isSelected:
+                        option(value = backendValue,
+                               selected = "selected"):
+                          text backendLabel
+                      else:
+                        option(value = backendValue):
+                          text backendLabel
               tdiv(class = "new-record-form-row"):
                 tdiv(class = "new-record-input-row"):
                   input(ref = workDirInput,
@@ -710,6 +753,15 @@ when defined(js):
         vm.setRecordOutputFolder(v)
         if callbacks.onRecordOutputFolderChange != nil:
           callbacks.onRecordOutputFolderChange(v))
+    if not backendSelect.isNil:
+      let backendNode = isonim_dom.Node(backendSelect)
+      isonim_dom.addEventListener(backendNode, cstring"change",
+        proc(ev: isonim_dom.Event) =
+          let backend = recordBackendChoiceFromWireName(
+            readInputValue(backendNode))
+          vm.setRecordBackendChoice(backend)
+          if callbacks.onRecordBackendChange != nil:
+            callbacks.onRecordBackendChange(backend))
     isonim_dom.addEventListener(checkboxNode, cstring"change",
       proc(ev: isonim_dom.Event) =
         vm.toggleDefaultOutputFolder()

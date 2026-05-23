@@ -129,6 +129,9 @@ type
     workDir*: string
     outputFolder*: string
     defaultOutputFolder*: bool
+    languageHint*: string
+    targetKind*: RecordTargetKind
+    backendChoice*: RecordBackendChoice
 
   WelcomeScreenVM* = ref object of ViewModel
     ## Reactive state for the Welcome Screen surface.
@@ -148,16 +151,37 @@ type
     onlineTraceInput*: Signal[string]
     launchConfig*: Signal[LaunchConfigState]
     newRecord*: Signal[NewRecordFormState]
+    recordBackendAvailability*: Signal[RecordBackendAvailability]
 
     # -- Derived state --
     hasRecentTraces*: Memo[bool]
     hasRecentFolders*: Memo[bool]
     activeStartOptions*: Memo[seq[WelcomeStartOptionRecord]]
     selectedLaunchConfig*: Memo[Option[LaunchConfigEntry]]
+    recordBackendOptions*: Memo[seq[RecordBackendOption]]
+    showRecordBackendChoice*: Memo[bool]
+    newRecordStartsLive*: Memo[bool]
+    newRecordSessionMode*: Memo[DebugSessionMode]
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+proc defaultRecordHostPlatform*(): RecordHostPlatform =
+  when defined(windows):
+    rhpWindows
+  elif defined(macosx):
+    rhpMacos
+  elif defined(linux):
+    rhpLinux
+  else:
+    rhpOther
+
+proc defaultRecordBackendAvailability*(): RecordBackendAvailability =
+  RecordBackendAvailability(
+    nativeBackendInstalled: false,
+    hostPlatform: defaultRecordHostPlatform(),
+  )
 
 proc emptyNewRecord*(): NewRecordFormState =
   ## Fresh ``NewRecordFormState`` with the defaults the Karax
@@ -171,7 +195,142 @@ proc emptyNewRecord*(): NewRecordFormState =
     workDir: "",
     outputFolder: "",
     defaultOutputFolder: true,
+    languageHint: "",
+    targetKind: recordTargetAuto,
+    backendChoice: recordBackendMcr,
   )
+
+proc normalizeLanguageName(value: string): string =
+  result = value.strip.toLowerAscii
+  if result.startsWith("."):
+    result = result[1..^1]
+
+proc extensionFromPath(path: string): string =
+  let slash = max(path.rfind('/'), path.rfind('\\'))
+  let filename =
+    if slash >= 0 and slash + 1 < path.len: path[slash + 1..^1]
+    else: path
+  let dot = filename.rfind('.')
+  if dot >= 0 and dot + 1 < filename.len:
+    result = filename[dot + 1..^1].normalizeLanguageName
+  else:
+    result = ""
+
+proc languageHintForForm(form: NewRecordFormState): string =
+  if form.languageHint.strip.len > 0:
+    form.languageHint.normalizeLanguageName
+  else:
+    extensionFromPath(form.executable)
+
+proc classifyLanguageOrPath*(languageOrExtension, path: string):
+    RecordTargetKind =
+  let lang =
+    if languageOrExtension.strip.len > 0:
+      languageOrExtension.normalizeLanguageName
+    else:
+      extensionFromPath(path)
+
+  case lang
+  of "c", "h", "cc", "cpp", "cxx", "hpp", "hxx", "rust", "rs",
+     "nim", "go", "pascal", "pas", "fortran", "f90", "d", "dlang",
+     "crystal", "cr", "lean", "julia", "jl", "ada", "adb", "asm", "s":
+    recordTargetNative
+  of "python", "py", "ruby", "rb", "ruby(db)", "javascript", "js", "lua",
+     "bash", "sh", "zsh", "elixir", "ex", "exs", "erlang", "erl", "hrl",
+     "wasm", "rust-wasm", "rustwasm", "cpp-wasm", "cppwasm":
+    recordTargetMaterializedLive
+  of "noir", "nr", "solidity", "sol", "masm", "miden", "sway", "sw",
+     "move", "polkavm", "cairo", "circom", "leo", "tolk", "aiken", "ak",
+     "cadence", "cdc", "solana":
+    recordTargetMaterializedReplayOnly
+  else:
+    if path.strip.len > 0 and extensionFromPath(path).len == 0:
+      recordTargetNative
+    else:
+      recordTargetAuto
+
+proc inferredRecordTargetKind*(form: NewRecordFormState): RecordTargetKind =
+  if form.targetKind != recordTargetAuto:
+    return form.targetKind
+  classifyLanguageOrPath(form.languageHintForForm, form.executable)
+
+proc recordBackendWireName*(backend: RecordBackendChoice): string =
+  case backend
+  of recordBackendMcr: "mcr"
+  of recordBackendRr: "rr"
+  of recordBackendTtd: "ttd"
+  of recordBackendMaterialized: "db"
+
+proc recordBackendChoiceFromWireName*(value: string): RecordBackendChoice =
+  case value.normalizeLanguageName
+  of "rr": recordBackendRr
+  of "ttd": recordBackendTtd
+  of "db", "materialized": recordBackendMaterialized
+  else: recordBackendMcr
+
+proc nativeBackendAllowed(backend: RecordBackendChoice;
+                          platform: RecordHostPlatform): bool =
+  case platform
+  of rhpLinux:
+    backend in {recordBackendMcr, recordBackendRr}
+  of rhpWindows:
+    backend in {recordBackendMcr, recordBackendTtd}
+  of rhpMacos:
+    backend == recordBackendMcr
+  of rhpOther:
+    backend == recordBackendMcr
+
+proc nativeBackendOptions(availability: RecordBackendAvailability):
+    seq[RecordBackendOption] =
+  if not availability.nativeBackendInstalled:
+    return @[]
+
+  result.add(RecordBackendOption(
+    backend: recordBackendMcr,
+    label: "MCR",
+    description: "Live debugging and replay",
+  ))
+  case availability.hostPlatform
+  of rhpLinux:
+    result.add(RecordBackendOption(
+      backend: recordBackendRr,
+      label: "RR",
+      description: "Record first, replay after completion",
+    ))
+  of rhpWindows:
+    result.add(RecordBackendOption(
+      backend: recordBackendTtd,
+      label: "TTD",
+      description: "Record first, replay after completion",
+    ))
+  of rhpMacos, rhpOther:
+    discard
+
+proc effectiveRecordBackend*(form: NewRecordFormState;
+                             availability: RecordBackendAvailability):
+    RecordBackendChoice =
+  let target = form.inferredRecordTargetKind
+  if target != recordTargetNative:
+    return recordBackendMaterialized
+  if form.backendChoice.nativeBackendAllowed(availability.hostPlatform):
+    form.backendChoice
+  else:
+    recordBackendMcr
+
+proc sessionModeForRecording*(target: RecordTargetKind;
+                              backend: RecordBackendChoice;
+                              availability: RecordBackendAvailability):
+    DebugSessionMode =
+  case target
+  of recordTargetNative:
+    if availability.nativeBackendInstalled and backend == recordBackendMcr:
+      liveMcr
+    else:
+      completedReplay
+  of recordTargetMaterializedLive:
+    liveMaterialized
+  of recordTargetMaterializedReplayOnly, recordTargetAuto:
+    completedReplay
 
 proc emptyLaunchConfig*(): LaunchConfigState =
   ## Fresh ``LaunchConfigState`` with no configs and no selection.
@@ -404,6 +563,32 @@ proc setRecordOutputFolder*(vm: WelcomeScreenVM; path: string) =
     form.outputFolder = path
     form.defaultOutputFolder = path.len == 0)
 
+proc setRecordLanguageHint*(vm: WelcomeScreenVM; language: string) =
+  ## Set the recorder language hint supplied by launch config parsing or
+  ## target detection. Empty falls back to extension-based inference.
+  vm.updateNewRecord(proc(form: var NewRecordFormState) =
+    form.languageHint = language)
+
+proc setRecordTargetKind*(vm: WelcomeScreenVM; targetKind: RecordTargetKind) =
+  ## Explicitly classify the target when extension inference is ambiguous
+  ## (notably compiled binaries without a source extension).
+  vm.updateNewRecord(proc(form: var NewRecordFormState) =
+    form.targetKind = targetKind)
+
+proc setRecordBackendChoice*(vm: WelcomeScreenVM;
+                             backend: RecordBackendChoice) =
+  ## Select the native recorder backend. Invalid choices for the host are
+  ## ignored at dispatch time by ``effectiveRecordBackend``.
+  vm.updateNewRecord(proc(form: var NewRecordFormState) =
+    form.backendChoice = backend)
+
+proc setRecordBackendAvailability*(vm: WelcomeScreenVM;
+                                   availability: RecordBackendAvailability) =
+  vm.recordBackendAvailability.val = availability
+  if not vm.newRecord.val.backendChoice.nativeBackendAllowed(
+      availability.hostPlatform):
+    vm.setRecordBackendChoice(recordBackendMcr)
+
 proc toggleDefaultOutputFolder*(vm: WelcomeScreenVM) =
   ## Flip the ``defaultOutputFolder`` flag.  Mirrors the Karax
   ## ``onchange`` handler on the form's checkbox.
@@ -429,6 +614,7 @@ proc loadRecentTrace*(vm: WelcomeScreenVM; recordingId: string) =
   ## (the bridge logs a warning); we pre-flip the loading overlay
   ## so the spec sees the spinner immediately.  The IPC field name
   ## ``traceId`` is preserved as wire format (M-REC-5 territory).
+  vm.store.setSessionMode(completedReplay)
   vm.beginLoadingTrace(recordingId)
   let args = %*{"traceId": recordingId}
   discard vm.store.backend.send("ct/load-recent-trace", args)
@@ -454,10 +640,23 @@ proc launchSelectedConfig*(vm: WelcomeScreenVM): bool =
     if entry.slug == lc.selectedSlug:
       if not entry.enabled:
         return false
+      let target = classifyLanguageOrPath(entry.language, entry.program)
+      let backend =
+        if target == recordTargetNative: recordBackendMcr
+        else: recordBackendMaterialized
+      let mode = sessionModeForRecording(
+        target,
+        backend,
+        vm.recordBackendAvailability.val,
+      )
+      vm.store.setSessionMode(mode)
       let args = %*{
         "slug": entry.slug,
         "language": entry.language,
         "program": entry.program,
+        "recordBackend": backend.recordBackendWireName,
+        "startsLive": mode in {liveMcr, liveMaterialized},
+        "debugSessionMode": $mode,
       }
       discard vm.store.backend.send("ct/launch-config", args)
       return true
@@ -470,12 +669,22 @@ proc submitNewRecord*(vm: WelcomeScreenVM): bool =
   if not vm.isNewRecordValid:
     return false
   let form = vm.newRecord.val
+  let availability = vm.recordBackendAvailability.val
+  let target = form.inferredRecordTargetKind
+  let backend = form.effectiveRecordBackend(availability)
+  let mode = sessionModeForRecording(target, backend, availability)
+  vm.store.setSessionMode(mode)
   let args = %*{
     "executable": form.executable,
     "args": form.args,
     "workDir": form.workDir,
     "outputFolder": form.outputFolder,
     "defaultOutputFolder": form.defaultOutputFolder,
+    "languageHint": form.languageHint,
+    "targetKind": $target,
+    "recordBackend": backend.recordBackendWireName,
+    "startsLive": mode in {liveMcr, liveMaterialized},
+    "debugSessionMode": $mode,
   }
   discard vm.store.backend.send("ct/new-record", args)
   return true
@@ -503,6 +712,8 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
     let onlineTraceInput = createSignal("")
     let launchConfig = createSignal(emptyLaunchConfig())
     let newRecord = createSignal(emptyNewRecord())
+    let recordBackendAvailability =
+      createSignal(defaultRecordBackendAvailability())
 
     let hasRecentTraces = createMemo[bool] proc(): bool =
       recentTraces.val.len > 0
@@ -526,6 +737,27 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
           return some(entry)
       none(LaunchConfigEntry)
 
+    let recordBackendOptions = createMemo[seq[RecordBackendOption]] proc():
+        seq[RecordBackendOption] =
+      if newRecord.val.inferredRecordTargetKind == recordTargetNative:
+        nativeBackendOptions(recordBackendAvailability.val)
+      else:
+        @[]
+
+    let showRecordBackendChoice = createMemo[bool] proc(): bool =
+      recordBackendOptions.val.len > 1
+
+    let newRecordSessionMode = createMemo[DebugSessionMode] proc():
+        DebugSessionMode =
+      let form = newRecord.val
+      let availability = recordBackendAvailability.val
+      let target = form.inferredRecordTargetKind
+      let backend = form.effectiveRecordBackend(availability)
+      sessionModeForRecording(target, backend, availability)
+
+    let newRecordStartsLive = createMemo[bool] proc(): bool =
+      newRecordSessionMode.val in {liveMcr, liveMaterialized}
+
     WelcomeScreenVM(
       store: store,
       recentTraces: recentTraces,
@@ -540,9 +772,14 @@ proc createWelcomeScreenVM*(store: ReplayDataStore): WelcomeScreenVM =
       onlineTraceInput: onlineTraceInput,
       launchConfig: launchConfig,
       newRecord: newRecord,
+      recordBackendAvailability: recordBackendAvailability,
       hasRecentTraces: hasRecentTraces,
       hasRecentFolders: hasRecentFolders,
       activeStartOptions: activeStartOptions,
       selectedLaunchConfig: selectedLaunchConfig,
+      recordBackendOptions: recordBackendOptions,
+      showRecordBackendChoice: showRecordBackendChoice,
+      newRecordStartsLive: newRecordStartsLive,
+      newRecordSessionMode: newRecordSessionMode,
       disposeProc: dispose,
     )

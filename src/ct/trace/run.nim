@@ -81,6 +81,7 @@ proc runWithRestart(
                              stylusTrace="",
                              address="",
                              socketPath="",
+                             recordBackend="",
                              withDiff="",
                              storeTraceFolderForPid = -1,
                              upload=false,

@@ -1445,6 +1445,9 @@ type
     pid*: cstring
     outputFolder*: cstring
     defaultOutputFolder*: bool
+    languageHint*: cstring
+    targetKind*: cstring
+    recordBackend*: cstring
     formValidator*: RecordScreenFormValidator
 
   RecordScreenFormValidator* = ref object

@@ -25,6 +25,15 @@ const gfxStreamArtifactNames = [
   "gfx_commands.idx",
 ]
 
+const
+  StateContentId* = 4
+  CalltraceContentId* = 6
+  EventLogContentId* = 8
+  TerminalOutputContentId* = 24
+  FrameViewerContentId* = 42
+  PixelHistoryContentId* = 43
+  ShaderDebugContentId* = 44
+
 proc joinTracePath(dir, name: string): string =
   if dir.len == 0:
     name
@@ -327,7 +336,7 @@ proc metadataAdvertisesVisualReplay*(rawMetadata: string): bool =
   try:
     let node = parseJson(rawMetadata)
     node.hasVisualReplayCapabilityObject()
-  except CatchableError:
+  except:
     false
 
 proc directoryHasGfxStreamArtifacts*(dir: string; pathExists: PathExistsProc): bool =

@@ -80,6 +80,7 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/shell-eval",
   "ct/mcr-get-recording-head",
   "ct/mcr-restore-at",
+  "ct/live-restore-at",
   "ct/mcr-live-step",
   "ct/seek-to-geid",
 ]

@@ -43,6 +43,7 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import ../store/replay_data_store
 
 import ../store/types
 import ../backend/backend_service
@@ -401,7 +402,7 @@ when defined(js):
         let resultEl = ui(r):
           tdiv(class = "search-result",
                onmousedown = proc() =
-                 discard vm.store.backend.send(
+                 vm.store.requestHistoricalNavigation(
                    "ct/calltrace-jump",
                    %*{"rrTicks": capturedRrTicks})):
             text "#" & key & " - stepId(" & $capturedRrTicks & "): " & name

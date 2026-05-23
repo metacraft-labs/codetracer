@@ -12,14 +12,16 @@
 ##
 ## The session_vm does NOT own or replace the legacy event-bus code.
 ## The existing UI still reads from legacy data structures.  The
-## Panel ViewModels are created by their panel modules once the legacy
-## startup sequence has created the expected components. This keeps
-## SessionViewModel passive during startup: constructing it must not
-## emit backend requests or mount any panel DOM.
+## default `createSessionVM` constructor stays passive during startup:
+## constructing it must not emit backend requests or mount any panel DOM.
+##
+## App-level owners that need a complete ViewModel graph call
+## `initializePanelViewModels` explicitly after their backend and
+## lifecycle wiring is ready.
 
 import isonim/viewmodel  # for ViewModel.dispose
 import backend/backend_service
-import store/[replay_data_store, types]
+import store/replay_data_store
 import viewmodels/[
   state_vm,
   calltrace_vm,
@@ -69,6 +71,40 @@ proc createSessionVM*(backend: BackendService): SessionViewModel =
     store: store,
     backend: backend,
   )
+
+proc initializePanelViewModels*(session: SessionViewModel) =
+  ## Create the standard panel ViewModels for a SessionViewModel.
+  ##
+  ## This is intentionally separate from `createSessionVM`: several panel
+  ## VMs own reactive effects that may issue backend requests, so the
+  ## production startup sequence must opt in only after middleware and bridge
+  ## callbacks are ready. Headless app tests use this proc to instantiate the
+  ## same app-level ViewModel graph without involving DOM or legacy modules.
+  if session.isNil or session.store.isNil:
+    return
+
+  if session.stateVM.isNil:
+    session.stateVM = createStateVM(session.store)
+  if session.calltraceVM.isNil:
+    session.calltraceVM = createCalltraceVM(session.store)
+  if session.eventLogVM.isNil:
+    session.eventLogVM = createEventLogVM(session.store)
+  if session.flowVM.isNil:
+    session.flowVM = createFlowVM(session.store)
+  if session.editorVM.isNil:
+    session.editorVM = createEditorVM(session.store)
+  if session.timelineVM.isNil:
+    session.timelineVM = createTimelineVM(session.store)
+  if session.debugControlsVM.isNil:
+    session.debugControlsVM = createDebugControlsVM(session.store)
+  if session.searchVM.isNil:
+    session.searchVM = createSearchVM(session.store)
+  if session.pointListVM.isNil:
+    session.pointListVM = createPointListVM(session.store)
+  if session.scratchpadVM.isNil:
+    session.scratchpadVM = createScratchpadVM(session.store)
+  if session.shellVM.isNil:
+    session.shellVM = createShellVM(session.store)
 
 proc dispose*(session: SessionViewModel) =
   ## Tear down all reactive roots.  Call this when the replay session

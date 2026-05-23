@@ -14,8 +14,6 @@ import isonim/core/async_compat
 when defined(js):
   import std/jsffi
 
-  import ../lib/[electron_lib, jslib]
-
 type
   VisualReplayPlayerState* = enum
     vrpStopped,
@@ -111,7 +109,7 @@ proc fail(lifecycle: VisualReplayPlayerLifecycle; message: string):
     lifecycle.process = nil
   VisualReplayPlayerResult(ok: false, url: "", error: message)
 
-proc start*(lifecycle: VisualReplayPlayerLifecycle):
+proc startAsync(lifecycle: VisualReplayPlayerLifecycle):
     Future[VisualReplayPlayerResult] {.async.} =
   if lifecycle.isNil:
     return VisualReplayPlayerResult(
@@ -149,6 +147,73 @@ proc start*(lifecycle: VisualReplayPlayerLifecycle):
   except CatchableError as e:
     return lifecycle.fail(e.msg)
 
+when defined(js):
+  proc requireCompleted[T](future: PlatformFuture[T]; label: string): T =
+    if future.isSyncResolved:
+      future.getSyncValue
+    elif future.isSyncFailed:
+      raise newException(CatchableError, future.getSyncError)
+    else:
+      raise newException(CatchableError,
+        label & " returned an async Promise in completed-dependencies mode")
+
+  proc requireCompleted(future: PlatformFuture[void]; label: string) =
+    if future.isSyncResolved:
+      return
+    elif future.isSyncFailed:
+      raise newException(CatchableError, future.getSyncError)
+    else:
+      raise newException(CatchableError,
+        label & " returned an async Promise in completed-dependencies mode")
+
+  proc startWithCompletedDeps(lifecycle: VisualReplayPlayerLifecycle):
+      VisualReplayPlayerResult =
+    if lifecycle.isNil:
+      return VisualReplayPlayerResult(
+        ok: false,
+        error: "Visual replay player lifecycle is not initialized")
+
+    lifecycle.state = vrpStarting
+    lifecycle.error = ""
+
+    try:
+      lifecycle.port = lifecycle.deps.allocatePort().requireCompleted(
+        "allocatePort")
+      if lifecycle.port <= 0:
+        return lifecycle.fail("Unable to allocate a visual replay player port.")
+
+      lifecycle.url = fmt"http://127.0.0.1:{lifecycle.port}"
+      lifecycle.process = lifecycle.deps.startProcess(
+        lifecycle.tracePath, lifecycle.port).requireCompleted("startProcess")
+      if lifecycle.process.isNil:
+        return lifecycle.fail("Unable to start the visual replay player.")
+
+      for attempt in 0 ..< lifecycle.readinessAttempts:
+        if not lifecycle.process.isRunning():
+          return lifecycle.fail(
+            "Visual replay player exited before becoming ready at " &
+            infoUrl(lifecycle.url))
+        let ready = lifecycle.deps.probeInfo(infoUrl(lifecycle.url)).
+          requireCompleted("probeInfo")
+        if ready:
+          lifecycle.state = vrpReady
+          return VisualReplayPlayerResult(ok: true, url: lifecycle.url, error: "")
+        if attempt < lifecycle.readinessAttempts - 1:
+          lifecycle.deps.sleep(lifecycle.readinessDelayMs).
+            requireCompleted("sleep")
+
+      return lifecycle.fail(
+        "Visual replay player did not become ready at " & infoUrl(lifecycle.url))
+    except CatchableError as e:
+      return lifecycle.fail(e.msg)
+
+proc start*(lifecycle: VisualReplayPlayerLifecycle;
+            completedDepsOnly = false): PlatformFuture[VisualReplayPlayerResult] =
+  when defined(js):
+    if completedDepsOnly:
+      return newCompletedFuture(lifecycle.startWithCompletedDeps())
+  lifecycle.startAsync()
+
 proc createVisualReplayPlayerLifecycle*(
     tracePath: string;
     deps: VisualReplayPlayerDeps;
@@ -162,11 +227,18 @@ proc createVisualReplayPlayerLifecycle*(
     deps: deps)
 
 when defined(js):
-  proc hasEnv(name: cstring): bool =
-    nodeProcess.env.hasKey(name) and nodeProcess.env[name].len > 0
+  proc envOrDefault(name, fallback: cstring): cstring {.importjs: """
+    ((function(name, fallback) {
+      return (typeof process !== "undefined" &&
+              process.env &&
+              process.env[name] &&
+              process.env[name].length > 0)
+        ? process.env[name]
+        : fallback;
+    })(#, #))
+  """.}
 
-  proc envOrDefault(name, fallback: cstring): cstring =
-    if hasEnv(name): nodeProcess.env[name] else: fallback
+  proc setTimeoutJs(resolve: proc(); ms: int): int {.importjs: "setTimeout(#, #)".}
 
   proc allocateTcpPortJs(): PlatformFuture[int] {.importjs: """
     (new Promise((resolve) => {
@@ -510,6 +582,9 @@ when defined(js):
   proc jsKilled(target: JsObject): bool {.
     importjs: "((function(child) { return (child && child.killed) || false; })(#))".}
 
+  proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
+  proc fsReaddirSync(path: cstring): seq[cstring] {.importjs: "require('fs').readdirSync(#)".}
+
   proc joinPath(left, right: string): string =
     if left.endsWith("/") or left.endsWith("\\"):
       left & right
@@ -518,15 +593,15 @@ when defined(js):
 
   proc findTraceContainerPath*(traceOutputFolder: string): string =
     let ctPath = joinPath(traceOutputFolder, "trace.ct")
-    if fs.existsSync(cstring(ctPath)):
+    if fsExistsSync(cstring(ctPath)):
       ctPath
     else:
-      let entries = fs.readdirSync(cstring(traceOutputFolder))
+      let entries = fsReaddirSync(cstring(traceOutputFolder))
       for entry in entries:
         let candidateName = $entry
         if candidateName.endsWith(".ct"):
           let candidatePath = joinPath(traceOutputFolder, candidateName)
-          if fs.existsSync(cstring(candidatePath)):
+          if fsExistsSync(cstring(candidatePath)):
             return candidatePath
       traceOutputFolder
 
@@ -542,13 +617,10 @@ when defined(js):
 
   proc defaultSleep(ms: int): PlatformFuture[void] =
     newPromise proc(resolve: proc()) =
-      discard windowSetTimeout(resolve, ms)
+      discard setTimeoutJs(resolve, ms)
 
   proc fakePlayerMode(): string =
-    if hasEnv(cstring"CODETRACER_VISUAL_REPLAY_FAKE_PLAYER"):
-      $nodeProcess.env[cstring"CODETRACER_VISUAL_REPLAY_FAKE_PLAYER"]
-    else:
-      ""
+    $envOrDefault(cstring"CODETRACER_VISUAL_REPLAY_FAKE_PLAYER", cstring"")
 
   proc defaultAllocatePort*(): PlatformFuture[int] =
     allocateTcpPortJs()

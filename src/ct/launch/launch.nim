@@ -361,7 +361,7 @@ proc runInitial*(conf: CodetracerConf) =
       discard record(
         conf.recordLang, conf.recordOutputFolder,
         conf.recordExportFile, conf.recordStylusTrace,
-        conf.recordAddress, conf.recordSocket,
+        conf.recordAddress, conf.recordSocket, conf.recordBackend,
         conf.recordWithDiff,
         conf.recordStoreTraceFolderForPid,
         conf.recordUpload,

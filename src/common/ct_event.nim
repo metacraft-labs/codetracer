@@ -80,6 +80,7 @@ type
     CtShellEval,
     CtMcrGetRecordingHead,
     CtMcrRestoreAt,
+    CtLiveRestoreAt,
     CtMcrLiveStep,
     CtSeekToGeid,
 

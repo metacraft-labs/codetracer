@@ -23,12 +23,8 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
-  # The pragma is a no-op without `-d:isonimHmr`; safe to import unconditionally.
-  import isonim/web/hmr_component
   when defined(ctHmr):
-    # `mountUiHot` is only used inside `when defined(ctHmr)` blocks
-    # below; importing it under the same gate avoids an UnusedImport
-    # hint on production builds.
+    import isonim/web/hmr_component
     import isonim/web/hmr
 
 import ../viewmodels/shell_vm
@@ -87,13 +83,16 @@ proc renderShellPanel*(r: MockRenderer; vm: ShellVM): MockNode =
   renderShellPanelImpl(r, vm, "shell-component")
 
 when defined(js):
-  proc renderShellPanel*(r: WebRenderer; vm: ShellVM): isonim_dom.Element {.uiComponent.} =
-    ## The `{.uiComponent.}` pragma registers a slot keyed by this
-    ## proc's source location (only under `-d:isonimHmr`). When a
-    ## bundle reload re-evaluates this module, a hash mismatch on the
-    ## body causes `mountUiHot` mounts that read the slot to re-render.
-    ## Without the flag the pragma is a transparent no-op.
-    renderShellPanelImpl(r, vm, "shell-component isonim-shell")
+  when defined(ctHmr):
+    proc renderShellPanel*(r: WebRenderer; vm: ShellVM): isonim_dom.Element {.uiComponent.} =
+      ## The `{.uiComponent.}` pragma registers a slot keyed by this
+      ## proc's source location for HMR-enabled bundles. A hash mismatch
+      ## on the body causes `mountUiHot` mounts that read the slot to
+      ## re-render this panel in place.
+      renderShellPanelImpl(r, vm, "shell-component isonim-shell")
+  else:
+    proc renderShellPanel*(r: WebRenderer; vm: ShellVM): isonim_dom.Element =
+      renderShellPanelImpl(r, vm, "shell-component isonim-shell")
 
   proc mountIsoNimShell*(container: isonim_dom.Element; vm: ShellVM) =
     ## Mount the IsoNim Shell panel as a child of `container`. Reactive
