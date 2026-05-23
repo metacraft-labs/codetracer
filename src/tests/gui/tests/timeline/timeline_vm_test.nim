@@ -35,6 +35,12 @@ proc makeStoreWithMock(autoRespond: bool = true):
   let store = createReplayDataStore(mock.toBackendService())
   (store, mock)
 
+proc commandsNamed(mock: MockBackendService; command: string):
+    seq[ReceivedCommand] =
+  for received in mock.receivedCommands:
+    if received.command == command:
+      result.add(received)
+
 # ---------------------------------------------------------------------------
 # Initial state
 # ---------------------------------------------------------------------------
@@ -108,6 +114,52 @@ suite "TimelineVM seek":
           found = true
           break
       check found
+
+      dispose()
+
+  test "seek in live MCR restores through live recording":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      store.session.val = SessionState(
+        connectionStatus: csConnected,
+        debugSessionMode: liveMcr,
+        lastLiveDebugSessionMode: liveMcr,
+        recordingHeadRRTicks: 900'u64,
+        recordingHeadLoadingState: lsIdle,
+      )
+      let vm = createTimelineVM(store)
+      drain()
+      mock.clearReceivedCommands()
+
+      vm.seek(500'u64)
+      drain()
+
+      let restores = mock.commandsNamed(LiveMcrRestoreAtCommand)
+      check restores.len == 1
+      if restores.len == 1:
+        check restores[0].args["rrTicks"].getBiggestInt == 500
+      check store.session.val.debugSessionMode == historicalFromLive
+
+      dispose()
+
+  test "seekAtFraction maps visible timeline position to ticks":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      var tl = store.timeline.val
+      tl.minRRTicks = 100'u64
+      tl.maxRRTicks = 1100'u64
+      store.timeline.val = tl
+      let vm = createTimelineVM(store)
+      drain()
+      mock.clearReceivedCommands()
+
+      vm.seekAtFraction(0.25)
+      drain()
+
+      let seeks = mock.commandsNamed("ct/timeline-seek")
+      check seeks.len == 1
+      if seeks.len == 1:
+        check seeks[0].args["rrTicks"].getBiggestInt == 350
 
       dispose()
 

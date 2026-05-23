@@ -129,6 +129,16 @@
                                 "componentType": "genericUiComponent",
                                 "componentState": {
                                     "id": 0,
+                                    "label": "timelineComponent-0",
+                                    "content": 19
+                                },
+                                "title": "genericUiComponent"
+                            },
+                            {
+                                "type": "component",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
                                     "label": "terminalComponent-0",
                                     "content": 24
                                 },

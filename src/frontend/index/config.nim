@@ -272,6 +272,61 @@ proc layoutContainsContentId(config: js; contentId: int): bool {.importjs:
   ## Recursively check whether a GoldenLayout config tree contains a
   ## component panel with the given `componentState.content` ordinal.
 
+proc ensureLayoutContentPanel(config: js; contentId: int; label: cstring): js {.importjs:
+  """(function(config, contentId, label) {
+    if (!config) return config;
+    const target = Number(contentId);
+    const root = config.root || config;
+    const stateOf = (node) => node && node.componentState ? node.componentState : {};
+    const walk = (node, visit) => {
+      if (!node) return;
+      visit(node);
+      if (Array.isArray(node.content)) {
+        for (const child of node.content) walk(child, visit);
+      }
+    };
+    let hasTarget = false;
+    walk(root, (node) => {
+      if (node.type === 'component' && Number(stateOf(node).content) === target) {
+        hasTarget = true;
+      }
+    });
+    if (hasTarget) return config;
+
+    let eventLogStack = null;
+    let firstStack = null;
+    walk(root, (node) => {
+      if (node.type !== 'stack') return;
+      if (!firstStack) firstStack = node;
+      if (eventLogStack) return;
+      if (Array.isArray(node.content) && node.content.some((child) =>
+        child && child.type === 'component' && Number(stateOf(child).content) === 8)) {
+        eventLogStack = node;
+      }
+    });
+
+    const targetStack = eventLogStack || firstStack;
+    if (!targetStack) return config;
+    if (!Array.isArray(targetStack.content)) targetStack.content = [];
+    targetStack.content.push({
+      type: 'component',
+      componentType: 'genericUiComponent',
+      componentState: {
+        id: 0,
+        label: String(label),
+        content: target
+      },
+      title: 'genericUiComponent'
+    });
+    return config;
+  })(#, #, #)""".}
+  ## Ensure a core panel exists in an otherwise valid GoldenLayout config.
+  ## This preserves user layouts while adding panels introduced after their
+  ## saved config was created.
+
+proc ensureReplayLayoutPanels(config: js): js =
+  ensureLayoutContentPanel(config, ord(Content.Timeline), cstring"timelineComponent-0")
+
 proc isValidLayoutConfig(config: js): bool =
   ## Check if a layout config has the minimum required structure for GoldenLayout.
   ## This helps detect corrupt or incompatible layout files from different branches.
@@ -355,6 +410,7 @@ proc editModeHiddenContentIds(): seq[int] =
     ord(Content.Scratchpad),
     ord(Content.Repl),
     ord(Content.EventLog),
+    ord(Content.Timeline),
     ord(Content.TerminalOutput),
     ord(Content.StepList),
     ord(Content.Calltrace),
@@ -454,7 +510,7 @@ proc loadLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
     if not isValidLayoutConfig(config):
       warnPrint "Layout config is invalid or incompatible: ", filename
       return await resetLayoutToDefault(filename)
-    return config
+    return ensureReplayLayoutPanels(config)
   else:
     let directory = filename.parentDir
     let errMkdir = await fsMkdirWithErr(cstring(directory), js{recursive: true})
@@ -499,7 +555,7 @@ proc loadEditLayoutConfig*(main: js, filename: string): Future[js] {.async.} =
         warnPrint "Default layout config is invalid: ", defaultLayoutFile
         return await resetLayoutToDefault(defaultLayoutFile)
       return sanitizeEditLayoutConfig(
-        config, ord(Content.EditorView), editModeHiddenContentIds())
+        ensureReplayLayoutPanels(config), ord(Content.EditorView), editModeHiddenContentIds())
     else:
       # Fall back to the bundled default layout
       let errCopy = await fsCopyFileWithErr(

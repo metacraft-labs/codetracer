@@ -20,7 +20,7 @@
 ##   vm.zoom(2.0)
 ##   echo vm.currentPosition.val       # derived from store
 
-import std/[json, options]
+import std/[json, math, options]
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -61,9 +61,25 @@ type
 
 proc seek*(vm: TimelineVM; tick: uint64) =
   ## Navigate to the given tick in the recording.
-  ## Sends a seek command to the backend.
-  let args = %*{"rrTicks": tick}
-  vm.store.requestHistoricalNavigation("ct/timeline-seek", args)
+  ## Live sessions must restore from the growing recording; completed replay
+  ## sessions use the generic timeline seek command.
+  let mode = vm.store.session.val.debugSessionMode
+  if mode in {liveMcr, liveMaterialized, historicalFromLive}:
+    vm.store.requestRestoreAt(tick)
+  else:
+    let args = %*{"rrTicks": tick}
+    vm.store.requestHistoricalNavigation("ct/timeline-seek", args)
+
+proc seekAtFraction*(vm: TimelineVM; fraction: float) =
+  ## Navigate by a 0..1 position along the visible timeline range.
+  let marks = vm.markers.val
+  if marks.len < 2 or marks[1] <= marks[0]:
+    return
+  let clamped = min(1.0, max(0.0, fraction))
+  let startTick = marks[0]
+  let range = marks[1] - marks[0]
+  let offset = uint64(round(float(range) * clamped))
+  vm.seek(startTick + offset)
 
 proc zoom*(vm: TimelineVM; level: float) =
   ## Set the zoom level. Values below 0.1 are clamped.

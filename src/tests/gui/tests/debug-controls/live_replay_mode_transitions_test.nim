@@ -116,13 +116,13 @@ suite "AppViewModel live/replay mode transitions":
       app.session.timelineVM.seek(120'u64)
       drain()
 
-      let seeks = mock.commandsNamed("ct/timeline-seek")
+      let restores = mock.commandsNamed(LiveMcrRestoreAtCommand)
       check app.session.store.session.val.debugSessionMode == historicalFromLive
       check app.session.editorVM.executionCursorKind.val == "historical"
       check app.session.debugControlsVM.showJumpToLive.val
-      check seeks.len == 1
-      if seeks.len == 1:
-        check seeks[0].args["rrTicks"].getBiggestInt == 120
+      check restores.len == 1
+      if restores.len == 1:
+        check restores[0].args["rrTicks"].getBiggestInt == 120
       app.dispose()
       teardown()
 

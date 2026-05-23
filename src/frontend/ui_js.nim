@@ -427,6 +427,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Calltrace", aFullCalltrace
           element "State", aState
           element "Event Log", aEventLog
+          element "Timeline", aTimeline
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
           element "Agent Activity", aAgentActivity
@@ -3145,6 +3146,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
     data.viewsApi.successMessage(
       cstring"Trace Static Block at Cursor is not yet wired up"),
+  proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), # aTimeline
 ]
 
 data.actions = actions

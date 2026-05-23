@@ -34,6 +34,14 @@ proc displayIf(cond: bool): string =
 proc positionTicksText(vm: TimelineVM): string =
   "Tick: " & $vm.currentPosition.val
 
+proc timelineMinText(vm: TimelineVM): string =
+  let marks = vm.markers.val
+  if marks.len >= 2: $marks[0] else: "0"
+
+proc timelineMaxText(vm: TimelineVM): string =
+  let marks = vm.markers.val
+  if marks.len >= 2: $marks[1] else: "0"
+
 proc positionPercent(vm: TimelineVM): float =
   ## Percentage through the recording, 0..100. Returns 0 when the
   ## marker range is invalid (no second marker, or markers in the
@@ -71,6 +79,14 @@ proc hoverTooltipText(vm: TimelineVM): string =
 proc hoverTooltipDisplay(vm: TimelineVM): string =
   if vm.hoveredTick.val.isSome: "block" else: "none"
 
+proc timelineRootStyle(): string =
+  "display: flex; flex-direction: column; width: 100%; height: 100%; " &
+    "min-height: 112px; box-sizing: border-box;"
+
+proc timelineTrackStyle(): string =
+  "position: relative; height: 42px; margin: 0 10px; " &
+    "flex: 0 0 auto; cursor: pointer;"
+
 # ---------------------------------------------------------------------------
 # Click handlers
 # ---------------------------------------------------------------------------
@@ -100,7 +116,7 @@ proc onZoomOut(vm: TimelineVM): proc() =
 
 template renderTimelinePanelImpl(r, vm, rootClass: untyped): untyped =
   ui(r):
-    tdiv(class = rootClass):
+    tdiv(class = rootClass, style = timelineRootStyle()):
       tdiv(class = "timeline-position"):
         span(class = "position-ticks"):
           text positionTicksText(vm)
@@ -113,7 +129,14 @@ template renderTimelinePanelImpl(r, vm, rootClass: untyped): untyped =
           text zoomLevelText(vm)
         button(class = "zoom-in", onclick = onZoomIn(vm)):
           text "+"
-      tdiv(class = "timeline-track"):
+      tdiv(class = "timeline-track",
+           role = "slider",
+           tabindex = "0",
+           `aria-label` = "Timeline",
+           `data-min-rr-ticks` = timelineMinText(vm),
+           `data-max-rr-ticks` = timelineMaxText(vm),
+           `data-current-rr-ticks` = $vm.currentPosition.val,
+           style = timelineTrackStyle()):
         tdiv(class = "timeline-playhead",
              left = playheadLeft(vm)):
           discard
@@ -130,6 +153,22 @@ proc renderTimelinePanel*(r: MockRenderer; vm: TimelineVM): MockNode =
   renderTimelinePanelImpl(r, vm, "timeline-component")
 
 when defined(js):
+  proc setTimelineTrackClickHandler(
+      panel: isonim_dom.Element;
+      onSeekFraction: proc(fraction: float) {.closure.})
+      {.importjs: """
+        (function(panel, onSeekFraction) {
+          const track = panel.querySelector(".timeline-track");
+          if (!track) return;
+          track.addEventListener("click", function(event) {
+            const rect = track.getBoundingClientRect();
+            if (!rect.width) return;
+            const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+            onSeekFraction(x / rect.width);
+          });
+        })(#, #);
+      """.}
+
   proc renderTimelinePanel*(r: WebRenderer; vm: TimelineVM): isonim_dom.Element =
     ## Render the Timeline panel into real DOM elements.
     renderTimelinePanelImpl(r, vm, "timeline-component isonim-timeline")
@@ -141,3 +180,5 @@ when defined(js):
     let r = WebRenderer()
     let panel = renderTimelinePanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+    setTimelineTrackClickHandler(panel, proc(fraction: float) =
+      vm.seekAtFraction(fraction))

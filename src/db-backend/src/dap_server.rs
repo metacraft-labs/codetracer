@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{Value, json};
 // use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
@@ -1098,6 +1098,21 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             handler.tracepoint_delete(req.clone(), req.load_args::<TracepointId>()?, sender.clone())?
         }
         "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
+        "ct/timeline-seek" => {
+            let args = req.load_args::<Value>()?;
+            let raw_ticks = args
+                .get("rrTicks")
+                .or_else(|| args.get("ticks"))
+                .ok_or("ct/timeline-seek requires rrTicks")?;
+            let ticks = if let Some(ticks) = raw_ticks.as_i64() {
+                ticks
+            } else if let Some(ticks) = raw_ticks.as_u64() {
+                i64::try_from(ticks).map_err(|_| "ct/timeline-seek rrTicks does not fit in i64")?
+            } else {
+                return Err("ct/timeline-seek rrTicks must be an integer".into());
+            };
+            handler.goto_ticks(req.clone(), GoToTicksArguments { thread_id: 0, ticks }, sender.clone())?
+        }
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?, sender.clone())?,
         "ct/run-to-entry" => handler.run_to_entry(req.clone(), None, sender.clone())?,
         "ct/mcr-live-step" => handler.mcr_live_step(

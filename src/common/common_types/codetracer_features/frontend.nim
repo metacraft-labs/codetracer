@@ -190,7 +190,8 @@ type
     aViewGeneratedCSource,    # View the C source generated for the current Nim file
     aViewDisassembly,         # View disassembly of the current binary
     aTraceMacroAtCursor,      # Trace macro expansion at the editor cursor
-    aTraceStaticBlockAtCursor # Trace `static:` block at the editor cursor
+    aTraceStaticBlockAtCursor, # Trace `static:` block at the editor cursor
+    aTimeline                 # Open the Timeline panel
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

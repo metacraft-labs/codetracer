@@ -26,7 +26,22 @@ async function stabilizeLiveLayout(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.dispatchEvent(new Event("resize"));
     const data = (window as any).data; // eslint-disable-line @typescript-eslint/no-explicit-any
-    data?.ui?.layout?.updateSize?.();
+    const root = document.getElementById("ROOT") ?? document.body;
+    const rect = root.getBoundingClientRect();
+    const top = Math.max(0, rect.top || 0);
+    const width = Math.max(
+      root.clientWidth,
+      document.documentElement.clientWidth,
+      window.innerWidth,
+      1200,
+    );
+    const height = Math.max(
+      root.clientHeight,
+      document.documentElement.clientHeight - top - 40,
+      window.innerHeight - top - 40,
+      600,
+    );
+    data?.ui?.layout?.updateSize?.(width, height);
     for (const editor of Object.values(data?.ui?.editors ?? {}) as any[]) {
       // eslint-disable-line @typescript-eslint/no-explicit-any
       editor?.monacoEditor?.layout?.();
@@ -484,6 +499,15 @@ async function expectPanelMode(
   await expect(layout.toolbarModeText()).toBeVisible();
 }
 
+async function openTimelinePane(layout: LayoutPage) {
+  await layout.waitForTimelineLoaded();
+  const timeline = (await layout.timelineTabs(true))[0];
+  if (timeline === undefined) {
+    throw new Error("Timeline pane did not open");
+  }
+  return timeline;
+}
+
 test.describe("Reprobuild HCR live GUI E2E", () => {
   test.skip(
     process.env.CODETRACER_ENABLE_MCR_HCR_GUI_E2E !== "1",
@@ -739,6 +763,35 @@ test.describe("Reprobuild HCR live GUI E2E", () => {
         ctPage,
         testInfo,
         "hcr-gui-generation1-live-after-jump.png",
+      );
+
+      const timeline = await openTimelinePane(layout);
+      await timeline.clickTab();
+      await stabilizeLiveLayout(ctPage);
+      await expect(timeline.track()).toBeVisible();
+      await expect
+        .poll(() => timeline.maxTicks())
+        .toBeGreaterThanOrEqual(gen1Ticks);
+      await timeline.clickTick(gen0Ticks);
+      await expectPanelMode(layout, "historicalFromLive");
+      await expectGenerationStop(layout, 0, GEN0_BREAKPOINT, "historical");
+      await expect
+        .poll(async () =>
+          (await currentLocationEditor(layout)).sourceDigestAttr(),
+        )
+        .toBe(gen0Digest);
+
+      await layout.jumpToLiveButton().click();
+      await expectPanelMode(layout, "liveMcr");
+      await expectGenerationStop(
+        layout,
+        1,
+        GEN1_STEP_NEXT,
+        "live-mcr",
+        {
+          generation_one_bias: "77",
+        },
+        77,
       );
 
       await expectRecordingHeadAtLeast(layout, headAfterGen1);

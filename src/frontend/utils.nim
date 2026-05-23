@@ -578,6 +578,14 @@ proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): S
   )
   data.registerComponent(result, Content.Scratchpad)
 
+proc makeTimelineComponent*(data: Data, id: int): TimelineComponent =
+  result = TimelineComponent(
+    id: id,
+    active: TimelineVariables,
+    service: data.services.flow,
+  )
+  data.registerComponent(result, Content.Timeline)
+
 proc makeRequestPanelComponent*(data: Data, id: int, inExtension: bool = false): RequestPanelComponent =
   result = RequestPanelComponent(
     id: id,
@@ -979,6 +987,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.EventLog:        data.makeEventLogComponent(id)
   of Content.State:           data.makeStateComponent(id)
   of Content.Calltrace:       data.makeCalltraceComponent(id)
+  of Content.Timeline:        data.makeTimelineComponent(id)
   of Content.Filesystem:      data.makeFilesystemComponent(id)
   of Content.Scratchpad:      data.makeScratchpadComponent(id)
   of Content.Repl:            data.makeReplComponent(id)

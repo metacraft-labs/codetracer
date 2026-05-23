@@ -2787,6 +2787,10 @@ suite "IsoNim Timeline Panel — structure":
 
       let track = findByClass(panel, "timeline-track")
       check track != nil
+      check track.attributes["role"] == "slider"
+      check track.attributes["data-min-rr-ticks"] == "0"
+      check track.attributes["data-max-rr-ticks"] == "0"
+      check track.attributes["data-current-rr-ticks"] == "0"
 
       let playhead = findByClass(panel, "timeline-playhead")
       check playhead != nil
