@@ -152,7 +152,19 @@ suite "EventLogVM doubleClickRow":
       # Populate event rows directly.
       vm.eventRows.val = @[
         EventLogRow(eventId: 1'u64, kind: "call", line: 10, value: "foo()"),
-        EventLogRow(eventId: 2'u64, kind: "return", line: 20, value: "42"),
+        EventLogRow(
+          eventId: 2'u64,
+          eventIndex: 7,
+          kindId: 10,
+          kind: "debugger-stop",
+          file: "src/patchable.c",
+          line: 20,
+          value: "debugger stop",
+          rrTicks: 200'u64,
+          maxRRTicks: 300'u64,
+          sourceGeneration: 1,
+          sourceDigest: "generation-1",
+        ),
       ]
 
       let cmdCountBefore = mock.receivedCommands.len
@@ -166,7 +178,16 @@ suite "EventLogVM doubleClickRow":
       for cmd in jumpCmds:
         if cmd.command == "ct/event-jump":
           check cmd.args["eventId"].getBiggestInt == 2
+          check cmd.args["rrEventId"].getBiggestInt == 2
+          check cmd.args["eventIndex"].getInt == 7
+          check cmd.args["kind"].getInt == 10
+          check cmd.args["highLevelPath"].getStr == "src/patchable.c"
           check cmd.args["line"].getInt == 20
+          check cmd.args["highLevelLine"].getInt == 20
+          check cmd.args["directLocationRRTicks"].getBiggestInt == 200
+          check cmd.args["maxRRTicks"].getBiggestInt == 300
+          check cmd.args["sourceGeneration"].getInt == 1
+          check cmd.args["sourceDigest"].getStr == "generation-1"
           found = true
           break
       check found

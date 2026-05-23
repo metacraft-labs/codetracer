@@ -119,7 +119,9 @@ template renderEventRowImpl(r, vm, item, index: untyped): untyped =
   ui(r):
     tdiv(class = rowClass(vm, index),
          `data-event-kind` = item().kind,
+         `data-event-path` = item().file,
          `data-rr-ticks` = $item().rrTicks,
+         `data-max-rr-ticks` = $item().maxRRTicks,
          `data-source-generation` = $item().sourceGeneration,
          `data-source-digest` = item().sourceDigest,
          onclick = onClick, ondblclick = onDblClick):

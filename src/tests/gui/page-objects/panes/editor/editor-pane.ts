@@ -39,7 +39,9 @@ export class EditorPane {
   }
 
   tabButton(): Locator {
-    return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
+    return this.page
+      .locator(".lm_title", { hasText: this.tabButtonText })
+      .first();
   }
 
   async clickTab(): Promise<void> {
@@ -93,9 +95,9 @@ export class EditorPane {
     // Resolve the source line via that index correspondence so the
     // returned locator points at the real rendered line on every platform.
     // `:scope` keeps the `.view-line` query scoped to the resolved index.
-    return this.root.locator(
-      ".monaco-editor .view-lines > .view-line",
-    ).nth(this.gutterDomIndexSync(lineNumber));
+    return this.root
+      .locator(".monaco-editor .view-lines > .view-line")
+      .nth(this.gutterDomIndexSync(lineNumber));
   }
 
   /**
@@ -136,25 +138,22 @@ export class EditorPane {
    */
   async clickSourceLine(lineNumber: number): Promise<void> {
     const resolveCoords = async (): Promise<{ x: number; y: number } | null> =>
-      await this.root.evaluate(
-        (paneRoot: Element, line: number) => {
-          const editorEl = paneRoot.querySelector(".monaco-editor");
-          if (!editorEl) return null;
-          const gutter = editorEl.querySelector(
-            `.margin-view-overlays .gutter[data-line='${line}']`,
-          );
-          const viewLinesEl = editorEl.querySelector(".view-lines");
-          if (!gutter || !viewLinesEl) return null;
-          const gRect = gutter.getBoundingClientRect();
-          const vRect = viewLinesEl.getBoundingClientRect();
-          if (gRect.height === 0 || vRect.width === 0) return null;
-          return {
-            x: vRect.left + 8,
-            y: gRect.top + gRect.height / 2,
-          };
-        },
-        lineNumber,
-      );
+      await this.root.evaluate((paneRoot: Element, line: number) => {
+        const editorEl = paneRoot.querySelector(".monaco-editor");
+        if (!editorEl) return null;
+        const gutter = editorEl.querySelector(
+          `.margin-view-overlays .gutter[data-line='${line}']`,
+        );
+        const viewLinesEl = editorEl.querySelector(".view-lines");
+        if (!gutter || !viewLinesEl) return null;
+        const gRect = gutter.getBoundingClientRect();
+        const vRect = viewLinesEl.getBoundingClientRect();
+        if (gRect.height === 0 || vRect.width === 0) return null;
+        return {
+          x: vRect.left + 8,
+          y: gRect.top + gRect.height / 2,
+        };
+      }, lineNumber);
 
     let coords: { x: number; y: number } | null = null;
     await retry(
@@ -176,7 +175,7 @@ export class EditorPane {
 
   gutterElement(lineNumber: number): Locator {
     return this.root.locator(
-      `.monaco-editor .margin-view-overlays > .gutter[data-line='${lineNumber}']`,
+      `.monaco-editor .margin-view-overlays .gutter[data-line='${lineNumber}']`,
     );
   }
 
@@ -209,12 +208,221 @@ export class EditorPane {
     return this.root.getAttribute("data-execution-cursor-kind");
   }
 
+  private async withEditorState<T>(
+    reader: (args: { path: string }) => T | null,
+  ): Promise<T | null> {
+    if (!this.filePath) {
+      return null;
+    }
+
+    try {
+      return await this.page.evaluate(reader, { path: this.filePath });
+    } catch {
+      return null;
+    }
+  }
+
+  async sourceText(): Promise<string> {
+    const stateText = await this.withEditorState<string>(({ path }) => {
+      const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const data = w?.data;
+
+      const aliasesFor = (raw: string): string[] => {
+        const aliases = [raw];
+        if (raw.startsWith("/private/var/")) {
+          aliases.push(raw.slice("/private".length));
+        } else if (raw.startsWith("/var/")) {
+          aliases.push(`/private${raw}`);
+        }
+        return [...new Set(aliases)];
+      };
+      const normalize = (raw: string): string =>
+        raw.startsWith("/private/var/") ? raw.slice("/private".length) : raw;
+
+      const readTab = (tab: any): string | null => {
+        // eslint-disable-line @typescript-eslint/no-explicit-any
+        if (!tab) return null;
+        const monacoEditor = tab.monacoEditor;
+        if (monacoEditor && typeof monacoEditor.getValue === "function") {
+          return String(monacoEditor.getValue());
+        }
+        if (typeof tab.source === "string") return tab.source;
+        if (Array.isArray(tab.sourceLines)) return tab.sourceLines.join("\n");
+        return null;
+      };
+
+      const readEditor = (editor: any): string | null => {
+        // eslint-disable-line @typescript-eslint/no-explicit-any
+        if (!editor) return null;
+        if (
+          editor.monacoEditor &&
+          typeof editor.monacoEditor.getValue === "function"
+        ) {
+          return String(editor.monacoEditor.getValue());
+        }
+        return readTab(editor.tabInfo);
+      };
+
+      const openTabs = data?.services?.editor?.open ?? {};
+      const editors = data?.ui?.editors ?? {};
+      for (const alias of aliasesFor(path)) {
+        const exact = readTab(openTabs[alias]) ?? readEditor(editors[alias]);
+        if (exact !== null) return exact;
+      }
+
+      const target = normalize(path);
+      for (const key of Object.keys(openTabs)) {
+        if (normalize(key) === target) {
+          const value = readTab(openTabs[key]);
+          if (value !== null) return value;
+        }
+      }
+      for (const key of Object.keys(editors)) {
+        if (normalize(key) === target) {
+          const value = readEditor(editors[key]);
+          if (value !== null) return value;
+        }
+      }
+
+      return null;
+    });
+
+    if (stateText !== null) {
+      return stateText;
+    }
+    return this.visibleText();
+  }
+
+  async revealLine(lineNumber: number): Promise<void> {
+    if (!this.filePath) {
+      return;
+    }
+
+    await this.page.evaluate(
+      ({ path, lineNumber }) => {
+        const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+        const data = w?.data;
+
+        const aliasesFor = (raw: string): string[] => {
+          const aliases = [raw];
+          if (raw.startsWith("/private/var/")) {
+            aliases.push(raw.slice("/private".length));
+          } else if (raw.startsWith("/var/")) {
+            aliases.push(`/private${raw}`);
+          }
+          return [...new Set(aliases)];
+        };
+        const normalize = (raw: string): string =>
+          raw.startsWith("/private/var/") ? raw.slice("/private".length) : raw;
+
+        const openTabs = data?.services?.editor?.open ?? {};
+        const editors = data?.ui?.editors ?? {};
+        let editor: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+        let tab: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+        for (const alias of aliasesFor(path)) {
+          editor = editors[alias] ?? null;
+          tab = openTabs[alias] ?? editor?.tabInfo ?? null;
+          if (editor || tab) break;
+        }
+        if (!editor && !tab) {
+          const target = normalize(path);
+          for (const key of Object.keys(editors)) {
+            if (normalize(key) === target) {
+              editor = editors[key];
+              tab = editor?.tabInfo ?? openTabs[key] ?? null;
+              break;
+            }
+          }
+          if (!editor && !tab) {
+            for (const key of Object.keys(openTabs)) {
+              if (normalize(key) === target) {
+                tab = openTabs[key];
+                break;
+              }
+            }
+          }
+        }
+
+        const monacoEditor = editor?.monacoEditor ?? tab?.monacoEditor;
+        data?.ui?.layout?.updateSize?.();
+        monacoEditor?.layout?.();
+        if (typeof monacoEditor?.setScrollTop === "function") {
+          monacoEditor.setScrollTop(Math.max(0, (lineNumber - 3) * 20));
+        }
+        if (
+          typeof monacoEditor?.revealLineInCenterIfOutsideViewport ===
+          "function"
+        ) {
+          monacoEditor.revealLineInCenterIfOutsideViewport(lineNumber);
+        } else if (typeof monacoEditor?.revealLineInCenter === "function") {
+          monacoEditor.revealLineInCenter(lineNumber);
+        }
+        if (typeof monacoEditor?.setPosition === "function") {
+          monacoEditor.setPosition({ lineNumber, column: 1 });
+        }
+        monacoEditor?.render?.(true);
+      },
+      { path: this.filePath, lineNumber },
+    );
+  }
+
+  async hasBreakpointAt(lineNumber: number): Promise<boolean> {
+    if (!this.filePath) {
+      return false;
+    }
+
+    try {
+      return await this.page.evaluate(
+        ({ path, lineNumber }) => {
+          const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          const table = w?.data?.services?.debugger?.breakpointTable;
+          if (!table) return false;
+
+          const aliases = [path];
+          if (path.startsWith("/private/var/")) {
+            aliases.push(path.slice("/private".length));
+          } else if (path.startsWith("/var/")) {
+            aliases.push(`/private${path}`);
+          }
+          for (const alias of aliases) {
+            if (table[alias]?.[lineNumber]) return true;
+          }
+
+          const normalize = (raw: string): string =>
+            raw.startsWith("/private/var/")
+              ? raw.slice("/private".length)
+              : raw;
+          const target = normalize(path);
+          for (const key of Object.keys(table)) {
+            if (normalize(key) === target && table[key]?.[lineNumber]) {
+              return true;
+            }
+          }
+          return false;
+        },
+        { path: this.filePath, lineNumber },
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async visibleText(): Promise<string> {
-    return (await this.root.locator(".monaco-editor .view-lines").innerText()).trim();
+    return (
+      await this.root.locator(".monaco-editor .view-lines").innerText()
+    ).trim();
   }
 
   async containsMarker(marker: string): Promise<boolean> {
-    return (await this.visibleText()).includes(marker);
+    if ((await this.sourceText()).includes(marker)) {
+      return true;
+    }
+    try {
+      return ((await this.root.textContent()) ?? "").includes(marker);
+    } catch {
+      return false;
+    }
   }
 
   grayedOutLineElementsLocator(): Locator {
@@ -242,7 +450,9 @@ export class EditorPane {
     // Strategy 1: Find a visible name label and pick its sibling value box.
     // Works for normal (non-loop) values where showName=true.
     const nameLocator = this.root
-      .locator(".ct-omni-name, .ct-omni-name-std, .flow-parallel-value-name, .flow-loop-value-name")
+      .locator(
+        ".ct-omni-name, .ct-omni-name-std, .flow-parallel-value-name, .flow-loop-value-name",
+      )
       .filter({ hasText: valueName });
 
     const siblingLocator = nameLocator
@@ -255,9 +465,9 @@ export class EditorPane {
     // `flow-{mode}-value-box-{i}-{stepCount}-{name}`, so we can match
     // elements whose ID ends with `-{valueName}` and has a value-box class.
     // Use a broad class pattern since the mode prefix varies (parallel, inline, multiline).
-    const idSuffixLocator = this.root.locator(
-      `[id$="-${valueName}"][class*="value-box"]`,
-    ).first();
+    const idSuffixLocator = this.root
+      .locator(`[id$="-${valueName}"][class*="value-box"]`)
+      .first();
 
     return siblingLocator.or(idSuffixLocator);
   }
@@ -270,7 +480,9 @@ export class EditorPane {
     for (const locator of locators) {
       const attr = await locator.getAttribute("data-line-number");
       const lineNumber = attr ? parseInt(attr, 10) : -1;
-      lines.push(new EditorLine(this, locator, isNaN(lineNumber) ? -1 : lineNumber));
+      lines.push(
+        new EditorLine(this, locator, isNaN(lineNumber) ? -1 : lineNumber),
+      );
     }
     return lines;
   }
@@ -292,52 +504,65 @@ export class EditorPane {
     }
 
     try {
-      return await this.page.evaluate(({ path }) => {
-        const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        const data = w?.data;
-        if (!data?.services?.editor) return null;
+      return await this.page.evaluate(
+        ({ path }) => {
+          const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          const data = w?.data;
+          if (!data?.services?.editor) return null;
 
-        const editorService = data.services.editor;
-        const openTabs = editorService.open;
-        if (!openTabs || !Object.prototype.hasOwnProperty.call(openTabs, path)) {
+          const editorService = data.services.editor;
+          const openTabs = editorService.open;
+          if (
+            !openTabs ||
+            !Object.prototype.hasOwnProperty.call(openTabs, path)
+          ) {
+            return null;
+          }
+
+          const tab = openTabs[path];
+          if (!tab) return null;
+
+          const viewLine = tab.viewLine;
+          if (
+            typeof viewLine === "number" &&
+            Number.isFinite(viewLine) &&
+            viewLine > 0
+          ) {
+            return viewLine;
+          }
+
+          const monacoEditor = tab.monacoEditor;
+          if (monacoEditor && typeof monacoEditor.getPosition === "function") {
+            const position = monacoEditor.getPosition();
+            if (
+              position &&
+              typeof position.lineNumber === "number" &&
+              Number.isFinite(position.lineNumber) &&
+              position.lineNumber > 0
+            ) {
+              return position.lineNumber;
+            }
+          }
+
+          if (
+            editorService.active === path &&
+            typeof editorService.activeTabInfo === "function"
+          ) {
+            const activeTab = editorService.activeTabInfo();
+            if (
+              activeTab &&
+              typeof activeTab.viewLine === "number" &&
+              Number.isFinite(activeTab.viewLine) &&
+              activeTab.viewLine > 0
+            ) {
+              return activeTab.viewLine;
+            }
+          }
+
           return null;
-        }
-
-        const tab = openTabs[path];
-        if (!tab) return null;
-
-        const viewLine = tab.viewLine;
-        if (typeof viewLine === "number" && Number.isFinite(viewLine) && viewLine > 0) {
-          return viewLine;
-        }
-
-        const monacoEditor = tab.monacoEditor;
-        if (monacoEditor && typeof monacoEditor.getPosition === "function") {
-          const position = monacoEditor.getPosition();
-          if (
-            position &&
-            typeof position.lineNumber === "number" &&
-            Number.isFinite(position.lineNumber) &&
-            position.lineNumber > 0
-          ) {
-            return position.lineNumber;
-          }
-        }
-
-        if (editorService.active === path && typeof editorService.activeTabInfo === "function") {
-          const activeTab = editorService.activeTabInfo();
-          if (
-            activeTab &&
-            typeof activeTab.viewLine === "number" &&
-            Number.isFinite(activeTab.viewLine) &&
-            activeTab.viewLine > 0
-          ) {
-            return activeTab.viewLine;
-          }
-        }
-
-        return null;
-      }, { path: this.filePath });
+        },
+        { path: this.filePath },
+      );
     } catch {
       return null;
     }

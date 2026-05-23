@@ -550,6 +550,7 @@ fn setup(
             // PID-derived run-id rendezvous for now.  Tracked as part
             // of M-REC-11 follow-up cleanup.
             recording_id: String::new(),
+            ..RecreatorArgs::default()
         };
         info!("ct_rr_args {:?}", ct_rr_args);
         let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
@@ -566,6 +567,58 @@ fn setup(
     } else {
         Err("problem with reading metadata or trace files and no replay-worker trace path was found".into())
     }
+}
+
+fn default_live_recording_dir(program: &Path, thread_name: &str) -> PathBuf {
+    let program_name = program
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("program");
+    std::env::temp_dir().join(format!(
+        "codetracer-live-{}-{}-{}",
+        std::process::id(),
+        thread_name,
+        program_name
+    ))
+}
+
+fn setup_live_program(
+    program: &Path,
+    program_args: Vec<String>,
+    cwd: Option<PathBuf>,
+    live_recording_dir: Option<PathBuf>,
+    recreator_exe: &Path,
+    sender: Sender<DapMessage>,
+    for_launch: bool,
+    thread_name: &str,
+) -> Result<Handler, Box<dyn Error>> {
+    let live_recording_dir = live_recording_dir.unwrap_or_else(|| default_live_recording_dir(program, thread_name));
+    info!(
+        "run setup_live_program() for {} with sink {}",
+        program.display(),
+        live_recording_dir.display()
+    );
+    std::fs::create_dir_all(&live_recording_dir)?;
+    let db = Db::new(&PathBuf::from(""));
+    let ct_rr_args = RecreatorArgs {
+        worker_exe: PathBuf::from(recreator_exe),
+        rr_trace_folder: live_recording_dir.clone(),
+        name: thread_name.to_string(),
+        live_program: Some(program.to_path_buf()),
+        live_program_args: program_args,
+        live_cwd: cwd,
+        live_recording_dir: Some(live_recording_dir.clone()),
+        recording_id: String::new(),
+    };
+    info!("live ct_rr_args {:?}", ct_rr_args);
+    let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
+    handler.load_macro_sourcemaps(&live_recording_dir);
+    if for_launch {
+        handler.run_to_entry(dap::Request::default(), None, sender)?;
+    }
+    handler.initialized = true;
+    Ok(handler)
 }
 
 /// Browser/WASM-specific setup path that reads trace data from the in-memory
@@ -1047,6 +1100,22 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/trace-jump" => handler.trace_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
         "ct/load-flow" => handler.load_flow(req.clone(), req.load_args::<CtLoadFlowArguments>()?, sender.clone())?,
         "ct/run-to-entry" => handler.run_to_entry(req.clone(), None, sender.clone())?,
+        "ct/mcr-live-step" => handler.mcr_live_step(
+            req.clone(),
+            req.load_args::<crate::dap_handler::McrLiveStepArguments>()?,
+            sender.clone(),
+        )?,
+        "ct/mcr-get-recording-head" => handler.mcr_get_recording_head(req.clone(), sender.clone())?,
+        "ct/mcr-restore-at" | "ct/live-restore-at" => handler.mcr_restore_at(
+            req.clone(),
+            req.load_args::<crate::dap_handler::McrRestoreAtArguments>()?,
+            sender.clone(),
+        )?,
+        "ct/seek-to-geid" => handler.seek_to_geid(
+            req.clone(),
+            req.load_args::<crate::dap_handler::SeekToGeidArguments>()?,
+            sender.clone(),
+        )?,
         "ct/run-tracepoints" => {
             handler.run_tracepoints(req.clone(), req.load_args::<RunTracepointsArg>()?, sender.clone())?
         }
@@ -1102,6 +1171,10 @@ pub struct Ctx {
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
     pub launch_raw_diff_index: Option<String>,
+    pub launch_program: Option<PathBuf>,
+    pub launch_program_args: Vec<String>,
+    pub launch_cwd: Option<PathBuf>,
+    pub launch_live_recording_dir: Option<PathBuf>,
     pub recreator_exe: PathBuf,
     pub restore_location: Option<Location>,
     pub received_configuration_done: bool,
@@ -1123,6 +1196,10 @@ impl Default for Ctx {
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
+            launch_program: None,
+            launch_program_args: Vec::new(),
+            launch_cwd: None,
+            launch_live_recording_dir: None,
             recreator_exe: PathBuf::from(""),
             restore_location: None,
             received_configuration_done: false,
@@ -1203,6 +1280,10 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             let args = req.load_args::<dap::LaunchRequestArguments>()?;
             if let Some(folder) = &args.trace_folder {
                 ctx.launch_trace_folder = folder.clone();
+                ctx.launch_program = None;
+                ctx.launch_program_args.clear();
+                ctx.launch_cwd = None;
+                ctx.launch_live_recording_dir = None;
                 if let Some(trace_file) = &args.trace_file {
                     ctx.launch_trace_file = trace_file.clone();
                 } else {
@@ -1239,6 +1320,22 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 } else {
                     resolve_recreator_exe(args.recreator_exe)
                 };
+                ctx.restore_location = args.restore_location.clone();
+
+                if ctx.received_configuration_done {
+                    if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
+                        to_stable_sender.send(req.clone())?;
+                    }
+                }
+            } else if let Some(program) = &args.program {
+                ctx.launch_program = Some(PathBuf::from(program));
+                ctx.launch_program_args = args.args.clone().unwrap_or_default();
+                ctx.launch_cwd = args.cwd.as_ref().map(PathBuf::from);
+                ctx.launch_live_recording_dir = args.live_recording_dir.clone();
+                ctx.launch_trace_folder = PathBuf::new();
+                ctx.launch_trace_file = PathBuf::new();
+                ctx.launch_raw_diff_index = args.raw_diff_index.clone();
+                ctx.recreator_exe = resolve_recreator_exe(args.recreator_exe);
                 ctx.restore_location = args.restore_location.clone();
 
                 if ctx.received_configuration_done {
@@ -1492,23 +1589,38 @@ fn task_thread(
 
     let mut handler = if cached_launch {
         let for_launch = false;
-        let h = setup(
-            &ctx_with_cached_launch.launch_trace_folder,
-            &ctx_with_cached_launch.launch_trace_file,
-            ctx_with_cached_launch.launch_raw_diff_index.clone(),
-            &ctx_with_cached_launch.recreator_exe,
-            ctx_with_cached_launch.restore_location.clone(),
-            sender.clone(),
-            for_launch,
-            name,
-        )
+        let h = if let Some(program) = &ctx_with_cached_launch.launch_program {
+            setup_live_program(
+                program,
+                ctx_with_cached_launch.launch_program_args.clone(),
+                ctx_with_cached_launch.launch_cwd.clone(),
+                ctx_with_cached_launch.launch_live_recording_dir.clone(),
+                &ctx_with_cached_launch.recreator_exe,
+                sender.clone(),
+                for_launch,
+                name,
+            )
+        } else {
+            setup(
+                &ctx_with_cached_launch.launch_trace_folder,
+                &ctx_with_cached_launch.launch_trace_file,
+                ctx_with_cached_launch.launch_raw_diff_index.clone(),
+                &ctx_with_cached_launch.recreator_exe,
+                ctx_with_cached_launch.restore_location.clone(),
+                sender.clone(),
+                for_launch,
+                name,
+            )
+        }
         .map_err(|e| {
             error!("launch error: {e:?}");
             format!("launch error: {e:?}")
         })?;
-        loaded_trace_folder = Some(ctx_with_cached_launch.launch_trace_folder.clone());
-        loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
-        loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
+        if ctx_with_cached_launch.launch_program.is_none() {
+            loaded_trace_folder = Some(ctx_with_cached_launch.launch_trace_folder.clone());
+            loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
+            loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
+        }
         h
     } else {
         // `.initialized` is false
@@ -1559,7 +1671,7 @@ fn task_thread(
                     info!("DB-based trace detected — skipping replay-worker resolution");
                     PathBuf::new()
                 } else {
-                    resolve_recreator_exe(args.recreator_exe)
+                    resolve_recreator_exe(args.recreator_exe.clone())
                 };
                 let restore_location = args.restore_location.clone();
 
@@ -1604,6 +1716,29 @@ fn task_thread(
                     loaded_trace_file = Some(launch_trace_file);
                     loaded_raw_diff_index = launch_raw_diff_index;
                 }
+            }
+            if let Some(program) = &args.program
+                && args.trace_folder.is_none()
+            {
+                let for_launch = run_to_entry;
+                let recreator_exe = resolve_recreator_exe(args.recreator_exe.clone());
+                handler = setup_live_program(
+                    &PathBuf::from(program),
+                    args.args.clone().unwrap_or_default(),
+                    args.cwd.as_ref().map(PathBuf::from),
+                    args.live_recording_dir.clone(),
+                    &recreator_exe,
+                    sender.clone(),
+                    for_launch,
+                    name,
+                )
+                .map_err(|e| {
+                    error!("live launch error: {e:?}");
+                    format!("live launch error: {e:?}")
+                })?;
+                loaded_trace_folder = None;
+                loaded_trace_file = None;
+                loaded_raw_diff_index = None;
             }
         } else if handler.initialized {
             let res = handle_request(&mut handler, request.clone(), sender.clone());

@@ -316,13 +316,18 @@ proc syncStoreCodeStateLine*(path: cstring; line: int) =
       discard setTimeout(proc() = retry(), 100)
   discard setTimeout(proc() = retry(), 100)
 
-proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
+proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int;
+                                sourceGeneration: int = 0;
+                                sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the StateVM's reactive pipeline sees the same rrTicks value.
   if stateVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  stateVMStore.updateDebuggerPosition(ticks, $path, line)
+  stateVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   syncStoreCodeStateLine(path, line)
   cerror fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
 
@@ -414,6 +419,7 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
 
   # Mirror the debugger position into the parallel ViewModel store.
   syncStoreDebuggerPosition(
-    response.location.rrTicks, response.location.path, response.location.line)
+    response.location.rrTicks, response.location.path, response.location.line,
+    response.location.sourceGeneration, response.location.sourceDigest)
 
   await self.onMove()

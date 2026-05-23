@@ -56,7 +56,15 @@ package reprobuildHcrInCodetracer:
           "gcc $cflags -c src/patchable.c -o build/patchable.o; " &
           "gcc $cflags -c \"$agent_dir/repro_hcr_agent.c\" -o build/repro_hcr_agent.o; " &
           "gcc build/main.o build/patchable.o build/repro_hcr_agent.o " &
-          "$ld_flags -lpthread -o build/hcr_target"
+          "$ld_flags -lpthread -o build/hcr_target; " &
+          "rm -rf build/hcr_target.dSYM; " &
+          "if [ \"$(uname -s)\" = Darwin ] && command -v dsymutil >/dev/null 2>&1; then " &
+          "dsymutil build/hcr_target -o build/hcr_target.dSYM; " &
+          "else " &
+          "mkdir -p build/hcr_target.dSYM/Contents/Resources/DWARF; " &
+          "printf '%s\n' 'debug symbols unavailable on this platform' > build/hcr_target.dSYM/Contents/Info.plist; " &
+          ": > build/hcr_target.dSYM/Contents/Resources/DWARF/hcr_target; " &
+          "fi"
         ]),
       deps = @["build-dir"],
       inputs = @[
@@ -68,7 +76,9 @@ package reprobuildHcrInCodetracer:
         "build/main.o",
         "build/patchable.o",
         "build/repro_hcr_agent.o",
-        "build/hcr_target"])
+        "build/hcr_target",
+        "build/hcr_target.dSYM/Contents/Info.plist",
+        "build/hcr_target.dSYM/Contents/Resources/DWARF/hcr_target"])
 
     target("hcr-target", [buildDir, metadata, hcrTarget])
     defaultTarget(hcrTarget)

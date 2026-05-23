@@ -125,7 +125,7 @@ proc renderDebugControlsPanel*(r: MockRenderer;
   reactiveDisabled(r, contBtn,     proc(): bool = not vm.canContinue.val)
   reactiveDisabled(r, revContBtn,  proc(): bool = not vm.canReverseContinue.val)
   reactiveDisabled(r, jumpLiveBtn, proc(): bool = not vm.canJumpToLive.val)
-  reactiveHidden(r, headIndicator, proc(): bool = not vm.showJumpToLive.val)
+  reactiveHidden(r, headIndicator, proc(): bool = not vm.showRecordingHead.val)
   reactiveHidden(r, jumpLiveBtn,   proc(): bool = not vm.showJumpToLive.val)
 
   panel
@@ -322,7 +322,7 @@ when defined(js):
     reactiveDisabled(r, revContBtn,    proc(): bool = not vm.canReverseContinue.val)
     reactiveDisabled(r, contBtn,       proc(): bool = not vm.canContinue.val)
     reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.canJumpToLive.val)
-    reactiveHidden(r, headIndicator,   proc(): bool = not vm.showJumpToLive.val)
+    reactiveHidden(r, headIndicator,   proc(): bool = not vm.showRecordingHead.val)
     reactiveHidden(r, jumpLiveBtn,     proc(): bool = not vm.showJumpToLive.val)
 
     panel

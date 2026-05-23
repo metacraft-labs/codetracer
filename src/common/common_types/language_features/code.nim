@@ -49,6 +49,8 @@ type
     functionLast*: int
     highLevelFunctionFirst*: int
     highLevelFunctionLast*: int
+    sourceGeneration*: int
+    sourceDigest*: langstring
     offset*: int
     error*: bool
     callstackDepth*: int

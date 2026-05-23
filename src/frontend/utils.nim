@@ -163,6 +163,7 @@ proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): Eve
     inExtension: inExtension,
     drawId: 0,
     started: false,
+    liveDebugRows: @[],
     usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
   data.registerComponent(result, Content.EventLog)
@@ -279,12 +280,79 @@ proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
   data.registerComponent(result, Content.TraceLog)
 
 
+proc canonicalSourceRevisionPath*(path: cstring): cstring =
+  if path.isNil or path.len == 0:
+    return cstring""
+  let pathText = $path
+  if pathText.startsWith("/private/var/"):
+    return cstring(pathText.substr("/private".len))
+  path
+
+proc sameSourceRevisionPath*(left, right: cstring): bool =
+  let canonicalLeft = canonicalSourceRevisionPath(left)
+  let canonicalRight = canonicalSourceRevisionPath(right)
+  canonicalLeft.len > 0 and canonicalRight.len > 0 and
+    canonicalLeft == canonicalRight
+
+proc sourceRevisionHasIdentity*(location: types.Location): bool =
+  location.sourceGeneration != 0 or
+    (not location.sourceDigest.isNil and location.sourceDigest.len > 0) or
+    (not location.path.isNil and location.path.len > 0 and location.line > 0)
+
+proc editorTabPath*(path: cstring; editorView: EditorView): cstring =
+  if editorView in {ViewSource, ViewTargetSource}:
+    canonicalSourceRevisionPath(path)
+  else:
+    path
+
+proc sourceRevisionPath*(location: types.Location): cstring =
+  ## User-facing source identity prefers the high-level path when sourcemaps
+  ## are present, and otherwise falls back to the debugger path.
+  let path = if not location.highLevelPath.isNil and location.highLevelPath.len > 0:
+    location.highLevelPath
+  else:
+    location.path
+  canonicalSourceRevisionPath(path)
+
+proc sourceRevisionKey*(location: types.Location): cstring =
+  if not sourceRevisionHasIdentity(location):
+    return cstring""
+  let path = sourceRevisionPath(location)
+  if path.isNil or path.len == 0:
+    return cstring""
+  let digest =
+    if location.sourceDigest.isNil:
+      cstring""
+    else:
+      location.sourceDigest
+  cstring($path & "\n" & $location.sourceGeneration & "\n" &
+          $digest)
+
+proc cacheSourceRevision*(self: EditorService; location: types.Location;
+                          source: cstring) =
+  if source.isNil:
+    return
+  let key = sourceRevisionKey(location)
+  if key.len > 0:
+    self.sourceRevisionCache[key] = source
+
+proc hasSourceRevision*(self: EditorService; location: types.Location): bool =
+  let key = sourceRevisionKey(location)
+  key.len > 0 and self.sourceRevisionCache.hasKey(key)
+
+proc sourceRevisionSource*(self: EditorService; location: types.Location): cstring =
+  let key = sourceRevisionKey(location)
+  if key.len > 0 and self.sourceRevisionCache.hasKey(key):
+    self.sourceRevisionCache[key]
+  else:
+    cstring""
+
 # lowLevel: enum TODO
 proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorView, lang: Lang, forceReload: bool = false): Future[TabInfo] {.async.} =
   var name = cstring""
   if not location.isExpanded:
     name = if editorView in {ViewSource, ViewTargetSource}:
-        location.path
+        sourceRevisionPath(location)
       elif editorView == ViewCalltrace:
         location.path & cstring":" & location.functionName & cstring"-" & location.key
       else:
@@ -325,9 +393,18 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
   tabInfo.highlightLine = -1
   # tabInfo.fileInfo = if not tabInfo.fileLoaded.isNil: fileLoaded else: FileLoaded(tokens: @[], symbols: JsAssoc[cstring, seq[Symbol]]{}, sourceLines: @[], exe: @[])
   tabInfo.name = name
+  if editorView in {ViewSource, ViewTargetSource}:
+    tabInfo.path = name
+    tabInfo.location.path = canonicalSourceRevisionPath(tabInfo.location.path)
+    tabInfo.location.highLevelPath = canonicalSourceRevisionPath(tabInfo.location.highLevelPath)
   if editorView == ViewInstructions:
     tabInfo.sourceLines = tabInfo.instructions.instructions.mapIt(formatLine(it))
     tabInfo.source = tabInfo.sourceLines.join(jsNl) & jsNl
+  if self.hasSourceRevision(location):
+    tabInfo.source = self.sourceRevisionSource(location)
+    tabInfo.sourceLines = tabInfo.source.split(jsNl)
+  else:
+    self.cacheSourceRevision(location, tabInfo.source)
   if tabInfo.lastSyncedSource.isNil:
     tabInfo.lastSyncedSource = tabInfo.source
 
@@ -354,9 +431,10 @@ proc makeEditorViewComponent*(
   expandedLocation: types.Location,
   lang: Lang): EditorViewComponent =
 
+  let canonicalPath = editorTabPath(path, editorView)
   let editorName = if not isExpansion:
       if editorView in {ViewSource, ViewTargetSource}:
-        path
+        canonicalPath
       else:
         name
     else:
@@ -368,7 +446,7 @@ proc makeEditorViewComponent*(
 
   result = EditorViewComponent(
     id: id,
-    path: path, # TODO: fix this and .name , maybe use this for actual path, for asm files now this seems == to name, think of something here
+    path: canonicalPath, # TODO: fix this and .name , maybe use this for actual path, for asm files now this seems == to name, think of something here
     line: line,
     lang: lang,
     name: editorName,
@@ -1050,6 +1128,7 @@ proc openLayoutTab*(
   editorView: EditorView = ViewSource,
   noInfoMessage: cstring = ""
 ) =
+  let layoutPath = editorTabPath(path, editorView)
 
   # If this panel lives in the auto-hide state (e.g. BUILD, PROBLEMS,
   # SEARCH RESULTS), show it via the auto-hide overlay instead of
@@ -1090,16 +1169,16 @@ proc openLayoutTab*(
         data.ui.editorPanels[EditorView.ViewSource] = parent
 
   var newComponent =
-    if not (isEditor and data.ui.editors.hasKey(path)):
+    if not (isEditor and data.ui.editors.hasKey(layoutPath)):
       var newId =
         if id != -1:
           id
         else:
           data.generateId(content)
 
-      data.makeComponent(content, newId, path)
+      data.makeComponent(content, newId, layoutPath)
     else:
-      data.ui.editors[path]
+      data.ui.editors[layoutPath]
 
   if content == Content.NoInfo:
     # (written by Alexander: sorry)
@@ -1108,7 +1187,7 @@ proc openLayoutTab*(
   var label: cstring
 
   if content == Content.EditorView:
-    label = path
+    label = layoutPath
   else:
     label = convertComponentLabel(content, newComponent.id)
 
@@ -1158,9 +1237,10 @@ proc makeEditorView*(
     editorView: EditorView,
     lang: Lang
 ) =
-  cdebug "editor: make editor view: " & $name & " " & $editorView
+  let editorName = editorTabPath(name, editorView)
+  cdebug "editor: make editor view: " & $editorName & " " & $editorView
   let tabInfo = TabInfo(
-    name: name,
+    name: editorName,
     lang: lang,
     viewLine: 1,
     highlightLine: NO_LINE,
@@ -1177,23 +1257,23 @@ proc makeEditorView*(
     source: content,
     lastSyncedSource: content,
     sourceLines: content.split(jsNl),
-    path: name
+    path: editorName
   )
 
-  data.removeEditorFromClosedTabs(name)
-  data.removeEditorFromLoading(name)
+  data.removeEditorFromClosedTabs(editorName)
+  data.removeEditorFromLoading(editorName)
 
   data.makeEditorViewDetailed(
-    name,
+    editorName,
     editorView,
     tabInfo,
     tabInfo.location
   )
   var editorComponent = data.makeEditorViewComponent(
     data.generateId(Content.EditorView),
-    name,
+    editorName,
     1,
-    name,
+    editorName,
     editorView,
     false,
     tabInfo.location,
@@ -1201,9 +1281,9 @@ proc makeEditorView*(
   editorComponent.tabInfo = tabInfo
 
   cdebug "editor: make editor view: open layout tab"
-  data.openLayoutTab(Content.EditorView, isEditor = true, path = name, editorView = editorView)
-  cdebug "editor: make editor view: active = " & $name
-  data.services.editor.active = name
+  data.openLayoutTab(Content.EditorView, isEditor = true, path = editorName, editorView = editorView)
+  cdebug "editor: make editor view: active = " & $editorName
+  data.services.editor.active = editorName
 
 proc focusLine(editor: EditorViewComponent, line: int) =
   editor.monacoEditor.revealLineInCenter(line)
@@ -1219,18 +1299,19 @@ proc openNewEditorView*(
   if name == "NO SOURCE" or editorView == ViewNoSource:
     data.openNoSourceView(name, noInfoMessage)
     return
-  elif not data.services.editor.open.hasKey(name):
-    data.services.editor.open[name] = TabInfo(loading: true)
-    data.removeEditorFromClosedTabs(name)
-    data.removeEditorFromLoading(name)
+  let editorName = editorTabPath(name, editorView)
+  if not data.services.editor.open.hasKey(editorName):
+    data.services.editor.open[editorName] = TabInfo(loading: true)
+    data.removeEditorFromClosedTabs(editorName)
+    data.removeEditorFromLoading(editorName)
 
     var location: types.Location
     var lang: Lang
     if editorView in {ViewSource, ViewTargetSource}:
       location = types.Location(
-        path: name,
+        path: editorName,
         line: NO_LINE,
-        highLevelPath: name,
+        highLevelPath: editorName,
         highLevelLine: NO_LINE,
         functionName: cstring"")
       lang = LangUnknown
@@ -1259,7 +1340,7 @@ proc openNewEditorView*(
     #   cerror "editor: tabInfo print: " & getCurrentExceptionMsg()
 
     data.makeEditorViewDetailed(
-      name,
+      editorName,
       editorView,
       tabInfo,
       location
@@ -1267,10 +1348,10 @@ proc openNewEditorView*(
 
     if line != NO_LINE:
       proc cb =
-        if isNull(data.ui.editors[name].monacoEditor):
+        if isNull(data.ui.editors[editorName].monacoEditor):
           discard kdom.setTimeout(cb, 10)
         else:
-          data.ui.editors[name].focusLine(line)
+          data.ui.editors[editorName].focusLine(line)
 
       discard kdom.setTimeout(cb, 10)
 
@@ -1281,12 +1362,13 @@ proc makeEditorViewDetailed(
     tabInfo: TabInfo,
     location: types.Location
 ) =
-  data.services.editor.open[name] = tabInfo
+  let editorName = editorTabPath(name, editorView)
+  data.services.editor.open[editorName] = tabInfo
   var editorComponent = data.makeEditorViewComponent(
     data.generateId(Content.EditorView),
-    name,
+    editorName,
     1,
-    name,
+    editorName,
     editorView,
     false,
     location,
@@ -1295,34 +1377,39 @@ proc makeEditorViewDetailed(
   # if not self.data.ui.editors[name].flow.isNil:
     # self.data.ui.editors[name].flow.tab = tabInfo
   cdebug "editor: openLayoutTab.."
-  data.openLayoutTab(Content.EditorView, isEditor = true, path = name, editorView = editorView)
-  cdebug "editor: after open layout tab, active = " & $name
-  data.services.editor.active = name
+  data.openLayoutTab(Content.EditorView, isEditor = true, path = editorName, editorView = editorView)
+  cdebug "editor: after open layout tab, active = " & $editorName
+  data.services.editor.active = editorName
 
 proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE) =
   if tab.isNil:
     cerror "tabs: tab is nil in showTab"
     return
-  if not data.ui.editors.hasKey(tab):
+  let editorName =
+    if data.ui.editors.hasKey(tab):
+      tab
+    else:
+      canonicalSourceRevisionPath(tab)
+  if not data.ui.editors.hasKey(editorName):
      # not data.ui.lowLevels.hasKey(tab):
     cerror "tabs: no editor in showTab for " & $tab
     return
 
   var contentItem: GoldenContentItem
 
-  if data.ui.editors.hasKey(tab):
+  if data.ui.editors.hasKey(editorName):
     var editor: EditorViewComponent
-    if not data.ui.editors[tab].layoutItem.isNil:
-      editor = data.ui.editors[tab]
+    if not data.ui.editors[editorName].layoutItem.isNil:
+      editor = data.ui.editors[editorName]
     else:
-      editor = data.ui.editors[tab].topLevelEditor
+      editor = data.ui.editors[editorName].topLevelEditor
 
     if editor.isNil:
-      cwarn "editor is nil in showTab " & $tab
+      cwarn "editor is nil in showTab " & $editorName
       return
 
     if editor.layoutItem.isNil:
-      cwarn "editor.layoutItem is nil in showTab " & $tab
+      cwarn "editor.layoutItem is nil in showTab " & $editorName
       return
     contentItem = editor.layoutItem
     if not editor.noInfo.isNil:
@@ -1348,7 +1435,7 @@ proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line
     #     return
     #   contentItem = editor.contentItem
   else:
-    cwarn "no editor for " & $tab
+    cwarn "no editor for " & $editorName
     return
 
   assert not contentItem.isNil
@@ -1374,7 +1461,7 @@ proc openTab*(
     editorView: EditorView = EditorView.ViewSource,
     noInfoMessage: cstring = cstring"",
     line: int = NO_LINE) = #  lang: Lang = LangUnknown) =
-  var tabName = name
+  var tabName = editorTabPath(name, editorView)
   if editorView in {EditorView.ViewSource, EditorView.ViewTargetSource} and
       not data.services.editor.open.hasKey(tabName):
     let nameText = $name

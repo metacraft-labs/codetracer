@@ -35,9 +35,13 @@ import backend_service
 # JSON <-> JsObject helpers
 # ---------------------------------------------------------------------------
 
-proc parseJsonFromJs(o: JsObject): JsonNode {.importjs:
-  "JSON.parse(JSON.stringify(#))".}
-  ## Convert a raw JsObject to a stdlib JsonNode.
+proc stringifyJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
+proc parseJsonFromJs(o: JsObject): JsonNode =
+  ## Convert a raw JsObject to a stdlib JsonNode. Nim's JS backend represents
+  ## JsonNode with a tagged object shape; a direct JSON.parse result is only a
+  ## plain JavaScript object and will fail JsonNode kind checks.
+  parseJson($stringifyJs(o))
 
 proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
 

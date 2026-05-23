@@ -321,6 +321,8 @@ type
     hasSaveHistoryTimeout*: bool
     switchTabHistoryLimit*: int
     cachedFiles*: JsAssoc[cstring, TabInfo]
+    sourceRevisionCache*: JsAssoc[cstring, cstring]
+    pendingDiskSourceByPath*: JsAssoc[cstring, cstring]
     addedDiffId*: seq[cstring]
     changedDiffId*: seq[cstring]
     deletedDiffId*: seq[cstring]
@@ -611,6 +613,7 @@ type
     started*: bool
     ignoreOutput*: bool
     programEvents*: seq[ProgramEvent]
+    liveDebugRows*: seq[TableRow]
     receivedUpdates*: bool
     pendingReloadRetries*: int
     extensionRendererId*: cstring
@@ -1062,6 +1065,7 @@ type
     lastMouseMoveLine*: int
     lastMouseClickCol*:  int
     lastMouseClickLine*: int
+    lastTraceToggleTime*: int64
     viewZone*:       JsObject
     topLevelEditor*: EditorViewComponent
     zoneId*:        int
@@ -1761,6 +1765,10 @@ type
     # process sends ``dap-replay-selected`` with the assigned replayId.
     # Used to stop the correct replay when the session is closed.
     replayId*:          int
+    # True while this session is driven by a live debugger launch.  The generic
+    # DAP-initialized middleware must not also launch the trace folder as a
+    # replay while this is set.
+    liveDebugSession*:  bool
     # M11: saved GL layout config for tab switching (destroy/recreate approach).
     savedLayoutConfig*: GoldenLayoutResolvedConfig
     # Nim-to-C sourcemap for ViewTargetSource (S3).
@@ -2084,6 +2092,8 @@ when defined(ctRenderer):
         switchTabHistoryLimit: 2000,
         expandedOpen: JsAssoc[cstring, TabInfo]{},
         cachedFiles: JsAssoc[cstring, TabInfo]{},
+        sourceRevisionCache: JsAssoc[cstring, cstring]{},
+        pendingDiskSourceByPath: JsAssoc[cstring, cstring]{},
         addedDiffId: @[],
         changedDiffId: @[],
         deletedDiffId: @[],

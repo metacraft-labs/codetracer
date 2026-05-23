@@ -210,13 +210,18 @@ proc initDebugControlsVM() =
   clog "DebugControlsVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimDebugControls()
 
-proc syncDebugControlsPosition(rrTicks: int, path: cstring, line: int) =
+proc syncDebugControlsPosition(rrTicks: int, path: cstring, line: int;
+                               sourceGeneration: int = 0;
+                               sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the DebugControlsVM's reactive memos see the updated state.
   if debugControlsVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  debugControlsVMStore.updateDebuggerPosition(ticks, $path, line)
+  debugControlsVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   clog fmt"DebugControlsVM: synced debugger rrTicks={ticks}"
 
 proc rewireDebugControlsBridgeForActiveSession*(data: Data) =
@@ -376,7 +381,9 @@ method onCompleteMove*(self: DebugComponent, response: MoveState) {.async.} =
   syncDebugControlsPosition(
     response.location.rrTicks,
     response.location.path,
-    response.location.line)
+    response.location.line,
+    response.location.sourceGeneration,
+    response.location.sourceDigest)
 
   echo "onCompleteMove for debug "
   console.log(response.location)

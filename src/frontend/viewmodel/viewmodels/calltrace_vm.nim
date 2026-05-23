@@ -184,6 +184,9 @@ proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =
       "highLevelLine": line.location.line,
       "rrTicks": line.rrTicks,
       "callstackDepth": line.location.callstackDepth,
+      "sourceGeneration": line.location.sourceGeneration,
+      "sourceDigest": line.location.sourceDigest,
+      "codeGeneration": line.codeGeneration,
     }
     vm.store.requestHistoricalNavigation("ct/calltrace-jump", args)
 

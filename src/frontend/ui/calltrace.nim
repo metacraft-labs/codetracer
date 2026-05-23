@@ -405,6 +405,9 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       rrTicks = cast[uint64](loc.rrTicks),
       file = $loc.highLevelPath,
       line = loc.highLevelLine,
+      sourceGeneration = loc.sourceGeneration,
+      sourceDigest = $loc.sourceDigest,
+      codeGeneration = loc.sourceGeneration,
       callstackDepth = loc.callstackDepth,
       hasChildren = lineHasChildren,
       isExpanded = lineIsExpanded,
@@ -504,7 +507,9 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   )
   cerror fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store ({vmArgs.len} arg entries), startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
 
-proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
+proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int;
+                                    sourceGeneration: int = 0;
+                                    sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
   ##
@@ -517,7 +522,10 @@ proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int) =
     return
   let ticks = cast[uint64](rrTicks)
   let diagStoreId = calltraceVMStore.storeId
-  calltraceVMStore.updateDebuggerPosition(ticks, $path, line)
+  calltraceVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   if calltraceVMStore.calltrace.lines.val.len == 0:
     # The VM can issue its first auto-load before DAP launch completes;
     # replay-server drops that request, so seed the initial section once
@@ -946,7 +954,8 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     # CtUpdatedCalltrace handled by the existing onUpdatedCalltrace
     # subscription.
     syncCalltraceDebuggerPosition(
-      location.rrTicks, location.path, location.line)
+      location.rrTicks, location.path, location.line,
+      location.sourceGeneration, location.sourceDigest)
     # Sync the viewport dimensions and filter patterns to the VM so the
     # auto-load effect can include them in its request.
     if hasVM:

@@ -1243,9 +1243,45 @@ proc openThreeWayMergeTab(data: Data, path, base, ours, theirs: cstring) =
 ## Refresh any open Monaco editors that point at the changed path.
 proc reloadOpenFileFromDisk(data: Data, targetPath: cstring) {.async.} =
   echo fmt"reload-file: received request for {targetPath}"
+  let currentLocation = data.services.debugger.location
+  let currentSourcePath = sourceRevisionPath(currentLocation)
+  let targetSourcePath = canonicalSourceRevisionPath(targetPath)
+  let currentHasRevisionIdentity = sourceRevisionHasIdentity(currentLocation)
+  var deferDiskReload = false
+
+  if targetSourcePath.len > 0:
+    for name, tab in data.services.editor.open:
+      let tabLocationPath = sourceRevisionPath(tab.location)
+      let tabMatchesTarget =
+        sameSourceRevisionPath(name, targetSourcePath) or
+        sameSourceRevisionPath(tab.path, targetSourcePath) or
+        sameSourceRevisionPath(tabLocationPath, targetSourcePath)
+      if not tabMatchesTarget:
+        continue
+
+      if sourceRevisionHasIdentity(tab.location):
+        data.services.editor.cacheSourceRevision(tab.location, tab.source)
+        deferDiskReload = true
+      elif currentHasRevisionIdentity and currentLocation.line > 0 and
+          sameSourceRevisionPath(currentSourcePath, targetSourcePath):
+        data.services.editor.cacheSourceRevision(currentLocation, tab.source)
+        deferDiskReload = true
+
+  if deferDiskReload:
+    try:
+      let diskContent = await readFileUtf8(targetPath)
+      if not diskContent.isNil:
+        data.services.editor.pendingDiskSourceByPath[targetSourcePath] = diskContent
+        data.services.editor.pendingDiskSourceByPath[targetPath] = diskContent
+    except:
+      cwarn fmt"reload-file: deferred revision read failed for {targetPath}: {getCurrentExceptionMsg()}"
+    return
+
   for name, tab in data.services.editor.open:
     # Match either by the tab key (usual case) or the stored path in TabInfo
-    if targetPath.len > 0 and name != targetPath and tab.path != targetPath:
+    if targetSourcePath.len > 0 and
+        not sameSourceRevisionPath(name, targetSourcePath) and
+        not sameSourceRevisionPath(tab.path, targetSourcePath):
       continue
     if not data.ui.editors.hasKey(name):
       continue

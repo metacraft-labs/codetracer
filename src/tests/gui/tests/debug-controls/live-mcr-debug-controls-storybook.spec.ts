@@ -63,8 +63,7 @@ test.describe("Live MCR debug controls StoryBook", () => {
 
     await expect(page.locator("#debug-toolbar-mode")).toContainText("Live MCR");
     await expect(page.locator("#recording-head-indicator")).toContainText("Head: 400");
-    await expect(page.locator("#jump-to-live-debug")).toBeVisible();
-    await expect(page.locator("#jump-to-live-debug")).toBeEnabled();
+    await expect(page.locator("#jump-to-live-debug")).toBeHidden();
     await expect(page.locator("#reverse-continue-debug")).toBeDisabled();
 
     const commandLog = page.locator("#live-mcr-command-log");
@@ -83,13 +82,6 @@ test.describe("Live MCR debug controls StoryBook", () => {
     const afterStep = JSON.parse((await commandLog.textContent()) || "[]");
     expect(afterStep.some((entry: { command: string }) => entry.command === "next")).toBe(false);
 
-    await page.locator("#jump-to-live-debug").click();
-    await expect
-      .poll(async () => JSON.parse((await commandLog.textContent()) || "[]"))
-      .toContainEqual({
-        command: "ct/mcr-restore-at",
-        args: { rrTicks: 400, jumpToLive: true },
-      });
     await expect(page.locator("#debug-toolbar-mode")).toContainText("Live MCR");
     await expect(page.locator("#recording-head-indicator")).toContainText("Head: 400");
   });

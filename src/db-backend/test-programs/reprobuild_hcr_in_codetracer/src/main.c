@@ -64,7 +64,7 @@ int main(void) {
   int iterations = loop_limit();
 
   for (int iteration = 0; iteration < iterations; iteration++) {
-    int value = reprobuild_hcr_patchable_value(iteration);
+    int value = reprobuild_hcr_patchable_value(iteration); /* REPROBUILD_HCR_CALL_SITE */
     int observable_value = value; /* REPROBUILD_HCR_OBSERVED_VALUE */
     int generation = (observable_value - iteration == 77) ? 1 : 0;
 
@@ -75,7 +75,7 @@ int main(void) {
     printf("{\"iteration\":%d,\"generation\":%d,\"value\":%d,\"oldFrameIdentity\":%d}\n",
            iteration, generation, observable_value, old_frame_identity);
     fflush(stdout);
-    (void)repro_hcr_agent_poll();
+    (void)repro_hcr_agent_poll(); /* REPROBUILD_HCR_PATCH_POLL */
 
     last_value = observable_value;
     last_generation = generation;

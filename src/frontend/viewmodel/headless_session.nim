@@ -83,6 +83,8 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   var rrTicks: uint64 = 0
   var file = ""
   var line = 0
+  var sourceGeneration = 0
+  var sourceDigest = ""
   var geid = none(uint64)
 
   # The location is nested under body.location (MoveState.location).
@@ -90,6 +92,8 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
     let loc = body["location"]
     file = loc.getOrDefault("path").getStr("")
     line = loc.getOrDefault("line").getInt(0)
+    sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
+    sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
     if loc.hasKey("rrTicks"):
       rrTicks = loc["rrTicks"].getBiggestInt().uint64
     if loc.hasKey("geid"):
@@ -99,7 +103,10 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   elif body.hasKey("currentGeid"):
     geid = some(body["currentGeid"].getBiggestInt().uint64)
 
-  session.session.store.updateDebuggerPosition(rrTicks, file, line, geid)
+  session.session.store.updateDebuggerPosition(
+    rrTicks, file, line, geid,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = sourceDigest)
 
   # Update the debugger status back to idle after the step completes.
   var dbg = session.session.store.debugger.val
@@ -583,6 +590,8 @@ type
     rrTicks*: uint64
     line*: int
     file*: string
+    sourceGeneration*: int
+    sourceDigest*: string
 
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
@@ -614,6 +623,10 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
           entry.line = ev.getOrDefault("high_level_line").getInt(
             ev.getOrDefault("highLevelLine").getInt(0))
           entry.rrTicks = ev.getOrDefault("directLocationRRTicks").getBiggestInt(0).uint64
+          entry.sourceGeneration = ev.getOrDefault("source_generation").getInt(
+            ev.getOrDefault("sourceGeneration").getInt(0))
+          entry.sourceDigest = ev.getOrDefault("source_digest").getStr(
+            ev.getOrDefault("sourceDigest").getStr(""))
           result.add(entry)
 
 proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =

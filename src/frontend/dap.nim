@@ -162,6 +162,11 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   of DapReverseContinue: DapReverseContinueResponse
   of CtReverseStepIn: CtReverseStepInResponse
   of CtReverseStepOut: CtReverseStepOutResponse
+  of CtMcrGetRecordingHead: CtMcrGetRecordingHead
+  of CtMcrRestoreAt: CtMcrRestoreAt
+  of CtLiveRestoreAt: CtLiveRestoreAt
+  of CtMcrLiveStep: CtMcrLiveStep
+  of CtSeekToGeid: CtSeekToGeid
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
@@ -190,6 +195,11 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   of "ct/reverseStepOut": CtReverseStepOutResponse
   of "ct/load-asm-function": CtLoadAsmFunctionResponse
   of "ct/update-expansion": CtUpdateExpansionResponse
+  of "ct/mcr-get-recording-head": CtMcrGetRecordingHead
+  of "ct/mcr-restore-at": CtMcrRestoreAt
+  of "ct/live-restore-at": CtLiveRestoreAt
+  of "ct/mcr-live-step": CtMcrLiveStep
+  of "ct/seek-to-geid": CtSeekToGeid
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")

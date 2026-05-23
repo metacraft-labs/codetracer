@@ -72,13 +72,18 @@ proc initTimelineVM() =
   clog "TimelineVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimTimelinePanel()
 
-proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int;
+                                  sourceGeneration: int = 0;
+                                  sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the TimelineVM's currentPosition memo sees the updated rrTicks.
   if timelineVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  timelineVMStore.updateDebuggerPosition(ticks, $path, line)
+  timelineVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   clog fmt"TimelineVM: synced debugger rrTicks={ticks}"
 
 proc tryMountIsoNimTimelinePanel() =
@@ -1531,8 +1536,6 @@ method redrawForExtension*(self: TraceComponent) =
 
 const TOGGLE_REPEAT_TIME_LIMIT = 100i64
 
-var lastToggleTime = 0i64
-
 proc resizeTraceHandler*(self: TraceComponent) =
   let traceMain = document.getElementById(cstring(fmt"trace-{self.id}"))
   if traceMain.isNil:
@@ -1589,11 +1592,12 @@ proc togglePoint*(trace: TraceComponent) =
 proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
   let newTime = now()
 
-  if lastToggleTime > 0 and newTime - lastToggleTime <= TOGGLE_REPEAT_TIME_LIMIT:
+  if editorUI.lastTraceToggleTime > 0 and
+      newTime - editorUI.lastTraceToggleTime <= TOGGLE_REPEAT_TIME_LIMIT:
     editorUI.api.warnMessage(cstring(&"no toggleTrace on line {line}: happens before limit"))
     return
 
-  lastToggleTime = newTime
+  editorUI.lastTraceToggleTime = newTime
 
   if line == -1:
     return
@@ -1682,7 +1686,9 @@ method onCompleteMove*(self: TraceComponent, response: MoveState) {.async.} =
   syncTimelineDebuggerPosition(
     response.location.rrTicks,
     response.location.path,
-    response.location.line)
+    response.location.line,
+    response.location.sourceGeneration,
+    response.location.sourceDigest)
 
   self.location = response.location
   # TODO: For now find a better way when in extension

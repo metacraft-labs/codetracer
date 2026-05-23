@@ -31,8 +31,14 @@ pub struct Request {
 pub struct LaunchRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
     #[serde(rename = "traceFolder", skip_serializing_if = "Option::is_none")]
     pub trace_folder: Option<PathBuf>,
+    #[serde(rename = "liveRecording", skip_serializing_if = "Option::is_none")]
+    pub live_recording: Option<bool>,
+    #[serde(rename = "liveRecordingDir", skip_serializing_if = "Option::is_none")]
+    pub live_recording_dir: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_file: Option<PathBuf>,
     #[serde(rename = "rawDiffIndex", skip_serializing_if = "Option::is_none")]

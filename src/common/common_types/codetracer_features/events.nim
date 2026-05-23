@@ -70,10 +70,13 @@ type
     fullPath*: langstring
     lowLevelLocation*: langstring
     kind*: EventLogKind
+    semanticKind*: langstring
     content*: langstring
     metadata*: langstring
     base64Encoded*: bool
     stdout*: bool
+    sourceGeneration*: int
+    sourceDigest*: langstring
 
   TableData* = object ## TableData object
     draw*: int
@@ -91,6 +94,7 @@ type
 
   ProgramEvent* = object
     kind*: EventLogKind
+    semanticKind*: langstring
     content*: langstring
     rrEventId*: int
     highLevelPath*: langstring
@@ -105,3 +109,5 @@ type
     eventIndex*: int # index in the overall events sequence
     base64Encoded*: bool
     maxRRTicks*: int
+    sourceGeneration*: int
+    sourceDigest*: langstring

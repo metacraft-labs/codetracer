@@ -39,7 +39,6 @@ type
     ignoreNext*:    int # save
     waitsPrompt*:   bool
 
-
 var data* = ServerData(
   replay: true,
   exe: @[],
@@ -62,6 +61,19 @@ var data* = ServerData(
   pluginCommands: JsAssoc[cstring, SearchSource]{},
   debugInstances: JsAssoc[cstring, DebugInstance]{}
 )
+
+proc ensureServerTab(filename: cstring, lang: Lang): ServerTab =
+  if not data.tabs.hasKey(filename):
+    data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
+  data.tabs[filename]
+
+proc notifySourceFileChanged(filename: cstring, lang: Lang) =
+  let tab = ensureServerTab(filename, lang)
+  if tab.ignoreNext > 0:
+    tab.ignoreNext = tab.ignoreNext - 1
+  elif tab.fileWatched and not tab.waitsPrompt:
+    tab.waitsPrompt = true
+    mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
 
 let helpers* {.exportc: "helpers".} = require("./helpers")
 var
@@ -132,16 +144,17 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   if err.isNil:
     if not data.tabs.hasKey(filename):
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
+      let watchedDir = nodePath.dirname(openedPath)
+      let watchedBase = nodePath.basename(openedPath)
       fs.watch(openedPath) do (e: cstring, filenameArg: cstring):
-        if e == cstring"change":
-          if not data.tabs.hasKey(filename):
-            data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
-          let tab = data.tabs[filename]
-          if tab.ignoreNext > 0:
-            tab.ignoreNext = tab.ignoreNext - 1
-          elif tab.fileWatched and not tab.waitsPrompt:
-            tab.waitsPrompt = true
-            mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
+        if e == cstring"change" or e == cstring"rename":
+          notifySourceFileChanged(filename, lang)
+      if watchedDir.len > 0 and watchedDir != openedPath:
+        fs.watch(watchedDir) do (e: cstring, filenameArg: cstring):
+          if e == cstring"change" or e == cstring"rename":
+            if filenameArg.isNil or filenameArg.len == 0 or
+                nodePath.basename(filenameArg) == watchedBase:
+              notifySourceFileChanged(filename, lang)
 
   echo "index_config open: file read succesfully"
   var sourceLines = source.split(jsNl)

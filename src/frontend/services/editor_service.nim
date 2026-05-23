@@ -17,6 +17,7 @@ proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) 
 data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveState) {.async.} =
   if response.location.path.len > 0 and not response.location.isExpanded: # TODO: exists path
     if not response.location.missingPath:
+      let editorPath = canonicalSourceRevisionPath(response.location.path)
       # Pass the active line through to ``openTab`` so a freshly opened
       # editor (e.g. a calltrace-jump landing on a file that was not yet
       # open — the noir-space-ship "calculate damage" navigation jumps
@@ -26,7 +27,7 @@ data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveSt
       # editors are unaffected — the per-component
       # ``onCompleteMove`` subscription handles their position update
       # via ``service.changeLine`` and the periodic ``gotoLine`` interval.
-      self.data.openTab(response.location.path, line = response.location.line)
+      self.data.openTab(editorPath, line = response.location.line)
     else:
       # eventually TODO(alexander: I wrote this: a more elegant way to pass
       # to the component)
@@ -45,8 +46,10 @@ data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveSt
   # path variant named the tab.
   if response.location.highLevelPath.len > 0:
     self.completeMoveResponses[response.location.highLevelPath] = response
+    self.completeMoveResponses[canonicalSourceRevisionPath(response.location.highLevelPath)] = response
   if response.location.path.len > 0 and response.location.path != response.location.highLevelPath:
     self.completeMoveResponses[response.location.path] = response
+    self.completeMoveResponses[canonicalSourceRevisionPath(response.location.path)] = response
 
 data.services.editor.onOpenedTab = proc(self: EditorService, response: OpenedTab) {.async.} =
   # kout2 response

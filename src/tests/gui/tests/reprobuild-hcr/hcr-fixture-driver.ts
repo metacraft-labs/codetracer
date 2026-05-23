@@ -1,4 +1,3 @@
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -21,6 +20,8 @@ export const GEN0_STEP_NEXT = "REPROBUILD_HCR_GEN0_STEP_NEXT";
 export const GEN1_BREAKPOINT = "REPROBUILD_HCR_GEN1_BREAKPOINT";
 export const GEN1_STEP_START = "REPROBUILD_HCR_GEN1_STEP_START";
 export const GEN1_STEP_NEXT = "REPROBUILD_HCR_GEN1_STEP_NEXT";
+export const MAIN_CALL_SITE = "REPROBUILD_HCR_CALL_SITE";
+export const MAIN_PATCH_POLL = "REPROBUILD_HCR_PATCH_POLL";
 
 export interface HcrRunPaths {
   runRoot: string;
@@ -45,10 +46,6 @@ function commandExists(command: string): boolean {
           stdio: "ignore",
         });
   return probe.status === 0;
-}
-
-function sha256(text: string): string {
-  return crypto.createHash("sha256").update(text).digest("hex");
 }
 
 function readIfExists(filePath: string): string {
@@ -127,8 +124,24 @@ export class HcrFixtureDriver {
     return path.join(this.paths.projectDir, "build", "hcr_target");
   }
 
+  get binaryDwarfPath(): string {
+    return path.join(
+      this.paths.projectDir,
+      "build",
+      "hcr_target.dSYM",
+      "Contents",
+      "Resources",
+      "DWARF",
+      "hcr_target",
+    );
+  }
+
   get patchableSourcePath(): string {
     return path.join(this.paths.projectDir, "src", "patchable.c");
+  }
+
+  get mainSourcePath(): string {
+    return path.join(this.paths.projectDir, "src", "main.c");
   }
 
   get generationOneSourcePath(): string {
@@ -141,6 +154,18 @@ export class HcrFixtureDriver {
 
   get generationOneSnapshotPath(): string {
     return path.join(this.paths.artifactsDir, "source-generation1-patchable.c");
+  }
+
+  isReproWatchRunning(): boolean {
+    return this.reproProcess !== null && this.reproProcess.exitCode === null;
+  }
+
+  readyFileExists(): boolean {
+    return fs.existsSync(this.paths.readyFile);
+  }
+
+  patchableSourceText(): string {
+    return fs.readFileSync(this.patchableSourcePath, "utf8");
   }
 
   static checkPrerequisites(): string[] {
@@ -216,6 +241,9 @@ export class HcrFixtureDriver {
     if (!fs.existsSync(this.binaryPath)) {
       throw new Error(`initial build did not produce ${this.binaryPath}`);
     }
+    if (process.platform === "darwin" && !fs.existsSync(this.binaryDwarfPath)) {
+      throw new Error(`initial build did not produce ${this.binaryDwarfPath}`);
+    }
   }
 
   async waitForAgentConnected(): Promise<void> {
@@ -226,14 +254,24 @@ export class HcrFixtureDriver {
     );
   }
 
+  async waitForWatchReady(): Promise<void> {
+    await this.waitForLogContains(
+      "repro watch: watching paths=",
+      "repro watch subscription",
+      60_000,
+    );
+  }
+
   applyGenerationOneEdit(): void {
     const nextSource = fs.readFileSync(this.generationOneSourcePath, "utf8");
-    fs.writeFileSync(this.patchableSourcePath, nextSource, "utf8");
-    fs.writeFileSync(
-      path.join(this.paths.projectDir, "build", "source-generation-1.sha256"),
-      `${sha256(nextSource)}  ${this.patchableSourcePath}\n`,
-      "utf8",
+    const tempPath = path.join(
+      path.dirname(this.patchableSourcePath),
+      `.patchable.c.${process.pid}.tmp`,
     );
+    fs.writeFileSync(tempPath, nextSource, "utf8");
+    fs.renameSync(tempPath, this.patchableSourcePath);
+    const now = new Date();
+    fs.utimesSync(this.patchableSourcePath, now, now);
     fs.copyFileSync(this.patchableSourcePath, this.generationOneSnapshotPath);
   }
 
@@ -299,7 +337,6 @@ export class HcrFixtureDriver {
       this.patchBundleMetadataPath,
       this.generationZeroSnapshotPath,
       this.generationOneSnapshotPath,
-      path.join(this.paths.projectDir, "build", "source-generation-1.sha256"),
     ];
     for (const filePath of artifactPaths) {
       if (!fs.existsSync(filePath)) continue;

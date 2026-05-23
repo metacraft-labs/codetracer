@@ -1182,6 +1182,7 @@ impl MaterializedReplaySession {
 
         ProgramEvent {
             kind: event_record.kind,
+            semantic_kind: String::new(),
             content: event_record.content.clone(),
             bytes: event_record.content.len(),
             rr_event_id: index,
@@ -1194,6 +1195,8 @@ impl MaterializedReplaySession {
             high_level_line: line,
             base64_encoded: false,
             max_rr_ticks: last_step_id.0,
+            source_generation: 0,
+            source_digest: String::new(),
         }
     }
 

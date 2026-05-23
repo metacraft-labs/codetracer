@@ -30,6 +30,7 @@ const
     cstring"CODETRACER::filesystem-loaded",
     cstring"CODETRACER::symbols-loaded",
     cstring"CODETRACER::dap-replay-selected",
+    cstring"CODETRACER::dap-live-session-selected",
     cstring"CODETRACER::complete-move"
   ]
 

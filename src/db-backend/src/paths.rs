@@ -40,7 +40,10 @@ pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> = LazyLock::new(|| Mutex::ne
 ///
 /// Base directory resolution (first match wins):
 /// 1. `$CODETRACER_RUNTIME_DIR` — explicit escape hatch (tests, unusual deployments).
-/// 2. **Linux**: `$XDG_RUNTIME_DIR/codetracer/` when the path exists.
+/// 2. **macOS**: `/tmp/codetracer/`, because the normal per-user cache path
+///    is too long for Unix-domain socket names once worker names and run ids
+///    are appended.
+/// 3. **Linux**: `$XDG_RUNTIME_DIR/codetracer/` when the path exists.
 ///    The XDG Base Directory spec designates this for sockets and other
 ///    runtime files; systemd-logind sets it at login (`/run/user/<uid>`,
 ///    tmpfs) and the value is stable across spawned children — crucially,
@@ -49,8 +52,8 @@ pub static CODETRACER_PATHS: LazyLock<Mutex<Paths>> = LazyLock::new(|| Mutex::ne
 ///    and the `ct-native-replay` worker computing different socket
 ///    directories and failing handshake. It also keeps sockets off
 ///    `/tmp`, which routinely fills up during long debug sessions.
-/// 3. Fallback: the supplied `tmp_path` (preserves historical behaviour
-///    in environments without XDG / on macOS / in unit tests).
+/// 4. Fallback: the supplied `tmp_path` (preserves historical behaviour
+///    in environments without XDG / in unit tests).
 pub fn run_dir_for(tmp_path: &Path, run_id: &str) -> Result<PathBuf, Box<dyn Error>> {
     let base = socket_runtime_base_dir(tmp_path);
     let run_dir = base.join(format!("run-{run_id}"));
@@ -67,6 +70,9 @@ fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
         if !explicit.is_empty() {
             return PathBuf::from(explicit);
         }
+    }
+    if cfg!(target_os = "macos") {
+        return PathBuf::from("/tmp/codetracer");
     }
     if !cfg!(target_os = "macos") {
         if let Ok(xdg) = env::var("XDG_RUNTIME_DIR") {

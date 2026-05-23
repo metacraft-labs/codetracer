@@ -104,6 +104,21 @@ impl EventDb {
         })
     }
 
+    pub fn replace_record_events(&mut self, events: &[ProgramEvent]) {
+        if self.single_tables.is_empty() {
+            self.add_new_table(DbEventKind::Record, events);
+        } else {
+            self.single_tables[0] = SingleTable {
+                kind: DbEventKind::Record,
+                events: events.to_vec(),
+            };
+        }
+        if !self.trace_list.contains(&SingleTableId(0)) {
+            self.trace_list.push(SingleTableId(0));
+        }
+        self.refresh_global();
+    }
+
     /// Replace the events of an existing event-table slot.
     ///
     /// `event_slot` is an index into `single_tables`.  M-REC-4 renamed the
@@ -171,6 +186,7 @@ impl EventDb {
         }
         ProgramEvent {
             kind: EventLogKind::TraceLogEvent,
+            semantic_kind: String::new(),
             content: res,
             rr_event_id: trace.event,
             high_level_path: trace.path.to_string(),
@@ -183,6 +199,8 @@ impl EventDb {
             stdout: false,
             base64_encoded: false,
             max_rr_ticks: 0,
+            source_generation: 0,
+            source_digest: String::new(),
         }
     }
 

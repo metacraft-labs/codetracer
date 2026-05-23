@@ -157,16 +157,30 @@ suite "Signal serialization round-trips":
   test "EventLogRow round-trips through JSON":
     let row = EventLogRow(
       eventId: 77'u64,
-      kind: "call",
+      eventIndex: 3,
+      kindId: 10,
+      kind: "debugger-stop",
+      file: "src/patchable.c",
       line: 12,
       value: "func()",
+      rrTicks: 900'u64,
+      maxRRTicks: 1200'u64,
+      sourceGeneration: 2,
+      sourceDigest: "digest-2",
     )
     let j = row.toJson
     let parsed = parseEventLogRow(j)
     check parsed.eventId == 77'u64
-    check parsed.kind == "call"
+    check parsed.eventIndex == 3
+    check parsed.kindId == 10
+    check parsed.kind == "debugger-stop"
+    check parsed.file == "src/patchable.c"
     check parsed.line == 12
     check parsed.value == "func()"
+    check parsed.rrTicks == 900'u64
+    check parsed.maxRRTicks == 1200'u64
+    check parsed.sourceGeneration == 2
+    check parsed.sourceDigest == "digest-2"
 
   test "Empty Variable seq round-trips":
     let vars: seq[Variable] = @[]

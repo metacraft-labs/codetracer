@@ -91,6 +91,8 @@ suite "M3 Live MCR debug controls":
         check liveSteps[0].args["threadId"].getInt == 1
       check mock.commandsNamed("next").len == 0
       check vm.toolbarModeText.val == "Live MCR"
+      check vm.showRecordingHead.val
+      check not vm.showJumpToLive.val
       check not vm.canStepBackward.val
       check not vm.canReverseContinue.val
 
@@ -126,6 +128,7 @@ suite "M3 Live MCR debug controls":
       check store.debugger.val.status == dsIdle
       check vm.toolbarModeText.val == "Historical replay"
       check vm.recordingHeadText.val == "Head: 400"
+      check vm.showRecordingHead.val
       check vm.showJumpToLive.val
       check vm.canJumpToLive.val
 

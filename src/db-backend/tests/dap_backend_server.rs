@@ -102,7 +102,10 @@ fn _test_backend_dap_server_socket() {
 
     let launch_args = LaunchRequestArguments {
         program: Some("main".to_string()),
+        args: None,
         trace_folder: Some(trace_dir),
+        live_recording: None,
+        live_recording_dir: None,
         trace_file: None,
         raw_diff_index: None,
         pid: Some(pid as u64),

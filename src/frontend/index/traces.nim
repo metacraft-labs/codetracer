@@ -180,6 +180,16 @@ proc pathExists(path: cstring): bool =
   except:
     return false
 
+proc ensureDirectory(path: cstring): bool =
+  if path.len == 0:
+    return false
+  try:
+    fs.mkdirSync(path, js{recursive: true})
+    true
+  except:
+    errorPrint "failed to create directory ", $path, ": ", getCurrentExceptionMsg()
+    false
+
 proc isExecutableFile(path: cstring): bool =
   if path.len == 0 or not pathExists(path):
     return false
@@ -438,6 +448,183 @@ proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config,
     visualReplayPlayerUrl: visualReplayPlayerUrl,
     visualReplayPlayerError: visualReplayPlayerError,
   }
+
+proc jsDateNow(): float {.importjs: "Date.now()".}
+proc jsRandom(): float {.importjs: "Math.random()".}
+proc nodeRandomUUID(): cstring {.importjs: "require('crypto').randomUUID()".}
+
+proc makeLiveRecordingId(): cstring =
+  try:
+    nodeRandomUUID()
+  except:
+    cstring(fmt"live-{nodeProcess.pid}-{jsDateNow().int64}-{int(jsRandom() * 1_000_000)}")
+
+proc optionCwd(options: JsObject): cstring =
+  if options.isNil:
+    return cstring""
+  try:
+    if not options.cwd.isNil:
+      return options.cwd.to(cstring)
+  except:
+    discard
+  cstring""
+
+proc sourceFoldersForLiveProgram(program, cwd: cstring): seq[cstring] =
+  if cwd.len > 0 and pathExists(cwd):
+    result.addUniquePath(cwd)
+  if program.len > 0:
+    let parent = cstring(($program).parentDir)
+    if parent.len > 0 and pathExists(parent):
+      result.addUniquePath(parent)
+
+proc resolveLiveProgramPath(program, cwd: cstring): cstring =
+  if program.len == 0:
+    return cstring""
+  if ($program).isAbsoluteFilesystemPath or cwd.len == 0:
+    return program
+  nodePath.join(cwd, program)
+
+proc argsFrom(recordArgs: seq[cstring]; start: int): seq[cstring] =
+  if start >= recordArgs.len:
+    @[]
+  else:
+    recordArgs[start .. ^1]
+
+proc liveProgramArgs(filename: cstring; recordArgs: seq[cstring]):
+    tuple[program: cstring, args: seq[cstring], outputFolder: cstring] =
+  let filenameIsProgram = filename.len > 0 and isExecutableFile(filename)
+
+  if filenameIsProgram:
+    result.program = filename
+    if recordArgs.len == 0:
+      result.args = @[]
+    elif recordArgs[0] == filename:
+      result.args = recordArgs.argsFrom(1)
+    elif recordArgs.len >= 2 and recordArgs[1] == filename:
+      result.outputFolder = recordArgs[0]
+      result.args = recordArgs.argsFrom(2)
+    else:
+      result.args = recordArgs
+    return
+
+  if recordArgs.len > 0 and isExecutableFile(recordArgs[0]):
+    result.program = recordArgs[0]
+    result.args = recordArgs.argsFrom(1)
+  elif recordArgs.len >= 2 and isExecutableFile(recordArgs[1]):
+    result.outputFolder = recordArgs[0]
+    result.program = recordArgs[1]
+    result.args = recordArgs.argsFrom(2)
+
+proc newLiveTrace(program: cstring;
+                  programArgs: seq[cstring];
+                  cwd: cstring;
+                  outputFolder: cstring): Trace =
+  let recordingId = makeLiveRecordingId()
+  let traceFolder =
+    if outputFolder.len > 0:
+      outputFolder
+    else:
+      cstring(recordingFolder(codetracerTraceDir, $recordingId))
+  let workdir =
+    if cwd.len > 0:
+      cwd
+    else:
+      cstring(($program).parentDir)
+  let sourceFolders = sourceFoldersForLiveProgram(program, workdir)
+  Trace(
+    recordingId: recordingId,
+    program: program,
+    args: programArgs,
+    env: cstring"",
+    workdir: workdir,
+    output: cstring"",
+    sourceFolders: sourceFolders,
+    lowLevelFolder: cstring"",
+    compileCommand: data.config.defaultBuild,
+    outputFolder: traceFolder,
+    date: cstring"",
+    duration: cstring"",
+    lang: toLangFromFilename(program),
+    imported: false,
+    calltrace: true,
+    events: true,
+    test: data.config.test,
+    archiveServerID: 0,
+    shellID: 0,
+    teamID: 0,
+    rrPid: 0,
+    exitCode: 0,
+    calltraceMode: CalltraceMode.FullRecord,
+    downloadKey: cstring"",
+    controlId: cstring"",
+    onlineExpireTime: 0,
+  )
+
+proc sendInitAndLoadTrace(trace: Trace) {.async.} =
+  data.trace = trace
+  data.pluginClient.trace = trace
+  if data.trace.compileCommand.len == 0:
+    data.trace.compileCommand = data.config.defaultBuild
+
+  mainWindow.webContents.send(
+    "CODETRACER::init",
+    js{
+      home: paths.home.cstring,
+      config: data.config,
+      layout: data.layout,
+      helpers: data.helpers,
+      startOptions: data.startOptions,
+      bypass: true})
+
+  await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
+
+proc prepareForLiveTrace*(trace: Trace,
+                          program: cstring,
+                          programArgs: seq[cstring],
+                          cwd: cstring,
+                          liveRecordingDir: cstring,
+                          pid: int) {.async.} =
+  callerProcessPid = pid
+  prefetchedTrace = trace
+  data.trace = trace
+  data.pluginClient.trace = trace
+
+  let replayStartFuture = newReplayStartFuture()
+  infoPrint "index: requesting live replay worker for ", $trace.recordingId,
+    " folder ", $liveRecordingDir
+
+  let packet = wrapJsonForSending js{
+    "type": cstring"request",
+    "command": cstring"ct/start-replay",
+    "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
+  }
+  backendManagerSocket.write(packet)
+
+  let replayId = await replayStartFuture
+  if replayId < 0:
+    errorPrint "Unable to start live replay worker"
+    return
+
+  selectedReplayId = replayId
+  let selectPacket = wrapJsonForSending js{
+    "type": cstring"request",
+    "command": cstring"ct/select-replay",
+    "arguments": replayId
+  }
+  backendManagerSocket.write(selectPacket)
+
+  mainWindow.webContents.send(
+    "CODETRACER::dap-live-session-selected",
+    js{
+      trace: trace,
+      replayId: replayId,
+      program: program,
+      args: programArgs,
+      cwd: cwd,
+      liveRecordingDir: liveRecordingDir,
+    })
+
+  await sendInitAndLoadTrace(trace)
 
 proc loadExistingRecord*(recordingId: cstring) {.async.} =
   ## M-REC-3: UUIDv7 recording-id (cstring in JS/Electron context).
@@ -800,6 +987,29 @@ proc onRecordWithLaunchConfig*(sender: js,
   infoPrint fmt"  CWD: {config.cwd}"
   infoPrint fmt"  codetracerExe: {codetracerExe}"
 
+  if response.recordBackend == cstring"mcr":
+    let resolvedProgram = resolveLiveProgramPath(config.program, config.cwd)
+    if isExecutableFile(resolvedProgram):
+      let liveTrace = newLiveTrace(
+        resolvedProgram,
+        config.args,
+        config.cwd,
+        cstring"")
+      if not ensureDirectory(liveTrace.outputFolder):
+        mainWindow.webContents.send "CODETRACER::failed-record",
+          js{errorMessage: cstring"failed to create live recording directory"}
+        return
+      mainWindow.webContents.send "CODETRACER::new-notification",
+        newNotification(NotificationInfo, fmt"Starting live session: {config.name}")
+      await prepareForLiveTrace(
+        liveTrace,
+        resolvedProgram,
+        config.args,
+        liveTrace.workdir,
+        liveTrace.outputFolder,
+        nodeProcess.pid.to(int))
+      return
+
   # Build record arguments
   var recordArgs = @[config.program]
   if not response.recordBackend.isNil and response.recordBackend.len > 0:
@@ -942,10 +1152,17 @@ proc onNewRecord*(sender: js,
       recordArgs[0]
     else:
       cstring""
-  if not data.trace.lang.usesMaterializedTraces and
+  let selectedLang =
+    if not data.trace.isNil:
+      data.trace.lang
+    else:
+      toLangFromFilename(selectedRecordTarget)
+  if not selectedLang.usesMaterializedTraces and
       not isExecutableFile(selectedRecordTarget):
     var buildArg = if selectedRecordTarget.len > 0:
         selectedRecordTarget
+      elif data.trace.isNil:
+        cstring""
       else:
         let (rawTracePaths, err) = await fsReadFileWithErr(nodePath.join(data.trace.outputFolder, cstring"paths.json"))
         if not err.isNil:
@@ -1001,6 +1218,30 @@ proc onNewRecord*(sender: js,
       return
   elif recordArgs.len == 0 and selectedRecordTarget.len > 0:
     recordArgs = @[selectedRecordTarget]
+
+  if response.recordBackend == cstring"mcr":
+    let liveLaunch = liveProgramArgs(response.filename, recordArgs)
+    let liveCwd = optionCwd(response.options)
+    let resolvedProgram = resolveLiveProgramPath(liveLaunch.program, liveCwd)
+    if resolvedProgram.len > 0 and isExecutableFile(resolvedProgram):
+      let liveTrace = newLiveTrace(
+        resolvedProgram,
+        liveLaunch.args,
+        liveCwd,
+        liveLaunch.outputFolder)
+      if not ensureDirectory(liveTrace.outputFolder):
+        mainWindow.webContents.send "CODETRACER::failed-record",
+          js{errorMessage: cstring"failed to create live recording directory"}
+        return
+      sendNotification(NotificationKind.NotificationInfo, "starting live native session")
+      await prepareForLiveTrace(
+        liveTrace,
+        resolvedProgram,
+        liveLaunch.args,
+        liveTrace.workdir,
+        liveTrace.outputFolder,
+        nodeProcess.pid.to(int))
+      return
 
   let finalRecordArgs = recordBackendArgs.concat(recordArgs)
   infoPrint "index: record with args: ", finalRecordArgs

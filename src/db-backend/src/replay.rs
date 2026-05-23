@@ -68,6 +68,28 @@ pub trait ReplaySession: std::fmt::Debug {
         lang: Lang,
     ) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
+    /// Return the latest replayable position for a live recording.
+    fn recording_head(&mut self) -> Result<u64, Box<dyn Error>> {
+        Err("recording head is only available for live replay sessions".into())
+    }
+
+    /// Restore the debugger/replay state to a recorded live position.
+    fn restore_at(
+        &mut self,
+        geid: u64,
+        tid: Option<u32>,
+        tick: Option<u64>,
+        phase: Option<String>,
+    ) -> Result<bool, Box<dyn Error>> {
+        let _ = (geid, tid, tick, phase);
+        Err("restore-at is only available for live replay sessions".into())
+    }
+
+    /// Seek to a GEID-backed event position.
+    fn seek_to_geid(&mut self, geid: u64) -> Result<bool, Box<dyn Error>> {
+        self.restore_at(geid, None, None, None)
+    }
+
     fn current_step_id(&mut self) -> StepId;
 
     /// Enumerate the processes captured in this trace.

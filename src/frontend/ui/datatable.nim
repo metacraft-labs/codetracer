@@ -119,7 +119,17 @@ proc syncScrollerMeasurements(self: DataTableComponent) =
   scroller.s.heights.row = rowHeight
   scroller.s.autoHeight = false
 
+proc rowSemanticKind(event: ProgramEvent): string =
+  if not event.semanticKind.isNil and event.semanticKind.len > 0:
+    $event.semanticKind
+  else:
+    $event.kind
+
 proc rowTimestamp*(row: Element, event: ProgramEvent, rrTicks: int) =
+  row.setAttribute(cstring"data-event-kind", cstring(rowSemanticKind(event)))
+  row.setAttribute(cstring"data-rr-ticks", cstring($event.directLocationRRTicks))
+  row.setAttribute(cstring"data-source-generation", cstring($event.sourceGeneration))
+  row.setAttribute(cstring"data-source-digest", cstring(event.sourceDigest))
   let currentDebuggerLocation = rrTicks
   if event.directLocationRRTicks < currentDebuggerLocation:
     row.classList.add("past")

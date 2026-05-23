@@ -815,8 +815,7 @@ impl EmulatorReplaySession {
         let meta_bytes = ctfs
             .read_file("meta.dat")
             .map_err(|e| ctfs_error(format!("CTFS container has no meta.dat: {e}")))?;
-        let meta =
-            parse_meta_dat(&meta_bytes).map_err(|e| ctfs_error(format!("meta.dat parse failed: {e}")))?;
+        let meta = parse_meta_dat(&meta_bytes).map_err(|e| ctfs_error(format!("meta.dat parse failed: {e}")))?;
 
         if meta.mcr.is_none() {
             return Err(ctfs_error(

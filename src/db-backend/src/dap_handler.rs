@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use log::{error, info, warn};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io;
@@ -44,6 +44,36 @@ use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{Type, Value, to_ct_value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McrLiveStepArguments {
+    pub action: String,
+    #[serde(default)]
+    pub thread_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McrRestoreAtArguments {
+    #[serde(alias = "rr_ticks")]
+    pub rr_ticks: u64,
+    #[serde(default)]
+    pub jump_to_live: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeekToGeidArguments {
+    pub geid: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordingHeadResponse {
+    rr_ticks: u64,
+    recording_head: u64,
+    head: u64,
+}
 
 #[derive(Debug)]
 pub struct Handler {
@@ -120,6 +150,11 @@ pub struct Handler {
 
 #[allow(clippy::expect_used)]
 impl Handler {
+    fn is_live_recreator_session(&self) -> bool {
+        self.trace_kind == TraceKind::Recreator
+            && (self.ct_rr_args.live_program.is_some() || self.ct_rr_args.live_recording_dir.is_some())
+    }
+
     pub fn new(trace_kind: TraceKind, ct_rr_args: RecreatorArgs, db: Box<Db>) -> Handler {
         Self::construct(trace_kind, ct_rr_args, db, false)
     }
@@ -446,6 +481,8 @@ impl Handler {
                 function_name: location.function_name.clone(),
                 function_first: location.function_first,
                 function_last: location.function_last,
+                source_generation: location.source_generation,
+                source_digest: location.source_digest.clone(),
                 rr_ticks: location.rr_ticks.clone(),
                 ..Location::default()
             }
@@ -484,6 +521,47 @@ impl Handler {
         }
 
         info!("ready complete move");
+        Ok(())
+    }
+
+    fn is_internal_jit_registration_stop(&mut self) -> Result<bool, Box<dyn Error>> {
+        const JIT_DEBUG_REGISTER_CODE: &str = "__jit_debug_register_code";
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        if location.function_name == JIT_DEBUG_REGISTER_CODE
+            || location.high_level_function_name == JIT_DEBUG_REGISTER_CODE
+        {
+            return Ok(true);
+        }
+
+        let callstack = self.replay.load_callstack()?;
+        Ok(callstack
+            .last()
+            .map(|line| {
+                let call = &line.content.call;
+                call.raw_name == JIT_DEBUG_REGISTER_CODE
+                    || call.location.function_name == JIT_DEBUG_REGISTER_CODE
+                    || call.location.high_level_function_name == JIT_DEBUG_REGISTER_CODE
+            })
+            .unwrap_or(false))
+    }
+
+    fn skip_internal_jit_registration_stops(&mut self) -> Result<(), Box<dyn Error>> {
+        if !self.is_live_recreator_session() {
+            return Ok(());
+        }
+
+        for _ in 0..8 {
+            if !self.is_internal_jit_registration_stop()? {
+                return Ok(());
+            }
+            info!("continuing internal JIT debug-symbol registration stop");
+            if !self.replay.step(Action::Continue, true)? {
+                return Ok(());
+            }
+            self.step_id = self.replay.current_step_id();
+        }
+
+        warn!("leaving repeated internal JIT debug-symbol registration stop visible after retry limit");
         Ok(())
     }
 
@@ -855,6 +933,7 @@ impl Handler {
             Action::Continue => self.step_continue(!arg.reverse, sender.clone())?,
             _ => error!("action {:?} not implemented", arg.action),
         }
+        self.skip_internal_jit_registration_stops()?;
         if arg.complete {
             // && arg.action != Action::Continue {
             self.complete_move(false, sender.clone())?;
@@ -897,6 +976,64 @@ impl Handler {
         Ok(())
     }
 
+    pub fn mcr_live_step(
+        &mut self,
+        request: dap::Request,
+        args: McrLiveStepArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let action = match args.action.as_str() {
+            "continue" => Action::Continue,
+            "next" => Action::Next,
+            "stepIn" | "step-in" | "step_in" => Action::StepIn,
+            "stepOut" | "step-out" | "step_out" => Action::StepOut,
+            other => return Err(format!("unsupported live MCR action: {other}").into()),
+        };
+        let _thread_id = args.thread_id;
+        self.step(request, StepArg::new(action, false), sender)
+    }
+
+    pub fn mcr_get_recording_head(
+        &mut self,
+        request: dap::Request,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let head = self.replay.recording_head()?;
+        self.respond_dap(
+            request,
+            RecordingHeadResponse {
+                rr_ticks: head,
+                recording_head: head,
+                head,
+            },
+            sender,
+        )
+    }
+
+    pub fn mcr_restore_at(
+        &mut self,
+        request: dap::Request,
+        args: McrRestoreAtArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let restored = self.replay.restore_at(args.rr_ticks, None, None, None)?;
+        self.step_id = self.replay.current_step_id();
+        self.complete_move(false, sender.clone())?;
+        self.respond_dap(request, restored, sender)
+    }
+
+    pub fn seek_to_geid(
+        &mut self,
+        request: dap::Request,
+        args: SeekToGeidArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let restored = self.replay.seek_to_geid(args.geid)?;
+        self.step_id = self.replay.current_step_id();
+        self.complete_move(false, sender.clone())?;
+        self.respond_dap(request, restored, sender)
+    }
+
     /// Ensure program events are loaded and cached.
     ///
     /// On the first call, events are loaded from the replay backend,
@@ -907,14 +1044,12 @@ impl Handler {
     /// events.  `load_terminal()` uses a separate fast path
     /// (`ensure_terminal_events_loaded`) that avoids loading all events.
     fn ensure_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.cached_events.is_none() {
+        if self.cached_events.is_none() || self.is_live_recreator_session() {
             let events_data = self.replay.load_events()?;
 
             // Register all events in the event database (needed by
             // tracepoints, terminal output, etc.).
-            self.event_db
-                .register_events(DbEventKind::Record, &events_data.events, vec![-1]);
-            self.event_db.refresh_global();
+            self.event_db.replace_record_events(&events_data.events);
 
             self.cached_events = Some(events_data.events);
         }
@@ -2314,6 +2449,7 @@ impl Handler {
 
         ProgramEvent {
             kind: event_record.kind,
+            semantic_kind: String::new(),
             content: event_record.content.clone(),
             bytes: event_record.content.len(),
             rr_event_id: index,
@@ -2333,6 +2469,8 @@ impl Handler {
             } else {
                 0
             },
+            source_generation: 0,
+            source_digest: String::new(),
         }
     }
 

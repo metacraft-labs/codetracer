@@ -149,6 +149,8 @@ proc rememberedLiveMode(session: SessionState): DebugSessionMode =
   else:
     liveMcr
 
+proc requestRecordingHead*(store: ReplayDataStore)
+
 proc enterHistoricalModeForNavigation*(store: ReplayDataStore) =
   ## Mark a live recording session as browsing recorded history. Completed
   ## replay sessions stay completed replay: there is no live head to return to.
@@ -157,6 +159,7 @@ proc enterHistoricalModeForNavigation*(store: ReplayDataStore) =
     session.lastLiveDebugSessionMode = session.debugSessionMode
     session.debugSessionMode = historicalFromLive
     store.session.val = session
+    store.requestRecordingHead()
 
 proc requestHistoricalNavigation*(store: ReplayDataStore; command: string;
                                   args: JsonNode) =
@@ -177,6 +180,26 @@ proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
   if rrTicks > timeline.maxRRTicks:
     timeline.maxRRTicks = rrTicks
   store.timeline.val = timeline
+
+proc installBackendEventHandlers(store: ReplayDataStore) =
+  ## Consume backend responses/events that are not mirrored through the
+  ## legacy component bridge. Most panel data still arrives through the
+  ## existing event-bus subscriptions; live recording-head updates are a
+  ## small session-level signal owned directly by the shared store.
+  let s = store
+  store.backend.onEvent proc(event: JsonNode) =
+    if event.kind != JObject or not event.hasKey("kind"):
+      return
+    let kind = event["kind"].getStr
+    case kind
+    of "CtMcrGetRecordingHead":
+      let payload =
+        if event.hasKey("data"): event["data"]
+        else: event
+      let head = payload.readRRTicks(s.session.val.recordingHeadRRTicks)
+      s.updateRecordingHead(head)
+    else:
+      discard
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -234,6 +257,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       requestTracker: newRequestTracker(),
       disposeProc: dispose,
     )
+    store.installBackendEventHandlers()
     store
 
 # ---------------------------------------------------------------------------
@@ -390,6 +414,9 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   )
   if geid.isSome:
     store.currentGeid.val = geid
+  if store.session.val.debugSessionMode in {liveMcr, liveMaterialized} and
+      rrTicks > store.session.val.recordingHeadRRTicks:
+    store.updateRecordingHead(rrTicks)
 
 proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
   ## Update the current visual replay GEID independently of rrTicks. MCR
@@ -487,6 +514,9 @@ proc makeCallArg*(name, text: string): CallArg =
 
 proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
                    file: string = ""; line: int = 0;
+                   sourceGeneration: int = 0;
+                   sourceDigest: string = "";
+                   codeGeneration: int = 0;
                    callstackDepth: int = 0;
                    hasChildren: bool = false; isExpanded: bool = false;
                    callKey: string = ""): CallLine =
@@ -497,7 +527,13 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
     name: name,
     depth: depth,
     rrTicks: rrTicks,
-    location: Location(file: file, line: line, callstackDepth: callstackDepth),
+    location: Location(
+      file: file,
+      line: line,
+      sourceGeneration: sourceGeneration,
+      sourceDigest: sourceDigest,
+      callstackDepth: callstackDepth),
+    codeGeneration: codeGeneration,
     hasChildren: hasChildren,
     isExpanded: isExpanded,
     callKey: callKey,

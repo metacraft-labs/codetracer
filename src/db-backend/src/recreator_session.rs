@@ -72,6 +72,10 @@ pub struct ReplayWorker {
     pub active: bool,
     pub recreator_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
+    pub live_program: Option<PathBuf>,
+    pub live_program_args: Vec<String>,
+    pub live_cwd: Option<PathBuf>,
+    pub live_recording_dir: Option<PathBuf>,
     /// M-REC-11: the run-id reserved for this worker (set by `start`,
     /// passed to the child via `$CODETRACER_RUN_ID`, and reused on the
     /// spawner side when computing the socket path).  Empty before
@@ -91,6 +95,10 @@ pub struct RecreatorArgs {
     pub worker_exe: PathBuf,
     pub rr_trace_folder: PathBuf,
     pub name: String,
+    pub live_program: Option<PathBuf>,
+    pub live_program_args: Vec<String>,
+    pub live_cwd: Option<PathBuf>,
+    pub live_recording_dir: Option<PathBuf>,
     /// M-REC-11: the trace's UUIDv7.  Empty string keeps the legacy
     /// pid-derived run-id behaviour for callers that have not yet been
     /// migrated to plumb the recording id.  When non-empty, the
@@ -128,6 +136,10 @@ impl ReplayWorker {
             active: false,
             recreator_exe: PathBuf::from(recreator_exe),
             rr_trace_folder: PathBuf::from(rr_trace_folder),
+            live_program: None,
+            live_program_args: Vec::new(),
+            live_cwd: None,
+            live_recording_dir: None,
             run_id: String::new(),
             recording_id: recording_id.to_string(),
             process: None,
@@ -136,13 +148,23 @@ impl ReplayWorker {
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
-        info!(
-            "start: {} replay-worker --name {} --index {} {}",
-            self.recreator_exe.display(),
-            self.name,
-            self.index,
-            self.rr_trace_folder.display()
-        );
+        if let Some(program) = &self.live_program {
+            info!(
+                "start: {} replay-worker --name {} --index {} --live-program {}",
+                self.recreator_exe.display(),
+                self.name,
+                self.index,
+                program.display()
+            );
+        } else {
+            info!(
+                "start: {} replay-worker --name {} --index {} {}",
+                self.recreator_exe.display(),
+                self.name,
+                self.index,
+                self.rr_trace_folder.display()
+            );
+        }
 
         // M-REC-11: reserve a process-unique run-id derived from the
         // trace's UUIDv7 (with a `-<seq>` suffix on collision).  Empty
@@ -160,13 +182,28 @@ impl ReplayWorker {
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
-        let ct_worker = Command::new(&self.recreator_exe)
+        let mut command = Command::new(&self.recreator_exe);
+        command
             .arg("replay-worker")
             .arg("--name")
             .arg(&self.name)
             .arg("--index")
-            .arg(self.index.to_string())
-            .arg(&self.rr_trace_folder)
+            .arg(self.index.to_string());
+        if let Some(program) = &self.live_program {
+            command.arg("--live-program").arg(program);
+            if let Some(dir) = &self.live_recording_dir {
+                command.arg("--live-recording-dir").arg(dir);
+            }
+            if let Some(cwd) = &self.live_cwd {
+                command.arg("--live-cwd").arg(cwd);
+            }
+            for arg in &self.live_program_args {
+                command.arg("--live-arg").arg(arg);
+            }
+        } else {
+            command.arg(&self.rr_trace_folder);
+        }
+        let ct_worker = command
             // M-REC-11: the worker (ct-native-replay) reads
             // $CODETRACER_RUN_ID to compute the socket path; falls
             // back to getppid() only when unset (transitional).
@@ -546,18 +583,23 @@ fn connect_tcp_endpoint_with_timeout(address: &str, timeout: Duration) -> Result
 
 impl RecreatorReplaySession {
     pub fn new(name: &str, index: usize, ct_rr_args: RecreatorArgs) -> RecreatorReplaySession {
+        let mut stable = ReplayWorker::new_with_recording_id(
+            name,
+            index,
+            &ct_rr_args.worker_exe,
+            &ct_rr_args.rr_trace_folder,
+            &ct_rr_args.recording_id,
+        );
+        stable.live_program = ct_rr_args.live_program.clone();
+        stable.live_program_args = ct_rr_args.live_program_args.clone();
+        stable.live_cwd = ct_rr_args.live_cwd.clone();
+        stable.live_recording_dir = ct_rr_args.live_recording_dir.clone();
         RecreatorReplaySession {
             name: name.to_string(),
             index,
             // M-REC-11: propagate the trace's recording_id to the
             // worker; empty falls back to the legacy PID rendezvous.
-            stable: ReplayWorker::new_with_recording_id(
-                name,
-                index,
-                &ct_rr_args.worker_exe,
-                &ct_rr_args.rr_trace_folder,
-                &ct_rr_args.recording_id,
-            ),
+            stable,
             recreator_exe: ct_rr_args.worker_exe.clone(),
             rr_trace_folder: ct_rr_args.rr_trace_folder.clone(),
             last_c_location: None,
@@ -876,6 +918,32 @@ impl ReplaySession for RecreatorReplaySession {
         Err("tracepoint call evaluation did not return a value".into())
     }
 
+    fn recording_head(&mut self) -> Result<u64, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self.stable.dispatch_replay_query(ReplayQuery::GetRecordingHead)?;
+        parse_recording_head_response(&response)
+    }
+
+    fn restore_at(
+        &mut self,
+        geid: u64,
+        tid: Option<u32>,
+        tick: Option<u64>,
+        phase: Option<String>,
+    ) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self
+            .stable
+            .dispatch_replay_query(ReplayQuery::RestoreAt { geid, tid, tick, phase })?;
+        parse_bool_or_status_response(&response)
+    }
+
+    fn seek_to_geid(&mut self, geid: u64) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self.stable.dispatch_replay_query(ReplayQuery::SeekToGeid { geid })?;
+        parse_bool_or_status_response(&response)
+    }
+
     /// Forward `GetProcessInfo` to the replay worker.
     ///
     /// The native-backend worker either shells out to `rr ps` (for RR traces)
@@ -902,6 +970,54 @@ impl ReplaySession for RecreatorReplaySession {
         }
         Ok(processes)
     }
+}
+
+fn parse_recording_head_response(response: &str) -> Result<u64, Box<dyn Error>> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(response) {
+        for key in ["rrTicks", "recordingHead", "head", "geid"] {
+            if let Some(head) = value.get(key).and_then(|v| v.as_u64()) {
+                return Ok(head);
+            }
+        }
+        if let Some(text) = value.as_str()
+            && let Some(head) = parse_geid_text(text)
+        {
+            return Ok(head);
+        }
+    }
+
+    if let Some(head) = parse_geid_text(response) {
+        return Ok(head);
+    }
+
+    Err(format!("GetRecordingHead: could not parse worker response: {response}").into())
+}
+
+fn parse_bool_or_status_response(response: &str) -> Result<bool, Box<dyn Error>> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(response) {
+        if let Some(b) = value.as_bool() {
+            return Ok(b);
+        }
+        if let Some(status) = value.get("status").and_then(|v| v.as_str()) {
+            return Ok(status == "ok" || status == "stopped");
+        }
+        if value.get("error").is_some() {
+            return Ok(false);
+        }
+    }
+
+    let trimmed = response.trim();
+    Ok(trimmed == "true"
+        || trimmed.starts_with("T05")
+        || trimmed.starts_with("T0")
+        || trimmed.contains("\"status\":\"ok\""))
+}
+
+fn parse_geid_text(text: &str) -> Option<u64> {
+    let marker = "geid:";
+    let start = text.find(marker)? + marker.len();
+    let digits: String = text[start..].chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    digits.parse().ok()
 }
 
 fn tracepoint_response_value(response: &TtdTracepointEvalResponseEnvelope) -> Option<ValueRecordWithType> {

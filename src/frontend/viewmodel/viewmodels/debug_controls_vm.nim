@@ -51,6 +51,7 @@ type
     statusText*: Memo[string]
     toolbarModeText*: Memo[string]
     recordingHeadText*: Memo[string]
+    showRecordingHead*: Memo[bool]
     showJumpToLive*: Memo[bool]
     canJumpToLive*: Memo[bool]
 
@@ -221,6 +222,13 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       else:
         "Head: " & $session.recordingHeadRRTicks
 
+    let showRecordingHead = createMemo[bool] proc(): bool =
+      store.session.val.debugSessionMode in {
+        liveMcr,
+        liveMaterialized,
+        historicalFromLive,
+      }
+
     let showJumpToLive = createMemo[bool] proc(): bool =
       store.session.val.debugSessionMode == historicalFromLive
 
@@ -243,6 +251,7 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       statusText: statusText,
       toolbarModeText: toolbarModeText,
       recordingHeadText: recordingHeadText,
+      showRecordingHead: showRecordingHead,
       showJumpToLive: showJumpToLive,
       canJumpToLive: canJumpToLive,
       disposeProc: dispose,

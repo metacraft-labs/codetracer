@@ -38,7 +38,14 @@ type
 
 proc toJson*(loc: Location): JsonNode =
   ## Serialize a Location to JSON.
-  %*{"file": loc.file, "line": loc.line, "column": loc.column}
+  %*{
+    "file": loc.file,
+    "line": loc.line,
+    "column": loc.column,
+    "sourceGeneration": loc.sourceGeneration,
+    "sourceDigest": loc.sourceDigest,
+    "callstackDepth": loc.callstackDepth,
+  }
 
 proc toJson*(status: DebuggerStatus): JsonNode =
   ## Serialize a DebuggerStatus enum to its string representation.
@@ -110,9 +117,16 @@ proc toJson*(row: EventLogRow): JsonNode =
   ## Serialize an EventLogRow to JSON.
   %*{
     "eventId": % row.eventId,
+    "eventIndex": row.eventIndex,
+    "kindId": row.kindId,
     "kind": row.kind,
+    "file": row.file,
     "line": row.line,
     "value": row.value,
+    "rrTicks": % row.rrTicks,
+    "maxRRTicks": % row.maxRRTicks,
+    "sourceGeneration": row.sourceGeneration,
+    "sourceDigest": row.sourceDigest,
   }
 
 proc toJson*[T](items: seq[T]): JsonNode =
@@ -129,9 +143,12 @@ proc toJson*[T](items: seq[T]): JsonNode =
 proc parseLocation*(j: JsonNode): Location =
   ## Parse a Location from JSON.
   Location(
-    file: j["file"].getStr,
-    line: j["line"].getInt,
-    column: j["column"].getInt,
+    file: j.getOrDefault("file").getStr(""),
+    line: j.getOrDefault("line").getInt(0),
+    column: j.getOrDefault("column").getInt(0),
+    sourceGeneration: j.getOrDefault("sourceGeneration").getInt(0),
+    sourceDigest: j.getOrDefault("sourceDigest").getStr(""),
+    callstackDepth: j.getOrDefault("callstackDepth").getInt(0),
   )
 
 proc parseDebuggerStatus*(s: string): DebuggerStatus =
@@ -227,9 +244,16 @@ proc parseEventLogRow*(j: JsonNode): EventLogRow =
   ## Parse an EventLogRow from JSON.
   EventLogRow(
     eventId: j["eventId"].getBiggestInt.uint64,
+    eventIndex: j.getOrDefault("eventIndex").getInt(0),
+    kindId: j.getOrDefault("kindId").getInt(0),
     kind: j["kind"].getStr,
+    file: j.getOrDefault("file").getStr(""),
     line: j["line"].getInt,
     value: j["value"].getStr,
+    rrTicks: j.getOrDefault("rrTicks").getBiggestInt(0).uint64,
+    maxRRTicks: j.getOrDefault("maxRRTicks").getBiggestInt(0).uint64,
+    sourceGeneration: j.getOrDefault("sourceGeneration").getInt(0),
+    sourceDigest: j.getOrDefault("sourceDigest").getStr(""),
   )
 
 proc parseVariableSeq*(j: JsonNode): seq[Variable] =

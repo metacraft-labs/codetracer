@@ -23,7 +23,9 @@ export class EventLogPane {
   }
 
   tabButton(): Locator {
-    return this.page.locator(".lm_title", { hasText: this.tabButtonText }).first();
+    return this.page
+      .locator(".lm_title", { hasText: this.tabButtonText })
+      .first();
   }
 
   async clickTab(): Promise<void> {
@@ -45,7 +47,7 @@ export class EventLogPane {
 
   async isVisible(): Promise<boolean> {
     const style = await this.root.locator("..").getAttribute("style");
-    return !(style?.includes("none"));
+    return !style?.includes("none");
   }
 
   footerContainer(): Locator {
@@ -92,10 +94,33 @@ export class EventLogPane {
       .first();
   }
 
+  rowByKindAndGeneration(kind: string, sourceGeneration: number): Locator {
+    return this.root
+      .locator(
+        `.eventLog-dense-table tbody tr[data-event-kind="${kind}"][data-source-generation="${sourceGeneration}"]`,
+      )
+      .first();
+  }
+
+  rowByKindGenerationAndText(
+    kind: string,
+    sourceGeneration: number,
+    text: string,
+  ): Locator {
+    return this.root
+      .locator(
+        `.eventLog-dense-table tbody tr[data-event-kind="${kind}"][data-source-generation="${sourceGeneration}"]`,
+      )
+      .filter({ hasText: text })
+      .first();
+  }
+
   async eventElements(forceReload = false): Promise<EventRow[]> {
     if (forceReload || this.events.length === 0) {
       const roots = await this.eventElementRoots().all();
-      this.events = roots.map((r) => new EventRow(r, EventElementType.EventLog));
+      this.events = roots.map(
+        (r) => new EventRow(r, EventElementType.EventLog),
+      );
     }
     return this.events;
   }
@@ -105,7 +130,9 @@ export class EventLogPane {
   }
 
   async rowByIndex(index: number, forceReload = false): Promise<EventRow> {
-    debugLogger.log(`EventLogPane: locating row ${index} (forceReload=${forceReload})`);
+    debugLogger.log(
+      `EventLogPane: locating row ${index} (forceReload=${forceReload})`,
+    );
 
     let found: EventRow | null = null;
     await retry(
@@ -126,7 +153,9 @@ export class EventLogPane {
     );
 
     if (!found) {
-      throw new Error(`Event log row with index ${index} was not found after retries.`);
+      throw new Error(
+        `Event log row with index ${index} was not found after retries.`,
+      );
     }
     debugLogger.log(`EventLogPane: found row ${index}`);
     return found;
@@ -142,7 +171,9 @@ export class EventLogPane {
 
   async activateTraceEventsFilter(): Promise<void> {
     await this.filterButton().click();
-    const traceButton = this.dropdownRoot().getByText("Trace events", { exact: true });
+    const traceButton = this.dropdownRoot().getByText("Trace events", {
+      exact: true,
+    });
     await traceButton.waitFor({ state: "visible" });
     await traceButton.click();
     await this.page.keyboard.press("Escape");
@@ -151,7 +182,9 @@ export class EventLogPane {
 
   async activateRecordedEventsFilter(): Promise<void> {
     await this.filterButton().click();
-    const recordedButton = this.dropdownRoot().getByText("Recorded events", { exact: true });
+    const recordedButton = this.dropdownRoot().getByText("Recorded events", {
+      exact: true,
+    });
     await recordedButton.waitFor({ state: "visible" });
     await recordedButton.click();
     await this.page.keyboard.press("Escape");

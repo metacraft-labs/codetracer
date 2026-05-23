@@ -11,8 +11,10 @@ import
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
+import ../viewmodel/store/types as vmtypes
 from ../viewmodel/viewmodels/event_log_vm import
-  EventLogVM, createEventLogVM
+  EventLogVM, createEventLogVM, appendLiveDebuggerStop
+from isonim/core/signals import val
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_view import
   mountIsoNimEventLog, mountIsoNimEventLogWithDataTables
@@ -77,14 +79,177 @@ proc initEventLogVM() =
   clog "EventLogVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimEventLogPanel()
 
-proc syncEventLogDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+proc syncEventLogDebuggerPosition(rrTicks: int, path: cstring, line: int;
+                                  sourceGeneration: int = 0;
+                                  sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the EventLogVM's auto-load effect fires with the updated rrTicks.
   if eventLogVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  eventLogVMStore.updateDebuggerPosition(ticks, $path, line)
+  eventLogVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   clog fmt"EventLogVM: synced debugger rrTicks={ticks}"
+
+proc safeText(value: cstring): cstring =
+  if value.isNil:
+    cstring""
+  else:
+    value
+
+proc liveEventLogSession(): bool =
+  not eventLogVMStore.isNil and
+    eventLogVMStore.session.val.debugSessionMode in {
+      vmtypes.liveMcr,
+      vmtypes.liveMaterialized,
+      vmtypes.historicalFromLive}
+
+proc locationSourcePath(location: types.Location): cstring =
+  if not location.highLevelPath.isNil and location.highLevelPath.len > 0:
+    location.highLevelPath
+  elif not location.path.isNil and location.path.len > 0:
+    location.path
+  else:
+    cstring""
+
+proc locationSourceLine(location: types.Location): int =
+  if location.highLevelLine > 0:
+    location.highLevelLine
+  else:
+    location.line
+
+proc parseTableRowLine(row: TableRow): int =
+  let fullPath = $row.fullPath
+  let colon = fullPath.rfind(":")
+  if colon < 0 or colon >= fullPath.len - 1:
+    return 0
+
+  try:
+    fullPath[colon + 1 .. ^1].parseInt
+  except ValueError:
+    0
+
+proc tableRowPath(row: TableRow): cstring =
+  if not row.lowLevelLocation.isNil and row.lowLevelLocation.len > 0:
+    row.lowLevelLocation
+  else:
+    let fullPath = $row.fullPath
+    let colon = fullPath.rfind(":")
+    if colon > 0:
+      cstring(fullPath[0 ..< colon])
+    else:
+      row.fullPath
+
+proc programEventFromTableRow(row: TableRow; eventIndex: int; maxRRTicks: int): ProgramEvent =
+  ProgramEvent(
+    kind: row.kind,
+    semanticKind: row.semanticKind,
+    content: row.content,
+    rrEventId: row.rrEventId,
+    metadata: row.metadata,
+    highLevelPath: tableRowPath(row),
+    highLevelLine: parseTableRowLine(row),
+    directLocationRRTicks: row.directLocationRRTicks,
+    eventIndex: eventIndex,
+    tracepointResultIndex: 0,
+    base64Encoded: row.base64Encoded,
+    maxRRTicks: maxRRTicks,
+    stdout: row.stdout,
+    sourceGeneration: row.sourceGeneration,
+    sourceDigest: row.sourceDigest
+  )
+
+proc equivalentTableRows(left, right: TableRow): bool =
+  left.semanticKind == right.semanticKind and
+    left.directLocationRRTicks == right.directLocationRRTicks and
+    left.fullPath == right.fullPath and
+    left.lowLevelLocation == right.lowLevelLocation and
+    left.sourceGeneration == right.sourceGeneration and
+    left.sourceDigest == right.sourceDigest
+
+proc makeDebuggerStopRow(self: EventLogComponent; location: types.Location): TableRow =
+  let path = locationSourcePath(location)
+  let line = locationSourceLine(location)
+  let description = cstring(fmt"debugger stop at {path}:{line}")
+  let ticks = location.rrTicks
+  let eventId =
+    if ticks > 0:
+      ticks
+    else:
+      1_000_000_000 + self.liveDebugRows.len
+
+  TableRow(
+    directLocationRRTicks: ticks,
+    rrEventId: eventId,
+    fullPath: cstring(fmt"{path}:{line}"),
+    lowLevelLocation: path,
+    kind: EventLogKind.Open,
+    semanticKind: cstring"debugger-stop",
+    content: description,
+    metadata: description,
+    base64Encoded: false,
+    stdout: false,
+    sourceGeneration: location.sourceGeneration,
+    sourceDigest: safeText(location.sourceDigest)
+  )
+
+proc syncLiveDebuggerRowToVM(row: TableRow) =
+  if eventLogVMInstance.isNil:
+    return
+
+  let eventId =
+    if row.directLocationRRTicks > 0:
+      uint64(row.directLocationRRTicks)
+    else:
+      uint64(row.rrEventId)
+
+  eventLogVMInstance.appendLiveDebuggerStop(vmtypes.EventLogRow(
+    eventId: eventId,
+    eventIndex: 0,
+    kindId: ord(row.kind),
+    kind: "debugger-stop",
+    file: $tableRowPath(row),
+    line: parseTableRowLine(row),
+    value: $row.metadata,
+    rrTicks: eventId,
+    maxRRTicks: eventId,
+    sourceGeneration: row.sourceGeneration,
+    sourceDigest: $row.sourceDigest,
+  ))
+
+proc addLiveDebuggerStopRow(self: EventLogComponent; location: types.Location): bool =
+  if not liveEventLogSession():
+    return false
+
+  let path = locationSourcePath(location)
+  let line = locationSourceLine(location)
+  if path.len == 0 or line <= 0:
+    return false
+
+  let row = self.makeDebuggerStopRow(location)
+  if self.liveDebugRows.len > 0 and
+     equivalentTableRows(self.liveDebugRows[^1], row):
+    return false
+
+  self.liveDebugRows.add(row)
+  syncLiveDebuggerRowToVM(row)
+  true
+
+proc mergeLiveDebuggerRows(self: EventLogComponent; data: var TableData): int =
+  if self.liveDebugRows.len == 0:
+    return 0
+
+  for liveRow in self.liveDebugRows:
+    var found = false
+    for row in data.data:
+      if equivalentTableRows(row, liveRow):
+        found = true
+        break
+    if not found:
+      data.data.add(liveRow)
+      result += 1
 
 proc tryMountIsoNimEventLogPanel() =
   ## Mount the IsoNim event log view into the GoldenLayout-managed
@@ -331,6 +496,18 @@ func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
   (name, lang)
 
 func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
+  if not eventElement.semanticKind.isNil and eventElement.semanticKind.len > 0:
+    case $eventElement.semanticKind
+    of "debugger-stop":
+      if eventElement.metadata.len > 0:
+        return $eventElement.metadata
+      elif eventElement.highLevelPath.len > 0 and eventElement.highLevelLine > 0:
+        return fmt"debugger stop at {eventElement.highLevelPath}:{eventElement.highLevelLine}"
+      else:
+        return $eventElement.content
+    else:
+      discard
+
   case eventElement.kind:
     of Write:
       let into = if eventElement.stdout: "stdout" else: "stderr"
@@ -372,6 +549,8 @@ func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
       fmt"event {eventElement.kind}"
 
 proc eventJump(self: EventLogComponent, event: ProgramEvent) =
+  if not eventLogVMStore.isNil:
+    eventLogVMStore.enterHistoricalModeForNavigation()
   self.api.emit(CtEventJump, event)
   self.api.emit(InternalNewOperation, NewOperation(name: fmt"Event jump #{event.rrEventId}", stableBusy: true))
 
@@ -399,16 +578,9 @@ proc jump(self: EventLogComponent, table: JsObject, e: JsObject) =
   var event: ProgramEvent
 
   if data.toJs != jsUndefined:
-    let location = self.location
-    event = cast[ProgramEvent](data)
-    event.highLevelPath = location.highLevelPath
-    event.highLevelLine = location.highLevelLine
-    event.metadata = ""
+    let row = cast[TableRow](data)
+    event = programEventFromTableRow(row, 0, self.data.maxRRTicks)
     event.bytes = 0
-    event.tracepointResultIndex = 0
-    event.eventIndex = 0
-    event.stdout = true
-    event.maxRRTicks = 0
   else:
     # DataTables emits placeholder rows while the table is empty; they are not real events.
     return
@@ -755,21 +927,7 @@ proc loadEvents*(self: EventLogComponent, update: TableData) =
   if update.data.len() > 0:
     self.receivedUpdates = true
   for i, row in update.data:
-    self.programEvents.add(
-      ProgramEvent(
-        kind: row.kind,
-        content: row.content,
-        rrEventId: row.rrEventId,
-        metadata: row.metadata,
-        highLevelPath: row.fullPath,
-        directLocationRRTicks: row.directLocationRRTicks,
-        eventIndex: i,
-        tracepointResultIndex: 0,
-        base64Encoded: row.base64Encoded,
-        maxRRTicks: data.maxRRTicks,
-        stdout: row.stdout
-      )
-    )
+    self.programEvents.add(programEventFromTableRow(row, i, data.maxRRTicks))
 
 
 method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody) {.async.} =
@@ -777,15 +935,20 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
 
   if not response.isTrace and self.drawId == response.data.draw:
     let dt = self.denseTable
-
-    dt.rowsCount = response.data.recordsTotal
-    self.loadEvents(response.data)
-
     var mutData = response.data
 
-    for i, row in response.data.data:
+    let liveRowsAdded = self.mergeLiveDebuggerRows(mutData)
+    if liveRowsAdded > 0:
+      mutData.recordsTotal = response.data.recordsTotal + liveRowsAdded
+      mutData.recordsFiltered = response.data.recordsFiltered + liveRowsAdded
+
+    dt.rowsCount = mutData.recordsTotal
+
+    for i, row in mutData.data:
       if row.base64Encoded:
-        mutData.data[i].content = cstring(decode($response.data.data[i].content))
+        mutData.data[i].content = cstring(decode($mutData.data[i].content))
+
+    self.loadEvents(mutData)
 
     self.tableCallback(mutData.toJs)
     self.redraw()
@@ -818,6 +981,7 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
     # backend is ready.  Stop retrying after events arrive or after a
     # maximum number of attempts to avoid infinite spinning.
     if response.data.recordsTotal == 0 and self.started and
+       self.liveDebugRows.len == 0 and
        not self.receivedUpdates and self.pendingReloadRetries < 8:
       self.pendingReloadRetries += 1
       let delay = 250 * self.pendingReloadRetries  # 250, 500, 750, ... ms
@@ -881,6 +1045,7 @@ method clear*(self: EventLogComponent) =
   self.rowSelected = 0
   self.activeRowTicks = 0
   self.hiddenRows = 0
+  self.liveDebugRows = @[]
 
 method restart*(self: EventLogComponent) =
   self.clear()
@@ -905,6 +1070,7 @@ method restart*(self: EventLogComponent) =
   self.autoScrollUpdate = false
   self.started = false
   self.isFlowUpdate = false
+  self.liveDebugRows = @[]
   self.init = false
   self.redrawColumns = true
   self.redraw()
@@ -960,7 +1126,9 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
   syncEventLogDebuggerPosition(
     response.location.rrTicks,
     response.location.path,
-    response.location.line)
+    response.location.line,
+    response.location.sourceGeneration,
+    response.location.sourceDigest)
 
   self.location = response.location
   let lang = toLangFromFilename(self.location.path)
@@ -978,6 +1146,12 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
 
   self.activeRowTicks = response.location.rrTicks
   self.lastJumpFireTime = currentTime
+  let liveRowAdded = self.addLiveDebuggerStopRow(response.location)
+  if liveRowAdded and not self.denseTable.isNil and not self.denseTable.context.isNil:
+    discard setTimeout(proc() =
+      if not self.denseTable.isNil and not self.denseTable.context.isNil:
+        self.denseTable.context.ajax.reload(nil, false)
+    , 0)
   if self.isFlowUpdate:
     self.findActiveRow(self.activeRowTicks, false)
 
@@ -1038,19 +1212,29 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
     # Trigger a DataTables ajax reload so it re-requests data now that the
     # backend has had time to load events.  A short delay gives the backend
     # a margin to finish processing ct/event-load before the reload fires.
-    if not self.started:
+    let hasSourceRevision = response.location.sourceGeneration != 0 or
+      (not response.location.sourceDigest.isNil and
+        response.location.sourceDigest.len > 0)
+    let liveEventStream =
+      not eventLogVMStore.isNil and
+      eventLogVMStore.session.val.debugSessionMode in {
+        vmtypes.liveMcr,
+        vmtypes.liveMaterialized,
+        vmtypes.historicalFromLive}
+    if not self.started or (hasSourceRevision and liveEventStream):
+      let firstLoad = not self.started
       self.started = true
-      # Emit CtEventLoad to ensure the backend loads events.
-      # The IsoNim EventLogVM auto-load effect may not fire reliably
-      # yet, so the legacy CtEventLoad path is the primary trigger.
+      # Emit CtEventLoad to ensure the backend loads or refreshes events.
+      # Live sessions can grow after the first stop, so source-revisioned
+      # positions intentionally refresh the event table.
       self.api.emit(CtEventLoad, EmptyArg())
-      # Schedule a single delayed DataTables ajax reload.  The
-      # onUpdatedTable retry mechanism handles further retries if
-      # the backend hasn't finished loading events yet.
       if not self.denseTable.isNil and not self.denseTable.context.isNil:
         discard setTimeout(proc() =
           if not self.denseTable.isNil and not self.denseTable.context.isNil:
-            cerror "[PIPELINE] event_log: first CtCompleteMove, reloading DataTables ajax"
+            if firstLoad:
+              cerror "[PIPELINE] event_log: first CtCompleteMove, reloading DataTables ajax"
+            else:
+              cerror "[PIPELINE] event_log: source-revision move, reloading DataTables ajax"
             self.denseTable.context.ajax.reload(nil, false)
         , 500)
   )

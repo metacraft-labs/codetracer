@@ -12,7 +12,7 @@ import isonim/core/[computation, owner, signals]
 import backend/mock_backend
 import app/app_vm
 import store/[replay_data_store, types]
-import viewmodels/[calltrace_vm, debug_controls_vm]
+import viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm]
 
 const
   PatchableFunction = "reprobuild_hcr_patchable_value"
@@ -58,6 +58,29 @@ proc makeVariable(name, value: string): Variable =
     hasChildren: false,
     children: @[],
   )
+
+proc appendStopEvent(app: AppViewModel; marker: string; generation: int;
+                     line: int; rrTicks: uint64) =
+  let rows = app.session.eventLogVM.eventRows.val
+  if rows.anyIt(it.rrTicks == rrTicks and
+                it.line == line and
+                it.sourceGeneration == generation):
+    return
+  var updated = rows
+  updated.add(EventLogRow(
+    eventId: rrTicks,
+    eventIndex: updated.len,
+    kindId: 10,
+    kind: "debugger-stop",
+    file: PatchableSource,
+    line: line,
+    value: marker,
+    rrTicks: rrTicks,
+    maxRRTicks: app.session.store.timeline.val.maxRRTicks,
+    sourceGeneration: generation,
+    sourceDigest: "generation-" & $generation,
+  ))
+  app.session.eventLogVM.eventRows.val = updated
 
 proc configureLiveSession(app: AppViewModel; rrTicks: uint64) =
   let store = app.session.store
@@ -105,6 +128,7 @@ proc publishStop(app: AppViewModel; marker: string; generation: int;
   store.updateCalltraceSection(@[
     makeCallLine(0'i64, marker, generation, line, rrTicks),
   ], 0'i64, 1'u64)
+  app.appendStopEvent(marker, generation, line, rrTicks)
   drain()
 
 proc assertGenerationVisible(app: AppViewModel; marker: string;
@@ -125,6 +149,10 @@ proc assertGenerationVisible(app: AppViewModel; marker: string;
     generation
   check session.calltraceVM.visibleLines.val[0].location.line ==
     session.store.debugger.val.location.line
+  check session.eventLogVM.eventRows.val.anyIt(
+    it.rrTicks == rrTicks and
+    it.sourceGeneration == generation and
+    it.sourceDigest == "generation-" & $generation)
 
 suite "Reprobuild HCR AppViewModel":
 
@@ -167,14 +195,24 @@ suite "Reprobuild HCR AppViewModel":
         check newLiveSteps[0].args["threadId"].getInt == 1
       app.publishStop(Gen1StepNext, 1, 63, 310'u64)
       app.assertGenerationVisible(Gen1StepNext, 1, 310'u64)
+      check vm.recordingHeadText.val == "Head: 310"
 
+      var historicalEventIndex = -1
+      for i, row in app.session.eventLogVM.eventRows.val:
+        if row.rrTicks == 100'u64 and row.sourceGeneration == 0:
+          historicalEventIndex = i
+          break
+      check historicalEventIndex >= 0
       mock.clearReceivedCommands()
-      vm.restoreAt(100'u64)
+      app.session.eventLogVM.doubleClickRow(historicalEventIndex)
       drain()
-      let restores = mock.commandsNamed(LiveMcrRestoreAtCommand)
-      check restores.len == 1
-      if restores.len == 1:
-        check restores[0].args["rrTicks"].getBiggestInt == 100
+      let eventJumps = mock.commandsNamed("ct/event-jump")
+      check eventJumps.len == 1
+      if eventJumps.len == 1:
+        check eventJumps[0].args["directLocationRRTicks"].getBiggestInt == 100
+        check eventJumps[0].args["highLevelPath"].getStr == PatchableSource
+        check eventJumps[0].args["sourceGeneration"].getInt == 0
+        check eventJumps[0].args["sourceDigest"].getStr == "generation-0"
       check app.session.store.session.val.debugSessionMode == historicalFromLive
       check vm.toolbarModeText.val == "Historical replay"
       app.publishStop(Gen0Breakpoint, 0, 41, 100'u64)
@@ -191,7 +229,7 @@ suite "Reprobuild HCR AppViewModel":
       let jumps = mock.commandsNamed(LiveMcrRestoreAtCommand)
       check jumps.len == 1
       if jumps.len == 1:
-        check jumps[0].args["rrTicks"].getBiggestInt == 300
+        check jumps[0].args["rrTicks"].getBiggestInt == 310
         check jumps[0].args["jumpToLive"].getBool
       check app.session.store.session.val.debugSessionMode == liveMcr
       check vm.toolbarModeText.val == "Live MCR"

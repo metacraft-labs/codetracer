@@ -32,7 +32,9 @@ proc jsMissing(value: JsObject): bool {.
 
 var vex* {.importc.}: js
 var middlewareConfigured = false
-var dapReplayHandlerRegistered = false
+var dapSessionSelectionReady = false
+var pendingDapReplaySelection: JsObject
+var pendingDapLiveSelection: JsObject
 const TAB_LIMIT = 20
 
 # ---------------------------------------------------------------------------
@@ -46,6 +48,7 @@ import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
+from viewmodel/store/types import liveMcr
 var activeSessionVM: SessionViewModel
 var activeIsoNimApp: IsoNimApp
 const MIN_FONTSIZE = 6
@@ -1211,12 +1214,10 @@ when not defined(ctInExtension):
 
       initPanelVM("initStateVMWithStore"):
         state.initStateVMWithStore(activeSessionVM.store)
+      initPanelVM("initDebugControlsVMWithStore"):
+        debug.initDebugControlsVMWithStore(activeSessionVM.store)
       initPanelVM("initCalltraceVMWithStore"):
         calltrace.initCalltraceVMWithStore(activeSessionVM.store)
-      # Keep the debugger toolbar on its legacy/stub-backed bridge during
-      # startup. The toolbar is global chrome, not a replay panel, and its
-      # shared-store upgrade currently runs JS side effects early enough to
-      # abort middleware registration.
       initPanelVM("initEventLogVMWithStore"):
         event_log.initEventLogVMWithStore(activeSessionVM.store)
       initPanelVM("initFlowVMWithStore"):
@@ -1303,6 +1304,8 @@ when not defined(ctInExtension):
           let rrTicks = response.location.rrTicks
           let path = response.location.path
           let line = response.location.line
+          let sourceGeneration = response.location.sourceGeneration
+          let sourceDigest = response.location.sourceDigest
           let rawResponse = response.toJs
           let geidValue = rawResponse["geid"]
           let currentGeidValue = rawResponse["currentGeid"]
@@ -1317,8 +1320,10 @@ when not defined(ctInExtension):
             else:
               none(uint64)
           isoBatch.batch proc() =
-            calltrace.syncCalltraceDebuggerPosition(rrTicks, path, line)
-            state.syncStoreDebuggerPosition(rrTicks, path, line)
+            calltrace.syncCalltraceDebuggerPosition(
+              rrTicks, path, line, sourceGeneration, sourceDigest)
+            state.syncStoreDebuggerPosition(
+              rrTicks, path, line, sourceGeneration, sourceDigest)
             if geid.isSome and not activeSessionVM.isNil:
               activeSessionVM.store.updateCurrentGeid(geid)
 
@@ -1472,6 +1477,74 @@ proc loadFrontendSourcemap(sourcemapPath: cstring): Future[FrontendSourcemap] {.
 
   return sm
 
+proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
+  let trace = response["trace"].to(Trace)
+  data.activeSession.replayId = response["replayId"].to(int)
+  data.activeSession.liveDebugSession = false
+  infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
+  if sendInitialize:
+    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+      clientName: "codetracer"
+    )))
+  data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+  data.dapApi.sendCtRequest(DapLaunch, js{
+    traceFolder: trace.outputFolder,
+    rawDiffIndex: data.startOptions.rawDiffIndex,
+    ctRRWorkerExe: data.rrBackendPath,
+  })
+
+proc handleDapLiveSessionSelected(response: JsObject; sendInitialize: bool) =
+  let trace = response["trace"].to(Trace)
+  data.activeSession.replayId = response["replayId"].to(int)
+  data.activeSession.liveDebugSession = true
+  if not activeSessionVM.isNil:
+    activeSessionVM.store.setSessionMode(liveMcr)
+  infoPrint "ui: initializing live dap session for trace ", $trace.recordingId
+  if sendInitialize:
+    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+      clientName: "codetracer"
+    )))
+  data.dapApi.sendCtRequest(DapConfigurationDone, js{})
+  data.dapApi.sendCtRequest(DapLaunch, js{
+    program: response["program"],
+    args: response["args"],
+    cwd: response["cwd"],
+    liveRecording: true,
+    liveRecordingDir: response["liveRecordingDir"],
+    rawDiffIndex: data.startOptions.rawDiffIndex,
+    ctRRWorkerExe: data.rrBackendPath,
+  })
+
+proc shouldInitializeForDapSelection(): bool =
+  data.startOptions.rawTestStrategy.len == 0
+
+proc flushPendingDapSessionSelections() =
+  if not dapSessionSelectionReady:
+    return
+  let sendInitialize = shouldInitializeForDapSelection()
+  if not pendingDapReplaySelection.isNil:
+    let payload = pendingDapReplaySelection
+    pendingDapReplaySelection = nil
+    handleDapReplaySelected(payload, sendInitialize)
+  if not pendingDapLiveSelection.isNil:
+    let payload = pendingDapLiveSelection
+    pendingDapLiveSelection = nil
+    handleDapLiveSessionSelected(payload, sendInitialize)
+
+proc onDapReplaySelected(sender: js; response: JsObject) =
+  data.activeSession.liveDebugSession = false
+  if dapSessionSelectionReady:
+    handleDapReplaySelected(response, shouldInitializeForDapSelection())
+  else:
+    pendingDapReplaySelection = response
+
+proc onDapLiveSessionSelected(sender: js; response: JsObject) =
+  data.activeSession.liveDebugSession = true
+  if dapSessionSelectionReady:
+    handleDapLiveSessionSelected(response, shouldInitializeForDapSelection())
+  else:
+    pendingDapLiveSelection = response
+
 proc onTraceLoaded(
   sender: js,
   response: jsobject(
@@ -1559,41 +1632,13 @@ proc onTraceLoaded(
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
-    if not dapReplayHandlerRegistered:
-      data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
-        let trace = response["trace"].to(Trace)
-        # Store the Backend Manager's replayId so we can stop it on close.
-        data.activeSession.replayId = response["replayId"].to(int)
-        infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
-        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-        data.dapApi.sendCtRequest(DapLaunch, js{
-          traceFolder: trace.outputFolder,
-          rawDiffIndex: data.startOptions.rawDiffIndex,
-          ctRRWorkerExe: data.rrBackendPath,
-        })
-      dapReplayHandlerRegistered = true
-
   when not defined(ctInExtension):
     if not middlewareConfigured:
       configureMiddleware()
       middlewareConfigured = true
 
-    if not dapReplayHandlerRegistered:
-      data.ipc.on(cstring"CODETRACER::dap-replay-selected") do (sender: js, response: JsObject):
-        let trace = response["trace"].to(Trace)
-        # Store the Backend Manager's replayId so we can stop it on close.
-        data.activeSession.replayId = response["replayId"].to(int)
-        infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
-        data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
-          clientName: "codetracer"
-        )))
-        data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-        data.dapApi.sendCtRequest(DapLaunch, js{
-          traceFolder: trace.outputFolder,
-          rawDiffIndex: data.startOptions.rawDiffIndex,
-          ctRRWorkerExe: data.rrBackendPath,
-        })
-      dapReplayHandlerRegistered = true
+  dapSessionSelectionReady = true
+  flushPendingDapSessionSelections()
 
   data.switchToDebug()
   renderer.requestInitialPanelData(data)
@@ -2491,6 +2536,8 @@ proc configureIPC(data: Data) =
     # Dap communication
     "dap-receive-response"
     "dap-receive-event"
+    "dap-replay-selected"
+    "dap-live-session-selected"
 
     # Acp communication
     # TODO: Rename to "acp-session-update"

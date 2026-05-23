@@ -49,6 +49,9 @@ when not defined(ctInExtension):
 
   proc dapInitializationHandler() =
     infoPrint "middleware: launching trace recordingId=", $data.trace.recordingId, " folder=", $data.trace.outputFolder
+    if data.activeSession.liveDebugSession:
+      infoPrint "middleware: live debug session selected; skipping replay trace launch"
+      return
 
     # it's important that this is in the `dapInitializationHandler` that is
     #   in the not defined(ctInExtension) case!

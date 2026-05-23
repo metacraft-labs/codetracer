@@ -598,7 +598,10 @@ impl DapTestClient {
         // Send launch
         let launch_args = LaunchRequestArguments {
             program: None,
+            args: None,
             trace_folder: Some(recording.trace_dir.clone()),
+            live_recording: None,
+            live_recording_dir: None,
             trace_file: None,
             raw_diff_index: None,
             pid: None,
@@ -832,7 +835,10 @@ impl DapStdioTestClient {
         // Send launch with recreator_exe
         let launch_args = LaunchRequestArguments {
             program: None,
+            args: None,
             trace_folder: Some(recording.trace_dir.clone()),
+            live_recording: None,
+            live_recording_dir: None,
             trace_file: None,
             raw_diff_index: None,
             pid: None,
@@ -878,7 +884,10 @@ impl DapStdioTestClient {
         // db-backend does not attempt to start an rr replay worker.
         let launch_args = LaunchRequestArguments {
             program: None,
+            args: None,
             trace_folder: Some(recording.trace_dir.clone()),
+            live_recording: None,
+            live_recording_dir: None,
             trace_file: None,
             raw_diff_index: None,
             pid: None,

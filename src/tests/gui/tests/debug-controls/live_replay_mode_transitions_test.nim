@@ -1,6 +1,6 @@
 ## Headless AppViewModel tests for live/replay mode transitions.
 
-import std/[options, unittest]
+import std/[json, options, unittest]
 
 import vm_test_helpers
 import isonim/core/[computation, owner, signals]
@@ -64,6 +64,65 @@ suite "AppViewModel live/replay mode transitions":
       check app.session.store.session.val.lastLiveDebugSessionMode == liveMcr
       check mock.commandsNamed("ct/event-jump").len == 1
       check app.session.editorVM.executionCursorKind.val == "historical"
+      app.dispose()
+      teardown()
+
+  test "calltrace navigation from live mode enters historical replay":
+    createRoot proc(teardown: proc()) =
+      let (app, mock) = makeAppWithMock()
+      app.configureMode(liveMcr)
+      app.session.store.updateCalltraceSection(@[
+        CallLine(
+          index: 0,
+          name: "reprobuild_hcr_patchable_value",
+          depth: 0,
+          rrTicks: 120'u64,
+          location: Location(
+            file: "patchable.c",
+            line: 41,
+            column: 1,
+            sourceGeneration: 0,
+            sourceDigest: "generation-0",
+          ),
+          codeGeneration: 0,
+          hasChildren: false,
+          isExpanded: false,
+          callKey: "patchable:generation-0",
+        )
+      ], startIndex = 0'i64, totalCount = 1'u64)
+
+      app.session.calltraceVM.doubleClickEntry(0)
+      drain()
+
+      let jumps = mock.commandsNamed("ct/calltrace-jump")
+      check app.session.store.session.val.debugSessionMode == historicalFromLive
+      check app.session.editorVM.executionCursorKind.val == "historical"
+      check jumps.len == 1
+      if jumps.len == 1:
+        check jumps[0].args["rrTicks"].getBiggestInt == 120
+        check jumps[0].args["path"].getStr == "patchable.c"
+        check jumps[0].args["line"].getInt == 41
+        check jumps[0].args["sourceGeneration"].getInt == 0
+        check jumps[0].args["sourceDigest"].getStr == "generation-0"
+        check jumps[0].args["codeGeneration"].getInt == 0
+      app.dispose()
+      teardown()
+
+  test "timeline navigation from live MCR enters historical replay":
+    createRoot proc(teardown: proc()) =
+      let (app, mock) = makeAppWithMock()
+      app.configureMode(liveMcr)
+
+      app.session.timelineVM.seek(120'u64)
+      drain()
+
+      let seeks = mock.commandsNamed("ct/timeline-seek")
+      check app.session.store.session.val.debugSessionMode == historicalFromLive
+      check app.session.editorVM.executionCursorKind.val == "historical"
+      check app.session.debugControlsVM.showJumpToLive.val
+      check seeks.len == 1
+      if seeks.len == 1:
+        check seeks[0].args["rrTicks"].getBiggestInt == 120
       app.dispose()
       teardown()
 

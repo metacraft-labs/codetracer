@@ -386,6 +386,15 @@ pub struct Location {
     pub rr_ticks: RRTicks,
     pub function_first: i64,
     pub function_last: i64,
+    /// Source revision/generation for live sessions where one original path
+    /// can have multiple debugger-visible contents. Legacy traces keep this at
+    /// zero and fall back to path-only source identity.
+    #[serde(default)]
+    pub source_generation: i64,
+    /// Optional digest for the source revision. Empty means the backend did
+    /// not provide a stable content identity.
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub source_digest: String,
     pub event: i64,
     #[serde(deserialize_with = "deserialize_null_default")]
     pub expression: String,
@@ -458,6 +467,8 @@ impl Location {
 
             function_first: NO_POSITION,
             function_last: NO_POSITION,
+            source_generation: 0,
+            source_digest: String::new(),
             event: NO_EVENT,
             expression: "".to_string(),
             offset: NO_OFFSET,
@@ -837,6 +848,10 @@ impl FlowUpdate {
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct ProgramEvent {
     pub kind: EventLogKind,
+    /// Optional semantic display kind for rows whose trace-format enum is only
+    /// a transport fallback. Empty means use `kind`.
+    #[serde(default)]
+    pub semantic_kind: String,
     pub content: String,
     pub rr_event_id: usize,
     pub high_level_path: String,
@@ -852,6 +867,13 @@ pub struct ProgramEvent {
     pub base64_encoded: bool,
     #[serde(rename = "maxRRTicks")]
     pub max_rr_ticks: i64,
+    /// Source revision/generation for events whose location belongs to a
+    /// versioned source identity. Legacy event streams keep this at zero.
+    #[serde(default)]
+    pub source_generation: i64,
+    /// Optional stable source revision digest.
+    #[serde(default)]
+    pub source_digest: String,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1043,9 +1065,15 @@ pub struct TableRow {
     pub full_path: String,
     pub low_level_location: String,
     pub kind: EventLogKind,
+    #[serde(default)]
+    pub semantic_kind: String,
     pub content: String,
     pub metadata: String,
     pub stdout: bool,
+    #[serde(default)]
+    pub source_generation: i64,
+    #[serde(default)]
+    pub source_digest: String,
 }
 
 impl TableRow {
@@ -1064,10 +1092,13 @@ impl TableRow {
             ),
             low_level_location: event.high_level_path.to_string(),
             kind: event.kind,
+            semantic_kind: event.semantic_kind.clone(),
             content: event.content.to_string(),
             base64_encoded: event.base64_encoded,
             metadata: event.metadata.clone(),
             stdout: event.stdout,
+            source_generation: event.source_generation,
+            source_digest: event.source_digest.clone(),
         }
     }
 }

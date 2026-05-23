@@ -80,16 +80,57 @@ proc selectRow*(vm: EventLogVM; row: Option[int]) =
   ## Set the currently selected row. Pass `none(int)` to clear.
   vm.selectedRow.val = row
 
+proc appendLiveDebuggerStop*(vm: EventLogVM; row: EventLogRow) =
+  ## Add a semantic live debugger-stop row to the ViewModel state.
+  ##
+  ## Persisted event rows still come from the backend; this covers the live
+  ## debugger head where each stop is visible immediately and may later be
+  ## mirrored by backend event loading.
+  var rows = vm.eventRows.val
+  for existing in rows:
+    if existing.eventId == row.eventId and
+       existing.kind == row.kind and
+       existing.sourceGeneration == row.sourceGeneration and
+       existing.sourceDigest == row.sourceDigest:
+      return
+
+  var nextRow = row
+  nextRow.eventIndex = rows.len
+  rows.add(nextRow)
+  vm.eventRows.val = rows
+  vm.totalEventCount.val = rows.len
+
 proc doubleClickRow*(vm: EventLogVM; row: int) =
   ## Navigate to the source location of the event at `row`.
   ## Looks up the event in the VM's event rows and sends a
-  ## navigation command via the backend.
+  ## ProgramEvent-shaped navigation command via the backend.
   let rows = vm.eventRows.val
   if row >= 0 and row < rows.len:
     let event = rows[row]
+    let rrTicks =
+      if event.rrTicks != 0'u64: event.rrTicks
+      else: event.eventId
+    let maxRRTicks =
+      if event.maxRRTicks != 0'u64: event.maxRRTicks
+      else: vm.store.timeline.val.maxRRTicks
     let args = %*{
+      "kind": event.kindId,
+      "content": event.value,
+      "rrEventId": event.eventId,
       "eventId": event.eventId,
+      "highLevelPath": event.file,
+      "highLevelLine": event.line,
+      "metadata": "",
+      "bytes": event.value.len,
+      "stdout": false,
+      "directLocationRRTicks": rrTicks,
+      "tracepointResultIndex": -1,
+      "eventIndex": event.eventIndex,
+      "base64Encoded": false,
+      "maxRRTicks": maxRRTicks,
       "line": event.line,
+      "sourceGeneration": event.sourceGeneration,
+      "sourceDigest": event.sourceDigest,
     }
     vm.store.requestHistoricalNavigation("ct/event-jump", args)
 

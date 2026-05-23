@@ -67,6 +67,16 @@ pub enum ReplayQuery {
     TtdTracepointEvaluate {
         request: TtdTracepointEvalRequest,
     },
+    RestoreAt {
+        geid: u64,
+        tid: Option<u32>,
+        tick: Option<u64>,
+        phase: Option<String>,
+    },
+    GetRecordingHead,
+    SeekToGeid {
+        geid: u64,
+    },
     /// Query the process table from the trace.
     ///
     /// For RR traces, the worker shells out to `rr ps` and returns the parsed

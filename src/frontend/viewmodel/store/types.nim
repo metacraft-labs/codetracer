@@ -202,10 +202,14 @@ type
   EventLogRow* = object
     ## One row in the event-log panel.
     eventId*: uint64
+    eventIndex*: int
+    kindId*: int
     kind*: string
+    file*: string
     line*: int
     value*: string
     rrTicks*: uint64
+    maxRRTicks*: uint64
     sourceGeneration*: int
     sourceDigest*: string
 

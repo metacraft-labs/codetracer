@@ -78,13 +78,18 @@ proc initEditorVM() =
   editorVMInstance = createEditorVM(editorVMStore)
   clog "EditorVM: parallel ViewModel instance created (stub backend)"
 
-proc syncEditorDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+proc syncEditorDebuggerPosition(rrTicks: int, path: cstring, line: int;
+                                sourceGeneration: int = 0;
+                                sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the EditorVM's activeFileName memo sees the updated location.
   if editorVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  editorVMStore.updateDebuggerPosition(ticks, $path, line)
+  editorVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   clog fmt"EditorVM: synced debugger rrTicks={ticks}"
 
 include system/timers
@@ -2293,6 +2298,66 @@ func supportsFlow*(self: EditorViewComponent): bool =
 method onFindOrFilter*(self: EditorViewComponent) {.async.} =
   self.monacoEditor.trigger("keyboard".cstring, "actions.find".cstring)
 
+proc applySourceRevisionForLocation(self: EditorViewComponent;
+                                    location: types.Location) {.async.} =
+  if self.tabInfo.isNil:
+    return
+  let revisionPath = sourceRevisionPath(location)
+  if revisionPath.len == 0:
+    return
+  if revisionPath != self.path and revisionPath != self.name and
+      location.path != self.path and location.path != self.name and
+      not sameSourceRevisionPath(revisionPath, self.path) and
+      not sameSourceRevisionPath(revisionPath, self.name) and
+      not sameSourceRevisionPath(location.path, self.path) and
+      not sameSourceRevisionPath(location.path, self.name):
+    return
+
+  let editorService = self.data.services.editor
+  let tabHasRevisionIdentity = sourceRevisionHasIdentity(self.tabInfo.location)
+  if tabHasRevisionIdentity and
+      sameSourceRevisionPath(sourceRevisionPath(self.tabInfo.location), revisionPath):
+    editorService.cacheSourceRevision(self.tabInfo.location, self.tabInfo.source)
+
+  var desiredSource = cstring""
+  let pendingPath = canonicalSourceRevisionPath(revisionPath)
+  if location.sourceGeneration != 0 and
+      editorService.pendingDiskSourceByPath.hasKey(pendingPath):
+    desiredSource = editorService.pendingDiskSourceByPath[pendingPath]
+    editorService.cacheSourceRevision(location, desiredSource)
+  elif location.sourceGeneration != 0 and
+      editorService.pendingDiskSourceByPath.hasKey(revisionPath):
+    desiredSource = editorService.pendingDiskSourceByPath[revisionPath]
+    editorService.cacheSourceRevision(location, desiredSource)
+  elif editorService.hasSourceRevision(location):
+    desiredSource = editorService.sourceRevisionSource(location)
+  elif location.sourceGeneration != 0:
+    try:
+      let diskSource = await readFileUtf8(revisionPath)
+      if not diskSource.isNil and diskSource.len > 0:
+        desiredSource = diskSource
+        editorService.cacheSourceRevision(location, desiredSource)
+    except:
+      cwarn fmt"source revision: failed to read {revisionPath}: {getCurrentExceptionMsg()}"
+  elif location.sourceGeneration == 0 and
+      sourceRevisionHasIdentity(location) and
+      not tabHasRevisionIdentity:
+    desiredSource = self.tabInfo.source
+    editorService.cacheSourceRevision(location, desiredSource)
+
+  if desiredSource.len == 0:
+    return
+
+  self.tabInfo.location = location
+  if self.tabInfo.source != desiredSource:
+    self.tabInfo.source = desiredSource
+    self.tabInfo.lastSyncedSource = desiredSource
+    self.tabInfo.sourceLines = desiredSource.split(jsNl)
+    self.tabInfo.changed = false
+    self.tabInfo.reloadChange = false
+    if not self.monacoEditor.isNil:
+      self.monacoEditor.setValue(desiredSource)
+
 method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.} =
   # ``[NSS-1.64]`` Diagnostic for the noir-space-ship loop-iteration GUI
   # blocker (§5.8).  Both failing tests (lines 278, 393 in
@@ -2318,10 +2383,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
   syncEditorDebuggerPosition(
     response.location.rrTicks,
     response.location.path,
-    response.location.line)
+    response.location.line,
+    response.location.sourceGeneration,
+    response.location.sourceDigest)
 
   duration("complete move")
   self.location = response.location
+  await self.applySourceRevisionForLocation(response.location)
   # cdebug fmt"reset Flow {response.resetFlow}"
 
   if self.editorView == ViewTargetSource and self.data.trace.lang == LangNim and
@@ -2354,14 +2422,14 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       self.path.split(cstring":")[0]
 
   let moveTargetsEditor =
-    response.location.path == sourceFilePath or
+    sameSourceRevisionPath(response.location.path, sourceFilePath) or
     (response.location.highLevelPath.len > 0 and
-     response.location.highLevelPath == sourceFilePath)
+     sameSourceRevisionPath(response.location.highLevelPath, sourceFilePath))
 
   if moveTargetsEditor:
     self.data.services.debugger.stableBusy = false
     if not response.location.isExpanded:
-      self.service.active = response.location.path
+      self.service.active = canonicalSourceRevisionPath(response.location.path)
     else:
       self.service.active = cstring(&"expanded-{response.location.expansionFirstLine}")
     self.service.changeLine = true

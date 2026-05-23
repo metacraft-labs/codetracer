@@ -447,11 +447,10 @@ export class LayoutPage extends BasePage {
             : fileName;
         const idMatch = idAttr.match(/(\d+)/);
         const idNumber = idMatch ? parseInt(idMatch[1], 10) : -1;
-        const paneRoot = this.page.locator(`#${idAttr}`);
         tabs.push(
           new EditorPane(
             this.page,
-            paneRoot,
+            r,
             tabButtonText,
             idNumber,
             filePath,

@@ -78,13 +78,18 @@ proc initFlowVM() =
   clog "FlowVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimFlowPanel()
 
-proc syncFlowDebuggerPosition(rrTicks: int, path: cstring, line: int) =
+proc syncFlowDebuggerPosition(rrTicks: int, path: cstring, line: int;
+                              sourceGeneration: int = 0;
+                              sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the FlowVM's auto-load effect fires with the updated rrTicks.
   if flowVMStore.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  flowVMStore.updateDebuggerPosition(ticks, $path, line)
+  flowVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
   clog fmt"FlowVM: synced debugger rrTicks={ticks}"
 
 proc jsQuerySelector(selector: cstring): dom_api.Element
@@ -231,7 +236,9 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
     syncFlowDebuggerPosition(
       response.location.rrTicks,
       response.location.path,
-      response.location.line)
+      response.location.line,
+      response.location.sourceGeneration,
+      response.location.sourceDigest)
 
     self.location = response.location
     # The legacy CtLoadFlow emit has been removed.  The
