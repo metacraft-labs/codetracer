@@ -88,6 +88,14 @@ type
     file*: string
     line*: int
     column*: int
+    sourceGeneration*: int
+      ## Source revision/generation for live-HCR and other workflows where
+      ## one filesystem path has multiple recorded contents. Legacy traces
+      ## leave this at 0.
+    sourceDigest*: string
+      ## Optional content digest for the source revision. Empty means the
+      ## backend did not provide a stable digest and the UI falls back to
+      ## path + generation.
     callstackDepth*: int
       ## Live RR traces use this frame depth when jumping from a calltrace row.
       ## Materialized traces can leave it at the default 0 because they jump by
@@ -156,9 +164,16 @@ type
     ## One row in the calltrace panel.
     index*: int64
     name*: string
+    displayName*: string
+      ## Optional display label when two occurrences have the same source
+      ## symbol but should render with generation context. Empty means use
+      ## ``name``.
     depth*: int
     rrTicks*: uint64
     location*: Location
+    codeGeneration*: int
+      ## Executable-code generation for HCR-aware call occurrences. Defaults
+      ## to 0 for legacy traces.
     hasChildren*: bool      ## Whether this call has children that can be expanded
     isExpanded*: bool       ## Whether children are currently shown (collapse toggle visible)
     callKey*: string        ## The call key used by the legacy expand/collapse system
@@ -190,6 +205,9 @@ type
     kind*: string
     line*: int
     value*: string
+    rrTicks*: uint64
+    sourceGeneration*: int
+    sourceDigest*: string
 
   TerminalEventFragment* = object
     ## One text fragment within a terminal-output line.

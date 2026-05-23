@@ -78,6 +78,20 @@ export class EventLogPane {
     return this.root.locator(".eventLog-dense-table tbody tr");
   }
 
+  rowByEventKind(kind: string): Locator {
+    return this.root
+      .locator(`.eventLog-dense-table tbody tr[data-event-kind="${kind}"]`)
+      .first();
+  }
+
+  rowByGeneration(sourceGeneration: number): Locator {
+    return this.root
+      .locator(
+        `.eventLog-dense-table tbody tr[data-source-generation="${sourceGeneration}"]`,
+      )
+      .first();
+  }
+
   async eventElements(forceReload = false): Promise<EventRow[]> {
     if (forceReload || this.events.length === 0) {
       const roots = await this.eventElementRoots().all();

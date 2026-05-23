@@ -265,6 +265,28 @@ export class LayoutPage extends BasePage {
   reverseNextButton(): Locator {
     return this.page.locator("#reverse-next-debug");
   }
+  debugControlsRoot(): Locator {
+    return this.page
+      .locator("#isonim-debug-controls .isonim-debug-controls, .isonim-debug-controls")
+      .first();
+  }
+  toolbarModeText(): Locator {
+    return this.page.locator("#debug-toolbar-mode, .debug-toolbar-mode").first();
+  }
+  recordingHeadIndicator(): Locator {
+    return this.page
+      .locator("#recording-head-indicator, .recording-head-indicator")
+      .first();
+  }
+  jumpToLiveButton(): Locator {
+    return this.page.locator("#jump-to-live-debug, .jump-to-live").first();
+  }
+  async sessionModeAttr(): Promise<string | null> {
+    return this.debugControlsRoot().getAttribute("data-session-mode");
+  }
+  async recordingHeadAttr(): Promise<string | null> {
+    return this.debugControlsRoot().getAttribute("data-recording-head");
+  }
 
   /**
    * Click a debug-toolbar button (next, continue, step-in/out, run-to-entry,

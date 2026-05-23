@@ -185,6 +185,7 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
   let onToggle = onToggleExpand(vm, item)
   ui(r):
     tdiv(class = rowClass(item),
+         `data-variable-name` = item().name,
          padding_left = rowPaddingLeft(item, 16)):
       tdiv(class = atomOrCompoundClass(item)):
         tdiv(class = "value-name-container"):

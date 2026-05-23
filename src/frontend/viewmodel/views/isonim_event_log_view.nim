@@ -118,6 +118,10 @@ template renderEventRowImpl(r, vm, item, index: untyped): untyped =
   let onDblClick = onDoubleClickRow(vm, index)
   ui(r):
     tdiv(class = rowClass(vm, index),
+         `data-event-kind` = item().kind,
+         `data-rr-ticks` = $item().rrTicks,
+         `data-source-generation` = $item().sourceGeneration,
+         `data-source-digest` = item().sourceDigest,
          onclick = onClick, ondblclick = onDblClick):
       span(class = "event-id"):
         text $item().eventId

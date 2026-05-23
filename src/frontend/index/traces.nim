@@ -180,6 +180,20 @@ proc pathExists(path: cstring): bool =
   except:
     return false
 
+proc isExecutableFile(path: cstring): bool =
+  if path.len == 0 or not pathExists(path):
+    return false
+  try:
+    let stat = fs.lstatSync(path)
+    if not cast[bool](stat.isFile()) and not cast[bool](stat.isSymbolicLink()):
+      return false
+    when defined(windows):
+      return true
+    else:
+      return (stat.mode.to(int) and 0o111) != 0
+  except:
+    return false
+
 proc materializedTraceRootHasEntries(trace: Trace; root: string): bool =
   let materializedPath = nodePath.join(trace.outputFolder, cstring"files", cstring(root))
   if not pathExists(materializedPath):
@@ -921,9 +935,17 @@ proc onNewRecord*(sender: js,
       @[cstring"--backend", response.recordBackend]
     else:
       newSeq[cstring]()
-  if not data.trace.lang.usesMaterializedTraces:
-    var buildArg = if response.filename.len > 0:
-        response.filename
+  let selectedRecordTarget =
+    if not response.filename.isNil and response.filename.len > 0:
+      response.filename
+    elif recordArgs.len > 0:
+      recordArgs[0]
+    else:
+      cstring""
+  if not data.trace.lang.usesMaterializedTraces and
+      not isExecutableFile(selectedRecordTarget):
+    var buildArg = if selectedRecordTarget.len > 0:
+        selectedRecordTarget
       else:
         let (rawTracePaths, err) = await fsReadFileWithErr(nodePath.join(data.trace.outputFolder, cstring"paths.json"))
         if not err.isNil:
@@ -970,13 +992,15 @@ proc onNewRecord*(sender: js,
       if lines[^1].startsWith("binary: "):
         let tokens = lines[^1].split(": ", 1)
         let binary = cstring(tokens[1].strip)
-        if recordArgs[0] != binary:
+        if recordArgs.len == 0 or recordArgs[0] != binary:
           recordArgs = @[binary] # assume other args from original trace might be unrelated
     else:
       errorPrint "index: build error: ", buildProcessResult.error
       # sendNewNotification(NotificationKind.NotificationError, "index: build error: " & $JSON.stringify(buildProcessResult.error))
       mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring("index: build error: " & $JSON.stringify(buildProcessResult.error))}
       return
+  elif recordArgs.len == 0 and selectedRecordTarget.len > 0:
+    recordArgs = @[selectedRecordTarget]
 
   let finalRecordArgs = recordBackendArgs.concat(recordArgs)
   infoPrint "index: record with args: ", finalRecordArgs

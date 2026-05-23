@@ -73,6 +73,23 @@ export class CallTracePane {
     return this.root.locator(".call-search-results");
   }
 
+  rowByFunction(functionName: string): Locator {
+    return this.linesContainer()
+      .locator(`[data-function="${functionName}"]`)
+      .first();
+  }
+
+  rowByFunctionAndGeneration(
+    functionName: string,
+    sourceGeneration: number,
+  ): Locator {
+    return this.linesContainer()
+      .locator(
+        `[data-function="${functionName}"][data-source-generation="${sourceGeneration}"]`,
+      )
+      .first();
+  }
+
   async waitForReady(): Promise<void> {
     await retry(
       async () =>

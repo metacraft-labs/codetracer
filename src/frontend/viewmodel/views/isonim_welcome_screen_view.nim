@@ -316,6 +316,8 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               tdiv(class = "new-record-input-row"):
                 input(ref = execInput,
                       `type` = "text",
+                      id = "new-record-executable",
+                      `data-field` = "new-record-executable",
                       class = "ct-input-form ct-fill-available",
                       placeholder = "Local project path",
                       value = vm.newRecord.val.executable)
@@ -328,12 +330,16 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               tdiv(class = "new-record-input-row"):
                 input(ref = argsInput,
                       `type` = "text",
+                      id = "new-record-args",
+                      `data-field` = "new-record-args",
                       class = "ct-input-form ct-fill-available",
                       placeholder = "Command line arguments",
                       value = vm.newRecord.val.args.join(" "))
             if vm.showRecordBackendChoice.val:
               tdiv(class = "new-record-form-row record-backend-row"):
                 select(ref = backendSelect,
+                       id = "new-record-backend",
+                       `data-field` = "new-record-backend",
                        class = "ct-input-form record-backend-select"):
                   for opt in vm.recordBackendOptions.val:
                     let backendValue = opt.backend.recordBackendWireName
@@ -351,6 +357,8 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               tdiv(class = "new-record-input-row"):
                 input(ref = workDirInput,
                       `type` = "text",
+                      id = "new-record-workdir",
+                      `data-field` = "new-record-workdir",
                       class = "ct-input-form ct-fill-available",
                       placeholder = "Working directory",
                       value = vm.newRecord.val.workDir)
@@ -373,6 +381,8 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               tdiv(class = "new-record-input-row"):
                 input(ref = outputInput,
                       `type` = "text",
+                      id = "new-record-output",
+                      `data-field` = "new-record-output",
                       class = "ct-input-form ct-fill-available",
                       placeholder = "Output folder",
                       value =
@@ -391,6 +401,7 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                        backToWelcome(vm, callbacks)):
                 text "Back"
               button(class = "ct-button-sm-primary",
+                     id = "new-record-submit",
                      onclick = proc() =
                        if callbacks.onSubmitNewRecord != nil:
                          callbacks.onSubmitNewRecord()
@@ -643,6 +654,8 @@ when defined(js):
                 tdiv(class = "new-record-input-row"):
                   input(ref = execInput,
                         `type` = "text",
+                        id = "new-record-executable",
+                        `data-field` = "new-record-executable",
                         class = "ct-input-form ct-fill-available",
                         placeholder = "Local project path",
                         value = vm.newRecord.val.executable)
@@ -655,12 +668,16 @@ when defined(js):
                 tdiv(class = "new-record-input-row"):
                   input(ref = argsInput,
                         `type` = "text",
+                        id = "new-record-args",
+                        `data-field` = "new-record-args",
                         class = "ct-input-form ct-fill-available",
                         placeholder = "Command line arguments",
                         value = vm.newRecord.val.args.join(" "))
               if vm.showRecordBackendChoice.val:
                 tdiv(class = "new-record-form-row record-backend-row"):
                   select(ref = backendSelect,
+                         id = "new-record-backend",
+                         `data-field` = "new-record-backend",
                          class = "ct-input-form record-backend-select"):
                     for opt in vm.recordBackendOptions.val:
                       let backendValue = opt.backend.recordBackendWireName
@@ -678,6 +695,8 @@ when defined(js):
                 tdiv(class = "new-record-input-row"):
                   input(ref = workDirInput,
                         `type` = "text",
+                        id = "new-record-workdir",
+                        `data-field` = "new-record-workdir",
                         class = "ct-input-form ct-fill-available",
                         placeholder = "Working directory",
                         value = vm.newRecord.val.workDir)
@@ -697,6 +716,8 @@ when defined(js):
                 tdiv(class = "new-record-input-row"):
                   input(ref = outputInput,
                         `type` = "text",
+                        id = "new-record-output",
+                        `data-field` = "new-record-output",
                         class = "ct-input-form ct-fill-available",
                         placeholder = "Output folder",
                         value =
@@ -715,6 +736,7 @@ when defined(js):
                          backToWelcome(vm, callbacks)):
                   text "Back"
                 button(class = "ct-button-sm-primary",
+                       id = "new-record-submit",
                        onclick = proc() =
                          if callbacks.onSubmitNewRecord != nil:
                            callbacks.onSubmitNewRecord()

@@ -107,6 +107,10 @@ proc paddingForDepth(item: proc(): CallLine; pxPerLevel: int): string =
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
+proc callDisplayName(line: CallLine): string =
+  ## Rendering stays backward-compatible: existing traces use ``name``.
+  if line.displayName.len > 0: line.displayName else: line.name
+
 # ---------------------------------------------------------------------------
 # MockRenderer renderer — simple structure for headless unit tests
 # ---------------------------------------------------------------------------
@@ -153,11 +157,16 @@ proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
   var argsContainer: MockNode
   let row = ui(r):
     tdiv(class = selectedRowClass("calltrace-call-line", vm, item),
+         `data-function` = item().name,
+         `data-source-generation` = $item().location.sourceGeneration,
+         `data-source-digest` = item().location.sourceDigest,
+         `data-code-generation` = $item().codeGeneration,
+         `data-rr-ticks` = $item().rrTicks,
          padding_left = paddingForDepth(item, 16),
          onclick = h.onSelect,
          ondblclick = h.onDblClick):
       span(class = "call-name"):
-        text item().name
+        text callDisplayName(item())
       tdiv(class = "call-args", ref = argsContainer):
         discard
 
@@ -310,7 +319,12 @@ when defined(js):
     let h = rowHandlers(vm, item)
     var argsContainer: isonim_dom.Element
     let row = ui(r):
-      tdiv(class = rowClassWeb(vm, item)):
+      tdiv(class = rowClassWeb(vm, item),
+           `data-function` = item().name,
+           `data-source-generation` = $item().location.sourceGeneration,
+           `data-source-digest` = item().location.sourceDigest,
+           `data-code-generation` = $item().codeGeneration,
+           `data-rr-ticks` = $item().rrTicks):
         span(min_width = $(item().depth * 8) & "px"):
           discard
         tdiv(class = "calltrace-child call-depth"):
@@ -321,7 +335,7 @@ when defined(js):
                 discard
             tdiv(id = "local-call-text-" & $item().index, class = "call-text",
                  onclick = h.onSelect, ondblclick = h.onDblClick):
-              text item().name & " #" & $item().index
+              text callDisplayName(item()) & " #" & $item().index
             tdiv(ref = argsContainer, class = "call-args",
                  id = "call-args-false-" & $item().index):
               discard

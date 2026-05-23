@@ -13,6 +13,9 @@
 ## Derives:
 ## - `activeFileName`: the file name for the currently active tab,
 ##   read from the store's debugger location
+## - `activeSourceGeneration` / `activeSourceDigest`: source revision
+##   identity for workflows where the same file path has multiple recorded
+##   contents, such as live HCR
 ##
 ## Usage:
 ##   let vm = createEditorVM(store)
@@ -39,6 +42,10 @@ type
     ##
     ## Derived memos:
     ##   activeFileName       — file name from the store's debugger location
+    ##   activeSourceGeneration — source revision generation for the active
+    ##                            debugger location
+    ##   activeSourceDigest   — optional content digest for the active source
+    ##                          revision
     ##   executionCursorKind  — semantic cursor kind for live/historical stops
     ##
     ## The store reference is kept for deriving state from the debugger.
@@ -54,6 +61,8 @@ type
 
     # -- Derived state --
     activeFileName*: Memo[string]
+    activeSourceGeneration*: Memo[int]
+    activeSourceDigest*: Memo[string]
     executionCursorKind*: Memo[string]
 
 # ---------------------------------------------------------------------------
@@ -116,6 +125,12 @@ proc createEditorVM*(store: ReplayDataStore): EditorVM =
     let activeFileName = createMemo[string] proc(): string =
       store.debugger.val.location.file
 
+    let activeSourceGeneration = createMemo[int] proc(): int =
+      store.debugger.val.location.sourceGeneration
+
+    let activeSourceDigest = createMemo[string] proc(): string =
+      store.debugger.val.location.sourceDigest
+
     let executionCursorKind = createMemo[string] proc(): string =
       case store.session.val.debugSessionMode
       of liveMcr:
@@ -136,6 +151,8 @@ proc createEditorVM*(store: ReplayDataStore): EditorVM =
       showFlowOverlay: showFlowOverlay,
       showBreakpointGutter: showBreakpointGutter,
       activeFileName: activeFileName,
+      activeSourceGeneration: activeSourceGeneration,
+      activeSourceDigest: activeSourceDigest,
       executionCursorKind: executionCursorKind,
       disposeProc: dispose,
     )

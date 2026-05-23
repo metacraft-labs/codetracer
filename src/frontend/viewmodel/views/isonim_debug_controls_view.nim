@@ -86,7 +86,9 @@ proc renderDebugControlsPanel*(r: MockRenderer;
     headIndicator, jumpLiveBtn: MockNode
 
   let panel = ui(r):
-    tdiv(class = "debug-controls"):
+    tdiv(class = "debug-controls",
+         `data-session-mode` = $vm.store.session.val.debugSessionMode,
+         `data-recording-head` = $vm.store.session.val.recordingHeadRRTicks):
       button(ref = stepBack, class = "step-backward",
              onclick = proc() = vm.stepBackward()):
         text "◀"
@@ -173,7 +175,9 @@ when defined(js):
       headIndicator, jumpLiveBtn: isonim_dom.Element
 
     let panel = ui(r):
-      tdiv(class = "ct-header isonim-debug-controls"):
+      tdiv(class = "ct-header isonim-debug-controls",
+           `data-session-mode` = $vm.store.session.val.debugSessionMode,
+           `data-recording-head` = $vm.store.session.val.recordingHeadRRTicks):
         tdiv(class = "separate-bar"):
           discard
         # -- History navigation --

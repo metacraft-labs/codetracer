@@ -26,6 +26,22 @@ export class EventRow {
     return text ? parseInt(text, 10) || 0 : 0;
   }
 
+  eventKindAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-event-kind");
+  }
+
+  rrTicksAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-rr-ticks");
+  }
+
+  sourceGenerationAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-source-generation");
+  }
+
+  sourceDigestAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-source-digest");
+  }
+
   async index(): Promise<number> {
     const text = await this.root.locator(".eventLog-index").textContent();
     return text ? parseInt(text, 10) || 0 : 0;

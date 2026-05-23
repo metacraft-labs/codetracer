@@ -37,7 +37,14 @@ proc makeCallLine(index: int64; marker: string; generation: int;
     name: PatchableFunction,
     depth: 0,
     rrTicks: rrTicks,
-    location: Location(file: PatchableSource, line: line, column: 0),
+    location: Location(
+      file: PatchableSource,
+      line: line,
+      column: 0,
+      sourceGeneration: generation,
+      sourceDigest: "generation-" & $generation,
+    ),
+    codeGeneration: generation,
     hasChildren: false,
     isExpanded: false,
     callKey: marker & ":" & $generation,
@@ -78,7 +85,13 @@ proc configureLiveSession(app: AppViewModel; rrTicks: uint64) =
 proc publishStop(app: AppViewModel; marker: string; generation: int;
                  line: int; rrTicks: uint64) =
   let store = app.session.store
-  store.updateDebuggerPosition(rrTicks, PatchableSource, line)
+  store.updateDebuggerPosition(
+    rrTicks,
+    PatchableSource,
+    line,
+    sourceGeneration = generation,
+    sourceDigest = "generation-" & $generation,
+  )
   var timeline = store.timeline.val
   timeline.currentRRTicks = rrTicks
   if rrTicks > timeline.maxRRTicks:
@@ -99,12 +112,17 @@ proc assertGenerationVisible(app: AppViewModel; marker: string;
   let session = app.session
   check session.debugControlsVM.toolbarModeText.val == "Live MCR"
   check session.editorVM.activeFileName.val.endsWith("patchable.c")
+  check session.editorVM.activeSourceGeneration.val == generation
+  check session.editorVM.activeSourceDigest.val == "generation-" & $generation
   check session.timelineVM.currentPosition.val == rrTicks
   check session.stateVM.codeStateLine.val.contains(marker)
   check session.stateVM.currentVariables.val.anyIt(
     it.name == "source_generation" and it.value == $generation)
   check session.calltraceVM.visibleLines.val.len == 1
   check session.calltraceVM.visibleLines.val[0].name == PatchableFunction
+  check session.calltraceVM.visibleLines.val[0].codeGeneration == generation
+  check session.calltraceVM.visibleLines.val[0].location.sourceGeneration ==
+    generation
   check session.calltraceVM.visibleLines.val[0].location.line ==
     session.store.debugger.val.location.line
 

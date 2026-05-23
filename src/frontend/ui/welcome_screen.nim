@@ -410,6 +410,7 @@ when defined(js):
         self.syncLegacyWelcomeScreenIntoVM()
         self.data.ipc.send(
             "CODETRACER::new-record", js{
+              filename: self.newRecord.executable,
               args: prepareArgs(self),
               options: js{ cwd: workDir },
               projectOnly: false,

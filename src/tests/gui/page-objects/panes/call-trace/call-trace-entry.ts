@@ -56,6 +56,26 @@ export class CallTraceEntry {
     return (await this.callTextLocator().innerText()).trim();
   }
 
+  dataFunction(): Promise<string | null> {
+    return this.root.getAttribute("data-function");
+  }
+
+  sourceGenerationAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-source-generation");
+  }
+
+  sourceDigestAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-source-digest");
+  }
+
+  codeGenerationAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-code-generation");
+  }
+
+  rrTicksAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-rr-ticks");
+  }
+
   /**
    * Extracts the function name from the call text.
    * Handles Ruby-style "Class#method #N" by finding the last " #N" pattern.

@@ -164,13 +164,14 @@ export class EditorPane {
       },
       { maxAttempts: 60, delayMs: 500 },
     );
-    if (!coords) {
+    const coordsForClick = coords as { x: number; y: number } | null;
+    if (!coordsForClick) {
       throw new Error(
         `Could not resolve source line ${lineNumber} for a click — ` +
           "the editor gutter / view-lines are not laid out yet.",
       );
     }
-    await this.page.mouse.click(coords!.x, coords!.y);
+    await this.page.mouse.click(coordsForClick.x, coordsForClick.y);
   }
 
   gutterElement(lineNumber: number): Locator {
@@ -194,6 +195,26 @@ export class EditorPane {
       ".monaco-editor .view-lines > .view-line.line-flow-hit, " +
         ".monaco-editor .view-lines > .view-line.highlight",
     );
+  }
+
+  sourceGenerationAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-source-generation");
+  }
+
+  sourceDigestAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-source-digest");
+  }
+
+  executionCursorKindAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-execution-cursor-kind");
+  }
+
+  async visibleText(): Promise<string> {
+    return (await this.root.locator(".monaco-editor .view-lines").innerText()).trim();
+  }
+
+  async containsMarker(marker: string): Promise<boolean> {
+    return (await this.visibleText()).includes(marker);
   }
 
   grayedOutLineElementsLocator(): Locator {

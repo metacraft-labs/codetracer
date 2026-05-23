@@ -359,7 +359,9 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
                              rrTicks: uint64;
                              file: string = "";
                              line: int = 0;
-                             geid: Option[uint64] = none(uint64)) =
+                             geid: Option[uint64] = none(uint64);
+                             sourceGeneration: int = 0;
+                             sourceDigest: string = "") =
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
   # Always construct and assign a new DebuggerState so the signal fires.
@@ -377,7 +379,12 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # trigger the signal's equality check (it compares to itself).
   store.debugger.val = DebuggerState(
     rrTicks: rrTicks,
-    location: Location(file: file, line: line),
+    location: Location(
+      file: file,
+      line: line,
+      sourceGeneration: sourceGeneration,
+      sourceDigest: sourceDigest,
+    ),
     status: current.status,
     threadId: current.threadId,
   )

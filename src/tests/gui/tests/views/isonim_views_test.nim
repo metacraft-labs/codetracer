@@ -148,6 +148,38 @@ suite "IsoNim Editor Panel - structure":
 
       dispose()
 
+  test "top-level editor exposes source revision semantics":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      store.debugger.val = DebuggerState(
+        location: Location(
+          file: "src/patchable.c",
+          line: 41,
+          column: 1,
+          sourceGeneration: 2,
+          sourceDigest: "sha256:patchable-gen2",
+        ),
+        rrTicks: 410'u64,
+        status: dsIdle,
+        threadId: 1'u32,
+      )
+      let vm = createEditorVM(store)
+      let r = MockRenderer()
+
+      let panel = renderEditorPanel(
+        r,
+        vm,
+        index = 7,
+        path = "src/patchable.c",
+        isExpansion = false,
+        expansionDepth = 0)
+
+      check panel.attributes["data-execution-cursor-kind"] == "replay"
+      check panel.attributes["data-source-generation"] == "2"
+      check panel.attributes["data-source-digest"] == "sha256:patchable-gen2"
+
+      dispose()
+
   test "expanded editor can reuse Monaco view-zone host id":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -989,11 +1021,13 @@ suite "IsoNim State Panel — variables":
       check "x" in firstText
       check "42" in firstText
       check "int" in firstText
+      check rows[0].attributes["data-variable-name"] == "x"
 
       # Check second variable content
       let secondText = rows[1].textContent
       check "y" in secondText
       check "hello" in secondText
+      check rows[1].attributes["data-variable-name"] == "y"
 
       dispose()
 
@@ -1446,6 +1480,52 @@ suite "IsoNim Calltrace Panel — call lines":
 
       dispose()
 
+  test "call rows expose function and source generation semantics":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      store.updateCalltraceSection(
+        @[
+          CallLine(
+            index: 0,
+            name: "reprobuild_hcr_patchable_value",
+            displayName: "reprobuild_hcr_patchable_value [gen 1]",
+            depth: 0,
+            rrTicks: 300'u64,
+            location: Location(
+              file: "src/patchable.c",
+              line: 61,
+              column: 1,
+              sourceGeneration: 1,
+              sourceDigest: "sha256:patchable-gen1",
+            ),
+            codeGeneration: 1,
+            callKey: "patchable:1",
+          ),
+        ],
+        startIndex = 0'i64,
+        totalCount = 1'u64,
+      )
+
+      vm.setViewportHeight(10)
+
+      let panel = renderCalltracePanel(r, vm)
+      let container = findByClass(panel, "calltrace-lines")
+      let rows = findAllByClass(container, "calltrace-call-line")
+      check rows.len == 1
+      check rows[0].textContent.contains("[gen 1]")
+      check rows[0].attributes["data-function"] ==
+        "reprobuild_hcr_patchable_value"
+      check rows[0].attributes["data-source-generation"] == "1"
+      check rows[0].attributes["data-source-digest"] ==
+        "sha256:patchable-gen1"
+      check rows[0].attributes["data-code-generation"] == "1"
+      check rows[0].attributes["data-rr-ticks"] == "300"
+
+      dispose()
+
   test "depth indentation via padding-left":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -1866,6 +1946,13 @@ suite "IsoNim Debug Controls Panel — structure":
   test "renders root with debug-controls class":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
+      store.session.val = SessionState(
+        connectionStatus: csConnected,
+        debugSessionMode: liveMcr,
+        lastLiveDebugSessionMode: liveMcr,
+        recordingHeadRRTicks: 400'u64,
+        recordingHeadLoadingState: lsIdle,
+      )
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
@@ -1874,6 +1961,8 @@ suite "IsoNim Debug Controls Panel — structure":
       check panel.kind == mnkElement
       check panel.tag == "div"
       check panel.attributes["class"] == "debug-controls"
+      check panel.attributes["data-session-mode"] == "liveMcr"
+      check panel.attributes["data-recording-head"] == "400"
 
       dispose()
 

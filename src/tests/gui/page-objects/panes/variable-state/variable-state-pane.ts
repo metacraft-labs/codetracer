@@ -49,6 +49,14 @@ export class VariableStatePane {
     return this.root.locator("#watch");
   }
 
+  variableRow(name: string): Locator {
+    return this.root.locator(`[data-variable-name="${name}"]`).first();
+  }
+
+  async variableValueText(name: string): Promise<string> {
+    return ((await this.variableRow(name).textContent()) ?? "").trim();
+  }
+
   async programStateVariables(forceReload = false): Promise<ValueComponentView[]> {
     if (forceReload || this.variables.length === 0) {
       const locators = await this.root.locator(".value-expanded").all();
