@@ -219,8 +219,10 @@ test.describe("CodeTracer HMR — full build pipeline", () => {
     expect(page).not.toBeNull();
     const p = page!;
 
-    test.skip(!existsSync(LOADER_CSS_PATH),
-      `loader.css not built at ${LOADER_CSS_PATH}`);
+    expect(
+      existsSync(LOADER_CSS_PATH),
+      `loader.css must be built at ${LOADER_CSS_PATH}; run the normal Tup/Stylus build pipeline before HMR tests`,
+    ).toBe(true);
 
     const stylBackup = captureSource(LOADER_STYL);
 

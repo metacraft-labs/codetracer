@@ -19,6 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 import * as process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import {
   test as base,
@@ -669,6 +670,101 @@ interface LaunchResult {
   consoleErrors: string[];
   /** Collected main-process stderr lines (for diagnostics). */
   mainProcessOutput: string[];
+}
+
+type CoreStylesheetSpec = {
+  name: string;
+  selector: string;
+};
+
+const CORE_ELECTRON_STYLESHEETS: CoreStylesheetSpec[] = [
+  {
+    name: "theme",
+    selector: "link#theme[href*='frontend/styles/']",
+  },
+  {
+    name: "loader",
+    selector: "link[rel='stylesheet'][href*='frontend/styles/loader.css']",
+  },
+];
+
+async function coreStylesheetStatus(page: Page) {
+  const browserStatus = await page.evaluate((specs) => {
+    const links = specs.map((spec) => {
+      const link = document.querySelector(spec.selector) as HTMLLinkElement | null;
+      return {
+        name: spec.name,
+        selector: spec.selector,
+        href: link?.href ?? "",
+        found: !!link,
+      };
+    });
+
+    return {
+      links,
+    };
+  }, CORE_ELECTRON_STYLESHEETS);
+
+  const links = browserStatus.links.map((link) => {
+    let filePath = "";
+    let exists = false;
+    let size = 0;
+    let fileError = "";
+    if (link.href.length > 0) {
+      try {
+        const url = new URL(link.href);
+        url.search = "";
+        url.hash = "";
+        filePath = fileURLToPath(url);
+        const stat = fs.statSync(filePath);
+        exists = stat.isFile();
+        size = stat.size;
+      } catch (error) {
+        fileError = String(error);
+      }
+    }
+    return {
+      ...link,
+      filePath,
+      exists,
+      size,
+      fileError,
+      loaded: link.found && exists && size > 0,
+    };
+  });
+
+  return {
+    ok: links.every((link) => link.loaded),
+    links,
+  };
+}
+
+async function assertCoreElectronStylesLoaded(page: Page): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let status = await coreStylesheetStatus(page);
+  while (!status.ok &&
+      status.links.some((link) => !link.found) &&
+      Date.now() < deadline) {
+    await page.waitForTimeout(100);
+    status = await coreStylesheetStatus(page);
+  }
+
+  if (status.ok) return;
+
+  const missing = status.links
+    .filter((link) => !link.found || !link.loaded)
+    .map((link) =>
+      `${link.name}: found=${link.found} loaded=${link.loaded} href=${link.href || "(missing)"} ` +
+        `file=${link.filePath || "(unresolved)"} exists=${link.exists} size=${link.size} ` +
+        `error=${link.fileError || "(none)"}`,
+    )
+    .join("\n  ");
+
+  throw new Error(
+    "Core CodeTracer Electron stylesheets are missing or empty. " +
+      "This usually means the debug build was created without the Tup/Stylus asset pipeline.\n" +
+      `Missing core styles:\n  ${missing || "(none)"}`,
+  );
 }
 
 /**
@@ -1484,45 +1580,51 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
           throw new Error(`Unknown launch mode: ${launchMode as string}`);
       }
 
-      await use(result.page);
+      try {
+        if (result.electronApp !== null) {
+          await assertCoreElectronStylesLoaded(result.page);
+        }
 
-      // Capture diagnostics on test failure (DOM snapshot, summary, error details)
-      if (testInfo.status !== testInfo.expectedStatus) {
-        try {
-          const url = result.page.url();
-          const bodyText = await result.page.evaluate(() => {
-            const body = document.body;
-            return body ? body.innerHTML.substring(0, 500) : "(no body)";
-          }).catch(() => "(page closed)");
-          console.log(`  FAIL url: ${url}`);
-          console.log(`  FAIL body: ${bodyText}`);
-          // Check if key script files loaded
-          const scriptStatus = await result.page.evaluate(() => {
-            const scripts = Array.from(document.querySelectorAll("script[src]"));
-            return scripts.map((s) => (s as HTMLScriptElement).src).join(", ");
-          }).catch(() => "(page closed)");
-          console.log(`  FAIL scripts: ${scriptStatus}`);
-        } catch { /* page may be closed */ }
-        // Report collected JS errors from the renderer
-        if (result.consoleErrors.length > 0) {
-          console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
-          for (const err of result.consoleErrors.slice(0, 50)) {
-            console.log(`    ${err}`);
+        await use(result.page);
+
+        // Capture diagnostics on test failure (DOM snapshot, summary, error details)
+        if (testInfo.status !== testInfo.expectedStatus) {
+          try {
+            const url = result.page.url();
+            const bodyText = await result.page.evaluate(() => {
+              const body = document.body;
+              return body ? body.innerHTML.substring(0, 500) : "(no body)";
+            }).catch(() => "(page closed)");
+            console.log(`  FAIL url: ${url}`);
+            console.log(`  FAIL body: ${bodyText}`);
+            // Check if key script files loaded
+            const scriptStatus = await result.page.evaluate(() => {
+              const scripts = Array.from(document.querySelectorAll("script[src]"));
+              return scripts.map((s) => (s as HTMLScriptElement).src).join(", ");
+            }).catch(() => "(page closed)");
+            console.log(`  FAIL scripts: ${scriptStatus}`);
+          } catch { /* page may be closed */ }
+          // Report collected JS errors from the renderer
+          if (result.consoleErrors.length > 0) {
+            console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
+            for (const err of result.consoleErrors.slice(0, 50)) {
+              console.log(`    ${err}`);
+            }
           }
-        }
-        // Report main process output (backend-manager, socket, init flow)
-        if (result.mainProcessOutput.length > 0) {
-          console.log(`  FAIL main process output (${result.mainProcessOutput.length} lines):`);
-          for (const line of result.mainProcessOutput.slice(0, 100)) {
-            console.log(`    ${line}`);
+          // Report main process output (backend-manager, socket, init flow)
+          if (result.mainProcessOutput.length > 0) {
+            console.log(`  FAIL main process output (${result.mainProcessOutput.length} lines):`);
+            for (const line of result.mainProcessOutput.slice(0, 100)) {
+              console.log(`    ${line}`);
+            }
+          } else {
+            console.log(`  FAIL main process output: (none captured)`);
           }
-        } else {
-          console.log(`  FAIL main process output: (none captured)`);
+          await captureFailureDiagnostics(result.page, testInfo);
         }
-        await captureFailureDiagnostics(result.page, testInfo);
+      } finally {
+        await result.teardown();
       }
-
-      await result.teardown();
     },
     { scope: "test" },
   ],
