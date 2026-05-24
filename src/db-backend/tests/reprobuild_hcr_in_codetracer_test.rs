@@ -61,6 +61,13 @@ mod macos_arm64_gate {
         "hcr_slot",
         "reprobuild_hcr_generation_id",
         "patchable_gen1_preload",
+        "write-hcr-fixture-metadata",
+        "hcr-fixture-metadata",
+        "REPROBUILD_REPRO_BIN",
+        "REPROBUILD_HCR_PATCHABLE",
+        "section(\"__HCR",
+        "repro_hcr_agent_symbol",
+        "&reprobuild_hcr_patchable_value",
     ];
 
     const REQUIRED_REPROBUILD_PROFILE_REQUIRES: &[&str] = &[
@@ -1051,7 +1058,6 @@ quit\n",
                 "--debounce-ms=100",
                 hcr_socket_arg.as_str(),
                 hcr_artifacts_arg.as_str(),
-                "--hcr-metadata=build/hcr-fixture-metadata.json",
             ])
             .env("REPROBUILD_SOURCE_ROOT", reprobuild_source_root)
             .current_dir(project_dir)

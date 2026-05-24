@@ -210,7 +210,6 @@ export class HcrFixtureDriver {
       "--debounce-ms=100",
       `--hcr-agent-socket=${this.paths.socketPath}`,
       `--hcr-artifacts=${this.paths.artifactsDir}`,
-      "--hcr-metadata=build/hcr-fixture-metadata.json",
     ];
 
     this.reproLogStream = fs.createWriteStream(this.coordinatorLogPath, {

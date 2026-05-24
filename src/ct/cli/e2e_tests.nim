@@ -307,8 +307,7 @@ proc runReprobuildHcrInCodetracer(args: seq[string]): int =
       "--max-cycles=2",
       "--debounce-ms=100",
       "--hcr-agent-socket=" & socketPath,
-      "--hcr-artifacts=" & parsed.artifacts,
-      "--hcr-metadata=build/hcr-fixture-metadata.json"
+      "--hcr-artifacts=" & parsed.artifacts
     ]) & " > " & q(coordinatorLog) & " 2>&1"
     let coordinator = startShell(coordinatorCmd, parsed.project)
     try:

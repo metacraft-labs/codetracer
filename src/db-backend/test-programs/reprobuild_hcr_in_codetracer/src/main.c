@@ -23,12 +23,8 @@ static void write_ready_file(void) {
 }
 
 static void start_hcr_agent_if_configured(void) {
-  static const repro_hcr_agent_symbol symbols[] = {
-      {"reprobuild_hcr_patchable_value", (void *)&reprobuild_hcr_patchable_value},
-  };
   int rc = repro_hcr_agent_start_polling_from_env(
-      "macos-arm64-direct-hcr-in-codetracer-v1", symbols,
-      sizeof(symbols) / sizeof(symbols[0]));
+      "macos-arm64-direct-hcr-in-codetracer-v1", NULL, 0);
   if (rc != 0) {
     fprintf(stderr, "failed to start Reprobuild HCR agent: %d\n", rc);
   }

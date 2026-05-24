@@ -5,12 +5,6 @@
 extern "C" {
 #endif
 
-#if defined(__APPLE__) && defined(__aarch64__)
-#define REPROBUILD_HCR_PATCHABLE __attribute__((noinline, used, visibility("default"), section("__HCR,__text")))
-#else
-#define REPROBUILD_HCR_PATCHABLE __attribute__((noinline, used))
-#endif
-
 int reprobuild_hcr_patchable_value(int iteration);
 
 #ifdef __cplusplus
