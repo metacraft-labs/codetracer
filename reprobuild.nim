@@ -1,4 +1,4 @@
-import std/os
+import std/[os, strutils]
 
 import repro_dsl_stdlib
 
@@ -11,6 +11,90 @@ const PublicResourceRoot = "src/public"
 # getpid/unlink/mkstemp implicit-decl errors to warnings so MinGW's import
 # library can wire the names at link time.
 const
+  CodeTracerDevEnvInputFiles = [
+    ".envrc",
+    ".env",
+    "flake.nix",
+    "flake.lock",
+    "justfile",
+    "nix/pre-commit.nix",
+    "nix/shells/default.nix",
+    "nix/shells/main.nix",
+    "nix/shells/armShell.nix",
+    "node-packages/package.json",
+    "node-packages/yarn.lock",
+    "package.json",
+    "scripts/build.sh",
+    "scripts/build-once.sh",
+    "scripts/detect-siblings.sh",
+    "scripts/developer-setup.sh",
+    "non-nix-build/env.sh",
+    "non-nix-build/windows/setup-codetracer-runtime-env.sh",
+    "src/Tuprules.tup"
+  ]
+  CodeTracerKnownSiblingDirs = [
+    "codetracer-native-backend",
+    "codetracer-rr-backend",
+    "codetracer-native-recorder",
+    "codetracer-native-test-programs",
+    "codetracer-python-recorder",
+    "codetracer-ruby-recorder",
+    "codetracer-js-recorder",
+    "codetracer-beam-recorder",
+    "codetracer-elixir-recorder",
+    "codetracer-shell-recorders",
+    "codetracer-wasm-recorder",
+    "codetracer-trace-format",
+    "codetracer-trace-format-nim",
+    "codetracer-visual-replay",
+    "codetracer-cairo-recorder",
+    "codetracer-cardano-recorder",
+    "codetracer-circom-recorder",
+    "codetracer-evm-recorder",
+    "codetracer-flow-recorder",
+    "codetracer-fuel-recorder",
+    "codetracer-leo-recorder",
+    "codetracer-miden-recorder",
+    "codetracer-move-recorder",
+    "codetracer-polkavm-recorder",
+    "codetracer-solana-recorder",
+    "codetracer-ton-recorder",
+    "codetracer-wasmi-recorder",
+    "nix-blockchain-development",
+    "noir",
+    "runquota",
+    "reprobuild"
+  ]
+  CodeTracerNixSiblingInputs = [
+    ("codetracer-python-recorder", "codetracer-python-recorder"),
+    ("codetracer-ruby-recorder", "codetracer-ruby-recorder"),
+    ("codetracer-js-recorder", "codetracer-js-recorder"),
+    ("codetracer-shell-recorders", "codetracer-shell-recorders"),
+    ("codetracer-wasm-recorder", "wazero"),
+    ("codetracer-trace-format", "codetracer-trace-format"),
+    ("nix-blockchain-development", "nix-blockchain-development"),
+    ("runquota", "runquota"),
+    ("reprobuild", "reprobuild")
+  ]
+  CodeTracerRepoEnvAliases = [
+    ("codetracer-native-backend", "CODETRACER_NATIVE_BACKEND_REPO_PATH"),
+    ("codetracer-rr-backend", "CODETRACER_RR_BACKEND_PATH"),
+    ("codetracer-native-recorder", "CODETRACER_NATIVE_RECORDER_REPO_PATH"),
+    ("codetracer-native-test-programs", "CODETRACER_NATIVE_TEST_PROGRAMS_PATH"),
+    ("codetracer-python-recorder", "CODETRACER_PYTHON_RECORDER_REPO_PATH"),
+    ("codetracer-ruby-recorder", "CODETRACER_RUBY_RECORDER_REPO_PATH"),
+    ("codetracer-js-recorder", "CODETRACER_JS_RECORDER_REPO_PATH"),
+    ("codetracer-beam-recorder", "CODETRACER_BEAM_RECORDER_PATH"),
+    ("codetracer-elixir-recorder", "CODETRACER_ELIXIR_RECORDER_PATH"),
+    ("codetracer-shell-recorders", "CODETRACER_SHELL_RECORDERS_REPO_PATH"),
+    ("codetracer-wasm-recorder", "CODETRACER_WASM_RECORDER_REPO_PATH"),
+    ("codetracer-trace-format", "CODETRACER_TRACE_FORMAT_REPO_PATH"),
+    ("codetracer-trace-format-nim", "CODETRACER_TRACE_FORMAT_NIM_REPO_PATH"),
+    ("codetracer-visual-replay", "CODETRACER_VISUAL_REPLAY_REPO_PATH"),
+    ("nix-blockchain-development", "CODETRACER_NIX_BLOCKCHAIN_DEVELOPMENT_REPO_PATH"),
+    ("runquota", "RUNQUOTA_SRC"),
+    ("reprobuild", "CODETRACER_REPROBUILD_REPO_PATH")
+  ]
   WindowsZlibRoot = "D:/metacraft-dev-deps/zlib/1.3.1"
   WindowsExtraPassC = @[
     "-I" & WindowsZlibRoot & "/include",
@@ -109,12 +193,243 @@ const
     "subwindow"
   ]
 
+proc codeTracerWorkspaceRoot(projectRoot: string): string =
+  for candidate in [projectRoot.parentDir, projectRoot.parentDir.parentDir]:
+    if candidate.len == 0:
+      continue
+    for sibling in CodeTracerKnownSiblingDirs:
+      if dirExists(candidate / sibling):
+        return normalizedPath(candidate)
+
+proc siblingPath(workspaceRoot, repoName: string): string =
+  if workspaceRoot.len == 0:
+    return ""
+  let candidate = normalizedPath(workspaceRoot / repoName)
+  if dirExists(candidate):
+    return candidate
+
+proc metacraftScriptsPath(projectRoot, workspaceRoot: string): string =
+  for candidate in [workspaceRoot, projectRoot.parentDir,
+      projectRoot.parentDir.parentDir]:
+    if candidate.len == 0:
+      continue
+    let scripts = normalizedPath(candidate / "scripts")
+    if dirExists(scripts):
+      return scripts
+
 package codeTracer:
   uses:
+    "bash >=5"
+    "bpftrace >=0"
+    "bpftool >=0"
+    "cachix >=0"
+    "capnp >=0"
+    "cargo >=1"
+    "cargo-nextest >=0"
+    "clang >=1"
+    "ctags >=0"
+    "curl >=0"
+    "dpkg >=0"
+    "electron >=0"
+    "emcc >=0"
+    "flake8 >=0"
     "nim >=1.6 <3.0"
+    "nimble >=0"
     "node >=20"
+    "npx >=0"
     "gcc >=1"
+    "gh >=0"
+    "git >=2"
+    "just >=1"
+    "llvm-config >=0"
+    "mdbook >=0"
+    "nix >=2"
+    "openssl >=0"
+    "pcre-config >=0"
+    "pkg-config >=0"
+    "playwright >=0"
+    "python3 >=3"
+    "rg >=0"
+    "ruby >=0"
+    "rust-analyzer >=0"
+    "rustc >=1"
+    "rustfmt >=1"
+    "rustup >=1"
+    "sh >=1"
+    "shellcheck >=0"
+    "sqlite3 >=0"
     "stylus >=0"
+    "tmux >=0"
+    "tree-sitter >=0"
+    "tup >=0"
+    "vim >=0"
+    "wasm-opt >=0"
+    "wasm-pack >=0"
+    "webpack-cli >=0"
+    "wget >=0"
+    "xdotool >=0"
+    "xvfb-run >=0"
+    "yarn >=1"
+    "zstd >=0"
+
+  devEnv:
+    activity "default"
+    activity "frontend"
+    activity "backend"
+    activity "tests"
+    activity "recorders"
+    activity "docs"
+    activity "bpf"
+
+    let projectRoot = getCurrentDir()
+    let workspaceRoot = codeTracerWorkspaceRoot(projectRoot)
+    var nixOverrideFlags: seq[string] = @[]
+    let workspaceParent = normalizedPath(projectRoot / "..")
+
+    setWorkingDirectory "."
+    providerDirectoryInput("..")
+    if workspaceRoot.len > 0 and workspaceRoot != workspaceParent:
+      providerDirectoryInput(workspaceRoot)
+
+    for inputFile in CodeTracerDevEnvInputFiles:
+      if fileExists(projectRoot / inputFile):
+        discard readDevEnvFile(inputFile)
+
+    setEnv "CODETRACER_REPO_ROOT_PATH", projectRoot
+    setEnv "CODETRACER_PREFIX", projectRoot / "src" / "build-debug"
+    setEnv "CODETRACER_DEV_TOOLS", "0"
+    setEnv "CODETRACER_LOG_LEVEL", "INFO"
+    setEnv "RUST_LOG", "info"
+    setEnv "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS", "true"
+    setEnv "REPROBUILD_USE_SYSTEM_HASH_LIBS", "1"
+    appendPath "NODE_PATH", projectRoot / "node_modules"
+    prependPath "PATH", projectRoot / "node_modules" / ".bin"
+    prependPath "PATH", projectRoot / "src" / "build-debug" / "bin"
+
+    let metacraftScripts = metacraftScriptsPath(projectRoot, workspaceRoot)
+    if metacraftScripts.len > 0:
+      setEnv "METACRAFT_WORKSPACE_PRESENT", "1"
+      setEnv "METACRAFT_WORKSPACE_SCRIPTS", metacraftScripts
+      prependPath "PATH", metacraftScripts
+
+    for (repoName, envName) in CodeTracerRepoEnvAliases:
+      let path = siblingPath(workspaceRoot, repoName)
+      if path.len > 0:
+        setEnv envName, path
+        if repoName == "reprobuild":
+          setEnv "REPROBUILD_SOURCE_ROOT", path
+
+    let nativeReplay = siblingPath(workspaceRoot, "codetracer-native-backend") /
+      "target" / "debug"
+    if fileExists(nativeReplay / "ct-native-replay"):
+      prependPath "PATH", nativeReplay
+
+    let nativeRecorder = siblingPath(workspaceRoot, "codetracer-native-recorder")
+    if fileExists(nativeRecorder / "ct_cli" / "ct_cli"):
+      setEnv "CODETRACER_CT_MCR_CMD",
+        nativeRecorder / "ct_cli" / "ct_cli"
+      prependPath "PATH", nativeRecorder / "ct_cli"
+
+    let pythonRecorder = siblingPath(workspaceRoot, "codetracer-python-recorder")
+    if dirExists(pythonRecorder / "codetracer-python-recorder"):
+      setEnv "CODETRACER_PYTHON_RECORDER_SRC",
+        pythonRecorder / "codetracer-python-recorder"
+      setEnv "CODETRACER_PYTHON_PURE_RECORDER_SRC",
+        pythonRecorder / "codetracer-pure-python-recorder"
+
+    let rubyRecorder = siblingPath(workspaceRoot, "codetracer-ruby-recorder")
+    if dirExists(rubyRecorder / "gems"):
+      setEnv "RUBY_RECORDER_ROOT", rubyRecorder
+      let rubyRecorderBin =
+        rubyRecorder / "gems" / "codetracer-ruby-recorder" / "bin"
+      if fileExists(rubyRecorderBin / "codetracer-ruby-recorder"):
+        prependPath "PATH", rubyRecorderBin
+
+    let jsRecorder = siblingPath(workspaceRoot, "codetracer-js-recorder")
+    if fileExists(jsRecorder / "node_modules" / ".bin" /
+        "codetracer-js-recorder"):
+      prependPath "PATH", jsRecorder / "node_modules" / ".bin"
+
+    let shellRecorders = siblingPath(workspaceRoot, "codetracer-shell-recorders")
+    if dirExists(shellRecorders / "bash-recorder"):
+      prependPath "PATH", shellRecorders / "zsh-recorder"
+      prependPath "PATH", shellRecorders / "bash-recorder"
+
+    let wasmRecorder = siblingPath(workspaceRoot, "codetracer-wasm-recorder")
+    if fileExists(wasmRecorder / "wazero"):
+      prependPath "PATH", wasmRecorder
+
+    let traceFormat = siblingPath(workspaceRoot, "codetracer-trace-format") /
+      "target" / "release"
+    if dirExists(traceFormat):
+      prependPath "LD_LIBRARY_PATH", traceFormat
+
+    let traceFormatNim = siblingPath(workspaceRoot,
+      "codetracer-trace-format-nim")
+    if fileExists(traceFormatNim / "libcodetracer_trace_writer.so"):
+      prependPath "LD_LIBRARY_PATH", traceFormatNim
+
+    for recorderName in [
+        "cairo", "cardano", "circom", "evm", "flow", "fuel", "leo",
+        "miden", "move", "polkavm", "solana", "ton", "native", "wasmi"]:
+      let recorderRepo = siblingPath(workspaceRoot,
+        "codetracer-" & recorderName & "-recorder")
+      let recorderBin = recorderRepo / "target" / "release" /
+        ("codetracer-" & recorderName & "-recorder")
+      if fileExists(recorderBin):
+        prependPath "PATH", recorderRepo / "target" / "release"
+
+    for (repoName, inputName) in CodeTracerNixSiblingInputs:
+      let path = siblingPath(workspaceRoot, repoName)
+      if path.len > 0:
+        nixOverrideFlags.add("--override-input " & inputName & " path:" & path)
+    if nixOverrideFlags.len > 0:
+      setEnv "CODETRACER_NIX_OVERRIDE_FLAGS", nixOverrideFlags.join(" ")
+
+    task "build", command = "just build-once",
+      description = "Build the CodeTracer development binaries"
+    task "watch", command = "just build",
+      description = "Run the continuous development build",
+      activities = ["frontend"]
+    task "nix-develop",
+      command = "nix develop '.?submodules=1' ${CODETRACER_NIX_OVERRIDE_FLAGS:-} -c bash",
+      description = "Enter the Nix shell with the detected sibling overrides"
+    task "test", command = "just test",
+      description = "Run the non-GUI test suite",
+      activities = ["tests"]
+    task "test-gui", command = "just test-gui",
+      description = "Run the Playwright GUI suite under a virtual display",
+      activities = ["tests"]
+    task "test-e2e", command = "just test-e2e",
+      description = "Run the Playwright GUI suite on the current display",
+      activities = ["tests"]
+    task "test-rust", command = "just test-rust",
+      description = "Run db-backend and backend-manager Rust tests",
+      activities = ["tests"]
+    task "db-backend-build", command = "cd src/db-backend && cargo build",
+      description = "Build the Rust db-backend",
+      activities = ["backend"]
+    task "db-backend-clippy",
+      command = "cd src/db-backend && cargo clippy --all-targets -- -D warnings",
+      description = "Run db-backend clippy checks",
+      activities = ["backend"]
+    task "frontend-tests", command = "just test-frontend-js",
+      description = "Run the frontend JavaScript tests",
+      activities = ["tests"]
+    task "storybook", command = "just storybook",
+      description = "Run Storybook",
+      activities = ["frontend"]
+    task "docs", command = "just build-docs",
+      description = "Build the documentation book",
+      activities = ["docs"]
+    task "developer-setup", command = "just developer-setup",
+      description = "Install local development capabilities such as BPF setup",
+      activities = ["bpf"]
+    task "test-bpf", command = "just test-bpf",
+      description = "Run BPF monitor tests",
+      activities = ["bpf"]
+
+    diagnostic "CodeTracer dev environment definition loaded"
 
   build:
     template ctNimJs(definesValue: seq[string];
