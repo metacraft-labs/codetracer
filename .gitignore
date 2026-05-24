@@ -8,6 +8,7 @@ node_modules
 node_modules/
 nimcache/
 .tup/
+.repro/
 .venv/
 .python-recorder-venv/
 build-*/
