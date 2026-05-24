@@ -2,7 +2,9 @@ import std/[os, strutils]
 
 import repro_dsl_stdlib
 
-const PublicResourceRoot = "src/public"
+const
+  BuildDebugRoot = "src/build-debug"
+  PublicResourceRoot = "src/public"
 
 # Windows: extra C/linker flags so the bundled libzip C sources compile under
 # MinGW UCRT (mirror of src/Tuprules.tup's NIM_WINDOWS_CFLAGS / DYNLIB_OVERRIDE_FLAGS
@@ -125,6 +127,10 @@ const
     "chronicles_enabled=off",
     "ctRenderer"
   ]
+  HmrRendererDefines = RendererDefines & @[
+    "ctHmr",
+    "isonimHmr"
+  ]
   NativeDefines = @[
     "chronicles_sinks=json",
     "chronicles_line_numbers=true",
@@ -171,13 +177,6 @@ const
     "libs/jsony/src",
     "libs/nim-uuid4/src"
   ]
-  NativeDynlibOverrides = @[
-    "libcrypto",
-    "libssl",
-    "sqlite3",
-    "pcre",
-    "libzip"
-  ]
   NativePassL = @[
     "-lssl",
     "-lcrypto",
@@ -191,6 +190,24 @@ const
     "default_dark_theme_extension",
     "loader",
     "subwindow"
+  ]
+
+when defined(linux):
+  const NativeDynlibOverrides = @[
+    # Nim 2.2's static OpenSSL wrapper path currently expands to `gimportc`,
+    # which is rejected as an invalid pragma. Keep OpenSSL dynamic on Linux,
+    # while still linking the same libraries through NativePassL.
+    "sqlite3",
+    "pcre",
+    "libzip"
+  ]
+else:
+  const NativeDynlibOverrides = @[
+    "libcrypto",
+    "libssl",
+    "sqlite3",
+    "pcre",
+    "libzip"
   ]
 
 proc codeTracerWorkspaceRoot(projectRoot: string): string =
@@ -216,6 +233,9 @@ proc metacraftScriptsPath(projectRoot, workspaceRoot: string): string =
     let scripts = normalizedPath(candidate / "scripts")
     if dirExists(scripts):
       return scripts
+
+proc buildDebugPath(path: string): string =
+  BuildDebugRoot / path
 
 package codeTracer:
   uses:
@@ -512,7 +532,7 @@ package codeTracer:
     template ctStylus(name: string): BuildActionDef =
       stylus(
         source = "src/frontend/styles/" & name & ".styl",
-        output = "src/frontend/styles/" & name & ".css")
+        output = buildDebugPath("frontend/styles/" & name & ".css"))
 
     let generatedConfigHeader = fs.writeText(
       output = "build/generated/ct_config.h",
@@ -523,8 +543,8 @@ package codeTracer:
     target("build-c-dir", buildCDir)
 
     let ipcRegistryTest = ctNimJs(
-      definesValue = CommonNimDefines & RendererDefines,
-      outputPath = "tests/ipc_registry_test.js",
+      definesValue = CommonNimDefines & HmrRendererDefines,
+      outputPath = buildDebugPath("tests/ipc_registry_test.js"),
       sourcePath = "src/frontend/tests/ipc_registry_test.nim",
       extraInputsValue = @[
         "src/frontend/index/ipc_registry.nim",
@@ -534,44 +554,57 @@ package codeTracer:
       hotCodeReloadingOnValue = true)
     target("nim-js-ipc-registry-test", ipcRegistryTest)
 
+    let reloadReconnectTest = ctNimJs(
+      definesValue = CommonNimDefines & HmrRendererDefines,
+      outputPath = buildDebugPath("tests/reload_reconnect.js"),
+      sourcePath = "src/frontend/tests/test_suites/reload_reconnect.nim",
+      debugInfoOnValue = true,
+      hotCodeReloadingOnValue = true)
+    target("nim-js-reload-reconnect-test", reloadReconnectTest)
+
+    let reloadBootstrapHost = fs.copyFile(
+      source = "src/frontend/tests/test_suites/reload_bootstrap_host.js",
+      output = buildDebugPath("tests/reload_bootstrap_host.js"))
+    target("reload-bootstrap-host-js", reloadBootstrapHost)
+
     let frontendUiJs = ctNimJs(
-      definesValue = CommonNimDefines & RendererDefines,
-      outputPath = "ui.js",
+      definesValue = CommonNimDefines & HmrRendererDefines,
+      outputPath = buildDebugPath("ui.js"),
       sourcePath = "src/frontend/ui_js.nim",
       debugInfoOnValue = true,
       hotCodeReloadingOnValue = true)
     target("frontend-ui-js", frontendUiJs)
 
     let frontendPublicUiJs = fs.copyFile(
-      source = "ui.js",
-      output = "public/ui.js")
+      source = buildDebugPath("ui.js"),
+      output = buildDebugPath("public/ui.js"))
     target("frontend-public-ui-js", frontendPublicUiJs)
 
     let frontendIndexJs = ctNimJs(
       definesValue = CommonNimDefines & @["ctIndex", "nodejs"],
-      outputPath = "index.js",
-      extraOutputsValue = @["index.js.map"],
+      outputPath = buildDebugPath("index.js"),
+      extraOutputsValue = @[buildDebugPath("index.js.map")],
       sourcePath = "src/frontend/index.nim",
       sourcemapOnValue = true)
     target("frontend-index-js", frontendIndexJs)
 
     let frontendSrcIndexJs = fs.copyFile(
-      source = "index.js",
-      output = "src/index.js")
+      source = buildDebugPath("index.js"),
+      output = buildDebugPath("src/index.js"))
     target("frontend-src-index-js", frontendSrcIndexJs)
 
     let frontendServerIndexJs = ctNimJs(
       definesValue = CommonNimDefines & @["ctIndex", "server", "nodejs"],
-      outputPath = "server_index.js",
-      extraOutputsValue = @["server_index.js.map"],
+      outputPath = buildDebugPath("server_index.js"),
+      extraOutputsValue = @[buildDebugPath("server_index.js.map")],
       sourcePath = "src/frontend/index.nim",
       sourcemapOnValue = true)
     target("frontend-server-index-js", frontendServerIndexJs)
 
     let frontendSubwindowJs = ctNimJs(
       definesValue = CommonNimDefines & RendererDefines,
-      outputPath = "subwindow.js",
-      extraOutputsValue = @["subwindow.js.map"],
+      outputPath = buildDebugPath("subwindow.js"),
+      extraOutputsValue = @[buildDebugPath("subwindow.js.map")],
       sourcePath = "src/frontend/subwindow.nim",
       debugInfoOnValue = true,
       sourcemapOnValue = true,
@@ -579,37 +612,42 @@ package codeTracer:
     target("frontend-subwindow-js", frontendSubwindowJs)
 
     let frontendSrcSubwindowJs = fs.copyFile(
-      source = "subwindow.js",
-      output = "src/subwindow.js")
+      source = buildDebugPath("subwindow.js"),
+      output = buildDebugPath("src/subwindow.js"))
     target("frontend-src-subwindow-js", frontendSrcSubwindowJs)
 
     let frontendIndexHtml = fs.copyFile(
       source = "src/frontend/index.html",
-      output = "index.html")
+      output = buildDebugPath("index.html"))
     target("frontend-index-html", frontendIndexHtml)
 
     let frontendSubwindowHtml = fs.copyFile(
       source = "src/frontend/subwindow.html",
-      output = "subwindow.html")
+      output = buildDebugPath("subwindow.html"))
     target("frontend-subwindow-html", frontendSubwindowHtml)
 
+    let frontendRootHelpersJs = fs.copyFile(
+      source = "src/helpers.js",
+      output = buildDebugPath("helpers.js"))
+    target("frontend-helpers-js", frontendRootHelpersJs)
+
     let frontendHelpersJs = fs.copyFile(
-      source = "helpers.js",
-      output = "src/helpers.js")
+      source = buildDebugPath("helpers.js"),
+      output = buildDebugPath("src/helpers.js"))
     target("frontend-src-helpers-js", frontendHelpersJs)
 
     var styleActions: seq[BuildActionDef] = @[]
     for name in StylusCssEntryPoints:
       styleActions.add(ctStylus(name))
     let defaultDarkThemeCss = fs.copyFile(
-      source = "src/frontend/styles/default_dark_theme_extension.css",
-      output = "src/frontend/styles/default_dark_theme.css")
+      source = buildDebugPath("frontend/styles/default_dark_theme_extension.css"),
+      output = buildDebugPath("frontend/styles/default_dark_theme.css"))
     styleActions.add(defaultDarkThemeCss)
     let frontendStyles = aggregate("frontend-styles", actions = styleActions)
 
     let publicResources = fs.preserveTree(
       sourceRoot = PublicResourceRoot,
-      outputRoot = "public")
+      outputRoot = buildDebugPath("public"))
     target("frontend-public-resources", publicResources)
 
     let frontend = aggregate("frontend",
@@ -623,7 +661,10 @@ package codeTracer:
         frontendSrcSubwindowJs,
         frontendIndexHtml,
         frontendSubwindowHtml,
+        frontendRootHelpersJs,
         frontendHelpersJs,
+        reloadReconnectTest,
+        reloadBootstrapHost,
         publicResources
       ],
       targets = @[frontendStyles])
@@ -633,14 +674,14 @@ package codeTracer:
     if fileExists("src/config/default_layout.json"):
       let defaultLayout = fs.copyFile(
         source = "src/config/default_layout.json",
-        output = "config/default_layout.json")
+        output = buildDebugPath("config/default_layout.json"))
       target("config-default-layout-json", defaultLayout)
       codetracerActions.add(defaultLayout)
 
     if fileExists("src/config/default_config.yaml"):
       let defaultConfig = fs.copyFile(
         source = "src/config/default_config.yaml",
-        output = "config/default_config.yaml")
+        output = buildDebugPath("config/default_config.yaml"))
       target("config-default-config-yaml", defaultConfig)
       codetracerActions.add(defaultConfig)
 
@@ -650,14 +691,14 @@ package codeTracer:
       fileExists("src/frontend/subwindow.nim") and
       fileExists("src/frontend/index.html") and
       fileExists("src/frontend/subwindow.html") and
-      fileExists("helpers.js")
+      fileExists("src/helpers.js")
     let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
     let hasCtInput = fileExists("src/ct/codetracer.nim")
 
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(
         nimcachePath = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
-        outputPath = "src/bin/db-backend-record",
+        outputPath = buildDebugPath("bin/db-backend-record"),
         sourcePath = "src/ct/db_backend_record.nim")
       target("db-backend-record", dbBackendRecord)
       codetracerActions.add(dbBackendRecord)
@@ -665,7 +706,7 @@ package codeTracer:
     if fileExists("src/ct/codetracer.nim"):
       let ct = ctNative(
         nimcachePath = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
-        outputPath = "src/bin/ct",
+        outputPath = buildDebugPath("bin/ct"),
         sourcePath = "src/ct/codetracer.nim")
       target("ct", ct)
       codetracerActions.add(ct)
