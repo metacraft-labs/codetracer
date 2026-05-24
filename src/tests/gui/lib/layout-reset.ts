@@ -12,14 +12,20 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-const userLayoutDir = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
-  "codetracer",
-);
+function currentLayoutPaths(): { userLayoutDir: string; userLayoutPath: string; backupPath: string } {
+  const userLayoutDir = path.join(
+    process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
+    "codetracer",
+  );
+  const userLayoutPath = path.join(userLayoutDir, "default_layout.json");
+  return {
+    userLayoutDir,
+    userLayoutPath,
+    backupPath: userLayoutPath + backupSuffix,
+  };
+}
 
-const userLayoutPath = path.join(userLayoutDir, "default_layout.json");
 const backupSuffix = ".backup_build_tests";
-const backupPath = userLayoutPath + backupSuffix;
 
 /**
  * The bundled default layout shipped with the source tree.
@@ -29,11 +35,29 @@ function bundledDefaultLayoutPath(codetracerInstallDir: string): string {
   return path.join(codetracerInstallDir, "src", "config", "default_layout.json");
 }
 
+function bundledDefaultConfigPath(codetracerInstallDir: string): string {
+  return path.join(codetracerInstallDir, "src", "config", "default_config.yaml");
+}
+
+export function ensureDefaultConfig(codetracerInstallDir: string): void {
+  const { userLayoutDir } = currentLayoutPaths();
+  const bundled = bundledDefaultConfigPath(codetracerInstallDir);
+  if (!fs.existsSync(bundled)) {
+    throw new Error(`Bundled default config not found at ${bundled}`);
+  }
+  if (!fs.existsSync(userLayoutDir)) {
+    fs.mkdirSync(userLayoutDir, { recursive: true });
+  }
+  fs.copyFileSync(bundled, path.join(userLayoutDir, ".config.yaml"));
+}
+
 /**
  * Backup the user's layout and replace it with the bundled default.
  * Call this from `test.beforeAll()`.
  */
 export function ensureDefaultLayout(codetracerInstallDir: string): void {
+  const { userLayoutDir, userLayoutPath, backupPath } = currentLayoutPaths();
+
   // Backup existing user layout if present and no backup exists yet.
   if (fs.existsSync(userLayoutPath) && !fs.existsSync(backupPath)) {
     fs.copyFileSync(userLayoutPath, backupPath);
@@ -55,6 +79,8 @@ export function ensureDefaultLayout(codetracerInstallDir: string): void {
  * Call this from `test.afterAll()`.
  */
 export function restoreUserLayout(): void {
+  const { userLayoutPath, backupPath } = currentLayoutPaths();
+
   if (fs.existsSync(backupPath)) {
     fs.copyFileSync(backupPath, userLayoutPath);
     fs.unlinkSync(backupPath);

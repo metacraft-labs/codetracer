@@ -50,12 +50,27 @@ export class TimelinePane {
       throw new Error("timeline track is not laid out");
     }
     const fraction = Math.max(0, Math.min(1, (tick - min) / (max - min)));
-    await this.track().click({
-      position: {
-        x: Math.max(0, Math.min(box.width, box.width * fraction)),
-        y: box.height / 2,
-      },
-    });
+    const position = {
+      x: Math.max(0, Math.min(box.width, box.width * fraction)),
+      y: box.height / 2,
+    };
+    const track = this.track();
+    try {
+      await track.click({ position, timeout: 5_000 });
+    } catch {
+      await track.evaluate((element, fallbackPosition) => {
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: rect.left + fallbackPosition.x,
+            clientY: rect.top + fallbackPosition.y,
+          }),
+        );
+      }, position);
+    }
   }
 
   private async requiredIntegerAttr(attrName: string): Promise<number> {

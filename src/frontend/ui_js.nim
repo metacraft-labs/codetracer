@@ -37,6 +37,11 @@ var pendingDapReplaySelection: JsObject
 var pendingDapLiveSelection: JsObject
 const TAB_LIMIT = 20
 
+proc hideWelcomeScreenSurface() =
+  if not data.ui.welcomeScreen.isNil:
+    data.ui.welcomeScreen.resetView()
+  welcome_screen.clearIsoNimWelcomeScreen()
+
 # ---------------------------------------------------------------------------
 # ViewModel layer — SessionViewModel backed by the real DapApi.
 # Created once in configureMiddleware; the shared store is passed to
@@ -1567,6 +1572,8 @@ proc onTraceLoaded(
   clog "trace loaded"
   # console.log response.withDiff, response.diff, response.rawDiffIndex
 
+  hideWelcomeScreenSurface()
+
   data.trace = response.trace
   requestSessionTabsRender(data)
   data.setEditorsReadOnlyState(true)
@@ -1679,8 +1686,7 @@ proc onStartShellUi*(sender: js, response: jsobject(config=Config)) =
         Content.Shell, data.generateId(Content.Shell)))
   discard shellComponent.createShell()
 
-  if not data.ui.welcomeScreen.isNil:
-    data.ui.welcomeScreen.resetView()
+  hideWelcomeScreenSurface()
 
   if data.ui.menu.isNil:
     discard data.makeMenuComponent()
@@ -1713,8 +1719,7 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
 
   loadTheme(data.config.theme)
 
-  if not data.ui.welcomeScreen.isNil:
-    data.ui.welcomeScreen.resetView()
+  hideWelcomeScreenSurface()
 
   # DeepReview GL layout: VCS panel (left) showing changed files from the
   # review data, DeepReview component (center) rendering the unified diff
@@ -2020,10 +2025,7 @@ proc onNoTrace(
   data.services.debugger.functions = response.functions
   data.ui.menuNode = data.webTechMenu(baseName(response.path))
 
-  # Hide welcome screen if it's currently displayed
-  if not data.ui.welcomeScreen.isNil:
-    data.ui.welcomeScreen.resetView()
-    welcome_screen.clearIsoNimWelcomeScreen()
+  hideWelcomeScreenSurface()
 
   for path in data.services.debugger.paths:
     data.services.search.pathsPrepared.add(fuzzysort.prepare(path))

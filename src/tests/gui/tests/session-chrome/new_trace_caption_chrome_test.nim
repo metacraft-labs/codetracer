@@ -151,6 +151,28 @@ else:
       check showWelcomeIndex < renderWelcomeIndex
       check welcomeBranchIndex < clearIndex
 
+    test "trace and edit session entry clear the global welcome host":
+      let source = readFile(UiJsPath)
+      let helperBody = sectionBetween(source,
+        "proc hideWelcomeScreenSurface() =",
+        "# ---------------------------------------------------------------------------")
+      check helperBody.contains("data.ui.welcomeScreen.resetView()")
+      check helperBody.contains("welcome_screen.clearIsoNimWelcomeScreen()")
+
+      let traceLoadedBody = sectionBetween(source,
+        "proc onTraceLoaded(",
+        "proc onStartShellUi*")
+      let traceLoadedClearIndex =
+        indexOfRequired(traceLoadedBody, "hideWelcomeScreenSurface()")
+      let traceAssignmentIndex =
+        indexOfRequired(traceLoadedBody, "data.trace = response.trace")
+      check traceLoadedClearIndex < traceAssignmentIndex
+
+      let noTraceBody = sectionBetween(source,
+        "proc onNoTrace(",
+        "proc invalidPath(")
+      check noTraceBody.contains("hideWelcomeScreenSurface()")
+
     test "switchSession rebinds debug toolbar bridge for active session":
       let source = readFile(SessionSwitchPath)
       let body = sectionBetween(source,
@@ -263,7 +285,7 @@ else:
       let noTraceBody = sectionBetween(uiSource,
         "proc onNoTrace(",
         "proc invalidPath(")
-      check noTraceBody.contains("welcome_screen.clearIsoNimWelcomeScreen()")
+      check noTraceBody.contains("hideWelcomeScreenSurface()")
       check noTraceBody.contains("filesystem.refreshIsoNimFilesystemPanel()")
       check noTraceBody.contains("vcs.resetAndRefreshVCS(")
       check noTraceBody.contains("vcs.tryMountIsoNimVCSPanel(")

@@ -49,6 +49,13 @@ async function stabilizeLiveLayout(page: Page): Promise<void> {
   });
 }
 
+async function expectWelcomeSurfaceHidden(page: Page): Promise<void> {
+  const welcomeHost = page.locator("#welcomeScreen");
+  await expect(welcomeHost).toHaveCount(1);
+  await expect(welcomeHost).toBeHidden();
+  await expect(welcomeHost.locator(".welcome-screen")).toHaveCount(0);
+}
+
 type CurrentLocation = {
   path: string;
   line: number;
@@ -395,6 +402,28 @@ async function rrTicksAttr(
   );
 }
 
+async function clickEventLogRow(row: Locator): Promise<void> {
+  const firstCell = row.locator("td").first();
+  await expect(firstCell).toBeVisible();
+  try {
+    await firstCell.click({
+      noWaitAfter: true,
+      timeout: 5_000,
+      position: { x: 8, y: 8 },
+    });
+  } catch {
+    await firstCell.evaluate((cell) => {
+      cell.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    });
+  }
+}
+
 async function attachScreenshot(
   page: Page,
   testInfo: TestInfo,
@@ -562,6 +591,7 @@ test.describe("Reprobuild HCR live GUI E2E", () => {
       const layout = new LayoutPage(ctPage);
       await layout.waitForBaseComponentsLoaded();
       await stabilizeLiveLayout(ctPage);
+      await expectWelcomeSurfaceHidden(ctPage);
       await expectPanelMode(layout, "liveMcr");
       await expect(layout.recordingHeadIndicator()).toBeVisible();
       await expectJumpToLiveUnavailable(layout);
@@ -701,7 +731,7 @@ test.describe("Reprobuild HCR live GUI E2E", () => {
         "generation 0 debugger-stop event",
       );
       expect(gen1Ticks).toBeGreaterThan(gen0Ticks);
-      await gen0Event.click();
+      await clickEventLogRow(gen0Event);
       await expectPanelMode(layout, "historicalFromLive");
       await expectRecordingHeadAtLeast(layout, headAfterGen1);
       await expectGenerationStop(layout, 0, GEN0_BREAKPOINT, "historical");

@@ -32,7 +32,7 @@ import { _electron, chromium } from "playwright";
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
 import { requiresRR } from "./lang-support";
-import { ensureDefaultLayout, restoreUserLayout } from "./layout-reset";
+import { ensureDefaultConfig, ensureDefaultLayout, restoreUserLayout } from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
   LIMIT_SMALL_RECORDING_MS,
@@ -61,6 +61,13 @@ const currentDir = path.resolve();
 const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
 const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+const guiTestXdgConfigHome =
+  process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME ??
+  fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-gui-xdg-config-"));
+const ownsGuiTestXdgConfigHome =
+  process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME === undefined;
+process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
 
 const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const envCodetracerPath = process.env.CODETRACER_E2E_CT_PATH ?? "";
@@ -547,6 +554,7 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+  env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
   // Bypass the Electron single-instance lock so that concurrent test runs
   // (or stale Electron processes from previous runs) do not prevent this
   // instance from starting.  With "window" policy the new process always
@@ -1441,15 +1449,25 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
       await use();
       // Kill any backend processes that may have leaked from this worker.
       killStrayCodetracerProcesses();
-      // Restore the user's pre-test layout backup, if any.  Tests in this
-      // worker overwrote ~/.config/codetracer/default_layout.json on every
-      // ctPage launch via ensureDefaultLayout(); the matching restore call
-      // here puts the original back so a developer's interactive session
-      // is not disturbed by the test run.
+      // Restore the worker-local layout backup, if any.  GUI tests run with an
+      // isolated XDG_CONFIG_HOME so layout resets and shutdown saves cannot
+      // disturb a developer's interactive CodeTracer layout.
       try {
         restoreUserLayout();
       } catch (ex) {
         console.warn(`fixtures: restoreUserLayout failed: ${(ex as Error).message}`);
+      }
+      if (ownsGuiTestXdgConfigHome) {
+        try {
+          fs.rmSync(guiTestXdgConfigHome, { recursive: true, force: true });
+        } catch (ex) {
+          console.warn(`fixtures: removing test XDG_CONFIG_HOME failed: ${(ex as Error).message}`);
+        }
+      }
+      if (originalXdgConfigHome === undefined) {
+        delete process.env.XDG_CONFIG_HOME;
+      } else {
+        process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
       }
       // Killing Electron with SIGKILL leaves Playwright's internal CDP
       // pipe handles open, preventing the worker from exiting.  Force
@@ -1486,14 +1504,15 @@ export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
     ) => {
       let result: LaunchResult;
 
-      // Ensure each test starts with the bundled default layout.  Earlier
-      // tests in the same worker may have mutated the saved layout
+      // Ensure each test starts with the bundled default layout in the
+      // worker-local config directory.  Earlier tests in the same worker may
+      // have mutated the saved layout
       // (e.g. auto-hide pin-to-edge, build/problems panel pop-out, layout
       // resilience).  Without this reset, that mutated layout persists
-      // via ~/.config/codetracer/default_layout.json and subsequent tests
-      // see a stale layout that may be missing the components they
-      // require (filesystem, state, etc.).
+      // via default_layout.json and subsequent tests see a stale layout that
+      // may be missing the components they require (filesystem, state, etc.).
       try {
+        ensureDefaultConfig(codetracerInstallDir);
         ensureDefaultLayout(codetracerInstallDir);
       } catch (ex) {
         // Non-fatal: a missing bundled layout file would surface as a
