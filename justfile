@@ -209,7 +209,7 @@ test-reprobuild-hcr-mcr-dap:
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
     --test reprobuild_hcr_mcr_dap_test -- --nocapture
 
-test-reprobuild-hcr-in-codetracer:
+test-reprobuild-hcr-in-codetracer: build-once
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -289,13 +289,12 @@ test-reprobuild-hcr-in-codetracer:
     export DYLD_LIBRARY_PATH="$LLDB_LIB_PATH${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
   fi
 
-  mkdir -p "$repo_root/build/test-bin"
-  nim c -d:ssl -d:useOpenssl3 --mm:refc --threads:on \
-    --path:src --path:src/ct --path:src/common --path:src/langs \
-    --path:src/frontend --path:src/frontend/viewmodel \
-    --nimcache:"${TMPDIR:-/tmp}/ct-nim-cache/reprobuild_hcr_ct" \
-    --out:"$repo_root/build/test-bin/ct" src/ct/codetracer.nim
-  export PATH="$repo_root/build/test-bin:$PATH"
+  ct_bin="$repo_root/src/build-debug/bin/ct"
+  if [ ! -x "$ct_bin" ]; then
+    echo "Error: CodeTracer build did not produce executable ct at $ct_bin" >&2
+    exit 1
+  fi
+  export PATH="$repo_root/src/build-debug/bin:$PATH"
 
   cd src/db-backend
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
