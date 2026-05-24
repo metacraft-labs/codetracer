@@ -44,6 +44,7 @@ mkShell {
 
     gcc
     binutils
+    pkg-config
 
     electron
 

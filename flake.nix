@@ -105,6 +105,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
+      inputs.runquota-src.follows = "runquota";
       flake = true;
     };
 

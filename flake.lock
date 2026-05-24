@@ -1370,6 +1370,23 @@
         "type": "github"
       }
     },
+    "nimcrypto-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1739624651,
+        "narHash": "sha256-Z6oaGzRiai/hLdudDb/VP6euoiEKG6T4sivucfmdFyM=",
+        "owner": "cheatfate",
+        "repo": "nimcrypto",
+        "rev": "69eec0375dd146aede41f920c702c531bfe89c6b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "cheatfate",
+        "repo": "nimcrypto",
+        "rev": "69eec0375dd146aede41f920c702c531bfe89c6b",
+        "type": "github"
+      }
+    },
     "nix": {
       "inputs": {
         "flake-compat": [
@@ -2390,6 +2407,7 @@
         "git-hooks": [
           "git-hooks-nix"
         ],
+        "nimcrypto-src": "nimcrypto-src",
         "nixos-modules": [
           "nix-blockchain-development",
           "nixos-modules"
@@ -2397,14 +2415,16 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "runquota-src": "runquota-src"
+        "runquota-src": [
+          "runquota"
+        ]
       },
       "locked": {
-        "lastModified": 1779312760,
-        "narHash": "sha256-L7lIuEOwWEk7XA5YgWZ+lVhktVzfIESNIziQLabtIbA=",
+        "lastModified": 1779624195,
+        "narHash": "sha256-jUFaL9NGaXY//C5v41PnOUtPgNn85/bVoQsir1vkGus=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "e8e8006523f61d59a6291b8357088479ceef81d7",
+        "rev": "839fe61615a2ec9c1da3180693ebff009fed7761",
         "type": "github"
       },
       "original": {
@@ -2460,28 +2480,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1779102768,
-        "narHash": "sha256-VI5pEEQ0CTd+ChFxmBB2HjdZ1FFwsGBsAvQT/OIgRpo=",
+        "lastModified": 1779612273,
+        "narHash": "sha256-LYZTamcDazX3b8mmNTG8s+sCyhxzMxdsMd+dWOKoxJw=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "b325ca05ae5855b44cd54dec377a58ad36f875d6",
-        "type": "github"
-      },
-      "original": {
-        "owner": "metacraft-labs",
-        "ref": "main",
-        "repo": "runquota",
-        "type": "github"
-      }
-    },
-    "runquota-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1779276001,
-        "narHash": "sha256-LXsc9ZC1MloTk0qcwnwRGFh0MjfiYVSpg1s4nE8wVcg=",
-        "owner": "metacraft-labs",
-        "repo": "runquota",
-        "rev": "cd7bf7a718730578a214745dc82bf93cb9707462",
+        "rev": "6519fe9d2c2113e17743ed637b33a33cd807fb3b",
         "type": "github"
       },
       "original": {

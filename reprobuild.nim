@@ -192,6 +192,15 @@ const
     "subwindow"
   ]
 
+when defined(windows):
+  const
+    ExeSuffix = ".exe"
+    CargoTargetBase = "C:/tmp/codetracer"
+else:
+  const
+    ExeSuffix = ""
+    CargoTargetBase = "/tmp/codetracer"
+
 when defined(linux):
   const NativeDynlibOverrides = @[
     # Nim 2.2's static OpenSSL wrapper path currently expands to `gimportc`,
@@ -534,6 +543,19 @@ package codeTracer:
         source = "src/frontend/styles/" & name & ".styl",
         output = buildDebugPath("frontend/styles/" & name & ".css"))
 
+    template ctShell(actionIdValue, commandValue: string;
+                     extraInputsValue: openArray[string] = [];
+                     extraOutputsValue: openArray[string] = [];
+                     afterValue: openArray[BuildActionDef] = [];
+                     cacheableValue = true): BuildActionDef =
+      shell(
+        command = commandValue,
+        actionId = actionIdValue,
+        extraInputs = extraInputsValue,
+        extraOutputs = extraOutputsValue,
+        after = afterValue,
+        cacheable = cacheableValue)
+
     let generatedConfigHeader = fs.writeText(
       output = "build/generated/ct_config.h",
       text = CtConfigHeader)
@@ -647,26 +669,71 @@ package codeTracer:
 
     let publicResources = fs.preserveTree(
       sourceRoot = PublicResourceRoot,
-      outputRoot = buildDebugPath("public"))
+      outputRoot = buildDebugPath("public"),
+      excludePrefixes = @["dist"])
     target("frontend-public-resources", publicResources)
 
+    var frontendExtraActions: seq[BuildActionDef] = @[]
+    if fileExists("webpack.config.js") and
+        fileExists("src/frontend/frontend_imports.js"):
+      let webpackDist = ctShell(
+        "frontend-webpack-dist",
+        "set -eu\n" &
+        "mkdir -p src/public/dist\n" &
+        "WEBPACK_BIN=node_modules/.bin/webpack\n" &
+        "if [ ! -x \"$WEBPACK_BIN\" ]; then WEBPACK_BIN=webpack-cli; fi\n" &
+        "\"$WEBPACK_BIN\" --progress\n" &
+        "touch " & buildDebugPath(".webpack-dist-built.stamp"),
+        extraInputsValue = @[
+          "webpack.config.js",
+          "package.json",
+          "src/frontend/frontend_imports.js"
+        ],
+        extraOutputsValue = @[
+          "src/public/dist",
+          buildDebugPath(".webpack-dist-built.stamp")
+        ],
+        cacheableValue = false)
+      target("frontend-webpack-dist", webpackDist)
+      frontendExtraActions.add(webpackDist)
+
+      let publicDist = ctShell(
+        "frontend-public-dist",
+        "set -eu\n" &
+        "rm -rf " & buildDebugPath("public/dist") & "\n" &
+        "mkdir -p " & buildDebugPath("public/dist") & "\n" &
+        "cp -a src/public/dist/. " & buildDebugPath("public/dist") & "/\n" &
+        "touch " & buildDebugPath(".public-dist.stamp"),
+        extraInputsValue = @["src/public/dist"],
+        extraOutputsValue = @[
+          buildDebugPath("public/dist"),
+          buildDebugPath(".public-dist.stamp")
+        ],
+        afterValue = @[publicResources, webpackDist],
+        cacheableValue = false)
+      target("frontend-public-dist", publicDist)
+      frontendExtraActions.add(publicDist)
+
+    var frontendActions = @[
+      frontendUiJs,
+      frontendPublicUiJs,
+      frontendIndexJs,
+      frontendSrcIndexJs,
+      frontendServerIndexJs,
+      frontendSubwindowJs,
+      frontendSrcSubwindowJs,
+      frontendIndexHtml,
+      frontendSubwindowHtml,
+      frontendRootHelpersJs,
+      frontendHelpersJs,
+      reloadReconnectTest,
+      reloadBootstrapHost,
+      publicResources
+    ]
+    frontendActions.add(frontendExtraActions)
+
     let frontend = aggregate("frontend",
-      actions = @[
-        frontendUiJs,
-        frontendPublicUiJs,
-        frontendIndexJs,
-        frontendSrcIndexJs,
-        frontendServerIndexJs,
-        frontendSubwindowJs,
-        frontendSrcSubwindowJs,
-        frontendIndexHtml,
-        frontendSubwindowHtml,
-        frontendRootHelpersJs,
-        frontendHelpersJs,
-        reloadReconnectTest,
-        reloadBootstrapHost,
-        publicResources
-      ],
+      actions = frontendActions,
       targets = @[frontendStyles])
 
     var codetracerActions: seq[BuildActionDef] = @[]
@@ -694,6 +761,45 @@ package codeTracer:
       fileExists("src/helpers.js")
     let hasDbBackendRecordInput = fileExists("src/ct/db_backend_record.nim")
     let hasCtInput = fileExists("src/ct/codetracer.nim")
+
+    if fileExists("src/backend-manager/Cargo.toml"):
+      let sessionManager = ctShell(
+        "backend-session-manager",
+        "set -eu\n" &
+        "mkdir -p " & buildDebugPath("bin") & "\n" &
+        "cargo build --locked --release " &
+          "--manifest-path src/backend-manager/Cargo.toml " &
+          "--target-dir " & CargoTargetBase & "/backend_manager_target\n" &
+        "cp " & CargoTargetBase & "/backend_manager_target/release/" &
+          "session-manager" & ExeSuffix & " " &
+          buildDebugPath("bin/session-manager" & ExeSuffix),
+        extraInputsValue = @[
+          "src/backend-manager/Cargo.toml",
+          "src/backend-manager/Cargo.lock"
+        ],
+        extraOutputsValue = @[buildDebugPath("bin/session-manager" & ExeSuffix)])
+      target("session-manager", sessionManager)
+      codetracerActions.add(sessionManager)
+
+    if fileExists("src/db-backend/Cargo.toml"):
+      let replayServer = ctShell(
+        "db-replay-server",
+        "set -eu\n" &
+        "mkdir -p " & buildDebugPath("bin") & "\n" &
+        "cargo build --locked " &
+          "--manifest-path src/db-backend/Cargo.toml " &
+          "--target-dir " & CargoTargetBase & "/db_backend_target\n" &
+        "cp " & CargoTargetBase & "/db_backend_target/debug/" &
+          "replay-server" & ExeSuffix & " " &
+          buildDebugPath("bin/replay-server" & ExeSuffix),
+        extraInputsValue = @[
+          "src/db-backend/Cargo.toml",
+          "src/db-backend/Cargo.lock",
+          "src/db-backend/build.rs"
+        ],
+        extraOutputsValue = @[buildDebugPath("bin/replay-server" & ExeSuffix)])
+      target("replay-server", replayServer)
+      codetracerActions.add(replayServer)
 
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(
