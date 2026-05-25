@@ -201,10 +201,10 @@ else:
     ExeSuffix = ""
     CargoTargetBase = "/tmp/codetracer"
 
-when defined(linux):
+when defined(linux) or defined(macosx):
   const NativeDynlibOverrides = @[
     # Nim 2.2's static OpenSSL wrapper path currently expands to `gimportc`,
-    # which is rejected as an invalid pragma. Keep OpenSSL dynamic on Linux,
+    # which is rejected as an invalid pragma. Keep OpenSSL dynamic on POSIX,
     # while still linking the same libraries through NativePassL.
     "sqlite3",
     "pcre",
@@ -246,11 +246,15 @@ proc metacraftScriptsPath(projectRoot, workspaceRoot: string): string =
 proc buildDebugPath(path: string): string =
   BuildDebugRoot / path
 
+proc nativeLibraryPathEnvName(): string =
+  when defined(macosx):
+    "DYLD_LIBRARY_PATH"
+  else:
+    "LD_LIBRARY_PATH"
+
 package codeTracer:
   uses:
     "bash >=5"
-    "bpftrace >=0"
-    "bpftool >=0"
     "cachix >=0"
     "capnp >=0"
     "cargo >=1"
@@ -258,7 +262,6 @@ package codeTracer:
     "clang >=1"
     "ctags >=0"
     "curl >=0"
-    "dpkg >=0"
     "electron >=0"
     "emcc >=0"
     "flake8 >=0"
@@ -290,16 +293,21 @@ package codeTracer:
     "stylus >=0"
     "tmux >=0"
     "tree-sitter >=0"
-    "tup >=0"
     "vim >=0"
     "wasm-opt >=0"
     "wasm-pack >=0"
     "webpack-cli >=0"
     "wget >=0"
-    "xdotool >=0"
-    "xvfb-run >=0"
     "yarn >=1"
     "zstd >=0"
+    when not defined(macosx):
+      "tup >=0"
+    when defined(linux):
+      "bpftrace >=0"
+      "bpftool >=0"
+      "dpkg >=0"
+      "xdotool >=0"
+      "xvfb-run >=0"
 
   devEnv:
     activity "default"
@@ -354,9 +362,16 @@ package codeTracer:
       prependPath "PATH", nativeReplay
 
     let nativeRecorder = siblingPath(workspaceRoot, "codetracer-native-recorder")
-    if fileExists(nativeRecorder / "ct_cli" / "ct_cli"):
-      setEnv "CODETRACER_CT_MCR_CMD",
+    let nativeRecorderBin =
+      when defined(macosx):
+        if fileExists(nativeRecorder / "ct_cli" / "ct_cli-debug"):
+          nativeRecorder / "ct_cli" / "ct_cli-debug"
+        else:
+          nativeRecorder / "ct_cli" / "ct_cli"
+      else:
         nativeRecorder / "ct_cli" / "ct_cli"
+    if fileExists(nativeRecorderBin):
+      setEnv "CODETRACER_CT_MCR_CMD", nativeRecorderBin
       prependPath "PATH", nativeRecorder / "ct_cli"
 
     let pythonRecorder = siblingPath(workspaceRoot, "codetracer-python-recorder")
@@ -391,12 +406,17 @@ package codeTracer:
     let traceFormat = siblingPath(workspaceRoot, "codetracer-trace-format") /
       "target" / "release"
     if dirExists(traceFormat):
-      prependPath "LD_LIBRARY_PATH", traceFormat
+      prependPath nativeLibraryPathEnvName(), traceFormat
 
     let traceFormatNim = siblingPath(workspaceRoot,
       "codetracer-trace-format-nim")
-    if fileExists(traceFormatNim / "libcodetracer_trace_writer.so"):
-      prependPath "LD_LIBRARY_PATH", traceFormatNim
+    let traceWriterLib =
+      when defined(macosx):
+        "libcodetracer_trace_writer.dylib"
+      else:
+        "libcodetracer_trace_writer.so"
+    if fileExists(traceFormatNim / traceWriterLib):
+      prependPath nativeLibraryPathEnvName(), traceFormatNim
 
     for recorderName in [
         "cairo", "cardano", "circom", "evm", "flow", "fuel", "leo",
@@ -681,7 +701,7 @@ package codeTracer:
         "set -eu\n" &
         "mkdir -p src/public/dist\n" &
         "WEBPACK_BIN=node_modules/.bin/webpack\n" &
-        "if [ ! -x \"$WEBPACK_BIN\" ]; then WEBPACK_BIN=webpack-cli; fi\n" &
+        "if [ ! -x \"$WEBPACK_BIN\" ]; then WEBPACK_BIN=webpack; fi\n" &
         "\"$WEBPACK_BIN\" --progress\n" &
         "touch " & buildDebugPath(".webpack-dist-built.stamp"),
         extraInputsValue = @[
@@ -786,6 +806,10 @@ package codeTracer:
         "db-replay-server",
         "set -eu\n" &
         "mkdir -p " & buildDebugPath("bin") & "\n" &
+        "if [ -f libs/tree-sitter-nim/grammar.js ] && " &
+          "[ ! -f libs/tree-sitter-nim/src/parser.c ]; then\n" &
+        "  (cd libs/tree-sitter-nim && tree-sitter generate)\n" &
+        "fi\n" &
         "cargo build --locked " &
           "--manifest-path src/db-backend/Cargo.toml " &
           "--target-dir " & CargoTargetBase & "/db_backend_target\n" &
@@ -795,7 +819,9 @@ package codeTracer:
         extraInputsValue = @[
           "src/db-backend/Cargo.toml",
           "src/db-backend/Cargo.lock",
-          "src/db-backend/build.rs"
+          "src/db-backend/build.rs",
+          "libs/tree-sitter-nim/grammar.js",
+          "libs/tree-sitter-nim/src/scanner.c"
         ],
         extraOutputsValue = @[buildDebugPath("bin/replay-server" & ExeSuffix)])
       target("replay-server", replayServer)
