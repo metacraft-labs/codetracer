@@ -65,7 +65,6 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		fi
 	fi
 
-	export REPRO_MONITOR_BYPASS="${REPRO_MONITOR_BYPASS:-1}"
 	"$repro_bin" build . \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-nix}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-auto}" \
