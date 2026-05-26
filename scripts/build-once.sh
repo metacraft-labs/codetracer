@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [ "$(uname -s)" = "Darwin" ]; then
 	repro_bin="${REPROBUILD_BIN:-}"
-	reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-${REPROBUILD_SOURCE_ROOT:-}}"
+	reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
 
 	if [ -z "$reprobuild_root" ]; then
 		for candidate in ../reprobuild ../../reprobuild; do
@@ -12,6 +12,11 @@ if [ "$(uname -s)" = "Darwin" ]; then
 				break
 			fi
 		done
+	fi
+
+	if [ -z "$reprobuild_root" ] && [ -n "${REPROBUILD_SOURCE_ROOT:-}" ] &&
+		[[ $REPROBUILD_SOURCE_ROOT != /nix/store/* ]]; then
+		reprobuild_root="$REPROBUILD_SOURCE_ROOT"
 	fi
 
 	if [ -z "$repro_bin" ] && [ -n "$reprobuild_root" ] &&
