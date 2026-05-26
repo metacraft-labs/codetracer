@@ -253,6 +253,8 @@ proc nativeLibraryPathEnvName(): string =
     "LD_LIBRARY_PATH"
 
 package codeTracer:
+  defaultToolProvisioning "nix"
+
   uses:
     "bash >=5"
     "cachix >=0"
