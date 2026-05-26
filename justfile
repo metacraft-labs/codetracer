@@ -391,6 +391,9 @@ build-nix-app-image:
 build-macos-app:
   bash non-nix-build/build.sh
 
+build-dmg:
+  CODETRACER_REPROBUILD_TARGET=.#dmg bash scripts/build-once.sh
+
 build-app-image:
   ./appimage-scripts/build_appimage.sh
 

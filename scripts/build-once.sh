@@ -39,6 +39,55 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
 	fi
 
+	runquotad_pid=""
+	if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
+		runquotad_bin="${RUNQUOTAD_BIN:-}"
+		if [ -z "$runquotad_bin" ]; then
+			for candidate in ../runquota/build/bin/runquotad ../../runquota/build/bin/runquotad; do
+				if [ -x "$candidate" ]; then
+					runquotad_bin="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+					break
+				fi
+			done
+		fi
+		if [ -z "$runquotad_bin" ]; then
+			runquotad_bin="$(command -v runquotad || true)"
+		fi
+		if [ -z "$runquotad_bin" ]; then
+			echo "Error: runquotad is required for Reprobuild builds with RunQuota." >&2
+			echo "Build ../runquota or set RUNQUOTAD_BIN/RUNQUOTA_SOCKET." >&2
+			exit 127
+		fi
+
+		mkdir -p .repro/runquota
+		runquota_socket="${TMPDIR:-/tmp}/codetracer-reprobuild-$$.sock"
+		runquota_log=".repro/runquota/runquotad.log"
+		rm -f "$runquota_socket"
+		"$runquotad_bin" \
+			--socket "$runquota_socket" \
+			--cpu-milli "${CODETRACER_RUNQUOTA_CPU_MILLI:-8000}" \
+			--memory-bytes "${CODETRACER_RUNQUOTA_MEMORY_BYTES:-17179869184}" \
+			--pool console=1 \
+			>"$runquota_log" 2>&1 &
+		runquotad_pid="$!"
+		trap 'if [ -n "$runquotad_pid" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi' EXIT
+		for _ in {1..300}; do
+			if grep -q "runquotad listening" "$runquota_log" 2>/dev/null; then
+				export RUNQUOTA_SOCKET="$runquota_socket"
+				break
+			fi
+			if ! kill -0 "$runquotad_pid" 2>/dev/null; then
+				echo "Error: runquotad exited before becoming ready. See $runquota_log" >&2
+				exit 1
+			fi
+			sleep 0.05
+		done
+		if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
+			echo "Error: runquotad did not become ready. See $runquota_log" >&2
+			exit 1
+		fi
+	fi
+
 	if [ -z "${SDKROOT:-}" ]; then
 		sdkroot="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
 		if [ -n "$sdkroot" ]; then
@@ -70,11 +119,10 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		fi
 	fi
 
-	"$repro_bin" build . \
+	"$repro_bin" build "${CODETRACER_REPROBUILD_TARGET:-.}" \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-nix}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-auto}" \
-		--log="${CODETRACER_REPROBUILD_LOG:-actions}" \
-		--no-runquota
+		--log="${CODETRACER_REPROBUILD_LOG:-actions}"
 	scripts/post-build-setcap.sh src/build-debug/bin/ct
 	exit 0
 fi

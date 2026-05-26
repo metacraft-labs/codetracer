@@ -910,14 +910,67 @@ package codeTracer:
           "  cp \"$CONTENTS/Info.plist\" \"$ELECTRON_APP/Contents/Info.plist\"\n" &
           "  cp \"$RESOURCES/CodeTracer.icns\" \"$ELECTRON_APP/Contents/Resources/\"\n" &
           "  /usr/bin/sed -i '' 's/<string>bin\\/ct/<string>Electron/g' \"$ELECTRON_APP/Contents/Info.plist\"\n" &
-          "fi",
+          "fi\n" &
+          "FRAMEWORKS=\"$CONTENTS/Frameworks\"\n" &
+          "mkdir -p \"$FRAMEWORKS\"\n" &
+          "is_bundle_dep() { case \"$1\" in /nix/store/*|/tmp/*) return 0 ;; *) return 1 ;; esac; }\n" &
+          "copy_bundle_dep() {\n" &
+          "  dep=\"$1\"\n" &
+          "  base=$(basename \"$dep\")\n" &
+          "  dest=\"$FRAMEWORKS/$base\"\n" &
+          "  if [ ! -e \"$dest\" ]; then\n" &
+          "    cp -L \"$dep\" \"$dest\"\n" &
+          "    chmod u+w \"$dest\"\n" &
+          "    printf '%s\\n' \"$dest\" >>\"$FRAMEWORKS/.deps.queue\"\n" &
+          "  fi\n" &
+          "}\n" &
+          "bundle_deps_for() {\n" &
+          "  otool -L \"$1\" 2>/dev/null | awk '/^[[:space:]]*\\/(nix\\/store|tmp)\\// { print $1 }'\n" &
+          "}\n" &
+          ": >\"$FRAMEWORKS/.deps.queue\"\n" &
+          "find \"$MACOS/bin\" -type f -print | while IFS= read -r binary; do\n" &
+          "  [ -x \"$binary\" ] || continue\n" &
+          "  bundle_deps_for \"$binary\" | while IFS= read -r dep; do copy_bundle_dep \"$dep\"; done\n" &
+          "done\n" &
+          "while [ -s \"$FRAMEWORKS/.deps.queue\" ]; do\n" &
+          "  queue=\"$FRAMEWORKS/.deps.queue\"\n" &
+          "  next=\"$FRAMEWORKS/.deps.next\"\n" &
+          "  mv \"$queue\" \"$next\"\n" &
+          "  : >\"$queue\"\n" &
+          "  while IFS= read -r dylib; do\n" &
+          "    bundle_deps_for \"$dylib\" | while IFS= read -r dep; do copy_bundle_dep \"$dep\"; done\n" &
+          "  done <\"$next\"\n" &
+          "  rm -f \"$next\"\n" &
+          "done\n" &
+          "rm -f \"$FRAMEWORKS/.deps.queue\"\n" &
+          "rewrite_macho_deps() {\n" &
+          "  file=\"$1\"\n" &
+          "  prefix=\"$2\"\n" &
+          "  bundle_deps_for \"$file\" | while IFS= read -r dep; do\n" &
+          "    base=$(basename \"$dep\")\n" &
+          "    if [ -e \"$FRAMEWORKS/$base\" ]; then\n" &
+          "      install_name_tool -change \"$dep\" \"$prefix/$base\" \"$file\"\n" &
+          "    fi\n" &
+          "  done\n" &
+          "}\n" &
+          "find \"$MACOS/bin\" -type f -print | while IFS= read -r binary; do\n" &
+          "  [ -x \"$binary\" ] || continue\n" &
+          "  rewrite_macho_deps \"$binary\" '@executable_path/../Frameworks'\n" &
+          "done\n" &
+          "find \"$FRAMEWORKS\" -type f -print | while IFS= read -r dylib; do\n" &
+          "  chmod u+w \"$dylib\"\n" &
+          "  install_name_tool -id \"@rpath/$(basename \"$dylib\")\" \"$dylib\" 2>/dev/null || true\n" &
+          "  rewrite_macho_deps \"$dylib\" '@loader_path'\n" &
+          "done\n" &
+          "codesign -s - --force --deep \"$APP_ROOT\" >/dev/null 2>&1 || true",
           extraInputsValue = @[
             "resources/electron",
             "resources/Icon.iconset",
             "resources/Info.plist",
             "src/ct/version.nim",
             "src/helpers.js",
-            "node_modules"
+            "node_modules",
+            "scripts/build-once.sh"
           ],
           extraOutputsValue = @["non-nix-build/CodeTracer.app"],
           afterValue = codetracerActions & frontendActions & styleActions)
