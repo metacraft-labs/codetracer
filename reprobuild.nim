@@ -712,8 +712,7 @@ package codeTracer:
         extraOutputsValue = @[
           "src/public/dist",
           buildDebugPath(".webpack-dist-built.stamp")
-        ],
-        cacheableValue = false)
+        ])
       target("frontend-webpack-dist", webpackDist)
       frontendExtraActions.add(webpackDist)
 
@@ -729,8 +728,7 @@ package codeTracer:
           buildDebugPath("public/dist"),
           buildDebugPath(".public-dist.stamp")
         ],
-        afterValue = @[publicResources, webpackDist],
-        cacheableValue = false)
+        afterValue = @[webpackDist])
       target("frontend-public-dist", publicDist)
       frontendExtraActions.add(publicDist)
 
