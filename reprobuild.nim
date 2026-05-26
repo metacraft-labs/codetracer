@@ -177,13 +177,6 @@ const
     "libs/jsony/src",
     "libs/nim-uuid4/src"
   ]
-  NativePassL = @[
-    "-lssl",
-    "-lcrypto",
-    "-lsqlite3",
-    "-lpcre",
-    "-lzip"
-  ]
   StylusCssEntryPoints = @[
     "default_white_theme",
     "default_dark_theme_electron",
@@ -217,6 +210,31 @@ else:
     "sqlite3",
     "pcre",
     "libzip"
+  ]
+
+when defined(macosx):
+  const NativePassL = @[
+    "-L/nix/store/3z54dgks2mz3dhwddj158sdibll8xmq5-openssl-3.6.0/lib",
+    "-L/nix/store/dfjhk9hdzfwb5jvhsya30lk1ipz92jr9-sqlite-3.50.4/lib",
+    "-L/nix/store/pim60iwy1hwmrxdgxi5zb4kigswhr88q-pcre-8.45/lib",
+    "-L/nix/store/8g96p6dsssmph0p81g0y4im6sl4i3gd5-libzip-1.11.4/lib",
+    "-Wl,-rpath,/nix/store/3z54dgks2mz3dhwddj158sdibll8xmq5-openssl-3.6.0/lib",
+    "-Wl,-rpath,/nix/store/dfjhk9hdzfwb5jvhsya30lk1ipz92jr9-sqlite-3.50.4/lib",
+    "-Wl,-rpath,/nix/store/pim60iwy1hwmrxdgxi5zb4kigswhr88q-pcre-8.45/lib",
+    "-Wl,-rpath,/nix/store/8g96p6dsssmph0p81g0y4im6sl4i3gd5-libzip-1.11.4/lib",
+    "-lssl",
+    "-lcrypto",
+    "-lsqlite3",
+    "-lpcre",
+    "-lzip"
+  ]
+else:
+  const NativePassL = @[
+    "-lssl",
+    "-lcrypto",
+    "-lsqlite3",
+    "-lpcre",
+    "-lzip"
   ]
 
 proc codeTracerWorkspaceRoot(projectRoot: string): string =
@@ -263,6 +281,7 @@ package codeTracer:
     "cargo-nextest >=0"
     "clang >=1"
     "ctags >=0"
+    "create-dmg >=1"
     "curl >=0"
     "electron >=0"
     "emcc >=0"
@@ -848,6 +867,87 @@ package codeTracer:
         actions = codetracerActions,
         targets = @[frontend])
       defaultBuildAction(codetracer)
+
+      when defined(macosx):
+        let macosApp = ctShell(
+          "macos-app",
+          "set -eu\n" &
+          "APP_ROOT=non-nix-build/CodeTracer.app\n" &
+          "CONTENTS=\"$APP_ROOT/Contents\"\n" &
+          "MACOS=\"$CONTENTS/MacOS\"\n" &
+          "RESOURCES=\"$CONTENTS/Resources\"\n" &
+          "rm -rf \"$APP_ROOT\"\n" &
+          "mkdir -p \"$MACOS\" \"$RESOURCES\"\n" &
+          "cp -a " & buildDebugPath(".") & "/. \"$MACOS\"/\n" &
+          "mkdir -p \"$MACOS/bin\" \"$MACOS/src\"\n" &
+          "cp resources/electron \"$MACOS/bin/electron\"\n" &
+          "cp src/helpers.js \"$MACOS/src/helpers.js\"\n" &
+          "cp src/helpers.js \"$MACOS/helpers.js\"\n" &
+          "if [ -d node_modules ]; then cp -a node_modules \"$MACOS/node_modules\"; fi\n" &
+          "if [ -e \"$MACOS/bin/ct\" ]; then\n" &
+          "  mv \"$MACOS/bin/ct\" \"$MACOS/bin/ct_unwrapped\"\n" &
+          "  cat >\"$MACOS/bin/ct\" <<'EOF'\n" &
+          "#!/usr/bin/env bash\n" &
+          "HERE=$(cd \"$(dirname \"$(dirname \"$0\")\")\" && pwd)\n" &
+          "export CODETRACER_PREFIX=\"$HERE\"\n" &
+          "export PATH=\"$HERE/bin:${PATH}\"\n" &
+          "exec \"$HERE/bin/ct_unwrapped\" \"$@\"\n" &
+          "EOF\n" &
+          "  chmod +x \"$MACOS/bin/ct\"\n" &
+          "fi\n" &
+          "iconutil -c icns resources/Icon.iconset --output \"$RESOURCES/CodeTracer.icns\"\n" &
+          "YEAR=$(sed -n 's/.*CodeTracerYear\\* = //p' src/ct/version.nim | head -n1)\n" &
+          "MONTH=$(printf '%02d' \"$(sed -n 's/.*CodeTracerMonth\\* = //p' src/ct/version.nim | head -n1)\")\n" &
+          "BUILD=$(sed -n 's/.*CodeTracerBuild\\* = //p' src/ct/version.nim | head -n1)\n" &
+          "VERSION=\"$YEAR.$MONTH.$BUILD\"\n" &
+          "cp resources/Info.plist \"$CONTENTS/Info.plist\"\n" &
+          "/usr/bin/sed -i '' \"s/CFBundleShortVersionString.*/CFBundleShortVersionString<\\/key><string>$VERSION<\\/string>/g\" \"$CONTENTS/Info.plist\"\n" &
+          "/usr/bin/sed -i '' \"s/CFBundleVersion.*/CFBundleVersion<\\/key><string>$VERSION<\\/string>/g\" \"$CONTENTS/Info.plist\"\n" &
+          "rm -f \"$CONTENTS/node_modules\"\n" &
+          "ln -s MacOS/node_modules \"$CONTENTS/node_modules\"\n" &
+          "ELECTRON_APP=\"$MACOS/node_modules/electron/dist/Electron.app\"\n" &
+          "if [ -d \"$ELECTRON_APP\" ]; then\n" &
+          "  cp \"$CONTENTS/Info.plist\" \"$ELECTRON_APP/Contents/Info.plist\"\n" &
+          "  cp \"$RESOURCES/CodeTracer.icns\" \"$ELECTRON_APP/Contents/Resources/\"\n" &
+          "  /usr/bin/sed -i '' 's/<string>bin\\/ct/<string>Electron/g' \"$ELECTRON_APP/Contents/Info.plist\"\n" &
+          "fi",
+          extraInputsValue = @[
+            "resources/electron",
+            "resources/Icon.iconset",
+            "resources/Info.plist",
+            "src/ct/version.nim",
+            "src/helpers.js",
+            "node_modules"
+          ],
+          extraOutputsValue = @["non-nix-build/CodeTracer.app"],
+          afterValue = codetracerActions & frontendActions & styleActions)
+        target("macos-app", macosApp)
+
+        let macosDmg = ctShell(
+          "macos-dmg",
+          "set -eu\n" &
+          "cd non-nix-build\n" &
+          "rm -f CodeTracer.dmg\n" &
+          "DMG_STAGING=$(mktemp -d)\n" &
+          "trap 'rm -rf \"$DMG_STAGING\"' EXIT\n" &
+          "cp -R CodeTracer.app \"$DMG_STAGING/\"\n" &
+          "create-dmg " &
+            "--volname CodeTracer " &
+            "--background dmg_background.png " &
+            "--window-pos 200 120 " &
+            "--window-size 600 400 " &
+            "--icon-size 100 " &
+            "--icon CodeTracer.app 150 200 " &
+            "--app-drop-link 450 200 " &
+            "--sandbox-safe " &
+            "CodeTracer.dmg \"$DMG_STAGING\"",
+          extraInputsValue = @[
+            "non-nix-build/CodeTracer.app",
+            "non-nix-build/dmg_background.png"
+          ],
+          extraOutputsValue = @["non-nix-build/CodeTracer.dmg"],
+          afterValue = @[macosApp])
+        target("dmg", macosDmg)
 
     let cSudokuObjectTup = gcc(
       source = "test-programs/c_sudoku_solver/main.c",
