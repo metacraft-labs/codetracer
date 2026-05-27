@@ -13,7 +13,8 @@ type
 
   InMemoryMessageKind* = enum
     imkViewOp,
-    imkJoinSnapshot
+    imkJoinSnapshot,
+    imkBackendSnapshot
 
   InMemoryRoomMessage* = object
     kind*: InMemoryMessageKind
@@ -21,6 +22,7 @@ type
     toPeerId*: InMemoryPeerId
     op*: ViewOpEnvelope
     snapshot*: SharedSessionSnapshot
+    backendSnapshot*: BackendDataSnapshotEnvelope
     tail*: seq[ViewOpEnvelope]
 
   InMemoryDelivery* = object
@@ -104,6 +106,16 @@ proc enqueueJoinSnapshot*(room: InMemoryRoomTransport;
     toPeerId: toPeerId,
     snapshot: snapshot,
     tail: tail,
+  )
+
+proc enqueueBackendSnapshot*(room: InMemoryRoomTransport;
+                             fromPeerId, toPeerId: InMemoryPeerId;
+                             snapshot: BackendDataSnapshotEnvelope) =
+  room.enqueue InMemoryRoomMessage(
+    kind: imkBackendSnapshot,
+    fromPeerId: fromPeerId,
+    toPeerId: toPeerId,
+    backendSnapshot: snapshot,
   )
 
 proc duplicatePending*(room: InMemoryRoomTransport; index: int) =

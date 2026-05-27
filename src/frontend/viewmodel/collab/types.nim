@@ -18,6 +18,10 @@ type
   CapabilityGrantId* = string
   DriverLeaseId* = string
 
+  PrincipalKind* = enum
+    pkUser,
+    pkService
+
   CapabilityKind* = enum
     capObserve,
     capPublishAwareness,
@@ -92,6 +96,19 @@ type
   SessionAuthority* = object
     principalId*: PrincipalId
     backendOwnerId*: PrincipalId
+
+  PrincipalDescriptor* = object
+    id*: PrincipalId
+    kind*: PrincipalKind
+    displayName*: string
+
+  ActorDescriptor* = object
+    id*: ActorId
+    principalId*: PrincipalId
+
+  ReplicaDescriptor* = object
+    id*: SessionReplicaId
+    actorId*: ActorId
 
   CapabilityGrant* = object
     id*: CapabilityGrantId
@@ -171,6 +188,14 @@ type
     backendEpoch*: uint64
     payload*: JsonNode
 
+  BackendDataSnapshotEnvelope* = object
+    sessionId*: string
+    backendOwnerId*: PrincipalId
+    emittedByPrincipalId*: PrincipalId
+    family*: string
+    backendEpoch*: uint64
+    payload*: JsonNode
+
   SharedSessionViewState* = object
     schemaVersion*: int
     traceIdentity*: string
@@ -178,6 +203,9 @@ type
     revision*: uint64
     activeSessionId*: LwwStringRegister
     authority*: SessionAuthority
+    principals*: seq[PrincipalDescriptor]
+    actors*: seq[ActorDescriptor]
+    replicas*: seq[ReplicaDescriptor]
     capabilityGrants*: seq[CapabilityGrant]
     activeDriver*: DriverRegister
     closedDriverLeases*: seq[DriverLeaseId]
@@ -229,7 +257,7 @@ proc initSharedSessionViewState*(
     traceIdentity = "";
     authorityPrincipalId = "";
     backendOwnerId = ""): SharedSessionViewState =
-  SharedSessionViewState(
+  result = SharedSessionViewState(
     schemaVersion: CurrentCollabSchemaVersion,
     traceIdentity: traceIdentity,
     sessionId: sessionId,
@@ -239,6 +267,18 @@ proc initSharedSessionViewState*(
       backendOwnerId: backendOwnerId,
     ),
   )
+  if authorityPrincipalId.len > 0:
+    result.principals.add PrincipalDescriptor(
+      id: authorityPrincipalId,
+      kind: pkUser,
+      displayName: authorityPrincipalId,
+    )
+  if backendOwnerId.len > 0 and backendOwnerId != authorityPrincipalId:
+    result.principals.add PrincipalDescriptor(
+      id: backendOwnerId,
+      kind: pkService,
+      displayName: backendOwnerId,
+    )
 
 proc initSharedSessionDocument*(
     sessionId = "";

@@ -2,11 +2,12 @@
 ##
 ##   nim c -r src/frontend/viewmodel/tests/integration/test_collab_headless.nim
 
-import std/[json, options, sets, unittest]
+import std/[json, options, sequtils, sets, unittest]
 
 import isonim/core/signals
 
-import ../../collab/[reducer, runtime_role, types]
+import ../../backend/mock_backend
+import ../../collab/[authority, reducer, runtime_role, types]
 import ../../viewmodels/state_vm
 import collab_headless_harness
 
@@ -168,5 +169,61 @@ suite "collaborative ViewModel M3 headless peers":
       check not harness.acceptedLog.containsOp("intruder:1")
       check harness.canonicalAuthorityState == beforeState
       check harness.pendingCount == 0
+    finally:
+      harness.dispose()
+
+  test "integration_collab_mock_backend_step_broadcasts_debugger_snapshot":
+    let harness = makeTwoPeerHarness()
+    try:
+      let peerB = harness.findPeer("peer-b")
+      harness.grantPeerCapabilities(
+        peerB,
+        capabilities = @[capControlDebugger],
+        targetPaths = @["activeDriver", "debugger.commands"])
+      harness.deliverAll()
+
+      let grantDriver = harness.forgedOp(
+        principalId = harness.authorityPrincipalId,
+        actorId = harness.authorityActorId,
+        opId = "authority-grant-driver-peer-b",
+        kind = vokGrantDriver,
+        targetPath = "activeDriver",
+        payload = %*{
+          "principalId": peerB.principalId,
+          "leaseId": "lease-peer-b",
+        })
+      check harness.submitToAuthority("authority", grantDriver).status == asApplied
+      harness.deliverAll()
+      harness.findPeer("owner").mockBackend.clearReceivedCommands()
+
+      var step = harness.forgedOp(
+        principalId = peerB.principalId,
+        actorId = peerB.actorId,
+        opId = "peer-b-step-next",
+        kind = vokDebugCommand,
+        targetPath = "debugger.commands",
+        payload = %*{
+          "command": "next",
+          "leaseId": "lease-peer-b",
+          "args": {"threadId": 1},
+        })
+      step.capabilityIds = @["grant-" & peerB.id]
+
+      let result = harness.submitToAuthority(peerB.id, step)
+      harness.deliverAll()
+
+      check result.status != asRejected
+      check harness.backendCommandAuthority.acceptedCommands.len == 1
+      check harness.backendCommandAuthority.acceptedCommands[0].command == "next"
+      let stepCommands = harness.findPeer("owner").mockBackend.receivedCommands.
+        filterIt(it.command == "next")
+      check stepCommands.len == 1
+      check harness.authorityDocument.state.backendSnapshots.len == 1
+      check harness.authorityDocument.state.backendSnapshots[0].family == "debugger"
+      check harness.authorityDocument.state.backendSnapshots[0].backendEpoch == 1'u64
+      check harness.findPeer("owner").session.store.debugger.val.rrTicks == 1'u64
+      check peerB.session.store.debugger.val.rrTicks == 1'u64
+      checkConverged(harness)
+      check harness.backendCommandAuthority.auditLog[^1].kind == aekDebugCommandAccepted
     finally:
       harness.dispose()

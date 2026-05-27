@@ -131,6 +131,44 @@ proc parseCapabilityGrant(node: JsonNode): CapabilityGrant =
   for pathNode in node{"targetPaths"}.getElems(@[]):
     result.targetPaths.add pathNode.getStr("")
 
+proc toJson*(principal: PrincipalDescriptor): JsonNode =
+  %*{
+    "id": principal.id,
+    "kind": $principal.kind,
+    "displayName": principal.displayName,
+  }
+
+proc parsePrincipalDescriptor(node: JsonNode): PrincipalDescriptor =
+  PrincipalDescriptor(
+    id: node{"id"}.getStr(""),
+    kind: parseEnumValue(node{"kind"}.getStr(""), pkUser),
+    displayName: node{"displayName"}.getStr(""),
+  )
+
+proc toJson*(actor: ActorDescriptor): JsonNode =
+  %*{
+    "id": actor.id,
+    "principalId": actor.principalId,
+  }
+
+proc parseActorDescriptor(node: JsonNode): ActorDescriptor =
+  ActorDescriptor(
+    id: node{"id"}.getStr(""),
+    principalId: node{"principalId"}.getStr(""),
+  )
+
+proc toJson*(replica: ReplicaDescriptor): JsonNode =
+  %*{
+    "id": replica.id,
+    "actorId": replica.actorId,
+  }
+
+proc parseReplicaDescriptor(node: JsonNode): ReplicaDescriptor =
+  ReplicaDescriptor(
+    id: node{"id"}.getStr(""),
+    actorId: node{"actorId"}.getStr(""),
+  )
+
 proc toJson*(watch: SharedWatch): JsonNode =
   %*{
     "id": watch.id,
@@ -245,6 +283,15 @@ proc toJson*(state: SharedSessionViewState): JsonNode =
   var grants = newJArray()
   for grant in state.capabilityGrants:
     grants.add grant.toJson
+  var principals = newJArray()
+  for principal in state.principals:
+    principals.add principal.toJson
+  var actors = newJArray()
+  for actor in state.actors:
+    actors.add actor.toJson
+  var replicas = newJArray()
+  for replica in state.replicas:
+    replicas.add replica.toJson
   var layout = newJArray()
   for panel in state.layout:
     layout.add panel.toJson
@@ -277,6 +324,9 @@ proc toJson*(state: SharedSessionViewState): JsonNode =
       "principalId": state.authority.principalId,
       "backendOwnerId": state.authority.backendOwnerId,
     },
+    "principals": principals,
+    "actors": actors,
+    "replicas": replicas,
     "capabilityGrants": grants,
     "activeDriver": state.activeDriver.toJson,
     "closedDriverLeases": jsonArray(state.closedDriverLeases),
@@ -311,6 +361,12 @@ proc parseSharedSessionViewState*(node: JsonNode): SharedSessionViewState =
     principalId: node{"authority"}{"principalId"}.getStr(""),
     backendOwnerId: node{"authority"}{"backendOwnerId"}.getStr(""),
   )
+  for principal in node{"principals"}.getElems(@[]):
+    result.principals.add parsePrincipalDescriptor(principal)
+  for actor in node{"actors"}.getElems(@[]):
+    result.actors.add parseActorDescriptor(actor)
+  for replica in node{"replicas"}.getElems(@[]):
+    result.replicas.add parseReplicaDescriptor(replica)
   result.activeDriver = parseDriverRegister(node{"activeDriver"})
   for leaseId in node{"closedDriverLeases"}.getElems(@[]):
     result.closedDriverLeases.add leaseId.getStr("")

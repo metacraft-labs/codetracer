@@ -11,7 +11,15 @@ import std/[algorithm, asyncdispatch, json, options, sequtils, sets]
 import isonim/core/signals
 
 import ../../backend/mock_backend
-import ../../collab/[codec, reducer, runtime_role, session_core, types]
+import ../../collab/[
+  authority,
+  backend_snapshots,
+  codec,
+  reducer,
+  runtime_role,
+  session_core,
+  types,
+]
 import ../../collab/transport/in_memory
 import ../../session_vm
 import ../../viewmodels/[calltrace_vm, state_vm]
@@ -27,6 +35,12 @@ type
     opId*: ViewOpId
     result*: ApplyResult
 
+  HeadlessPeerSnapshotEvent* = object
+    peerId*: string
+    family*: string
+    backendEpoch*: uint64
+    result*: ApplyResult
+
   HeadlessPeer* = ref object
     id*: string
     principalId*: PrincipalId
@@ -36,6 +50,7 @@ type
     mockBackend*: MockBackendService
     lastPublishedLocalOp*: int
     receivedOps*: seq[HeadlessPeerApplyEvent]
+    receivedBackendSnapshots*: seq[HeadlessPeerSnapshotEvent]
 
   ProjectedSignalsSnapshot* = object
     calltraceSelection*: Option[int64]
@@ -55,6 +70,8 @@ type
     authoritySeq*: uint64
     authorityLamport*: uint64
     authorityDocument*: SharedSessionDocument
+    backendCommandAuthority*: BackendCommandAuthority
+    backendEpoch*: uint64
     transport*: InMemoryRoomTransport
     peers*: seq[HeadlessPeer]
     acceptedLog*: seq[ViewOpEnvelope]
@@ -170,6 +187,20 @@ proc receiveMessage(harness: CollabHeadlessHarness;
       )
       harness.protocolLog.add "deliver tail op " & op.opId & " to " &
         peerId & " => " & $result.status
+  of imkBackendSnapshot:
+    let result = peer.session.collabCore.document.applyAndProjectBackendSnapshot(
+      peer.session.store,
+      message.backendSnapshot)
+    peer.receivedBackendSnapshots.add HeadlessPeerSnapshotEvent(
+      peerId: peerId,
+      family: message.backendSnapshot.family,
+      backendEpoch: message.backendSnapshot.backendEpoch,
+      result: result,
+    )
+    harness.protocolLog.add "deliver backend snapshot " &
+      message.backendSnapshot.family & "@" &
+      $message.backendSnapshot.backendEpoch & " to " & peerId &
+      " => " & $result.status
 
 proc newCollabHeadlessHarness*(
     sessionId = "headless-m3-session";
@@ -189,6 +220,8 @@ proc newCollabHeadlessHarness*(
       authorityPrincipalId = authorityPrincipalId,
       backendOwnerId = backendOwnerId,
     ),
+    backendCommandAuthority: newBackendCommandAuthority(backendOwnerId, nil),
+    backendEpoch: 0'u64,
     transport: newInMemoryRoomTransport(),
     peers: @[],
     acceptedLog: @[],
@@ -245,6 +278,8 @@ proc addPeer*(harness: CollabHeadlessHarness;
     ).snapshot)
 
   harness.peers.add result
+  if principal == harness.backendOwnerId:
+    harness.backendCommandAuthority.backend = mock.toBackendService()
   harness.transport.registerPeer(peerId, proc(message: InMemoryRoomMessage) =
     harness.receiveMessage(peerId, message))
   harness.protocolLog.add "peer joined transport " & peerId
@@ -277,10 +312,22 @@ proc broadcastAccepted(harness: CollabHeadlessHarness;
   for peer in harness.peers:
     harness.transport.enqueueViewOp(fromPeerId, peer.id, op)
 
+proc emitDebuggerSnapshot*(harness: CollabHeadlessHarness;
+                           rrTicks: uint64;
+                           status = "dsIdle";
+                           file = "main.nim";
+                           line = 1): ApplyResult
+
 proc submitToAuthority*(harness: CollabHeadlessHarness;
                         fromPeerId: string;
                         op: ViewOpEnvelope): ApplyResult =
-  result = harness.authorityDocument.applyViewOp(op)
+  if op.kind == vokDebugCommand:
+    result = harness.backendCommandAuthority.submitDebugCommand(
+      harness.authorityDocument,
+      op)
+  else:
+    result = harness.authorityDocument.applyViewOp(op)
+    harness.backendCommandAuthority.auditViewOp(op, result)
   let event = HeadlessAuthorityEvent(
     fromPeerId: fromPeerId,
     op: op,
@@ -296,6 +343,45 @@ proc submitToAuthority*(harness: CollabHeadlessHarness;
   if result.status != asDuplicate and not harness.acceptedLog.containsOp(op.opId):
     harness.acceptedLog.add op
     harness.broadcastAccepted(fromPeerId, op)
+    if op.kind == vokDebugCommand:
+      let current = harness.authorityDocument.state.backendSnapshots
+      var nextTicks = 1'u64
+      for snapshot in current:
+        if snapshot.family == "debugger":
+          nextTicks = snapshot.payload{"rrTicks"}.getBiggestInt.uint64 + 1'u64
+      discard harness.emitDebuggerSnapshot(nextTicks)
+
+proc broadcastBackendSnapshot*(harness: CollabHeadlessHarness;
+                               fromPeerId: string;
+                               snapshot: BackendDataSnapshotEnvelope) =
+  for peer in harness.peers:
+    harness.transport.enqueueBackendSnapshot(fromPeerId, peer.id, snapshot)
+
+proc emitDebuggerSnapshot*(harness: CollabHeadlessHarness;
+                           rrTicks: uint64;
+                           status = "dsIdle";
+                           file = "main.nim";
+                           line = 1): ApplyResult =
+  harness.backendEpoch.inc
+  let snapshot = backendSnapshot(
+    sessionId = harness.sessionId,
+    backendOwnerId = harness.backendOwnerId,
+    emittedByPrincipalId = harness.backendOwnerId,
+    family = "debugger",
+    backendEpoch = harness.backendEpoch,
+    payload = %*{
+      "rrTicks": rrTicks,
+      "status": status,
+      "file": file,
+      "line": line,
+      "threadId": 1,
+    },
+  )
+  result = harness.authorityDocument.applyAuthoritativeBackendSnapshot(snapshot)
+  harness.protocolLog.add "authority backend snapshot debugger@" &
+    $snapshot.backendEpoch & " => " & $result.status & " " & result.reason
+  if result.status == asApplied:
+    harness.broadcastBackendSnapshot("backend", snapshot)
 
 proc publishLocalOps*(harness: CollabHeadlessHarness; peer: HeadlessPeer) =
   if peer.isNil:
