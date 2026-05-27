@@ -587,6 +587,7 @@ package codeTracer:
     template ctShell(actionIdValue, commandValue: string;
                      extraInputsValue: openArray[string] = [];
                      extraOutputsValue: openArray[string] = [];
+                     ignoredInputPrefixesValue: openArray[string] = [];
                      afterValue: openArray[BuildActionDef] = [];
                      cacheableValue = true): BuildActionDef =
       shell(
@@ -594,8 +595,16 @@ package codeTracer:
         actionId = actionIdValue,
         extraInputs = extraInputsValue,
         extraOutputs = extraOutputsValue,
+        ignoredInputPrefixes = ignoredInputPrefixesValue,
         after = afterValue,
         cacheable = cacheableValue)
+
+    let cargoVolatileCachePrefixes = @[
+      "$CARGO_HOME/.global-cache",
+      "$CARGO_HOME/.package-cache",
+      "$HOME/.cargo/.global-cache",
+      "$HOME/.cargo/.package-cache"
+    ]
 
     let generatedConfigHeader = fs.writeText(
       output = "build/generated/ct_config.h",
@@ -816,6 +825,7 @@ package codeTracer:
           "src/backend-manager/Cargo.toml",
           "src/backend-manager/Cargo.lock"
         ],
+        ignoredInputPrefixesValue = cargoVolatileCachePrefixes,
         extraOutputsValue = @[buildDebugPath("bin/session-manager" & ExeSuffix)])
       target("session-manager", sessionManager)
       codetracerActions.add(sessionManager)
@@ -842,6 +852,7 @@ package codeTracer:
           "libs/tree-sitter-nim/grammar.js",
           "libs/tree-sitter-nim/src/scanner.c"
         ],
+        ignoredInputPrefixesValue = cargoVolatileCachePrefixes,
         extraOutputsValue = @[buildDebugPath("bin/replay-server" & ExeSuffix)])
       target("replay-server", replayServer)
       codetracerActions.add(replayServer)
