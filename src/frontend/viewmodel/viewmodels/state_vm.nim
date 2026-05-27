@@ -23,11 +23,12 @@
 ##   vm.selectTab(stGlobals)
 ##   echo vm.currentVariables.val # globals from the store
 
-import std/sets
+import std/[json, options, sets]
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
+import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types]
 
 type
@@ -52,6 +53,8 @@ type
     ##
     ## The store reference is kept for the auto-load effect.
     store*: ReplayDataStore
+    collabCore*: CollaborativeSessionCore
+    runtimeRole*: ViewModelRuntimeRole
 
     # -- Mutable state --
     activeTab*: Signal[StateTab]
@@ -81,12 +84,35 @@ type
 proc selectTab*(vm: StateVM; tab: StateTab) =
   ## Switch to a different tab. The `currentVariables` memo updates
   ## automatically because it depends on `activeTab`.
+  if not vm.collabCore.isNil:
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokSetStateTab,
+      "statePane.activeTab",
+      %*{"tab": $tab},
+    )
+    return
   vm.activeTab.val = tab
 
 proc toggleExpand*(vm: StateVM; path: string) =
   ## Toggle whether a variable path is expanded or collapsed.
   ## If the path is currently in the expanded set it is removed;
   ## otherwise it is added.
+  if not vm.collabCore.isNil:
+    let expanded = not (path in vm.expandedPaths.val)
+    let observedAddTags =
+      if expanded: @[]
+      else: vm.collabCore.liveAddTags(
+        vm.collabCore.document.state.statePane.expandedPaths, path)
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokToggleStatePath,
+      "statePane.expandedPaths",
+      %*{
+        "path": path,
+        "expanded": expanded,
+        "observedAddTags": observedAddTags,
+      },
+    )
+    return
   var paths = vm.expandedPaths.val
   if path in paths:
     paths.excl(path)
@@ -97,6 +123,13 @@ proc toggleExpand*(vm: StateVM; path: string) =
 proc selectPath*(vm: StateVM; path: string) =
   ## Set the currently selected variable path.
   ## Pass an empty string to clear the selection.
+  if not vm.collabCore.isNil:
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokSetRegister,
+      "statePane.selectedPath",
+      %*{"value": path},
+    )
+    return
   vm.selectedPath.val = path
 
 proc addWatch*(vm: StateVM; expression: string) =
@@ -104,6 +137,21 @@ proc addWatch*(vm: StateVM; expression: string) =
   ## After adding, the auto-load effect will re-request locals with
   ## the updated watch list on the next rrTicks change.
   if expression.len == 0:
+    return
+  if not vm.collabCore.isNil:
+    if vm.collabCore.liveWatchForExpression(expression).isSome:
+      return
+    let watchId = "watch:" & expression
+    let orderKey = $vm.collabCore.document.state.statePane.visibleWatches.len
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokAddWatch,
+      "statePane.watchExpressions",
+      %*{
+        "watchId": watchId,
+        "expression": expression,
+        "orderKey": orderKey,
+      },
+    )
     return
   var exprs = vm.watchExpressions.val
   for existing in exprs:
@@ -114,6 +162,19 @@ proc addWatch*(vm: StateVM; expression: string) =
 
 proc removeWatch*(vm: StateVM; expression: string) =
   ## Remove a watch expression by value. No-op if not found.
+  if not vm.collabCore.isNil:
+    let watch = vm.collabCore.liveWatchForExpression(expression)
+    if watch.isNone:
+      return
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokRemoveWatch,
+      "statePane.watchExpressions",
+      %*{
+        "watchId": watch.get.id,
+        "observedAddTags": watch.get.addTags,
+      },
+    )
+    return
   var exprs = vm.watchExpressions.val
   var idx = -1
   for i, e in exprs:
@@ -132,7 +193,9 @@ proc toggleHistory*(vm: StateVM; expression: string) =
 # Factory
 # ---------------------------------------------------------------------------
 
-proc createStateVM*(store: ReplayDataStore): StateVM =
+proc createStateVM*(store: ReplayDataStore;
+                    collabCore: CollaborativeSessionCore = nil;
+                    runtimeRole = vrrStandalone): StateVM =
   ## Create a StateVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
   ##
@@ -173,6 +236,8 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
 
     let vm = StateVM(
       store: store,
+      collabCore: collabCore,
+      runtimeRole: runtimeRole,
       activeTab: activeTab,
       expandedPaths: expandedPaths,
       selectedPath: selectedPath,
@@ -186,6 +251,8 @@ proc createStateVM*(store: ReplayDataStore): StateVM =
     createEffect proc() =
       let dbg = store.debugger.val
       let watches = watchExpressions.val
+      if not mayIssueBackendCommands(runtimeRole):
+        return
       store.requestLocals(dbg.rrTicks, watchExpressions = watches)
 
     vm

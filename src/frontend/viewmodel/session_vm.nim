@@ -21,6 +21,7 @@
 
 import isonim/viewmodel  # for ViewModel.dispose
 import backend/backend_service
+import collab/[projection, runtime_role, session_core]
 import store/replay_data_store
 import viewmodels/[
   state_vm,
@@ -42,6 +43,8 @@ type
     ## Created once per session and shared across all panels.
     store*: ReplayDataStore
     backend*: BackendService
+    collabCore*: CollaborativeSessionCore
+    runtimeRole*: ViewModelRuntimeRole
     stateVM*: StateVM
     calltraceVM*: CalltraceVM
     eventLogVM*: EventLogVM
@@ -54,7 +57,8 @@ type
     scratchpadVM*: ScratchpadVM
     shellVM*: ShellVM
 
-proc createSessionVM*(backend: BackendService): SessionViewModel =
+proc createSessionVM*(backend: BackendService;
+                      runtimeRole = vrrStandalone): SessionViewModel =
   ## Create the shared ViewModel store for a replay session.
   ##
   ## The BackendService is typically created via `newRealBackendService`
@@ -66,10 +70,19 @@ proc createSessionVM*(backend: BackendService): SessionViewModel =
   ## pipeline without running panel effects before middleware wiring is
   ## complete.
   let store = createReplayDataStore(backend)
+  let core = createCollaborativeSessionCore(
+    sessionId = "local-session-" & $store.storeId,
+    localPrincipalId = "local-user",
+    localActorId = "local-actor-" & $store.storeId,
+    localReplicaId = "local-replica-" & $store.storeId,
+    backendOwnerId = "local-user",
+  )
 
   SessionViewModel(
     store: store,
     backend: backend,
+    collabCore: core,
+    runtimeRole: runtimeRole,
   )
 
 proc initializePanelViewModels*(session: SessionViewModel) =
@@ -84,9 +97,13 @@ proc initializePanelViewModels*(session: SessionViewModel) =
     return
 
   if session.stateVM.isNil:
-    session.stateVM = createStateVM(session.store)
+    session.stateVM = createStateVM(
+      session.store, session.collabCore, session.runtimeRole)
+    installStateProjection(session.collabCore, session.stateVM)
   if session.calltraceVM.isNil:
-    session.calltraceVM = createCalltraceVM(session.store)
+    session.calltraceVM = createCalltraceVM(
+      session.store, session.collabCore, session.runtimeRole)
+    installCalltraceProjection(session.collabCore, session.calltraceVM)
   if session.eventLogVM.isNil:
     session.eventLogVM = createEventLogVM(session.store)
   if session.flowVM.isNil:

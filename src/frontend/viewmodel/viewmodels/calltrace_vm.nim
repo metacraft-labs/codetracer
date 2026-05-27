@@ -33,6 +33,7 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../backend/backend_service
+import ../collab/[runtime_role, session_core, types]
 import ../store/[replay_data_store, request_tracker, types]
 
 const
@@ -68,6 +69,8 @@ type
     ## The store reference is kept for the auto-load effect and for
     ## navigation actions (double-click jumps).
     store*: ReplayDataStore
+    collabCore*: CollaborativeSessionCore
+    runtimeRole*: ViewModelRuntimeRole
 
     # -- Mutable state --
     scrollPosition*: Signal[int64]
@@ -106,12 +109,37 @@ proc scroll*(vm: CalltraceVM; position: int64) =
 proc selectEntry*(vm: CalltraceVM; lineIndex: Option[int64]) =
   ## Set the currently selected calltrace entry.
   ## Pass `none(int64)` to clear the selection.
+  if not vm.collabCore.isNil:
+    let entryId = if lineIndex.isSome: $lineIndex.get else: ""
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokSetCalltraceSelection,
+      "calltrace.selectedEntry",
+      %*{"entryId": entryId},
+    )
+    return
   vm.selectedEntry.val = lineIndex
 
 proc toggleExpand*(vm: CalltraceVM; lineIndex: int64) =
   ## Toggle whether a calltrace node is expanded or collapsed.
   ## If the index is currently in the expanded set it is removed;
   ## otherwise it is added.
+  if not vm.collabCore.isNil:
+    let id = $lineIndex
+    let expanded = not (lineIndex in vm.expandedNodes.val)
+    let observedAddTags =
+      if expanded: @[]
+      else: vm.collabCore.liveAddTags(
+        vm.collabCore.document.state.calltrace.expandedNodes, id)
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokToggleCalltraceExpansion,
+      "calltrace.expandedNodes",
+      %*{
+        "id": id,
+        "expanded": expanded,
+        "observedAddTags": observedAddTags,
+      },
+    )
+    return
   var nodes = vm.expandedNodes.val
   if lineIndex in nodes:
     nodes.excl(lineIndex)
@@ -195,7 +223,17 @@ proc setSearchQuery*(vm: CalltraceVM; query: string) =
   ## ct/search-calltrace and also updates the local highlightedMatches.
   ## The backend response arrives via registerSearchRes in calltrace.nim
   ## which calls setBackendSearchResults.
-  vm.searchQuery.val = query
+  if not vm.collabCore.isNil:
+    discard vm.collabCore.dispatchLocalViewOp(
+      vokSetCalltraceSearch,
+      "calltrace.searchQuery",
+      %*{"query": query},
+    )
+  else:
+    vm.searchQuery.val = query
+
+  if not mayIssueBackendCommands(vm.runtimeRole):
+    return
 
   # Also send the query to the backend for full-trace search.
   if query.len > 0:
@@ -228,7 +266,9 @@ proc setRawIgnorePatterns*(vm: CalltraceVM; patterns: string) =
 # Factory
 # ---------------------------------------------------------------------------
 
-proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
+proc createCalltraceVM*(store: ReplayDataStore;
+                        collabCore: CollaborativeSessionCore = nil;
+                        runtimeRole = vrrStandalone): CalltraceVM =
   ## Create a CalltraceVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
   ##
@@ -333,6 +373,8 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
 
     let vm = CalltraceVM(
       store: store,
+      collabCore: collabCore,
+      runtimeRole: runtimeRole,
       scrollPosition: scrollPosition,
       viewportHeight: viewportHeight,
       viewportDepth: viewportDepth,
@@ -346,7 +388,7 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
       hasMoreBelow: hasMoreBelow,
       highlightedMatches: highlightedMatches,
       isLoading: isLoading,
-      disposeProc: dispose,
+      disposeProc: wrappedDispose,
     )
 
     # Auto-load effect: whenever scrollPosition, viewportHeight, or the
@@ -368,6 +410,8 @@ proc createCalltraceVM*(store: ReplayDataStore): CalltraceVM =
           $vpHeight & " scrollPos=" & $scrollPos & " depth=" & $depth
       # No rrTicks guard — DB-based traces always have rrTicks=0.
       # RequestTracker deduplicates redundant backend requests.
+      if not mayIssueBackendCommands(runtimeRole):
+        return
       let effectiveHeight = if vpHeight > 0: vpHeight else: 50
       var bufferStart = max(0'i64, scrollPos - CALLTRACE_BUFFER.int64)
       var totalHeight = effectiveHeight + CALLTRACE_BUFFER * 2
