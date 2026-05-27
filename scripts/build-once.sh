@@ -19,13 +19,13 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		reprobuild_root="$REPROBUILD_SOURCE_ROOT"
 	fi
 
+	if [ -z "$repro_bin" ]; then
+		repro_bin="$(command -v repro || true)"
+	fi
+
 	if [ -z "$repro_bin" ] && [ -n "$reprobuild_root" ] &&
 		[ -x "$reprobuild_root/build/bin/repro" ]; then
 		repro_bin="$reprobuild_root/build/bin/repro"
-	fi
-
-	if [ -z "$repro_bin" ]; then
-		repro_bin="$(command -v repro || true)"
 	fi
 
 	if [ -z "$repro_bin" ]; then
