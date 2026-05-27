@@ -2420,11 +2420,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1779898499,
-        "narHash": "sha256-8/Vu83aVCp/bVE26JvqASFG7jMfAc0xmzc3qI+47RJg=",
+        "lastModified": 1779902512,
+        "narHash": "sha256-AKC/NQ0KNAcom69uXsVQBV3pOgWd2vut6dhZEsf2lLY=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "cd6e416c3328ef611c8052eb5e4adc6da038d1cf",
+        "rev": "4738ec4720bbd648a67b2b19bc55048e3696c7c5",
         "type": "github"
       },
       "original": {
