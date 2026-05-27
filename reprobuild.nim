@@ -587,7 +587,6 @@ package codeTracer:
     template ctShell(actionIdValue, commandValue: string;
                      extraInputsValue: openArray[string] = [];
                      extraOutputsValue: openArray[string] = [];
-                     ignoredInputPrefixesValue: openArray[string] = [];
                      afterValue: openArray[BuildActionDef] = [];
                      cacheableValue = true): BuildActionDef =
       shell(
@@ -595,16 +594,8 @@ package codeTracer:
         actionId = actionIdValue,
         extraInputs = extraInputsValue,
         extraOutputs = extraOutputsValue,
-        ignoredInputPrefixes = ignoredInputPrefixesValue,
         after = afterValue,
         cacheable = cacheableValue)
-
-    let cargoVolatileCachePrefixes = @[
-      "$CARGO_HOME/.global-cache",
-      "$CARGO_HOME/.package-cache",
-      "$HOME/.cargo/.global-cache",
-      "$HOME/.cargo/.package-cache"
-    ]
 
     let generatedConfigHeader = fs.writeText(
       output = "build/generated/ct_config.h",
@@ -811,49 +802,50 @@ package codeTracer:
     let hasCtInput = fileExists("src/ct/codetracer.nim")
 
     if fileExists("src/backend-manager/Cargo.toml"):
-      let sessionManager = ctShell(
-        "backend-session-manager",
-        "set -eu\n" &
-        "mkdir -p " & buildDebugPath("bin") & "\n" &
-        "cargo build --locked --release " &
-          "--manifest-path src/backend-manager/Cargo.toml " &
-          "--target-dir " & CargoTargetBase & "/backend_manager_target\n" &
-        "cp " & CargoTargetBase & "/backend_manager_target/release/" &
-          "session-manager" & ExeSuffix & " " &
-          buildDebugPath("bin/session-manager" & ExeSuffix),
-        extraInputsValue = @[
+      let sessionManagerBinary =
+        CargoTargetBase & "/backend_manager_target/release/session-manager" &
+          ExeSuffix
+      let sessionManagerBuild = cargo.build(
+        locked = true,
+        release = true,
+        manifestPath = "src/backend-manager/Cargo.toml",
+        targetDir = CargoTargetBase & "/backend_manager_target",
+        actionId = "backend-session-manager-cargo",
+        extraInputs = @[
           "src/backend-manager/Cargo.toml",
           "src/backend-manager/Cargo.lock"
         ],
-        ignoredInputPrefixesValue = cargoVolatileCachePrefixes,
-        extraOutputsValue = @[buildDebugPath("bin/session-manager" & ExeSuffix)])
+        extraOutputs = @[sessionManagerBinary])
+      let sessionManager = fs.copyFile(
+        source = sessionManagerBinary,
+        output = buildDebugPath("bin/session-manager" & ExeSuffix),
+        actionId = "backend-session-manager",
+        after = @[sessionManagerBuild])
       target("session-manager", sessionManager)
       codetracerActions.add(sessionManager)
 
     if fileExists("src/db-backend/Cargo.toml"):
-      let replayServer = ctShell(
-        "db-replay-server",
-        "set -eu\n" &
-        "mkdir -p " & buildDebugPath("bin") & "\n" &
-        "if [ -f libs/tree-sitter-nim/grammar.js ] && " &
-          "[ ! -f libs/tree-sitter-nim/src/parser.c ]; then\n" &
-        "  (cd libs/tree-sitter-nim && tree-sitter generate)\n" &
-        "fi\n" &
-        "cargo build --locked " &
-          "--manifest-path src/db-backend/Cargo.toml " &
-          "--target-dir " & CargoTargetBase & "/db_backend_target\n" &
-        "cp " & CargoTargetBase & "/db_backend_target/debug/" &
-          "replay-server" & ExeSuffix & " " &
-          buildDebugPath("bin/replay-server" & ExeSuffix),
-        extraInputsValue = @[
+      let replayServerBinary =
+        CargoTargetBase & "/db_backend_target/debug/replay-server" & ExeSuffix
+      let replayServerBuild = cargo.build(
+        locked = true,
+        manifestPath = "src/db-backend/Cargo.toml",
+        targetDir = CargoTargetBase & "/db_backend_target",
+        actionId = "db-replay-server-cargo",
+        extraInputs = @[
           "src/db-backend/Cargo.toml",
           "src/db-backend/Cargo.lock",
           "src/db-backend/build.rs",
           "libs/tree-sitter-nim/grammar.js",
+          "libs/tree-sitter-nim/src/parser.c",
           "libs/tree-sitter-nim/src/scanner.c"
         ],
-        ignoredInputPrefixesValue = cargoVolatileCachePrefixes,
-        extraOutputsValue = @[buildDebugPath("bin/replay-server" & ExeSuffix)])
+        extraOutputs = @[replayServerBinary])
+      let replayServer = fs.copyFile(
+        source = replayServerBinary,
+        output = buildDebugPath("bin/replay-server" & ExeSuffix),
+        actionId = "db-replay-server",
+        after = @[replayServerBuild])
       target("replay-server", replayServer)
       codetracerActions.add(replayServer)
 
