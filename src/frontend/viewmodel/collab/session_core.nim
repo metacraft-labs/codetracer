@@ -81,6 +81,31 @@ proc projectCurrentState*(core: CollaborativeSessionCore) =
     if not callback.isNil:
       callback(core.document.state)
 
+proc loadJoinSnapshot*(core: CollaborativeSessionCore;
+                       snapshot: SharedSessionSnapshot) =
+  ## Replace the local document with a join snapshot and project it into the
+  ## installed panel ViewModels. Transport and room policy live above the core;
+  ## this helper keeps snapshot installation consistent for headless peers.
+  if core.isNil:
+    return
+  core.document = SharedSessionDocument(
+    state: snapshot.state,
+    appliedOpIds: snapshot.appliedOpIds,
+  )
+  core.lamport = max(core.lamport, snapshot.state.revision)
+  core.projectCurrentState()
+
+proc applyRemoteViewOp*(core: CollaborativeSessionCore;
+                        op: ViewOpEnvelope): ApplyResult =
+  ## Apply an operation received from another peer and project the reducer
+  ## result. Local operation logs remain local-only; accepted room logs are
+  ## captured by the M3 headless harness.
+  if core.isNil:
+    return rejected("missing collaborative session core")
+  core.lamport = max(core.lamport, op.lamport)
+  result = applyViewOp(core.document, op)
+  core.projectCurrentState()
+
 proc nextLocalViewOp*(core: CollaborativeSessionCore;
                       kind: ViewOpKind;
                       targetPath: string;
