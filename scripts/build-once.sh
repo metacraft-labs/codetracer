@@ -121,8 +121,9 @@ if [ "$(uname -s)" = "Darwin" ]; then
 
 	"$repro_bin" build "${CODETRACER_REPROBUILD_TARGET:-.}" \
 		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-nix}" \
-		--progress="${CODETRACER_REPROBUILD_PROGRESS:-auto}" \
-		--log="${CODETRACER_REPROBUILD_LOG:-actions}"
+		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
+		--diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
+		--log="${CODETRACER_REPROBUILD_LOG:-quiet}"
 	scripts/post-build-setcap.sh src/build-debug/bin/ct
 	exit 0
 fi
