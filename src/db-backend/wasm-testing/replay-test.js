@@ -63,6 +63,11 @@ const fileNames = (params.get('files') || 'trace.ct')
 // the current origin.
 const traceBaseUrl = params.get('traceBaseUrl') || '/traces/';
 
+// Optional trace file name for the DAP launch request. This is needed when
+// the VFS payload is a real fixture name such as `trace-portable.ct` rather
+// than the canonical auto-detected `trace.ct`.
+const traceFile = params.get('traceFile') || '';
+
 // Mode: "basic" (original DAP init only) or "comprehensive" (full panel verification).
 // Default: "comprehensive".
 const testMode = params.get('mode') || 'comprehensive';
@@ -153,9 +158,12 @@ async function sendDapRequest(command, args = {}, collectMs = 3000) {
     arguments: args,
   });
   const allMessages = await collector;
-  const response = allMessages.find(
+  const responses = allMessages.filter(
     r => r.command === command && r.type === 'response'
-  ) || null;
+  );
+  const response = responses.find(r => r.success === false) ||
+    responses[responses.length - 1] ||
+    null;
   const events = allMessages.filter(r => r.type === 'event');
   return { response, events, allMessages, seq };
 }
@@ -297,10 +305,17 @@ async function queryCurrentState() {
 
     // Step 5: Send DAP launch request.
     setStatus('Sending DAP launch...', 'pending');
-    const launchResult = await sendDapRequest('launch', {
+    const launchArguments = {
       traceFolder: traceFolder,
-    });
+    };
+    if (traceFile) {
+      launchArguments.trace_file = traceFile;
+    }
+    const launchResult = await sendDapRequest('launch', launchArguments);
     appendLog(`launch: ${safeStringify(launchResult.response)}`);
+    if (!launchResult.response || !launchResult.response.success) {
+      throw new Error('DAP launch failed: ' + safeStringify(launchResult.response));
+    }
 
     // Step 6: Send configurationDone — triggers VFS setup_from_vfs.
     setStatus('Sending DAP configurationDone...', 'pending');
@@ -329,6 +344,7 @@ async function queryCurrentState() {
     const result = {
       success: true,
       initResponse,
+      launchResponse: launchResult.response,
       configDoneResponse: configDoneResp,
       stoppedEvent: stoppedEvent || null,
       totalResponses,

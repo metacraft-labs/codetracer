@@ -6,6 +6,12 @@ SYSROOT="$(pwd)/wasm-sysroot"
 
 echo "SYSROOT: ${SYSROOT}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+RECORDER_ROOT="$WORKSPACE_ROOT/codetracer-native-recorder"
+EMULATOR_DIR="$RECORDER_ROOT/ct_emulator"
+EMULATOR_WASM_BUILD_SCRIPT="$EMULATOR_DIR/build_wasm_api.sh"
+
 # make sure we use LLVM tools for wasm C/AR
 export CC_wasm32_unknown_unknown=clang
 
@@ -59,7 +65,26 @@ case "$(uname -s)" in
     ;;
 esac
 
-cargo clean
+if [ "${CODETRACER_WASM_BUILD_CLEAN:-1}" != "0" ]; then
+  cargo clean
+else
+  echo "Skipping cargo clean because CODETRACER_WASM_BUILD_CLEAN=0"
+fi
+
+if [ ! -x "$EMULATOR_WASM_BUILD_SCRIPT" ]; then
+  echo "error: missing executable emulator WASM build script: $EMULATOR_WASM_BUILD_SCRIPT" >&2
+  exit 1
+fi
+
+echo "Regenerating emulator WASM C inputs"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*|*_NT*)
+    bash "$EMULATOR_WASM_BUILD_SCRIPT"
+    ;;
+  *)
+    direnv exec "$RECORDER_ROOT" bash "$EMULATOR_WASM_BUILD_SCRIPT"
+    ;;
+esac
 
 # build (just your crate, or the specific package)
 cargo build --target wasm32-unknown-unknown --release --no-default-features --features browser-transport
