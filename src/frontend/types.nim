@@ -2213,22 +2213,32 @@ when defined(ctRenderer):
     {.emit: """
     (function(d) {
       if (!d || typeof Object.defineProperty !== "function") return;
+      var currentProto = Object.getPrototypeOf(d);
+      var target = Object.create(currentProto || null);
+      if (typeof Object.setPrototypeOf === "function") {
+        Object.setPrototypeOf(d, target);
+      } else if ("__proto__" in d) {
+        d.__proto__ = target;
+      } else {
+        target = d;
+      }
       function defineForward(name) {
         if (Object.prototype.hasOwnProperty.call(d, name)) return;
-        Object.defineProperty(d, name, {
+        if (Object.prototype.hasOwnProperty.call(target, name)) return;
+        Object.defineProperty(target, name, {
           configurable: true,
           enumerable: true,
           get: function() {
-            var sessions = d.sessions;
+            var sessions = this.sessions;
             if (!sessions) return undefined;
-            var idx = d.activeSessionIndex | 0;
+            var idx = this.activeSessionIndex | 0;
             if (idx < 0 || idx >= sessions.length) return undefined;
             return sessions[idx][name];
           },
           set: function(value) {
-            var sessions = d.sessions;
+            var sessions = this.sessions;
             if (!sessions) return;
-            var idx = d.activeSessionIndex | 0;
+            var idx = this.activeSessionIndex | 0;
             if (idx < 0 || idx >= sessions.length) return;
             sessions[idx][name] = value;
           }
@@ -2240,15 +2250,23 @@ when defined(ctRenderer):
         "connection", "network", "pointList", "sourcemap"
       ].forEach(defineForward);
       if (!Object.prototype.hasOwnProperty.call(d, "activeSession")) {
-        Object.defineProperty(d, "activeSession", {
+        if (Object.prototype.hasOwnProperty.call(target, "activeSession")) return;
+        Object.defineProperty(target, "activeSession", {
           configurable: true,
           enumerable: true,
           get: function() {
-            var sessions = d.sessions;
+            var sessions = this.sessions;
             if (!sessions) return undefined;
-            var idx = d.activeSessionIndex | 0;
+            var idx = this.activeSessionIndex | 0;
             if (idx < 0 || idx >= sessions.length) return undefined;
             return sessions[idx];
+          },
+          set: function(value) {
+            var sessions = this.sessions;
+            if (!sessions) return;
+            var idx = this.activeSessionIndex | 0;
+            if (idx < 0 || idx >= sessions.length) return;
+            sessions[idx] = value;
           }
         });
       }

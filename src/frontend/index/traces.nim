@@ -58,6 +58,43 @@ proc handleReplayStartResponse(body: JsObject) =
 
 registerStartReplayHandler(handleReplayStartResponse)
 
+proc pathExists(path: cstring): bool
+
+proc nimSourceCandidate(program: string): cstring =
+  if program.len == 0:
+    return cstring""
+  if program.endsWith(".nim"):
+    return cstring(program)
+
+  let adjacentSource = cstring(program & ".nim")
+  if pathExists(adjacentSource):
+    return adjacentSource
+
+  let buildSourcesPath = cstring(program & ".ct-build-sources.json")
+  if pathExists(buildSourcesPath):
+    try:
+      let sources = cast[seq[cstring]](
+        JSON.parse(fs.readFileSync(buildSourcesPath, cstring"utf8")))
+      for source in sources:
+        if ($source).endsWith(".nim") and pathExists(source):
+          return source
+    except:
+      warnPrint "failed to inspect Nim build sources for ", program, ": ",
+        getCurrentExceptionMsg()
+
+  return cstring""
+
+proc normalizeTraceProgramForUi(trace: Trace) =
+  if trace.isNil:
+    return
+  let program = $trace.program
+  let sourceCandidate = nimSourceCandidate(program)
+  if sourceCandidate.len == 0:
+    return
+  if trace.lang == LangNim or trace.lang == LangUnknown:
+    trace.program = sourceCandidate
+    trace.lang = LangNim
+
 proc assignTrace(recordingId: cstring): Future[bool] {.async.} =
   ## M-REC-3: ``recordingId`` is a UUIDv7 recording-id (carried as
   ## ``cstring`` to match the renderer/Electron-IPC layer's JS string
@@ -72,6 +109,7 @@ proc assignTrace(recordingId: cstring): Future[bool] {.async.} =
   if trace.isNil:
     errorPrint "Unable to locate trace metadata for ", recordingId
     return false
+  normalizeTraceProgramForUi(trace)
   prefetchedTrace = trace
   data.trace = trace
   data.pluginClient.trace = trace
@@ -253,6 +291,17 @@ proc sourceFoldersFromTracePaths(trace: Trace): Future[seq[cstring]] {.async.} =
   if not trace.imported:
     if sourceFolders.len == 0:
       sourceFolders = fallbackLiveSourceFolders(trace)
+    return sourceFolders
+
+  if trace.workdir.len > 0 and materializedTraceRootHasEntries(trace, $trace.workdir):
+    let workdirInsideKnownSource =
+      sourceFolders.len == 0 or
+      sourceFolders.anyIt(isPathInside(trace.workdir, it))
+    if workdirInsideKnownSource:
+      return @[trace.workdir]
+
+  if sourceFolders.len > 0 and
+      sourceFolders.allIt(materializedTraceRootHasEntries(trace, $it)):
     return sourceFolders
 
   let (rawTracePaths, err) = await fsReadFileWithErr(

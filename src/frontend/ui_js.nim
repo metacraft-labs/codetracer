@@ -28,6 +28,44 @@ proc configureIPC(data: Data)
 proc jsMissing(value: JsObject): bool {.
   importjs: "((function(v) { return v === undefined || v === null; })(#))".}
 
+proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
+proc fsReadFileSync(path: cstring, encoding: cstring): cstring {.importjs: "require('fs').readFileSync(#, #)".}
+
+proc nimSourceCandidate(program: string): cstring =
+  if program.len == 0:
+    return cstring""
+  if program.endsWith(".nim"):
+    return cstring(program)
+
+  let adjacentSource = cstring(program & ".nim")
+  if fsExistsSync(adjacentSource):
+    return adjacentSource
+
+  let buildSourcesPath = cstring(program & ".ct-build-sources.json")
+  if fsExistsSync(buildSourcesPath):
+    try:
+      let sources = cast[seq[cstring]](
+        JSON.parse(fsReadFileSync(buildSourcesPath, cstring"utf8")))
+      for source in sources:
+        if ($source).endsWith(".nim") and fsExistsSync(source):
+          return source
+    except:
+      cwarn "failed to inspect Nim build sources for " & program & ": " &
+        getCurrentExceptionMsg()
+
+  return cstring""
+
+proc normalizeTraceProgramForUi(trace: Trace) =
+  if trace.isNil:
+    return
+  let program = $trace.program
+  let sourceCandidate = nimSourceCandidate(program)
+  if sourceCandidate.len == 0:
+    return
+  if trace.lang == LangNim or trace.lang == LangUnknown:
+    trace.program = sourceCandidate
+    trace.lang = LangNim
+
 proc bootstrapCollabJoinFromLocation() {.importjs: """
 (async function() {
   if (window.CODETRACER_COLLAB_BOOTSTRAP_STARTED) return;
@@ -549,13 +587,24 @@ proc appendLanguageSpecificViewItems(menu: MenuNode, data: Data) =
     else: @[]
   if items.len == 0:
     return
-  for element in menu.elements:
-    if element.kind == MenuFolder and element.name == cstring"View":
-      if seqIsNil(element.elements):
-        element.elements = @[]
+
+  proc appendToViewFolder(node: MenuNode): bool =
+    if node.isNil or node.kind != MenuFolder:
+      return false
+    if node.name == cstring"View":
+      if seqIsNil(node.elements):
+        node.elements = @[]
       for item in items:
-        element.elements.add(item)
-      return
+        node.elements.add(item)
+      return true
+    if seqIsNil(node.elements):
+      return false
+    for child in node.elements:
+      if appendToViewFolder(child):
+        return true
+    false
+
+  discard appendToViewFolder(menu)
 
 proc webTechMenu(data: Data, program: cstring): MenuNode =
   let config = data.config
@@ -1300,6 +1349,15 @@ proc onReady(event: dom.Event) =
       #     debugComponent.message.message = ""
       #     redrawAll()
 
+proc sleepMs(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
+
+proc waitForLayoutGround(data: Data): Future[void] {.async.} =
+  for _ in 0 ..< 50:
+    if not data.ui.layout.isNil and not data.ui.layout.groundItem.isNil and
+        data.ui.layout.groundItem.contentItems.len > 0:
+      return
+    await sleepMs(20)
+
 proc onInit*(
     sender: js,
     response: jsobject(
@@ -1787,6 +1845,7 @@ proc onTraceLoaded(
 
   hideWelcomeScreenSurface()
 
+  normalizeTraceProgramForUi(response.trace)
   data.trace = response.trace
   requestSessionTabsRender(data)
   data.setEditorsReadOnlyState(true)
@@ -1849,6 +1908,18 @@ proc onTraceLoaded(
 
   data.ui.initEventReceived = true
   data.tryInitLayout()
+  if data.trace.lang == LangNim and data.trace.program.len > 0 and
+      ($data.trace.program).endsWith(".nim"):
+    await waitForLayoutGround(data)
+    let programTab = editorTabPath(data.trace.program, ViewSource)
+    if data.services.editor.open.hasKey(programTab):
+      for _ in 0 ..< 100:
+        if not data.services.editor.open[programTab].loading:
+          data.showTab(programTab)
+          break
+        await sleepMs(20)
+    else:
+      await data.openNewEditorView(programTab, ViewSource)
 
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
@@ -2319,6 +2390,7 @@ proc onNoTrace(
     cstring(chooseInitialEditPath(requestedEditPath, filenameStrings,
                                   data.startOptions.edit))
   if initialEditPath.len > 0:
+    await waitForLayoutGround(data)
     data.openTab(initialEditPath, ViewSource) # , response.lang)
   let ext = $toJsLang(response.lang)
   # for i, file in data.save.files:

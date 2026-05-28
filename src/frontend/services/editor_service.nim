@@ -13,21 +13,44 @@ proc switchHistory*(self: EditorService, path: cstring, editorView: EditorView) 
   self.historyIndex = self.tabHistory.len - 1
   clog "tabs: switchHistory: historyIndex -> " & $self.historyIndex
 
+proc isInternalRuntimePath(path: cstring): bool =
+  path.startsWith(cstring"/nix/store/")
+
+proc isUserTraceProgram(trace: Trace): bool =
+  not trace.isNil and trace.program.len > 0 and not isInternalRuntimePath(trace.program)
+
+proc shouldAutoOpenMoveLocation(self: EditorService, location: Location): bool =
+  if location.path.len == 0:
+    return false
+
+  let internalRuntimePath = isInternalRuntimePath(location.path)
+  if internalRuntimePath and location.line <= 0 and location.highLevelLine <= 0:
+    return false
+
+  # Initial movement in Nim/compiled traces can transiently report a runtime
+  # frame before the user entry source is selected. Keep the entry source tab
+  # active instead of opening implementation internals as the first visible tab.
+  if internalRuntimePath and location.rrTicks == 0 and isUserTraceProgram(self.data.trace):
+    return false
+
+  true
+
 
 data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveState) {.async.} =
   if response.location.path.len > 0 and not response.location.isExpanded: # TODO: exists path
     if not response.location.missingPath:
-      let editorPath = canonicalSourceRevisionPath(response.location.path)
-      # Pass the active line through to ``openTab`` so a freshly opened
-      # editor (e.g. a calltrace-jump landing on a file that was not yet
-      # open — the noir-space-ship "calculate damage" navigation jumps
-      # to ``shield.nr:22`` from an open ``main.nr``) seeds the Monaco
-      # cursor at the right line.  ``openTab`` only forwards the line
-      # when creating the editor for the first time, so already-open
-      # editors are unaffected — the per-component
-      # ``onCompleteMove`` subscription handles their position update
-      # via ``service.changeLine`` and the periodic ``gotoLine`` interval.
-      self.data.openTab(editorPath, line = response.location.line)
+      if self.shouldAutoOpenMoveLocation(response.location):
+        let editorPath = canonicalSourceRevisionPath(response.location.path)
+        # Pass the active line through to ``openTab`` so a freshly opened
+        # editor (e.g. a calltrace-jump landing on a file that was not yet
+        # open — the noir-space-ship "calculate damage" navigation jumps
+        # to ``shield.nr:22`` from an open ``main.nr``) seeds the Monaco
+        # cursor at the right line.  ``openTab`` only forwards the line
+        # when creating the editor for the first time, so already-open
+        # editors are unaffected — the per-component
+        # ``onCompleteMove`` subscription handles their position update
+        # via ``service.changeLine`` and the periodic ``gotoLine`` interval.
+        self.data.openTab(editorPath, line = response.location.line)
     else:
       # eventually TODO(alexander: I wrote this: a more elegant way to pass
       # to the component)

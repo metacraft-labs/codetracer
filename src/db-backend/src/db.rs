@@ -1313,6 +1313,58 @@ impl MaterializedReplaySession {
     fn id_to_name(&self, variable_id: VariableId) -> &str {
         self.reader.variable_name(variable_id).unwrap_or("<unknown>")
     }
+
+    fn is_user_source_path(path: &str) -> bool {
+        !path.is_empty() && !path.starts_with("/nix/store/")
+    }
+
+    fn first_user_call(&self) -> Option<&DbCall> {
+        self.reader
+            .calls_iter()
+            .find(|call| {
+                self.reader
+                    .function(call.function_id)
+                    .and_then(|function| self.reader.path(function.path_id))
+                    .map(Self::is_user_source_path)
+                    .unwrap_or(false)
+            })
+            .or_else(|| self.reader.call(CallKey(0)))
+    }
+
+    fn first_executable_step_for_call(&self, call: &DbCall) -> StepId {
+        let Some(function) = self.reader.function(call.function_id) else {
+            return call.step_id;
+        };
+        let function_path = self.reader.path(function.path_id).unwrap_or("");
+        let function_line = function.line.0;
+        let call_steps = self.reader.steps_from(call.step_id);
+
+        if function_path.ends_with(".nr") {
+            // Noir DWARF can point a function at the synthetic/comment/header
+            // line while the first executable statement is the next source
+            // line recorded for the same file. Prefer that executable line so
+            // run-to-entry opens the state/editor on user code, not line 1.
+            let header_line = if function_line <= 0 { 1 } else { function_line };
+            if let Some(step) = call_steps
+                .iter()
+                .find(|step| {
+                    step.call_key == call.key && step.path_id == function.path_id && step.line.0 > header_line
+                })
+            {
+                return step.step_id;
+            }
+        }
+
+        if function_line <= 0 {
+            return call.step_id;
+        }
+
+        call_steps
+            .iter()
+            .find(|step| step.call_key == call.key && step.path_id == function.path_id && step.line.0 >= function_line)
+            .map(|step| step.step_id)
+            .unwrap_or(call.step_id)
+    }
 }
 
 impl ReplaySession for MaterializedReplaySession {
@@ -1350,9 +1402,8 @@ impl ReplaySession for MaterializedReplaySession {
         // call-less step traces.
         if self.reader.call_count() > 0 {
             let entry_step = self
-                .reader
-                .call(CallKey(0))
-                .map(|call| call.step_id)
+                .first_user_call()
+                .map(|call| self.first_executable_step_for_call(call))
                 .unwrap_or(StepId(0));
             self.step_id_jump(entry_step);
         } else if self.reader.step_count() > 0 {
