@@ -15,9 +15,11 @@ import ../../collab/[
   authority,
   backend_snapshots,
   codec,
+  diagnostics,
   reducer,
   runtime_role,
   session_core,
+  telemetry,
   types,
 ]
 import ../../collab/transport/in_memory
@@ -77,6 +79,7 @@ type
     acceptedLog*: seq[ViewOpEnvelope]
     authorityEvents*: seq[HeadlessAuthorityEvent]
     rejectionDiagnostics*: seq[HeadlessAuthorityEvent]
+    telemetryEvents*: seq[CollabTelemetryEvent]
     protocolLog*: seq[string]
 
 proc drain*() =
@@ -227,8 +230,15 @@ proc newCollabHeadlessHarness*(
     acceptedLog: @[],
     authorityEvents: @[],
     rejectionDiagnostics: @[],
+    telemetryEvents: @[],
     protocolLog: @[],
   )
+
+proc recordTelemetry*(harness: CollabHeadlessHarness;
+                      event: CollabTelemetryEvent) =
+  if harness.isNil:
+    return
+  harness.telemetryEvents.add event
 
 proc currentAuthoritySnapshot*(harness: CollabHeadlessHarness): SharedSessionSnapshot =
   harness.authorityDocument.snapshot
@@ -339,6 +349,7 @@ proc submitToAuthority*(harness: CollabHeadlessHarness;
 
   if result.status == asRejected:
     harness.rejectionDiagnostics.add event
+    harness.recordTelemetry(rejectedCommandEvent(harness.sessionId, op, result))
     return
   if result.status != asDuplicate and not harness.acceptedLog.containsOp(op.opId):
     harness.acceptedLog.add op
@@ -458,12 +469,20 @@ proc enqueueJoin*(harness: CollabHeadlessHarness;
                   peerId: string;
                   snapshot: SharedSessionSnapshot;
                   fromPeerId = "authority") =
+  let tail = harness.acceptedTailAfter(snapshot)
   harness.transport.enqueueJoinSnapshot(
     fromPeerId,
     peerId,
     snapshot,
-    harness.acceptedTailAfter(snapshot),
+    tail,
   )
+  harness.recordTelemetry(reconnectRecoveryEvent(
+    harness.sessionId,
+    peerId,
+    missedOps = tail.len,
+    recoveredOps = tail.len,
+    converged = false,
+  ))
 
 proc enqueueCurrentJoin*(harness: CollabHeadlessHarness;
                          peerId: string;
@@ -553,6 +572,28 @@ proc replaySnapshotPlusTail*(harness: CollabHeadlessHarness;
   )
   for op in harness.acceptedTailAfter(snapshot):
     discard result.applyViewOp(op)
+
+proc recordConvergenceFailure*(harness: CollabHeadlessHarness) =
+  if harness.isNil:
+    return
+  harness.recordTelemetry(convergenceFailureEvent(
+    harness.sessionId,
+    peerCount = harness.peers.len,
+    acceptedOps = harness.acceptedLog.len,
+    pendingOps = harness.pendingCount,
+    stateDigest = harness.canonicalAuthorityState,
+  ))
+
+proc exportFailureArtifacts*(harness: CollabHeadlessHarness;
+                             outputRoot: string;
+                             testName: string):
+                             CollabDiagnosticExportResult =
+  exportCollabDiagnostics(
+    outputRoot,
+    testName,
+    harness.protocolLog,
+    harness.currentAuthoritySnapshot,
+  )
 
 proc dispose*(harness: CollabHeadlessHarness) =
   for peer in harness.peers:
