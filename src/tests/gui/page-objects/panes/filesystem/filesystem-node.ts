@@ -12,7 +12,6 @@ const POST_EXPAND_DELAY_MS = 500;
  */
 export class FilesystemNode {
   private readonly pane: FilesystemPane;
-  private readonly _page: Page;
   readonly nodeLocator: Locator;
   readonly anchorLocator: Locator;
   private readonly contextMenu: ContextMenu;
@@ -24,7 +23,6 @@ export class FilesystemNode {
     contextMenu: ContextMenu,
   ) {
     this.pane = pane;
-    this._page = page;
     this.nodeLocator = nodeLocator;
     this.anchorLocator = nodeLocator.locator("> a.jstree-anchor");
     this.contextMenu = contextMenu;
@@ -82,46 +80,30 @@ export class FilesystemNode {
   }
 
   /**
-   * Opens the context menu using jstree's $.vakata.context.show() API.
-   * Direct DOM right-click doesn't trigger jQuery-bound jstree handlers.
+   * Opens the filesystem context menu.
+   *
+   * The production IsoNim filesystem view renders jstree-compatible DOM
+   * classes but uses CodeTracer's shared context-menu widget rather than
+   * the old $.vakata menu plugin.
    */
   async openContextMenu(): Promise<ContextMenu> {
     await this.anchorLocator.scrollIntoViewIfNeeded();
     await sleep(POST_EXPAND_DELAY_MS);
 
-    const nodeId = await this.nodeLocator.getAttribute("id");
-
-    await this._page.evaluate((nid: string) => {
-      const jq = (window as any).$ || (window as any).jQuery; // eslint-disable-line @typescript-eslint/no-explicit-any
-      if (!jq) throw new Error("jQuery is not available");
-      if (!jq.vakata?.context?.show) {
-        throw new Error("$.vakata.context is not available");
-      }
-
-      const tree = jq(".filesystem").jstree(true);
-      if (!tree) throw new Error("jstree instance not found");
-
-      const node = tree.get_node(nid);
-      if (!node) throw new Error("jstree node not found: " + nid);
-
-      const itemsFn = tree.settings.contextmenu.items;
-      const items = typeof itemsFn === "function" ? itemsFn.call(tree, node) : itemsFn;
-      if (!items || typeof items !== "object") {
-        throw new Error("contextmenu items is empty or not an object");
-      }
-
-      const anchor = document.getElementById(nid + "_anchor");
-      if (!anchor) throw new Error("anchor element not found for node: " + nid);
+    await this.anchorLocator.evaluate((anchor: Element) => {
       const rect = anchor.getBoundingClientRect();
-
-      jq(anchor).addClass("jstree-context");
-      tree._data.contextmenu.visible = true;
-
-      jq.vakata.context.show(jq(anchor), {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height,
-      }, items);
-    }, nodeId!);
+      anchor.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button: 2,
+          buttons: 2,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height,
+        }),
+      );
+    });
 
     await this.contextMenu.container.waitFor({ state: "visible", timeout: 10_000 });
     return this.contextMenu;

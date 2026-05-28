@@ -44,6 +44,14 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   import ../store/replay_data_store
+  from ./context_menu_bridge import showContextMenu
+  from ../../types import ContextMenuItem, RAW_TYPE, TypeKind, Value,
+    ValueWithExpression
+  when defined(ctRenderer):
+    from ../../../common/ct_event import InternalAddToScratchpad
+    from ../../communication import emit
+    from ../../types import data
+  import kdom except Location
 
 import ../store/types
 import ../backend/backend_service
@@ -261,6 +269,8 @@ when defined(js):
   proc createSvgElement(tag: cstring): isonim_dom.Element {.importjs: "document.createElementNS('http://www.w3.org/2000/svg', #)".}
   proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc eventKeyCode(ev: isonim_dom.Event): int {.importjs: "(#.keyCode || 0)".}
   proc scrollTop(node: isonim_dom.Element): float {.importjs: "(#.scrollTop || 0)".}
@@ -304,6 +314,58 @@ when defined(js):
     else:
       base
 
+  proc rawScratchpadValue(text: string): Value =
+    Value(
+      kind: TypeKind.Raw,
+      typ: RAW_TYPE,
+      r: cstring(text),
+      isLiteral: false)
+
+  proc addCallArgToScratchpad(name, text: string) =
+    when defined(ctRenderer):
+      if data.sessions.len == 0:
+        return
+      let api =
+        data.sessions[data.activeSessionIndex].viewsApi
+      api.emit(InternalAddToScratchpad, ValueWithExpression(
+        expression: cstring(name),
+        value: rawScratchpadValue(text)))
+    else:
+      discard
+
+  proc showMenu(ev: isonim_dom.Event; items: seq[ContextMenuItem]) =
+    ev.preventDefault()
+    ev.stopPropagation()
+    showContextMenu(items, ev.eventClientX(), ev.eventClientY())
+
+  proc calltraceRowContextItems(vm: CalltraceVM; item: proc(): CallLine):
+      seq[ContextMenuItem] =
+    let line = item()
+    let toggleName =
+      if line.hasChildren and line.isExpanded:
+        cstring"Collapse Call Children"
+      else:
+        cstring"Expand Call Children"
+    let lineIndex = line.index
+    result.add(ContextMenuItem(
+      name: toggleName,
+      hint: cstring"",
+      handler: proc(ev: kdom.Event) =
+        vm.toggleExpandCallChildren(lineIndex)))
+    result.add(ContextMenuItem(
+      name: cstring"Expand Full Callstack",
+      hint: cstring"",
+      handler: proc(ev: kdom.Event) =
+        discard))
+
+  proc callArgContextItems(argName, argText: string):
+      seq[ContextMenuItem] =
+    result.add(ContextMenuItem(
+      name: cstring"Add value to scratchpad",
+      hint: cstring"",
+      handler: proc(ev: kdom.Event) =
+        addCallArgToScratchpad(argName, argText)))
+
   proc renderCallLineRowWeb(r: WebRenderer; vm: CalltraceVM;
                             item: proc(): CallLine): isonim_dom.Element =
     ## Render a single calltrace row using the Karax-compatible markup.
@@ -317,10 +379,12 @@ when defined(js):
     ## be reactive. Reading `item()` inside the DSL achieves that
     ## automatically.
     let h = rowHandlers(vm, item)
-    var argsContainer: isonim_dom.Element
+    var argsContainer, callTextEl: isonim_dom.Element
     let row = ui(r):
       tdiv(class = rowClassWeb(vm, item),
            `data-function` = item().name,
+           `data-path` = item().location.file,
+           `data-line` = $item().location.line,
            `data-source-generation` = $item().location.sourceGeneration,
            `data-source-digest` = item().location.sourceDigest,
            `data-code-generation` = $item().codeGeneration,
@@ -333,7 +397,8 @@ when defined(js):
             span(class = "toggle-call", onclick = h.onToggle):
               tdiv(class = selectedToggleIconClass(vm, item)):
                 discard
-            tdiv(id = "local-call-text-" & $item().index, class = "call-text",
+            tdiv(ref = callTextEl,
+                 id = "local-call-text-" & $item().index, class = "call-text",
                  onclick = h.onSelect, ondblclick = h.onDblClick):
               text callDisplayName(item()) & " #" & $item().index
             tdiv(ref = argsContainer, class = "call-args",
@@ -344,6 +409,10 @@ when defined(js):
                 text returnArrowForRow(vm, item)
               span(class = "return-text"):
                 text returnValueForRow(vm, item)
+
+    isonim_dom.addEventListener(isonim_dom.Node(callTextEl), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        showMenu(ev, calltraceRowContextItems(vm, item)))
 
     # Reactively populate the args container with one ``.call-arg``
     # element per argument. Mirrors the historical Karax call-argument
@@ -384,6 +453,9 @@ when defined(js):
               tdiv(class = "call-arg-text",
                    id = "call-arg-text-" & $line.index & "-" & argName):
                 text argText
+        isonim_dom.addEventListener(isonim_dom.Node(argEl), cstring"contextmenu",
+          proc(ev: isonim_dom.Event) =
+            showMenu(ev, callArgContextItems(argName, argText)))
         r.appendChild(argsContainer, argEl)
         if i < callArgs.len - 1:
           let sep = ui(r):

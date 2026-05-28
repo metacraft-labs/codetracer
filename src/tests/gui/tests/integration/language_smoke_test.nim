@@ -92,6 +92,16 @@ proc isUsableTraceDir(dir: string): bool =
     return true
   return false
 
+proc traceDirForRecordingId(idStr: string): string =
+  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
+  let bareDir = baseDir / idStr
+  if dirExists(bareDir):
+    return bareDir
+  let legacyDir = baseDir / ("trace-" & idStr)
+  if dirExists(legacyDir):
+    return legacyDir
+  bareDir
+
 proc findExistingTrace(programPattern: string): string =
   ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
   ## directory name matches ``programPattern``.
@@ -107,11 +117,9 @@ proc findExistingTrace(programPattern: string): string =
   for kind, path in walkDir(baseDir):
     if kind != pcDir:
       continue
-    let dirname = path.extractFilename()
-    if not dirname.startsWith("trace-"):
-      continue
     if not isUsableTraceDir(path):
       continue
+    let dirname = path.extractFilename()
     if programPattern in dirname:
       return path
   return ""
@@ -151,7 +159,7 @@ proc recordTraceToDefaultLocation(programPath: string; lang: string = ""): strin
   for line in output.splitLines():
     if line.startsWith("recordingId:"):
       let idStr = line[("recordingId:").len..^1].strip()
-      let traceDir = getHomeDir() / ".local" / "share" / "codetracer" / ("trace-" & idStr)
+      let traceDir = traceDirForRecordingId(idStr)
       if dirExists(traceDir):
         return traceDir
 

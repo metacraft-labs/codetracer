@@ -77,6 +77,16 @@ proc isUsableTraceDir(dir: string): bool =
     return true
   return false
 
+proc traceDirForRecordingId(idStr: string): string =
+  let baseDir = getHomeDir() / ".local" / "share" / "codetracer"
+  let bareDir = baseDir / idStr
+  if dirExists(bareDir):
+    return bareDir
+  let legacyDir = baseDir / ("trace-" & idStr)
+  if dirExists(legacyDir):
+    return legacyDir
+  bareDir
+
 proc findExistingTrace(programPattern: string): string =
   ## Search ``~/.local/share/codetracer/`` for a pre-recorded trace whose
   ## metadata program OR workdir field contains ``programPattern``.
@@ -88,13 +98,11 @@ proc findExistingTrace(programPattern: string): string =
   for kind, path in walkDir(baseDir):
     if kind != pcDir:
       continue
-    let dirname = path.extractFilename()
-    if not dirname.startsWith("trace-"):
-      continue
     if not isUsableTraceDir(path):
       continue
     # M-REC-1.5: derive the program identifier from the folder name
     # (legacy JSON sidecars retired).
+    let dirname = path.extractFilename()
     let program = dirname
     if programPattern in program:
       return path
@@ -117,7 +125,7 @@ proc recordTraceToDefaultLocation(programPath: string): string =
   for line in output.splitLines():
     if line.startsWith("recordingId:"):
       let idStr = line[("recordingId:").len..^1].strip()
-      let traceDir = getHomeDir() / ".local" / "share" / "codetracer" / ("trace-" & idStr)
+      let traceDir = traceDirForRecordingId(idStr)
       if dirExists(traceDir):
         return traceDir
   raise newException(IOError,
@@ -274,6 +282,61 @@ proc collectFlowNames(resp: JsonNode): tuple[exprNames: seq[string], valueNames:
           for name, _ in values.pairs:
             result.valueNames.addUniqueName(name)
 
+type FlowStepSummary = object
+  position: int
+  loop: int
+  iteration: int
+  stepCount: int
+  rrTicks: int
+  exprNames: seq[string]
+  valueNames: seq[string]
+
+proc collectFlowStepSummaries(resp: JsonNode): seq[FlowStepSummary] =
+  ## Collect enough per-step detail to pin the renderer-facing flow contract:
+  ## loop-local values must be attached to concrete source positions and
+  ## iterations, not just appear somewhere in the overall FlowUpdate.
+  let body = resp.getOrDefault("body")
+  if body.isNil:
+    return
+  let viewUpdates = body.getOrDefault("viewUpdates")
+  if viewUpdates.isNil:
+    return
+
+  var entries: seq[JsonNode] = @[]
+  if viewUpdates.kind == JArray:
+    entries = viewUpdates.elems
+  elif viewUpdates.kind == JObject:
+    for _, value in viewUpdates.pairs:
+      entries.add(value)
+
+  for entry in entries:
+    if entry.isNil or entry.kind != JObject:
+      continue
+    let stepsNode = entry.getOrDefault("steps")
+    if stepsNode.isNil or stepsNode.kind != JArray:
+      continue
+    for step in stepsNode.elems:
+      var summary = FlowStepSummary(
+        position: step.getOrDefault("position").getInt(-1),
+        loop: step.getOrDefault("loop").getInt(-1),
+        iteration: step.getOrDefault("iteration").getInt(-1),
+        stepCount: step.getOrDefault("stepCount").getInt(-1),
+        rrTicks: step.getOrDefault("rrTicks").getInt(-1),
+      )
+
+      let exprOrder = step.getOrDefault("exprOrder")
+      if not exprOrder.isNil and exprOrder.kind == JArray:
+        for expr in exprOrder.elems:
+          summary.exprNames.addUniqueName(expr.getStr(""))
+
+      for valueTableName in ["beforeValues", "afterValues"]:
+        let values = step.getOrDefault(valueTableName)
+        if not values.isNil and values.kind == JObject:
+          for name, _ in values.pairs:
+            summary.valueNames.addUniqueName(name)
+
+      result.add(summary)
+
 # ---------------------------------------------------------------------------
 # Suite 1: Editor loaded main.nr
 # Mirrors: "editor loaded main.nr file"
@@ -405,11 +468,11 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
           break
       check hasNamedEntry
 
-  test "calltrace jump to calculate_damage lands on shield.nr line 22":
+  test "calltrace jump to calculate_damage lands on shield.nr executable line 26":
     ## Tight headless mirror of the failing GUI test
     ## ``calculate damage calltrace navigation``: jump to the
     ## calculate_damage entry and verify the debugger position is
-    ## exactly ``shield.nr:22`` (the function header line in the
+    ## exactly ``shield.nr:26`` (the first executable line in the
     ## noir_space_ship trace).  This isolates the calltrace-jump →
     ## complete-move → editor flow at the VM/backend layer so we
     ## can tell whether the bug is in the backend (wrong location)
@@ -440,10 +503,10 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
          " @ ", target.location.file, ":", target.location.line,
          " rrTicks=", target.rrTicks
 
-    # The CallLine itself should already report shield.nr:22 since the
-    # backend's load_location uses the call's first step record.
+    # The CallLine itself should already report shield.nr:26 since the
+    # backend's load_location uses the call's first executable step record.
     check "shield.nr" in target.location.file
-    check target.location.line == 22
+    check target.location.line == 26
 
     # Now perform the actual jump that the GUI exercises.
     session.calltraceJumpByLine(target)
@@ -454,9 +517,9 @@ suite "Noir Space Ship: calculate damage calltrace navigation":
 
     check session.getDebuggerStatus() == dsIdle
     check "shield.nr" in file
-    # The expected active line is 22 — the GUI test's
-    # ``activeLine === 22`` assertion in noir-space-ship.spec.ts.
-    check line == 22
+    # The expected active line is the calltrace row's executable source line.
+    check line == target.location.line
+    check line == 26
 
 # ---------------------------------------------------------------------------
 # Suite 3: Loop iteration / iterate_asteroids
@@ -969,6 +1032,30 @@ suite "Noir Space Ship: loop iteration via calltrace":
       check "masses" in names.valueNames
       check "regeneration" in names.valueNames
       check "remaining_shield" in names.valueNames
+
+      let summaries = collectFlowStepSummaries(resp)
+      var loopHeaderIterations: seq[int] = @[]
+      var regenerationIterations: seq[int] = @[]
+      var remainingShieldIterations: seq[int] = @[]
+      for summary in summaries:
+        if summary.position == 4 and summary.loop > 0:
+          loopHeaderIterations.add(summary.iteration)
+        if summary.position == 12 and summary.loop > 0 and
+           "regeneration" in summary.valueNames:
+          regenerationIterations.add(summary.iteration)
+        if summary.position == 12 and summary.loop > 0 and
+           "remaining_shield" in summary.valueNames:
+          remainingShieldIterations.add(summary.iteration)
+
+      echo "  iterate_asteroids loop header iterations: ", loopHeaderIterations
+      echo "  regeneration value iterations at line 12: ", regenerationIterations
+      echo "  remaining_shield value iterations at line 12: ", remainingShieldIterations
+      check 0 in loopHeaderIterations
+      check 7 in loopHeaderIterations
+      check 0 in regenerationIterations
+      check 7 in regenerationIterations
+      check 0 in remainingShieldIterations
+      check 7 in remainingShieldIterations
 
 # ---------------------------------------------------------------------------
 # Suite 4: Event log populated

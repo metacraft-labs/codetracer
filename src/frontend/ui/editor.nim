@@ -1978,6 +1978,8 @@ proc editorAfterRedraw(self: EditorViewComponent) =
 
     if not self.flow.isNil and self.data.config.flow.enabled and self.data.ui.mode == DebugMode:
       self.redrawFlow()
+      if not self.flow.flow.isNil:
+        self.flow.scheduleActiveLoopIterationValueRender()
     else:
       if not self.flow.isNil and not self.flow.flow.isNil:
         self.flow.clear()
@@ -2031,6 +2033,15 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     self.ensureExpanded(expandedInstance, line)
     if expandedInstance.isExpanded:
       expandedInstance.renderExpandedEditorDirect()
+
+proc refreshFlowAfterActivation*(self: EditorViewComponent) =
+  if self.isNil or self.flow.isNil:
+    return
+  if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
+    return
+  if self.data.config.flow.enabled and self.data.ui.mode == DebugMode and
+     not self.flow.flow.isNil:
+    self.flow.scheduleActiveLoopIterationValueRender()
 
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
   ## Mark the IsoNim editor view as the primary renderer once Monaco

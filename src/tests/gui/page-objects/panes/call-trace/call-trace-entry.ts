@@ -76,6 +76,14 @@ export class CallTraceEntry {
     return this.root.getAttribute("data-rr-ticks");
   }
 
+  sourcePathAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-path");
+  }
+
+  lineAttr(): Promise<string | null> {
+    return this.root.getAttribute("data-line");
+  }
+
   /**
    * Extracts the function name from the call text.
    * Handles Ruby-style "Class#method #N" by finding the last " #N" pattern.

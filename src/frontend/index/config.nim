@@ -4,7 +4,7 @@ import
   ../[ config, types, lang ],
   ../lib/[ jslib, electron_lib, misc_lib ],
   ./bootstrap_cache,
-  ../../common/[ paths, ct_logging ]
+  ../../common/[ paths, ct_logging, trace_source_paths ]
 
 type
   ServerData* = object
@@ -75,6 +75,24 @@ proc notifySourceFileChanged(filename: cstring, lang: Lang) =
     tab.waitsPrompt = true
     mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
 
+proc addUniquePathCandidate(paths: var seq[cstring], path: cstring) =
+  if path.len == 0:
+    return
+  for existing in paths:
+    if $existing == $path:
+      return
+  paths.add(path)
+
+proc selfContainedReadPathCandidates(trace: Trace, filename: cstring): seq[cstring] =
+  if trace.isNil:
+    return
+  let traceFilesFolder = nodePath.join(trace.outputFolder, cstring"files")
+  let sourceFolders = trace.sourceFolders.mapIt($it)
+  let payloadCandidates = selfContainedSourcePayloadCandidates(
+    $filename, $trace.workdir, sourceFolders)
+  for payloadPath in payloadCandidates:
+    result.addUniquePathCandidate(nodePath.join(traceFilesFolder, cstring(payloadPath)))
+
 let helpers* {.exportc: "helpers".} = require("./helpers")
 var
   fsWriteFileWithErr*  {.  importcpp: "helpers.fsWriteFileWithErr(#, #)"                   .}:  proc(f: cstring, s: cstring):                    Future[js]
@@ -82,6 +100,16 @@ var
   fsMkdirWithErr       {.  importcpp: "helpers.fsMkdirWithErr(#, #)"                       .}:  proc(a: cstring, options: JsObject):             Future[JsObject]
   fsReadFileWithErr*   {.  importcpp: "helpers.fsReadFileWithErr(#)"                       .}:  proc(f: cstring):                                Future[(cstring, js)]
   fsUnlinkWithErr*     {.  importcpp: "helpers.fsUnlinkWithErr(#)"                         .}:  proc(f: cstring):                                Future[js]
+
+proc readFirstAvailable(pathCandidates: seq[cstring]):
+    Future[tuple[source: cstring, err: js, openedPath: cstring]] {.async.} =
+  if pathCandidates.len == 0:
+    return (cstring"", cstring"no source path candidates".toJs, cstring"")
+  for path in pathCandidates:
+    let (source, err) = await fsReadFileWithErr(path)
+    if err.isNil:
+      return (source, err, path)
+    result = (source, err, path)
 
 proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int): Future[void] {.async.} =
   var source = cstring""
@@ -100,25 +128,19 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   #   trace paths/trace sourcefolder or direct filesystem/other
   # ctrl+o/similar => direct
   let traceImported = not data.trace.isNil and data.trace.imported
-  var readPath = if traceImported:
-      let traceFilesFolder = nodePath.join(data.trace.outputFolder, cstring"files")
-      # Strip drive letter / root from filename so the path is relative
-      # to the trace files folder (e.g. D:\foo -> foo).
-      let fnStr = $filename
-      let relName = if fnStr.len >= 3 and fnStr[1] == ':' and (fnStr[2] == '\\' or fnStr[2] == '/'):
-          cstring(fnStr[3..^1])
-        elif fnStr.len > 0 and (fnStr[0] == '/' or fnStr[0] == '\\'):
-          cstring(fnStr[1..^1])
-        else:
-          filename
-      nodePath.join(traceFilesFolder, relName)
+  let readCandidates =
+    if traceImported:
+      selfContainedReadPathCandidates(data.trace, filename)
     else:
-      filename
+      @[filename]
 
   var
     err: js
-    openedPath = readPath
-  (source, err) = await fsReadFileWithErr(readPath)
+    openedPath = if readCandidates.len > 0: readCandidates[0] else: filename
+  let readResult = await readFirstAvailable(readCandidates)
+  source = readResult.source
+  err = readResult.err
+  openedPath = readResult.openedPath
   if not err.isNil:
     # source = cstring"<file missing>!"
     # filename = cstring"<file missing: " & filename & cstring">"

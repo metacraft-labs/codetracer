@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { ContextMenu, createJsTreeContextMenu } from "../../components/context-menu";
+import { ContextMenu } from "../../components/context-menu";
 import { FilesystemNode } from "./filesystem-node";
 import { retry } from "../../../lib/retry-helpers";
 
@@ -23,7 +23,7 @@ export class FilesystemPane {
     this.page = page;
     this.root = root;
     this.tabButtonText = tabButtonText;
-    this.contextMenu = createJsTreeContextMenu(page);
+    this.contextMenu = new ContextMenu(page);
   }
 
   tabButton(): Locator {

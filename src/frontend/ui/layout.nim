@@ -427,6 +427,19 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           else:
             state.label
 
+      let editorPathForTab = state.label
+      tab.element.addEventListener(cstring"click", proc(event: JsObject) =
+        if data.ui.editors.hasKey(editorPathForTab):
+          let editor = data.ui.editors[editorPathForTab]
+          data.services.editor.active = editorPathForTab
+          editor.refreshFlowAfterActivation()
+          discard setTimeout(proc() =
+            editor.refreshFlowAfterActivation()
+          , 250)
+          discard setTimeout(proc() =
+            editor.refreshFlowAfterActivation()
+          , 1000))
+
       data.ui.activeEditorPanel = cast[GoldenContentItem](tab.contentItem.parent)
 
       # get latest editorPanel
@@ -453,6 +466,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             cdebug "layout: tab changed: active = " & $editorPath
             data.services.editor.active = editorPath
             let editor = data.ui.editors[editorPath]
+            editor.refreshFlowAfterActivation()
             let tab = EditorViewTabArgs(name: editorPath, editorView: editor.editorView)
             # check if current active tab is newly created or it exists in tab history
             if data.services.editor.tabHistory.find(tab) == -1:

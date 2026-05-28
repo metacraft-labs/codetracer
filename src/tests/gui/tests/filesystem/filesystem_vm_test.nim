@@ -28,6 +28,7 @@ import backend/mock_backend
 import store/types
 import store/replay_data_store
 import viewmodels/filesystem_vm
+import ../../../../common/trace_source_paths
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,6 +75,42 @@ proc makeRoot(children: seq[FilesystemEntryNode]): FilesystemEntryNode =
 # ---------------------------------------------------------------------------
 # Initial state
 # ---------------------------------------------------------------------------
+
+suite "self-contained source path candidates":
+
+  test "absolute Noir replay paths also resolve relative to the recorded workdir":
+    let candidates = selfContainedSourcePayloadCandidates(
+      "/home/dev/project/src/main.nr",
+      "/home/dev/project")
+    check candidates == @[
+      "home/dev/project/src/main.nr",
+      "src/main.nr"
+    ]
+
+  test "source folders provide a portable fallback when workdir is unavailable":
+    let candidates = selfContainedSourcePayloadCandidates(
+      "/workspace/project/src/main.c",
+      "",
+      ["/workspace/project"])
+    check candidates == @[
+      "workspace/project/src/main.c",
+      "src/main.c"
+    ]
+
+  test "relative payload paths are preserved without adding root-stripped variants":
+    let candidates = selfContainedSourcePayloadCandidates(
+      "src/shield.nr",
+      "/home/dev/project")
+    check candidates == @["src/shield.nr"]
+
+  test "windows absolute paths resolve to drive-stripped and workdir-relative payloads":
+    let candidates = selfContainedSourcePayloadCandidates(
+      "D:\\repo\\game\\src\\main.nr",
+      "D:\\repo\\game")
+    check candidates == @[
+      "repo/game/src/main.nr",
+      "src/main.nr"
+    ]
 
 suite "FilesystemVM initial state":
 

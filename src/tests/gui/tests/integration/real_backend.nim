@@ -602,9 +602,6 @@ proc findExistingTrace(programPattern: string): string =
   for kind, path in walkDir(baseDir):
     if kind != pcDir:
       continue
-    let dirname = path.extractFilename()
-    if not dirname.startsWith("trace-"):
-      continue
     if not isUsableTraceDir(path):
       continue
     # M-REC-1.5: trace metadata lives in the CTFS `meta.dat` inside

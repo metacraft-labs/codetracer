@@ -3,7 +3,7 @@ import
   electron_vars, config,
   ../[ types, lang ],
   ../lib/[ jslib, electron_lib ],
-  ../../common/ct_logging
+  ../../common/[ ct_logging, trace_source_paths ]
 
 type FileFilter = ref object
   name*: cstring
@@ -38,6 +38,22 @@ proc stripPathRoot(path: cstring): cstring =
   else:
     return path
 
+proc firstPathSegment(path: string): string =
+  let normalized = path.replace('\\', '/').strip(leading = true, trailing = true, chars = {'/'})
+  if normalized.len == 0:
+    return ""
+  let slash = normalized.find('/')
+  if slash < 0:
+    normalized
+  else:
+    normalized[0 ..< slash]
+
+proc containsPathName(paths: seq[cstring], name: cstring): bool =
+  for path in paths:
+    if $path == $name:
+      return true
+  false
+
 proc stripLastChar(text: cstring, c: cstring): cstring =
   if cstring($(text[text.len - 1])) == c:
     return cstring(($(text)).substr(0, text.len - 2))
@@ -62,14 +78,17 @@ proc loadFile(
     index: int,
     parentIndices: seq[int],
     traceFilesPath: cstring,
-    selfContained: bool): Future[CodetracerFile] {.async.} =
+    selfContained: bool,
+    readPathOverride: cstring = cstring""): Future[CodetracerFile] {.async.} =
   var data: js
   var res: CodetracerFile
 
   if path.len == 0:
     return res
 
-  var realPath = if not selfContained:
+  var realPath = if readPathOverride.len > 0:
+      readPathOverride
+    elif not selfContained:
       path
     else:
       # Strip the path root (drive letter on Windows, leading / on Unix)
@@ -80,7 +99,7 @@ proc loadFile(
   try:
     data = await cast[Future[js]](fsAsync.lstat(realPath))
   except:
-    if selfContained and path != realPath:
+    if selfContained and readPathOverride.len == 0 and path != realPath:
       try:
         data = await cast[Future[js]](fsAsync.lstat(path))
         realPath = path
@@ -137,7 +156,36 @@ proc loadFile(
             fileIndex,
             newParentIndices,
             traceFilesPath,
-            selfContained)
+            selfContained,
+            if readPathOverride.len > 0:
+              nodePath.join(readPathOverride, file)
+            else:
+              cstring"")
+          if not child.isNil:
+            res.children.add(child)
+
+      if selfContained and readPathOverride.len == 0 and
+          traceFilesPath.len > 0 and isAbsoluteTraceSourcePath($path):
+        # Portable self-contained traces can store source files relative to
+        # the recorded workdir (`files/src/main.nr`) while project metadata
+        # may still be mirrored under the root-stripped absolute path
+        # (`files/home/user/project/Nargo.toml`).  Present both as one tree
+        # rooted at the recorded source folder.
+        let skippedRoot = firstPathSegment(stripTraceSourceRoot($path))
+        let rootFiles = await cast[Future[seq[cstring]]](fsAsync.readdir(traceFilesPath))
+        var overlayParentIndices = parentIndices
+        overlayParentIndices.add(index)
+        for rootIndex, file in rootFiles:
+          if ($file).len == 0 or $file == skippedRoot or files.containsPathName(file):
+            continue
+          var child = await loadFile(
+            nodePath.join(path, file),
+            depth + 1,
+            files.len + rootIndex,
+            overlayParentIndices,
+            traceFilesPath,
+            selfContained,
+            nodePath.join(traceFilesPath, file))
           if not child.isNil:
             res.children.add(child)
     except:

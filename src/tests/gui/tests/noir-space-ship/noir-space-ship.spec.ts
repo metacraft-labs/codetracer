@@ -117,6 +117,75 @@ async function requireShieldEditor(layout: LayoutPage): Promise<EditorPane> {
   return editor;
 }
 
+async function loopFlowSnapshot(editor: EditorPane): Promise<string> {
+  return await editor.root.evaluate((root: Element) => {
+    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const editorIdRaw = root.id.replace("editorComponent-", "");
+    const editorId = Number(editorIdRaw);
+    const components =
+      w?.data?.ui?.componentMapping?.[2] ??
+      w?.data?.ui?.componentMapping?.EditorView ??
+      {};
+    const editorComponent = components[editorId];
+    const flowComponent = editorComponent?.flow;
+    const flow = flowComponent?.flow;
+    if (!flowComponent || !flow) {
+      return `flow-missing editorId=${editorId} hasEditor=${Boolean(editorComponent)} hasFlowComponent=${Boolean(flowComponent)} hasFlow=${Boolean(flow)}`;
+    }
+
+    const line12Steps: string[] = [];
+    const steps = flow.steps ?? [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step?.position !== 12) continue;
+      const beforeKeys = Object.keys(step.beforeValues ?? {});
+      const afterKeys = Object.keys(step.afterValues ?? {});
+      line12Steps.push(
+        `#${i}/sc=${step.stepCount}/loop=${step.loop}/iter=${step.iteration}/before=${beforeKeys.join("|")}/after=${afterKeys.join("|")}`,
+      );
+    }
+
+    const loopKeys = Object.keys(flowComponent.flowLoops ?? {});
+    const flowLoopSummaries = loopKeys.map((key) => {
+      const loopStep = flowComponent.flowLoops?.[key]?.loopStep;
+      return `${key}:loop=${loopStep?.loop}/iter=${loopStep?.iteration}/step=${loopStep?.stepCount}`;
+    });
+    const loopSummaries = (flow.loops ?? []).map((loop: any, index: number) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stepCounts = Array.isArray(loop?.stepCounts) ? loop.stepCounts : [];
+      return `${index}:base=${loop?.base}/iter=${loop?.iteration}/reg=${loop?.registeredLine}/steps=${stepCounts.slice(0, 12).join("|")}/len=${stepCounts.length}`;
+    });
+    const flowLine12 = flowComponent.flowLines?.[12];
+    const sorted12 = Object.keys(flowLine12?.sortedVariables ?? {});
+    const positions12 = Object.keys(flowLine12?.variablesPositions ?? {});
+    const flowLineKeys = Object.keys(flowComponent.flowLines ?? {});
+    const stepNodeKeys = Object.keys(flowComponent.stepNodes ?? {});
+    const multilineZoneKeys = Object.keys(flowComponent.multilineZones ?? {});
+    const multilineValueKeys = Object.keys(flowComponent.multilineValuesDoms ?? {});
+    const loopIterationShape = (flow.loopIterationSteps ?? []).map((iterations: any[]) => // eslint-disable-line @typescript-eslint/no-explicit-any
+      Array.isArray(iterations) ? iterations.length : Object.keys(iterations ?? {}).length,
+    );
+
+    return [
+      `editorId=${editorId}`,
+      `realFlowUI=${flowComponent?.data?.config?.flow?.realFlowUI}`,
+      `loops=${(flow.loops ?? []).length}`,
+      `flowLoopKeys=${loopKeys.join("|")}`,
+      `flowLoops=${flowLoopSummaries.join(",")}`,
+      `loopDefs=${loopSummaries.join(",")}`,
+      `flowLineKeys=${flowLineKeys.join("|")}`,
+      `stepNodeKeys=${stepNodeKeys.join("|")}`,
+      `multilineZoneKeys=${multilineZoneKeys.join("|")}`,
+      `multilineValueKeys=${multilineValueKeys.join("|")}`,
+      `loopIterationShape=${loopIterationShape.join("|")}`,
+      `line12Steps=${line12Steps.join(";")}`,
+      `line12Positions=${positions12.join("|")}`,
+      `line12Sorted=${sorted12.join("|")}`,
+      `domValueBoxes=${root.querySelectorAll("[class*='value-box']").length}`,
+      `domLoopControls=${root.querySelectorAll(".flow-loop-textarea").length}`,
+    ].join(" ");
+  });
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -223,6 +292,14 @@ test.describe("NoirSpaceShip", () => {
     callTrace.invalidateEntries();
 
     const calculateDamageEntry = await requireCallTraceEntry(callTrace, "calculate_damage");
+    const sourcePath = await calculateDamageEntry.sourcePathAttr();
+    const lineText = await calculateDamageEntry.lineAttr();
+    const expectedLine = Number(lineText);
+
+    expect(sourcePath).toContain("shield.nr");
+    expect(Number.isInteger(expectedLine)).toBe(true);
+    expect(expectedLine).toBe(26);
+
     await calculateDamageEntry.activate();
 
     const editors = await layout.editorTabs(true);
@@ -235,7 +312,7 @@ test.describe("NoirSpaceShip", () => {
     await retry(
       async () => {
         const activeLine = await shieldEditor!.activeLineNumber();
-        return activeLine === 22;
+        return activeLine === expectedLine;
       },
       { maxAttempts: 30, delayMs: 200 },
     );
@@ -268,12 +345,6 @@ test.describe("NoirSpaceShip", () => {
     await layout.reverseNextButton().dispatchEvent("click");
   });
 
-  // TODO(failing): TimeoutError waiting for flow value 'regeneration' to become visible.
-  //   The headless DAP regression in noir_space_ship_test.nim proves ct/load-flow includes
-  //   regeneration in both exprOrder and resolved before/after value names for
-  //   shield.nr::iterate_asteroids. The remaining boundary is the GUI flow view projection /
-  //   selector path: the loop chrome renders, but the browser-visible value labels are still
-  //   the main/argument values rather than the iterate_asteroids loop-local values.
   test("loop iteration slider tracks remaining shield", async ({ ctPage }) => {
     let traceStep = 0;
     function trace(message: string): void {
@@ -306,10 +377,15 @@ test.describe("NoirSpaceShip", () => {
     await loopControlContainer.waitFor({ state: "visible", timeout: 20_000 });
     trace("Loop control container visible");
 
-    const iterationValueBoxLocator = editor.flowValueElementByName("regeneration");
+    const iterationValueBoxLocator = editor.flowValueElementByName("remaining_shield");
 
     const iterationValueBox = iterationValueBoxLocator.first();
-    await iterationValueBox.waitFor({ state: "visible", timeout: 5_000 });
+    try {
+      await iterationValueBox.waitFor({ state: "visible", timeout: 5_000 });
+    } catch (error) {
+      debugLogger.log(`Loop flow snapshot: ${await loopFlowSnapshot(editor)}`);
+      throw error;
+    }
     trace("Loop iteration value box located");
 
     const iterationTextarea = editor.root.locator(".flow-loop-textarea").first();
@@ -385,9 +461,6 @@ test.describe("NoirSpaceShip", () => {
     trace("LoopIterationSliderTracksRemainingShield completed");
   });
 
-  // TODO(failing): Same root cause as "loop iteration slider tracks remaining shield" --
-  //   ct/load-flow contains the regeneration value at the DAP layer, but the GUI flow view
-  //   does not expose a browser-visible value box for it after the iterate_asteroids jump.
   test("simple loop iteration jump", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
@@ -401,10 +474,15 @@ test.describe("NoirSpaceShip", () => {
 
     const shieldEditor = await requireShieldEditor(layout);
 
-    const iterationValueBoxLocator = shieldEditor.flowValueElementByName("regeneration");
+    const iterationValueBoxLocator = shieldEditor.flowValueElementByName("remaining_shield");
 
     const iterationValueBox = iterationValueBoxLocator.first();
-    await iterationValueBox.waitFor({ state: "visible", timeout: 5_000 });
+    try {
+      await iterationValueBox.waitFor({ state: "visible", timeout: 5_000 });
+    } catch (error) {
+      debugLogger.log(`Loop flow snapshot: ${await loopFlowSnapshot(shieldEditor)}`);
+      throw error;
+    }
 
     const iterationEditor = shieldEditor.root.locator(".flow-loop-textarea").first();
     await iterationEditor.waitFor({ state: "visible", timeout: 5_000 });
