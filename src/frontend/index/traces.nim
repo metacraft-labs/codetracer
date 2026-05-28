@@ -87,13 +87,14 @@ proc nimSourceCandidate(program: string): cstring =
 proc normalizeTraceProgramForUi(trace: Trace) =
   if trace.isNil:
     return
+  if trace.lang != LangNim and trace.lang != LangUnknown:
+    return
   let program = $trace.program
   let sourceCandidate = nimSourceCandidate(program)
   if sourceCandidate.len == 0:
     return
-  if trace.lang == LangNim or trace.lang == LangUnknown:
-    trace.program = sourceCandidate
-    trace.lang = LangNim
+  trace.program = sourceCandidate
+  trace.lang = LangNim
 
 proc assignTrace(recordingId: cstring): Future[bool] {.async.} =
   ## M-REC-3: ``recordingId`` is a UUIDv7 recording-id (carried as

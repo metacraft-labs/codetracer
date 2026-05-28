@@ -28,8 +28,12 @@ proc configureIPC(data: Data)
 proc jsMissing(value: JsObject): bool {.
   importjs: "((function(v) { return v === undefined || v === null; })(#))".}
 
-proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
-proc fsReadFileSync(path: cstring, encoding: cstring): cstring {.importjs: "require('fs').readFileSync(#, #)".}
+proc fsExistsSync(path: cstring): bool {.importjs: """
+  ((typeof require === 'function') && require('fs').existsSync(#))
+""".}
+proc fsReadFileSync(path: cstring, encoding: cstring): cstring {.importjs: """
+  ((typeof require === 'function') ? require('fs').readFileSync(#, #) : '')
+""".}
 
 proc nimSourceCandidate(program: string): cstring =
   if program.len == 0:
@@ -58,13 +62,14 @@ proc nimSourceCandidate(program: string): cstring =
 proc normalizeTraceProgramForUi(trace: Trace) =
   if trace.isNil:
     return
+  if trace.lang != LangNim and trace.lang != LangUnknown:
+    return
   let program = $trace.program
   let sourceCandidate = nimSourceCandidate(program)
   if sourceCandidate.len == 0:
     return
-  if trace.lang == LangNim or trace.lang == LangUnknown:
-    trace.program = sourceCandidate
-    trace.lang = LangNim
+  trace.program = sourceCandidate
+  trace.lang = LangNim
 
 proc bootstrapCollabJoinFromLocation() {.importjs: """
 (async function() {
