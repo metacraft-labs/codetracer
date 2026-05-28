@@ -116,13 +116,15 @@ proc hideWelcomeScreenSurface() =
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
-import viewmodel/collab/[invite_bootstrap, join_session, reducer, session_core, types]
+import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
+  reducer, session_core, types]
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
 from isonim/core/batch as isoBatch import batch
 import hmr_runtime
 from viewmodel/store/types import liveMcr
 var activeSessionVM: SessionViewModel
+var activeCollabFrontEndAdapter: FrontEndAdapter
 var activeIsoNimApp: IsoNimApp
 var pendingCollabJoinBootstrapRaw: cstring = cstring""
 const MIN_FONTSIZE = 6
@@ -1404,6 +1406,12 @@ when not defined(ctInExtension):
                 handler($kind, raw)),
       )
       activeSessionVM = createSessionVM(realBackend)
+      activeCollabFrontEndAdapter = initWebUiCollabAdapter(
+        activeSessionVM.collabCore.localPrincipalId,
+        activeSessionVM.collabCore.localActorId
+      )
+      activeSessionVM.collabCore.installFrontEndAdapterProjection(
+        activeCollabFrontEndAdapter)
       cerror "[PIPELINE] configureMiddleware: SessionVM created"
       cerror "[PIPELINE] configureMiddleware: RealBackendService created"
       clog "SessionViewModel: created with real DapApi backend"
