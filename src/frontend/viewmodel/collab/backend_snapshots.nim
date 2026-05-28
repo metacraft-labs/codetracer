@@ -7,6 +7,7 @@ import isonim/core/signals
 import ./[capabilities, reducer, types]
 import ../store/replay_data_store
 import ../store/types as store_types
+import ../sync/signal_serializer
 
 proc backendSnapshot*(sessionId: string;
                       backendOwnerId: PrincipalId;
@@ -90,6 +91,17 @@ proc projectBackendSnapshotToStore*(store: ReplayDataStore;
   case snapshot.family
   of "debugger":
     store.projectDebuggerSnapshot(snapshot.payload)
+  of "calltrace":
+    let lines = parseCallLineSeq(snapshot.payload{"lines"})
+    let startIndex = snapshot.payload{"startLineIndex"}.getBiggestInt(0).int64
+    let totalCallsCount =
+      snapshot.payload{"totalCallsCount"}.getBiggestInt(lines.len).uint64
+    store.updateCalltraceSection(lines, startIndex, totalCallsCount)
+  of "locals":
+    let locals = parseVariableSeq(snapshot.payload{"locals"})
+    store.updateLocals(locals)
+    store.locals.loadedForRRTicks.val =
+      snapshot.payload{"rrTicks"}.getBiggestInt(0).uint64
   else:
     discard
 

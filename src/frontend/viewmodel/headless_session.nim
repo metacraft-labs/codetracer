@@ -65,7 +65,7 @@ proc drain() =
   except ValueError:
     # "No handles or timers registered" — nothing to drain.
     discard
-  drainCallbacks()
+  drainPlatformCallbacks()
 
 proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
                                     completeMoveEvent: JsonNode) =
@@ -124,6 +124,14 @@ proc consumeCompleteMoveEvent(session: HeadlessDebugSession) =
   ## ``ct/complete-move`` for position data.
   let completeMove = session.backend.waitForEvent("ct/complete-move")
   session.updatePositionFromCompleteMove(completeMove)
+
+proc consumeNextCompleteMove*(session: HeadlessDebugSession) =
+  ## Public wrapper used by collaboration harnesses that route a debugger
+  ## command through BackendCommandAuthority. The command has already been sent
+  ## to replay-server; this consumes the resulting stop/move events and mirrors
+  ## the real backend position into the ViewModel store.
+  discard session.backend.waitForEvent("stopped")
+  session.consumeCompleteMoveEvent()
 
 # ---------------------------------------------------------------------------
 # Construction
@@ -487,6 +495,7 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
         for localNode in localsNode:
           variables.add(parseVariable(localNode))
         s.session.store.updateLocals(variables)
+        s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
         drain()
 
 proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
