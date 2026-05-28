@@ -10,6 +10,7 @@ import ./[reducer, types]
 
 type
   ProjectionCallback* = proc(state: SharedSessionViewState)
+  ViewOpPublisher* = proc(op: ViewOpEnvelope): bool {.closure.}
 
   LocalViewOpDispatch* = object
     op*: ViewOpEnvelope
@@ -31,6 +32,9 @@ type
     peerTransportStarted*: bool
     remoteAwarenessStarted*: bool
     remoteGossipStarted*: bool
+    publishLocalViewOp*: ViewOpPublisher
+    transportSnapshotBase*: SharedSessionSnapshot
+    hasTransportSnapshotBase*: bool
 
 proc createCollaborativeSessionCore*(
     sessionId = "local-session";
@@ -59,6 +63,7 @@ proc createCollaborativeSessionCore*(
     peerTransportStarted: false,
     remoteAwarenessStarted: false,
     remoteGossipStarted: false,
+    hasTransportSnapshotBase: false,
   )
 
 proc peerServicesStarted*(core: CollaborativeSessionCore): bool =
@@ -142,13 +147,16 @@ proc dispatchLocalViewOp*(core: CollaborativeSessionCore;
 
   let op = core.nextLocalViewOp(kind, targetPath, payload)
   result = applyViewOp(core.document, op)
+  var published = false
   if result.status != asRejected:
     core.localOperationLog.add op
+    if core.collaborationEnabled and not core.publishLocalViewOp.isNil:
+      published = core.publishLocalViewOp(op)
   core.dispatchLog.add LocalViewOpDispatch(
     op: op,
     result: result,
-    localOnly: true,
-    publishedToPeer: false,
+    localOnly: not published,
+    publishedToPeer: published,
   )
   core.projectCurrentState()
 

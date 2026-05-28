@@ -27,6 +27,9 @@
 ## the upload session itself and is unaffected by this rename.
 
 import std/[httpclient, json, net, strformat, strutils, uri]
+import collab_invite_url
+
+export collab_invite_url
 
 type
   TenantListItem* = object
@@ -48,6 +51,17 @@ type
   TraceDownloadUrlResponse* = object
     downloadUrl*: string
     expiresAt*: string
+
+  CollabJoinBootstrapResponse* = object
+    replayId*: string
+    traceId*: string
+    traceIdentity*: string
+    roomId*: string
+    initialGrants*: seq[string]
+    webUiUrl*: string
+    nativeJoinUrl*: string
+    rendezvousUrl*: string
+    transportHints*: seq[string]
 
   LicenseInfoResponse* = object
     licenseInfo*: string
@@ -180,6 +194,35 @@ proc parseDownloadShareUrl*(url: string):
       result.recordingId = parts[^1]
     return
   raise newException(ValueError, "Invalid download URL: " & url)
+
+proc exchangeCollabInvite*(client: ApiClient, inviteToken: string):
+    CollabJoinBootstrapResponse =
+  ## ``POST /api/v1/collab/invites/exchange`` for standalone load-trace URL
+  ## joins. CI returns bootstrap metadata only; ViewOps are not sent here.
+  let url = buildCollabInviteExchangePath(client.baseApiUrl)
+  let response = client.httpClient.request(
+    url,
+    httpMethod = HttpPost,
+    headers = newHttpHeaders({"Content-Type": "application/json"}),
+    body = $ %*{"token": inviteToken})
+  ensureSuccess(response, "exchangeCollabInvite")
+
+  let body = parseJson(response.body)
+  result = CollabJoinBootstrapResponse(
+    replayId: body{"replayId"}.getStr(),
+    traceId: body{"traceId"}.getStr(),
+    traceIdentity: body{"traceIdentity"}.getStr(),
+    roomId: body{"roomId"}.getStr(),
+    initialGrants: @[],
+    webUiUrl: body{"webUiUrl"}.getStr(),
+    nativeJoinUrl: body{"nativeJoinUrl"}.getStr(),
+    rendezvousUrl: body{"rendezvousUrl"}.getStr(),
+    transportHints: @[],
+  )
+  for grant in body{"initialGrants"}.getElems:
+    result.initialGrants.add grant.getStr()
+  for hint in body{"transportHints"}.getElems:
+    result.transportHints.add hint.getStr()
 
 proc requestTraceUploadUrl*(client: ApiClient, tenantId: string,
     recordingId: string, fileName: string, contentType: string,

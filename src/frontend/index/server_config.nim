@@ -70,6 +70,11 @@ when defined(server):
         frontendSocketPort: data.startOptions.frontendSocket.port,
         frontendSocketParameters: data.startOptions.frontendSocket.parameters
       }))
+    server.get(cstring"/collab/join/:inviteToken", proc(request: JsObject, response: JsObject) =
+      response.render(cstring"server_index", js{
+        frontendSocketPort: data.startOptions.frontendSocket.port,
+        frontendSocketParameters: data.startOptions.frontendSocket.parameters
+      }))
 
     debugPrint codetracerExeDir & cstring"/frontend/styles/"
     server.use(cstring"/golden-layout", express.`static`(codetracerInstallDir & cstring"/libs/golden-layout"))

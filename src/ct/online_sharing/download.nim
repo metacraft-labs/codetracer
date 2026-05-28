@@ -2,7 +2,7 @@ import streams, nimcrypto, std/[ terminal, options, strutils, strformat, os, htt
 import ../../common/[ config, trace_index, paths, lang, types ]
 import ../utilities/[ types, zip, language_detection ]
 import ../trace/storage_and_import, ../globals
-import remote_config, api_client, file_transfer as ft, tenant_resolver
+import remote_config, api_client, collab_native_session, file_transfer as ft, tenant_resolver
 
 # M-REC-8: the previous private ``parseDownloadUrl`` helper moved to
 # ``api_client.parseDownloadShareUrl`` so the M-REC-8 wire-format tests
@@ -95,6 +95,36 @@ proc downloadTraceCommand*(traceDownloadUrl: string,
     token: Option[string] = none(string),
     baseUrl: Option[string] = none(string)) =
   try:
+    var inviteBaseUrl = ""
+    var inviteToken = ""
+    try:
+      let invite = parseCollabInviteUrl(traceDownloadUrl)
+      inviteBaseUrl = invite.baseUrl
+      inviteToken = invite.inviteToken
+    except ValueError:
+      discard
+
+    if inviteToken.len > 0:
+      var client = initApiClient(baseUrl.get(inviteBaseUrl))
+      defer: client.close()
+      let bootstrap = client.exchangeCollabInvite(inviteToken)
+      let runtime = startNativeCollabRuntime(NativeCollabBootstrap(
+        replayId: bootstrap.replayId,
+        traceId: bootstrap.traceId,
+        traceIdentity: bootstrap.traceIdentity,
+        roomId: bootstrap.roomId,
+        initialGrants: bootstrap.initialGrants,
+        webUiUrl: bootstrap.webUiUrl,
+        nativeJoinUrl: bootstrap.nativeJoinUrl,
+        rendezvousUrl: bootstrap.rendezvousUrl,
+        transportHints: bootstrap.transportHints))
+      if not runtime.isActive:
+        raise newException(ValueError,
+          "collaboration invite did not start an active native session")
+      echo fmt"OK: joined collaboration room {runtime.activeSession.roomId} " &
+        fmt"via {runtime.transport.kind}"
+      return
+
     let recordingId = downloadTrace(traceDownloadUrl, token, baseUrl)
     if isatty(stdout):
       echo fmt"OK: downloaded with recording id {recordingId}"

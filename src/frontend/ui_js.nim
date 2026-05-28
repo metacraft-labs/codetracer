@@ -1,6 +1,6 @@
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
-  options,
+  options, json,
   ui/[agent_activity, agent_activity_deepreview, agent_workspace, deepreview, layout, editor, trace, event_log,
       state, calltrace, menu, status,
       debug, flow, filesystem, vcs, value, repl,
@@ -28,6 +28,73 @@ proc configureIPC(data: Data)
 proc jsMissing(value: JsObject): bool {.
   importjs: "((function(v) { return v === undefined || v === null; })(#))".}
 
+proc bootstrapCollabJoinFromLocation() {.importjs: """
+(async function() {
+  if (window.CODETRACER_COLLAB_BOOTSTRAP_STARTED) return;
+  const prefix = "/collab/join/";
+  const pathname = window.location.pathname;
+  if (!pathname.startsWith(prefix)) return;
+  window.CODETRACER_COLLAB_BOOTSTRAP_STARTED = true;
+  const tokenPart = pathname.slice(prefix.length);
+  if (!tokenPart || tokenPart.includes("/")) return;
+
+  const token = decodeURIComponent(tokenPart);
+  const response = await fetch("/api/v1/collab/invites/exchange", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token })
+  });
+  if (!response.ok) {
+    window.CODETRACER_COLLAB_JOIN_ERROR = await response.text();
+    return;
+  }
+
+  const bootstrap = await response.json();
+  window.CODETRACER_COLLAB_BOOTSTRAP = bootstrap;
+  window.CODETRACER_REPLAY_ID = bootstrap.replayId;
+  window.localStorage.setItem("CODETRACER_REPLAY_ID", bootstrap.replayId);
+  window.localStorage.setItem("CODETRACER_COLLAB_ROOM_ID", bootstrap.roomId);
+  if (bootstrap.rendezvousUrl) {
+    const rendezvous = await fetch(bootstrap.rendezvousUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        inviteToken: token,
+        payload: {
+          client: "webui",
+          roomId: bootstrap.roomId,
+          grants: bootstrap.initialGrants || []
+        }
+      })
+    });
+    if (rendezvous.ok) {
+      window.CODETRACER_COLLAB_RENDEZVOUS = await rendezvous.json();
+    } else {
+      window.CODETRACER_COLLAB_RENDEZVOUS_ERROR = await rendezvous.text();
+    }
+  }
+  const activate = typeof window.activateCollabJoinBootstrap === "function"
+    ? window.activateCollabJoinBootstrap
+    : (typeof activateCollabJoinBootstrap === "function"
+      ? activateCollabJoinBootstrap
+      : null);
+  if (typeof activate === "function") {
+    const activationRaw = activate(JSON.stringify(bootstrap));
+    try {
+      window.CODETRACER_COLLAB_SESSION = JSON.parse(activationRaw);
+    } catch (_error) {
+      window.CODETRACER_COLLAB_SESSION = {
+        activated: false,
+        error: "collaboration activation returned invalid JSON"
+      };
+    }
+    window.CODETRACER_COLLAB_JOIN_READY = true;
+  }
+})()
+""".}
+
 # IPC HANDLERS
 
 var vex* {.importc.}: js
@@ -49,6 +116,7 @@ proc hideWelcomeScreenSurface() =
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
 import viewmodel/backend/[backend_service, real_backend]
+import viewmodel/collab/[invite_bootstrap, join_session, reducer, session_core, types]
 import viewmodel/app/isonim_app
 import viewmodel/viewmodels/visual_replay_layout
 from isonim/core/batch as isoBatch import batch
@@ -56,6 +124,7 @@ import hmr_runtime
 from viewmodel/store/types import liveMcr
 var activeSessionVM: SessionViewModel
 var activeIsoNimApp: IsoNimApp
+var pendingCollabJoinBootstrapRaw: cstring = cstring""
 const MIN_FONTSIZE = 6
 const MAX_FONTSIZE = 40
 const EDITOR_GUTTER_PADDING = 2 #px
@@ -63,6 +132,137 @@ const EDITOR_GUTTER_PADDING = 2 #px
 var disconnectedNotification: Notification
 
 proc seqIsNil[T](s: seq[T]): bool {.importjs: "(# == null)".}
+
+proc publishCollabJoinState(raw: cstring) {.importjs: """
+  (function(raw) {
+    let state = null;
+    try {
+      state = JSON.parse(String(raw || "{}"));
+    } catch (error) {
+      state = { activated: false, error: String(error && error.message || error) };
+    }
+    window.CODETRACER_COLLAB_SESSION = state;
+    window.CODETRACER_COLLAB_JOIN_READY = true;
+  })(#);
+""".}
+
+proc activateCollabJoinBootstrap*(raw: cstring): cstring {.exportc.} =
+  ## JS-callable M6 join hook. Invite exchange can complete before the real
+  ## SessionViewModel exists, so this stores the bootstrap and configureMiddleware
+  ## replays it once the collaboration core is available.
+  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+    pendingCollabJoinBootstrapRaw = raw
+    result = cstring($(%*{
+      "activated": false,
+      "pending": true,
+    }))
+    publishCollabJoinState(result)
+    return
+
+  try:
+    let activation = activeSessionVM.collabCore.startCollabJoinSession(
+      parseJson($raw))
+    pendingCollabJoinBootstrapRaw = cstring""
+    result = cstring($(activation.toJson))
+  except CatchableError as e:
+    result = cstring($(%*{
+      "activated": false,
+      "pending": false,
+      "error": e.msg,
+    }))
+  publishCollabJoinState(result)
+
+proc activateCollabHostInvite*(raw: cstring): cstring {.exportc.} =
+  ## JS-callable M6 host hook. Creating an invite starts the same browser
+  ## collaboration transport as joining through an invite URL.
+  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+    result = cstring($(%*{
+      "activated": false,
+      "pending": true,
+    }))
+    publishCollabJoinState(result)
+    return
+
+  try:
+    let activation = activeSessionVM.collabCore.startCollabHostSession(
+      parseJson($raw))
+    result = cstring($(activation.toJson))
+  except CatchableError as e:
+    result = cstring($(%*{
+      "activated": false,
+      "pending": false,
+      "error": e.msg,
+    }))
+  publishCollabJoinState(result)
+
+proc collabTestDispatchSetRegister*(targetPath, value: cstring): cstring {.exportc.} =
+  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+    return cstring($(%*{"status": "missingCore"}))
+  let core = activeSessionVM.collabCore
+  let applyResult = core.dispatchLocalViewOp(
+    vokSetRegister,
+    $targetPath,
+    %*{"value": $value})
+  let last =
+    if core.dispatchLog.len == 0:
+      LocalViewOpDispatch()
+    else:
+      core.dispatchLog[^1]
+  cstring($(%*{
+    "status": $applyResult.status,
+    "reason": applyResult.reason,
+    "publishedToPeer": last.publishedToPeer,
+    "localOnly": last.localOnly,
+    "opId": last.op.opId,
+    "selectedPath": core.document.state.statePane.selectedPath.value,
+  }))
+
+proc collabTestDispatchDebugCommand*(command, leaseId: cstring): cstring {.exportc.} =
+  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+    return cstring($(%*{"status": "missingCore"}))
+  let core = activeSessionVM.collabCore
+  let applyResult = core.dispatchLocalViewOp(
+    vokDebugCommand,
+    "debugger.commands",
+    %*{
+      "command": $command,
+      "leaseId": $leaseId,
+    })
+  let last =
+    if core.dispatchLog.len == 0:
+      LocalViewOpDispatch()
+    else:
+      core.dispatchLog[^1]
+  cstring($(%*{
+    "status": $applyResult.status,
+    "reason": applyResult.reason,
+    "publishedToPeer": last.publishedToPeer,
+    "localOnly": last.localOnly,
+    "opId": last.op.opId,
+  }))
+
+proc collabTestState*(): cstring {.exportc.} =
+  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+    return cstring($(%*{"status": "missingCore"}))
+  let core = activeSessionVM.collabCore
+  var grants = newJArray()
+  for grant in core.document.state.capabilityGrants:
+    if grant.subject == core.localPrincipalId and grant.revokedByOpId.len == 0:
+      for cap in grant.capabilities:
+        grants.add %($cap)
+  cstring($(%*{
+    "status": "ready",
+    "sessionId": core.document.state.sessionId,
+    "traceIdentity": core.document.state.traceIdentity,
+    "localPrincipalId": core.localPrincipalId,
+    "selectedPath": core.document.state.statePane.selectedPath.value,
+    "collaborationEnabled": core.collaborationEnabled,
+    "peerTransportStarted": core.peerTransportStarted,
+    "localOperationLogLen": core.localOperationLog.len,
+    "grants": grants,
+  }))
+
+bootstrapCollabJoinFromLocation()
 
 proc rrBackendPath(data: Data): cstring =
   ## Safely retrieve the RR backend executable path from the config.
@@ -559,6 +759,8 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Disable Tracepoint", aDisableTracepoint
           element "Disable All Tracepoints", aDisableAllTracepoints
           element "Run All Tracepoints", aCollectEnabledTracepointResults
+          --sub
+          element "Invite to Collaborative Session...", aCollabInvite
 
         # The standard macOS Window menu
         macfolder "Window", "window"
@@ -1109,6 +1311,7 @@ proc onInit*(
   data.startOptions = response.startOptions
   data.homedir = response.home
   data.config = response.config
+  bootstrapCollabJoinFromLocation()
   if response.bypass:
     # if subsystem: DON'T reset the layout:
     #   keep it, and expect that the event log/other global panels
@@ -1204,6 +1407,8 @@ when not defined(ctInExtension):
       cerror "[PIPELINE] configureMiddleware: SessionVM created"
       cerror "[PIPELINE] configureMiddleware: RealBackendService created"
       clog "SessionViewModel: created with real DapApi backend"
+      if pendingCollabJoinBootstrapRaw.len > 0:
+        discard activateCollabJoinBootstrap(pendingCollabJoinBootstrapRaw)
 
       # Pre-initialise (or upgrade) the panel VMs that have legacy bridge
       # code so they use the shared store from the SessionViewModel.
@@ -2917,6 +3122,185 @@ proc isInputElementFocused(data: Data): bool =
 proc toggleTracepoint*(path: cstring, line: int) {.exportc.} =
   data.ui.editors[path].toggleTrace(path, line)
 
+proc openCollabInviteDialog(presets: seq[cstring]) {.importjs: """
+(async function(presets) {
+  const hostGrants = [
+    "observe",
+    "publishAwareness",
+    "mutateSharedViewState",
+    "controlDebugger",
+    "manageBreakpoints",
+    "manageWatches",
+    "manageLayout",
+    "grantCapabilities",
+    "invite",
+    "exportSession",
+    "hostBackend"
+  ];
+  const createInvite = async function(normalized, tenantId, replayId) {
+    const response = await fetch(
+      "/api/v1/tenants/" + encodeURIComponent(tenantId) +
+        "/replays/" + encodeURIComponent(replayId) + "/collab/invites",
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grantPreset: normalized,
+          expiresInSeconds: 3600
+        })
+      });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        "Could not create collaboration invite: " + response.status + " " + body);
+    }
+
+    const invite = await response.json();
+    window.CODETRACER_LAST_COLLAB_INVITE = invite;
+    const activate = typeof window.activateCollabHostInvite === "function"
+      ? window.activateCollabHostInvite
+      : (typeof activateCollabHostInvite === "function"
+        ? activateCollabHostInvite
+        : null);
+    if (typeof activate === "function") {
+      const activationRaw = activate(JSON.stringify({
+        replayId,
+        traceId: window.CODETRACER_TRACE_ID || replayId,
+        traceIdentity: window.CODETRACER_TRACE_ID || replayId,
+        roomId: invite.roomId,
+        initialGrants: hostGrants,
+        webUiUrl: invite.joinUrl,
+        nativeJoinUrl: invite.joinUrl,
+        rendezvousUrl: "/api/v1/collab/rooms/" +
+          encodeURIComponent(invite.roomId) + "/rendezvous",
+        transportHints: ["browser-channel", "viewops-not-accepted"]
+      }));
+      try {
+        window.CODETRACER_COLLAB_HOST_SESSION = JSON.parse(activationRaw);
+      } catch (_error) {
+        window.CODETRACER_COLLAB_HOST_SESSION = { activated: false };
+      }
+    }
+    return invite;
+  };
+  window.__ctTestCreateCollabInvite = createInvite;
+
+  const preset = window.prompt(
+    "Collaboration role preset (Viewer, Driver, Host)",
+    "Viewer");
+  if (preset === null) return;
+
+  const normalized = presets.find((candidate) =>
+    candidate.toLowerCase() === String(preset).trim().toLowerCase());
+  if (!normalized) {
+    window.alert("Unknown collaboration role preset.");
+    return;
+  }
+
+  const tenantId = window.CODETRACER_TENANT_ID ||
+    window.localStorage.getItem("CODETRACER_TENANT_ID") ||
+    window.prompt("Tenant UUID for this replay");
+  if (!tenantId) return;
+
+  const replayId = window.CODETRACER_REPLAY_ID ||
+    window.localStorage.getItem("CODETRACER_REPLAY_ID") ||
+    window.prompt("Running replay UUID");
+  if (!replayId) return;
+
+  let invite = null;
+  try {
+    invite = await createInvite(normalized, tenantId, replayId);
+  } catch (error) {
+    window.alert(String(error && error.message || error));
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(invite.joinUrl);
+  }
+
+  const revoke = window.confirm(
+    "Join URL copied:\n" + invite.joinUrl + "\n\nRevoke this invite now?");
+  if (!revoke) return;
+
+  await fetch(
+    "/api/v1/tenants/" + encodeURIComponent(tenantId) +
+      "/collab/invites/" + encodeURIComponent(invite.inviteId) + "/revoke",
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+})(#)
+""".}
+
+proc installCollabInviteTestHooks() {.importjs: """
+(function() {
+  if (window.__ctTestCreateCollabInvite) return;
+  const hostGrants = [
+    "observe",
+    "publishAwareness",
+    "mutateSharedViewState",
+    "controlDebugger",
+    "manageBreakpoints",
+    "manageWatches",
+    "manageLayout",
+    "grantCapabilities",
+    "invite",
+    "exportSession",
+    "hostBackend"
+  ];
+  window.__ctTestCreateCollabInvite = async function(normalized, tenantId, replayId) {
+    const response = await fetch(
+      "/api/v1/tenants/" + encodeURIComponent(tenantId) +
+        "/replays/" + encodeURIComponent(replayId) + "/collab/invites",
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grantPreset: normalized,
+          expiresInSeconds: 3600
+        })
+      });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const invite = await response.json();
+    window.CODETRACER_LAST_COLLAB_INVITE = invite;
+    const activate = typeof window.activateCollabHostInvite === "function"
+      ? window.activateCollabHostInvite
+      : (typeof activateCollabHostInvite === "function"
+        ? activateCollabHostInvite
+        : null);
+    if (typeof activate === "function") {
+      const activationRaw = activate(JSON.stringify({
+        replayId,
+        traceId: window.CODETRACER_TRACE_ID || replayId,
+        traceIdentity: window.CODETRACER_TRACE_ID || replayId,
+        roomId: invite.roomId,
+        initialGrants: hostGrants,
+        webUiUrl: invite.joinUrl,
+        nativeJoinUrl: invite.joinUrl,
+        rendezvousUrl: "/api/v1/collab/rooms/" +
+          encodeURIComponent(invite.roomId) + "/rendezvous",
+        transportHints: ["browser-channel", "viewops-not-accepted"]
+      }));
+      try {
+        window.CODETRACER_COLLAB_HOST_SESSION = JSON.parse(activationRaw);
+      } catch (_error) {
+        window.CODETRACER_COLLAB_HOST_SESSION = { activated: false };
+      }
+    }
+    return invite;
+  };
+})()
+""".}
+
+installCollabInviteTestHooks()
+
 var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) =
     if not invokeDebugStepAction(cstring"continue"):
@@ -3148,6 +3532,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   proc(actionData: JsObject) = # aTraceStaticBlockAtCursor
     data.viewsApi.successMessage(
       cstring"Trace Static Block at Cursor is not yet wired up"),
+  proc(actionData: JsObject) = # aCollabInvite
+    openCollabInviteDialog(@[
+      cstring(cgpViewer.presetName),
+      cstring(cgpDriver.presetName),
+      cstring(cgpHost.presetName)]),
   proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), # aTimeline
 ]
 

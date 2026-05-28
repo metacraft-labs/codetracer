@@ -191,6 +191,7 @@ type
     aViewDisassembly,         # View disassembly of the current binary
     aTraceMacroAtCursor,      # Trace macro expansion at the editor cursor
     aTraceStaticBlockAtCursor, # Trace `static:` block at the editor cursor
+    aCollabInvite,            # Create/copy/revoke a collaboration invite URL
     aTimeline                 # Open the Timeline panel
 
   InputShortcutMap* = TableLike[langstring, langstring]
