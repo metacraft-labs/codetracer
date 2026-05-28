@@ -1459,6 +1459,8 @@ proc selectLoopIteration(
     if self.flowLoops.hasKey(registeredLine):
       self.flowLoops[registeredLine].loopStep = loopStep
     self.activeStep = loopStep
+    self.renderActiveLoopIterationValues()
+    self.scheduleActiveLoopIterationValueRender()
 
   let jumpStep = self.firstLoopBodyStepForIteration(loopIndex, iteration)
   if jumpStep.stepCount != NO_STEP_COUNT:
@@ -1529,22 +1531,22 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       .toLowerAscii()
   let before = &"flow-{flowMode}-value-before-only"
 
-  let (klass, name) =
+  let (nameClassSuffix, valueClass, name) =
     case event.kind:
     of EventLogKind.Error:
-      ("-error", "error")
+      ("-error", "flow-error-box", "error")
     of EventLogKind.Write:
-      ("-std", "stdout")
+      ("-std", "flow-std-default-box", "stdout")
     of EventLogKind.WriteFile:
-      ("-std", "stdout")
+      ("-std", "flow-std-default-box", "stdout")
     of EventLogKind.Read:
-      ("-std", "stdin")
+      ("-std", "flow-std-default-box", "stdin")
     of EventLogKind.ReadFile:
-      ("-std", "stdin")
+      ("-std", "flow-std-default-box", "stdin")
     of EventLogKind.EvmEvent:
-      ("-std", $event.metadata)
+      ("-std", "flow-std-default-box", $event.metadata)
     else:
-      ("", "")
+      ("", "", "")
 
   result = document.createElement(cstring"span")
   result.setAttribute(cstring"class", cstring"ct-omni-value")
@@ -1552,7 +1554,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
 
   if event.text.len() > FLOW_VALUE_LIMIT:
     let viewMore = document.createElement(cstring"span")
-    viewMore.setAttribute(cstring"class", cstring(&"ct-omni-name{klass} flow-view-more-button flow-hide-content"))
+    viewMore.setAttribute(cstring"class", cstring(&"ct-omni-name{nameClassSuffix} flow-view-more-button flow-hide-content"))
     viewMore.applyStyle(style)
     viewMore.addEventListener(cstring"mousedown", proc(e: Event) =
       let targetId = &"flow-{flowMode}-value-box-{stepCount}-{i}"
@@ -1572,7 +1574,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     result.appendChild(viewMore)
 
   let nameSpan = document.createElement(cstring"span")
-  nameSpan.setAttribute(cstring"class", cstring(&"ct-omni-name{klass}"))
+  nameSpan.setAttribute(cstring"class", cstring(&"ct-omni-name{nameClassSuffix}"))
   nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
     self.jumpToLocalStep(stepCount)
   )
@@ -1583,7 +1585,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
   valueSpan.setAttribute(cstring"id", cstring(&"flow-{flowMode}-value-box-{stepCount}-{i}"))
   valueSpan.applyStyle(style)
   valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
-  valueSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-box {klass}-box " & before))
+  valueSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-box {valueClass} " & before))
   valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
     self.jumpToLocalStep(stepCount)
   )
@@ -3303,6 +3305,8 @@ proc flowLoopValue*(
   textarea.setAttribute(cstring"maxlength", cstring($width))
   textarea.addEventListener(cstring"blur", proc(e: Event) =
     self.onEnter()
+    self.redrawFlow()
+    self.scheduleActiveLoopIterationValueRender()
   )
   textarea.addEventListener(cstring"input", proc(ev: Event) =
     let rawValue = $cast[cstring](ev.target.toJs.value)
@@ -3534,8 +3538,8 @@ proc getCurrentStepCount*(self: FlowComponent, line: int): int =
     let step = self.flow.steps[stepCount]
 
     if step.loop >= 0 and step.loop < self.flow.loops.len and
-       self.flowLoops.hasKey(self.flow.loops[step.loop].first):
-      let loopStep = self.flowLoops[self.flow.loops[step.loop].first].loopStep
+       self.flowLoops.hasKey(self.flow.loops[step.loop].registeredLine):
+      let loopStep = self.flowLoops[self.flow.loops[step.loop].registeredLine].loopStep
       stepCount = self.updateIterationStepCount(line, stepCount, loopStep.loop, loopStep.iteration)
     elif self.activeStep.rrTicks == NO_TICKS:
       stepCount = self.positionRRTicksToStepCount(line, self.location.rrTicks)
@@ -4554,6 +4558,7 @@ method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
   self.location = response.location
   # self.updateFlowOnMove(self.location.rrTicks, self.location.line)
   self.redrawFlow()
+  self.scheduleActiveLoopIterationValueRender()
 
 method onLoadedFlowShape*(self: Component, update: FlowShape) {.async.} =
   discard

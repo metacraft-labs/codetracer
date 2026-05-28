@@ -66,20 +66,20 @@ fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
     // requires Rust edition 2024; this crate is currently on edition
     // 2021 (`Cargo.toml`), so we nest the checks manually.  Revisit
     // when the workspace bumps its edition.
-    if let Ok(explicit) = env::var("CODETRACER_RUNTIME_DIR") {
-        if !explicit.is_empty() {
-            return PathBuf::from(explicit);
-        }
+    if let Ok(explicit) = env::var("CODETRACER_RUNTIME_DIR")
+        && !explicit.is_empty()
+    {
+        return PathBuf::from(explicit);
     }
     if cfg!(target_os = "macos") {
         return PathBuf::from("/tmp/codetracer");
     }
-    if !cfg!(target_os = "macos") {
-        if let Ok(xdg) = env::var("XDG_RUNTIME_DIR") {
-            let candidate = PathBuf::from(&xdg);
-            if !xdg.is_empty() && candidate.is_dir() {
-                return candidate.join("codetracer");
-            }
+    if !cfg!(target_os = "macos")
+        && let Ok(xdg) = env::var("XDG_RUNTIME_DIR")
+    {
+        let candidate = PathBuf::from(&xdg);
+        if !xdg.is_empty() && candidate.is_dir() {
+            return candidate.join("codetracer");
         }
     }
     fallback_tmp.to_path_buf()
@@ -167,10 +167,10 @@ pub fn reserve_run_id_for_recording(recording_id: &str) -> String {
 /// A future cleanup will drop the fallback and hard-error when the env
 /// var is unset; see `Architecture/Runtime-Paths-Strategy.md` §4.3.
 pub fn resolve_run_id_for_worker() -> String {
-    if let Ok(value) = env::var(CODETRACER_RUN_ID_ENV) {
-        if !value.is_empty() {
-            return value;
-        }
+    if let Ok(value) = env::var(CODETRACER_RUN_ID_ENV)
+        && !value.is_empty()
+    {
+        return value;
     }
     #[cfg(unix)]
     let fallback = std::os::unix::process::parent_id();

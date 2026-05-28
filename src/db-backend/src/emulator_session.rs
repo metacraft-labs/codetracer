@@ -990,10 +990,10 @@ impl EmulatorReplaySession {
     /// puts the program's primary source first); falls back to
     /// `meta.program` so we never emit an empty `Location.path`.
     fn primary_path(&self) -> String {
-        if let Some(first) = self.meta.paths.first() {
-            if !first.is_empty() {
-                return first.clone();
-            }
+        if let Some(first) = self.meta.paths.first()
+            && !first.is_empty()
+        {
+            return first.clone();
         }
         if !self.meta.program.is_empty() {
             return self.meta.program.clone();
@@ -1084,10 +1084,10 @@ impl EmulatorReplaySession {
             // Prefer the DWARF-supplied function name when present —
             // the per-frame names are what makes `inventory_service ->
             // runForever -> _start` legible in DAP stackTrace output.
-            if let Some(name) = info.function {
-                if !name.is_empty() {
-                    function_name = name;
-                }
+            if let Some(name) = info.function
+                && !name.is_empty()
+            {
+                function_name = name;
             }
         }
 
@@ -1687,11 +1687,11 @@ impl ReplaySession for EmulatorReplaySession {
         // a path that doesn't match any CU are all silent — we still
         // mint the breakpoint so the GUI's breakpoint marker shows up,
         // but `Continue` won't halt on it.
-        if let Some(dwarf) = self.dwarf.as_ref() {
-            if let Ok(line_u32) = u32::try_from(line) {
-                for pc in dwarf.pcs_for_line(Path::new(path), line_u32) {
-                    self.breakpoint_static_pcs.insert(pc);
-                }
+        if let Some(dwarf) = self.dwarf.as_ref()
+            && let Ok(line_u32) = u32::try_from(line)
+        {
+            for pc in dwarf.pcs_for_line(Path::new(path), line_u32) {
+                self.breakpoint_static_pcs.insert(pc);
             }
         }
         Ok(breakpoint)

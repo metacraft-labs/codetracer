@@ -153,6 +153,7 @@ proc resizeTraceHandler*(self: TraceComponent)
 proc refreshTraceTableLayout*(self: TraceComponent)
 proc refreshTraceComponentLayout*(self: TraceComponent)
 proc renderTraceForExtension(self: TraceComponent)
+proc ensureMonacoEditor(self: TraceComponent)
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig
 proc traceBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
 
@@ -446,6 +447,10 @@ proc runTracepoints*(data: Data) {.exportc.} =
 
   for id, component in data.ui.componentMapping[Content.Trace]:
     let trace = TraceComponent(component)
+    if trace.monacoEditor.isNil:
+      trace.ensureMonacoEditor()
+      data.viewsApi.warnMessage(cstring"Tracepoint editor is still loading.")
+      return
     let code = trace.monacoEditor.getValue()
 
     if code != "" and not trace.isDisabled: # and trace.isChanged
@@ -843,6 +848,10 @@ method refreshTrace*(self: TraceComponent) =
   #     ($self.chart.viewKind)[4..^1].toLowerAscii().cstring
 
 proc saveSource*(self: TraceComponent) =
+  if self.monacoEditor.isNil:
+    self.ensureMonacoEditor()
+    return
+
   self.source = self.monacoEditor.getValue()
 
   if self.source != self.loggedSource:
@@ -957,6 +966,10 @@ proc toggleHamburger(self: TraceComponent) =
     self.openHamburger()
 
 proc getTracepointInfo(trace: TraceComponent): Tracepoint =
+  if trace.monacoEditor.isNil:
+    trace.ensureMonacoEditor()
+    return
+
   let code = trace.monacoEditor.getValue()
 
   if code != "":
@@ -1234,7 +1247,7 @@ proc traceMenuDom(self: TraceComponent): Node =
 proc renderEditDom(self: TraceComponent): Node =
   result = traceDiv(cstring"edit")
   result.setAttribute(cstring"id", self.selectorId)
-  result.appendTraceText(if self.source.isNil: cstring"                 " else: self.source)
+  result.appendTraceText(if self.source.isNil: cstring"" else: self.source)
 
 func traceLine(line: int): cstring =
   cstring($line)
@@ -1244,28 +1257,91 @@ func traceLine(line: int): cstring =
 proc expandWithEnter*(self: TraceComponent, newHeight: int) =
   self.updateViewZoneHeight(newHeight + TRACE_EDITOR_EXTRA_HEIGHT_PX + self.traceResultsPanelHeight() + TRACE_VIEWZONE_EXTRA_HEIGHT_PX)
 
-proc ensureMonacoEditor(self: TraceComponent) =
-  # check if trace has a monaco editor
-  if self.monacoEditor.isNil:
-    # get main editor monaco editor and it's theme
+const TraceMonacoMountMaxAttempts = 200
+const TraceMonacoMountRetryMs = 25
 
-    # TODO: Finf a way to store the monaco current theme?
-    # let activeMonacoEditor =
-    #   data.ui.editors[data.services.editor.active].monacoEditor
-    # let activeMonacoTheme = activeMonacoEditor.getCurrentMonacoTheme()
+proc nodeIsConnected(node: Node): bool {.importjs: "Boolean(#.isConnected)".}
 
+proc traceSourceValue(self: TraceComponent): cstring =
+  if self.source.isNil:
+    self.source = cstring""
+  self.source
+
+proc traceEditorTheme(self: TraceComponent): cstring =
+  if self.inExtension:
+    return cstring"vs-dark"
+
+  if not self.editorUI.isNil and not self.editorUI.monacoEditor.isNil:
+    return self.editorUI.monacoEditor.getCurrentMonacoTheme()
+
+  let active = self.data.services.editor.active
+  if not active.isNil and active.len > 0 and self.data.ui.editors.hasKey(active):
+    let activeEditor = self.data.ui.editors[active]
+    if not activeEditor.isNil and not activeEditor.monacoEditor.isNil:
+      return activeEditor.monacoEditor.getCurrentMonacoTheme()
+
+  cstring""
+
+proc traceEditorHost(self: TraceComponent): Element =
+  self.ensureEdit()
+
+  if not self.viewZone.isNil:
+    let root = cast[Node](self.viewZone.domNode)
+    if not root.isNil:
+      let host = cast[Node](root.findNodeInElement(cstring(&"#{self.selectorId}")))
+      if not host.isNil and nodeIsConnected(host):
+        return cast[Element](host)
+    return nil
+
+  if self.extensionRendererId.len > 0:
+    let extensionHost = document.getElementById(self.extensionRendererId)
+    if not extensionHost.isNil:
+      let host = cast[Node](cast[Node](extensionHost).findNodeInElement(cstring(&"#{self.selectorId}")))
+      if not host.isNil and nodeIsConnected(host):
+        return cast[Element](host)
+
+  let host = cast[Node](document.getElementById(self.selectorId))
+  if not host.isNil and nodeIsConnected(host):
+    return cast[Element](host)
+
+proc hostHasMonacoDom(host: Element): bool =
+  not host.isNil and not cast[Node](host).findNodeInElement(cstring".monaco-editor").isNil
+
+proc mountMonacoEditor(self: TraceComponent): bool =
+  let editorHost = self.traceEditorHost()
+  if editorHost.isNil:
+    return false
+
+  if not self.monacoEditor.isNil:
+    if hostHasMonacoDom(editorHost):
+      return true
+
+    let currentValue = self.monacoEditor.getValue()
+    if not currentValue.isNil:
+      self.source = currentValue
+    try:
+      self.monacoEditor.dispose()
+    except:
+      discard
+    self.monacoEditor = nil
+
+  let theme = self.traceEditorTheme()
+  if theme.len == 0:
+    return false
+
+  try:
     let documentTmp = domWindow.document
     let overflowHost = documentTmp.createElement("div")
     overflowHost.className = cstring("monaco-editor")
     documentTmp.body.appendChild(overflowHost)
 
-    # create trace monaco editor
-    self.monacoEditor = monaco.editor.create(
-      jq(cstring(fmt".trace #{self.selectorId}")),
+    editorHost.innerHTML = cstring""
+    let editor = monaco.editor.create(
+      editorHost,
       MonacoEditorOptions(
-        value: self.source,
+        value: self.traceSourceValue(),
         # language: toJsLang(self.editorUI.lang),
-        theme: if self.inExtension: "vs-dark" else: data.ui.editors[data.services.editor.active].monacoEditor.getCurrentMonacoTheme(),
+        theme: theme,
         readOnly: false,
         automaticLayout: true,
         lineNumbers: traceLine,
@@ -1284,35 +1360,68 @@ proc ensureMonacoEditor(self: TraceComponent) =
         fixedOverflowWidgets: true
       )
     )
+    self.monacoEditor = editor
+  except:
+    cerror "trace: create monaco editor: " & getCurrentExceptionMsg()
+    self.monacoEditor = nil
+    return false
 
-    # focus trace monaco editor text area after delay
-    self.focusTraceEditor()
+  # focus trace monaco editor text area after delay
+  self.focusTraceEditor()
 
-    # add trace monaco editor to the register
-    # TODO: Find a better way when using extension
-    if not self.inExtension:
-      self.data.ui.traceMonacoEditors.add(self.monacoEditor)
-      self.monacoEditor.onMouseWheel(proc(e: js) =
-        e.preventDefault()
-      )
-    # subscribe to trace monaco editor change event
-    self.monacoEditor.onDidChangeModelContent(proc (event: JsObject) =
-      self.error = nil
-      self.saveSource()
-
-      let code = self.monacoEditor.getValue()
-      let lineCount = code.split("\n").len()
-
-      if self.lineCount != lineCount:
-        self.lineCount = lineCount
-        if not self.inExtension:
-          self.expandWithEnter(self.traceEditorContentHeight())
-
-      discard setTimeout(proc() =
-        if not self.monacoEditor.isNil and not self.monacoEditor.hasTextFocus():
-          self.focusTraceEditor()
-      , 0)
+  # add trace monaco editor to the register
+  # TODO: Find a better way when using extension
+  if not self.inExtension:
+    self.data.ui.traceMonacoEditors.add(self.monacoEditor)
+    self.monacoEditor.onMouseWheel(proc(e: js) =
+      e.preventDefault()
     )
+  # subscribe to trace monaco editor change event
+  self.monacoEditor.onDidChangeModelContent(proc (event: JsObject) =
+    self.error = nil
+    self.saveSource()
+
+    let code = self.monacoEditor.getValue()
+    let lineCount = code.split("\n").len()
+
+    if self.lineCount != lineCount:
+      self.lineCount = lineCount
+      if not self.inExtension:
+        self.expandWithEnter(self.traceEditorContentHeight())
+
+    discard setTimeout(proc() =
+      if not self.monacoEditor.isNil and not self.monacoEditor.hasTextFocus():
+        self.focusTraceEditor()
+    , 0)
+  )
+
+  self.monacoMountScheduled = false
+  self.monacoMountAttempts = 0
+  true
+
+proc ensureMonacoEditor(self: TraceComponent) =
+  # check if trace has a monaco editor
+  if self.mountMonacoEditor():
+    return
+
+  if self.monacoMountScheduled:
+    return
+
+  self.monacoMountScheduled = true
+  self.monacoMountAttempts = 0
+
+  proc retryMount() =
+    if self.mountMonacoEditor():
+      return
+
+    inc self.monacoMountAttempts
+    if self.monacoMountAttempts <= TraceMonacoMountMaxAttempts:
+      discard setTimeout(proc() = retryMount(), TraceMonacoMountRetryMs)
+    else:
+      self.monacoMountScheduled = false
+      cerror cstring("trace: failed to mount monaco editor for " & $self.selectorId)
+
+  discard setTimeout(proc() = retryMount(), TraceMonacoMountRetryMs)
 
 proc resizeEditorHandler(self: TraceComponent) =
   # get new monaco editor config
@@ -1704,7 +1813,6 @@ method register*(self: TraceComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     self.ensureMonacoEditor()
-    self.togglePoint()
     discard self.onCompleteMove(response)
   )
   api.subscribe(CtUpdatedTable, proc(kind: CtEventKind, response: CtUpdatedTableResponseBody, sub: Subscriber) =

@@ -273,10 +273,10 @@ fn parse_first_ttd_fixture(manifest_path: &Path) -> Result<TtdFixture, String> {
 }
 
 fn find_compiler(candidates: &[&str]) -> Option<String> {
-    if let Ok(value) = std::env::var("CT_TTD_CC") {
-        if !value.trim().is_empty() {
-            return Some(value);
-        }
+    if let Ok(value) = std::env::var("CT_TTD_CC")
+        && !value.trim().is_empty()
+    {
+        return Some(value);
     }
     for candidate in candidates {
         let ok = if *candidate == "cl" {
@@ -551,10 +551,10 @@ fn launch_ttd_session_with_fixture(session: &mut DapStdioSession, fixture: &TtdF
 }
 
 fn launch_ttd_session(session: &mut DapStdioSession) -> Result<(), String> {
-    if let Ok(manifest) = resolve_manifest_path() {
-        if let Ok(fixture) = parse_first_ttd_fixture(&manifest) {
-            return launch_ttd_session_with_fixture(session, &fixture);
-        }
+    if let Ok(manifest) = resolve_manifest_path()
+        && let Ok(fixture) = parse_first_ttd_fixture(&manifest)
+    {
+        return launch_ttd_session_with_fixture(session, &fixture);
     }
 
     let Some(fixture) = auto_record_tracepoint_fixture()? else {

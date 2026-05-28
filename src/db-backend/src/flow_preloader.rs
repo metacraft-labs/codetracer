@@ -23,6 +23,10 @@ const STEP_COUNT_LIMIT: usize = 10000;
 const RETURN_VALUE_RR_DEPTH_LIMIT: usize = 7;
 const LOAD_FLOW_VALUE_RR_DEPTH_LIMIT: usize = 2;
 
+fn should_enter_materialized_call_body(location: &Location) -> bool {
+    location.rr_ticks.0 > 0 || (location.rr_ticks.0 == 0 && location.line > 0)
+}
+
 #[derive(Debug)]
 pub struct FlowPreloader {
     pub expr_loader: ExprLoader,
@@ -263,19 +267,18 @@ impl<'a> CallFlowPreloader<'a> {
             if self.trace_kind == TraceKind::Materialized
                 && self.lang != Lang::Elixir
                 && self.lang != Lang::Erlang
-                && self.location.rr_ticks.0 > 0
+                && should_enter_materialized_call_body(&self.location)
+                && let Ok(call_loc) = replay.jump_to_call(&self.location)
             {
-                if let Ok(call_loc) = replay.jump_to_call(&self.location) {
-                    // jump_to_call lands on the call entry step (the Call
-                    // event itself). StepIn from there enters the call body.
-                    if replay.step(Action::StepIn, true).is_ok() {
-                        let step_id = replay.current_step_id();
-                        info!(
-                            "  flow: entered call body at step {} (from call entry at step {})",
-                            step_id.0, call_loc.rr_ticks.0
-                        );
-                        self.location.rr_ticks = RRTicks(step_id.0);
-                    }
+                // jump_to_call lands on the call entry step (the Call
+                // event itself). StepIn from there enters the call body.
+                if replay.step(Action::StepIn, true).is_ok() {
+                    let step_id = replay.current_step_id();
+                    info!(
+                        "  flow: entered call body at step {} (from call entry at step {})",
+                        step_id.0, call_loc.rr_ticks.0
+                    );
+                    self.location.rr_ticks = RRTicks(step_id.0);
                 }
             }
         }
@@ -622,11 +625,11 @@ impl<'a> CallFlowPreloader<'a> {
                     replay.step(Action::StepIn, false)?; // hopefully go back to the end of our original function
                     let return_location = replay.load_location(&mut expr_loader)?;
                     // maybe this can be improved with a limited loop/jump to return/exit of call in the future
-                    if let Ok(return_call_key) = self.call_key_from(&return_location) {
-                        if return_call_key == tracked_call_key {
-                            flow_view_update = self.add_return_value(flow_view_update, replay);
-                            load_return_value = true;
-                        }
+                    if let Ok(return_call_key) = self.call_key_from(&return_location)
+                        && return_call_key == tracked_call_key
+                    {
+                        flow_view_update = self.add_return_value(flow_view_update, replay);
+                        load_return_value = true;
                     }
                 }
                 if !load_return_value {
@@ -858,15 +861,14 @@ impl<'a> CallFlowPreloader<'a> {
                         let param_name = format!("{}_p{}", value_name, suffix);
                         if let Ok(value) =
                             replay.load_value(&param_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                            && !value.is_not_found()
                         {
-                            if !value.is_not_found() {
-                                info!(
-                                    "    found Nim param via suffixed name: {} -> {}",
-                                    value_name, param_name
-                                );
-                                found_value = Some(value);
-                                break;
-                            }
+                            info!(
+                                "    found Nim param via suffixed name: {} -> {}",
+                                value_name, param_name
+                            );
+                            found_value = Some(value);
+                            break;
                         }
                     }
 
@@ -876,15 +878,14 @@ impl<'a> CallFlowPreloader<'a> {
                             let suffixed_name = format!("{}_{}", value_name, suffix);
                             if let Ok(value) =
                                 replay.load_value(&suffixed_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                                && !value.is_not_found()
                             {
-                                if !value.is_not_found() {
-                                    info!(
-                                        "    found Nim local via suffixed name: {} -> {}",
-                                        value_name, suffixed_name
-                                    );
-                                    found_value = Some(value);
-                                    break;
-                                }
+                                info!(
+                                    "    found Nim local via suffixed name: {} -> {}",
+                                    value_name, suffixed_name
+                                );
+                                found_value = Some(value);
+                                break;
                             }
                         }
                     }
@@ -897,21 +898,20 @@ impl<'a> CallFlowPreloader<'a> {
                             while let Some(mangled_name) = iter.next_candidate() {
                                 if let Ok(value) =
                                     replay.load_value(mangled_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                                    && !value.is_not_found()
                                 {
-                                    if !value.is_not_found() {
-                                        // Copy name only on success (to release borrow before calling iter methods)
-                                        let matched_name = mangled_name.to_string();
-                                        info!(
-                                            "    found Nim global via mangled name: {} -> {} (style: {:?})",
-                                            value_name,
-                                            matched_name,
-                                            iter.current_style()
-                                        );
-                                        // Record successful style for future lookups
-                                        iter.record_success();
-                                        found_value = Some(value);
-                                        break;
-                                    }
+                                    // Copy name only on success (to release borrow before calling iter methods)
+                                    let matched_name = mangled_name.to_string();
+                                    info!(
+                                        "    found Nim global via mangled name: {} -> {} (style: {:?})",
+                                        value_name,
+                                        matched_name,
+                                        iter.current_style()
+                                    );
+                                    // Record successful style for future lookups
+                                    iter.record_success();
+                                    found_value = Some(value);
+                                    break;
                                 }
                             }
                         }
@@ -1151,6 +1151,14 @@ mod tests {
             event,
             ..Location::default()
         }
+    }
+
+    #[test]
+    fn materialized_call_body_entry_guard_accepts_real_tick_zero_source_locations() {
+        assert!(should_enter_materialized_call_body(&make_location(1, 0, 0)));
+        assert!(should_enter_materialized_call_body(&make_location(-1, 42, 0)));
+        assert!(!should_enter_materialized_call_body(&make_location(-1, 0, 0)));
+        assert!(!should_enter_materialized_call_body(&make_location(0, 0, 0)));
     }
 
     #[test]

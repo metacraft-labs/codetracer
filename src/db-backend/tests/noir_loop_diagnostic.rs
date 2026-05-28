@@ -106,10 +106,10 @@ fn dump_noir_loop_trace_steps() {
     let mut step_lines: Vec<i64> = Vec::new();
     let mut path_strings: Vec<String> = Vec::new();
     for step in db.step_from(StepId(0), true) {
-        if let Some(p) = reader.path(step.path_id) {
-            if !path_strings.iter().any(|existing| existing == p) {
-                path_strings.push(p.to_string());
-            }
+        if let Some(p) = reader.path(step.path_id)
+            && !path_strings.iter().any(|existing| existing == p)
+        {
+            path_strings.push(p.to_string());
         }
         step_lines.push(step.line.0);
     }

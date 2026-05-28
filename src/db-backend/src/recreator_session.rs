@@ -268,10 +268,10 @@ impl ReplayWorker {
             }
 
             // Check if the worker process is still alive.
-            if let Some(ref mut child) = self.process {
-                if let Some(status) = child.try_wait()? {
-                    return Err(format!("worker process exited with {} before creating socket", status).into());
-                }
+            if let Some(ref mut child) = self.process
+                && let Some(status) = child.try_wait()?
+            {
+                return Err(format!("worker process exited with {} before creating socket", status).into());
             }
 
             thread::sleep(Duration::from_millis(10));
@@ -525,17 +525,16 @@ impl ReplayWorker {
         //   {"status":"error","code":"...","message":"..."}
         // Detect these so they don't pass through as "success" and cause
         // downstream deserialization failures (e.g. "missing field `path`").
-        if res.starts_with('{') {
-            if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&res) {
-                if envelope.get("status").and_then(|v| v.as_str()) == Some("error") {
-                    let code = envelope.get("code").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    let message = envelope
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(no message)");
-                    return Err(format!("dispatch_replay_query ct rr worker error: [{code}] {message}").into());
-                }
-            }
+        if res.starts_with('{')
+            && let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&res)
+            && envelope.get("status").and_then(|v| v.as_str()) == Some("error")
+        {
+            let code = envelope.get("code").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let message = envelope
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no message)");
+            return Err(format!("dispatch_replay_query ct rr worker error: [{code}] {message}").into());
         }
 
         Ok(res)

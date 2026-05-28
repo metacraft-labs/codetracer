@@ -123,6 +123,7 @@ proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehavio
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
 proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
 proc editorAfterRedraw(self: EditorViewComponent)
+proc scheduleInitialFlowLoad(self: EditorViewComponent)
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
 proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring)
 proc renderExpandedEditorDirect(self: EditorViewComponent)
@@ -710,6 +711,8 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
     discard self.onUpdatedFlow(response)
   )
+  api.emit(InternalLastCompleteMove, EmptyArg())
+  self.scheduleInitialFlowLoad()
 
 proc registerEditorViewComponent*(component: EditorViewComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
@@ -1770,6 +1773,240 @@ proc clearTest(self: EditorViewComponent) =
       testLine.contentWidget = nil
   self.testDom = JsAssoc[int, Node]{}
 
+proc loadPendingFlowIfReady(self: EditorViewComponent): bool =
+  if self.api.isNil:
+    return false
+  if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
+    return false
+  if not self.shouldLoadFlow:
+    return false
+
+  # Prefer the cached complete-move location over tabInfo.location. The latter
+  # is the open-tab request shape and can carry rrTicks=0/NO_LINE while Monaco
+  # was still mounting.
+  let flowLocation =
+    if self.hasPendingFlowLocation:
+      self.pendingFlowLocation
+    else:
+      self.tabInfo.location
+  if flowLocation.line <= 0:
+    return false
+  self.loadFlow(FlowMode.Call, flowLocation)
+  self.shouldLoadFlow = false
+  self.hasPendingFlowLocation = false
+  true
+
+proc editorLineCanHostFlow(self: EditorViewComponent, line: int): bool =
+  if line <= 0:
+    return false
+  if self.tabInfo.isNil or self.tabInfo.sourceLines.len == 0:
+    return true
+  line <= self.tabInfo.sourceLines.len
+
+proc locationPathMatchesEditor(self: EditorViewComponent, location: types.Location): bool =
+  if location.path.len > 0 and sameSourceRevisionPath(location.path, self.name):
+    return true
+  if location.highLevelPath.len > 0 and sameSourceRevisionPath(location.highLevelPath, self.name):
+    return true
+  if location.lowLevelPath.len > 0 and sameSourceRevisionPath(location.lowLevelPath, self.name):
+    return true
+  location.path.len == 0 and location.highLevelPath.len == 0 and location.lowLevelPath.len == 0
+
+proc usableInitialFlowLocation(
+  self: EditorViewComponent,
+  input: types.Location
+): tuple[found: bool, location: types.Location] =
+  var location = input
+  if not self.locationPathMatchesEditor(location):
+    return
+
+  if not self.editorLineCanHostFlow(location.line):
+    if location.highLevelPath.len > 0 and
+        sameSourceRevisionPath(location.highLevelPath, self.name) and
+        self.editorLineCanHostFlow(location.highLevelLine):
+      location.path = location.highLevelPath
+      location.line = location.highLevelLine
+    elif location.lowLevelPath.len > 0 and
+        sameSourceRevisionPath(location.lowLevelPath, self.name) and
+        self.editorLineCanHostFlow(location.lowLevelLine):
+      location.path = location.lowLevelPath
+      location.line = location.lowLevelLine
+    else:
+      return
+
+  if location.path.len == 0 and location.highLevelPath.len == 0:
+    location.path = self.name
+
+  (true, location)
+
+proc eventFlowLocation(event: ProgramEvent): types.Location =
+  types.Location(
+    path: event.highLevelPath,
+    line: event.highLevelLine,
+    event: event.rrEventId,
+    highLevelPath: event.highLevelPath,
+    highLevelLine: event.highLevelLine,
+    rrTicks: event.directLocationRRTicks,
+    sourceGeneration: event.sourceGeneration,
+    sourceDigest: event.sourceDigest
+  )
+
+proc firstEditorFlowLine(self: EditorViewComponent): int =
+  if self.tabInfo.isNil:
+    return 0
+  for i, line in self.tabInfo.sourceLines:
+    if ($line).strip.len > 0:
+      return i + 1
+  if self.tabInfo.sourceLines.len > 0:
+    return 1
+  0
+
+proc eventFlowLocationForEditor(
+  self: EditorViewComponent,
+  event: ProgramEvent
+): tuple[found: bool, location: types.Location] =
+  let directLocation = self.usableInitialFlowLocation(eventFlowLocation(event))
+  if directLocation.found:
+    return directLocation
+  if event.directLocationRRTicks <= 0:
+    return
+  if event.highLevelPath.len > 0 and not sameSourceRevisionPath(event.highLevelPath, self.name):
+    return
+
+  let line = self.firstEditorFlowLine()
+  if not self.editorLineCanHostFlow(line):
+    return
+
+  (true, types.Location(
+    path: self.name,
+    line: line,
+    event: event.rrEventId,
+    highLevelPath: self.name,
+    highLevelLine: line,
+    rrTicks: event.directLocationRRTicks,
+    sourceGeneration: event.sourceGeneration,
+    sourceDigest: event.sourceDigest
+  ))
+
+proc initialDebuggerFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  if self.data.isNil or self.data.services.isNil or self.data.services.debugger.isNil:
+    return
+  self.usableInitialFlowLocation(self.data.services.debugger.location)
+
+proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  if self.service.isNil:
+    return
+
+  let candidates = @[
+    self.path,
+    self.name,
+    canonicalSourceRevisionPath(self.path),
+    canonicalSourceRevisionPath(self.name)
+  ]
+  for key in candidates:
+    if key.len == 0 or not self.service.completeMoveResponses.hasKey(key):
+      continue
+    let location = self.usableInitialFlowLocation(self.service.completeMoveResponses[key].location)
+    if location.found:
+      return location
+
+proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  if self.data.isNil or self.data.ui.isNil:
+    return
+  if self.data.ui.componentMapping[Content.Calltrace].len == 0:
+    return
+
+  for _, component in self.data.ui.componentMapping[Content.Calltrace]:
+    let calltrace = CalltraceComponent(component)
+    if calltrace.isNil:
+      continue
+    for callLine in calltrace.callLines:
+      if callLine.isNil or callLine.content.isNil:
+        continue
+      if callLine.content.kind != CallLineContentKind.Call or callLine.content.call.isNil:
+        continue
+      let location = callLine.content.call.location
+      let usableLocation = self.usableInitialFlowLocation(location)
+      if usableLocation.found:
+        if usableLocation.location.rrTicks > 0:
+          return usableLocation
+
+proc initialEventLogFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  if self.data.isNil:
+    return
+
+  if not self.data.services.isNil and not self.data.services.eventLog.isNil:
+    for event in self.data.services.eventLog.events:
+      let location = self.eventFlowLocationForEditor(event)
+      if location.found:
+        return location
+
+  if not self.data.ui.isNil:
+    for _, component in self.data.ui.componentMapping[Content.EventLog]:
+      let eventLog = EventLogComponent(component)
+      if eventLog.isNil:
+        continue
+      for event in eventLog.programEvents:
+        let location = self.eventFlowLocationForEditor(event)
+        if location.found:
+          return location
+
+proc initialFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  let tabLocation = self.usableInitialFlowLocation(self.tabInfo.location)
+  if tabLocation.found:
+    return tabLocation
+
+  let debuggerLocation = self.initialDebuggerFlowLocation()
+  if debuggerLocation.found:
+    return debuggerLocation
+
+  let cachedMoveLocation = self.initialCachedMoveFlowLocation()
+  if cachedMoveLocation.found:
+    return cachedMoveLocation
+
+  let eventLogLocation = self.initialEventLogFlowLocation()
+  if eventLogLocation.found:
+    return eventLogLocation
+
+  let calltraceLocation = self.initialCalltraceFlowLocation()
+  if calltraceLocation.found:
+    return calltraceLocation
+
+proc loadInitialFlowIfReady(self: EditorViewComponent): bool =
+  if self.api.isNil:
+    return false
+  if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
+    return false
+  if not self.flow.isNil:
+    return false
+  if not self.data.config.flow.enabled or
+     self.data.ui.mode != DebugMode:
+    return false
+  let initialLocation = self.initialFlowLocation()
+  if not initialLocation.found:
+    return false
+
+  self.loadFlow(FlowMode.Call, initialLocation.location)
+  true
+
+proc scheduleInitialFlowLoad(self: EditorViewComponent) =
+  var attempts = 0
+
+  proc tryLoad() =
+    if self.isNil:
+      return
+    if not self.api.isNil and self.flow.isNil:
+      self.api.emit(InternalLastCompleteMove, EmptyArg())
+    if not self.flow.isNil:
+      return
+    if self.loadPendingFlowIfReady() or self.loadInitialFlowIfReady():
+      return
+    attempts += 1
+    if attempts <= 200:
+      discard setTimeout(proc() = tryLoad(), 50)
+
+  discard setTimeout(proc() = tryLoad(), 0)
+
 # ---------------------------------------------------------------------------
 # IsoNim primary rendering — Monaco init and after-redraw extracted procs
 # ---------------------------------------------------------------------------
@@ -1965,6 +2202,11 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
         return
   )
 
+  discard self.loadInitialFlowIfReady()
+
+  if not self.api.isNil:
+    self.api.emit(InternalLastCompleteMove, EmptyArg())
+
 proc editorAfterRedraw(self: EditorViewComponent) =
   ## Per-redraw work for the editor: flow rendering, line styles, test
   ## actions, inline values, trace/expansion redraws.
@@ -1984,28 +2226,8 @@ proc editorAfterRedraw(self: EditorViewComponent) =
       if not self.flow.isNil and not self.flow.flow.isNil:
         self.flow.clear()
 
-    if self.shouldLoadFlow and not self.tabInfo.monacoEditor.isNil:
-      # NSS-1.68 FRONTEND fix: prefer the cached complete_move location over
-      # tabInfo.location. tabInfo.location reflects the *open-tab* request and is
-      # built by openNewEditorView (utils.nim:1208-1216) with rrTicks=0 and
-      # line=NO_LINE — the backend echoes that shape back via tabLoad
-      # (config.nim:175). Passing it to ct/load-flow yields no loop steps for
-      # the current cursor position (verified by the headless test
-      # ``ct/load-flow with stale tabInfo.location returns no loop steps`` in
-      # noir_space_ship_test.nim, which shows stale=1 loop / 12 steps vs
-      # good=2 loops / 84 steps).
-      #
-      # The response.location captured at deferral time (in onCompleteMove) is
-      # the move's true location with the correct rrTicks/line, so we replay
-      # *that* shape when monaco finally becomes ready.
-      let flowLocation =
-        if self.hasPendingFlowLocation:
-          self.pendingFlowLocation
-        else:
-          tabInfo.location
-      self.loadFlow(FlowMode.Call, flowLocation)
-      self.shouldLoadFlow = false
-      self.hasPendingFlowLocation = false
+    if not self.loadPendingFlowIfReady():
+      discard self.loadInitialFlowIfReady()
 
     if not self.data.startOptions.diff.isNil and
       self.diffViewZones.len() == 0 and
@@ -2035,12 +2257,25 @@ proc editorAfterRedraw(self: EditorViewComponent) =
       expandedInstance.renderExpandedEditorDirect()
 
 proc refreshFlowAfterActivation*(self: EditorViewComponent) =
-  if self.isNil or self.flow.isNil:
+  if self.isNil:
     return
   if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
     return
+  if not self.api.isNil and self.flow.isNil:
+    self.api.emit(InternalLastCompleteMove, EmptyArg())
+  if not self.flow.isNil:
+    self.redrawFlow()
+    self.flow.scheduleActiveLoopIterationValueRender()
+    return
+  if self.loadPendingFlowIfReady():
+    return
+  if self.loadInitialFlowIfReady():
+    return
+  if self.flow.isNil:
+    return
   if self.data.config.flow.enabled and self.data.ui.mode == DebugMode and
      not self.flow.flow.isNil:
+    self.flow.redrawFlow()
     self.flow.scheduleActiveLoopIterationValueRender()
 
 proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
@@ -2470,7 +2705,10 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       if not self.flow.isNil:
         self.flow.clear()
       cdebug "flow: create flow again"
-      if self.tabInfo.monacoEditor.isNil:
+      if response.location.line <= 0:
+        self.shouldLoadFlow = false
+        self.hasPendingFlowLocation = false
+      elif self.tabInfo.monacoEditor.isNil:
         self.shouldLoadFlow = true
         # NSS-1.68 FRONTEND fix: capture the move's true location so the deferred
         # loadFlow in ``editorAfterRedraw`` does not fall back to the stale

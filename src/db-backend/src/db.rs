@@ -662,12 +662,11 @@ impl Db {
             for cell_change in self.cell_changes[&place].iter().rev() {
                 if cell_change.step_id <= step_id {
                     info!("  cell change for index {index}: {cell_change:?}");
-                    if let Some(change_index) = cell_change.index {
-                        if change_index == index {
-                            if let Some(item_place) = cell_change.item_place {
-                                return self.load_value_for_place(item_place, step_id);
-                            }
-                        }
+                    if let Some(change_index) = cell_change.index
+                        && change_index == index
+                        && let Some(item_place) = cell_change.item_place
+                    {
+                        return self.load_value_for_place(item_place, step_id);
                     }
                 }
             }
@@ -711,21 +710,19 @@ impl Db {
         // also the last step id of the group for a certain line visit
         // and to filter for that group
         let mut last_step_id_for_line = step_id;
-        if !exact {
-            if let Some(original_step) = self.steps.get(step_id) {
-                let original_path_id = original_step.path_id;
-                let original_line = original_step.line;
-                let mut current_step_id = step_id + 1;
-                // Guard against negative step_id wrapping: only iterate when
-                // the next id is non-negative and within bounds.
-                while current_step_id.0 >= 0 && (current_step_id.0 as usize) < self.steps.len() {
-                    let step = self.steps[current_step_id];
-                    if step.path_id != original_path_id || step.line != original_line {
-                        break;
-                    } else {
-                        last_step_id_for_line = current_step_id;
-                        current_step_id = current_step_id + 1;
-                    }
+        if !exact && let Some(original_step) = self.steps.get(step_id) {
+            let original_path_id = original_step.path_id;
+            let original_line = original_step.line;
+            let mut current_step_id = step_id + 1;
+            // Guard against negative step_id wrapping: only iterate when
+            // the next id is non-negative and within bounds.
+            while current_step_id.0 >= 0 && (current_step_id.0 as usize) < self.steps.len() {
+                let step = self.steps[current_step_id];
+                if step.path_id != original_path_id || step.line != original_line {
+                    break;
+                } else {
+                    last_step_id_for_line = current_step_id;
+                    current_step_id = current_step_id + 1;
                 }
             }
         }
@@ -1272,12 +1269,11 @@ impl MaterializedReplaySession {
                 if let Some(enabled) = self.breakpoint_list[step.path_id.0]
                     .get(&step.line.into())
                     .map(|bp| bp.enabled)
+                    && enabled
                 {
-                    if enabled {
-                        self.step_id_jump(step.step_id);
-                        // true: has hit a breakpoint
-                        return Ok(true);
-                    }
+                    self.step_id_jump(step.step_id);
+                    // true: has hit a breakpoint
+                    return Ok(true);
                 }
             } else {
                 break;

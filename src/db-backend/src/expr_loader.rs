@@ -717,10 +717,10 @@ impl ExprLoader {
                     return Some((child.start_position().column, child.end_position().column));
                 }
                 // For Nim, the identifier is inside exported_symbol/symbol
-                if child.kind() == "exported_symbol" || child.kind() == "symbol" {
-                    if let Some(range) = find_identifier_range(&child, values, depth + 1) {
-                        return Some(range);
-                    }
+                if (child.kind() == "exported_symbol" || child.kind() == "symbol")
+                    && let Some(range) = find_identifier_range(&child, values, depth + 1)
+                {
+                    return Some(range);
                 }
             }
             None
@@ -830,12 +830,11 @@ impl ExprLoader {
                     return false;
                 }
 
-                if parent_kind == "scoped_identifier" {
-                    if let Some(grandparent) = parent.parent() {
-                        if grandparent.kind() == "call_expression" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "scoped_identifier"
+                    && let Some(grandparent) = parent.parent()
+                    && grandparent.kind() == "call_expression"
+                {
+                    return false;
                 }
 
                 true
@@ -854,32 +853,30 @@ impl ExprLoader {
 
                 // Filter out routine definitions (proc, func, method, iterator, etc.)
                 // The identifier is the "name" field of routine_definition
-                if parent_kind == "routine_definition" {
-                    if let Some(name_field) = field_name_in_parent(node) {
-                        if name_field == "name" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "routine_definition"
+                    && let Some(name_field) = field_name_in_parent(node)
+                    && name_field == "name"
+                {
+                    return false;
                 }
 
                 // Filter out exported_symbol (used in routine names, type names, etc.)
-                if parent_kind == "exported_symbol" {
-                    if let Some(grandparent) = parent.parent() {
-                        let grandparent_kind = grandparent.kind();
-                        // Routine definitions, type definitions, enum fields
-                        if matches!(grandparent_kind, "routine_definition" | "type_def" | "enum_field_def") {
-                            return false;
-                        }
+                if parent_kind == "exported_symbol"
+                    && let Some(grandparent) = parent.parent()
+                {
+                    let grandparent_kind = grandparent.kind();
+                    // Routine definitions, type definitions, enum fields
+                    if matches!(grandparent_kind, "routine_definition" | "type_def" | "enum_field_def") {
+                        return false;
                     }
                 }
 
                 // Filter out function calls - identifier followed by call_suffix
-                if parent_kind == "postfix_expr" || parent_kind == "command_expr" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "function" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "postfix_expr" || parent_kind == "command_expr")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "function"
+                {
+                    return false;
                 }
 
                 // Filter out function calls
@@ -910,32 +907,32 @@ impl ExprLoader {
                 }
 
                 // Now current should be postfixable_primary
-                if check_parent == "postfixable_primary" {
-                    if let Some(postfix_parent) = current.parent() {
-                        if postfix_parent.kind() == "postfix_expr" {
-                            // Check if there's a call_suffix sibling
-                            let mut cursor = postfix_parent.walk();
-                            if cursor.goto_first_child() {
-                                loop {
-                                    if cursor.node().kind() == "call_suffix" {
-                                        return false; // This is a function call
-                                    }
-                                    if !cursor.goto_next_sibling() {
-                                        break;
-                                    }
+                if check_parent == "postfixable_primary"
+                    && let Some(postfix_parent) = current.parent()
+                {
+                    if postfix_parent.kind() == "postfix_expr" {
+                        // Check if there's a call_suffix sibling
+                        let mut cursor = postfix_parent.walk();
+                        if cursor.goto_first_child() {
+                            loop {
+                                if cursor.node().kind() == "call_suffix" {
+                                    return false; // This is a function call
                                 }
-                            }
-                            // Also check if postfix_expr is inside command_expr (e.g., echo x)
-                            if let Some(grandparent) = postfix_parent.parent() {
-                                if grandparent.kind() == "command_expr" {
-                                    return false;
+                                if !cursor.goto_next_sibling() {
+                                    break;
                                 }
                             }
                         }
-                        // Direct command_expr as parent of postfixable_primary
-                        if postfix_parent.kind() == "command_expr" {
+                        // Also check if postfix_expr is inside command_expr (e.g., echo x)
+                        if let Some(grandparent) = postfix_parent.parent()
+                            && grandparent.kind() == "command_expr"
+                        {
                             return false;
                         }
+                    }
+                    // Direct command_expr as parent of postfixable_primary
+                    if postfix_parent.kind() == "command_expr" {
+                        return false;
                     }
                 }
 
@@ -1019,22 +1016,20 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
 
                 // Filter out function/method declaration names
-                if parent_kind == "function_declaration" || parent_kind == "method_declaration" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "function_declaration" || parent_kind == "method_declaration")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out function names in call expressions.
                 // In `foo()`, the AST is: call_expression { function: identifier "foo", ... }
-                if parent_kind == "call_expression" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "function" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "call_expression"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "function"
+                {
+                    return false;
                 }
 
                 // Filter out selector expressions used as function calls.
@@ -1047,16 +1042,15 @@ impl ExprLoader {
                 //   }
                 // The `fmt` operand is an identifier, so we filter it out when it's
                 // the operand of a selector_expression inside a call_expression.
-                if parent_kind == "selector_expression" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "operand" {
-                            // Check if the selector_expression is the callee of a call
-                            if let Some(grandparent) = parent.parent() {
-                                if grandparent.kind() == "call_expression" {
-                                    return false;
-                                }
-                            }
-                        }
+                if parent_kind == "selector_expression"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "operand"
+                {
+                    // Check if the selector_expression is the callee of a call
+                    if let Some(grandparent) = parent.parent()
+                        && grandparent.kind() == "call_expression"
+                    {
+                        return false;
                     }
                 }
 
@@ -1071,22 +1065,20 @@ impl ExprLoader {
                 }
 
                 // Filter out type identifiers in type contexts
-                if parent_kind == "type_spec" || parent_kind == "type_declaration" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" || field_name == "type" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "type_spec" || parent_kind == "type_declaration")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && (field_name == "name" || field_name == "type")
+                {
+                    return false;
                 }
 
                 // Filter out parameter names (function parameters are not local variables
                 // in the same sense — they are already captured by the debugger separately)
-                if parent_kind == "parameter_declaration" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "type" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "parameter_declaration"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "type"
+                {
+                    return false;
                 }
 
                 true
@@ -1120,51 +1112,47 @@ impl ExprLoader {
 
                 // Filter out function definition names.
                 // AST: function_definition { name: identifier "foo", parameters: ..., body: ... }
-                if parent_kind == "function_definition" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "function_definition"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out class definition names.
                 // AST: class_definition { name: identifier "MyClass", body: ... }
-                if parent_kind == "class_definition" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "class_definition"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out function names in call expressions.
                 // AST: call { function: identifier "print", arguments: argument_list { ... } }
-                if parent_kind == "call" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "function" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "call"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "function"
+                {
+                    return false;
                 }
 
                 // Filter out attribute names in attribute access.
                 // AST: attribute { object: identifier, attribute: identifier }
                 // The `attribute` field (right side of the dot) is not a variable reference.
-                if parent_kind == "attribute" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "attribute" {
-                            return false;
-                        }
-                        // Filter out the object when the attribute is used as a call function.
-                        // E.g., `math.sqrt(x)` — `math` is not a local variable reference.
-                        if field_name == "object" {
-                            if let Some(grandparent) = parent.parent() {
-                                if grandparent.kind() == "call" {
-                                    return false;
-                                }
-                            }
-                        }
+                if parent_kind == "attribute"
+                    && let Some(field_name) = field_name_in_parent(node)
+                {
+                    if field_name == "attribute" {
+                        return false;
+                    }
+                    // Filter out the object when the attribute is used as a call function.
+                    // E.g., `math.sqrt(x)` — `math` is not a local variable reference.
+                    if field_name == "object"
+                        && let Some(grandparent) = parent.parent()
+                        && grandparent.kind() == "call"
+                    {
+                        return false;
                     }
                 }
 
@@ -1229,28 +1217,27 @@ impl ExprLoader {
 
                 // Filter out method definition names.
                 // AST: method { name: identifier "foo", parameters: ..., body: ... }
-                if parent_kind == "method" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "method"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out method names in call expressions.
                 // AST: call { method: identifier "puts", arguments: argument_list { ... } }
                 // Bare calls like `puts x` have method field but no receiver.
-                if parent_kind == "call" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "method" {
-                            return false;
-                        }
-                        // Filter out the receiver when it's part of a method call.
-                        // E.g., `obj.method(x)` — `obj` is the receiver, not a
-                        // standalone variable reference in this call context.
-                        if field_name == "receiver" {
-                            return false;
-                        }
+                if parent_kind == "call"
+                    && let Some(field_name) = field_name_in_parent(node)
+                {
+                    if field_name == "method" {
+                        return false;
+                    }
+                    // Filter out the receiver when it's part of a method call.
+                    // E.g., `obj.method(x)` — `obj` is the receiver, not a
+                    // standalone variable reference in this call context.
+                    if field_name == "receiver" {
+                        return false;
                     }
                 }
 
@@ -1258,12 +1245,11 @@ impl ExprLoader {
                 // AST: class { name: constant "MyClass" }
                 // (Class names are typically `constant` nodes, not `identifier`,
                 // but handle it defensively.)
-                if parent_kind == "class" || parent_kind == "module" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "class" || parent_kind == "module")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out method parameter identifiers.
@@ -1305,63 +1291,58 @@ impl ExprLoader {
 
                 // Filter out function declaration names.
                 // AST: function_declaration { name: identifier "foo", parameters: ..., body: ... }
-                if parent_kind == "function_declaration" || parent_kind == "function" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "function_declaration" || parent_kind == "function")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out method definition names.
                 // AST: method_definition { name: property_identifier ... }
                 // (method names are usually property_identifier, not identifier,
                 // but handle defensively)
-                if parent_kind == "method_definition" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "method_definition"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out class declaration names.
                 // AST: class_declaration { name: identifier "MyClass", body: ... }
-                if parent_kind == "class_declaration" || parent_kind == "class" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "class_declaration" || parent_kind == "class")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out function names in call expressions.
                 // AST: call_expression { function: identifier "foo", arguments: ... }
-                if parent_kind == "call_expression" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "function" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "call_expression"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "function"
+                {
+                    return false;
                 }
 
                 // Filter out property names in member expressions.
                 // AST: member_expression { object: identifier, property: property_identifier }
                 // The `property` field is usually property_identifier but handle identifier too.
-                if parent_kind == "member_expression" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "property" {
-                            return false;
-                        }
-                        // Filter out the object when the member_expression is a callee.
-                        // E.g., `console.log(x)` — `console` is not a local variable reference.
-                        if field_name == "object" {
-                            if let Some(grandparent) = parent.parent() {
-                                if grandparent.kind() == "call_expression" {
-                                    return false;
-                                }
-                            }
-                        }
+                if parent_kind == "member_expression"
+                    && let Some(field_name) = field_name_in_parent(node)
+                {
+                    if field_name == "property" {
+                        return false;
+                    }
+                    // Filter out the object when the member_expression is a callee.
+                    // E.g., `console.log(x)` — `console` is not a local variable reference.
+                    if field_name == "object"
+                        && let Some(grandparent) = parent.parent()
+                        && grandparent.kind() == "call_expression"
+                    {
+                        return false;
                     }
                 }
 
@@ -1465,34 +1446,31 @@ impl ExprLoader {
 
                 // Filter out function names in function/method definitions.
                 // AST: function_definition > function_declarator > identifier (declarator field)
-                if parent_kind == "function_declarator" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "declarator" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "function_declarator"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "declarator"
+                {
+                    return false;
                 }
 
                 // Filter out function names in call expressions.
                 // AST: call_expression > identifier (function field)
                 // Example: `printf("hello")` — `printf` is the `function` field.
-                if parent_kind == "call_expression" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "function" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "call_expression"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "function"
+                {
+                    return false;
                 }
 
                 // Filter out macro names in preprocessor definitions.
                 // AST: preproc_def > identifier (name field) — e.g. `#define MAX 100`
                 //      preproc_function_def > identifier (name field) — e.g. `#define ADD(a,b) ...`
-                if parent_kind == "preproc_def" || parent_kind == "preproc_function_def" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "preproc_def" || parent_kind == "preproc_function_def")
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 // Filter out macro parameter names in function-like macro definitions.
@@ -1509,12 +1487,11 @@ impl ExprLoader {
                 // Filter out enumerator constant names in enum declarations.
                 // AST: enumerator > identifier (name field) — e.g. `enum { RED, GREEN }`
                 // Enum constants are compile-time values, not runtime variables.
-                if parent_kind == "enumerator" {
-                    if let Some(field_name) = field_name_in_parent(node) {
-                        if field_name == "name" {
-                            return false;
-                        }
-                    }
+                if parent_kind == "enumerator"
+                    && let Some(field_name) = field_name_in_parent(node)
+                    && field_name == "name"
+                {
+                    return false;
                 }
 
                 true
@@ -1621,12 +1598,11 @@ impl ExprLoader {
                     "type_identifier" | "scoped_type_identifier" => return false,
                     _ => {}
                 }
-                if parent_kind == "call_expression" || parent_kind == "macro_invocation" {
-                    if let Some(field) = field_name_in_parent(node) {
-                        if field == "function" {
-                            return false;
-                        }
-                    }
+                if (parent_kind == "call_expression" || parent_kind == "macro_invocation")
+                    && let Some(field) = field_name_in_parent(node)
+                    && field == "function"
+                {
+                    return false;
                 }
                 true
             }
@@ -1643,18 +1619,18 @@ impl ExprLoader {
                 // Filter out function definitions, use/import, type names
                 match parent_kind {
                     "function_definition" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "use_path" | "use_clause" | "mod_item" | "trait_definition" | "impl_item" => return false,
                     "call_expression" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "function" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "function"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1673,18 +1649,18 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
                 match parent_kind {
                     "function_definition" | "template_definition" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "include_directive" => return false,
                     "call_expression" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "function" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "function"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1703,25 +1679,25 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
                 match parent_kind {
                     "function_declaration" | "transition_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "import_declaration" | "import_path" => return false,
                     "struct_declaration" | "record_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "function_call" | "call_expression" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "function" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "function"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1740,18 +1716,18 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
                 match parent_kind {
                     "function_declaration" | "method_declaration" | "get_method_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "import_statement" | "import_path" => return false,
                     "call_expression" | "function_call" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "function" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "function"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1770,18 +1746,18 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
                 match parent_kind {
                     "function" | "test" | "validator" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "import" | "module_path" | "use" => return false,
                     "type_definition" | "type_alias" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1821,10 +1797,10 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
                 match parent_kind {
                     "function_declaration" | "view_function_declaration" | "init_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "contract_declaration"
@@ -1833,32 +1809,32 @@ impl ExprLoader {
                     | "enum_declaration"
                     | "event_declaration"
                     | "type_alias_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "import_declaration" => return false,
                     "invocation_expression" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "function" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "function"
+                        {
+                            return false;
                         }
                     }
                     "member_expression" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "member" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "member"
+                        {
+                            return false;
                         }
                     }
                     "parameter" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "label" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "label"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1877,32 +1853,32 @@ impl ExprLoader {
                 let parent_kind = parent.kind();
                 match parent_kind {
                     "function_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "module_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "use_declaration" | "use_member" | "use_module" => return false,
                     "struct_declaration" | "enum_declaration" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "name" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "name"
+                        {
+                            return false;
                         }
                     }
                     "call_expression" => {
-                        if let Some(field) = field_name_in_parent(node) {
-                            if field == "function" {
-                                return false;
-                            }
+                        if let Some(field) = field_name_in_parent(node)
+                            && field == "function"
+                        {
+                            return false;
                         }
                     }
                     _ => {}
@@ -1956,15 +1932,15 @@ impl ExprLoader {
         } else if NODE_NAMES[&lang].loops.contains(&node.kind().to_string()) && start != end {
             self.register_loop(start, end, path)
         } else if lang == Lang::Ruby && node.kind() == "call" {
-            if let Some(block_node) = node.child_by_field_name("block") {
-                if let Some(method_node) = node.child_by_field_name("method") {
-                    let row = method_node.start_position().row + 1;
-                    let method_name = self.extract_expr(&method_node, path, row);
-                    if method_name == "each" {
-                        let start = self.get_first_line(&block_node);
-                        let end = self.get_last_line(&block_node);
-                        self.register_loop(start, end, path);
-                    }
+            if let Some(block_node) = node.child_by_field_name("block")
+                && let Some(method_node) = node.child_by_field_name("method")
+            {
+                let row = method_node.start_position().row + 1;
+                let method_name = self.extract_expr(&method_node, path, row);
+                if method_name == "each" {
+                    let start = self.get_first_line(&block_node);
+                    let end = self.get_last_line(&block_node);
+                    self.register_loop(start, end, path);
                 }
             }
         } else if NODE_NAMES[&lang].if_conditions.contains(&node.kind().to_string()) {
@@ -1979,7 +1955,7 @@ impl ExprLoader {
     }
 
     fn find_real_path(&self, path: &Path) -> PathBuf {
-        let read_path = if self.trace.imported {
+        if self.trace.imported {
             let trace_files_folder = PathBuf::from(&self.trace.trace_output_folder).join("files");
             // Strip the path root so join works correctly.
             // On Unix: /path -> path
@@ -2005,9 +1981,7 @@ impl ExprLoader {
             trace_files_folder.join(PathBuf::from(after_root_path))
         } else {
             path.to_path_buf()
-        };
-
-        read_path
+        }
     }
 
     pub fn file_source_code(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {

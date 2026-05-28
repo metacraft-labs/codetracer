@@ -202,10 +202,10 @@ fn send_fund_transaction(contract_address: &str) -> Result<String, String> {
     let stdout = ansi_re.replace_all(&stdout_raw, "");
     for line in stdout.lines() {
         let line = line.trim();
-        if line.starts_with("transactionHash") {
-            if let Some(hash) = line.split_whitespace().last() {
-                return Ok(hash.to_string());
-            }
+        if line.starts_with("transactionHash")
+            && let Some(hash) = line.split_whitespace().last()
+        {
+            return Ok(hash.to_string());
         }
     }
 

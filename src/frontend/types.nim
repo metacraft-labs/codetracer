@@ -1146,6 +1146,8 @@ type
     showSearch*:            bool
     error*:                 DebuggerError
     monacoEditor*:          MonacoEditor
+    monacoMountScheduled*:  bool
+    monacoMountAttempts*:   int
     source*:                cstring
     selectorId*:            cstring
     isChanged*:             bool

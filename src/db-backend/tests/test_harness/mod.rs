@@ -698,10 +698,10 @@ impl DapTestClient {
 
             match dap::read_dap_message_from_reader(&mut self.reader) {
                 Ok(msg) => {
-                    if let DapMessage::Event(ref e) = msg {
-                        if e.event == event_name {
-                            return Ok(msg);
-                        }
+                    if let DapMessage::Event(ref e) = msg
+                        && e.event == event_name
+                    {
+                        return Ok(msg);
                     }
                 }
                 Err(e) => {
@@ -723,10 +723,10 @@ impl DapTestClient {
 
             match dap::read_dap_message_from_reader(&mut self.reader) {
                 Ok(msg) => {
-                    if let DapMessage::Response(ref r) = msg {
-                        if r.command == command {
-                            return Ok(msg);
-                        }
+                    if let DapMessage::Response(ref r) = msg
+                        && r.command == command
+                    {
+                        return Ok(msg);
                     }
                 }
                 Err(e) => {
@@ -995,10 +995,10 @@ impl DapStdioTestClient {
             }
 
             let msg = self.read_next(remaining)?;
-            if let DapMessage::Event(ref e) = msg {
-                if e.event == event_name {
-                    return Ok(msg);
-                }
+            if let DapMessage::Event(ref e) = msg
+                && e.event == event_name
+            {
+                return Ok(msg);
             }
         }
     }
@@ -1012,10 +1012,10 @@ impl DapStdioTestClient {
             }
 
             let msg = self.read_next(remaining)?;
-            if let DapMessage::Response(ref r) = msg {
-                if r.command == command {
-                    return Ok(msg);
-                }
+            if let DapMessage::Response(ref r) = msg
+                && r.command == command
+            {
+                return Ok(msg);
             }
         }
     }
@@ -1152,21 +1152,20 @@ impl FlowData {
     /// Extract an integer value from a flow value structure
     pub fn extract_int_value(value: &serde_json::Value) -> Option<i64> {
         // The "i" field contains the integer value as a string
-        if let Some(i_val) = value.get("i").and_then(|v| v.as_str()) {
-            if !i_val.is_empty() {
-                if let Ok(n) = i_val.parse::<i64>() {
-                    return Some(n);
-                }
-            }
+        if let Some(i_val) = value.get("i").and_then(|v| v.as_str())
+            && !i_val.is_empty()
+            && let Ok(n) = i_val.parse::<i64>()
+        {
+            return Some(n);
         }
 
         // The "r" field contains the raw result
-        if let Some(r_val) = value.get("r").and_then(|v| v.as_str()) {
-            if r_val != "<NONE>" && !r_val.is_empty() {
-                if let Ok(n) = r_val.parse::<i64>() {
-                    return Some(n);
-                }
-            }
+        if let Some(r_val) = value.get("r").and_then(|v| v.as_str())
+            && r_val != "<NONE>"
+            && !r_val.is_empty()
+            && let Ok(n) = r_val.parse::<i64>()
+        {
+            return Some(n);
         }
 
         None
@@ -1205,12 +1204,12 @@ pub struct FlowTestConfig {
 fn find_on_path(name: &str) -> Option<PathBuf> {
     #[cfg(unix)]
     {
-        if let Ok(output) = Command::new("which").arg(name).output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Some(PathBuf::from(path));
-                }
+        if let Ok(output) = Command::new("which").arg(name).output()
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
             }
         }
     }
@@ -1463,10 +1462,10 @@ pub fn find_python_recorder() -> Option<PathBuf> {
     let probe = Command::new(&python)
         .args(["-c", "import codetracer_python_recorder"])
         .output();
-    if let Ok(out) = probe {
-        if out.status.success() {
-            return Some(PathBuf::from(RUST_PYTHON_RECORDER_MODULE_SENTINEL));
-        }
+    if let Ok(out) = probe
+        && out.status.success()
+    {
+        return Some(PathBuf::from(RUST_PYTHON_RECORDER_MODULE_SENTINEL));
     }
 
     None

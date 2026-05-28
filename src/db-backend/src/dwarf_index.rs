@@ -321,15 +321,15 @@ impl DwarfIndex {
         let mut last_location: Option<(PathBuf, u32, Option<u32>)> = None;
 
         while let Ok(Some(frame)) = frame_iter.next() {
-            if let Some(loc) = frame.location.as_ref() {
-                if let (Some(file), Some(line)) = (loc.file, loc.line) {
-                    last_location = Some((PathBuf::from(file), line, loc.column));
-                }
+            if let Some(loc) = frame.location.as_ref()
+                && let (Some(file), Some(line)) = (loc.file, loc.line)
+            {
+                last_location = Some((PathBuf::from(file), line, loc.column));
             }
-            if let Some(func) = frame.function.as_ref() {
-                if let Ok(name) = func.raw_name() {
-                    last_function = Some(name.into_owned());
-                }
+            if let Some(func) = frame.function.as_ref()
+                && let Ok(name) = func.raw_name()
+            {
+                last_function = Some(name.into_owned());
             }
         }
 

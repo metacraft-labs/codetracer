@@ -119,21 +119,21 @@ pub fn socket_path_for(pid: usize) -> PathBuf {
 /// request for RR-based traces.
 fn resolve_recreator_exe(from_launch_args: Option<PathBuf>) -> PathBuf {
     // 1. Use the provided path if it's non-empty.
-    if let Some(ref path) = from_launch_args {
-        if !path.as_os_str().is_empty() {
-            info!("ct-native-replay: using path from launch args: {}", path.display());
-            return path.clone();
-        }
+    if let Some(ref path) = from_launch_args
+        && !path.as_os_str().is_empty()
+    {
+        info!("ct-native-replay: using path from launch args: {}", path.display());
+        return path.clone();
     }
 
     // 2. Check CODETRACER_CT_NATIVE_REPLAY_CMD environment variable,
     //    falling back to the legacy CODETRACER_CT_RR_SUPPORT_CMD.
     for var_name in &["CODETRACER_CT_NATIVE_REPLAY_CMD", "CODETRACER_CT_RR_SUPPORT_CMD"] {
-        if let Ok(env_path) = std::env::var(var_name) {
-            if !env_path.is_empty() {
-                info!("ct-native-replay: using path from {}: {}", var_name, env_path);
-                return PathBuf::from(env_path);
-            }
+        if let Ok(env_path) = std::env::var(var_name)
+            && !env_path.is_empty()
+        {
+            info!("ct-native-replay: using path from {}: {}", var_name, env_path);
+            return PathBuf::from(env_path);
         }
     }
 
@@ -433,7 +433,7 @@ fn setup(
             .filter(|p| p.is_file())
             .and_then(|p| std::fs::read(&p).ok())
             .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(|s| PathBuf::from(s)));
+            .and_then(|v| v.get("workdir").and_then(|w| w.as_str()).map(PathBuf::from));
         let workdir = meta_workdir.unwrap_or_else(|| {
             json_path
                 .parent()
@@ -583,20 +583,26 @@ fn default_live_recording_dir(program: &Path, thread_name: &str) -> PathBuf {
     ))
 }
 
-fn setup_live_program(
-    program: &Path,
+struct LiveProgramSetup {
+    program: PathBuf,
     program_args: Vec<String>,
     cwd: Option<PathBuf>,
     live_recording_dir: Option<PathBuf>,
+}
+
+fn setup_live_program(
+    live_setup: LiveProgramSetup,
     recreator_exe: &Path,
     sender: Sender<DapMessage>,
     for_launch: bool,
     thread_name: &str,
 ) -> Result<Handler, Box<dyn Error>> {
-    let live_recording_dir = live_recording_dir.unwrap_or_else(|| default_live_recording_dir(program, thread_name));
+    let live_recording_dir = live_setup
+        .live_recording_dir
+        .unwrap_or_else(|| default_live_recording_dir(&live_setup.program, thread_name));
     info!(
         "run setup_live_program() for {} with sink {}",
-        program.display(),
+        live_setup.program.display(),
         live_recording_dir.display()
     );
     std::fs::create_dir_all(&live_recording_dir)?;
@@ -605,9 +611,9 @@ fn setup_live_program(
         worker_exe: PathBuf::from(recreator_exe),
         rr_trace_folder: live_recording_dir.clone(),
         name: thread_name.to_string(),
-        live_program: Some(program.to_path_buf()),
-        live_program_args: program_args,
-        live_cwd: cwd,
+        live_program: Some(live_setup.program),
+        live_program_args: live_setup.program_args,
+        live_cwd: live_setup.cwd,
         live_recording_dir: Some(live_recording_dir.clone()),
         recording_id: String::new(),
     };
@@ -978,10 +984,10 @@ fn is_codetracer_ctfs_file(path: &Path) -> bool {
 fn is_mcr_ctfs_container(ctfs: &mut CtfsReader) -> bool {
     // The binary `meta.dat` carries an explicit `FLAG_HAS_MCR_FIELDS`
     // bit. Legacy `meta.json` sidecars are no longer supported.
-    if let Ok(bytes) = ctfs.read_file("meta.dat") {
-        if let Ok(meta) = crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&bytes) {
-            return meta.mcr.is_some();
-        }
+    if let Ok(bytes) = ctfs.read_file("meta.dat")
+        && let Ok(meta) = crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&bytes)
+    {
+        return meta.mcr.is_some();
     }
     false
 }
@@ -1337,10 +1343,10 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 };
                 ctx.restore_location = args.restore_location.clone();
 
-                if ctx.received_configuration_done {
-                    if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
-                        to_stable_sender.send(req.clone())?;
-                    }
+                if ctx.received_configuration_done
+                    && let Some(to_stable_sender) = ctx.to_stable_sender.clone()
+                {
+                    to_stable_sender.send(req.clone())?;
                 }
             } else if let Some(program) = &args.program {
                 ctx.launch_program = Some(PathBuf::from(program));
@@ -1353,10 +1359,10 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.recreator_exe = resolve_recreator_exe(args.recreator_exe);
                 ctx.restore_location = args.restore_location.clone();
 
-                if ctx.received_configuration_done {
-                    if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
-                        to_stable_sender.send(req.clone())?;
-                    }
+                if ctx.received_configuration_done
+                    && let Some(to_stable_sender) = ctx.to_stable_sender.clone()
+                {
+                    to_stable_sender.send(req.clone())?;
                 }
             }
             info!(
@@ -1400,10 +1406,10 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 "configuration done sent response; launch_request: {:?}",
                 ctx.launch_request,
             );
-            if let Some(launch_request) = ctx.launch_request.clone() {
-                if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
-                    to_stable_sender.send(launch_request)?;
-                }
+            if let Some(launch_request) = ctx.launch_request.clone()
+                && let Some(to_stable_sender) = ctx.to_stable_sender.clone()
+            {
+                to_stable_sender.send(launch_request)?;
             }
         }
         DapMessage::Request(req) if req.command == "disconnect" => {
@@ -1606,10 +1612,12 @@ fn task_thread(
         let for_launch = false;
         let h = if let Some(program) = &ctx_with_cached_launch.launch_program {
             setup_live_program(
-                program,
-                ctx_with_cached_launch.launch_program_args.clone(),
-                ctx_with_cached_launch.launch_cwd.clone(),
-                ctx_with_cached_launch.launch_live_recording_dir.clone(),
+                LiveProgramSetup {
+                    program: program.clone(),
+                    program_args: ctx_with_cached_launch.launch_program_args.clone(),
+                    cwd: ctx_with_cached_launch.launch_cwd.clone(),
+                    live_recording_dir: ctx_with_cached_launch.launch_live_recording_dir.clone(),
+                },
                 &ctx_with_cached_launch.recreator_exe,
                 sender.clone(),
                 for_launch,
@@ -1738,10 +1746,12 @@ fn task_thread(
                 let for_launch = run_to_entry;
                 let recreator_exe = resolve_recreator_exe(args.recreator_exe.clone());
                 handler = setup_live_program(
-                    &PathBuf::from(program),
-                    args.args.clone().unwrap_or_default(),
-                    args.cwd.as_ref().map(PathBuf::from),
-                    args.live_recording_dir.clone(),
+                    LiveProgramSetup {
+                        program: PathBuf::from(program),
+                        program_args: args.args.clone().unwrap_or_default(),
+                        cwd: args.cwd.as_ref().map(PathBuf::from),
+                        live_recording_dir: args.live_recording_dir.clone(),
+                    },
                     &recreator_exe,
                     sender.clone(),
                     for_launch,
@@ -1822,10 +1832,10 @@ where
                 error!("transport send error: {e:}");
                 format!("transport send error: {e:}")
             })?;
-            if let DapMessage::Response(resp) = &msg_with_seq {
-                if resp.command == "disconnect" {
-                    disconnect_response_written.store(true, Ordering::SeqCst);
-                }
+            if let DapMessage::Response(resp) = &msg_with_seq
+                && resp.command == "disconnect"
+            {
+                disconnect_response_written.store(true, Ordering::SeqCst);
             }
         }
     })?;
@@ -1915,26 +1925,26 @@ where
         if let DapMessage::Request(request) = msg.clone() {
             // setups other worker threads
             if request.command == "launch" {
-                if let Some(to_flow_sender) = ctx.to_flow_sender.clone() {
-                    if let Err(e) = to_flow_sender.send(request.clone()) {
-                        error!("flow send launch error: {e:?}");
-                    }
+                if let Some(to_flow_sender) = ctx.to_flow_sender.clone()
+                    && let Err(e) = to_flow_sender.send(request.clone())
+                {
+                    error!("flow send launch error: {e:?}");
                 }
 
-                if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
-                    if let Err(e) = to_tracepoint_sender.send(request.clone()) {
-                        error!("tracepoint send launch error: {e:?}");
-                    }
+                if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone()
+                    && let Err(e) = to_tracepoint_sender.send(request.clone())
+                {
+                    error!("tracepoint send launch error: {e:?}");
                 }
             }
 
             // handle all requests here: including `launch` from actually stable thread
             match request.command.as_str() {
                 "ct/load-flow" => {
-                    if let Some(to_flow_sender) = ctx.to_flow_sender.clone() {
-                        if let Err(e) = to_flow_sender.send(request.clone()) {
-                            error!("flow send request error: {e:?}");
-                        }
+                    if let Some(to_flow_sender) = ctx.to_flow_sender.clone()
+                        && let Err(e) = to_flow_sender.send(request.clone())
+                    {
+                        error!("flow send request error: {e:?}");
                     }
                 }
                 "ct/event-load"
@@ -1946,10 +1956,10 @@ where
                 | "ct/tracepoint-delete"
                 | "ct/load-history" => {
                     // TODO: separate load-history
-                    if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone() {
-                        if let Err(e) = to_tracepoint_sender.send(request.clone()) {
-                            error!("tracepoint send request error: {e:?}");
-                        }
+                    if let Some(to_tracepoint_sender) = ctx.to_tracepoint_sender.clone()
+                        && let Err(e) = to_tracepoint_sender.send(request.clone())
+                    {
+                        error!("tracepoint send request error: {e:?}");
                     }
                 }
                 _ => {

@@ -79,7 +79,10 @@ impl EventDb {
     }
 
     fn sort_global_table(&mut self) {
-        self.global_table.sort_by_key(|&(step_id, _, _)| step_id)
+        self.global_table.sort_by_key(|&(step_id, table_id, event_index)| {
+            let record_table_order = if table_id.0 == 0 { 1 } else { 0 };
+            (step_id, record_table_order, table_id, event_index)
+        })
     }
 
     pub fn get_trace_length(&mut self, tracepoint_id: usize) -> usize {
@@ -457,5 +460,68 @@ impl EventDb {
             self.clear_single_table(SingleTableId(tracepoint_id + 1));
             self.refresh_global();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task::{SearchValue, StopType, TableArgs, UpdateTableArgs};
+
+    fn event(kind: EventLogKind, content: &str, rr_ticks: i64, rr_event_id: usize) -> ProgramEvent {
+        ProgramEvent {
+            kind,
+            content: content.to_string(),
+            rr_event_id,
+            high_level_path: "src/main.nr".to_string(),
+            high_level_line: 42,
+            direct_location_rr_ticks: rr_ticks,
+            ..ProgramEvent::default()
+        }
+    }
+
+    fn table_args() -> UpdateTableArgs {
+        UpdateTableArgs {
+            table_args: TableArgs {
+                draw: 1,
+                length: 10,
+                search: SearchValue {
+                    value: String::new(),
+                    regex: false,
+                },
+                ..TableArgs::default()
+            },
+            selected_kinds: [true; EVENT_KINDS_COUNT],
+            is_trace: false,
+            event_slot: 0,
+        }
+    }
+
+    #[test]
+    fn global_event_log_orders_tracepoint_rows_before_record_rows_on_same_rr_tick()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = EventDb::new();
+
+        db.replace_record_events(&[event(EventLogKind::Write, "recorded write", 1, 10)]);
+        db.register_tracepoint_results(&[Stop::new(
+            "src/main.nr".to_string(),
+            42,
+            vec![],
+            1,
+            0,
+            0,
+            StopType::Trace,
+        )]);
+
+        let (update, _) = db.update_table(table_args())?;
+        let rows = update.data.data;
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].kind, EventLogKind::TraceLogEvent);
+        assert_eq!(rows[0].direct_location_rr_ticks, 1);
+        assert_eq!(rows[1].kind, EventLogKind::Write);
+        assert_eq!(rows[1].content, "recorded write");
+        assert_eq!(rows[1].direct_location_rr_ticks, 1);
+        Ok(())
     }
 }

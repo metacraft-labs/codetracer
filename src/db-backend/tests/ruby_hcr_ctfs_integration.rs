@@ -148,14 +148,13 @@ fn extract_var_value_at_line_occurrence(
 ) -> Option<i64> {
     let mut count = 0;
     for step in &flow.steps {
-        if step.line == line_number {
-            if let Some(val) = step.before_values.get(var_name) {
-                if FlowData::is_value_loaded(val) {
-                    count += 1;
-                    if count == occurrence {
-                        return FlowData::extract_int_value(val);
-                    }
-                }
+        if step.line == line_number
+            && let Some(val) = step.before_values.get(var_name)
+            && FlowData::is_value_loaded(val)
+        {
+            count += 1;
+            if count == occurrence {
+                return FlowData::extract_int_value(val);
             }
         }
     }

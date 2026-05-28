@@ -224,10 +224,11 @@ impl MacroSourceMap {
                         first_line: expansion.first_line,
                     });
 
-                    if let Some((top_path, top_line)) = self.top_level_lines.get(&location_line) {
-                        if top_path != "???" && *top_line > 0 {
-                            break;
-                        }
+                    if let Some((top_path, top_line)) = self.top_level_lines.get(&location_line)
+                        && top_path != "???"
+                        && *top_line > 0
+                    {
+                        break;
                     }
 
                     if info.site_file != self.expanded_filename {
@@ -446,10 +447,10 @@ fn parse_locations(val: &serde_json::Value) -> HashMap<i64, ExpansionInfo> {
     let mut map = HashMap::new();
     if let Some(obj) = val.as_object() {
         for (key, value) in obj {
-            if let Ok(line) = key.parse::<i64>() {
-                if let Ok(info) = serde_json::from_value::<ExpansionInfo>(value.clone()) {
-                    map.insert(line, info);
-                }
+            if let Ok(line) = key.parse::<i64>()
+                && let Ok(info) = serde_json::from_value::<ExpansionInfo>(value.clone())
+            {
+                map.insert(line, info);
             }
         }
     }
@@ -464,10 +465,10 @@ fn parse_expanded_entries(val: &serde_json::Value) -> HashMap<String, HashMap<i6
             let mut inner_map = HashMap::new();
             if let Some(inner_obj) = inner.as_object() {
                 for (line_str, expanded_line_val) in inner_obj {
-                    if let Ok(line) = line_str.parse::<i64>() {
-                        if let Some(expanded_line) = expanded_line_val.as_i64() {
-                            inner_map.insert(line, expanded_line);
-                        }
+                    if let Ok(line) = line_str.parse::<i64>()
+                        && let Some(expanded_line) = expanded_line_val.as_i64()
+                    {
+                        inner_map.insert(line, expanded_line);
                     }
                 }
             }
@@ -484,18 +485,18 @@ fn parse_top_level_lines(val: &serde_json::Value) -> HashMap<i64, (String, i64)>
         for (key, value) in obj {
             if let Ok(line) = key.parse::<i64>() {
                 if let Some(arr) = value.as_array() {
-                    if arr.len() >= 2 {
-                        if let (Some(path), Some(orig_line)) = (arr[0].as_str(), arr[1].as_i64()) {
-                            map.insert(line, (path.to_string(), orig_line));
-                        }
-                    }
-                } else if let Some(obj) = value.as_object() {
-                    if let (Some(path), Some(orig_line)) = (
-                        obj.get("Field1").and_then(|v| v.as_str()),
-                        obj.get("Field2").and_then(|v| v.as_i64()),
-                    ) {
+                    if arr.len() >= 2
+                        && let (Some(path), Some(orig_line)) = (arr[0].as_str(), arr[1].as_i64())
+                    {
                         map.insert(line, (path.to_string(), orig_line));
                     }
+                } else if let Some(obj) = value.as_object()
+                    && let (Some(path), Some(orig_line)) = (
+                        obj.get("Field1").and_then(|v| v.as_str()),
+                        obj.get("Field2").and_then(|v| v.as_i64()),
+                    )
+                {
+                    map.insert(line, (path.to_string(), orig_line));
                 }
             }
         }

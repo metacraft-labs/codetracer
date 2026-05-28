@@ -1700,74 +1700,74 @@ impl Handler {
                     let path = location.path.clone();
                     let line = location.line as usize;
 
-                    if let Some(line_map) = tracepoint_locations.get(path.as_str()) {
-                        if let Some(tracepoint_indices) = line_map.get(&line) {
-                            let visit_counts = location_visit_indices.entry(path.clone()).or_default();
-                            let visit_entry = visit_counts.entry(line).or_insert(0);
-                            let mut visit_index = *visit_entry;
+                    if let Some(line_map) = tracepoint_locations.get(path.as_str())
+                        && let Some(tracepoint_indices) = line_map.get(&line)
+                    {
+                        let visit_counts = location_visit_indices.entry(path.clone()).or_default();
+                        let visit_entry = visit_counts.entry(line).or_insert(0);
+                        let mut visit_index = *visit_entry;
 
-                            for tracepoint_index in tracepoint_indices {
-                                if !registered[*tracepoint_index] {
-                                    continue;
-                                }
-                                let tracepoint = &tracepoints[*tracepoint_index];
-                                let locals = self.evaluate_tracepoint(
-                                    &interpreter,
-                                    *tracepoint_index,
-                                    &tracepoint.expression,
-                                    current_step_id,
-                                    lang_from_context(Path::new(&location.path), self.trace_kind),
-                                );
-                                if locals.is_empty() {
-                                    continue;
-                                }
-                                let stop = Stop::new(
-                                    path.clone(),
-                                    location.line,
-                                    locals,
-                                    current_step_id.0 as usize,
-                                    tracepoint.tracepoint_id,
-                                    visit_index,
-                                    StopType::Trace,
-                                );
-                                results.push(stop);
-
-                                visit_index += 1;
+                        for tracepoint_index in tracepoint_indices {
+                            if !registered[*tracepoint_index] {
+                                continue;
                             }
-
-                            *visit_entry = visit_index;
-
-                            // Step past the current source line to skip any
-                            // remaining sub-breakpoint addresses. GDB/LLDB can
-                            // resolve a single source-line breakpoint to
-                            // multiple addresses (e.g. macro expansion), and
-                            // without this, each address triggers a separate
-                            // Continue stop, duplicating tracepoint results.
-                            // Loop `next` until the source line actually
-                            // changes, since `next` may stop at another
-                            // sub-breakpoint address on the same line.
-                            let mut program_ended = false;
-                            for _ in 0..16 {
-                                if !self.replay.step(Action::Next, true).unwrap_or(false) {
-                                    program_ended = true;
-                                    break;
-                                }
-                                let next_loc = self.replay.load_location(&mut self.expr_loader)?;
-                                if next_loc.path != path || next_loc.line as usize != line {
-                                    break;
-                                }
+                            let tracepoint = &tracepoints[*tracepoint_index];
+                            let locals = self.evaluate_tracepoint(
+                                &interpreter,
+                                *tracepoint_index,
+                                &tracepoint.expression,
+                                current_step_id,
+                                lang_from_context(Path::new(&location.path), self.trace_kind),
+                            );
+                            if locals.is_empty() {
+                                continue;
                             }
-                            if program_ended {
+                            let stop = Stop::new(
+                                path.clone(),
+                                location.line,
+                                locals,
+                                current_step_id.0 as usize,
+                                tracepoint.tracepoint_id,
+                                visit_index,
+                                StopType::Trace,
+                            );
+                            results.push(stop);
+
+                            visit_index += 1;
+                        }
+
+                        *visit_entry = visit_index;
+
+                        // Step past the current source line to skip any
+                        // remaining sub-breakpoint addresses. GDB/LLDB can
+                        // resolve a single source-line breakpoint to
+                        // multiple addresses (e.g. macro expansion), and
+                        // without this, each address triggers a separate
+                        // Continue stop, duplicating tracepoint results.
+                        // Loop `next` until the source line actually
+                        // changes, since `next` may stop at another
+                        // sub-breakpoint address on the same line.
+                        let mut program_ended = false;
+                        for _ in 0..16 {
+                            if !self.replay.step(Action::Next, true).unwrap_or(false) {
+                                program_ended = true;
                                 break;
                             }
-                            // We've landed on a new line after stepping past
-                            // sub-breakpoints. Check it for tracepoints before
-                            // doing Continue — GDB's Continue skips breakpoints
-                            // at the current PC, so we'd miss adjacent-line
-                            // tracepoints if we didn't check here.
-                            need_continue = false;
-                            continue;
+                            let next_loc = self.replay.load_location(&mut self.expr_loader)?;
+                            if next_loc.path != path || next_loc.line as usize != line {
+                                break;
+                            }
                         }
+                        if program_ended {
+                            break;
+                        }
+                        // We've landed on a new line after stepping past
+                        // sub-breakpoints. Check it for tracepoints before
+                        // doing Continue — GDB's Continue skips breakpoints
+                        // at the current PC, so we'd miss adjacent-line
+                        // tracepoints if we didn't check here.
+                        need_continue = false;
+                        continue;
                     }
                 }
 
@@ -1782,17 +1782,17 @@ impl Handler {
         let mut cleanup_error: Option<Box<dyn Error>> = None;
 
         for breakpoint in tracepoint_breakpoints.iter() {
-            if let Err(err) = self.replay.delete_breakpoint(breakpoint) {
-                if cleanup_error.is_none() {
-                    cleanup_error = Some(err);
-                }
+            if let Err(err) = self.replay.delete_breakpoint(breakpoint)
+                && cleanup_error.is_none()
+            {
+                cleanup_error = Some(err);
             }
         }
 
-        if let Err(err) = self.replay.jump_to(original_step_id) {
-            if cleanup_error.is_none() {
-                cleanup_error = Some(err);
-            }
+        if let Err(err) = self.replay.jump_to(original_step_id)
+            && cleanup_error.is_none()
+        {
+            cleanup_error = Some(err);
         }
         self.step_id = original_step_id;
 

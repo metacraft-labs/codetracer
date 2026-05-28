@@ -116,13 +116,13 @@ fn mangle_nim_identifier_into(name: &str, buf: &mut String) {
     let mut i = 0;
 
     // Handle leading digit
-    if let Some(&first) = chars.peek() {
-        if first.is_ascii_digit() {
-            buf.push('X');
-            buf.push(first);
-            chars.next();
-            i = 1;
-        }
+    if let Some(&first) = chars.peek()
+        && first.is_ascii_digit()
+    {
+        buf.push('X');
+        buf.push(first);
+        chars.next();
+        i = 1;
     }
 
     while let Some(c) = chars.next() {
@@ -388,10 +388,10 @@ impl MangledNameDualIterator {
         }
 
         // Try secondary iterator
-        if let Some(ref mut iter) = self.secondary_iter {
-            if iter.next_candidate().is_some() {
-                return self.secondary_iter.as_ref().map(|i| i.buffer.as_str());
-            }
+        if let Some(ref mut iter) = self.secondary_iter
+            && iter.next_candidate().is_some()
+        {
+            return self.secondary_iter.as_ref().map(|i| i.buffer.as_str());
         }
 
         None

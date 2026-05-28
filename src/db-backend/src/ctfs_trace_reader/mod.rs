@@ -392,11 +392,10 @@ impl CTFSTraceReader {
                         .items
                         .last()
                         .is_some_and(|step| target_call_key.is_none_or(|call_key| step.call_key == call_key))
+                        && let Some(step_values) = db.variables.items.last_mut()
                     {
-                        if let Some(step_values) = db.variables.items.last_mut() {
-                            step_values.retain(|existing| existing.variable_id != variable_id);
-                            step_values.push(full);
-                        }
+                        step_values.retain(|existing| existing.variable_id != variable_id);
+                        step_values.push(full);
                     }
                 }
                 Some("drop_variables") => {
@@ -412,15 +411,15 @@ impl CTFSTraceReader {
                     }
                 }
                 Some("return_from") => {
-                    if let Some(frame_id) = event.get("frame_id").and_then(Value::as_u64) {
-                        if let Some(call_key) = frame_calls.remove(&frame_id) {
-                            if let Some(value) = event.get("return_value").and_then(Self::elixir_sidecar_value_record) {
-                                db.calls[call_key].return_value = value;
-                            }
-                            while let Some(top) = call_stack.pop() {
-                                if top == call_key {
-                                    break;
-                                }
+                    if let Some(frame_id) = event.get("frame_id").and_then(Value::as_u64)
+                        && let Some(call_key) = frame_calls.remove(&frame_id)
+                    {
+                        if let Some(value) = event.get("return_value").and_then(Self::elixir_sidecar_value_record) {
+                            db.calls[call_key].return_value = value;
+                        }
+                        while let Some(top) = call_stack.pop() {
+                            if top == call_key {
+                                break;
                             }
                         }
                     }

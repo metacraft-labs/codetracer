@@ -94,18 +94,18 @@ fn test_ctfs_call_args_roundtrip() {
     let mut found_args = false;
     for k in 0..reader.call_count() {
         let key = codetracer_trace_types::CallKey(k as i64);
-        if let Some(db_call) = reader.call(key) {
-            if !db_call.args.is_empty() {
-                found_args = true;
-                // Verify the value round-tripped correctly.
-                match db_call.args[0].value {
-                    ValueRecord::Int { i, .. } => {
-                        assert_eq!(i, 42, "expected the staged `x=42` arg to survive round-trip");
-                    }
-                    ref other => panic!("expected Int arg, got {:?}", other),
+        if let Some(db_call) = reader.call(key)
+            && !db_call.args.is_empty()
+        {
+            found_args = true;
+            // Verify the value round-tripped correctly.
+            match db_call.args[0].value {
+                ValueRecord::Int { i, .. } => {
+                    assert_eq!(i, 42, "expected the staged `x=42` arg to survive round-trip");
                 }
-                break;
+                ref other => panic!("expected Int arg, got {:?}", other),
             }
+            break;
         }
     }
 

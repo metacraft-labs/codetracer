@@ -724,12 +724,11 @@ pub trait TraceReader: std::fmt::Debug + Send {
             for cell_change in changes.iter().rev() {
                 if cell_change.step_id <= step_id {
                     info!("  cell change for index {index}: {cell_change:?}");
-                    if let Some(change_index) = cell_change.index {
-                        if change_index == index {
-                            if let Some(item_place) = cell_change.item_place {
-                                return self.load_value_for_place(item_place, step_id);
-                            }
-                        }
+                    if let Some(change_index) = cell_change.index
+                        && change_index == index
+                        && let Some(item_place) = cell_change.item_place
+                    {
+                        return self.load_value_for_place(item_place, step_id);
                     }
                 }
             }
@@ -791,18 +790,20 @@ pub trait TraceReader: std::fmt::Debug + Send {
         let workdir = self.workdir();
 
         // 2. Try stripping the workdir prefix to obtain a relative path.
-        if let Ok(relative) = abs_path.strip_prefix(workdir) {
-            if let Some(rel_str) = relative.to_str() {
-                if let Some(id) = self.path_id_for(rel_str) {
-                    return Some(id);
-                }
-                #[cfg(windows)]
-                {
-                    let norm_rel = rel_str.replace('\\', "/");
-                    if norm_rel != rel_str {
-                        if let Some(id) = self.path_id_for(&norm_rel) {
-                            return Some(id);
-                        }
+        let relative_str = abs_path
+            .strip_prefix(workdir)
+            .ok()
+            .and_then(|relative| relative.to_str());
+        if let Some(id) = relative_str.and_then(|rel_str| self.path_id_for(rel_str)) {
+            return Some(id);
+        }
+        #[cfg(windows)]
+        {
+            if let Some(rel_str) = relative_str {
+                let norm_rel = rel_str.replace('\\', "/");
+                if norm_rel != rel_str {
+                    if let Some(id) = self.path_id_for(&norm_rel) {
+                        return Some(id);
                     }
                 }
             }
@@ -829,17 +830,17 @@ pub trait TraceReader: std::fmt::Debug + Send {
         }
 
         // 4. Canonicalize and retry.
-        if let Ok(canonical) = abs_path.canonicalize() {
-            if canonical != abs_path {
-                if let Some(canonical_str) = canonical.to_str() {
-                    if let Some(id) = self.path_id_for(canonical_str) {
-                        return Some(id);
-                    }
-                }
-                for (stored_path, id) in self.path_entries_iter() {
-                    if !stored_path.is_empty() && canonical.ends_with(stored_path) {
-                        return Some(id);
-                    }
+        if let Ok(canonical) = abs_path.canonicalize()
+            && canonical != abs_path
+        {
+            if let Some(canonical_str) = canonical.to_str()
+                && let Some(id) = self.path_id_for(canonical_str)
+            {
+                return Some(id);
+            }
+            for (stored_path, id) in self.path_entries_iter() {
+                if !stored_path.is_empty() && canonical.ends_with(stored_path) {
+                    return Some(id);
                 }
             }
         }
@@ -850,12 +851,11 @@ pub trait TraceReader: std::fmt::Debug + Send {
                 continue;
             }
             let sp = std::path::Path::new(stored_path);
-            if sp.is_absolute() {
-                if let Ok(canonical_stored) = sp.canonicalize() {
-                    if canonical_stored == abs_path {
-                        return Some(id);
-                    }
-                }
+            if sp.is_absolute()
+                && let Ok(canonical_stored) = sp.canonicalize()
+                && canonical_stored == abs_path
+            {
+                return Some(id);
             }
         }
 
