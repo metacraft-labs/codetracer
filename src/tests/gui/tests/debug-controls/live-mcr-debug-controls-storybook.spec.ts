@@ -5,6 +5,23 @@ import { test, expect } from "@playwright/test";
 
 const repoRoot = path.resolve(__dirname, "../../../../..");
 const staticRoot = path.join(repoRoot, "storybook", "storybook-static");
+const staticIframe = path.join(staticRoot, "iframe.html");
+const storybookComponentsBundle = path.join(repoRoot, "storybook", "dist", "components.js");
+const componentFreshnessInputs = [
+  path.join(repoRoot, "src", "frontend", "storybook_components.nim"),
+  path.join(repoRoot, "src", "frontend", "viewmodel", "views", "isonim_debug_controls_view.nim"),
+  path.join(repoRoot, "src", "frontend", "viewmodel", "viewmodels", "debug_controls_vm.nim"),
+];
+const staticFreshnessInputs = [
+  path.join(repoRoot, "storybook", ".storybook"),
+  path.join(repoRoot, "storybook", "stories", "CodeTracerSurfaces.stories.js"),
+  storybookComponentsBundle,
+];
+
+type FileMtime = {
+  filePath: string;
+  mtimeMs: number;
+};
 
 function contentType(filePath: string): string {
   if (filePath.endsWith(".html")) return "text/html";
@@ -15,14 +32,62 @@ function contentType(filePath: string): string {
   return "application/octet-stream";
 }
 
+function newestInput(paths: string[]): FileMtime {
+  let newest: FileMtime | undefined;
+
+  function visit(filePath: string) {
+    const stat = fs.statSync(filePath);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(filePath)) {
+        visit(path.join(filePath, entry));
+      }
+      return;
+    }
+
+    if (!newest || stat.mtimeMs > newest.mtimeMs) {
+      newest = { filePath, mtimeMs: stat.mtimeMs };
+    }
+  }
+
+  for (const filePath of paths) {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Missing StoryBook build input: ${path.relative(repoRoot, filePath)}`);
+    }
+    visit(filePath);
+  }
+
+  if (!newest) throw new Error("No StoryBook build inputs found.");
+  return newest;
+}
+
+function assertFreshOutput(outputPath: string, inputPaths: string[], staleMessage: string) {
+  const outputStat = fs.statSync(outputPath);
+  const latestInput = newestInput(inputPaths);
+  if (latestInput.mtimeMs - outputStat.mtimeMs <= 1000) return;
+
+  throw new Error(
+    [
+      staleMessage,
+      `${path.relative(repoRoot, outputPath)} is older than ${path.relative(repoRoot, latestInput.filePath)}.`,
+      "Run `just storybook-build`, or run this spec through `just test-gui` so the static build is refreshed.",
+    ].join(" "),
+  );
+}
+
 test.describe("Live MCR debug controls StoryBook", () => {
   let server: http.Server;
   let baseUrl: string;
 
   test.beforeAll(async () => {
-    if (!fs.existsSync(path.join(staticRoot, "iframe.html"))) {
+    if (!fs.existsSync(staticIframe)) {
       throw new Error("Missing StoryBook static build. Run `just storybook-build` first.");
     }
+    assertFreshOutput(
+      storybookComponentsBundle,
+      componentFreshnessInputs,
+      "Stale StoryBook component bundle.",
+    );
+    assertFreshOutput(staticIframe, staticFreshnessInputs, "Stale StoryBook static build.");
 
     server = http.createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");

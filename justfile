@@ -353,6 +353,39 @@ storybook-build: build-storybook-components
 storybook-check-styles:
   cd storybook && npm run check-styles
 
+ensure-storybook-static *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  set -- {{args}}
+
+  needs_storybook=0
+  if [ "$#" -eq 0 ]; then
+    needs_storybook=1
+  fi
+
+  for arg in "$@"; do
+    case "$arg" in
+      *storybook*)
+        needs_storybook=1
+        ;;
+    esac
+
+    target=""
+    if [ -e "$arg" ]; then
+      target="$arg"
+    elif [ -e "src/tests/gui/$arg" ]; then
+      target="src/tests/gui/$arg"
+    fi
+
+    if [ -d "$target" ] && find "$target" -name '*storybook*.spec.ts' -print -quit | grep -q .; then
+      needs_storybook=1
+    fi
+  done
+
+  if [ "$needs_storybook" -eq 1 ]; then
+    just storybook-build
+  fi
+
 serve-docs hostname="localhost" port="3000":
   #!/usr/bin/env bash
   cd docs/book/
@@ -839,6 +872,7 @@ test-e2e *args:
       fi
       ;;
   esac
+  just ensure-storybook-static {{args}}
   cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
     npm install --no-audit --no-fund && \
     env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
