@@ -13,73 +13,9 @@
  * pane; the recorder's manifest carries the language so the trace reader
  * preserves the original casing.
  */
-import * as childProcess from "node:child_process";
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures";
+import { erlangOutDir, prepareBeamFixtures } from "../lib/beam-fixtures";
 import { LayoutPage } from "../page-objects/layout_page";
-
-// This spec lives at src/tests/gui/tests/ — four levels below the codetracer
-// repo root.  (The suite moved from the old one-level-deep tsc-ui-tests/ and
-// this constant was not updated, so the codetracer-beam-recorder sibling
-// lookup and the target/ fixture dir resolved under src/tests/ instead.)
-const repoRoot = path.resolve(__dirname, "../../../..");
-const elixirOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "elixir-canonical-flow");
-const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "erlang-canonical-flow");
-
-function resolveRecorderRepo(): string {
-  const explicit = process.env.CODETRACER_BEAM_RECORDER_PATH ?? process.env.CODETRACER_ELIXIR_RECORDER_PATH;
-  if (explicit) {
-    if (!fs.existsSync(path.join(explicit, "scripts", "prepare-beam-fixtures.sh"))) {
-      throw new Error(
-        `CODETRACER_BEAM_RECORDER_PATH does not point to a recorder repo with prepare-beam-fixtures.sh: ${explicit}`,
-      );
-    }
-    return explicit;
-  }
-
-  const candidates = [
-    path.resolve(repoRoot, "..", "codetracer-beam-recorder"),
-    path.resolve(repoRoot, "..", "..", "..", "metacraft", "codetracer-beam-recorder"),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(path.join(candidate, "scripts", "prepare-beam-fixtures.sh"))) {
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    "codetracer-beam-recorder repo not found; set CODETRACER_BEAM_RECORDER_PATH",
-  );
-}
-
-function prepareBeamFixtures(): { erlangDir: string } {
-  const recorderRepo = resolveRecorderRepo();
-  const script = path.join(recorderRepo, "scripts", "prepare-beam-fixtures.sh");
-  // The fixture generator is a bash script. On Windows a `.sh` path is not
-  // directly executable, so invoke it through `bash` (present on PATH via
-  // the dev shell on every platform the suite runs on).
-  const result = childProcess.spawnSync("bash", [script, elixirOutDir, erlangOutDir], {
-    cwd: recorderRepo,
-    encoding: "utf-8",
-    stdio: "pipe",
-    env: {
-      ...process.env,
-      FORCE: process.env.CI ? "1" : process.env.FORCE ?? "0",
-      TMPDIR: process.env.TMPDIR ?? path.join(repoRoot, "target", ".tmp"),
-    },
-    timeout: 240_000,
-  });
-
-  if (result.error || result.status !== 0) {
-    throw new Error(
-      `BEAM fixture preparation failed: error=${result.error}; status=${result.status}\n` +
-        `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-    );
-  }
-  return { erlangDir: erlangOutDir };
-}
 
 // The Erlang CTFS bundle directory is a deterministic path, so test.use()
 // can reference it up front.  The actual recording (which shells out to the
