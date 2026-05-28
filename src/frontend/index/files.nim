@@ -441,6 +441,51 @@ proc collectDirectoryFilenames(
       return
     await collectDirectoryFilenames(nodePath.join(path, entry), res, limit)
 
+proc stripPathPrefix(path, root: string): string =
+  if path == root:
+    return ""
+  let unixPrefix = root & "/"
+  let windowsPrefix = root & "\\"
+  if path.startsWith(unixPrefix):
+    return path[unixPrefix.len .. ^1]
+  if path.startsWith(windowsPrefix):
+    return path[windowsPrefix.len .. ^1].replace("\\", "/")
+  path
+
+proc collectDirectoryFilenamesRelative(
+    root: cstring,
+    path: cstring,
+    res: var seq[string],
+    limit: int = 5000): Future[void] {.async.} =
+  if res.len >= limit:
+    return
+
+  var stat: js
+  try:
+    stat = await cast[Future[js]](fsAsync.lstat(path))
+  except:
+    return
+
+  if cast[bool](stat.isFile()) or cast[bool](stat.isSymbolicLink()):
+    let relative = stripPathPrefix($path, $root)
+    if relative.len > 0:
+      res.add(relative)
+    return
+
+  if not cast[bool](stat.isDirectory()) or shouldSkipIndexedDirectory(path):
+    return
+
+  var entries: seq[cstring] = @[]
+  try:
+    entries = await cast[Future[seq[cstring]]](fsAsync.readdir(path))
+  except:
+    return
+
+  for entry in entries:
+    if res.len >= limit:
+      return
+    await collectDirectoryFilenamesRelative(root, nodePath.join(path, entry), res, limit)
+
 proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bool): Future[seq[string]] {.async.} =
   var res: seq[string] = @[]
 
@@ -480,6 +525,9 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
 
       for path, _ in pathSet:
         res.add($path)
+      if res.len == 0:
+        let filesRoot = nodePath.join(traceFolder, cstring"files")
+        await collectDirectoryFilenamesRelative(filesRoot, filesRoot, res)
     else:
       # leave res empty
       discard

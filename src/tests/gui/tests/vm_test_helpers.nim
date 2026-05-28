@@ -32,7 +32,7 @@ when defined(js):
     ## Only works for futures created with `newCompletedFuture`.
     ## For `newFailedFuture` futures, this will raise.
     # Flush any pending callbacks first so side effects fire.
-    drainCallbacks()
+    drainPlatformCallbacks()
     if isSyncResolved(f):
       return getSyncValue[T](f)
     elif isSyncFailed(f):
@@ -54,14 +54,5 @@ proc drain*() =
   ## On JS, flushes the `pendingCallbacks` queue populated by
   ## `onComplete` for mock futures, matching native `poll(0)` behavior.
   ##
-  ## On native, calls poll(0) and silently ignores when no handles are
-  ## registered in the dispatcher.
-  when defined(js):
-    drainCallbacks()
-  else:
-    try:
-      poll(0)
-    except ValueError:
-      # "No handles or timers registered in dispatcher" — nothing to drain.
-      discard
-    drainCallbacks()
+  ## On native, calls the active backend's non-blocking drain helper.
+  drainPlatformCallbacks()

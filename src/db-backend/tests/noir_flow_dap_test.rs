@@ -73,52 +73,6 @@ fn setup_noir_trace() -> Option<(TestRecording, PathBuf)> {
 // Existing Tier-2 test: single breakpoint, flow variable extraction & values
 // ---------------------------------------------------------------------------
 
-// ROOT CAUSE (2026-05-20): All three failing noir_flow_dap_* tests share a
-// single trace-shape mismatch in the noir tracer at
-// `~/metacraft/noir/tooling/tracer/src/lib.rs`.  Inspecting the freshly
-// recorded trace with `ct-print --events` reveals that the call site of
-// `add_offset(doubled)` (source line 26 inside `calculate_sum`) is recorded
-// as TWO distinct steps:
-//
-//   step_index=4  line=26 function=add_offset    depth=2  (call site, NEW
-//                                                          frame already
-//                                                          attributed)
-//   ...
-//   step_index=5  line=18 function=add_offset    depth=2  (body)
-//   step_index=6  line=19 function=add_offset    depth=2  (body)
-//   step_index=7  line=21 function=calculate_sum depth=1  (post-return,
-//                                                          BUT debugger PC
-//                                                          reports line 21,
-//                                                          which is `}` of
-//                                                          add_offset)
-//   step_index=8  line=26 function=calculate_sum depth=1  (post-return,
-//                                                          back at call site)
-//
-// Both M5 tests authored against the previous noir tracer assumed:
-//   (a) the call site step at line 26 lives in calculate_sum (depth=1) with
-//       `doubled` in scope, and
-//   (b) the post-return step uses the call-site line, not noir's spurious
-//       "line 21" intermediate.
-//
-// The current noir tracer's `TracingContext::update_record` (lib.rs ~218-262)
-// uses `source_locations[stack.len()-2]` as the post-return registration
-// site; the noir Brillig debugger reports calculate_sum's PC as line 21 (the
-// closing brace of add_offset) at that moment instead of the call site at
-// line 26.  The extra step at line 21 then absorbs the DAP "step over"
-// transition, so the stepping test stops one line short of line 26 and the
-// breakpoint test attributes line-26 variables to add_offset's scope.
-//
-// Fixing requires changes in the noir sibling repo
-// (`noir/tooling/tracer/src/lib.rs` + `tooling/debugger/src/context.rs` or
-// the SourceLocation builder in `tooling/tracer/src/debugger_glue.rs`) so
-// that the post-return SourceLocation returns the call-site line and not
-// `add_offset`'s `}` line.  Out of scope for the db-backend session that
-// owns these tests; tracked as separate noir compiler work.
-//
-// Per repo policy (no #[ignore], no silent skips, no weakened assertions),
-// the tests stay failing until the noir tracer is fixed.  When that lands,
-// re-run these three tests against the new nargo build and they should go
-// green without any test-side changes.
 #[test]
 fn noir_flow_dap_variables_and_values() {
     let (recording, breakpoint_source) = match setup_noir_trace() {
@@ -137,9 +91,9 @@ fn noir_flow_dap_variables_and_values() {
 
     let config = FlowTestConfig {
         source_file: breakpoint_source.to_str().unwrap().to_string(),
-        // Line 26 is `let final_result = add_offset(doubled);` inside
-        // calculate_sum -- after sum_val and doubled are computed.
-        breakpoint_line: 26,
+        // Line 27 is the first statement after `final_result` has been
+        // assigned by the line-26 call to `add_offset(doubled)`.
+        breakpoint_line: 27,
         expected_variables: vec!["sum_val", "doubled", "final_result"]
             .into_iter()
             .map(String::from)
