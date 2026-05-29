@@ -273,6 +273,11 @@ src/ct/ci/bpf_monitor_native_test
 src/ct/ci/bpf_native_integration_test
 src/ct/ci/bpf_integration_test
 src/ct/ci/bpf_comparison_test
+src/common/cross_machine_replay_test
+src/common/events_wire_format_test
+src/common/recording_folder_layout_test
+src/common/trace_index_test
+src/ct/launch/launch_env_var_test
 
 # Temporary .patch file, used to coppy results from codex and applied using git apply <file name>.patch
 *.patch
