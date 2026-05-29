@@ -503,10 +503,6 @@ test.describe("NoirSpaceShip", () => {
     );
   });
 
-  // TODO(failing): Flaky -- expect(rows.length).toBeGreaterThanOrEqual(2) sometimes gets 0 rows.
-  //   The event log eventElements(true) returns an empty array when the event log has not finished
-  //   populating. Passes on retry when ct record completes faster.
-  //   Hypothesis: Needs a retry/waitFor around the eventElements() call to handle slow trace loads.
   test("event log jump highlights active row", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
@@ -514,7 +510,17 @@ test.describe("NoirSpaceShip", () => {
     const eventLog = (await layout.eventLogTabs())[0];
     await eventLog.clickTab();
 
-    const rows = await eventLog.eventElements(true);
+    // waitForAllComponentsLoaded returns once components are mounted,
+    // but event-log rows can still be streaming in.  Retry until the
+    // expected row count is present rather than reading once.
+    let rows: Awaited<ReturnType<typeof eventLog.eventElements>> = [];
+    await retry(
+      async () => {
+        rows = await eventLog.eventElements(true);
+        return rows.length >= 2;
+      },
+      { maxAttempts: 30, delayMs: 500 },
+    );
     expect(rows.length).toBeGreaterThanOrEqual(2);
 
     const firstRow = rows[0];
