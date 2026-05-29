@@ -133,7 +133,7 @@ test.describe("README animations", () => {
     const { layout } = await setup(ctPage);
     const state = (await layout.programStateTabs())[0];
     await state.tabButton().click();
-    await expect(state.root.locator(".variable-state-row")).toBeVisible({ timeout: 10000 });
+    await expect(state.root.locator(".value-expanded").first()).toBeVisible({ timeout: 10000 });
 
     await ctPage.mouse.wheel(0, 300);
     await ctPage.waitForTimeout(500);
@@ -145,7 +145,7 @@ test.describe("README animations", () => {
     const { layout } = await setup(ctPage);
     const eventLog = (await layout.eventLogTabs())[0];
     await eventLog.tabButton().click();
-    await expect(eventLog.root.locator(".eventLog-row")).toBeVisible({ timeout: 10000 });
+    await expect(eventLog.root.locator(".eventLog-dense-table tbody tr").first()).toBeVisible({ timeout: 10000 });
 
     await ctPage.mouse.wheel(0, 300);
     await ctPage.waitForTimeout(500);
@@ -157,7 +157,7 @@ test.describe("README animations", () => {
     const { layout } = await setup(ctPage);
     const terminal = (await layout.terminalTabs())[0];
     await terminal.tabButton().click();
-    await expect(terminal.root.locator(".terminal-output-row, .terminal-line")).toBeVisible({ timeout: 10000 });
+    await expect(terminal.root.locator(".terminal-line").first()).toBeVisible({ timeout: 10000 });
 
     await ctPage.mouse.wheel(0, 300);
     await ctPage.waitForTimeout(500);
