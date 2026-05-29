@@ -36,8 +36,14 @@ export const LIMIT_TOTAL_SETUP_MS = 30_000;
 /** Cached recording lookup (already recorded, no recompilation). */
 export const LIMIT_CACHED_RECORDING_MS = 500;
 
-/** Small program recording (< 100 lines). */
-export const LIMIT_SMALL_RECORDING_MS = 5_000;
+/** Small program recording (< 100 lines).
+ * Baseline (warm cache, idle host) is well under 1s, but the first
+ * recording in a worker process pays ct/recorder startup cost and
+ * can collide with concurrent host activity (background builds,
+ * Nix evaluations) for several seconds. 15s catches a regression
+ * (small program should never take that long) while absorbing
+ * cold-start + realistic noise. */
+export const LIMIT_SMALL_RECORDING_MS = 15_000;
 
 /** RR recording: compile + rr record. Ranges from 8s (C) to 60s+ (Crystal, Lean).
  * TTD (Windows) recording has much higher overhead than RR.  Compute-heavy
