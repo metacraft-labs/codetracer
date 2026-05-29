@@ -257,7 +257,8 @@ when defined(js):
           tdiv(class = "data-tables-footer-info"):
             span:
               text "Rows"
-            input(class = "ct-input-small mx-2", value = "0")
+            input(class = "ct-input-small mx-2 data-tables-footer-input",
+                  value = "0")
             span:
               text "to"
             tdiv(class = "data-tables-footer-end-row"):

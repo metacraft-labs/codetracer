@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export class BasePage {
   readonly page: Page;
@@ -127,34 +127,75 @@ export class EventLogTab extends TabObject {
   }
 
   rows(): Locator {
-    return this.footerContainer().locator(".data-tables-footer-input")
+    return this.footerContainer().locator(".data-tables-footer-input");
+  }
+
+  private parsePositiveInt(text: string | null | undefined): number {
+    const match = text?.match(/\d+/);
+    return match ? parseInt(match[0], 10) : 0;
   }
 
   async getRows(): Promise<number> {
+    const input = this.rows().first();
+    if (await input.count() > 0) {
+      const value = await input.inputValue();
+      const parsed = this.parsePositiveInt(value);
+      if (parsed > 0) {
+        return parsed;
+      }
+    }
+
     const klass = await this.footerContainer().getAttribute("class");
-    const m = klass?.match(/(\d*)to/);
+    const m = klass?.match(/(\d+)to/);
     return m ? parseInt(m[1], 10) : 0;
   }
 
   async getToRow(): Promise<number> {
+    const endRow = this.footerContainer()
+      .locator(".data-tables-footer-end-row")
+      .first();
+    if (await endRow.count() > 0) {
+      return this.parsePositiveInt(await endRow.textContent());
+    }
+
     const text = await this.rowsInfoContainer().textContent();
-    const m = text?.match(/(\d*)\sof/);
+    const m = text?.match(/(\d+)\sof/);
     return m ? parseInt(m[1], 10) : 0;
   }
 
   async getOfRows(): Promise<number> {
+    const rowsCount = this.footerContainer()
+      .locator(".data-tables-footer-rows-count")
+      .first();
+    if (await rowsCount.count() > 0) {
+      return this.parsePositiveInt(await rowsCount.textContent());
+    }
+
     const text = await this.rowsInfoContainer().textContent();
-    const m = text?.match(/of\s(\d*)/);
+    const m = text?.match(/of\s(\d+)/);
     return m ? parseInt(m[1], 10) : 0;
   }
 
-  private async eventElementRoots(): Promise<Locator[]> {
-    return await this.root.locator(".eventLog-dense-table tbody tr").all();
+  private eventElementRoots(): Locator {
+    return this.root.locator(
+      ".eventLog-dense-table tbody tr:has(td.eventLog-index)",
+    );
+  }
+
+  async waitForRowsLoaded(): Promise<void> {
+    await this.footerContainer().waitFor({ state: "visible", timeout: 15_000 });
+
+    await expect.poll(
+      async () =>
+        (await this.getOfRows()) > 0 &&
+        (await this.eventElementRoots().count()) > 0,
+      { timeout: 30_000, intervals: [250, 500, 1000] },
+    ).toBe(true);
   }
 
   async eventElements(forceReload = false): Promise<EventElement[]> {
     if (forceReload || this.events.length === 0) {
-      const locators = await this.eventElementRoots();
+      const locators = await this.eventElementRoots().all();
       this.events = locators.map((l) =>
         new EventElement(this.page, l, EventElementType.EventLog),
       );

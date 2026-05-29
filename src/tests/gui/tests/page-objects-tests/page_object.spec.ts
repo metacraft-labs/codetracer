@@ -55,8 +55,22 @@ test("Event Log Rows", async ({ ctPage }) => {
   const layoutPage = new LayoutPage(ctPage);
 
   const eventLogTab = (await layoutPage.eventLogTabs())[0];
-  const rows = await eventLogTab.getRows();
+  await eventLogTab.waitForRowsLoaded();
 
-  expect(rows).toBeGreaterThanOrEqual(1);
+  const fromRow = await eventLogTab.getRows();
+  const toRow = await eventLogTab.getToRow();
+  const totalRows = await eventLogTab.getOfRows();
+  const eventRows = await eventLogTab.eventElements(true);
+  const eventTexts = await Promise.all(
+    eventRows.map((row) => row.consoleOutput()),
+  );
+
+  expect(fromRow).toBe(1);
+  expect(toRow).toBeGreaterThanOrEqual(fromRow);
+  expect(totalRows).toBeGreaterThanOrEqual(toRow);
+  expect(eventRows.length).toBeGreaterThanOrEqual(1);
+  expect(eventRows.length).toBeGreaterThanOrEqual(toRow - fromRow + 1);
+  expect(eventRows.length).toBeLessThanOrEqual(totalRows);
+  expect(eventTexts.some((text) => text.trim().length > 0)).toBe(true);
 
 });
