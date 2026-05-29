@@ -2,9 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { test, expect } from "../../lib/fixtures";
+import { resolveRealVisualTracePath } from "../../lib/real-visual-trace";
 import type { Locator, Page } from "@playwright/test";
 
-const visualTracePath = process.env.CODETRACER_REAL_VISUAL_TRACE ?? "";
+const visualTracePath = resolveRealVisualTracePath();
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
 const outputDir = process.env.CODETRACER_BOOK_SCREENSHOT_DIR
   ?? path.join(repoRoot, "docs", "book", "src", "generated", "visual_recordings");
@@ -31,9 +32,6 @@ test.describe("visual recording book screenshots", () => {
 
   test.beforeEach(() => {
     delete process.env.CODETRACER_VISUAL_REPLAY_FAKE_PLAYER;
-    if (!visualTracePath) {
-      throw new Error("CODETRACER_REAL_VISUAL_TRACE must point to a recorded .ct trace");
-    }
   });
 
   test("captures the visual replay workflow for the CodeTracer book", async ({ ctPage }) => {

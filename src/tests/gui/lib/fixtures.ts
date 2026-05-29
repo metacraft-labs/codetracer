@@ -506,6 +506,58 @@ function markTraceVisualReplayCapable(recordingId: string): void {
   fs.writeFileSync(path.join(gfxDir, "gfx_commands.dat"), "");
 }
 
+function companionGfxStreamDir(tracePath: string): string {
+  const baseDir = fs.statSync(tracePath).isDirectory()
+    ? tracePath
+    : path.dirname(tracePath);
+  return path.join(baseDir, "gfx_stream");
+}
+
+function importedTraceIdFromStdout(stdout: string): string | null {
+  const match = stdout.match(/ct host: imported as trace id ([0-9a-f-]{36})/);
+  return match?.[1] ?? null;
+}
+
+async function copyCompanionGfxStreamAfterTracePathImport(
+  tracePath: string,
+  stdoutChunks: string[],
+  ctProcess: childProcess.ChildProcess,
+): Promise<void> {
+  const sourceGfxDir = companionGfxStreamDir(tracePath);
+  if (!fs.existsSync(sourceGfxDir)) {
+    return;
+  }
+
+  const deadline = Date.now() + MAX_CONNECT_ATTEMPTS * RETRY_DELAY_MS;
+  let recordingId: string | null = null;
+  while (Date.now() < deadline) {
+    recordingId = importedTraceIdFromStdout(stdoutChunks.join(""));
+    if (recordingId) {
+      break;
+    }
+    if (ctProcess.exitCode !== null || ctProcess.signalCode !== null) {
+      break;
+    }
+    await sleep(100);
+  }
+
+  if (!recordingId) {
+    console.warn(
+      `fixtures: trace-path import id not observed; visual replay artifacts were not copied from ${sourceGfxDir}`,
+    );
+    return;
+  }
+
+  const targetGfxDir = path.join(traceFolderForId(recordingId), "gfx_stream");
+  fs.mkdirSync(path.dirname(targetGfxDir), { recursive: true });
+  fs.cpSync(sourceGfxDir, targetGfxDir, { recursive: true, force: true });
+  const sourceCtfsSidecar = `${sourceGfxDir}.ctfs`;
+  if (fs.existsSync(sourceCtfsSidecar)) {
+    fs.copyFileSync(sourceCtfsSidecar, `${targetGfxDir}.ctfs`);
+  }
+  console.log(`# copied visual replay stream for imported trace ${recordingId}`);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1214,6 +1266,8 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
   ctProcess.stderr?.on("data", (chunk: Buffer) => {
     ctStderr.push(chunk.toString());
   });
+
+  await copyCompanionGfxStreamAfterTracePathImport(tracePath, ctStdout, ctProcess);
 
   const chromiumPath = resolveChromiumPath();
   const extraArgs = (process.env.CODETRACER_ELECTRON_ARGS ?? "")

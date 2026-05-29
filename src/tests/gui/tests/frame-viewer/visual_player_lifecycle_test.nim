@@ -18,7 +18,8 @@ suite "Visual replay player lifecycle":
       "/opt/tools/ct gfx player")
 
     check command.ctMcr == "/opt/tools/ct mcr"
-    check command.ctMcrArgs == @["extract-gfx", "-o", "/tmp/gfx stream", tracePath]
+    check command.ctMcrArgs == @["extract-gfx", "--ctfs-visual-streams",
+      "-o", "/tmp/gfx stream", tracePath]
     check command.gfxPlayer == "/opt/tools/ct gfx player"
     check command.gfxPlayerArgs == @[
       "--gfx-stream", "/tmp/gfx stream", "--http", "--port", "41237"]

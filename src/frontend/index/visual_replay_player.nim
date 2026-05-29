@@ -1,7 +1,7 @@
 ## Lifecycle orchestration for the MCR visual replay HTTP player.
 ##
 ## The production pipeline is:
-##   ct-mcr extract-gfx -o <gfx_stream> trace.ct
+##   ct-mcr extract-gfx --ctfs-visual-streams -o <gfx_stream> trace.ct
 ##   ct-gfx-player --gfx-stream <gfx_stream> --http --port <port>
 ##
 ## Tests inject the port allocator, process starter, readiness probe, and
@@ -78,7 +78,8 @@ proc createVisualReplayPipelineCommand*(
     gfxPlayerArgs.add(@["--backend", gfxPlayerBackend.strip])
   VisualReplayPipelineCommand(
     ctMcr: ctMcr,
-    ctMcrArgs: @["extract-gfx", "-o", gfxStreamDir, tracePath],
+    ctMcrArgs: @["extract-gfx", "--ctfs-visual-streams", "-o", gfxStreamDir,
+      tracePath],
     gfxPlayer: gfxPlayer,
     gfxPlayerArgs: gfxPlayerArgs)
 
@@ -500,7 +501,7 @@ when defined(js):
       try {
         extractor = childProcess.spawn(
           ctMcrPath,
-          ["extract-gfx", "-o", gfxStreamDir, tracePathString],
+          ["extract-gfx", "--ctfs-visual-streams", "-o", gfxStreamDir, tracePathString],
           { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
         );
       } catch (error) {

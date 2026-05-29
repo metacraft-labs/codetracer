@@ -1,6 +1,7 @@
 import { test, expect } from "../../lib/fixtures";
+import { resolveRealVisualTracePath } from "../../lib/real-visual-trace";
 
-const visualTracePath = process.env.CODETRACER_REAL_VISUAL_TRACE ?? "";
+const visualTracePath = resolveRealVisualTracePath();
 
 test.describe("MCR visual replay real recording GUI integration", () => {
   test.describe.configure({ mode: "serial" });
@@ -14,9 +15,6 @@ test.describe("MCR visual replay real recording GUI integration", () => {
 
   test.beforeEach(() => {
     delete process.env.CODETRACER_VISUAL_REPLAY_FAKE_PLAYER;
-    if (!visualTracePath) {
-      throw new Error("CODETRACER_REAL_VISUAL_TRACE must point to a recorded .ct trace");
-    }
   });
 
   test("recorded GL trace supports GUI scrubbing and pixel-level debugging", async ({ ctPage }) => {
