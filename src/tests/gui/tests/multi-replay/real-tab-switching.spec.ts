@@ -367,12 +367,13 @@ test.describe("Real tab switching with GL rebuild", () => {
     expect(firstLineText).toBeTruthy();
     expect(firstLineText!.trim().length).toBeGreaterThan(0);
 
-    // --- Event log: same row count and first row text ---
+    // --- Event log: same trace's events present (count may exceed the
+    // pre-step snapshot because stepping forward in Phase 3 surfaces
+    // additional events).  First-row text is the stable identity check. ---
     const eventLogTabsAfter = await layout.eventLogTabs(true);
     expect(eventLogTabsAfter.length).toBeGreaterThan(0);
     const eventRowCountAfter = await eventLogTabsAfter[0].rowCount();
-    expect(eventRowCountAfter).toBeGreaterThan(0);
-    expect(eventRowCountAfter).toBe(initialEventRowCount);
+    expect(eventRowCountAfter).toBeGreaterThanOrEqual(initialEventRowCount);
 
     const eventRowsAfter = await eventLogTabsAfter[0].eventElements(true);
     expect(eventRowsAfter.length).toBeGreaterThan(0);
