@@ -2814,6 +2814,7 @@ function startPlatformLaunchBridge(options: {
   runnerRoot: string;
   port: number;
   launches: Array<{ ctProcess: childProcess.ChildProcess; hostOutput: string[]; hostUrl: string }>;
+  events?: string[];
 }): http.Server {
   const server = http.createServer(async (request, response) => {
     try {
@@ -2892,7 +2893,7 @@ function startPlatformLaunchBridge(options: {
       response.writeHead(302, { location: hostUrl });
       response.end();
     } catch (error) {
-      options.events.push(
+      options.events?.push(
         `error ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
       );
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });

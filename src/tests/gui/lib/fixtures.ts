@@ -284,6 +284,9 @@ interface CodetracerFixtures {
   ctPage: Page;
   /** The Electron app handle (null in web mode). */
   electronApp: ElectronApplication | null;
+}
+
+interface CodetracerWorkerFixtures {
   /** Internal: forces worker exit to avoid teardown timeout. */
   _workerCleanup: void;
 }
@@ -1482,7 +1485,10 @@ async function launchDeepReview(jsonPath: string): Promise<LaunchResult> {
 // Fixture definition
 // ---------------------------------------------------------------------------
 
-export const test = base.extend<CodetracerFixtures & CodetracerOptions>({
+export const test = base.extend<
+  CodetracerFixtures & CodetracerOptions,
+  CodetracerWorkerFixtures
+>({
   // Options (set via test.use)
   deploymentMode: ["electron", { option: true }],
   sourcePath: ["", { option: true }],

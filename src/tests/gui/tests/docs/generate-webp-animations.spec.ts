@@ -30,6 +30,13 @@ test.describe("generate faithful webp animations", () => {
         if (!d) return;
         d.config.flow.ui = "inline";
         d.config.flow.realFlowUI = 1; // FlowInline
+        const switchFlowUI = (value: unknown) => {
+          if (typeof value !== "object" || value === null) return;
+          const candidate = value as { switchFlowUI?: unknown };
+          if (typeof candidate.switchFlowUI === "function") {
+            candidate.switchFlowUI(1);
+          }
+        };
         // Trigger redraw
         if (d.ui && d.ui.componentMapping) {
             for (const group of d.ui.componentMapping) {
@@ -38,13 +45,9 @@ test.describe("generate faithful webp animations", () => {
                     if (!comp) continue;
                     // Switch UI for any component that supports it
                     for (const key of Object.keys(comp)) {
-                        if (comp[key] && typeof comp[key].switchFlowUI === 'function') {
-                            comp[key].switchFlowUI(1);
-                        }
+                        switchFlowUI((comp as Record<string, unknown>)[key]);
                     }
-                    if (typeof (comp as any).switchFlowUI === 'function') {
-                        (comp as any).switchFlowUI(1);
-                    }
+                    switchFlowUI(comp);
                 }
             }
         }

@@ -267,6 +267,17 @@ interface CodetracerHandle {
   electronApp: ElectronApplication;
 }
 
+type ElectronBrowserWindow = {
+  id: number;
+  isDestroyed(): boolean;
+  getTitle(): string;
+};
+
+type WindowTitle = {
+  id: number;
+  title: string;
+};
+
 const test = base.extend<{
   codetracer: CodetracerHandle;
 }>({
@@ -366,7 +377,7 @@ async function createSecondWindow(
 
   return electronApp.evaluate(
     async ({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows().map((w) => w.id),
+      BrowserWindow.getAllWindows().map((w: ElectronBrowserWindow) => w.id),
   );
 }
 
@@ -449,7 +460,7 @@ test.describe("Cross-window interaction", () => {
     // Verify windows are not destroyed.
     const states = await electronApp.evaluate(
       async ({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().map((w) => ({
+        BrowserWindow.getAllWindows().map((w: ElectronBrowserWindow) => ({
           id: w.id,
           destroyed: w.isDestroyed(),
         })),
@@ -528,13 +539,13 @@ test.describe("Cross-window interaction", () => {
     const postDrag = await electronApp.evaluate(
       async ({ BrowserWindow }) =>
         BrowserWindow.getAllWindows()
-          .filter((w) => !w.isDestroyed())
-          .map((w) => ({ id: w.id, title: w.getTitle() })),
+          .filter((w: ElectronBrowserWindow) => !w.isDestroyed())
+          .map((w: ElectronBrowserWindow) => ({ id: w.id, title: w.getTitle() })),
     );
 
     expect(postDrag.length).toBeGreaterThanOrEqual(2);
     console.log(
-      `# post-drag: ${postDrag.map((w) => `${w.id}:${w.title}`).join(", ")}`,
+      `# post-drag: ${postDrag.map((w: WindowTitle) => `${w.id}:${w.title}`).join(", ")}`,
     );
   });
 
@@ -577,7 +588,7 @@ test.describe("Cross-window interaction", () => {
       xdotoolDelay(500);
       const windowCount = await electronApp.evaluate(
         async ({ BrowserWindow }) =>
-          BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+          BrowserWindow.getAllWindows().filter((w: ElectronBrowserWindow) => !w.isDestroyed()).length,
       );
       expect(windowCount).toBeGreaterThanOrEqual(2);
     } else {
@@ -642,7 +653,7 @@ test.describe("Cross-window interaction", () => {
       async () => {
         const count = await electronApp.evaluate(
           async ({ BrowserWindow }) =>
-            BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+            BrowserWindow.getAllWindows().filter((w: ElectronBrowserWindow) => !w.isDestroyed())
               .length,
         );
         return count < initialCount;
@@ -652,7 +663,7 @@ test.describe("Cross-window interaction", () => {
 
     const finalCount = await electronApp.evaluate(
       async ({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+        BrowserWindow.getAllWindows().filter((w: ElectronBrowserWindow) => !w.isDestroyed()).length,
     );
     expect(finalCount).toBeLessThan(initialCount);
     console.log(`# Window closed: ${initialCount} -> ${finalCount}`);
@@ -805,7 +816,7 @@ test.describe("Cross-window interaction", () => {
     // Record initial window count.
     const initialWindowCount = await electronApp.evaluate(
       async ({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+        BrowserWindow.getAllWindows().filter((w: ElectronBrowserWindow) => !w.isDestroyed()).length,
     );
 
     // Detach a panel from session 0 with targetWindowId: -1 (create new window).
@@ -838,7 +849,7 @@ test.describe("Cross-window interaction", () => {
       async () => {
         const count = await electronApp.evaluate(
           async ({ BrowserWindow }) =>
-            BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+            BrowserWindow.getAllWindows().filter((w: ElectronBrowserWindow) => !w.isDestroyed()).length,
         );
         newWindowCreated = count > initialWindowCount;
         return newWindowCreated;
@@ -856,8 +867,8 @@ test.describe("Cross-window interaction", () => {
       const windowIds = await electronApp.evaluate(
         async ({ BrowserWindow }) =>
           BrowserWindow.getAllWindows()
-            .filter((w) => !w.isDestroyed())
-            .map((w) => w.id),
+            .filter((w: ElectronBrowserWindow) => !w.isDestroyed())
+            .map((w: ElectronBrowserWindow) => w.id),
       );
       expect(windowIds.length).toBeGreaterThan(initialWindowCount);
 
