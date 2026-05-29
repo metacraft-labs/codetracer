@@ -93,16 +93,23 @@ test.describe("README animations", () => {
   test("tracepoint", async ({ ctPage }) => {
     const { editor } = await setup(ctPage);
 
-    await editor.openTrace(3); // return n
-    const tracePanel = new TraceLogPanel(editor, 3);
+    await editor.openTrace(9); // print(f"fib({i}) = ...")
+    const tracePanel = new TraceLogPanel(editor, 9);
     await tracePanel.root.waitFor({ state: "visible" });
-    await tracePanel.typeExpression("print(f'n={n}')");
+    await tracePanel.typeExpression("log(i)");
     await editor.runTracepointsJs();
 
-    await expect(tracePanel.root.locator(".trace-log-row")).toHaveCount(10, { timeout: 30000 });
+    const resultRows = tracePanel.root.locator(
+      ".chart-table .trace-table tbody tr:has(td.trace-values)",
+    );
+    await expect(tracePanel.root.locator(".trace-error")).toHaveCount(0);
+    await expect(resultRows).toHaveCount(10, { timeout: 30000 });
+    await expect(resultRows.first()).toContainText("i=0");
+    await expect(resultRows.nth(9)).toContainText("i=9");
+    await expect(tracePanel.root.locator(".data-tables-footer-rows-count")).toHaveText("10");
 
     // Scroll through results
-    const results = tracePanel.root.locator(".trace-log-rows-container");
+    const results = tracePanel.root.locator(".chart-table .dt-scroll-body");
     await results.hover();
     await ctPage.mouse.wheel(0, 500);
     await ctPage.waitForTimeout(500);
