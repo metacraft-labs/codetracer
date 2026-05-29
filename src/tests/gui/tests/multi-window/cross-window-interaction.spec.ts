@@ -681,21 +681,14 @@ test.describe("Cross-window interaction", () => {
 
     const windowIds = await createSecondWindow(page, electronApp);
 
-    // Get the source window ID.
-    const sourceWindowId = await page.evaluate(() => {
-      try {
-        const { ipcRenderer } = require("electron");
-        return ipcRenderer.sendSync("CODETRACER::get-window-id");
-      } catch {
-        return -1;
-      }
-    });
-
-    const targetWindowId =
-      sourceWindowId > 0
-        ? windowIds.find((id) => id !== sourceWindowId) ??
-          windowIds[windowIds.length - 1]
-        : windowIds[windowIds.length - 1];
+    // The previous version called `ipcRenderer.sendSync("CODETRACER::get-window-id")`
+    // to pick a target distinct from the source.  That channel has no
+    // main-process handler, so the renderer's sendSync hung indefinitely
+    // and tripped the 120s test timeout.  Since `createSecondWindow`
+    // creates exactly one extra window (so windowIds.length === 2),
+    // the last entry is reliably the freshly-created one and is suitable
+    // as the panel-detach target regardless of which is the "source".
+    const targetWindowId = windowIds[windowIds.length - 1];
 
     const result = await page.evaluate(
       ({ targetId }) => {
