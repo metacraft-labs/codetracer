@@ -121,7 +121,7 @@ test.describe("README animations", () => {
     const { layout } = await setup(ctPage);
     const callTrace = (await layout.callTraceTabs())[0];
     await callTrace.tabButton().click();
-    await expect(callTrace.root.locator(".calltrace-entry")).toBeVisible({ timeout: 10000 });
+    await expect(callTrace.root.locator(".calltrace-call-line").first()).toBeVisible({ timeout: 10000 });
 
     await ctPage.mouse.wheel(0, 300);
     await ctPage.waitForTimeout(500);
