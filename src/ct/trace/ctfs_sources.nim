@@ -1,4 +1,4 @@
-import std/[json, os, strutils, sequtils]
+import std/[json, os, sets, strutils, sequtils]
 
 import source_paths
 
@@ -254,6 +254,8 @@ proc extractInterningTablePaths(reader: CtfsReader): seq[string] =
     if endOff > startOff:
       result.add datBytes[startOff ..< endOff]
 
+proc parseCtfsMetaDat(data: string): CtfsMetaDat   # forward decl — used by materializeCtfsSources' meta.paths fallback below
+
 proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   ## Extract source metadata from a CTFS .ct file into the runtime
   ## trace-folder layout consumed by the current frontend: a sibling
@@ -268,6 +270,7 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     return false
 
   var paths: seq[string] = @[]
+  var pathsJsonNonEmpty = false
   try:
     let pathsJson = reader.readCtfsFile("paths.json")
     if pathsJson.len > 0:
@@ -276,6 +279,7 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
         if pathNode.kind == JString:
           paths.add pathNode.getStr()
       result = true
+      pathsJsonNonEmpty = paths.len > 0
   except CatchableError:
     discard
 
@@ -293,6 +297,55 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
         result = true
     except CatchableError as e:
       echo "ct host: warning: failed to decode CTFS paths.dat: ", e.msg
+
+  # M-REC-1.5/M4a: the ct_recorder (live MCR) trace-writer currently
+  # finalizes the internal ``paths.json`` as a placeholder ``"[]"`` even
+  # when the operator passed ``--source`` paths (those paths *do* land
+  # in ``meta.dat``'s ``paths`` field — see
+  # ``ct_recorder/trace_writer.nim`` TODO("meta-json-retirement")).
+  # Until ``paths.json`` is retired, mirror ``meta.dat``'s paths into
+  # the sidecar when the internal ``paths.json`` was empty so the
+  # importer derives a usable jstree root from the recorded source
+  # paths instead of leaving an empty list.
+  #
+  # Any sibling sidecar already present in ``outputFolder`` (e.g.
+  # ``trace_paths.json`` written by the local manifest importer to
+  # surface request-details JSON files alongside the recorded source)
+  # is merged in — without the merge ``normalizeImportedTracePaths``
+  # would silently drop the sidecar because it prefers ``paths.json``
+  # whenever it exists.
+  if not pathsJsonNonEmpty:
+    try:
+      let metaPaths = parseCtfsMetaDat(reader.readCtfsFile("meta.dat")).paths
+      var merged: seq[string] = @[]
+      var seen = initHashSet[string]()
+      # Sidecar entries first so the manifest importer's intent
+      # (e.g. inventory-response.json) wins ordering for any later
+      # `paths.json[0]` consumer that picks the first entry.
+      for sidecarName in ["paths.json", "trace_paths.json"]:
+        let sidecarPath = outputFolder / sidecarName
+        if fileExists(sidecarPath):
+          try:
+            let sidecarJson = parseJson(readFile(sidecarPath))
+            if sidecarJson.kind == JArray:
+              for node in sidecarJson:
+                if node.kind == JString:
+                  let p = node.getStr()
+                  if p.len > 0 and p notin seen:
+                    merged.add p
+                    seen.incl p
+          except CatchableError:
+            discard
+      for path in metaPaths:
+        if path.len > 0 and path notin seen:
+          merged.add path
+          seen.incl path
+      if merged.len > 0:
+        paths = merged
+        writeFile(outputFolder / "paths.json", $(%paths))
+        result = true
+    except CatchableError as e:
+      echo "ct host: warning: failed to decode meta.dat paths fallback: ", e.msg
 
   try:
     let filemapPaths = extractFilemapSources(reader, outputFolder)
