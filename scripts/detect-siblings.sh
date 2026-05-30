@@ -264,9 +264,21 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-wasm-rec
 fi
 
 # --- codetracer-trace-format ---
-# Exports: LD_LIBRARY_PATH addition for libcodetracer_trace_writer_ffi.so (needed by wazero)
+# Exports: library path for libcodetracer_trace_writer_ffi.so (needed by wazero)
+#
+# We export both LD_LIBRARY_PATH (for tools the user runs directly from the
+# dev shell, e.g. wazero or a sibling recorder) and
+# CODETRACER_RECORDER_LD_LIBRARY_PATH (for the chain that goes through `ct`).
+# The latter exists because `ct` runs with Linux file capabilities
+# (cap_bpf+cap_perfmon+cap_dac_read_search — applied by build-once.sh), and
+# glibc's secure-execution mode unconditionally strips LD_LIBRARY_PATH from
+# environ before ct's code runs.  CODETRACER_RECORDER_LD_LIBRARY_PATH carries
+# the recorder-only entries through that scrub; ct's startup re-composition
+# in src/ct/codetracer.nim then splices them back onto LD_LIBRARY_PATH for
+# its subprocesses (db-backend-record → wazero etc.).
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-trace-format/target/release" ]; then
 	export LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format/target/release:${LD_LIBRARY_PATH:-}"
+	export CODETRACER_RECORDER_LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format/target/release${CODETRACER_RECORDER_LD_LIBRARY_PATH:+:$CODETRACER_RECORDER_LD_LIBRARY_PATH}"
 	_ct_detect_summary "codetracer-trace-format (FFI library available)"
 fi
 
@@ -281,8 +293,16 @@ fi
 # open shared object file`. Export the sibling repo's library directory so
 # the dynamic loader can resolve it. The Nim build drops the artefact at
 # the repo root next to the .nimble manifest (`nim c --app:lib -o:...`).
+#
+# See the comment above (codetracer-trace-format block) for why this is
+# duplicated into CODETRACER_RECORDER_LD_LIBRARY_PATH — ct's file
+# capabilities cause glibc to scrub LD_LIBRARY_PATH at exec time, so we
+# carry the path through a non-LD_-prefixed env var that survives the
+# scrub and is re-spliced onto LD_LIBRARY_PATH by ct's startup hook in
+# src/ct/codetracer.nim.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -f "$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim/libcodetracer_trace_writer.so" ]; then
 	export LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim:${LD_LIBRARY_PATH:-}"
+	export CODETRACER_RECORDER_LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim${CODETRACER_RECORDER_LD_LIBRARY_PATH:+:$CODETRACER_RECORDER_LD_LIBRARY_PATH}"
 	_ct_detect_summary "codetracer-trace-format-nim (Nim FFI library available for wazero)"
 fi
 

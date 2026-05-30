@@ -14,13 +14,42 @@ when not defined(js):
 
 when not defined(js) and not defined(windows):
   block:
+    # IMPORTANT: ct has Linux file capabilities (cap_bpf+cap_perfmon+
+    # cap_dac_read_search — applied by scripts/build-once.sh).  When a
+    # binary runs in glibc's secure-execution mode (any non-empty
+    # capability set qualifies), the dynamic linker strips LD_LIBRARY_PATH
+    # from environ before user code sees it (see `man ld.so` →
+    # "Secure-execution mode").  As a result, getEnv("LD_LIBRARY_PATH")
+    # here returns the empty string even when the calling shell exported
+    # it explicitly, which used to silently drop the sibling-repo
+    # additions baked in by scripts/detect-siblings.sh (notably the
+    # codetracer-trace-format-nim path that wazero needs to dlopen
+    # libcodetracer_trace_writer.so).
+    #
+    # We therefore re-export LD_LIBRARY_PATH from two env vars that are
+    # NOT touched by the secure-execution scrub:
+    #   * CODETRACER_LD_LIBRARY_PATH — Nix-store libs (SQLite, PCRE,
+    #     OpenSSL, …) that the dev shell bakes in for ct itself.
+    #   * CODETRACER_RECORDER_LD_LIBRARY_PATH — extra library directories
+    #     that recorder subprocesses dlopen at runtime
+    #     (trace-format-nim / trace-format-rust). detect-siblings.sh
+    #     populates this var precisely so the LD_LIBRARY_PATH scrub does
+    #     not strand wazero & friends.
     let ctLibPath = getEnv("CODETRACER_LD_LIBRARY_PATH")
-    if ctLibPath.len > 0:
-      let current = getEnv("LD_LIBRARY_PATH")
-      if current.len > 0:
-        putEnv("LD_LIBRARY_PATH", ctLibPath & ":" & current)
+    let recorderLibPath = getEnv("CODETRACER_RECORDER_LD_LIBRARY_PATH")
+    let current = getEnv("LD_LIBRARY_PATH")
+    var composed = ""
+    proc appendSegment(composed: var string, segment: string) =
+      if segment.len == 0: return
+      if composed.len == 0:
+        composed = segment
       else:
-        putEnv("LD_LIBRARY_PATH", ctLibPath)
+        composed = composed & ":" & segment
+    appendSegment(composed, ctLibPath)
+    appendSegment(composed, recorderLibPath)
+    appendSegment(composed, current)
+    if composed.len > 0:
+      putEnv("LD_LIBRARY_PATH", composed)
 
 try:
   when not defined(js):
