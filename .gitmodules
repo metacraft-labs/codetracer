@@ -100,7 +100,8 @@
 	url = https://github.com/r001/tree-sitter-leo.git
 [submodule "libs/tree-sitter-tolk"]
 	path = libs/tree-sitter-tolk
-	url = https://github.com/ton-blockchain/tree-sitter-tolk.git
+	url = https://github.com/metacraft-labs/tree-sitter-tolk.git
+	branch = codetracer
 [submodule "libs/tree-sitter-masm"]
 	path = libs/tree-sitter-masm
 	url = https://github.com/metacraft-labs/tree-sitter-masm.git
