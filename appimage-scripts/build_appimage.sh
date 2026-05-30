@@ -109,6 +109,19 @@ nix build "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv"
 LIBUV=$(nix eval --raw "${ROOT_PATH}#packages.${CURRENT_NIX_SYSTEM}.libuv.out")
 cp -L "${LIBUV}"/lib/libuv.so.1 "${APP_DIR}"/lib
 
+# libbpf — needed by the native BPF process monitor used by `ct ci`.
+# ct_unwrapped links against libbpf.so.1; libbpf itself transitively
+# pulls in libelf.so.1, which is also rarely shipped by base distro
+# images.  Bundling both keeps the AppImage self-contained on Debian/
+# Fedora/Arch where neither lib is installed by default.
+nix build --no-link "nixpkgs#libbpf"
+LIBBPF=$(nix eval --raw "nixpkgs#libbpf.out" 2>/dev/null)
+cp -L "${LIBBPF}"/lib/libbpf.so.1 "${APP_DIR}"/lib
+
+nix build --no-link "nixpkgs#elfutils"
+LIBELF=$(nix eval --raw "nixpkgs#elfutils.out" 2>/dev/null)
+cp -L "${LIBELF}"/lib/libelf.so.1 "${APP_DIR}"/lib
+
 # Copy over electron
 # bash "${ROOT_PATH}"/appimage-scripts/install_electron_nix.sh
 bash "${ROOT_PATH}"/appimage-scripts/install_electron.sh
@@ -286,9 +299,9 @@ try_patchelf() {
 # Patchelf the executable's interpreter
 PATCHELF_BINARIES=(
 	"${APP_DIR}"/bin/ct_unwrapped
-	"${APP_DIR}"/bin/db-backend
+	"${APP_DIR}"/bin/replay-server
 	"${APP_DIR}"/bin/db-backend-record
-	"${APP_DIR}"/bin/backend-manager
+	"${APP_DIR}"/bin/session-manager
 	"${APP_DIR}"/bin/nargo
 	"${APP_DIR}"/bin/wazero
 	"${APP_DIR}"/bin/ctags
@@ -302,11 +315,16 @@ for binary in "${PATCHELF_BINARIES[@]}"; do
 	try_patchelf "$binary" --set-interpreter "${INTERPRETER_PATH}"
 done
 
-# Clear up the executable's rpath
+# Clear up the executable's rpath.  Bundled .so files that have their
+# own NEEDED libs (libbpf needs libelf, etc.) get the same treatment so
+# the loader falls back to ct_unwrapped's $ORIGIN/../lib instead of
+# searching the Nix-store paths baked in at build time.
 REMOVE_RPATH_TARGETS=(
 	"${PATCHELF_BINARIES[@]}"
 	"${APP_DIR}"/lib/libicui18n.so.76
 	"${APP_DIR}"/lib/libgssapi_krb5.so.2
+	"${APP_DIR}"/lib/libbpf.so.1
+	"${APP_DIR}"/lib/libelf.so.1
 )
 for binary in "${REMOVE_RPATH_TARGETS[@]}"; do
 	try_patchelf "$binary" --remove-rpath
@@ -318,6 +336,8 @@ RPATH_BINARIES=(
 	"${PATCHELF_BINARIES[@]}"
 	"${APP_DIR}"/lib/libicui18n.so.76
 	"${APP_DIR}"/lib/libgssapi_krb5.so.2
+	"${APP_DIR}"/lib/libbpf.so.1
+	"${APP_DIR}"/lib/libelf.so.1
 )
 for binary in "${RPATH_BINARIES[@]}"; do
 	# shellcheck disable=SC2016

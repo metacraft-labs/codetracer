@@ -117,7 +117,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends \
   ca-certificates file zstd squashfs-tools \
-  libfontconfig1 libfreetype6 libxcb1 libxcb-cursor0 libxkbcommon0 \
+libfontconfig1 libfreetype6 libxcb1 libxcb-cursor0 libxkbcommon0 \
   libnss3 libgbm1 libdrm2 libatk-bridge2.0-0 libatk1.0-0 libcups2 \
   libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0 libxss1 \
   >/tmp/apt.log 2>&1
@@ -128,7 +128,7 @@ install_deps_fedora() {
 	cat <<'EOF'
 dnf install -y -q \
   ca-certificates file zstd squashfs-tools \
-  fontconfig freetype libxcb xcb-util-cursor libxkbcommon \
+fontconfig freetype libxcb xcb-util-cursor libxkbcommon \
   nss mesa-libgbm libdrm at-spi2-atk atk cups-libs \
   pango cairo alsa-lib-libs gtk3 libXScrnSaver \
   >/tmp/dnf.log 2>&1
@@ -139,7 +139,7 @@ install_deps_arch() {
 	cat <<'EOF'
 pacman -Sy --noconfirm --needed \
   ca-certificates file zstd squashfs-tools \
-  fontconfig freetype2 libxcb xcb-util-cursor libxkbcommon \
+fontconfig freetype2 libxcb xcb-util-cursor libxkbcommon \
   nss mesa libdrm at-spi2-core atk cups \
   pango cairo alsa-lib gtk3 libxss \
   >/tmp/pacman.log 2>&1
@@ -163,21 +163,30 @@ deps_for() {
 smoke_commands() {
 	cat <<'EOF'
 set -e
-chmod +x /work/AppImage
+# AppImage is bind-mounted read-only from the host; copy to a writable
+# location so --appimage-extract-and-run can stage its squashfs tree.
+cp /work/AppImage /tmp/CodeTracer.AppImage
+chmod +x /tmp/CodeTracer.AppImage
+APPIMAGE=/tmp/CodeTracer.AppImage
 cd /tmp
-echo "--- $(/work/AppImage --appimage-extract-and-run --version) ---"
-/work/AppImage --appimage-extract-and-run --help >/dev/null
-cat >/tmp/hello.py <<'PY'
-def main():
-    print("hello from", __name__)
-main()
-PY
-/work/AppImage --appimage-extract-and-run record /tmp/hello.py >/tmp/record.log 2>&1 || {
-    rc=$?
-    echo "ct record exited $rc; output:" >&2
-    cat /tmp/record.log >&2
-    exit $rc
-}
+
+# 1. --version — exercises the core binary's loader path.  Surfaces
+#    glibc symbol-version mismatches and missing NEEDED libs (this is
+#    what flagged libbpf/libelf as previously-unbundled).
+echo "--- $($APPIMAGE --appimage-extract-and-run --version) ---"
+
+# 2. --help — exercises the argument parser, which pulls in more of the
+#    Nim runtime than --version does.
+$APPIMAGE --appimage-extract-and-run --help >/dev/null
+
+# Note on `ct record`: we deliberately don't exercise it here.  Recording
+# a real program needs the per-language recorder (Python module, Ruby
+# gem, etc.) installed in the user's environment — those are explicitly
+# out-of-AppImage (see install-on-distributions.sh for how end users are
+# expected to set them up).  A "ct record /tmp/hello.py" smoke would
+# need pip + codetracer_python_recorder in every container, which tests
+# the recorder packaging, not the AppImage portability story.
+
 echo "OK"
 EOF
 }

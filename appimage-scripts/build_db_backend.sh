@@ -9,9 +9,17 @@ echo "codetracer build: build db-backend"
 echo "-----------"
 
 pushd "$ROOT_PATH/src/db-backend"
-cargo build --release
+# `--features io-transport` is required by the [[bin]] declarations in
+# src/db-backend/Cargo.toml (replay-server / virtualization-layers);
+# without it Cargo builds just the crate library and no executables get
+# emitted into target/release.
+cargo build --release --features io-transport
 popd
 
-cp -rL "$ROOT_PATH/src/db-backend/target/release/db-backend" "${CODETRACER_PREFIX}/bin/db-backend"
+# 2026: the crate + binary were renamed from `db-backend` to
+# `replay-server` (commit 056d229c, "Phase 4 naming alignment").  The Nim
+# launcher in src/common/paths.nim looks up `bin/replay-server`, so we
+# bundle under that name and let the legacy name stay retired.
+cp -rL "$ROOT_PATH/src/db-backend/target/release/replay-server" "${CODETRACER_PREFIX}/bin/replay-server"
 
 echo "==========="

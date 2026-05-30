@@ -79,15 +79,24 @@ nim \
 #
 # patchelf --set-rpath ${APP_DIR}/lib ${APP_DIR}/bin/ct
 
+# -d:nimNoLentIterators is required for Nim 2.2: the index/ui frontend
+# code captures cstring iterator values into async closures (see
+# src/frontend/index/files.nim:541), which Nim 2.2's default lent-cstring
+# iterators refuse with "cannot be captured as it would violate memory
+# safety".  The tup build already passes this flag via
+# src/Tuprules.tup:NIM_COMMON_FLAGS; the AppImage path needs it too.
+
 # index.js
 nim \
 	--hints:on --warnings:off --sourcemap:on \
+	-d:nimNoLentIterators \
 	-d:ctIndex -d:chronicles_sinks=json \
 	-d:nodejs --out:"${APP_DIR}/index.js" js src/frontend/index.nim
 cp "${APP_DIR}/index.js" "${APP_DIR}/src/index.js"
 
 nim \
 	--hints:on --warnings:off --sourcemap:on \
+	-d:nimNoLentIterators \
 	-d:ctIndex -d:server -d:chronicles_sinks=json \
 	-d:nodejs --out:"${APP_DIR}/server_index.js" js src/frontend/index.nim
 cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
@@ -95,6 +104,7 @@ cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
 # ui.js
 nim \
 	--hints:off --warnings:off \
+	-d:nimNoLentIterators \
 	-d:chronicles_enabled=off \
 	-d:ctRenderer \
 	--out:"${APP_DIR}/ui.js" js src/frontend/ui_js.nim
@@ -103,6 +113,7 @@ cp "${APP_DIR}/ui.js" "${APP_DIR}/src/ui.js"
 # subwindow.js
 nim \
 	--hints:off --warnings:off \
+	-d:nimNoLentIterators \
 	-d:chronicles_enabled=off \
 	-d:ctRenderer \
 	--out:"${APP_DIR}/subwindow.js" js src/frontend/subwindow.nim
