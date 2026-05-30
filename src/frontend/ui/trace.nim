@@ -1207,7 +1207,18 @@ proc traceMenuDom(self: TraceComponent): Node =
   )
   hamburgerContainer.appendChild(hamburgerButton)
 
-  let dropdown = traceDiv(cstring"dropdown-list hidden")
+  # Preserve hamburger dropdown visibility across trace DOM rebuilds.  The
+  # `data.redraw()` path tears down and re-creates this subtree via
+  # `refreshTraceViewZoneDom`; without honouring `self.toggleState` here the
+  # menu would snap shut on every redraw, breaking interactions that depend
+  # on it being open (e.g. the toggle button click in
+  # `TraceLogPanel.clickToggleButton`).
+  let dropdownClass =
+    if self.toggleState:
+      cstring"dropdown-list"
+    else:
+      cstring"dropdown-list hidden"
+  let dropdown = traceDiv(dropdownClass)
   dropdown.addEventListener(cstring"mousedown", proc(ev: Event) =
     ev.preventDefault()
   )
@@ -1221,7 +1232,12 @@ proc traceMenuDom(self: TraceComponent): Node =
     self.toggleTraceState()
     self.data.redraw()
   )
-  disableItem.appendTraceText(cstring"Disable")
+  # Reflect current `isDisabled` state at render time so that DOM rebuilds
+  # triggered by `refreshTraceViewZoneDom` after a `data.redraw()` do not
+  # revert the button label to the wrong value.  The matching toggle path
+  # (refreshTrace -> enable/disableIcon) updates the same node post-toggle.
+  let disableItemLabel = if self.isDisabled: cstring"Enable" else: cstring"Disable"
+  disableItem.appendTraceText(disableItemLabel)
   listContainer.appendChild(disableItem)
 
   let minimizeItem = traceDiv(cstring"trace-minimize dropdown-list-item")
@@ -1492,7 +1508,18 @@ proc renderTraceDom*(self: TraceComponent): Node =
   editorTextarea.applyStyle(style(StyleAttr.height, cstring(fmt"{self.traceEditorHeight()}px")))
   editorInfo.appendChild(editorTextarea)
 
-  let disabledOverlay = traceDiv(cstring"trace-disabled-overlay tracepoint-overlay hidden")
+  # Preserve the disabled-overlay visibility across `refreshTraceViewZoneDom`
+  # rebuilds: when the user toggles the tracepoint off, `toggleTraceState`
+  # flips `self.isDisabled` and `refreshTrace` removes the `hidden` class,
+  # but the subsequent `data.redraw()` re-runs `renderTraceDom`, recreating
+  # this node from scratch.  Without the conditional class below the overlay
+  # would always come back hidden after every redraw, defeating the toggle.
+  let disabledOverlayClass =
+    if self.isDisabled:
+      cstring"trace-disabled-overlay tracepoint-overlay"
+    else:
+      cstring"trace-disabled-overlay tracepoint-overlay hidden"
+  let disabledOverlay = traceDiv(disabledOverlayClass)
   let disabledOverlayContent = traceDiv(cstring"trace-overlay")
   disabledOverlayContent.appendTraceText(cstring"Tracepoint is disabled")
   disabledOverlay.appendChild(disabledOverlayContent)

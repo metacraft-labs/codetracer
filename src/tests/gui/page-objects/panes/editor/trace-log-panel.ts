@@ -134,29 +134,47 @@ export class TraceLogPanel {
 
   /**
    * Opens the hamburger menu and clicks the Disable/Enable toggle button.
-   * Uses JavaScript to avoid race conditions with blur handlers.
+   *
+   * The trace view-zone DOM is rebuilt by the renderer on every
+   * `data.redraw()` (see `refreshTraceViewZoneDom` in trace.nim), so any
+   * reference captured before the click can be detached by the time the
+   * synthetic click event fires.  We re-query the toggle button each
+   * attempt to ride out that rebuild window, and we click the toggle
+   * directly — bypassing the hamburger open/close dance, which is purely
+   * a visual affordance for the user — because synthetic `HTMLElement.click()`
+   * does not focus/blur the way a real pointer event does and the dropdown
+   * tends to snap shut on every redraw.
    */
   async clickToggleButton(): Promise<void> {
     const editTraceId = `edit-trace-${this.parentPane.idNumber}-${this.lineNumber}`;
 
-    await this.page.evaluate((eid: string) => {
-      const editTrace = document.getElementById(eid);
-      if (!editTrace) return;
+    const success = await this.page.evaluate(async (eid: string) => {
+      const findToggle = (): HTMLElement | null => {
+        const editTrace = document.getElementById(eid);
+        const trace = editTrace?.closest(".trace");
+        return (trace?.querySelector(".trace-disable") as HTMLElement | null) ?? null;
+      };
 
-      const trace = editTrace.closest(".trace");
-      if (!trace) return;
-
-      const hamburger = trace.querySelector(".hamburger-dropdown") as HTMLElement | null;
-      if (hamburger) {
-        hamburger.click();
-        setTimeout(() => {
-          const toggleBtn = trace.querySelector(".trace-disable") as HTMLElement | null;
-          if (toggleBtn) {
-            toggleBtn.click();
-          }
-        }, 150);
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const toggleBtn = findToggle();
+        if (toggleBtn) {
+          // Synthetic .click() dispatches a click event without going through
+          // the dropdown visibility chain — the click handler does not care
+          // whether the dropdown CSS-hidden ancestor would block a real
+          // pointer event, so the handler fires reliably here.
+          toggleBtn.click();
+          return true;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
+      return false;
     }, editTraceId);
+
+    if (!success) {
+      throw new Error(
+        `Trace disable toggle button not found for line ${this.lineNumber}`,
+      );
+    }
 
     await sleep(POST_TOGGLE_DELAY_MS);
   }

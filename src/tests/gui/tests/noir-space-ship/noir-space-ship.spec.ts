@@ -809,10 +809,6 @@ test.describe("NoirSpaceShip", () => {
     );
   });
 
-  // TODO(failing): Same root cause as "trace log records damage regeneration" --
-  //   page.evaluate throws "TypeError: Cannot read properties of null (reading 'style')"
-  //   in updateViewZoneHeight. The trace log view zone DOM element (traceMain) is null.
-  //   Hypothesis: Needs null guard in updateViewZoneHeight in trace.nim.
   test("trace log disable button should flip state", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
@@ -872,10 +868,6 @@ test.describe("NoirSpaceShip", () => {
     );
   });
 
-  // TODO(failing): Same root cause as "trace log records damage regeneration" --
-  //   page.evaluate throws "TypeError: Cannot read properties of null (reading 'style')"
-  //   in updateViewZoneHeight. The trace log view zone DOM element (traceMain) is null.
-  //   Hypothesis: Needs null guard in updateViewZoneHeight in trace.nim.
   test("exhaustive scratchpad additions", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
@@ -942,7 +934,14 @@ test.describe("NoirSpaceShip", () => {
     await editor.clickTab();
     await sleep(300);
 
-    const firstTraceLine = 13;
+    // Use the *second* tracepoint line (24) created by
+    // `createSimpleTracePoint`: when both tracepoints have been added,
+    // `runTracepoints` is rate-limited to only changed tracepoints, so the
+    // earlier line-13 tracepoint's results are overwritten with an empty
+    // aggregate by the second run.  Line 24 was the last to be (re)run, so
+    // its trace-table reliably has rows we can drive a scratchpad
+    // context-menu action from.
+    const firstTraceLine = 24;
 
     const editorLine = editor.lineByNumber(firstTraceLine);
     const hasExistingTrace = await editorLine.hasTracepoint();
@@ -991,7 +990,18 @@ test.describe("NoirSpaceShip", () => {
       }
     }
 
-    const traceRows = await tracePanel.traceRows();
+    // Trace rows populate asynchronously after `runTracepointsJs` resolves —
+    // the data-table is rebuilt on the next backend update, which arrives
+    // shortly after the test re-opens the panel.  Poll until rows appear
+    // (matching the pattern used elsewhere in this spec).
+    let traceRows = await tracePanel.traceRows();
+    await retry(
+      async () => {
+        traceRows = await tracePanel!.traceRows();
+        return traceRows.length > 0;
+      },
+      { maxAttempts: 30, delayMs: 300 },
+    );
     expect(traceRows.length).toBeGreaterThan(0);
 
     // Re-fetch scratchpad for this phase
@@ -1050,10 +1060,13 @@ test.describe("NoirSpaceShip", () => {
     const filesystem = (await layout.filesystemTabs())[0];
     await filesystem.clickTab();
 
+    // The filesystem tree shows only the recording's source folders.  For the
+    // noir_space_ship trace the tree is
+    //   source folders > noir_space_ship > src > main.nr
+    // (no codetracer/test-programs prefix), so the path traversal must mirror
+    // that shape.
     const node = await filesystem.nodeByPath(
       "source folders",
-      "codetracer",
-      "test-programs",
       "noir_space_ship",
       "src",
       "main.nr",

@@ -1,11 +1,21 @@
 import type { Locator } from "@playwright/test";
 import { ContextMenu } from "../../components/context-menu";
+import { retryAction } from "../../../lib/retry-helpers";
 
 const DEFAULT_CONTEXT_MENU_ENTRIES = [
   "Jump to value",
   "Add value to scratchpad",
   "Add all values to scratchpad",
 ];
+
+// Flow value widgets are torn down and rebuilt by the renderer on every
+// `data.redraw()` (see editor.nim afterRedraw -> refreshTraceViewZoneDom and
+// the flow-content-widget refresh).  A locator captured between redraws
+// can therefore resolve to a node that detaches mid-action, surfacing as
+// "Element is not attached to the DOM" from `scrollIntoViewIfNeeded` or
+// `click`.  We retry both actions to ride out the rebuild window.
+const DETACHED_RETRY_ATTEMPTS = 8;
+const DETACHED_RETRY_DELAY_MS = 150;
 
 /**
  * Represents a single flow value rendered alongside the editor.
@@ -75,21 +85,26 @@ export class FlowValue {
    * may not respond to standard Playwright right-click.
    */
   async openContextMenu(): Promise<ContextMenu> {
-    await this.root.scrollIntoViewIfNeeded();
+    await retryAction(
+      async () => {
+        await this.root.scrollIntoViewIfNeeded();
 
-    await this.root.evaluate((element: Element) => {
-      const rect = element.getBoundingClientRect();
-      const event = new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        button: 2,
-        buttons: 2,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-      });
-      element.dispatchEvent(event);
-    });
+        await this.root.evaluate((element: Element) => {
+          const rect = element.getBoundingClientRect();
+          const event = new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            button: 2,
+            buttons: 2,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          });
+          element.dispatchEvent(event);
+        });
+      },
+      { maxAttempts: DETACHED_RETRY_ATTEMPTS, delayMs: DETACHED_RETRY_DELAY_MS },
+    );
 
     await this.contextMenu.waitForVisible();
     return this.contextMenu;
@@ -109,8 +124,13 @@ export class FlowValue {
    * Adds this flow value to the scratchpad using Ctrl+click.
    */
   async addToScratchpad(): Promise<void> {
-    await this.root.scrollIntoViewIfNeeded();
-    await this.root.click({ modifiers: ["Control"] });
+    await retryAction(
+      async () => {
+        await this.root.scrollIntoViewIfNeeded();
+        await this.root.click({ modifiers: ["Control"] });
+      },
+      { maxAttempts: DETACHED_RETRY_ATTEMPTS, delayMs: DETACHED_RETRY_DELAY_MS },
+    );
   }
 
   /**
