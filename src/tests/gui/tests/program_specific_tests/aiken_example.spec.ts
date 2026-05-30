@@ -43,7 +43,11 @@ import { resolveRecorderTestProgram } from "../../lib/sibling-test-programs";
  */
 function hasAikenRecorder(): boolean {
   const fromEnv = process.env.CODETRACER_AIKEN_RECORDER_PATH ?? "";
-  const binary = fromEnv.length > 0 ? fromEnv : "codetracer-aiken-recorder";
+  // ct's paths.nim maps LangAiken to `codetracer-cardano-recorder` (Aiken
+  // is Cardano's smart-contract language and ships inside the Cardano
+  // recorder repo).  Match that lookup rather than expecting a separate
+  // codetracer-aiken-recorder binary that doesn't exist.
+  const binary = fromEnv.length > 0 ? fromEnv : "codetracer-cardano-recorder";
   try {
     const result = childProcess.spawnSync(binary, ["--version"], {
       encoding: "utf-8",

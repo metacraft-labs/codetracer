@@ -43,7 +43,11 @@ import { resolveRecorderTestProgram } from "../../lib/sibling-test-programs";
  */
 function hasTolkRecorder(): boolean {
   const fromEnv = process.env.CODETRACER_TOLK_RECORDER_PATH ?? "";
-  const binary = fromEnv.length > 0 ? fromEnv : "codetracer-tolk-recorder";
+  // ct's paths.nim maps LangTolk to `codetracer-ton-recorder` (Tolk is
+  // TON's smart-contract language and ships inside the TON recorder repo).
+  // Match that lookup rather than expecting a separate
+  // codetracer-tolk-recorder binary that doesn't exist.
+  const binary = fromEnv.length > 0 ? fromEnv : "codetracer-ton-recorder";
   try {
     const result = childProcess.spawnSync(binary, ["--version"], {
       encoding: "utf-8",
