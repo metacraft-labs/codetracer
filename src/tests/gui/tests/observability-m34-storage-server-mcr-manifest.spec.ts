@@ -3713,11 +3713,14 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       );
       await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
       const bodyText = await page.evaluate(() => document.body.innerText);
+      // M-REC-3/M-REC-7: see materialized-manifest spec for the rename
+      // rationale.  ``recordingId`` is a canonical UUIDv7 string and the
+      // on-disk output folder is the bare UUID.
       const traceMetadata = await page.evaluate(() => {
         const d = (window as any).data;
         const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
         return {
-          id: Number(trace?.id ?? -1),
+          recordingId: String(trace?.recordingId ?? ""),
           outputFolder: String(trace?.outputFolder ?? ""),
         };
       });
@@ -3732,8 +3735,17 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       expect(requestDetailsText).toContain(
         `"branch": "reserve_from_primary_bin"`,
       );
-      expect(traceMetadata.id).toBeGreaterThan(0);
-      expect(traceMetadata.outputFolder).toContain("trace-");
+      expect(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          traceMetadata.recordingId,
+        ),
+        "trace recording id should be a canonical UUIDv7",
+      ).toBe(true);
+      expect(
+        fs.existsSync(traceMetadata.outputFolder),
+        "trace output folder should exist on disk",
+      ).toBe(true);
+      expect(path.basename(traceMetadata.outputFolder)).toBe(traceMetadata.recordingId);
     } finally {
       if (ctProcess?.pid) {
         killProcessTree(ctProcess.pid);
@@ -3947,11 +3959,14 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await waitForVisibleEditorText(page, `"branch": "reserve_from_primary_bin"`);
 
       const bodyText = await page.evaluate(() => document.body.innerText);
+      // M-REC-3/M-REC-7: see materialized-manifest spec for the rename
+      // rationale.  ``recordingId`` is a canonical UUIDv7 string and the
+      // on-disk output folder is the bare UUID.
       const traceMetadata = await page.evaluate(() => {
         const d = (window as any).data;
         const trace = d?.sessions?.[d?.activeSessionIndex ?? 0]?.trace;
         return {
-          id: Number(trace?.id ?? -1),
+          recordingId: String(trace?.recordingId ?? ""),
           outputFolder: String(trace?.outputFolder ?? ""),
         };
       });
@@ -3966,8 +3981,17 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       expect(requestDetailsText).toContain(
         `"branch": "reserve_from_primary_bin"`,
       );
-      expect(traceMetadata.id).toBeGreaterThan(0);
-      expect(traceMetadata.outputFolder).toContain("trace-");
+      expect(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          traceMetadata.recordingId,
+        ),
+        "trace recording id should be a canonical UUIDv7",
+      ).toBe(true);
+      expect(
+        fs.existsSync(traceMetadata.outputFolder),
+        "trace output folder should exist on disk",
+      ).toBe(true);
+      expect(path.basename(traceMetadata.outputFolder)).toBe(traceMetadata.recordingId);
     } finally {
       if (ctProcess?.pid) {
         killProcessTree(ctProcess.pid);
