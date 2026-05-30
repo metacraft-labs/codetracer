@@ -14,6 +14,29 @@ let
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
   runquotaPkgs = inputs'.runquota.packages;
   reprobuildPkgs = inputs'.reprobuild.packages;
+
+  # Rust toolchain managed by Nix (via fenix), not rustup.  Replaces the
+  # earlier `rustup` package + `rustup override set 1.89` shellHook that
+  # required a writable ~/.rustup directory and broke when that state
+  # file became corrupt.  The combined toolchain bundles cargo, clippy,
+  # rust-src, rustc, rustfmt plus the rust-std for the three targets the
+  # codetracer crates compile against: native x86_64-unknown-linux-gnu,
+  # wasm32-unknown-unknown (db-backend wasm bundle) and
+  # wasm32-unknown-emscripten (legacy db-backend build).  This mirrors
+  # the `rustWithWasm` pattern used by codetracer-browser-extension and
+  # codetracer-ci.
+  fenixPkgs = inputs.fenix.packages.${pkgs.system};
+  rustToolchain = fenixPkgs.combine [
+    fenixPkgs.stable.cargo
+    fenixPkgs.stable.clippy
+    fenixPkgs.stable.rust-src
+    fenixPkgs.stable.rustc
+    fenixPkgs.stable.rustfmt
+    fenixPkgs.stable.rust-analyzer
+    fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
+    fenixPkgs.targets.wasm32-unknown-emscripten.stable.rust-std
+    fenixPkgs.targets.x86_64-unknown-linux-gnu.stable.rust-std
+  ];
 in
 with pkgs;
 mkShell {
@@ -92,9 +115,11 @@ mkShell {
     # Test runner
     cargo-nextest
 
-    rust-analyzer
-    rustup
-    rustfmt
+    # Rust toolchain (managed by Nix/fenix — see `rustToolchain` in the
+    # let-block above).  Bundles cargo/clippy/rustc/rustfmt/rust-analyzer/
+    # rust-src + rust-std for native, wasm32-unknown-unknown, and
+    # wasm32-unknown-emscripten targets.
+    rustToolchain
     emscripten
     capnproto
     # ourPkgs.codetracer-rust-wrapped
@@ -265,11 +290,11 @@ mkShell {
     # Symlink the generated config
     ln -sf ${preCommit.settings.configFile} .pre-commit-config.yaml
 
-    rustup override set 1.89
-    rustup target add wasm32-unknown-unknown
-    rustup target add wasm32-unknown-emscripten
-    rustup target add x86_64-unknown-linux-gnu
-
+    # Rust toolchain + wasm targets are provided directly by Nix/fenix
+    # (see `rustToolchain` in the let-block).  The previous setup ran
+    # `rustup override set 1.89` and three `rustup target add` lines
+    # here, which required a writable ~/.rustup directory and silently
+    # broke on hosts where that state file got corrupted.
 
     export CPPFLAGS_wasm32_unknown_unknown="--target=wasm32 --sysroot=$(pwd)/src/db-backend/wasm-sysroot -isystem $(pwd)/src/db-backend/wasm-sysroot/include"
     export CFLAGS_wasm32_unknown_unknown="-I$(pwd)/src/db-backend/wasm-sysroot/include -DNDEBUG -Wbad-function-cast -Wcast-function-type -fno-builtin"
