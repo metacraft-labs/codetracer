@@ -11,6 +11,15 @@ build-once:
 build-siblings *args:
   bash scripts/build-siblings.sh {{args}}
 
+# Smoke-test the built AppImage on multiple Linux distros via Docker.
+# Catches glibc/libgcc/libstdc++ symbol-version regressions and missing
+# runtime libs that the on-NixOS build can't surface.  Pass the AppImage
+# path as the first arg; defaults to ./CodeTracer.AppImage at the repo
+# root (which is where `appimage-scripts/build_appimage.sh` writes it).
+# See scripts/test-appimage-cross-distro.sh for distro list + tuning.
+test-appimage-cross-distro APPIMAGE="./CodeTracer.AppImage" *args:
+  bash scripts/test-appimage-cross-distro.sh {{args}} {{APPIMAGE}}
+
 build-docs:
   #!/usr/bin/env bash
   cd docs/book/
