@@ -260,6 +260,9 @@ test-programs/*/sudoku
 test-programs/lean_sudoku_solver/.lake/
 test-programs/lean_sudoku_solver/lake-manifest.json
 test-programs/lean_sudoku_solver/*_build/
+# Move recorder generates these dirs when ct record drives sui/aptos move test --trace
+test-programs/move_example/build/
+test-programs/move_example/traces/
 # GNAT Ada build intermediaries
 test-programs/ada_sudoku_solver/b~*
 test-programs/ada_sudoku_solver/*.ali
