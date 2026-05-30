@@ -225,6 +225,31 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
 
     # Auto-load effect: whenever page, sort, search, or debugger position
     # changes, request fresh event log data from the backend.
+    #
+    # Dedup intentionally piggybacks on the effect itself: ``store.debugger``
+    # is reassigned on every legacy ``updateDebuggerPosition`` call (the
+    # signal does *not* compare values), so without an explicit guard this
+    # effect re-fires several times per CtCompleteMove — once per panel
+    # that calls ``updateDebuggerPosition`` on the shared store.  When the
+    # trace's entry stop sits on a non-zero rrTicks (e.g. the JavaScript
+    # recorder's flow_test where step[0] has call_key=-1 and the first
+    # real call starts at step 1, giving rrTicks=1 at launch) every one of
+    # those reassignments would issue a fresh ``ct/event-load``.  Each
+    # response then triggers ``onUpdatedEvents`` → ``ajax.reload`` →
+    # ``ct/update-table``; the DataTables ``td.dt-empty`` "Loading…"
+    # placeholder never clears because a newer ajax round-trip is always
+    # in flight, and the GUI test times out.  Tracking the last
+    # (rrTicks, page, pageSize, searchQuery, sortColumn, sortAscending)
+    # tuple lets unchanged events keep the table populated rather than
+    # forcing a reload — events are intrinsically static for non-live
+    # traces, so re-fetching with the same parameters is wasted work.
+    var lastTicks: uint64 = 0
+    var lastPage = -1
+    var lastPageSize = -1
+    var lastQuery = ""
+    var lastCol = -1
+    var lastAsc = false
+    var hasFired = false
     createEffect proc() =
       let page = currentPage.val
       let ps = pageSize.val
@@ -233,6 +258,17 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       let asc = sortAscending.val
       let ticks = store.debugger.val.rrTicks
       if ticks > 0'u64:
+        if hasFired and ticks == lastTicks and page == lastPage and
+            ps == lastPageSize and query == lastQuery and
+            col == lastCol and asc == lastAsc:
+          return
+        lastTicks = ticks
+        lastPage = page
+        lastPageSize = ps
+        lastQuery = query
+        lastCol = col
+        lastAsc = asc
+        hasFired = true
         let args = %*{
           "page": page,
           "pageSize": ps,

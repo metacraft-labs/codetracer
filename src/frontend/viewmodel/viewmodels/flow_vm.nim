@@ -165,13 +165,30 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
 
     # Auto-load effect: whenever the debugger position or flow mode
     # changes, request fresh flow data from the backend.
+    #
+    # See the matching dedup in ``event_log_vm.nim`` for the rationale.
+    # The legacy ``updateDebuggerPosition`` path reassigns ``store.debugger``
+    # without value equality, so the effect's dependency dereference fires
+    # once per panel involved in a single CtCompleteMove — without this
+    # guard ``ct/load-flow`` is issued several times per move, which is
+    # both wasteful and (in combination with the ``fmCall`` JSON-arg
+    # mismatch the backend currently rejects) noisy in the host logs.
+    var lastTicks: uint64 = 0
+    var lastMode = ""
+    var hasFired = false
     createEffect proc() =
       let ticks = store.debugger.val.rrTicks
       let mode = flowMode.val
+      let modeStr = $mode
       if ticks > 0'u64:
+        if hasFired and ticks == lastTicks and modeStr == lastMode:
+          return
+        lastTicks = ticks
+        lastMode = modeStr
+        hasFired = true
         let args = %*{
           "rrTicks": ticks,
-          "flowMode": $mode,
+          "flowMode": modeStr,
         }
         discard store.backend.send("ct/load-flow", args)
 
