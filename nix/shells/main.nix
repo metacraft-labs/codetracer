@@ -19,12 +19,19 @@ let
   # earlier `rustup` package + `rustup override set 1.89` shellHook that
   # required a writable ~/.rustup directory and broke when that state
   # file became corrupt.  The combined toolchain bundles cargo, clippy,
-  # rust-src, rustc, rustfmt plus the rust-std for the three targets the
-  # codetracer crates compile against: native x86_64-unknown-linux-gnu,
-  # wasm32-unknown-unknown (db-backend wasm bundle) and
-  # wasm32-unknown-emscripten (legacy db-backend build).  This mirrors
-  # the `rustWithWasm` pattern used by codetracer-browser-extension and
-  # codetracer-ci.
+  # rust-src, rustc, rustfmt plus the rust-std for the four targets the
+  # codetracer crates compile against:
+  #   - x86_64-unknown-linux-gnu       — native build of ct, db-backend.
+  #   - wasm32-unknown-unknown         — browser-replay wasm bundle built
+  #                                       by src/db-backend/build_wasm.sh
+  #                                       (used by `just test-wasm-replay`).
+  #   - wasm32-unknown-emscripten      — legacy db-backend wasm path.
+  #   - wasm32-wasip1                  — flow/omniscience test target the
+  #                                       MCR emulator uses for `just
+  #                                       test-wasm-flow` (and the
+  #                                       wasm_example program).
+  # Mirrors the `rustWithWasm` pattern used by
+  # codetracer-browser-extension and codetracer-ci.
   fenixPkgs = inputs.fenix.packages.${pkgs.system};
   rustToolchain = fenixPkgs.combine [
     fenixPkgs.stable.cargo
@@ -35,6 +42,7 @@ let
     fenixPkgs.stable.rust-analyzer
     fenixPkgs.targets.wasm32-unknown-unknown.stable.rust-std
     fenixPkgs.targets.wasm32-unknown-emscripten.stable.rust-std
+    fenixPkgs.targets.wasm32-wasip1.stable.rust-std
     fenixPkgs.targets.x86_64-unknown-linux-gnu.stable.rust-std
   ];
 in
