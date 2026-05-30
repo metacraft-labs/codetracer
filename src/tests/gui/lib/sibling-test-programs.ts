@@ -16,9 +16,17 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// The codetracer repo root (parent of tsc-ui-tests/).
+// The codetracer repo root.  Playwright runs with cwd =
+// `src/tests/gui/` (set by `just test-e2e`).  After the
+// 2026-04-30 move from `tsc-ui-tests/` to `src/tests/gui/`, the
+// earlier `path.dirname(currentDir)` was off by two levels — it
+// resolved the workspace root to `<codetracer>/src/`, so every
+// sibling-recorder lookup silently returned null and every
+// `program_specific_tests/<lang>_example.spec.ts` test was
+// skipped with "recorder pipeline not available".
+// Walk up three levels: src/tests/gui/ → src/tests/ → src/ → codetracer.
 const currentDir = path.resolve();
-const codetracerRepoRoot = path.dirname(currentDir);
+const codetracerRepoRoot = path.resolve(currentDir, "..", "..", "..");
 
 // The workspace root (parent of the codetracer repo).
 const workspaceRoot = path.dirname(codetracerRepoRoot);

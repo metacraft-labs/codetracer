@@ -4,6 +4,13 @@ build:
 build-once:
   bash scripts/build-once.sh
 
+# Build all sibling-recorder binaries that the GUI tests reach for.
+# Idempotent — already-built artefacts short-circuit, so this is cheap on
+# warm checkouts.  Pass `--force` to rebuild everything; `--check` to just
+# report status without building.  See scripts/build-siblings.sh.
+build-siblings *args:
+  bash scripts/build-siblings.sh {{args}}
+
 build-docs:
   #!/usr/bin/env bash
   cd docs/book/
@@ -476,7 +483,7 @@ test:
 # changes that haven't been compiled silently produce stale-binary test
 # failures (see task #317 + the May 19→20 staleness incident that produced
 # the "ct-mcr binary not found" Cluster B failure).
-test-gui *args: build-once
+test-gui *args: build-once build-siblings
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
@@ -506,7 +513,7 @@ test-gui *args: build-once
 # On Linux, requires a running display server ($DISPLAY must be set).
 # On Windows, always works (no $DISPLAY needed).
 # `build-once` is a prereq for the same reason as `test-gui` (task #317).
-test-gui-visible *args: build-once
+test-gui-visible *args: build-once build-siblings
   #!/usr/bin/env bash
   set -e
   case "$(uname -s)" in
