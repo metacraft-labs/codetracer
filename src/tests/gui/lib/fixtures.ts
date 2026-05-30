@@ -297,9 +297,23 @@ interface CodetracerWorkerFixtures {
 
 function setupLdLibraryPath(): void {
   // LD_LIBRARY_PATH is a Linux/macOS concept; skip on Windows.
-  if (!isWindows) {
-    process.env.LD_LIBRARY_PATH = process.env.CT_LD_LIBRARY_PATH;
-  }
+  if (isWindows) return;
+  // Prepend CT_LD_LIBRARY_PATH (Nix-store libs the dev shell baked in)
+  // to the current LD_LIBRARY_PATH rather than overwriting it.  The
+  // current path already has sibling-repo additions baked in by
+  // detect-siblings.sh — notably codetracer-trace-format-nim, which is
+  // what wazero (codetracer-wasm-recorder) dlopens to write traces.
+  // Overwriting drops that path and the wasm_example test (and any other
+  // path that shells out to wazero) fails with
+  // `libcodetracer_trace_writer.so: cannot open shared object file`.
+  const ctLibs = process.env.CT_LD_LIBRARY_PATH ?? "";
+  const current = process.env.LD_LIBRARY_PATH ?? "";
+  process.env.LD_LIBRARY_PATH =
+    ctLibs.length > 0 && current.length > 0
+      ? `${ctLibs}:${current}`
+      : ctLibs.length > 0
+        ? ctLibs
+        : current;
 }
 
 /**
