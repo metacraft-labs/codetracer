@@ -44,13 +44,30 @@ proc initEventLogVMWithStore*(store: ReplayDataStore) =
   ## If a stub-backed instance already exists (created by initEventLogVM
   ## before the real backend was available), it is replaced so that the
   ## panel uses the real DapApi instead of the no-op stub.
-  if eventLogVMInstance != nil:
+  let replacing = eventLogVMInstance != nil
+  if replacing:
     clog "EventLogVM: replacing existing instance with shared-store version"
-    isoNimEventLogMounted = false
   eventLogVMStore = store
   eventLogVMInstance = createEventLogVM(store)
   clog "EventLogVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimEventLogPanel()
+  # 2026-05-30 — earlier this proc unconditionally cleared
+  # `isoNimEventLogMounted = false` before falling through to
+  # tryMountIsoNimEventLogPanel().  That triggered a full re-mount of
+  # the IsoNim shell, which rerenders the `data-tables-footer-rows-count`
+  # placeholder back to "0".  The legacy DataTables onUpdatedTable
+  # path then races against a stale rowsCount=0 reset (the
+  # DataTables context is destroyed+recreated in `reInit`/`redrawColumns`
+  # path), and the footer is observed at "0" rather than the live
+  # `recordsTotal` until the next ajax round-trip lands — which the
+  # cross-language GUI tests (circom/aiken/tolk/wasm event-log) read
+  # within their 30s poll budget and fail on.
+  #
+  # The DOM doesn't need a re-mount when only the VM changes — only the
+  # VM auto-load effects need to re-bind, and those rebind when the
+  # next mutation propagates.  Skip the mount-state reset on
+  # replacement.
+  if not replacing:
+    tryMountIsoNimEventLogPanel()
 
 proc initEventLogVM() =
   ## Lazily create the parallel EventLogVM backed by a stub

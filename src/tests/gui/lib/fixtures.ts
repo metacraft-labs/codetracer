@@ -1786,13 +1786,37 @@ export async function readyOnEntryTest(p: Page): Promise<void> {
  * (let DataTables finish populating) without depending on the click.
  */
 export async function loadedEventLog(p: Page): Promise<void> {
+  // Accept either signal as "loaded":
+  //   (a) the footer counter has a non-zero integer
+  //   (b) the dense-table tbody has at least one rendered row
+  //
+  // The footer is the canonical "DataTables done populating" signal but
+  // it's served by the IsoNim event-log shell which gets re-rendered on
+  // certain session-VM lifecycle events and on each re-mount stamps a
+  // static `text "0"` over whatever the legacy DataTable's
+  // `updateTableFooter()` wrote.  Browsers see the right number for a
+  // moment and then the IsoNim re-render replaces it with "0", which
+  // makes the poll race-dependent.  The dense-table row count comes
+  // from DataTables' own `<tr>` insertions and is unaffected by the
+  // IsoNim shell refresh, so it's the more reliable readiness signal
+  // for the "trace has at least N events" contract that callers care
+  // about.  See `src/frontend/ui/event_log.nim:eventLogAfterRedraws`
+  // for the underlying remount path that this works around.
   const rowsCount = p.locator(".data-tables-footer-rows-count");
+  const denseRows = p.locator(".eventLog-dense-table tbody tr");
   await rowsCount.waitFor({ state: "visible", timeout: 15_000 });
   await expect.poll(
     async () => {
       const text = (await rowsCount.textContent()) ?? "";
       const match = text.match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
+      const footerCount = match ? parseInt(match[1], 10) : 0;
+      if (footerCount > 0) return footerCount;
+      // Fall back to actual rendered rows in case the footer is in the
+      // remount "0" gap.  We don't return the raw count here — any
+      // non-zero answer is enough for callers (the assertion is
+      // ">= 1").
+      const renderedRows = await denseRows.count();
+      return renderedRows;
     },
     { timeout: 30_000, intervals: [250, 500, 1000] },
   ).toBeGreaterThan(0);

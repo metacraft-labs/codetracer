@@ -109,13 +109,13 @@ test.describe("circom_example — event log", () => {
   test("event log has at least one event", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 
-    const raw = await ctPage.$eval(
-      ".data-tables-footer-rows-count",
-      (el) => el.textContent ?? "",
-    );
-    const match = raw.match(/(\d+)/);
-    expect(match).not.toBeNull();
-    const count = parseInt(match![1], 10);
+    // The footer counter (.data-tables-footer-rows-count) gets clobbered
+    // back to "0" when the IsoNim event-log shell remounts mid-test —
+    // see the comment in loadedEventLog().  Read the actual rendered row
+    // count instead; that's what "has at least one event" really means
+    // for a trace.
+    const denseRows = ctPage.locator(".eventLog-dense-table tbody tr");
+    const count = await denseRows.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
 });

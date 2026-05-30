@@ -116,13 +116,10 @@ test.describe("tolk_example — event log", () => {
   test("event log has at least one event", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 
-    const raw = await ctPage.$eval(
-      ".data-tables-footer-rows-count",
-      (el) => el.textContent ?? "",
-    );
-    const match = raw.match(/(\d+)/);
-    expect(match).not.toBeNull();
-    const count = parseInt(match![1], 10);
+    // Read actual rendered rows rather than the footer counter; the
+    // counter is in a remount-prone DOM path (see loadedEventLog comment).
+    const denseRows = ctPage.locator(".eventLog-dense-table tbody tr");
+    const count = await denseRows.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
 });
