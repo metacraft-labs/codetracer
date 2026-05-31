@@ -50,7 +50,9 @@ proc findReplayServer(): string =
   if envBin.len > 0 and fileExists(envBin):
     return envBin
   let thisFile = currentSourcePath()
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir
+  # Test lives at src/tests/gui/tests/integration/<this>.nim — six
+  # parentDir hops to the codetracer/ checkout root.
+  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
   let candidate = repoRoot / "src" / "build-debug" / "bin" / "replay-server"
   if fileExists(candidate):
     return candidate
@@ -59,8 +61,10 @@ proc findReplayServer(): string =
     "build it with 'cargo build' in src/db-backend/. Tried: " & candidate)
 
 proc repoRoot(): string =
-  ## Return the repository root (5 levels up from this test file).
-  currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir
+  ## Return the repository root.
+  ## Test lives at src/tests/gui/tests/integration/<this>.nim — six
+  ## parentDir hops back to the codetracer/ checkout root.
+  currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
 
 proc findCtFile(dir: string): string =
   ## Return the path to the first ``.ct`` file in ``dir``, or "" if none.
