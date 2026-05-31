@@ -217,17 +217,17 @@ test.describe("noir example — state and navigation", () => {
   test("expected event count", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 
-    const raw = await ctPage.$eval(
-      ".data-tables-footer-rows-count",
-      (el) => el.textContent ?? "",
-    );
-
-    // The noir_example program executes several events (println, assert).
-    // Verify at least one event is recorded rather than hardcoding a count
-    // that can change with nargo/debugger version updates.
-    const match = raw.match(/(\d+)/);
-    expect(match).not.toBeNull();
-    const count = parseInt(match![1], 10);
+    // Read rendered rows from .eventLog-dense-table tbody, not the
+    // footer counter — the footer is in a remount-prone DOM path that
+    // gets clobbered back to "0" when the IsoNim event-log shell
+    // remounts (see loadedEventLog comment in fixtures.ts and the
+    // M5 move_example fix that established this pattern).
+    //
+    // The noir_example program executes several events (println,
+    // assert).  Direct row count is what "at least one event" really
+    // means for the user and survives the remount race.
+    const denseRows = ctPage.locator(".eventLog-dense-table tbody tr");
+    const count = await denseRows.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
