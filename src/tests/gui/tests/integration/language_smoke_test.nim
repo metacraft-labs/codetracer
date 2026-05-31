@@ -609,13 +609,19 @@ languageSmokeTest("Language smoke: Noir", noirConfig,
 # Suite: Nim Sudoku
 # ---------------------------------------------------------------------------
 #
-# DISABLED 2026-05-31 — the headless session for nim_sudoku hangs
-# indefinitely after the trace is recorded.  The replay-server child
-# starts but no DAP responses come back, blocking the suite forever.
-# Nim sudoku passes the *GUI* test, so this is a headless-specific
-# regression (likely missing query timeout in stdio_backend.nim's
-# readDapMessage or an MCR replay-worker issue specific to Nim
-# traces).  Filed as a follow-up so subsequent languages run.
+# DISABLED 2026-05-31 — `replay-server` is by design a DAP backend for
+# materialized-trace languages only (see `replay-server --help`:
+# "a DAP-based replay backend for materialized-trace languages ... as
+# opposed to rr/gdb-based replay").  Nim sudoku records an rr-style
+# trace via ct-native-replay, which `replay-server dap-server --stdio`
+# accepts but never produces DAP responses for; the connection hangs
+# on the first request.
+#
+# Driving rr-style traces from a headless test needs a different
+# harness (a thin Nim wrapper around the ct-native-replay query
+# protocol, mirroring src/db-backend/src/query.rs's `CtRRQuery`).
+# Tracked separately as M-FOLLOWUP "headless ct-native-replay
+# harness for rr-style traces".
 #
 # languageSmokeTest("Language smoke: Nim sudoku", nimConfig,
 #                   "editor loads .nim file")
@@ -624,12 +630,9 @@ languageSmokeTest("Language smoke: Noir", noirConfig,
 # Suite: Rust Sudoku
 # ---------------------------------------------------------------------------
 #
-# DISABLED 2026-05-31 — same shape as Nim sudoku above: recording
-# (via ct-native-replay) succeeds, then the headless DAP session
-# hangs indefinitely on the first query, blocking subsequent suites.
-# Suspected systematic issue with MCR-recorded traces in this
-# harness; both Nim and Rust traces exhibit it.  Filed as a
-# follow-up so the Crystal/Fortran/Go/Pascal/D suites below can run.
+# DISABLED 2026-05-31 — same harness limitation as Nim above: Rust
+# sudoku records an rr-style trace via ct-native-replay, which
+# `replay-server dap-server --stdio` is not designed to drive.
 #
 # languageSmokeTest("Language smoke: Rust sudoku", rustConfig,
 #                   "editor loads main.rs")
@@ -638,22 +641,12 @@ languageSmokeTest("Language smoke: Noir", noirConfig,
 # Suites: Crystal / Fortran / Go / Pascal / D sudoku
 # ---------------------------------------------------------------------------
 #
-# DISABLED 2026-05-31 — all five languages record via ct-native-replay
-# (rr-style traces).  When the existing headless harness opens an
-# rr trace through ``replay-server dap-server --stdio``, the
-# replay-server child accepts the connection but never sends back any
-# DAP responses, so the first stepForward / getLocals / getCallTrace
-# query blocks indefinitely.  Confirmed reproducible for Nim, Rust,
-# and Crystal traces — almost certainly affects Fortran / Go /
-# Pascal / D too (same MCR replay path).
-#
-# Until the stdio_backend / replay-worker handshake for MCR traces is
-# fixed (filed as M-FOLLOWUP "MCR DAP-stdio hang in headless harness"),
-# leave these suites disabled so the working DB-trace suites
-# (Python / Ruby / Noir) still run to completion when the test binary
-# is invoked manually.  The LanguageTestConfig entries are retained so
-# re-enabling each suite is a single-line uncomment once the harness
-# bug is resolved.
+# DISABLED 2026-05-31 — same harness limitation as the Nim and Rust
+# suites above.  All five languages record via ct-native-replay
+# (rr-style traces), which is outside `replay-server`'s materialized-
+# trace DAP scope.  The LanguageTestConfig entries are retained so
+# re-enabling each suite is a single-line uncomment once a proper
+# headless ct-native-replay harness lands.
 #
 # languageSmokeTest("Language smoke: Crystal sudoku", crystalConfig,
 #                   "editor loads sudoku.cr")
