@@ -61,6 +61,125 @@ pub fn run_dir_for(tmp_path: &Path, run_id: &str) -> Result<PathBuf, Box<dyn Err
     Ok(run_dir)
 }
 
+/// Best-effort cleanup of stale `run-<pid>/` directories under the
+/// per-user runtime base (typically `$XDG_RUNTIME_DIR/codetracer/`).
+///
+/// The db-backend (replay-server) historically created
+/// `run-<pid>/` directories at startup and never removed them — each
+/// dir is ~18 MB of logs + sockets, so after a few hundred invocations
+/// the XDG_RUNTIME_DIR tmpfs (typ. 13 GB) fills up and subsequent
+/// recording-opens fail with `ENOSPC`.  See GUI-Test-Stabilization
+/// M12.
+///
+/// Strategy: list `run-*` entries; if the suffix parses as a `u32`
+/// PID and that PID is no longer alive (POSIX `kill(pid, 0)` returns
+/// `ESRCH`), delete the directory.  Anything else — non-PID suffix
+/// (e.g. UUIDv7 worker dirs), live PID, parse failure, or our own
+/// PID — is left untouched.
+///
+/// Entirely best-effort: every error is logged at debug level and
+/// swallowed so a flaky filesystem can never abort spawner startup.
+/// Returns the number of directories actually removed (primarily for
+/// unit-testing the GC; production code ignores the count).
+///
+/// Safety / PID-reuse: `kill(0)` only tells us *some* process holds
+/// that PID, not that it's a codetracer process.  To avoid deleting
+/// a live unrelated tenant's data we treat any alive PID as "keep".
+/// The worst case is therefore a stale dir lingering until the next
+/// spawner start (when its PID is no longer alive), which is the
+/// pre-existing behaviour for ~one extra cycle.
+///
+/// The caller is expected to invoke this *before* creating its own
+/// run dir; we additionally hard-skip `current_pid` defensively in
+/// case the caller does it the other way around.
+pub fn gc_stale_run_dirs(tmp_path: &Path, current_pid: u32) -> usize {
+    let base = socket_runtime_base_dir(tmp_path);
+    gc_stale_run_dirs_in(&base, current_pid, &PosixKillProbe)
+}
+
+/// Liveness probe abstraction so the GC is unit-testable without
+/// forking real processes.
+trait PidLivenessProbe {
+    /// Returns `true` if a process with that PID currently exists.
+    fn is_alive(&self, pid: u32) -> bool;
+}
+
+struct PosixKillProbe;
+
+impl PidLivenessProbe for PosixKillProbe {
+    fn is_alive(&self, pid: u32) -> bool {
+        // POSIX `kill(pid, 0)`:
+        //   * returns 0  → process exists and we may signal it,
+        //   * returns -1 with errno == EPERM → process exists but
+        //     we lack permission (so it IS alive — treat as alive),
+        //   * returns -1 with errno == ESRCH → no such process.
+        // See: https://pubs.opengroup.org/onlinepubs/9699919799/functions/kill.html
+        #[cfg(unix)]
+        unsafe {
+            if libc::kill(pid as libc::pid_t, 0) == 0 {
+                return true;
+            }
+            // Read errno via the libc accessor; ESRCH means dead,
+            // anything else (EPERM in particular) means alive.
+            let err = *libc::__errno_location();
+            err != libc::ESRCH
+        }
+        #[cfg(not(unix))]
+        {
+            // Non-unix targets: be conservative and never claim a
+            // PID is dead, so the GC never deletes anything.
+            let _ = pid;
+            true
+        }
+    }
+}
+
+/// Inner GC, separated from the public entry point so tests can
+/// inject a fake liveness probe and a fake base dir.
+fn gc_stale_run_dirs_in(base: &Path, current_pid: u32, probe: &dyn PidLivenessProbe) -> usize {
+    let entries = match std::fs::read_dir(base) {
+        Ok(e) => e,
+        // Base dir doesn't exist yet on a clean machine — nothing to do.
+        Err(_) => return 0,
+    };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = match name.to_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        // Only consider `run-<...>` entries; everything else (the
+        // `last` symlink, future siblings) is preserved.
+        let suffix = match name.strip_prefix("run-") {
+            Some(s) => s,
+            None => continue,
+        };
+        // Only reclaim PID-derived dirs.  UUIDv7 worker dirs do not
+        // parse as u32 and are intentionally left alone.
+        let pid = match suffix.parse::<u32>() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        // Defensive: never reclaim our own run dir even if it
+        // somehow already exists.
+        if pid == current_pid {
+            continue;
+        }
+        if probe.is_alive(pid) {
+            continue;
+        }
+        let path = entry.path();
+        // remove_dir_all on a non-empty dir is one fs op; we
+        // deliberately do not crawl entry contents.
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => removed += 1,
+            Err(e) => log::debug!("gc_stale_run_dirs: failed to remove {}: {e}", path.display()),
+        }
+    }
+    removed
+}
+
 fn socket_runtime_base_dir(fallback_tmp: &Path) -> PathBuf {
     // The cleaner `if let Ok(x) = ... && !x.is_empty()` let-chain form
     // requires Rust edition 2024; this crate is currently on edition
@@ -188,7 +307,13 @@ pub fn resolve_run_id_for_worker() -> String {
 #[allow(clippy::expect_used)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{CODETRACER_RUN_ID_ENV, reserve_run_id_for_recording, resolve_run_id_for_worker, run_dir_for};
+    use super::{
+        CODETRACER_RUN_ID_ENV, PidLivenessProbe, gc_stale_run_dirs_in, reserve_run_id_for_recording,
+        resolve_run_id_for_worker, run_dir_for,
+    };
+    use std::collections::HashSet;
+    use std::fs;
+    use std::path::Path;
 
     /// M-REC-11: run_id widens from `usize` to `&str`; the directory
     /// name still uses the `run-` prefix, but the suffix is now the
@@ -226,6 +351,84 @@ mod tests {
     #[test]
     fn reserve_run_id_empty_recording_falls_back_to_pid() {
         assert_eq!(reserve_run_id_for_recording(""), std::process::id().to_string());
+    }
+
+    /// Fake liveness probe driven by an explicit set of "alive" PIDs.
+    struct FakeProbe {
+        alive: HashSet<u32>,
+    }
+    impl PidLivenessProbe for FakeProbe {
+        fn is_alive(&self, pid: u32) -> bool {
+            self.alive.contains(&pid)
+        }
+    }
+
+    fn seed_run_dir(base: &Path, name: &str) {
+        let p = base.join(name);
+        fs::create_dir_all(&p).expect("seed run dir");
+        // Drop a tiny file inside so we exercise the recursive remove path.
+        fs::write(p.join("replay-server.log"), b"junk").expect("seed log");
+    }
+
+    /// GC removes dirs for dead PIDs, keeps dirs for live PIDs, and
+    /// never touches non-`run-<pid>` entries (UUIDv7 worker dirs, the
+    /// `last` symlink, unrelated files).
+    #[test]
+    fn gc_stale_run_dirs_in_removes_only_dead_pid_dirs() {
+        let temp = tempfile::tempdir().expect("create temp base");
+        let base = temp.path();
+        // Dead PIDs: should be removed.
+        seed_run_dir(base, "run-99999990");
+        seed_run_dir(base, "run-99999991");
+        // Live PID: must be preserved.
+        seed_run_dir(base, "run-4242");
+        // UUIDv7 worker dir (non-numeric suffix): must be preserved.
+        seed_run_dir(base, "run-01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb");
+        // Unrelated entry: must be preserved.
+        fs::create_dir_all(base.join("scratch")).expect("seed scratch");
+        // `last` symlink-style preserved (we just create a plain file
+        // here; the GC only inspects entries whose name starts with
+        // `run-`).
+        fs::write(base.join("last"), b"").expect("seed last marker");
+
+        let probe = FakeProbe {
+            alive: [4242u32].iter().copied().collect(),
+        };
+        // Our own pid is some arbitrary number that's NOT in the seed set.
+        let removed = gc_stale_run_dirs_in(base, 12345, &probe);
+        assert_eq!(removed, 2, "should have removed exactly the two dead-PID dirs");
+
+        assert!(!base.join("run-99999990").exists());
+        assert!(!base.join("run-99999991").exists());
+        assert!(base.join("run-4242").is_dir());
+        assert!(base.join("run-01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb").is_dir());
+        assert!(base.join("scratch").is_dir());
+        assert!(base.join("last").exists());
+    }
+
+    /// Defensive: even if a `run-<current_pid>` dir somehow exists at
+    /// GC time (it shouldn't, but startup ordering bugs are easy), the
+    /// GC must never reclaim it.
+    #[test]
+    fn gc_stale_run_dirs_in_skips_current_pid() {
+        let temp = tempfile::tempdir().expect("create temp base");
+        let base = temp.path();
+        seed_run_dir(base, "run-77");
+        // Probe says dead — but we own this PID.
+        let probe = FakeProbe { alive: HashSet::new() };
+        let removed = gc_stale_run_dirs_in(base, 77, &probe);
+        assert_eq!(removed, 0);
+        assert!(base.join("run-77").is_dir());
+    }
+
+    /// Missing base dir is a no-op (clean machine, never started yet).
+    #[test]
+    fn gc_stale_run_dirs_in_missing_base_is_noop() {
+        let temp = tempfile::tempdir().expect("create temp base");
+        let missing = temp.path().join("does-not-exist");
+        let probe = FakeProbe { alive: HashSet::new() };
+        let removed = gc_stale_run_dirs_in(&missing, 12345, &probe);
+        assert_eq!(removed, 0);
     }
 
     /// Worker-side resolution honours `$CODETRACER_RUN_ID` when set.

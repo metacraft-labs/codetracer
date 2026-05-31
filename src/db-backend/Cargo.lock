@@ -1379,6 +1379,7 @@ dependencies = [
  "gimli",
  "indexmap 1.9.3",
  "js-sys",
+ "libc",
  "log",
  "ntest",
  "num-bigint",

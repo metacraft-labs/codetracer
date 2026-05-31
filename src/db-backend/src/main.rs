@@ -58,7 +58,7 @@ mod transport;
 mod transport_endpoint;
 mod value;
 
-use crate::paths::{CODETRACER_PATHS, run_dir_for};
+use crate::paths::{CODETRACER_PATHS, gc_stale_run_dirs, run_dir_for};
 
 /// The replay server: a DAP-based replay backend for materialized-trace languages
 /// (Ruby, Python, JS, shell, Wasm, etc.) as opposed to rr/gdb-based replay
@@ -111,7 +111,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     // below), so its own log/run directory still uses its pid.  This
     // is fine — its child replay-workers will be steered to their
     // own recording-id-derived directories via $CODETRACER_RUN_ID.
-    let run_id = std::process::id().to_string();
+    let pid = std::process::id();
+    let run_id = pid.to_string();
+    // GUI-Test-Stabilization M12: before creating our own run dir,
+    // reclaim any leftover `run-<pid>/` dirs whose owning PID is no
+    // longer alive.  This is fast (a directory listing + one
+    // `kill(pid, 0)` syscall per candidate) and synchronous so that
+    // a freshly-spawned replay-server never piles on top of stale
+    // 18 MB per-run blobs.  Best-effort: errors are swallowed
+    // internally and never abort startup.
+    let _gc_removed = gc_stale_run_dirs(&tmp_path, pid);
     let run_dir = run_dir_for(&tmp_path, &run_id)?;
     create_dir_all(&run_dir)?;
 
