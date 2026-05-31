@@ -14,12 +14,20 @@
   ];
 
   hooks = {
-    # Rust hooks (run from src/db-backend directory)
-    # Use cargo from PATH (set up by nix shell with rustup override)
+    # Rust hooks — these always operate on `src/db-backend/Cargo.toml`
+    # regardless of which nested .pre-commit-config.yaml symlink prek
+    # is processing.  Without the cd-to-repo-root prefix, prek invokes
+    # the hooks from each nested directory's cwd (e.g. src/db-backend
+    # itself), and `--manifest-path src/db-backend/Cargo.toml` then
+    # resolves to a nonexistent `src/db-backend/src/db-backend/Cargo.toml`,
+    # surfacing as "Failed to run hook ... No such file or directory".
+    # Wrapping in bash + `git rev-parse --show-toplevel` makes cwd
+    # canonical before cargo runs.  Cargo itself comes from the Nix
+    # dev shell PATH (fenix-combined toolchain in nix/shells/main.nix).
     clippy = {
       enable = true;
       name = "clippy";
-      entry = "cargo clippy --manifest-path src/db-backend/Cargo.toml --all-targets -- -D warnings";
+      entry = "bash -c 'cd \"$(git rev-parse --show-toplevel)\" && cargo clippy --manifest-path src/db-backend/Cargo.toml --all-targets -- -D warnings'";
       language = "system";
       files = "\\.rs$";
       pass_filenames = false;
@@ -27,7 +35,7 @@
     cargo-check = {
       enable = true;
       name = "cargo-check";
-      entry = "cargo check --manifest-path src/db-backend/Cargo.toml --all-targets";
+      entry = "bash -c 'cd \"$(git rev-parse --show-toplevel)\" && cargo check --manifest-path src/db-backend/Cargo.toml --all-targets'";
       language = "system";
       files = "\\.rs$";
       pass_filenames = false;
@@ -35,7 +43,7 @@
     rustfmt = {
       enable = true;
       name = "rustfmt";
-      entry = "cargo fmt --manifest-path src/db-backend/Cargo.toml -- --check";
+      entry = "bash -c 'cd \"$(git rev-parse --show-toplevel)\" && cargo fmt --manifest-path src/db-backend/Cargo.toml -- --check'";
       language = "system";
       files = "\\.rs$";
       pass_filenames = false;

@@ -1751,7 +1751,7 @@ mod tests {
     fn median_duration(durations: &mut [std::time::Duration]) -> std::time::Duration {
         durations.sort();
         let mid = durations.len() / 2;
-        if durations.len() % 2 == 0 {
+        if durations.len().is_multiple_of(2) {
             (durations[mid - 1] + durations[mid]) / 2
         } else {
             durations[mid]

@@ -1347,9 +1347,7 @@ impl MaterializedReplaySession {
             let header_line = if function_line <= 0 { 1 } else { function_line };
             if let Some(step) = call_steps
                 .iter()
-                .find(|step| {
-                    step.call_key == call.key && step.path_id == function.path_id && step.line.0 > header_line
-                })
+                .find(|step| step.call_key == call.key && step.path_id == function.path_id && step.line.0 > header_line)
             {
                 return step.step_id;
             }
