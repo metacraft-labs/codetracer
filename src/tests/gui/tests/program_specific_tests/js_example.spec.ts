@@ -112,13 +112,12 @@ test.describe("js_example — event log", () => {
   test("event log has at least one event", async ({ ctPage }) => {
     await loadedEventLog(ctPage);
 
-    const raw = await ctPage.$eval(
-      ".data-tables-footer-rows-count",
-      (el) => el.textContent ?? "",
-    );
-    const match = raw.match(/(\d+)/);
-    expect(match).not.toBeNull();
-    const count = parseInt(match![1], 10);
+    // Read rendered rows from .eventLog-dense-table tbody, not the footer
+    // counter — the footer is in a remount-prone DOM path that the
+    // IsoNim event-log shell clobbers back to "0" (see loadedEventLog
+    // comment in fixtures.ts). M5/noir established this pattern.
+    const denseRows = ctPage.locator(".eventLog-dense-table tbody tr");
+    const count = await denseRows.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
 });
