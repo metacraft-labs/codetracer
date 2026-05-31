@@ -168,15 +168,33 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       data.tabs[filename] = ServerTab(path: filename, lang: lang, fileWatched: true)
       let watchedDir = nodePath.dirname(openedPath)
       let watchedBase = nodePath.basename(openedPath)
-      fs.watch(openedPath) do (e: cstring, filenameArg: cstring):
-        if e == cstring"change" or e == cstring"rename":
-          notifySourceFileChanged(filename, lang)
-      if watchedDir.len > 0 and watchedDir != openedPath:
-        fs.watch(watchedDir) do (e: cstring, filenameArg: cstring):
+      # Hot-reload file watchers are a developer convenience.  ``fs.watch`` can
+      # fail with ``ENOSPC`` when the system-wide inotify watch budget is
+      # exhausted (common during long Playwright runs that spawn many ``ct
+      # host`` processes), or with ``EPERM`` / ``ENOENT`` for transient trace
+      # directories.  The synchronous throw used to abort ``open()`` before
+      # ``CODETRACER::tab-load-received`` was sent back to the renderer,
+      # leaving the Monaco editor stuck on "Loading…" forever — see
+      # M10/M9 in ``GUI-Test-Stabilization-2026-05.status.org``.  Swallow the
+      # error so the source-load contract is not coupled to inotify health.
+      try:
+        fs.watch(openedPath) do (e: cstring, filenameArg: cstring):
           if e == cstring"change" or e == cstring"rename":
-            if filenameArg.isNil or filenameArg.len == 0 or
-                nodePath.basename(filenameArg) == watchedBase:
-              notifySourceFileChanged(filename, lang)
+            notifySourceFileChanged(filename, lang)
+      except:
+        warnPrint "fs.watch failed for ", openedPath, ": ",
+          getCurrentExceptionMsg()
+        data.tabs[filename].fileWatched = false
+      if watchedDir.len > 0 and watchedDir != openedPath:
+        try:
+          fs.watch(watchedDir) do (e: cstring, filenameArg: cstring):
+            if e == cstring"change" or e == cstring"rename":
+              if filenameArg.isNil or filenameArg.len == 0 or
+                  nodePath.basename(filenameArg) == watchedBase:
+                notifySourceFileChanged(filename, lang)
+        except:
+          warnPrint "fs.watch failed for directory ", watchedDir, ": ",
+            getCurrentExceptionMsg()
 
   echo "index_config open: file read succesfully"
   var sourceLines = source.split(jsNl)
