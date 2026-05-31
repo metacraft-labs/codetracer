@@ -1,5 +1,5 @@
 import
-  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets ],
+  std / [ options, strformat, strutils, osproc, os, json, uri, httpclient, sets, strtabs ],
   ../../common/[ types, trace_index, paths, lang ],
   storage_and_import,
   ctfs_sources,
@@ -1245,6 +1245,40 @@ proc hostCommand*(
 
   let callerPid = getCurrentProcessId()
   echo "server index ", codetracerExeDir
+
+  # ``ct host`` passes the trace identity and listening ports to the
+  # Electron index process via explicit CLI arguments
+  # (``$traceId --port ... --backend-socket-port ... --frontend-socket-port ...``).
+  # The ``CODETRACER_RECORDING_ID`` env var, which leaks into our
+  # environment from the ReplayAgent docker entrypoint
+  # (``apps/ReplayAgent/ReplaySessionRunner.cs::AddTraceEnvironment`` —
+  # the .NET runner sets ``-e CODETRACER_RECORDING_ID=<uuid>`` on the
+  # container, and the same variable is preserved by the
+  # ``replay-entrypoint.sh`` ``exec ct host`` boundary), would otherwise
+  # short-circuit ``src/frontend/index/args.nim::parseArgs`` via its
+  # early ``return`` branch: the env var triggers a fast-path that
+  # records ``recordingID`` and skips the entire argv loop, leaving
+  # ``data.startOptions.port`` at its zero default.  The visible symptom
+  # is the index process logging ``listening on localhost:0`` instead of
+  # the port the test/runner requested, which then fails browser
+  # connection (Playwright cannot reach an unknown port).
+  #
+  # We strip the variable (and its companion ``CODETRACER_CALLER_PID``)
+  # from the *child* env only — mutating the in-process environment with
+  # ``delEnv`` would change behaviour for any other code that reads the
+  # variable later in ``ct host`` (storage import, mcr enrichment) and
+  # would also affect subsequent ``startProcess`` calls under
+  # ``ct host``-like wrappers.  Passing a scoped ``StringTableRef`` to
+  # ``startProcess`` ensures only the spawned ``node server_index.js``
+  # sees the filter; ``ct host``'s own environment is untouched.  This
+  # makes the host's CLI argument flow authoritative for the spawned
+  # index without side effects on other code paths.
+  var childEnv = newStringTable(modeCaseSensitive)
+  for key, value in envPairs():
+    if key == "CODETRACER_RECORDING_ID" or key == "CODETRACER_CALLER_PID":
+      continue
+    childEnv[key] = value
+
   var process = startProcess(
     nodeExe,
     workingDir = codetracerInstallDir,
@@ -1266,6 +1300,7 @@ proc hostCommand*(
       "--idle-timeout-ms",
       $idleTimeoutMs
     ],
+    env = childEnv,
     options={poParentStreams})
   var electronPid = process.processID
   echo "status code:", waitForExit(process)

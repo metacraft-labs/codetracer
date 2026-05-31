@@ -567,13 +567,25 @@ function sha256File(filePath: string): string {
 
 function parseMcrMarkerCoordinates(filePath: string): McrMarkerCoordinates {
   const text = fs.readFileSync(filePath).toString("utf-8");
+  // The .ct trace file is a binary container with embedded null-separated
+  // C strings.  Splitting on NUL/CR/LF surfaces both the printf format
+  // string used to emit the marker (e.g. ``trace_id=%s span_id=%s``,
+  // present in the inventory_smoke binary section that the recorder
+  // captured) AND the runtime marker output lines (e.g.
+  // ``trace_id=6f92f3577b34da6a3ce929d0e0e4ab14``).  We MUST select the
+  // latter; matching the format string yields ``traceId="%s"`` which the
+  // monolith rejects with HTTP 400 (NormalizeTraceId, 32 lowercase hex).
+  //
+  // The runtime trace_id is a 32-character lowercase hex string per the
+  // W3C trace-context spec, so we require that exact shape.  The runtime
+  // span_id is a 16-character lowercase hex string.  This filter
+  // eliminates the format-string match while accepting every legitimate
+  // runtime marker line.
+  const runtimeMarkerPattern =
+    /CT_TRACE_MARKER\b[^\0\r\n]*\btrace_id=[0-9a-f]{32}\b[^\0\r\n]*\bspan_id=[0-9a-f]{16}\b/;
   const markerLine = text
     .split(/[\0\r\n]+/)
-    .find((line) =>
-      line.includes("CT_TRACE_MARKER") &&
-      /trace_id=/i.test(line) &&
-      /span_id=/i.test(line),
-    );
+    .find((line) => runtimeMarkerPattern.test(line));
   if (!markerLine) {
     throw new Error(`MCR marker with trace_id/span_id not found in ${filePath}`);
   }
