@@ -177,14 +177,25 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
       # leaving the Monaco editor stuck on "Loading…" forever — see
       # M10/M9 in ``GUI-Test-Stabilization-2026-05.status.org``.  Swallow the
       # error so the source-load contract is not coupled to inotify health.
+      #
+      # M11: even when ``fs.watch`` does not throw, it may silently fail to
+      # deliver events on tmpfs/overlayfs or when no inotify instances are
+      # available.  And when it *does* throw ENOSPC, M10 disabled hot-reload
+      # entirely.  Both cases break ``file_conflicts.spec.ts``.  As a
+      # robust fallback we additionally register ``fs.watchFile`` which
+      # uses ``stat(2)`` polling, never throws ENOSPC, and works on any
+      # filesystem.  The slight extra wake-up cost (one stat per file per
+      # poll interval) is negligible for the small set of files a user
+      # has open at any one time.
+      var watchAttached = false
       try:
         fs.watch(openedPath) do (e: cstring, filenameArg: cstring):
           if e == cstring"change" or e == cstring"rename":
             notifySourceFileChanged(filename, lang)
+        watchAttached = true
       except:
         warnPrint "fs.watch failed for ", openedPath, ": ",
           getCurrentExceptionMsg()
-        data.tabs[filename].fileWatched = false
       if watchedDir.len > 0 and watchedDir != openedPath:
         try:
           fs.watch(watchedDir) do (e: cstring, filenameArg: cstring):
@@ -192,9 +203,37 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
               if filenameArg.isNil or filenameArg.len == 0 or
                   nodePath.basename(filenameArg) == watchedBase:
                 notifySourceFileChanged(filename, lang)
+          watchAttached = true
         except:
           warnPrint "fs.watch failed for directory ", watchedDir, ": ",
             getCurrentExceptionMsg()
+      # Always also register the polling watcher.  This is intentional: even
+      # when ``fs.watch`` *appears* to succeed, it can silently never fire on
+      # certain mounts (in Playwright + Electron + tmpfs scenarios we observed
+      # zero ``change`` events).  ``fs.watchFile`` only fires when the
+      # mtime/size actually changed between polls, so registering both does
+      # not double-notify in practice; ``tab.waitsPrompt`` further dedupes
+      # the IPC.
+      try:
+        fs.watchFile(openedPath, js{interval: 250, persistent: false}) do (curr: js, prev: js):
+          # ``curr.mtimeMs`` and ``prev.mtimeMs`` are numeric epoch ms;
+          # when the file is deleted ``curr.mtimeMs == 0``.  Treat any
+          # change in mtime or size as an external edit.
+          let currMtime = curr["mtimeMs"]
+          let prevMtime = prev["mtimeMs"]
+          let currSize = curr["size"]
+          let prevSize = prev["size"]
+          let mtimeChanged = (not currMtime.isNil) and (not prevMtime.isNil) and
+            currMtime.to(float) != prevMtime.to(float)
+          let sizeChanged = (not currSize.isNil) and (not prevSize.isNil) and
+            currSize.to(float) != prevSize.to(float)
+          if mtimeChanged or sizeChanged:
+            notifySourceFileChanged(filename, lang)
+      except:
+        warnPrint "fs.watchFile failed for ", openedPath, ": ",
+          getCurrentExceptionMsg()
+        if not watchAttached:
+          data.tabs[filename].fileWatched = false
 
   echo "index_config open: file read succesfully"
   var sourceLines = source.split(jsNl)

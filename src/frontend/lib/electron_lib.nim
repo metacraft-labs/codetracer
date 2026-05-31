@@ -41,6 +41,17 @@ type
       handler: proc(
         e: cstring,
         filenameArg: cstring))
+    # ``fs.watchFile`` uses ``stat(2)`` polling rather than inotify, so it
+    # is immune to ``ENOSPC`` (the system-wide inotify watch budget) and to
+    # platforms/filesystems where ``fs.watch`` silently never fires (e.g.
+    # certain tmpfs/overlayfs/NFS mounts).  We use it as a fallback when
+    # ``fs.watch`` is unavailable.
+    # https://nodejs.org/api/fs.html#fswatchfilefilename-options-listener
+    watchFile*: proc(
+      path: cstring,
+      options: JsObject,
+      handler: proc(curr: js, prev: js))
+    unwatchFile*: proc(path: cstring)
     writeFile*: proc(
       filename: cstring,
       content: cstring,
