@@ -1158,6 +1158,115 @@ class Trace:
             diffs=diffs,
         )
 
+    def memory_diff_record_vs_replay(
+        self,
+        replay_snapshot_path: Union[str, Path],
+        geid: int,
+        max_diffs: int = 16,
+    ) -> MemoryDiffResult:
+        """Diff the recorded memory snapshot at ``geid`` against the
+        replayer's single-shot snapshot at the same GEID (MW47 Phase 3).
+
+        Use this when you need to localise where the replay diverges
+        from the recording, NOT where two snapshots inside a single
+        recording diverge (that's :meth:`memory_diff`).  The Phase 3
+        wire produces ONE matched pair per call: the recorded
+        ``evMemorySnapshot`` event at ``geid`` plus the replayer's
+        standalone snapshot file written by
+        ``CT_REPLAY_SNAPSHOT_AT_GEID=geid``.
+
+        **Setup**: record the program with
+        ``CT_MEMORY_SNAPSHOT_AT_GEID=N``; replay it with the verify
+        harness and ``CT_REPLAY_SNAPSHOT_AT_GEID=N`` plus
+        ``CT_REPLAY_SNAPSHOT_OUT_PATH=<some path>``; then call this
+        method with the same ``N`` and the same ``<some path>``.  The
+        worked example
+        ``examples/mcr_record_vs_replay_bisect.py`` shows the full
+        binary search.
+
+        **Algorithm** (the user's 2026-06-01 description, verbatim):
+
+        > "We can do something like binary search.  Capture snapshot at
+        > event X.  If the snapshots differ, look for divergence earlier.
+        > If the snapshots are the same, look later."
+
+        Each iteration re-records + re-replays at the new midpoint, then
+        calls this method; the agent halves the search window until the
+        first divergent GEID is pinned.
+
+        **CLR non-determinism caveat**: if successive recordings produce
+        diverging event streams (e.g. a CLR fixture whose JIT scheduling
+        introduces a different GEID for "the same logical operation"
+        across runs), the bisect may not converge — the agent can spot
+        this by watching whether the diff at the same GEID changes
+        between adjacent iterations.
+
+        Per ``feedback_mcr_divergence_is_a_bug``: this is diagnostic-only.
+        Surface divergence; NEVER normalise it away.
+
+        Parameters:
+            replay_snapshot_path: Filesystem path to the standalone
+                snapshot file produced by the replayer (the value of
+                ``CT_REPLAY_SNAPSHOT_OUT_PATH`` for that run).
+            geid:      GEID at which both the recorder and the replayer
+                       were configured to take their single-shot
+                       snapshot.
+            max_diffs: Cap on the number of differing pages returned in
+                       the response (default 16).  ``differing_pages``
+                       always reports the true total; ``truncated`` is
+                       set when ``differing_pages > len(diffs)``.
+
+        Returns:
+            A :class:`MemoryDiffResult` describing the diff.  When the
+            recorded and replayed snapshots agree on every page hash,
+            ``differing_pages == 0`` and
+            ``first_divergence_event_geid == -1``.  Otherwise
+            ``first_divergence_event_geid == geid``.
+
+        Raises:
+            TraceError: If the daemon reports an error (recorded
+                snapshot not found at ``geid``, replay snapshot file
+                missing / corrupt, GEIDs mismatched, etc.).
+        """
+        response = self._connection.send_request(
+            "ct/py-memory-diff-record-vs-replay",
+            {
+                "recordTrace": self._path,
+                "replaySnapshot": str(replay_snapshot_path),
+                "geid": int(geid),
+                "maxDiffs": int(max_diffs),
+            },
+        )
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", "memory_diff_record_vs_replay() failed")
+            )
+        body = response.get("body", {})
+        diffs_raw = body.get("diffs", []) or []
+        diffs = [
+            MemoryPageDiff(
+                page_index=int(d.get("pageIndex", 0)),
+                page_va=str(d.get("pageVa", "0x0")),
+                region_base=str(d.get("regionBase", "0x0")),
+                region_protect=int(d.get("regionProtect", 0)),
+                hash_recorded=str(d.get("hashRecorded", "0x0")),
+                hash_replayed=str(d.get("hashReplayed", "0x0")),
+            )
+            for d in diffs_raw
+        ]
+        return MemoryDiffResult(
+            event_a=int(body.get("eventA", geid)),
+            event_b=int(body.get("eventB", geid)),
+            snapshots_in_range=int(body.get("snapshotsInRange", 2)),
+            pages_compared=int(body.get("pagesCompared", 0)),
+            differing_pages=int(body.get("differingPages", 0)),
+            truncated=bool(body.get("truncated", False)),
+            first_divergence_event_geid=int(
+                body.get("firstDivergenceEventGeid", -1)
+            ),
+            diffs=diffs,
+        )
+
     # --- Lifecycle ---
 
     def close(self) -> None:

@@ -212,6 +212,18 @@ class Trace:
         """Diff two MCR ``evMemorySnapshot`` events by GEID."""
         ...
 
+    # --- MCR record-vs-replay memory-diff (MW47 Phase 3) ---
+
+    def memory_diff_record_vs_replay(
+        self,
+        replay_snapshot_path: Union[str, Path],
+        geid: int,
+        max_diffs: int = ...,
+    ) -> MemoryDiffResult:
+        """Diff the recorded snapshot at ``geid`` against the replay-side
+        single-shot snapshot file at the same GEID."""
+        ...
+
     # --- Lifecycle ---
 
     def close(self) -> None:

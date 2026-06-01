@@ -93,7 +93,7 @@ const TRACE_URI_PREFIX: &str = "trace://";
 fn exec_script_tool() -> Value {
     json!({
         "name": "exec_script",
-        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(expr) -> id, remove_watchpoint(id)\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints() -> results\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n- MCR diagnostic (MW47): trace.memory_diff(event_a, event_b, max_diffs=16) -> MemoryDiffResult with first_divergence_event_geid for cascade-peeling binary search; works on .ct traces recorded with CT_MEMORY_SNAPSHOT_AT_EVENT=1\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
+        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(expr) -> id, remove_watchpoint(id)\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints() -> results\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n- MCR diagnostic (MW47): trace.memory_diff(event_a, event_b, max_diffs=16) -> MemoryDiffResult with first_divergence_event_geid for cascade-peeling binary search; works on .ct traces recorded with CT_MEMORY_SNAPSHOT_AT_EVENT=1\n- MCR record-vs-replay diff (MW47 Phase 3): trace.memory_diff_record_vs_replay(replay_snapshot_path, geid, max_diffs=16) -> MemoryDiffResult; compares the recorded snapshot at GEID N against the replayer's single-shot file at the same GEID; agent binary-searches over N to localise where replay diverges from record. Requires re-recording with CT_MEMORY_SNAPSHOT_AT_GEID=N and re-replaying with CT_REPLAY_SNAPSHOT_AT_GEID=N + CT_REPLAY_SNAPSHOT_OUT_PATH.\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -469,6 +469,31 @@ access (`var['name']`).  Common aliases: `call['function']` for
       hash_recorded, hash_replayed}`.
   - Per `feedback_mcr_divergence_is_a_bug`: this is diagnostic-only.
     Surface divergence, NEVER normalise it.
+
+### MCR Record-vs-Replay Memory-Diff (MW47 Phase 3)
+- `trace.memory_diff_record_vs_replay(replay_snapshot_path: str, geid: int, max_diffs=16) -> MemoryDiffResult`
+  - Sibling of `memory_diff()` that compares ONE recorded snapshot at
+    GEID `N` against ONE standalone replay-side snapshot at the same
+    GEID `N`.  Use this to answer "where does REPLAY diverge from
+    RECORD?", NOT "where do two snapshots inside a single recording
+    diverge?" (the latter is Phase 2's `memory_diff()`).
+  - **Setup**: re-record the program with `CT_MEMORY_SNAPSHOT_AT_GEID=N`
+    (the recorder emits exactly one `evMemorySnapshot` event at GEID N);
+    re-replay with `CT_REPLAY_SNAPSHOT_AT_GEID=N` and
+    `CT_REPLAY_SNAPSHOT_OUT_PATH=<file>` (the replayer writes the same
+    page-hash payload to `<file>` at the same GEID).  Then call this
+    method with the same N + the path.
+  - **Binary-search algorithm** (the user's 2026-06-01 description):
+    capture snapshots at midpoint GEID X.  If they differ → divergence
+    earlier; halve hi=X.  If they match → divergence later; lo=X+1.
+    Converges in O(log N) iterations.  See
+    `examples/mcr_record_vs_replay_bisect.py` for the worked script.
+  - **CLR non-determinism caveat**: if successive recordings produce
+    diverging event streams, the bisect may not converge — the agent
+    can spot this by watching the diff at the same GEID flip between
+    adjacent iterations.
+  - Returns the same `MemoryDiffResult` shape as `memory_diff()` so the
+    cascade-peeling and record-vs-replay agents share the parsing.
 
 ## Sessions
 

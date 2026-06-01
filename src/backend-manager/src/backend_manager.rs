@@ -2417,6 +2417,12 @@ impl BackendManager {
                     "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
                     "ct/py-memory-diff" => self.handle_py_memory_diff(seq, args).await,
                     "ct/mcrMemoryDiff" => self.handle_py_memory_diff(seq, args).await,
+                    "ct/py-memory-diff-record-vs-replay" => {
+                        self.handle_py_memory_diff_record_vs_replay(seq, args).await
+                    }
+                    "ct/mcrMemoryDiffRecordVsReplay" => {
+                        self.handle_py_memory_diff_record_vs_replay(seq, args).await
+                    }
                     "ct/open-trace" => self.handle_open_trace(seq, args).await,
                     "ct/trace-info" => self.handle_trace_info(seq, args),
                     "ct/exec-script" => self.handle_exec_script(seq, args),
@@ -5413,6 +5419,205 @@ impl BackendManager {
             self.send_manager_message(response);
         }
         let _ = send_response;  // silence the unused-closure warning when refactored
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-memory-diff-record-vs-replay handler (MW47 Phase 3)
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-memory-diff-record-vs-replay` (alias:
+    /// `ct/mcrMemoryDiffRecordVsReplay`).
+    ///
+    /// MW47 Phase 3.  Cross-trace diff between the recorded snapshot
+    /// at GEID N (gated by `CT_MEMORY_SNAPSHOT_AT_GEID=N` during
+    /// recording) and the replayer's standalone single-shot file
+    /// (gated by `CT_REPLAY_SNAPSHOT_AT_GEID=N` during the verify
+    /// replay).  The agent binary-searches over GEID N to localise
+    /// the first point at which replay diverges from record.
+    ///
+    /// **Wire protocol**
+    ///
+    /// Request:
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-memory-diff-record-vs-replay",
+    ///   "seq": 9,
+    ///   "arguments": {
+    ///     "recordTrace":    "/path/to/recorded.ct",
+    ///     "replaySnapshot": "/path/to/<trace>.replay-snapshot-geid-<N>.bin",
+    ///     "geid":           4096,
+    ///     "maxDiffs":       16
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Response body shape is identical to `ct/py-memory-diff` —
+    /// returns a `MemoryDiffResult` JSON with `differingPages`,
+    /// `firstDivergenceEventGeid`, and a `diffs` array.
+    async fn handle_py_memory_diff_record_vs_replay(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        const COMMAND: &str = "ct/py-memory-diff-record-vs-replay";
+
+        let record_trace = match args
+            .and_then(|a| a.get("recordTrace"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'recordTrace' in arguments");
+                return Ok(());
+            }
+        };
+
+        let replay_snapshot = match args
+            .and_then(|a| a.get("replaySnapshot"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'replaySnapshot' in arguments");
+                return Ok(());
+            }
+        };
+
+        let geid = match args.and_then(|a| a.get("geid")).and_then(Value::as_i64) {
+            Some(v) => v,
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'geid' in arguments");
+                return Ok(());
+            }
+        };
+
+        let max_diffs = args
+            .and_then(|a| a.get("maxDiffs"))
+            .and_then(Value::as_i64)
+            .unwrap_or(16)
+            .max(1);
+
+        // Refresh the session TTL if one is loaded for this trace —
+        // bisect agents call back-to-back and shouldn't lose state.
+        let trace_path = PathBuf::from(&record_trace);
+        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+            self.reset_ttl_for_backend_id(backend_id);
+        }
+
+        let helper = match Self::resolve_memdiff_helper() {
+            Some(p) => p,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    "ct_memdiff_helper not found (set CODETRACER_CT_MEMDIFF_HELPER or \
+                     ensure the binary is next to backend-manager or on PATH)",
+                );
+                return Ok(());
+            }
+        };
+
+        let helper_request = serde_json::json!({
+            "command": "record-vs-replay",
+            "recordTrace": record_trace,
+            "replaySnapshot": replay_snapshot,
+            "geid": geid,
+            "maxDiffs": max_diffs,
+        });
+        let helper_request_str = helper_request.to_string();
+
+        let client_id = self.lookup_client_for_seq(seq);
+        let stdout_bytes = match tokio::process::Command::new(&helper)
+            .arg("--stdin")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use tokio::io::AsyncWriteExt as _;
+                    if let Err(e) = stdin.write_all(helper_request_str.as_bytes()).await {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("failed writing helper stdin: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+                match child.wait_with_output().await {
+                    Ok(output) => output.stdout,
+                    Err(e) => {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("ct_memdiff_helper wait failed: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                );
+                return Ok(());
+            }
+        };
+
+        let stdout_str = String::from_utf8_lossy(&stdout_bytes);
+        let parsed: Value = match serde_json::from_str(stdout_str.trim()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!(
+                        "ct_memdiff_helper produced invalid JSON ({e}); raw output: {}",
+                        stdout_str.trim()
+                    ),
+                );
+                return Ok(());
+            }
+        };
+
+        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let response = if success {
+            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": true,
+                "command": COMMAND,
+                "body": body,
+            })
+        } else {
+            let msg = parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ct_memdiff_helper reported failure")
+                .to_string();
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": COMMAND,
+                "message": msg,
+            })
+        };
+
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
+        }
         Ok(())
     }
 
