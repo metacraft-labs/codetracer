@@ -11,6 +11,7 @@ from codetracer.types import (
     Frame,
     Location,
     Loop,
+    MemoryDiffResult,
     Process,
     Variable,
 )
@@ -198,6 +199,17 @@ class Trace:
 
     def process_info(self) -> Process:
         """Return metadata about the recorded process."""
+        ...
+
+    # --- MCR memory-diff (MW47 Phase 2) ---
+
+    def memory_diff(
+        self,
+        event_a: int,
+        event_b: int,
+        max_diffs: int = ...,
+    ) -> MemoryDiffResult:
+        """Diff two MCR ``evMemorySnapshot`` events by GEID."""
         ...
 
     # --- Lifecycle ---

@@ -93,7 +93,7 @@ const TRACE_URI_PREFIX: &str = "trace://";
 fn exec_script_tool() -> Value {
     json!({
         "name": "exec_script",
-        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(expr) -> id, remove_watchpoint(id)\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints() -> results\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
+        "description": "Execute a Python script against a CodeTracer trace file. The `trace` variable is pre-bound to the opened trace.\n\nAvailable trace methods:\n- Navigation: trace.step_over(), step_in(), step_out(), step_back(), continue_forward(), continue_reverse(), goto_ticks(n)\n- Breakpoints: trace.add_breakpoint(path, line) -> id, remove_breakpoint(id)\n- Watchpoints: trace.add_watchpoint(expr) -> id, remove_watchpoint(id)\n- Tracepoints: trace.add_tracepoint(path, line, expr) -> id, remove_tracepoint(id), run_tracepoints() -> results\n- Inspection: trace.locals(), evaluate(expr), stack_trace(), location, ticks\n- Value Trace: trace.value_trace(path, line, mode='call') -> ValueTrace with .steps and .loops\n- Data: trace.source_files, calltrace(), events(), terminal_output()\n- Source: trace.read_source(path)\n- MCR diagnostic (MW47): trace.memory_diff(event_a, event_b, max_diffs=16) -> MemoryDiffResult with first_divergence_event_geid for cascade-peeling binary search; works on .ct traces recorded with CT_MEMORY_SNAPSHOT_AT_EVENT=1\n\nAll navigation methods raise StopIteration at trace boundaries. Print results to stdout.\n\nUse the optional 'session_id' parameter to preserve execution state (breakpoints, position) across multiple calls — this enables incremental step-by-step debugging.\n\nUse the 'trace_query_api' prompt for the full API reference with data types and examples.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -450,6 +450,25 @@ access (`var['name']`).  Common aliases: `call['function']` for
 
 ### Source Files
 - `trace.read_source(path: str) -> str` - Read a source file's content.
+
+### MCR Memory-Diff Diagnostic (MW47 Phase 2)
+- `trace.memory_diff(event_a: int, event_b: int, max_diffs=16) -> MemoryDiffResult`
+  - Compare two `evMemorySnapshot` events captured by MCR's MW47
+    producer (`.ct` traces recorded with `CT_MEMORY_SNAPSHOT_AT_EVENT=1`).
+  - Returns the page-by-page diff between the two snapshots PLUS
+    `first_divergence_event_geid`: the GEID of the earliest snapshot
+    in `(event_a, event_b]` whose page hashes diverge from snapshot A.
+  - Agents binary-search on `first_divergence_event_geid` to localise
+    the precise event boundary at which the missing-capture surface
+    fired.  See `examples/mcr_memory_diff_bisect.py` for a worked
+    cascade-peeling agent.
+  - `MemoryDiffResult` fields: `event_a`, `event_b`, `pages_compared`,
+    `differing_pages`, `truncated`, `first_divergence_event_geid`,
+    `diffs: list[MemoryPageDiff]` with
+    `{page_index, page_va, region_base, region_protect,
+      hash_recorded, hash_replayed}`.
+  - Per `feedback_mcr_divergence_is_a_bug`: this is diagnostic-only.
+    Surface divergence, NEVER normalise it.
 
 ## Sessions
 

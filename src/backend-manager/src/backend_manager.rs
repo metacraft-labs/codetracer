@@ -2415,6 +2415,8 @@ impl BackendManager {
                     "ct/py-read-source" => self.handle_py_read_source(seq, args).await,
                     "ct/py-processes" => self.handle_py_processes(seq, args).await,
                     "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
+                    "ct/py-memory-diff" => self.handle_py_memory_diff(seq, args).await,
+                    "ct/mcrMemoryDiff" => self.handle_py_memory_diff(seq, args).await,
                     "ct/open-trace" => self.handle_open_trace(seq, args).await,
                     "ct/trace-info" => self.handle_trace_info(seq, args),
                     "ct/exec-script" => self.handle_exec_script(seq, args),
@@ -5179,6 +5181,279 @@ impl BackendManager {
         }
 
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-memory-diff handler (MW47 Phase 2 — MCR agentic interface)
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-memory-diff` (alias: `ct/mcrMemoryDiff`) requests.
+    ///
+    /// MW47 Phase 2.  MCR's MW47 Phase 1b producer emits
+    /// `evMemorySnapshot` events into per-thread rings whenever
+    /// `CT_MEMORY_SNAPSHOT_AT_EVENT=1` is set at recording time.  This
+    /// handler decodes those snapshots from the `.ct` trace file and
+    /// returns the page-by-page diff between two snapshot GEIDs, plus
+    /// the GEID of the earliest divergent snapshot in `(eventA, eventB]`
+    /// — the field a cascade-peeling agent binary-searches on to
+    /// localise the missing-capture surface.
+    ///
+    /// The decode itself is delegated to the `ct_memdiff_helper` binary
+    /// (built from `ct_replayer/src/ct_memdiff_helper.nim`) which is
+    /// spawned as a one-shot subprocess.  This keeps the
+    /// backend-manager free of any CTFS / per-thread-ring decoder
+    /// dependency.  The helper is NOT a user-facing `ct-mcr`
+    /// subcommand — see `feedback_codetracer_agentic_interface`.
+    ///
+    /// Helper-binary discovery: `CODETRACER_CT_MEMDIFF_HELPER` env var
+    /// (absolute path) takes precedence; otherwise we look for
+    /// `ct_memdiff_helper`/`ct_memdiff_helper.exe` next to the current
+    /// backend-manager executable, then fall back to `$PATH`.
+    ///
+    /// **Wire protocol**
+    ///
+    /// Request:
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-memory-diff",
+    ///   "seq": 7,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace.ct",
+    ///     "eventA": 42,
+    ///     "eventB": 4096,
+    ///     "maxDiffs": 16
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Response body:
+    /// ```json
+    /// {
+    ///   "eventA": 42, "eventB": 4096,
+    ///   "snapshotsInRange": 1024,
+    ///   "pagesCompared": 4711,
+    ///   "differingPages": 3, "truncated": false,
+    ///   "firstDivergenceEventGeid": 117,
+    ///   "diffs": [
+    ///     {"pageIndex": 12, "pageVa": "0x...", "regionBase": "0x...",
+    ///      "regionProtect": 4, "hashRecorded": "0x...", "hashReplayed": "0x..."}
+    ///   ]
+    /// }
+    /// ```
+    async fn handle_py_memory_diff(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        const COMMAND: &str = "ct/py-memory-diff";
+
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'tracePath' in arguments");
+                return Ok(());
+            }
+        };
+
+        let event_a = match args.and_then(|a| a.get("eventA")).and_then(Value::as_i64) {
+            Some(v) => v,
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'eventA' in arguments");
+                return Ok(());
+            }
+        };
+
+        let event_b = match args.and_then(|a| a.get("eventB")).and_then(Value::as_i64) {
+            Some(v) => v,
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'eventB' in arguments");
+                return Ok(());
+            }
+        };
+
+        let max_diffs = args
+            .and_then(|a| a.get("maxDiffs"))
+            .and_then(Value::as_i64)
+            .unwrap_or(16)
+            .max(1);
+
+        // Reset TTL for the session (if any) backing this trace; the
+        // memory-diff query doesn't actually drive the backend, but if
+        // a session is loaded we don't want it to expire mid-bisect.
+        let trace_path = PathBuf::from(&trace_path_str);
+        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+            self.reset_ttl_for_backend_id(backend_id);
+        }
+
+        // Resolve the helper binary path.
+        let helper = match Self::resolve_memdiff_helper() {
+            Some(p) => p,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    "ct_memdiff_helper not found (set CODETRACER_CT_MEMDIFF_HELPER or \
+                     ensure the binary is next to backend-manager or on PATH)",
+                );
+                return Ok(());
+            }
+        };
+
+        // Build the JSON request for the helper.
+        let helper_request = serde_json::json!({
+            "tracePath": trace_path_str,
+            "eventA": event_a,
+            "eventB": event_b,
+            "maxDiffs": max_diffs,
+        });
+        let helper_request_str = helper_request.to_string();
+
+        // Spawn the helper and collect stdout.  This is a fast,
+        // one-shot operation; we spawn synchronously via tokio's
+        // blocking subprocess primitive to avoid further wiring.
+        let client_id = self.lookup_client_for_seq(seq);
+        let send_response = move |daemon_send: Box<dyn FnOnce(Value) + Send>, resp: Value| {
+            daemon_send(resp);
+        };
+        // We need a closure to ship the response either through the
+        // daemon's client channel or the legacy manager sender.  Build
+        // both responses (success / failure) here and dispatch.
+        let stdout_bytes = match tokio::process::Command::new(&helper)
+            .arg("--stdin")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use tokio::io::AsyncWriteExt as _;
+                    if let Err(e) = stdin.write_all(helper_request_str.as_bytes()).await {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("failed writing helper stdin: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+                match child.wait_with_output().await {
+                    Ok(output) => output.stdout,
+                    Err(e) => {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("ct_memdiff_helper wait failed: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                );
+                return Ok(());
+            }
+        };
+
+        // The helper prints exactly one JSON object followed by a newline.
+        let stdout_str = String::from_utf8_lossy(&stdout_bytes);
+        let parsed: Value = match serde_json::from_str(stdout_str.trim()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!(
+                        "ct_memdiff_helper produced invalid JSON ({e}); raw output: {}",
+                        stdout_str.trim()
+                    ),
+                );
+                return Ok(());
+            }
+        };
+
+        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let response = if success {
+            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": true,
+                "command": COMMAND,
+                "body": body,
+            })
+        } else {
+            let msg = parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ct_memdiff_helper reported failure")
+                .to_string();
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": COMMAND,
+                "message": msg,
+            })
+        };
+
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
+        }
+        let _ = send_response;  // silence the unused-closure warning when refactored
+        Ok(())
+    }
+
+    /// Resolves the path to the `ct_memdiff_helper` executable used by
+    /// `handle_py_memory_diff`.  Search order:
+    ///
+    /// 1. `CODETRACER_CT_MEMDIFF_HELPER` env var (absolute path).
+    /// 2. Same directory as the current executable.
+    /// 3. `$PATH` lookup.
+    ///
+    /// Returns `None` if no candidate exists / is executable.
+    fn resolve_memdiff_helper() -> Option<PathBuf> {
+        if let Ok(env_path) = std::env::var("CODETRACER_CT_MEMDIFF_HELPER") {
+            let candidate = PathBuf::from(env_path);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        let exe_name = if cfg!(windows) {
+            "ct_memdiff_helper.exe"
+        } else {
+            "ct_memdiff_helper"
+        };
+        if let Ok(self_exe) = std::env::current_exe()
+            && let Some(dir) = self_exe.parent()
+        {
+            let sibling = dir.join(exe_name);
+            if sibling.is_file() {
+                return Some(sibling);
+            }
+        }
+        // PATH lookup.
+        if let Ok(path_env) = std::env::var("PATH") {
+            for entry in std::env::split_paths(&path_env) {
+                let candidate = entry.join(exe_name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
     }
 
     // -----------------------------------------------------------------------

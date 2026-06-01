@@ -271,3 +271,77 @@ class Process(DictAccessMixin):
     id: int
     name: str
     command: str
+
+
+@dataclass(frozen=True)
+class MemoryPageDiff(DictAccessMixin):
+    """A single page that differs between two memory snapshots.
+
+    Returned inside :class:`MemoryDiffResult.diffs` when
+    :meth:`Trace.memory_diff` finds writable-memory differences between
+    two ``evMemorySnapshot`` events captured by MCR's MW47 producer
+    (``ct_interpose/src/ct_interpose/recording/memory_snapshot_windows.nim``).
+
+    Attributes:
+        page_index:     Flat-page-hash array index of the differing page.
+        page_va:        Virtual address (hex string ``"0x..."``) of the
+                        page in the recorded process's address space.
+        region_base:    Base virtual address of the containing
+                        ``VirtualQueryEx`` region.
+        region_protect: Win32 ``PAGE_*`` protection bits at capture time.
+        hash_recorded:  ``xxh64`` of the page bytes at snapshot A.
+        hash_replayed:  ``xxh64`` of the page bytes at snapshot B.
+    """
+
+    page_index: int
+    page_va: str
+    region_base: str
+    region_protect: int
+    hash_recorded: str
+    hash_replayed: str
+
+
+@dataclass(frozen=True)
+class MemoryDiffResult(DictAccessMixin):
+    """Result of :meth:`Trace.memory_diff`.
+
+    Reports the writable-memory pages whose page hash differs between
+    two ``evMemorySnapshot`` events in the trace and — crucially for the
+    cascade-peeling workflow — the GEID of the *earliest* snapshot
+    between the two endpoints whose hashes diverge from snapshot A.
+    Agents binary-search on ``first_divergence_event_geid`` to localise
+    the precise event boundary at which the missing-capture surface
+    fired.
+
+    See also: ``feedback_mcr_divergence_is_a_bug`` (no slight divergence
+    is tolerable; the diff is the diagnostic, never a normaliser).
+
+    Attributes:
+        event_a:                     GEID of snapshot A (resolved).
+        event_b:                     GEID of snapshot B (resolved).
+        snapshots_in_range:          Count of ``evMemorySnapshot`` events
+                                     observed in ``[event_a .. event_b]``.
+        pages_compared:              Number of page hashes that were
+                                     paired (``min(A.pages, B.pages)``).
+        differing_pages:             Total count of differing pages
+                                     across the whole snapshot, even if
+                                     more than ``max_diffs`` are returned.
+        truncated:                   ``True`` iff ``differing_pages >
+                                     len(diffs)``.
+        first_divergence_event_geid: GEID of the earliest snapshot in
+                                     ``(event_a, event_b]`` whose page
+                                     hashes differ from snapshot A, or
+                                     ``-1`` if none was found.  This is
+                                     the field the binary-search bisect
+                                     iterates on.
+        diffs:                       Up to ``max_diffs`` differing pages.
+    """
+
+    event_a: int
+    event_b: int
+    snapshots_in_range: int
+    pages_compared: int
+    differing_pages: int
+    truncated: bool
+    first_divergence_event_geid: int
+    diffs: list[MemoryPageDiff]
