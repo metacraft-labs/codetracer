@@ -508,4 +508,12 @@ proc runInitial*(conf: CodetracerConf) =
     of StartupCommand.`ct-complete`:
       # M7: context-aware completion. The argument list mirrors the
       # partial command line the shell completion script captured.
+      # M8 extends this entry point with two-level dispatch (fast
+      # capability-only top-level + delegation to component binaries
+      # for subcommand completions).
       runCtComplete(conf.ctCompleteArgs)
+    of StartupCommand.`ct-completions`:
+      # M8: emit the shell-completion script (bash/zsh/fish) that
+      # users source into their shell. The script calls back into
+      # ``codetracer ct-complete`` at runtime. See spec §2.7.
+      runCtCompletions(conf.ctCompletionsShell)

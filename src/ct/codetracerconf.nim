@@ -88,6 +88,12 @@ type
     `ct-help`,
     `ct-complete`,
 
+    # M8 (CodeTracer Launcher campaign): shell completion script
+    # generator. Emits the per-shell completion script that the user
+    # sources or installs into their shell. The generated script calls
+    # back into ``codetracer ct-complete`` at runtime (see spec §2.7).
+    `ct-completions`,
+
 type
   # the following TODOs are for changes in confutils
   # TODO handle descriptions of commands
@@ -1182,6 +1188,16 @@ type
         defaultValue: @[]
         desc: "Partial command line to complete"
       .}: seq[string]
+
+    # M8: ``ct-completions <shell>`` emits the per-shell completion
+    # script. The script content is hardcoded per-shell in
+    # ``src/ct/launch/help_delegate.nim`` and printed to stdout.
+    of `ct-completions`:
+      ctCompletionsShell* {.
+        argument
+        defaultValue: ""
+        desc: "Target shell (bash, zsh, fish)"
+      .}: string
 
 proc customValidateConfig*(
     conf: CodetracerConf) =

@@ -177,6 +177,7 @@ const describeIgnoredCommands* = [
     "ct-describe-commands",
     "ct-help",
     "ct-complete",
+    "ct-completions",
     # Implementation-detail subcommands: useful for the desktop app
     # internals or tests, not user-facing.
     "electron",
@@ -269,6 +270,13 @@ type
     levelLabel*: string   ## human label for the provenance column
     isHelpDelegate*: bool ## true if the capabilities file declares help-delegate
     description*: string  ## description from the capabilities file (when present)
+    declaredCommands*: seq[string]
+      ## command names declared in the capabilities file, in the order
+      ## they appear. Populated by :proc:`parseCapabilitiesFile` from
+      ## lines of the form ``<command> [.ext1 .ext2 ...]`` (i.e. lines
+      ## whose first token is not a reserved capability-file keyword).
+      ## Used by M8's fast-path top-level completion to enumerate
+      ## known commands *without* spawning component binaries.
     surface*: RuntimeCommandSurface
       ## populated by :proc:`collectComponentSurfaces` after running
       ## ``<binPath> ct-describe-commands`` -- left empty by the
@@ -286,12 +294,27 @@ func splitComponentDirName(dirName: string):
     return (dirName, "")
   (dirName[0 ..< atIdx], dirName[atIdx + 1 .. ^1])
 
+const reservedCapabilityKeywords* = [
+    "name", "version", "bin", "description", "help-delegate",
+    "licensed", "project"
+  ]
+  ## Capability-file line keywords that are *not* command
+  ## declarations. Every other first-token is treated as a command
+  ## name (spec §2.3: ``<command> [.ext ...]`` lines).
+  ## Forward-compatible: future capability keywords should be added
+  ## here so they do not pollute the command-completion fast path.
+
 proc parseCapabilitiesFile(content: string,
                             comp: var InstalledComponent) =
   ## Extract the structured fields we care about from a capabilities
   ## file. Format mirrors the launcher's strict byte parser
   ## (``codetracer-launcher/src/caps.nim``) but with full string
   ## tolerance: blank lines, ``#`` comments, ``key value`` shape.
+  ##
+  ## Beyond the structured fields, we also collect command-name
+  ## declarations into ``declaredCommands``. This powers M8's fast-path
+  ## top-level completion (spec §2.7) which must enumerate known
+  ## commands without spawning any component binary.
   for rawLine in content.splitLines:
     let line = rawLine.strip()
     if line.len == 0 or line.startsWith("#"): continue
@@ -323,7 +346,12 @@ proc parseCapabilitiesFile(content: string,
       if comp.description.len == 0:
         comp.description = rest
     else:
-      discard
+      # Anything that is not a reserved keyword is a command
+      # declaration (spec §2.3: ``<cmd> [.ext ...]`` lines).
+      if key.len > 0 and key notin reservedCapabilityKeywords and
+         key notin describeIgnoredCommands and
+         key notin comp.declaredCommands:
+        comp.declaredCommands.add key
 
 proc collectComponentLevels(): seq[ComponentLevel] =
   ## Build the list of search roots in launcher priority order.
@@ -788,42 +816,230 @@ proc completionsForSubcommand(asm0: HelpAssembly,
     if ext in cmd.fileTypes:
       result.add full
 
+proc fastTopLevelCommandNames*(): seq[string] =
+  ## M8 fast path: enumerate every top-level command name known to the
+  ## launcher *without* spawning any component binary. This must read
+  ## only capability files (spec §2.7: "the help delegate reads
+  ## capability files, no subprocess needed"). Sources:
+  ##
+  ## * codetracer-desktop's own commands -- discovered from the
+  ##   compile-time :type:`CodetracerConf` surface (no I/O at all).
+  ## * Every installed third-party component -- discovered from the
+  ##   ``declaredCommands`` field populated by the capability-file
+  ##   parser.
+  var seen = initTable[string, bool]()
+  # Self commands (codetracer-desktop is the help delegate).
+  let self = selfSurface()
+  for cmd in self.commands:
+    if cmd.name.len == 0: continue
+    if cmd.name in describeIgnoredCommands: continue
+    if not seen.getOrDefault(cmd.name, false):
+      seen[cmd.name] = true
+      result.add cmd.name
+  # Other installed components -- read their capabilities files only.
+  for comp in scanInstalledComponents():
+    if comp.name == helpDelegateComponentName: continue
+    for c in comp.declaredCommands:
+      if c.len == 0: continue
+      if c in describeIgnoredCommands: continue
+      if not seen.getOrDefault(c, false):
+        seen[c] = true
+        result.add c
+  result.sort()
+
+proc findComponentForCommand*(cmdName: string): InstalledComponent =
+  ## Return the highest-priority installed component whose capability
+  ## file declares ``cmdName``. Returns an empty component (``name ==
+  ## ""``) if no installed component handles it. ``scanInstalledComponents``
+  ## already returns the per-component first-wins list in priority
+  ## order, so we just take the first hit.
+  for comp in scanInstalledComponents():
+    if comp.name == helpDelegateComponentName: continue
+    if cmdName in comp.declaredCommands:
+      return comp
+  return InstalledComponent()
+
+proc delegateCompletionToComponent*(comp: InstalledComponent,
+                                    args: seq[string]): tuple[ok: bool, output: string] =
+  ## Run ``<comp.binPath> ct-complete <args...>`` and return its
+  ## stdout. ``ok`` is false on any failure (missing binary, non-zero
+  ## exit, exception). Stderr is folded into the captured stream the
+  ## same way M7's :proc:`runDescribeCommands` does -- the launcher
+  ## treats a failing delegate as "no candidates" rather than aborting.
+  if comp.binPath.len == 0: return (false, "")
+  if not fileExists(comp.binPath): return (false, "")
+  var procArgs: seq[string] = @["ct-complete"]
+  for a in args:
+    procArgs.add a
+  try:
+    let p = startProcess(comp.binPath, args = procArgs,
+                         options = {poStdErrToStdOut, poUsePath})
+    let outp = p.outputStream.readAll()
+    let code = waitForExit(p)
+    close p
+    if code != 0:
+      return (false, "")
+    return (true, outp)
+  except CatchableError:
+    return (false, "")
+
+proc selfHandlesCommand(cmdName: string): bool =
+  ## True if codetracer-desktop's own surface declares the command.
+  ## Used to short-circuit delegation when the launcher would route
+  ## the command back to us anyway.
+  let self = selfSurface()
+  for cmd in self.commands:
+    if cmd.name == cmdName: return true
+  false
+
 proc runCtComplete*(args: seq[string]) =
-  ## Entry point for ``codetracer ct-complete``.
+  ## Entry point for ``codetracer ct-complete``. M8 implements the
+  ## two-level dispatch described in spec §2.7:
   ##
-  ## Two-level dispatch:
+  ## **Fast path (top-level)**: when ``args`` is empty or is still
+  ## typing the first token, return every top-level command name
+  ## declared by an installed component's capability file (or by
+  ## codetracer-desktop's own compile-time surface). This path
+  ## explicitly avoids spawning any component binary -- exec
+  ## overhead is unacceptable for interactive tab completion.
   ##
-  ## * Zero args or the first arg is still being typed: emit all
-  ##   known top-level command names matching the prefix.
-  ## * First arg is a known subcommand: emit context-aware
-  ##   completions for that subcommand (file paths filtered by
-  ##   file-types, or flag tokens when the prefix starts with "-").
-  let asm0 = assembleHelp()
+  ## **Delegation path (subcommand)**: when ``args`` starts with a
+  ## known command:
+  ##
+  ## * If the command is handled by codetracer-desktop itself, run
+  ##   the M7 file-system + flag completion logic locally.
+  ## * Otherwise, find the component that declares the command in
+  ##   its capabilities file and exec ``<binary> ct-complete <args>``
+  ##   -- the component is responsible for context-aware completions
+  ##   (trace IDs, license-gated flags, etc.).
   if args.len <= 1:
+    # ---- Fast path: top-level command-name completion ----
     let prefix = if args.len == 1: args[0] else: ""
-    var commandNames: seq[string]
-    for cmd in asm0.merged.commands:
-      if cmd.name.len == 0: continue
-      if cmd.name in describeIgnoredCommands: continue
-      commandNames.add cmd.name
-    commandNames.sort()
-    for name in commandNames:
+    for name in fastTopLevelCommandNames():
       if name.startsWith(prefix):
         stdout.writeLine name
     stdout.flushFile()
     return
-  # Subcommand dispatch. ``args[0]`` is the subcommand, ``args[^1]``
-  # is the partial token to complete.
+  # ---- Delegation path: a subcommand was named ----
   let cmdName = args[0]
   let prefix = args[^1]
-  let knownCommand = findCommandIdx(asm0.merged, cmdName) >= 0
-  if not knownCommand:
-    # Unknown command -- fall back to top-level completion.
-    for cmd in asm0.merged.commands:
-      if cmd.name.startsWith(cmdName):
-        stdout.writeLine cmd.name
+  if selfHandlesCommand(cmdName):
+    # codetracer-desktop owns this command -- use M7's local
+    # completion (file-system filtered by file-types, flag tokens).
+    let asm0 = assembleHelp()
+    if findCommandIdx(asm0.merged, cmdName) < 0:
+      # Defensive: synthesize a minimal surface lookup.
+      for cmd in asm0.merged.commands:
+        if cmd.name.startsWith(cmdName):
+          stdout.writeLine cmd.name
+      stdout.flushFile()
+      return
+    for cand in completionsForSubcommand(asm0, cmdName, prefix):
+      stdout.writeLine cand
     stdout.flushFile()
     return
-  for cand in completionsForSubcommand(asm0, cmdName, prefix):
-    stdout.writeLine cand
+  # Locate the component declaring this command and delegate.
+  let comp = findComponentForCommand(cmdName)
+  if comp.name.len == 0:
+    # Unknown command -- fall back to filtered top-level names so
+    # the user gets *something* useful from a typo.
+    for name in fastTopLevelCommandNames():
+      if name.startsWith(cmdName):
+        stdout.writeLine name
+    stdout.flushFile()
+    return
+  let (ok, outp) = delegateCompletionToComponent(comp, args)
+  if ok:
+    stdout.write outp
+  stdout.flushFile()
+
+# ---- Shell completion script generator (M8) -------------------------------
+#
+# Per spec §2.7, ``ct completion <shell>`` is delegated to the help
+# delegate, which prints a per-shell completion script the user can
+# source. The generated script calls back into ``codetracer
+# ct-complete`` (bypassing the ``ct`` launcher to avoid an extra
+# exec hop -- spec §2.7 closing paragraph). For each supported shell
+# we ship a hardcoded snippet; the launcher repo's size budget does
+# not apply here (codetracer-desktop has no size cap).
+
+const
+  bashCompletionScript* = """# bash completion script for the ct launcher
+# Generated by `codetracer ct-completions bash`.
+# Source this file (e.g. add to /etc/bash_completion.d/ct) or
+# evaluate inline: `eval "$(codetracer ct-completions bash)"`.
+#
+# At runtime, _ct_completions calls `codetracer ct-complete ...`
+# directly -- bypassing the `ct` launcher exec hop (spec §2.7).
+_ct_completions() {
+  local IFS=$'\n'
+  local cur_words=("${COMP_WORDS[@]:1}")
+  COMPREPLY=($(codetracer ct-complete "${cur_words[@]}"))
+}
+complete -F _ct_completions ct
+"""
+
+  zshCompletionScript* = """#compdef ct
+# zsh completion script for the ct launcher
+# Generated by `codetracer ct-completions zsh`.
+# Save under a directory in $fpath (e.g. /usr/share/zsh/site-functions/_ct)
+# or source inline: `source <(codetracer ct-completions zsh)`.
+#
+# At runtime, _ct calls `codetracer ct-complete ...` directly --
+# bypassing the `ct` launcher exec hop (spec §2.7).
+_ct() {
+  local -a candidates
+  local cur_word="${words[CURRENT]}"
+  local -a partial
+  partial=("${(@)words[2,CURRENT]}")
+  candidates=("${(@f)$(codetracer ct-complete "${partial[@]}")}")
+  compadd -a candidates
+}
+compdef _ct ct
+"""
+
+  fishCompletionScript* = """# fish completion script for the ct launcher
+# Generated by `codetracer ct-completions fish`.
+# Save under ~/.config/fish/completions/ct.fish or source it.
+#
+# At runtime, the completion calls `codetracer ct-complete ...`
+# directly -- bypassing the `ct` launcher exec hop (spec §2.7).
+function __ct_complete
+  set -l tokens (commandline -opc)
+  set -l current (commandline -ct)
+  set -l partial $tokens[2..-1] $current
+  codetracer ct-complete $partial
+end
+complete -c ct -f -a '(__ct_complete)'
+"""
+
+proc completionScriptFor*(shell: string): string =
+  ## Return the canned completion script for ``shell`` (case
+  ## insensitive). Returns the empty string for unknown shells; the
+  ## caller is responsible for emitting a diagnostic.
+  case shell.toLowerAscii()
+  of "bash":
+    bashCompletionScript
+  of "zsh":
+    zshCompletionScript
+  of "fish":
+    fishCompletionScript
+  else:
+    ""
+
+proc runCtCompletions*(shell: string) =
+  ## Entry point for ``codetracer ct-completions <shell>``.
+  ## Emits the requested shell-completion script on stdout.
+  ## Unknown shells produce a one-line error on stderr and an
+  ## exit-style non-zero status (we use ``quit 1`` so the caller
+  ## sees a real failure rather than a silently empty stdout).
+  if shell.len == 0:
+    stderr.writeLine "ct-completions: missing shell argument (expected bash, zsh, or fish)"
+    quit 1
+  let body = completionScriptFor(shell)
+  if body.len == 0:
+    stderr.writeLine "ct-completions: unsupported shell '" & shell &
+                     "' (supported: bash, zsh, fish)"
+    quit 1
+  stdout.write body
   stdout.flushFile()
