@@ -79,6 +79,15 @@ type
     `trace-metadata`, # TODO .hidden?
     start_backend,
 
+    # M7 (CodeTracer Launcher campaign): help delegate subcommands.
+    # These power the `help-delegate` protocol from the launcher
+    # spec §2.6. The launcher detects `codetracer-desktop` as the
+    # help delegate via its capabilities file and execs these
+    # subcommands to assemble and surface help.
+    `ct-describe-commands`,
+    `ct-help`,
+    `ct-complete`,
+
 type
   # the following TODOs are for changes in confutils
   # TODO handle descriptions of commands
@@ -1153,6 +1162,26 @@ type
       socketPath* {.
         name: "socket-path",
       .}: Option[string]
+
+    # M7: Help delegate subcommands. The full machinery lives in
+    # ``src/ct/launch/help_delegate.nim``; here we just declare the
+    # subcommand surfaces so confutils accepts them on the command
+    # line. See spec §2.6 (Help Screen Assembly) for the protocol
+    # the launcher uses to drive these subcommands.
+    of `ct-describe-commands`:
+      ctDescribeCommandsArgs* {.
+        ignore
+      .}: seq[string]
+    of `ct-help`:
+      ctHelpArgs* {.
+        ignore
+      .}: seq[string]
+    of `ct-complete`:
+      ctCompleteArgs* {.
+        argument
+        defaultValue: @[]
+        desc: "Partial command line to complete"
+      .}: seq[string]
 
 proc customValidateConfig*(
     conf: CodetracerConf) =

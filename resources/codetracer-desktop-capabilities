@@ -1,0 +1,46 @@
+# codetracer-desktop capabilities file (CodeTracer Launcher spec §2.6).
+#
+# This file is the source of truth for the launcher's component
+# discovery: when ct is installed as a launcher component, this file
+# is copied to
+#   <components-root>/codetracer-desktop@<version>/capabilities
+# (see codetracer-launcher/src/install.nim and §2.3 of the spec).
+#
+# Key declarations:
+#   * ``bin`` -- launcher uses this to find the binary inside the
+#     component directory's ``bin/`` subdir.
+#   * ``help-delegate`` -- marks codetracer-desktop as the launcher's
+#     mandatory help delegate. ``ct --help`` / ``ct`` / ``ct completion``
+#     all route to this binary's ct-help / ct-describe-commands /
+#     ct-complete / ct-completions subcommands.
+#   * ``<command> .ext1 .ext2 ...`` -- declares which file extensions
+#     each command can handle (used by the launcher router to pick
+#     the right component for ``ct record foo.py``).
+#
+# The dynamic, human-readable help content for these commands comes
+# from running ``ct ct-describe-commands`` at runtime -- this static
+# file is intentionally minimal.
+
+name codetracer-desktop
+bin codetracer
+description CodeTracer desktop application -- launcher help delegate
+help-delegate
+
+record .py .rb .nr .styl .wasm
+record-test .py .rb .nr
+run .py .rb .nr .styl .wasm
+replay
+list
+print
+install
+host
+upload
+download
+login
+edit
+import
+ci
+help
+remote
+activate
+check-license

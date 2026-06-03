@@ -13,6 +13,7 @@ import
   ../stylus/[deploy, record, arb_node_utils],
   backends,
   electron,
+  help_delegate,
   recording_id_env,
   results,
   json_serialization
@@ -497,3 +498,14 @@ proc runInitial*(conf: CodetracerConf) =
         conf.traceMetadataTest)
     of StartupCommand.start_backend:
       startBackend(conf.backendKind, conf.isStdio, conf.socketPath)
+    of StartupCommand.`ct-describe-commands`:
+      # M7: emit the line-oriented description used by the launcher's
+      # help-delegate algorithm. See spec §2.6.
+      runCtDescribeCommands()
+    of StartupCommand.`ct-help`:
+      # M7: assemble + render the full ``ct --help`` screen.
+      runCtHelp()
+    of StartupCommand.`ct-complete`:
+      # M7: context-aware completion. The argument list mirrors the
+      # partial command line the shell completion script captured.
+      runCtComplete(conf.ctCompleteArgs)
