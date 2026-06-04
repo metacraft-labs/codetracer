@@ -239,6 +239,20 @@ impl DapClient {
         }))
     }
 
+    /// Emitted alongside the `ct/originChain` response so frontends can
+    /// react to lazy continuations without re-issuing the request
+    /// (spec §5.2 "ct/updated-origin-chain").
+    pub fn updated_origin_chain_event(&mut self, chain: &task::OriginChain) -> DapResult<DapMessage> {
+        Ok(DapMessage::Event(Event {
+            base: ProtocolMessage {
+                seq: self.next_seq(),
+                type_: "event".to_string(),
+            },
+            event: "ct/updated-origin-chain".to_string(),
+            body: serde_json::to_value(chain)?,
+        }))
+    }
+
     pub fn calltrace_search_event(&mut self, search_res: Vec<task::Call>) -> DapResult<DapMessage> {
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {

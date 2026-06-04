@@ -1141,6 +1141,10 @@ mod tests {
         fn current_step_id(&mut self) -> StepId {
             self.current_step_id
         }
+
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
     }
 
     fn make_location(line: i64, rr_ticks: i64, event: i64) -> Location {

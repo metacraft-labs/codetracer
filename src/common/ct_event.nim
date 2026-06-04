@@ -83,6 +83,9 @@ type
     CtLiveRestoreAt,
     CtMcrLiveStep,
     CtSeekToGeid,
+    # Value Origin Tracking (M2). See
+    # codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md §5.2.
+    CtUpdatedOriginChain,
 
 when defined(js):
   import std / jsffi

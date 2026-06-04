@@ -128,6 +128,28 @@ pub struct Handler {
     /// Macro sourcemaps loaded from the trace directory.
     /// Used for resolving macro expansion locations (ALT+E shortcut).
     pub macro_sourcemaps: MacroSourceMapCollection,
+
+    /// Per-session cache of computed `OriginSummary` values keyed by
+    /// `(variable_id, step_id)` per spec §3.2.3 / M2 deliverable
+    /// "Backend caches summaries per `(variable_id, step_id)` within a
+    /// session to avoid recomputing on every navigation". The cache
+    /// lives on the `Handler` (rather than on `MaterializedReplaySession`)
+    /// because the handler is the natural session-scope owner —
+    /// `MaterializedReplaySession` is also instantiated inside
+    /// `load_flow` as a side replay (`Handler::load_flow`), and we
+    /// explicitly want the cache to be shared across both the primary
+    /// replay and any side replays that compute origins for the same
+    /// `(variable, step)` pair.
+    pub(crate) origin_summary_cache: HashMap<(usize, i64), task::OriginSummary>,
+
+    /// Counter — increments once per *actual* origin-chain build
+    /// (cache miss) inside `build_origin_summary_for_local_at`. Used
+    /// by the M2 cache-hit verification test
+    /// (`test_load_locals_origin_summary_populated`) to prove the
+    /// `(variable_id, step_id)` cache is consulted. Stays on the
+    /// public type because it is a real signal — internal benchmarks
+    /// and future telemetry can read it too.
+    pub origin_summary_chain_builds: std::sync::atomic::AtomicUsize,
 }
 
 // two choices:
@@ -248,6 +270,8 @@ impl Handler {
             cached_events: None,
             cached_terminal_events: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
+            origin_summary_cache: HashMap::new(),
+            origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -595,14 +619,24 @@ impl Handler {
         // let locals: Vec<Variable> = vec![];
         // warn!("load_locals not implemented for rr yet");
         let locals_with_records = self.replay.load_locals(args)?;
-        let locals = locals_with_records
-            .iter()
-            .map(|l| Variable {
+        // Per spec §3.2.3, locals on the active frame use *Eager*
+        // origin summaries on the materialized backend. The cache
+        // inside `build_origin_summary_for_local` keeps repeated
+        // `ct/load-locals` requests on the same step ~O(1).
+        let mut locals: Vec<Variable> = Vec::with_capacity(locals_with_records.len());
+        for l in locals_with_records.iter() {
+            let origin_summary = if self.trace_kind == TraceKind::Materialized {
+                Some(self.build_origin_summary_for_local(&l.expression))
+            } else {
+                None
+            };
+            locals.push(Variable {
                 expression: l.expression.clone(),
                 value: to_ct_value(&l.value),
                 address: l.address,
-            })
-            .collect();
+                origin_summary,
+            });
+        }
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
         Ok(())
         // }
@@ -801,6 +835,36 @@ impl Handler {
             return Err(message.into());
         };
         info!("  flow ready");
+        // Per spec §3.2.3 the Omniscience-Flow overlay annotations
+        // carry per-annotated-value `OriginSummary` entries. On M2
+        // (materialized, no omniscient DB), every annotation defaults
+        // to *placeholder* mode — the frontend lazily fills them via
+        // `ct/originSummary` (spec §5.3.2). Walk each FlowStep's
+        // after-values and emit a placeholder summary keyed by
+        // variable name; the placeholder token captures the per-step
+        // `(variable_name, step_id)` pair so each token round-trips
+        // independently.
+        let mut flow_update = flow_update;
+        if self.trace_kind == TraceKind::Materialized {
+            for view in flow_update.view_updates.iter_mut() {
+                for step in view.steps.iter_mut() {
+                    let step_id = StepId(step.rr_ticks.0);
+                    let names: Vec<String> = step
+                        .after_values
+                        .keys()
+                        .chain(step.before_values.keys())
+                        .cloned()
+                        .collect();
+                    for name in names {
+                        if step.origin_summaries.contains_key(&name) {
+                            continue;
+                        }
+                        let summary = self.build_origin_summary_placeholder_at(&name, step_id);
+                        step.origin_summaries.insert(name, summary);
+                    }
+                }
+            }
+        }
         let raw_event = self.dap_client.updated_flow_event(flow_update.clone())?;
         sender.send(raw_event)?;
 
@@ -1219,15 +1283,30 @@ impl Handler {
             self.tracepoint_rr_worker_index += 1;
         };
         let (history_results_with_records, address) = self.replay.load_history(&load_history_arg)?;
-        let history_results: Vec<HistoryResult> = history_results_with_records
-            .iter()
-            .map(|r| HistoryResult {
+        // Per spec §3.2.3 (and the M2 deliverable expanding
+        // `ct/load-history` with per-entry origin summaries), each
+        // historic value carries its own `OriginSummary`. On a
+        // materialized trace without an omniscient DB, the default
+        // mode is *placeholder* — each entry encodes its
+        // (variable_name, historic step_id) into the placeholder
+        // token so the frontend can lazily fill it via
+        // `ct/originSummary` (spec §5.3.2).
+        let mut history_results: Vec<HistoryResult> = Vec::with_capacity(history_results_with_records.len());
+        for r in history_results_with_records.iter() {
+            let entry_step_id = StepId(r.location.rr_ticks.0);
+            let summary = if self.trace_kind == TraceKind::Materialized {
+                Some(self.build_origin_summary_placeholder_at(&load_history_arg.expression, entry_step_id))
+            } else {
+                None
+            };
+            history_results.push(HistoryResult {
                 location: r.location.clone(),
                 value: to_ct_value(&r.value),
                 time: r.time,
                 description: r.description.clone(),
-            })
-            .collect();
+                origin_summary: summary,
+            });
+        }
 
         let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), address, &history_results);
         let raw_event = self.dap_client.updated_history_event(history_update.clone())?;
@@ -1250,6 +1329,266 @@ impl Handler {
         self.step_id = self.replay.current_step_id();
         self.complete_move(false, sender)?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Value Origin Tracking — `ct/originChain` and `ct/originSummary`
+    // dispatch (spec §5.3, §5.3.2). Materialized traces drive the Path B
+    // algorithm in `db::MaterializedReplaySession`; emulator and
+    // recreator sessions return DAP error 6103 until M11 / M18.
+    // -----------------------------------------------------------------
+
+    /// Dispatch handler for `ct/originChain` (spec §5.3).
+    pub fn origin_chain(
+        &mut self,
+        req: dap::Request,
+        args: task::CtOriginChainArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Build the per-request budget. Defaults from spec §6.1.7.
+        let budget = task::OriginBudget {
+            max_hops: args.max_hops,
+            wall_clock_ms: task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
+            max_steps_scanned: task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
+        };
+        let result = match self.trace_kind {
+            TraceKind::Materialized => {
+                let patterns = origin_classifier::PatternSet::built_in();
+                let meta_dat_sources_root = self.meta_dat_sources_root();
+                self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
+            }
+            TraceKind::Emulator => Err(crate::origin_query::OriginError::unsupported_backend(
+                "emulator (Materialized path is the only V1 backend; emulator support lands in M18)",
+            )),
+            TraceKind::Recreator => Err(crate::origin_query::OriginError::unsupported_backend(
+                "recreator (RR support lands in M11)",
+            )),
+        };
+        match result {
+            Ok(chain) => {
+                // Emit the `ct/updated-origin-chain` event alongside the
+                // response so the event-driven UI can react to lazy
+                // continuations without re-issuing a fresh request.
+                let raw_event = self.dap_client.updated_origin_chain_event(&chain)?;
+                sender.send(raw_event)?;
+                self.respond_dap(req, &chain, sender)?;
+                Ok(())
+            }
+            Err(origin_err) => {
+                self.send_origin_error(req, sender, origin_err)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Dispatch handler for `ct/originSummary` — batch placeholder fill
+    /// (spec §5.3.2).
+    pub fn origin_summary(
+        &mut self,
+        req: dap::Request,
+        args: task::CtOriginSummaryArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Per spec §5.3.2 per-token errors yield UnknownVariable /
+        // UnknownSource summaries rather than request-level failures.
+        let mut summaries = Vec::with_capacity(args.tokens.len());
+        for token_str in &args.tokens {
+            match self.resolve_single_placeholder(token_str) {
+                Ok(summary) => summaries.push(summary),
+                Err(_) => {
+                    summaries.push(task::OriginSummary {
+                        terminator_kind: task::TerminatorKindWire::UnknownVariable,
+                        ..task::OriginSummary::default()
+                    });
+                }
+            }
+        }
+        self.respond_dap(req, &task::CtOriginSummaryResponse { summaries }, sender)?;
+        Ok(())
+    }
+
+    fn materialized_origin_chain(
+        &mut self,
+        args: &task::CtOriginChainArguments,
+        budget: &task::OriginBudget,
+        patterns: &origin_classifier::PatternSet,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Result<task::OriginChain, crate::origin_query::OriginError> {
+        // The materialized algorithm lives on `MaterializedReplaySession`.
+        // The handler keeps a `Box<dyn ReplaySession>` so we down-cast to
+        // the concrete session before invoking the algorithm. Downcast
+        // failure means the backend was constructed for a non-materialized
+        // trace kind — surface 6103 so the frontend can render the
+        // "coming soon" affordance.
+        let any_session = self.replay.as_any_mut();
+        match any_session.downcast_mut::<MaterializedReplaySession>() {
+            Some(session) => {
+                session.origin_chain_inferred(args, budget, &mut self.expr_loader, patterns, meta_dat_sources_root)
+            }
+            None => Err(crate::origin_query::OriginError::unsupported_backend(
+                "non-materialized backend (downcast failed)",
+            )),
+        }
+    }
+
+    fn resolve_single_placeholder(
+        &mut self,
+        token_str: &str,
+    ) -> Result<task::OriginSummary, crate::origin_query::OriginError> {
+        let token = crate::origin_query::OriginContinuationToken::decode(token_str)?;
+        let args = task::CtOriginChainArguments {
+            variable_name: token.query_variable.clone(),
+            variable_path: Vec::new(),
+            frame_id: token.current_frame,
+            step_id: token.query_step_id,
+            thread_id: 0,
+            max_hops: task::DEFAULT_ORIGIN_MAX_HOPS,
+            lazy: false,
+            continuation_token: None,
+            session_id: String::new(),
+            classify_source: true,
+        };
+        let budget = task::OriginBudget::default();
+        let patterns = origin_classifier::PatternSet::built_in();
+        let meta_dat_sources_root = self.meta_dat_sources_root();
+        let chain = self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())?;
+        Ok(origin_chain_to_summary(&chain, false))
+    }
+
+    fn send_origin_error(
+        &mut self,
+        req: dap::Request,
+        sender: Sender<DapMessage>,
+        origin_err: crate::origin_query::OriginError,
+    ) -> Result<(), Box<dyn Error>> {
+        let body = serde_json::json!({
+            "originErrorCode": origin_err.code.as_u32(),
+            "message": origin_err.message,
+            "detail": origin_err.detail,
+        });
+        let response = dap::DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: self.dap_client.seq,
+                type_: "response".to_string(),
+            },
+            request_seq: req.base.seq,
+            success: false,
+            command: req.command.clone(),
+            message: Some(origin_err.message.clone()),
+            body,
+        });
+        self.dap_client.seq += 1;
+        sender.send(response)?;
+        Ok(())
+    }
+
+    /// Locate the bundled-sources directory `meta_dat/sources/` for the
+    /// active trace, if it exists. Returns `None` when the trace was
+    /// recorded without bundled sources (the classifier falls back to
+    /// filesystem reads — spec §6.1 "Source-file resolution").
+    fn meta_dat_sources_root(&self) -> Option<std::path::PathBuf> {
+        let candidate = self.reader.workdir().join("meta_dat").join("sources");
+        if candidate.is_dir() { Some(candidate) } else { None }
+    }
+
+    /// Compute the per-variable origin summary for an *eager* surface
+    /// (e.g. `ct/load-locals`). On the materialized backend this is a
+    /// truncated origin-chain query; on backends without origin support
+    /// the summary degrades to a UnknownSource placeholder.
+    ///
+    /// Consults the per-session `(VariableId, StepId)` cache (M2
+    /// deliverable, spec §3.2.3). On classifier / chain-build failure
+    /// returns an `UnknownSource` summary rather than propagating —
+    /// the surrounding response (load-locals etc.) must not fail just
+    /// because one variable's origin is unknown.
+    pub(crate) fn build_origin_summary_for_local(&mut self, var_name: &str) -> task::OriginSummary {
+        self.build_origin_summary_for_local_at(var_name, self.step_id)
+    }
+
+    /// Variant of `build_origin_summary_for_local` that takes an
+    /// explicit step. Used by callers that want the origin of a
+    /// historical value (e.g. the eager `ct/load-history` path used
+    /// when an omniscient DB is present per spec §3.2.3 / §6.8).
+    pub(crate) fn build_origin_summary_for_local_at(&mut self, var_name: &str, step_id: StepId) -> task::OriginSummary {
+        if self.trace_kind != TraceKind::Materialized {
+            return placeholder_unknown_summary();
+        }
+        // Cache key is `(variable_id, step_id)`. We resolve the
+        // variable name to a VariableId via the reader's name table.
+        // Unknown names fall through to a fresh build (no cache key
+        // possible — but they will produce a placeholder UnknownSource
+        // summary anyway). `StepId` is wrapped i64 without a `Hash`
+        // derive in the trace-types crate, so the key is stored as
+        // `(usize, i64)` (the wrapper-id newtype's payload pair).
+        let cache_key: Option<(usize, i64)> = self.reader.variable_id_for(var_name).map(|vid| (vid.0, step_id.0));
+        if let Some(ref key) = cache_key
+            && let Some(cached) = self.origin_summary_cache.get(key)
+        {
+            return cached.clone();
+        }
+
+        // Cache miss — perform the actual chain build. Bump the
+        // per-session chain-build counter for test instrumentation.
+        self.origin_summary_chain_builds
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let args = task::CtOriginChainArguments {
+            variable_name: var_name.to_string(),
+            variable_path: Vec::new(),
+            frame_id: -1,
+            step_id: step_id.0,
+            thread_id: 0,
+            max_hops: task::DEFAULT_ORIGIN_MAX_HOPS,
+            lazy: false,
+            continuation_token: None,
+            session_id: String::new(),
+            classify_source: true,
+        };
+        let budget = task::OriginBudget::default();
+        let patterns = origin_classifier::PatternSet::built_in();
+        let meta_dat_sources_root = self.meta_dat_sources_root();
+        let summary = match self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
+        {
+            Ok(chain) => origin_chain_to_summary(&chain, false),
+            Err(_) => placeholder_unknown_summary(),
+        };
+        if let Some(key) = cache_key {
+            self.origin_summary_cache.insert(key, summary.clone());
+        }
+        summary
+    }
+
+    /// Build a *placeholder* summary suitable for off-screen / history /
+    /// flow surfaces (spec §3.2.3 default-mode table) — uses the
+    /// current step.
+    pub(crate) fn build_origin_summary_placeholder(&mut self, var_name: &str) -> task::OriginSummary {
+        self.build_origin_summary_placeholder_at(var_name, self.step_id)
+    }
+
+    /// Build a placeholder summary for `(var_name, step_id)` — used by
+    /// `ct/load-history` so each placeholder token round-trips through
+    /// `ct/originSummary` with the *historic* variable+step pair (per
+    /// spec §3.2.3 "the origin of *that historic value*, not the
+    /// current value").
+    pub(crate) fn build_origin_summary_placeholder_at(
+        &mut self,
+        var_name: &str,
+        step_id: StepId,
+    ) -> task::OriginSummary {
+        let token = crate::origin_query::OriginContinuationToken {
+            v: crate::origin_query::OriginContinuationToken::CURRENT_VERSION,
+            query_variable: var_name.to_string(),
+            query_step_id: step_id.0,
+            current_step: step_id.0,
+            current_frame: -1,
+            current_var_name: var_name.to_string(),
+            hops_emitted: 0,
+            max_hops: task::DEFAULT_ORIGIN_MAX_HOPS,
+            patterns_fingerprint: origin_classifier::PatternSet::built_in().fingerprint().hex.clone(),
+            source_digests: Vec::new(),
+            issued_at: 0,
+        };
+        crate::origin_query::placeholder_summary(token)
     }
 
     fn load_path_id(&self, path: &str) -> Option<PathId> {
@@ -2816,6 +3155,7 @@ impl Handler {
                     .to_string(),
                 value: self.reader.to_ct_value(&v.value),
                 address: NO_ADDRESS,
+                origin_summary: None,
             })
             .collect();
 
@@ -2841,6 +3181,41 @@ impl Handler {
         self.respond_dap(request, dap::DisconnectResponseBody {}, sender)?;
 
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Value Origin Tracking — small free helpers shared by the eager/placeholder
+// summary builders. Kept outside `impl Handler` so they can be reused from
+// tests + future MCP/CLI surfaces without going through a Handler instance.
+// ---------------------------------------------------------------------------
+
+/// Compress an `OriginChain` into its single-row `OriginSummary` (spec
+/// §4.1). `is_placeholder` is the value the caller wants set on the
+/// summary; pass `false` for eager surfaces.
+pub(crate) fn origin_chain_to_summary(chain: &task::OriginChain, is_placeholder: bool) -> task::OriginSummary {
+    task::OriginSummary {
+        terminator_kind: chain.terminator.kind.into(),
+        terminator_expr: chain.terminator.expression.clone(),
+        terminator_function: chain.terminator.function.clone(),
+        hop_count: chain.hops.len() as u32,
+        confidence: chain.confidence,
+        is_placeholder,
+        placeholder_token: None,
+    }
+}
+
+/// Default fallback summary used when a backend does not (yet) support
+/// origin queries — the frontend renders an unobtrusive Unknown badge.
+pub(crate) fn placeholder_unknown_summary() -> task::OriginSummary {
+    task::OriginSummary {
+        terminator_kind: task::TerminatorKindWire::UnknownSource,
+        terminator_expr: String::new(),
+        terminator_function: None,
+        hop_count: 0,
+        confidence: 0.0,
+        is_placeholder: true,
+        placeholder_token: None,
     }
 }
 

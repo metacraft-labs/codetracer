@@ -44,6 +44,7 @@ mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
 mod nim_mangling;
+mod origin_query;
 mod paths;
 mod program_search_tool;
 mod query;

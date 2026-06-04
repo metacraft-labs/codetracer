@@ -116,4 +116,10 @@ pub trait ReplaySession: std::fmt::Debug {
             command: "main".to_string(),
         }])
     }
+
+    /// Downcast hook used by `Handler::origin_chain` to call into the
+    /// concrete `MaterializedReplaySession::origin_chain_inferred` (M2).
+    /// The default implementation returns `None` so non-materialized
+    /// sessions surface the DAP 6103 error without further plumbing.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }

@@ -49,6 +49,26 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// Resolve a variable id to its human-readable name.
     fn variable_name(&self, id: VariableId) -> Option<&str>;
 
+    /// Reverse-lookup: return the `VariableId` for a given variable
+    /// name, scanning the interning table. Used by the per-session
+    /// origin-summary cache (spec §3.2.3 / M2 deliverable) where the
+    /// cache key is `(VariableId, StepId)`. Default impl is O(n) over
+    /// the variable name table; concrete implementations may override
+    /// with a hash index when scanning becomes a hot path.
+    fn variable_id_for(&self, name: &str) -> Option<VariableId> {
+        // The fully generic fall-back: scan the name table. Concrete
+        // backends with their own interning maps override this for O(1).
+        let mut idx: usize = 0;
+        loop {
+            let id = VariableId(idx);
+            match self.variable_name(id) {
+                Some(n) if n == name => return Some(id),
+                Some(_) => idx += 1,
+                None => return None,
+            }
+        }
+    }
+
     /// Total number of recorded paths.
     fn path_count(&self) -> usize;
 

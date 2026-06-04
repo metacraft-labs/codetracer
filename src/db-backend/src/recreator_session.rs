@@ -969,6 +969,10 @@ impl ReplaySession for RecreatorReplaySession {
         }
         Ok(processes)
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 fn parse_recording_head_response(response: &str) -> Result<u64, Box<dyn Error>> {

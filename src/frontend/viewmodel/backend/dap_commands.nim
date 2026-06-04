@@ -83,6 +83,10 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/live-restore-at",
   "ct/mcr-live-step",
   "ct/seek-to-geid",
+  # Value Origin Tracking (M2). The backend emits this event next to
+  # `ct/updated-history` so the frontend can react to lazy
+  # continuations of an origin chain.
+  "ct/updated-origin-chain",
 ]
 
 let VALID_DAP_COMMANDS*: HashSet[string] = VALID_DAP_COMMANDS_SEQ.toHashSet

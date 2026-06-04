@@ -59,6 +59,11 @@ pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;
 pub mod nim_mangling;
+// Value Origin Tracking — M2 surface: trait + continuation-token codec +
+// DAP error codes 6101–6106. The per-backend implementations live next
+// to their `ReplaySession` impls (`db.rs`, `emulator_session.rs`,
+// `recreator_session.rs`).
+pub mod origin_query;
 pub mod paths;
 pub mod program_search_tool;
 pub mod query;

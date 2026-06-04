@@ -1083,6 +1083,18 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/calltrace-jump" => handler.calltrace_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
         "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
         "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?, sender.clone())?,
+        // Value Origin Tracking — `ct/originChain` (spec §5.3) and
+        // `ct/originSummary` (spec §5.3.2 batch placeholder fill).
+        "ct/originChain" => handler.origin_chain(
+            req.clone(),
+            req.load_args::<crate::task::CtOriginChainArguments>()?,
+            sender.clone(),
+        )?,
+        "ct/originSummary" => handler.origin_summary(
+            req.clone(),
+            req.load_args::<crate::task::CtOriginSummaryArguments>()?,
+            sender.clone(),
+        )?,
         "ct/history-jump" => handler.history_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
         "ct/search-calltrace" => {
             handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?, sender.clone())?

@@ -692,6 +692,53 @@ impl ExprLoader {
         }
     }
 
+    /// Spec §6.1 "Source-file resolution" — return `(line_text, origin)`
+    /// so the M2 origin-chain helpers can attribute the line to either
+    /// the trace's bundled `meta_dat/sources/` copy or a filesystem
+    /// read. When the loader has already cached the file (via
+    /// [`Self::load_file`]) the cached lines are reused.
+    ///
+    /// The bundled-copy probe falls back when the candidate path does
+    /// not exist; failing both yields `SourceOrigin::Unavailable`.
+    /// Existing callers continue to use [`Self::get_source_line`] which
+    /// preserves the original behaviour.
+    pub fn get_source_line_v2(
+        &mut self,
+        path: &PathBuf,
+        row: usize,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> (String, SourceOrigin) {
+        // Bundled copy first per spec §6.1: when the trace ships its own
+        // sources under `meta_dat/sources/`, that is the authoritative
+        // line text used for the classifier.
+        if let Some(root) = meta_dat_sources_root {
+            let candidate = bundled_source_path(root, path);
+            if candidate.exists()
+                && let Ok(text) = fs::read_to_string(&candidate)
+            {
+                // Match `get_source_line`'s 1-indexed convention: the
+                // bundled-source branch is invoked with the same `row`
+                // value the cached-file branch consumes (where
+                // `file_lines[0]` is a dummy empty entry). Subtract 1
+                // for the 0-indexed `nth_line` call.
+                let line = nth_line(&text, row.saturating_sub(1));
+                return (line, SourceOrigin::BundledMetaData);
+            }
+        }
+        // Fall back to the cached file lines (already populated by
+        // load_file) — this is the original [`Self::get_source_line`]
+        // path. If the file is not yet cached, attempt a lazy load.
+        if !self.processed_files.contains_key(path) && self.load_file(path).is_err() {
+            return (String::new(), SourceOrigin::Unavailable);
+        }
+        if let Some(info) = self.processed_files.get(path)
+            && row < info.file_lines.len()
+        {
+            return (info.file_lines[row].clone(), SourceOrigin::Filesystem);
+        }
+        (String::new(), SourceOrigin::Unavailable)
+    }
+
     #[cfg(feature = "syntax-highlight")]
     fn extract_expr(&mut self, node: &Node, path: &PathBuf, row: usize) -> String {
         let source_line = self.get_source_line(path, row);
@@ -2238,6 +2285,34 @@ impl ExprLoader {
             .comment_lines
             .clone()
     }
+}
+
+// ---------------------------------------------------------------------------
+// `SourceOrigin` — spec §6.1 source-file provenance for the Value Origin
+// Tracking algorithm. Threaded through every origin hop so the
+// continuation-token integrity check (spec §5.3.1) can distinguish a
+// bundled copy (immune to disk edits) from a filesystem copy (subject to
+// the spec §5.3.1 digest verification on resume).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceOrigin {
+    /// The line came from the trace's `meta_dat/sources/<path>` bundle.
+    BundledMetaData,
+    /// The line came from the on-disk file at `path`.
+    Filesystem,
+    /// The line could not be resolved through either route.
+    Unavailable,
+}
+
+fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
+    // Strip the leading "/" so absolute paths can sit under root/.
+    let rel = source_path.strip_prefix("/").unwrap_or(source_path);
+    root.join(rel)
+}
+
+fn nth_line(text: &str, row: usize) -> String {
+    text.split('\n').nth(row).unwrap_or("").to_string()
 }
 
 //     iteration: Iteration

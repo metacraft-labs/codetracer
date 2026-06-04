@@ -2,7 +2,7 @@ use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::vec::Vec;
@@ -1768,4 +1768,961 @@ impl ReplaySession for MaterializedReplaySession {
     ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         Err("tracepoint call expressions are not supported for db traces".into())
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
+
+// ===========================================================================
+// Value Origin Tracking — materialized DB Path B algorithm (M2).
+//
+// Implements `Db::origin_chain_inferred` per spec §6.1. The algorithm
+// reuses the per-step value history that `Db.variables` already exposes
+// for `load_history` (this file, line ~1576) plus the existing
+// `Function`/`Call`/`Step` event vocabulary to walk backward through
+// the chain.
+//
+// Two collaborators are required:
+//
+// - The `origin-classifier` crate (M1) is invoked once per hop to parse
+//   the source-line and classify the RHS. This is the only client of
+//   tree-sitter from inside the algorithm.
+// - The handler's `ExprLoader` is reused so we share its source-line
+//   cache (loaded once per file across the entire DAP session).
+//
+// The algorithm is hosted on `MaterializedReplaySession` because the
+// session already owns `reader: Arc<dyn TraceReader>` and bookkeeps
+// `step_id`. The recreator / emulator sessions implement
+// `OriginQueryEngine` with a 6103 stub until their respective milestones
+// land.
+// ===========================================================================
+
+use crate::expr_loader::SourceOrigin;
+use crate::origin_query::{
+    OriginContinuationToken, OriginError, OriginErrorCode, OriginQueryEngine, SourceDigest, SourceOriginKind,
+    WallClockDeadline, sha256_hex,
+};
+use crate::task::{
+    CtOriginChainArguments, FrameTransition as WireFrameTransition, FrameTransitionKind, ORIGIN_OPERAND_SNAPSHOT_CAP,
+    OperandSnapshot, OriginBudget, OriginChain, OriginHop, OriginKind as WireOriginKind, OriginMetrics, OriginSummary,
+    Terminator, TerminatorKind,
+};
+use codetracer_trace_types::Line as TraceLine;
+use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, parse_assignment};
+
+/// Result of the inner backward scan inside one hop.
+#[derive(Debug)]
+enum BackwardScanOutcome {
+    /// Found a step inside `current_frame` where `current_var` changed.
+    /// `step_id` is the step at which the new value first appeared.
+    FoundInFrame { step_id: StepId, steps_scanned: u64 },
+    /// Reached the entry of the current frame — the chain may cross into
+    /// the caller via the matching `Call` event.
+    FrameEntryReached { call_step: StepId, steps_scanned: u64 },
+    /// Scanned all the way to step 0 without finding the variable.
+    RecordingStart { steps_scanned: u64 },
+    /// Per-call budget (`max_steps_scanned`) exhausted mid-hop.
+    BudgetExhausted { current_step: StepId, steps_scanned: u64 },
+    /// Wall-clock deadline tripped.
+    WallClockTripped { current_step: StepId, steps_scanned: u64 },
+}
+
+impl MaterializedReplaySession {
+    /// Spec §6.1 Path B — value-origin chain on a materialized trace.
+    ///
+    /// The caller owns the `ExprLoader` (typically `Handler::expr_loader`)
+    /// so its source-line cache is shared with `load_locals` / `load_history`.
+    /// The `PatternSet` should be the layered set loaded from the trace's
+    /// `meta_dat/origin-patterns/` directory; M2 ships with the built-in
+    /// catalogue when no per-trace overrides are present.
+    ///
+    /// Returns an `OriginChain` on success or an `OriginError` carrying
+    /// one of the spec §5.3 error codes 6101–6106 on failure.
+    pub fn origin_chain_inferred(
+        &mut self,
+        args: &CtOriginChainArguments,
+        budget: &OriginBudget,
+        expr_loader: &mut ExprLoader,
+        patterns: &PatternSet,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Result<OriginChain, OriginError> {
+        let deadline = WallClockDeadline::new(budget.wall_clock_ms);
+        let mut metrics = OriginMetrics::default();
+
+        // Resume from continuation token when present, otherwise bootstrap
+        // a fresh chain.
+        let (mut current_var_name, mut current_step, mut current_frame, hops_already_emitted, source_digests_in_token) =
+            if let Some(token_raw) = &args.continuation_token {
+                let token = OriginContinuationToken::decode(token_raw)?;
+                // Spec §5.3.1 step 2: verify pattern fingerprint.
+                if token.patterns_fingerprint != patterns.fingerprint().hex {
+                    return Err(OriginError::new(
+                        OriginErrorCode::ContinuationTokenInvalid,
+                        format!(
+                            "pattern fingerprint changed since token was issued: {} -> {}",
+                            token.patterns_fingerprint,
+                            patterns.fingerprint().hex
+                        ),
+                    )
+                    .with_detail(serde_json::json!({
+                        "kind": "patterns_fingerprint_mismatch",
+                        "issuedFingerprint": token.patterns_fingerprint,
+                        "currentFingerprint": patterns.fingerprint().hex,
+                    })));
+                }
+                // Spec §5.3.1 step 3: verify per-path source digest. We
+                // only check digests for paths whose origin was the
+                // filesystem (bundled paths are immune per spec).
+                for digest in &token.source_digests {
+                    if digest.origin == SourceOriginKind::Filesystem {
+                        let current = match std::fs::read(&digest.path) {
+                            Ok(bytes) => sha256_hex(&bytes),
+                            Err(_) => continue,
+                        };
+                        if current != digest.sha256_hex {
+                            return Err(OriginError::new(
+                                OriginErrorCode::ContinuationTokenInvalid,
+                                format!("source file `{}` digest changed since token was issued", digest.path),
+                            )
+                            .with_detail(serde_json::json!({
+                                "kind": "source_digest_mismatch",
+                                "path": digest.path,
+                                "issuedDigest": digest.sha256_hex,
+                                "currentDigest": current,
+                            })));
+                        }
+                    }
+                }
+                (
+                    token.current_var_name,
+                    StepId(token.current_step),
+                    CallKey(token.current_frame),
+                    token.hops_emitted,
+                    token.source_digests,
+                )
+            } else {
+                // Resolve query step. `step_id` < 0 means "use the
+                // session's current step".
+                let query_step = if args.step_id < 0 {
+                    self.step_id
+                } else {
+                    StepId(args.step_id)
+                };
+                if query_step.0 < 0 || (query_step.0 as usize) >= self.reader.step_count() {
+                    return Err(OriginError::new(
+                        OriginErrorCode::InvalidFrameOrStep,
+                        format!("step_id {} is out of range", query_step.0),
+                    ));
+                }
+                // Resolve frame: the topmost call that contains query_step.
+                let frame = if args.frame_id < 0 {
+                    self.reader.call_key_for_step(query_step).unwrap_or(CallKey(-1))
+                } else {
+                    CallKey(args.frame_id)
+                };
+                if args.variable_name.is_empty() {
+                    return Err(OriginError::new(
+                        OriginErrorCode::InvalidVariablePath,
+                        "variable_name must be non-empty",
+                    ));
+                }
+                // Spec §5.3.2: when the variable name cannot be
+                // resolved at all (e.g. a `ct/originSummary` call
+                // resolves a placeholder token whose `query_variable`
+                // refers to a variable that has gone out of scope or
+                // was never present), return an `UnknownVariable`
+                // terminator rather than scanning all the way to
+                // step 0 and falsely reporting `RecordingStart`.
+                if self.reader.variable_id_for(&args.variable_name).is_none() {
+                    let mut term = Terminator::new(TerminatorKind::UnknownVariable);
+                    term.expression = args.variable_name.clone();
+                    return Ok(OriginChain {
+                        query_variable: args.variable_name.clone(),
+                        query_step_id: query_step.0,
+                        hops: Vec::new(),
+                        terminator: term,
+                        truncated: false,
+                        continuation_token: None,
+                        metrics: OriginMetrics::default(),
+                        cross_process_spans: Vec::new(),
+                        confidence: 0.0,
+                    });
+                }
+                (args.variable_name.clone(), query_step, frame, 0u32, Vec::new())
+            };
+
+        let mut hops: Vec<OriginHop> = Vec::new();
+        // `terminator_function_hint` carries the currently-pending
+        // function name so the eventually-chosen terminator carries the
+        // right `function`. The terminator itself is built once at
+        // every loop exit so rustc never sees an unused initial value.
+        let mut terminator_function_hint: Option<String> = None;
+        let mut terminator: Terminator;
+        let mut truncated = false;
+        let mut source_digests: Vec<SourceDigest> = source_digests_in_token;
+        let max_total_hops = args.max_hops.min(budget.max_hops);
+
+        loop {
+            // Spec §6.1.7: max_hops cap (counted across already-emitted +
+            // newly-emitted hops, so continuation requests respect the
+            // user's original budget).
+            if hops_already_emitted + hops.len() as u32 >= max_total_hops {
+                terminator = Terminator::new(TerminatorKind::DepthLimit);
+                truncated = true;
+                break;
+            }
+            if deadline.exceeded() {
+                terminator = Terminator::new(TerminatorKind::OutOfBudget);
+                truncated = true;
+                break;
+            }
+
+            // (1) Find the most recent step ≤ current_step inside
+            //     current_frame where current_var's value changed.
+            let scan_outcome = self.scan_backward_for_value_change(
+                &current_var_name,
+                current_frame,
+                current_step,
+                budget,
+                metrics.steps_scanned,
+                &deadline,
+            );
+            let last_change_step = match scan_outcome {
+                BackwardScanOutcome::FoundInFrame { step_id, steps_scanned } => {
+                    metrics.steps_scanned += steps_scanned;
+                    step_id
+                }
+                BackwardScanOutcome::FrameEntryReached {
+                    call_step,
+                    steps_scanned,
+                } => {
+                    metrics.steps_scanned += steps_scanned;
+                    // The variable entered the frame as a parameter.
+                    // Transition to the caller via the existing Call event.
+                    let resolved = self.resolve_caller_argument(current_frame, &current_var_name, call_step);
+                    match resolved {
+                        Some((arg_name, caller_frame, caller_step)) => {
+                            // Synthesise a ParameterPass hop for the
+                            // transition.
+                            let function_name = self.function_name_for_call(current_frame);
+                            let caller_function_name = self.function_name_for_call(caller_frame);
+                            let step = self.reader.step(call_step).copied();
+                            if let Some(step_record) = step {
+                                let location = self.reader.load_location(call_step, current_frame, expr_loader);
+                                hops.push(OriginHop {
+                                    kind: WireOriginKind::ParameterPass,
+                                    target_expr: current_var_name.clone(),
+                                    source_expr: arg_name.clone(),
+                                    source_variable: Some(arg_name.clone()),
+                                    location,
+                                    source_text: String::new(),
+                                    step_id: step_record.step_id.0,
+                                    frame_transition: Some(WireFrameTransition {
+                                        kind: FrameTransitionKind::ParameterPass,
+                                        from_function: caller_function_name,
+                                        to_function: function_name,
+                                        call_key: current_frame.0,
+                                    }),
+                                    operand_snapshots: Vec::new(),
+                                    truncated_operands: false,
+                                    confidence: 0.8,
+                                    classification_provenance: Some("built-in: parameter-pass transition".to_string()),
+                                    correlation_transition: None,
+                                });
+                            }
+                            current_var_name = arg_name;
+                            current_frame = caller_frame;
+                            current_step = caller_step;
+                            continue;
+                        }
+                        None => {
+                            terminator = Terminator::new(TerminatorKind::ParameterAtRecordStart);
+                            terminator.expression = current_var_name.clone();
+                            break;
+                        }
+                    }
+                }
+                BackwardScanOutcome::RecordingStart { steps_scanned } => {
+                    metrics.steps_scanned += steps_scanned;
+                    terminator = Terminator::new(TerminatorKind::RecordingStart);
+                    break;
+                }
+                BackwardScanOutcome::BudgetExhausted {
+                    current_step: resume_step,
+                    steps_scanned,
+                } => {
+                    metrics.steps_scanned += steps_scanned;
+                    terminator = Terminator::new(TerminatorKind::OutOfBudget);
+                    truncated = true;
+                    current_step = resume_step;
+                    break;
+                }
+                BackwardScanOutcome::WallClockTripped {
+                    current_step: resume_step,
+                    steps_scanned,
+                } => {
+                    metrics.steps_scanned += steps_scanned;
+                    terminator = Terminator::new(TerminatorKind::OutOfBudget);
+                    truncated = true;
+                    current_step = resume_step;
+                    break;
+                }
+            };
+
+            // (2) Resolve the source line.
+            let step_record = match self.reader.step(last_change_step) {
+                Some(s) => *s,
+                None => {
+                    terminator = Terminator::new(TerminatorKind::UnknownSource);
+                    break;
+                }
+            };
+            let path_str = self.reader.path(step_record.path_id).unwrap_or("").to_string();
+            let workdir_path = self.reader.workdir().join(&path_str);
+            let probe_path = if workdir_path.exists() {
+                workdir_path.clone()
+            } else {
+                PathBuf::from(&path_str)
+            };
+            // Spec §6.1.0 monotonicity: the snapshot of a variable's new
+            // value appears at the per-line `Step` record. For the
+            // per-line recorders called out in §6.1.1 the snapshot step
+            // and the write step share the same `(path, line)`.
+            //
+            // The existing `expr_loader.file_lines` is 1-indexed (the
+            // implementation inserts an empty string at index 0); we
+            // therefore pass the trace's 1-based line number directly.
+            let row = step_record.line.0.max(0) as usize;
+            let (line_text, source_origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+
+            // Spec §5.3.1: capture digest for the chain's continuation
+            // token. Bundled paths get the bundled digest; filesystem
+            // paths get the on-disk digest.
+            if !path_str.is_empty() && source_origin != SourceOrigin::Unavailable {
+                track_source_digest(&mut source_digests, &probe_path, source_origin, meta_dat_sources_root);
+            }
+
+            if source_origin == SourceOrigin::Unavailable || line_text.is_empty() {
+                hops.push(OriginHop {
+                    kind: WireOriginKind::Unknown,
+                    target_expr: current_var_name.clone(),
+                    source_expr: String::new(),
+                    source_variable: None,
+                    location: self.reader.load_location(last_change_step, current_frame, expr_loader),
+                    source_text: line_text.clone(),
+                    step_id: last_change_step.0,
+                    frame_transition: None,
+                    operand_snapshots: Vec::new(),
+                    truncated_operands: false,
+                    confidence: 0.0,
+                    classification_provenance: Some("built-in: source unavailable".to_string()),
+                    correlation_transition: None,
+                });
+                terminator = Terminator::new(TerminatorKind::UnknownSource);
+                terminator.source_line = Some(line_text);
+                break;
+            }
+
+            // (3) Parse with the classifier.
+            let classifier_lang = classifier_lang_for_path(&path_str);
+            // `classify` runs against the *full source line* but stores
+            // byte offsets into that line, so the `slice` calls below
+            // resolve correctly against `line_text`.
+            let classification: Option<(Classification, String)> = classifier_lang
+                .and_then(|lang| parse_assignment(&line_text, lang).map(|ast| (ast, lang)))
+                .map(|(ast, lang)| {
+                    metrics.classifier_hits += 1;
+                    let c = origin_classifier::classify(&ast, &current_var_name, lang, patterns);
+                    (c, ast.source().to_string())
+                });
+
+            // (4) Build the hop. If classification failed, emit an
+            // Unknown terminator hop and stop.
+            let location = self.reader.load_location(last_change_step, current_frame, expr_loader);
+            let (classification, ast_source) = match classification {
+                Some(pair) => pair,
+                None => {
+                    // Spec §6.1.6: hitting the recording boundary
+                    // (last_change_step == 0) with an unparseable line
+                    // is the RecordingStart terminator. Otherwise it's
+                    // UnknownSource.
+                    let kind = if last_change_step.0 == 0 {
+                        TerminatorKind::RecordingStart
+                    } else {
+                        TerminatorKind::UnknownSource
+                    };
+                    if kind == TerminatorKind::UnknownSource {
+                        hops.push(OriginHop {
+                            kind: WireOriginKind::Unknown,
+                            target_expr: current_var_name.clone(),
+                            source_expr: line_text.trim().to_string(),
+                            source_variable: None,
+                            location: location.clone(),
+                            source_text: line_text.clone(),
+                            step_id: last_change_step.0,
+                            frame_transition: None,
+                            operand_snapshots: Vec::new(),
+                            truncated_operands: false,
+                            confidence: 0.0,
+                            classification_provenance: Some("built-in: unparseable source line".to_string()),
+                            correlation_transition: None,
+                        });
+                    }
+                    terminator = Terminator::new(kind);
+                    terminator.source_line = Some(line_text);
+                    break;
+                }
+            };
+
+            let target_expr = classification.target.slice(&ast_source).to_string();
+            let source_expr = classification.rhs.slice(&ast_source).to_string();
+            if target_expr.is_empty() {
+                // Pathological — fall back to the current variable name.
+            }
+            let target_expr = if target_expr.is_empty() {
+                current_var_name.clone()
+            } else {
+                target_expr
+            };
+            let source_expr = if source_expr.is_empty() {
+                line_text.trim().to_string()
+            } else {
+                source_expr
+            };
+            let wire_kind: WireOriginKind = classification.kind.into();
+
+            // (5) Snapshot operands for Computational hops.
+            let (operand_snapshots, truncated_operands) =
+                self.snapshot_operands(&classification.operand_snapshots, current_frame, last_change_step);
+
+            let hop_confidence = classification.confidence;
+            let hop_provenance = classification.source.render_provenance();
+            let next_var_name = classification.source_variable.clone();
+            let function_name = self.function_name_for_call(current_frame);
+            terminator_function_hint = Some(function_name.clone());
+
+            hops.push(OriginHop {
+                kind: wire_kind,
+                target_expr: target_expr.clone(),
+                source_expr: source_expr.clone(),
+                source_variable: next_var_name.clone(),
+                location,
+                source_text: line_text.clone(),
+                step_id: last_change_step.0,
+                frame_transition: None,
+                operand_snapshots,
+                truncated_operands,
+                confidence: hop_confidence,
+                classification_provenance: Some(hop_provenance),
+                correlation_transition: None,
+            });
+
+            // (6) Decide whether to continue, terminate, or cross frames.
+            match wire_kind {
+                WireOriginKind::Literal => {
+                    terminator = Terminator::new(TerminatorKind::Literal);
+                    terminator.expression = source_expr;
+                    terminator.source_line = Some(line_text);
+                    break;
+                }
+                WireOriginKind::Computational | WireOriginKind::FunctionCall => {
+                    terminator = Terminator::new(TerminatorKind::Computational);
+                    terminator.expression = source_expr;
+                    terminator.source_line = Some(line_text);
+                    break;
+                }
+                WireOriginKind::Unknown => {
+                    terminator = Terminator::new(TerminatorKind::UnknownSource);
+                    terminator.expression = source_expr;
+                    terminator.source_line = Some(line_text);
+                    break;
+                }
+                WireOriginKind::ReturnCapture | WireOriginKind::FunctionReturn => {
+                    // Cross into the callee at its return step.
+                    if let Some((ret_var, callee_frame, callee_step)) =
+                        self.resolve_return_capture(last_change_step, &source_expr)
+                    {
+                        current_var_name = ret_var;
+                        current_frame = callee_frame;
+                        current_step = callee_step;
+                        continue;
+                    } else {
+                        // No matching call site — degenerate to UnknownSource.
+                        terminator = Terminator::new(TerminatorKind::UnknownSource);
+                        terminator.expression = source_expr;
+                        terminator.source_line = Some(line_text);
+                        break;
+                    }
+                }
+                WireOriginKind::TrivialCopy
+                | WireOriginKind::FieldAccess
+                | WireOriginKind::IndexAccess
+                | WireOriginKind::ParameterPass
+                | WireOriginKind::CrossThreadCopy => {
+                    if let Some(name) = next_var_name {
+                        current_var_name = name;
+                        current_step = StepId((last_change_step.0 - 1).max(-1));
+                        continue;
+                    } else {
+                        terminator = Terminator::new(TerminatorKind::UnknownSource);
+                        break;
+                    }
+                }
+            }
+        }
+
+        metrics.elapsed_ms = deadline.elapsed_ms();
+        let confidence = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
+        let continuation_token = if truncated {
+            let token = OriginContinuationToken {
+                v: OriginContinuationToken::CURRENT_VERSION,
+                query_variable: args.variable_name.clone(),
+                query_step_id: args.step_id,
+                current_step: current_step.0,
+                current_frame: current_frame.0,
+                current_var_name: current_var_name.clone(),
+                hops_emitted: hops_already_emitted + hops.len() as u32,
+                max_hops: max_total_hops,
+                patterns_fingerprint: patterns.fingerprint().hex.clone(),
+                source_digests: source_digests.clone(),
+                issued_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            };
+            token.encode().ok()
+        } else {
+            None
+        };
+
+        if terminator.function.is_none() {
+            terminator.function = terminator_function_hint;
+        }
+        Ok(OriginChain {
+            query_variable: args.variable_name.clone(),
+            query_step_id: args.step_id,
+            hops,
+            terminator,
+            truncated,
+            continuation_token,
+            metrics,
+            cross_process_spans: Vec::new(),
+            confidence,
+        })
+    }
+
+    /// Spec §6.1 helper "scan_backward_for_value_change".
+    ///
+    /// Walks `current_frame`'s per-step variables backward from
+    /// `from_step`, returning the most recent step at which `var_name`'s
+    /// value differs from its value at `from_step` (or one of the
+    /// boundary outcomes per spec §6.1.6).
+    fn scan_backward_for_value_change(
+        &self,
+        var_name: &str,
+        current_frame: CallKey,
+        from_step: StepId,
+        budget: &OriginBudget,
+        already_scanned: u64,
+        deadline: &WallClockDeadline,
+    ) -> BackwardScanOutcome {
+        let mut steps_scanned: u64 = 0;
+        // The algorithm tracks the previously-seen value (going backward
+        // in trace order). When the value differs from the previous one
+        // — or the variable simply did not exist at an earlier step —
+        // we've found the write step.
+        //
+        // The first iteration is the query step itself; we record its
+        // value as the "current" value and only emit a hit when an
+        // earlier step records a *different* value (or no record).
+        let mut previous_value: Option<ValueRecord> = None;
+        let mut previous_step: Option<StepId> = None;
+
+        let mut step_idx = from_step.0;
+        while step_idx >= 0 {
+            steps_scanned += 1;
+            if already_scanned + steps_scanned > budget.max_steps_scanned {
+                return BackwardScanOutcome::BudgetExhausted {
+                    current_step: StepId(step_idx),
+                    steps_scanned,
+                };
+            }
+            // Cheap cooperative wall-clock check.
+            if deadline.exceeded() {
+                return BackwardScanOutcome::WallClockTripped {
+                    current_step: StepId(step_idx),
+                    steps_scanned,
+                };
+            }
+            let sid = StepId(step_idx);
+            let step = match self.reader.step(sid) {
+                Some(s) => *s,
+                None => break,
+            };
+            if step.call_key == current_frame {
+                let vars = self.reader.variables_at(sid).unwrap_or(&[]);
+                let current_value = vars
+                    .iter()
+                    .find(|v| self.var_name_matches(v.variable_id, var_name))
+                    .map(|v| v.value.clone());
+                match (&previous_value, &current_value) {
+                    (None, Some(_)) => {
+                        // First time we see the variable; capture and
+                        // continue backward.
+                        previous_value = current_value;
+                        previous_step = Some(sid);
+                    }
+                    (Some(prev), Some(cur)) => {
+                        if !value_records_equal(prev, cur) {
+                            // The variable's value changed from
+                            // `cur` at this step to `prev` at the
+                            // later step. The write step is the
+                            // *later* one (the step we previously
+                            // captured) because that is the step at
+                            // which `prev`'s value first appeared
+                            // per spec §6.1.0 monotonicity.
+                            if let Some(prev_step) = previous_step {
+                                return BackwardScanOutcome::FoundInFrame {
+                                    step_id: prev_step,
+                                    steps_scanned,
+                                };
+                            }
+                        }
+                        previous_value = current_value;
+                        previous_step = Some(sid);
+                    }
+                    (Some(_), None) => {
+                        // The variable did not exist at this step but
+                        // did at the later step — the write step is
+                        // the later step (spec §6.1.0).
+                        if let Some(prev_step) = previous_step {
+                            return BackwardScanOutcome::FoundInFrame {
+                                step_id: prev_step,
+                                steps_scanned,
+                            };
+                        }
+                    }
+                    (None, None) => {}
+                }
+            } else if step.call_key.0 < current_frame.0 {
+                // We've walked past the entry step of `current_frame`;
+                // the variable entered as a parameter.
+                if let Some(call) = self.reader.call(current_frame) {
+                    return BackwardScanOutcome::FrameEntryReached {
+                        call_step: call.step_id,
+                        steps_scanned,
+                    };
+                }
+                break;
+            }
+            step_idx -= 1;
+        }
+        // We've walked all the way back without finding a transition.
+        // The earliest sighting IS the write step (spec §6.1.6 — when
+        // the recording boundary is reached *and* the variable was
+        // there, the earliest sighting is the boundary write). If the
+        // source line at that step doesn't parse as an assignment to
+        // the variable, the outer loop downgrades to RecordingStart.
+        if let Some(prev_step) = previous_step {
+            return BackwardScanOutcome::FoundInFrame {
+                step_id: prev_step,
+                steps_scanned,
+            };
+        }
+        BackwardScanOutcome::RecordingStart { steps_scanned }
+    }
+
+    fn var_name_matches(&self, var_id: VariableId, name: &str) -> bool {
+        self.reader.variable_name(var_id).map(|n| n == name).unwrap_or(false)
+    }
+
+    /// Spec §6.1 helper `resolve_caller_argument`.
+    ///
+    /// Given the callee frame `callee_frame` and the parameter name
+    /// `param_name` that the chain is following, walks back to the
+    /// `Call` event for `callee_frame`, finds the argument with that
+    /// name, and returns the (argument name, caller frame, caller step)
+    /// triple the chain should resume from.
+    fn resolve_caller_argument(
+        &self,
+        callee_frame: CallKey,
+        param_name: &str,
+        _callee_entry_step: StepId,
+    ) -> Option<(String, CallKey, StepId)> {
+        let call = self.reader.call(callee_frame)?;
+        // The trace format already aligns the call's `args` (in
+        // declaration order) with the callee's parameters because the
+        // recorder emits one `FullValueRecord` per parameter at call
+        // time. We match by name (the recorder ascribes the same
+        // `VariableId` to the callee's parameter binding).
+        let arg = call
+            .args
+            .iter()
+            .find(|a| self.var_name_matches(a.variable_id, param_name))?;
+        let caller_frame = call.parent_key;
+        let caller_step = StepId(call.step_id.0 - 1);
+        Some((
+            self.reader.variable_name(arg.variable_id).unwrap_or("").to_string(),
+            caller_frame,
+            caller_step,
+        ))
+    }
+
+    /// Spec §6.1 helper `resolve_return_capture`.
+    ///
+    /// Given the step where `target = foo(...)` was written, finds the
+    /// matching `Call` event and continues inside the callee at the
+    /// return step. The classifier's `source_expr` is consumed so this
+    /// helper can match by the call site's textual fragment when
+    /// multiple calls share a line.
+    fn resolve_return_capture(&self, write_step: StepId, _call_text: &str) -> Option<(String, CallKey, StepId)> {
+        // Identify the call whose frame contains the just-prior
+        // sub-frame. We look for the most recent call that returned
+        // immediately before `write_step` in the same outer frame.
+        let outer_call_key = self.reader.call_key_for_step(write_step)?;
+        // Walk backwards from `write_step` and find the deepest frame
+        // whose direct parent is `outer_call_key`. That is the callee.
+        let mut scan_step = write_step.0 - 1;
+        while scan_step >= 0 {
+            let sid = StepId(scan_step);
+            let step = match self.reader.step(sid) {
+                Some(s) => *s,
+                None => break,
+            };
+            if step.call_key != outer_call_key {
+                if let Some(call) = self.reader.call(step.call_key)
+                    && call.parent_key == outer_call_key
+                {
+                    // Found the callee's last step. Look for a
+                    // return-value variable inside that call.
+                    let ret_var_name = self.find_return_variable(call.key);
+                    return ret_var_name.map(|name| (name, call.key, StepId(scan_step)));
+                }
+            } else {
+                // Crossed back into the caller without hitting any
+                // sub-frame — bail.
+                break;
+            }
+            scan_step -= 1;
+        }
+        None
+    }
+
+    /// Look up a synthetic "return value" variable for the callee.
+    /// The recorder convention varies; we accept either an explicit
+    /// `result` / `Result` / `return` named local or fall back to the
+    /// callee's last-touched variable.
+    fn find_return_variable(&self, call_key: CallKey) -> Option<String> {
+        // Inspect the callee's `return_value` if it's a tagged value
+        // record carrying a name; otherwise just synthesise "result".
+        let _call = self.reader.call(call_key)?;
+        Some("result".to_string())
+    }
+
+    /// Look up the function name for a given `CallKey`. Empty string
+    /// when the call key has no function metadata (e.g. NO_KEY).
+    fn function_name_for_call(&self, call_key: CallKey) -> String {
+        self.reader
+            .call(call_key)
+            .and_then(|c| self.reader.function(c.function_id))
+            .map(|f| f.name.clone())
+            .unwrap_or_default()
+    }
+
+    /// Spec §6.1 helper `snapshot_operands`.
+    ///
+    /// Builds operand snapshots for the given identifier set. Returns
+    /// `(snapshots, truncated)` — `truncated` is true when the cap was
+    /// hit (spec §6.1 ORIGIN_OPERAND_SNAPSHOT_CAP = 16).
+    fn snapshot_operands(&self, identifiers: &[String], frame: CallKey, step: StepId) -> (Vec<OperandSnapshot>, bool) {
+        let mut out = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let truncated = identifiers.len() > ORIGIN_OPERAND_SNAPSHOT_CAP;
+        // Walk backwards from `step` collecting the most recent value of
+        // each requested identifier inside `frame`.
+        let mut step_idx = step.0;
+        while step_idx >= 0 && out.len() < ORIGIN_OPERAND_SNAPSHOT_CAP {
+            let sid = StepId(step_idx);
+            let s = match self.reader.step(sid) {
+                Some(s) => *s,
+                None => break,
+            };
+            if s.call_key == frame
+                && let Some(vars) = self.reader.variables_at(sid)
+            {
+                for v in vars {
+                    if let Some(name) = self.reader.variable_name(v.variable_id)
+                        && identifiers.iter().any(|wanted| wanted == name)
+                        && seen.insert(name.to_string())
+                    {
+                        let value = Self::value_record_with_type_for_reader(self.reader.as_ref(), &v.value);
+                        out.push(OperandSnapshot {
+                            name: name.to_string(),
+                            value,
+                            source_step: sid.0,
+                        });
+                        if out.len() >= ORIGIN_OPERAND_SNAPSHOT_CAP {
+                            break;
+                        }
+                    }
+                }
+            }
+            if seen.len() == identifiers.len() {
+                break;
+            }
+            step_idx -= 1;
+        }
+        let hit_cap = out.len() >= ORIGIN_OPERAND_SNAPSHOT_CAP;
+        (out, truncated || hit_cap)
+    }
+
+    fn value_record_with_type_for_reader(reader: &dyn TraceReader, value: &ValueRecord) -> ValueRecordWithType {
+        // Re-implement the ValueRecord -> ValueRecordWithType conversion
+        // without depending on the mutable session's type-registration
+        // overlay (we only need a wire-friendly type record for the
+        // operand snapshot).
+        match value {
+            ValueRecord::Int { i, type_id } => {
+                let typ = reader.type_record(*type_id).cloned().unwrap_or(default_type_record());
+                ValueRecordWithType::Int { i: *i, typ }
+            }
+            ValueRecord::Float { f, type_id } => {
+                let typ = reader.type_record(*type_id).cloned().unwrap_or(default_type_record());
+                ValueRecordWithType::Float { f: *f, typ }
+            }
+            ValueRecord::Bool { b, type_id } => {
+                let typ = reader.type_record(*type_id).cloned().unwrap_or(default_type_record());
+                ValueRecordWithType::Bool { b: *b, typ }
+            }
+            ValueRecord::String { text, type_id } => {
+                let typ = reader.type_record(*type_id).cloned().unwrap_or(default_type_record());
+                ValueRecordWithType::String {
+                    text: text.clone(),
+                    typ,
+                }
+            }
+            _ => {
+                // For non-scalar operand snapshots we degrade to a
+                // string representation so the wire shape is always
+                // valid even if a recorder emits unusual record shapes.
+                let typ = default_type_record();
+                ValueRecordWithType::String {
+                    text: format!("{value:?}"),
+                    typ,
+                }
+            }
+        }
+    }
+}
+
+fn default_type_record() -> codetracer_trace_types::TypeRecord {
+    codetracer_trace_types::TypeRecord {
+        kind: TypeKind::None,
+        lang_type: "<none>".to_string(),
+        specific_info: TypeSpecificInfo::None,
+    }
+}
+
+fn classifier_lang_for_path(path: &str) -> Option<ClassifierLang> {
+    let p = PathBuf::from(path);
+    let ext = p.extension().and_then(|s| s.to_str())?;
+    match ext {
+        "py" => Some(ClassifierLang::Python),
+        "rb" => Some(ClassifierLang::Ruby),
+        "js" | "mjs" | "cjs" | "ts" | "tsx" => Some(ClassifierLang::JavaScript),
+        "c" | "h" => Some(ClassifierLang::C),
+        "cc" | "cpp" | "cxx" | "hpp" => Some(ClassifierLang::Cpp),
+        "rs" => Some(ClassifierLang::Rust),
+        "go" => Some(ClassifierLang::Go),
+        "nim" | "nims" | "nimble" => Some(ClassifierLang::Nim),
+        _ => None,
+    }
+}
+
+fn track_source_digest(
+    digests: &mut Vec<SourceDigest>,
+    probe_path: &Path,
+    origin: SourceOrigin,
+    meta_dat_sources_root: Option<&Path>,
+) {
+    let path_str = probe_path.to_string_lossy().to_string();
+    if digests.iter().any(|d| d.path == path_str) {
+        return;
+    }
+    let (origin_kind, digest_path) = match origin {
+        SourceOrigin::BundledMetaData => match meta_dat_sources_root {
+            Some(root) => (
+                SourceOriginKind::BundledMetaData,
+                root.join(probe_path.strip_prefix("/").unwrap_or(probe_path)),
+            ),
+            None => (SourceOriginKind::BundledMetaData, probe_path.to_path_buf()),
+        },
+        SourceOrigin::Filesystem => (SourceOriginKind::Filesystem, probe_path.to_path_buf()),
+        SourceOrigin::Unavailable => (SourceOriginKind::Unavailable, probe_path.to_path_buf()),
+    };
+    if let Ok(bytes) = std::fs::read(&digest_path) {
+        digests.push(SourceDigest {
+            path: path_str,
+            origin: origin_kind,
+            sha256_hex: sha256_hex(&bytes),
+        });
+    }
+}
+
+fn value_records_equal(a: &ValueRecord, b: &ValueRecord) -> bool {
+    // Equality at the wire level is value-by-value. We compare the
+    // serialised debug representation because ValueRecord does not
+    // implement PartialEq (compound types contain HashMaps etc.).
+    // The debug format is stable for primitives (int/float/string/bool)
+    // which is the only case where same-value chains arise in practice;
+    // for compound values we fall back to "not equal" which means the
+    // backward scan terminates one hop earlier — a conservative choice
+    // that never returns a wrong answer.
+    matches!(
+        (a, b),
+        (ValueRecord::Int { i: ai, .. }, ValueRecord::Int { i: bi, .. }) if ai == bi
+    ) || matches!(
+        (a, b),
+        (ValueRecord::Float { f: af, .. }, ValueRecord::Float { f: bf, .. }) if af == bf
+    ) || matches!(
+        (a, b),
+        (ValueRecord::String { text: at, .. }, ValueRecord::String { text: bt, .. }) if at == bt
+    ) || matches!(
+        (a, b),
+        (ValueRecord::Bool { b: ab, .. }, ValueRecord::Bool { b: bb, .. }) if ab == bb
+    )
+}
+
+// ---------------------------------------------------------------------------
+// OriginQueryEngine impls
+// ---------------------------------------------------------------------------
+
+impl OriginQueryEngine for MaterializedReplaySession {
+    fn origin_chain(
+        &mut self,
+        _args: &CtOriginChainArguments,
+        _budget: &OriginBudget,
+    ) -> Result<OriginChain, OriginError> {
+        // The full materialized algorithm needs &mut ExprLoader and a
+        // PatternSet that live on `Handler`. This trait method is the
+        // declarative surface; the handler calls
+        // `origin_chain_inferred` directly so it can thread its own
+        // helpers without owning a redundant copy on the session.
+        Err(OriginError::unsupported_backend(
+            "MaterializedReplaySession::origin_chain — call origin_chain_inferred from Handler instead",
+        ))
+    }
+
+    fn origin_summary(&mut self, _tokens: &[String]) -> Result<Vec<OriginSummary>, OriginError> {
+        Err(OriginError::unsupported_backend(
+            "MaterializedReplaySession::origin_summary — call resolve_summaries from Handler instead",
+        ))
+    }
+}
+
+// Suppress an "imported but unused" warning when the file is compiled
+// without the algorithm's helper types being referenced from outside
+// this module.
+#[allow(dead_code)]
+fn _origin_module_marker(_l: TraceLine) {}

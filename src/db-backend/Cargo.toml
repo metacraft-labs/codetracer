@@ -45,6 +45,17 @@ codetracer_trace_reader = { path = "../../../codetracer-trace-format/codetracer_
 codetracer_trace_writer = { path = "../../../codetracer-trace-format/codetracer_trace_writer" }
 codetracer_ctfs = { path = "../../../codetracer-trace-format/codetracer_ctfs" }
 codetracer_trace_writer_nim = { path = "../../../codetracer-trace-format/codetracer_trace_writer_nim", optional = true }
+# Value Origin Tracking classifier (M1). The db-backend is the only
+# consumer at replay time — recorders do NOT depend on this crate
+# (per Value-Origin-Tracking GUI spec §7 and milestones M1, M2).
+origin-classifier = { path = "../../libs/origin-classifier" }
+# SHA-256 hashing for OriginContinuationToken source-digest verification
+# (spec §5.3.1). M1 already depends on `sha2` transitively but the
+# db-backend uses the digest directly so we wire it explicitly.
+sha2 = "0.10"
+# base64url encoding for the opaque continuation token payload
+# (spec §5.3.1 "opaque base64url JSON").
+base64 = "0.22"
 cbor4ii = { version = "1.0.0", features = ["serde1", "use_std"] }
 num-bigint = "0.4.6"
 chrono = "0.4.41"

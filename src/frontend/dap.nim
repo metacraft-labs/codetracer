@@ -127,6 +127,10 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtLiveRestoreAt: "ct/live-restore-at",
   CtMcrLiveStep: "ct/mcr-live-step",
   CtSeekToGeid: "ct/seek-to-geid",
+  # Value Origin Tracking (M2) — the backend emits an event alongside the
+  # `ct/originChain` response so frontends can react to lazy continuations
+  # without re-issuing the request (spec §5.2).
+  CtUpdatedOriginChain: "ct/updated-origin-chain",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}

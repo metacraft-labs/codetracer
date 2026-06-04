@@ -244,6 +244,13 @@ pub struct Variable {
     // for db traces: usually NO_ADDRESS = -1
     // used for now for rr traces
     pub address: i64,
+    /// Per spec §3.2.3, every value-bearing response carries a per-value
+    /// `OriginSummary`. For `ct/load-locals` the summary is computed
+    /// eagerly (see `Handler::build_origin_summary_for_local`). Omitted
+    /// from the wire when not populated so legacy consumers stay
+    /// compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_summary: Option<OriginSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -676,6 +683,15 @@ pub struct FlowStep {
     pub after_values: HashMap<String, Value>,
     pub expr_order: Vec<String>,
     pub events: Vec<FlowEvent>,
+    /// Per spec §3.2.3, Omniscience-Flow overlay annotations carry a
+    /// per-annotated-value `OriginSummary`. Keyed by variable name to
+    /// match `before_values`/`after_values`. Each summary covers the
+    /// origin of the after-value at this flow step (i.e. what the
+    /// editor renders next to the annotation). On M2 (materialized
+    /// trace, no omniscient DB) these are placeholders (per the
+    /// §3.2.3 V1 defaults table).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub origin_summaries: HashMap<String, OriginSummary>,
 }
 
 // for now not sending last step id for line visit
@@ -701,6 +717,7 @@ impl FlowStep {
             after_values: HashMap::default(),
             expr_order: vec![],
             events,
+            origin_summaries: HashMap::default(),
         }
     }
 }
@@ -1250,6 +1267,15 @@ pub struct HistoryResult {
     pub value: Value,
     pub time: u64,
     pub description: String,
+    /// Per spec §3.2.3 the value-history popover entries carry a
+    /// per-entry origin summary. Each summary is the origin of *that*
+    /// historic value (not the current value). On a materialized trace
+    /// without an omniscient DB (M2 default), these are emitted as
+    /// placeholders (`is_placeholder: true`, non-null
+    /// `placeholder_token`) — the frontend resolves them in batches
+    /// via `ct/originSummary` (spec §5.3.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_summary: Option<OriginSummary>,
 }
 
 impl HistoryResult {
@@ -1264,6 +1290,7 @@ impl HistoryResult {
             value: val,
             time: time.as_secs(),
             description: name,
+            origin_summary: None,
         }
     }
 }
@@ -1286,6 +1313,394 @@ impl HistoryUpdate {
             finish: true,
         }
     }
+}
+
+// ===========================================================================
+// Value Origin Tracking — wire types (M2).
+//
+// Mirrors the canonical types in spec §4.1 "Core types" of
+// `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md` and
+// the DAP protocol in §5. The classifier-side `OriginKind` lives in the
+// `origin-classifier` crate; here we keep an independent wire enum so the
+// JSON-camelCase surface is stable independently of internal classifier
+// renames. Conversion is implemented in `origin_query.rs`.
+// ===========================================================================
+
+/// Arguments for `ct/originChain` (spec §5.3 "Request").
+///
+/// The wire shape carries both the high-level query (variable + step) and
+/// per-request budget knobs (`max_hops`, `lazy`). Field names match the
+/// camelCase rendering the frontend already serialises.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct CtOriginChainArguments {
+    /// The variable / expression to query.  V1 is identifier-only; dotted
+    /// paths are reserved for M3.
+    pub variable_name: String,
+    /// Reserved for V1 — present so dotted paths can be added without a
+    /// wire break. Empty means "use `variable_name` verbatim".
+    #[serde(default)]
+    pub variable_path: Vec<String>,
+    /// Optional DAP frame id; absent or negative means "topmost frame".
+    #[serde(default = "default_no_frame")]
+    pub frame_id: i64,
+    /// Optional StepId; absent or negative means "current step".
+    #[serde(default = "default_no_step")]
+    pub step_id: i64,
+    /// Optional DAP thread id (single-thread today).
+    #[serde(default)]
+    pub thread_id: i64,
+    /// Maximum hops to return in this batch. Spec §6.1 numerics: 16.
+    #[serde(default = "default_max_hops")]
+    pub max_hops: u32,
+    /// If true, server may return early with a continuation token (spec
+    /// §5.3.1).
+    #[serde(default)]
+    pub lazy: bool,
+    /// Opaque base64url JSON resume cursor. When set, the server resumes
+    /// the chain from the cursor instead of re-querying.
+    #[serde(default)]
+    pub continuation_token: Option<String>,
+    /// Reserved session id for multi-`.ct` sessions (M29). Empty in V1.
+    #[serde(default)]
+    pub session_id: String,
+    /// If false, skip the source-line classifier and only follow
+    /// Assignment events. Defaults to true.
+    #[serde(default = "default_true")]
+    pub classify_source: bool,
+}
+
+fn default_no_frame() -> i64 {
+    NO_KEY_I64
+}
+fn default_no_step() -> i64 {
+    NO_STEP_ID
+}
+fn default_max_hops() -> u32 {
+    DEFAULT_ORIGIN_MAX_HOPS
+}
+fn default_true() -> bool {
+    true
+}
+
+const NO_KEY_I64: i64 = -1;
+/// Spec §6.1.7 numerics: 16 is the V1 default.
+pub const DEFAULT_ORIGIN_MAX_HOPS: u32 = 16;
+/// Conservative default for the scan-step cap; high enough to never trip
+/// on the canonical fixtures but low enough to surface the budget knob in
+/// integration tests.
+pub const DEFAULT_ORIGIN_MAX_STEPS_SCANNED: u64 = 100_000;
+/// Conservative wall-clock cap. The classifier itself is microsecond-cheap
+/// so the budget normally trips first via `max_steps_scanned`.
+pub const DEFAULT_ORIGIN_WALL_CLOCK_MS: u32 = 5_000;
+/// Snapshot cap for Computational hops (spec §6.1 `snapshot_operands`).
+pub const ORIGIN_OPERAND_SNAPSHOT_CAP: usize = 16;
+
+/// Per-request budget honoured by the backward scan (spec §6.1.7).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct OriginBudget {
+    pub max_hops: u32,
+    pub wall_clock_ms: u32,
+    pub max_steps_scanned: u64,
+}
+
+impl Default for OriginBudget {
+    fn default() -> Self {
+        OriginBudget {
+            max_hops: DEFAULT_ORIGIN_MAX_HOPS,
+            wall_clock_ms: DEFAULT_ORIGIN_WALL_CLOCK_MS,
+            max_steps_scanned: DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
+        }
+    }
+}
+
+/// Wire-side origin kind. Mirrors `origin_classifier::OriginKind` plus
+/// `FunctionReturn` (returned by the materialised algorithm distinct from
+/// the classifier's `ReturnCapture` for cases where the chain crosses a
+/// frame boundary without an explicit `await`). The wire enum is the
+/// closed type-space carried by every `OriginHop`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OriginKind {
+    TrivialCopy,
+    FieldAccess,
+    IndexAccess,
+    Computational,
+    FunctionCall,
+    Literal,
+    /// Result of `await`/explicit return capture (`x = foo()`).
+    ReturnCapture,
+    /// Distinct alias of `ReturnCapture` carried when the algorithm
+    /// re-emits the hop on the callee side. Reserved so future
+    /// implementations may render them differently.
+    FunctionReturn,
+    /// Hop crosses into a callee via a parameter binding.
+    ParameterPass,
+    /// Hop crosses a thread boundary (RR/MCR backends — surfaced now).
+    CrossThreadCopy,
+    /// Garbled / unparseable line.
+    Unknown,
+}
+
+impl From<origin_classifier_kind_alias::OriginKind> for OriginKind {
+    fn from(value: origin_classifier_kind_alias::OriginKind) -> Self {
+        use origin_classifier_kind_alias::OriginKind as Src;
+        match value {
+            Src::TrivialCopy => OriginKind::TrivialCopy,
+            Src::FieldAccess => OriginKind::FieldAccess,
+            Src::IndexAccess => OriginKind::IndexAccess,
+            Src::Computational => OriginKind::Computational,
+            Src::FunctionCall => OriginKind::FunctionCall,
+            Src::Literal => OriginKind::Literal,
+            Src::ReturnCapture => OriginKind::ReturnCapture,
+            Src::ParameterPass => OriginKind::ParameterPass,
+            Src::CrossThread => OriginKind::CrossThreadCopy,
+            Src::Unknown => OriginKind::Unknown,
+        }
+    }
+}
+
+/// Tiny module-alias so the `From` impl above does not bloat the
+/// `use` block at the top of the file (the classifier crate is the only
+/// caller).
+pub(crate) mod origin_classifier_kind_alias {
+    pub use origin_classifier::OriginKind;
+}
+
+/// Wire-side terminator kind (spec §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminatorKind {
+    Literal,
+    Computational,
+    ParameterAtRecordStart,
+    ReadFromExternal,
+    RecordingStart,
+    UnknownSource,
+    UnknownVariable,
+    DepthLimit,
+    OutOfBudget,
+}
+
+/// Closed terminator descriptor surfaced in `OriginChain.terminator`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct Terminator {
+    pub kind: TerminatorKind,
+    /// Terminator expression (computational RHS / literal text / parameter
+    /// descriptor / external descriptor). Empty when the chain ended
+    /// without parsing a terminator hop.
+    #[serde(default)]
+    pub expression: String,
+    /// Function containing the terminator, when known.
+    #[serde(default)]
+    pub function: Option<String>,
+    /// Source line text of the terminator hop, when known.
+    #[serde(default)]
+    pub source_line: Option<String>,
+}
+
+impl Terminator {
+    pub fn new(kind: TerminatorKind) -> Self {
+        Terminator {
+            kind,
+            expression: String::new(),
+            function: None,
+            source_line: None,
+        }
+    }
+}
+
+/// One operand-value snapshot attached to a Computational hop (spec §6.1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct OperandSnapshot {
+    pub name: String,
+    pub value: ValueRecordWithType,
+    pub source_step: i64,
+}
+
+/// Per-hop frame-transition descriptor (spec §4.1 `FrameTransition`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct FrameTransition {
+    pub kind: FrameTransitionKind,
+    pub from_function: String,
+    pub to_function: String,
+    pub call_key: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FrameTransitionKind {
+    ParameterPass,
+    ReturnCapture,
+}
+
+/// Reserved for M29 cross-process spans (spec §4.4). Carried so the wire
+/// shape never breaks when M29 lands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct CrossProcessSpan {
+    pub from_process: String,
+    pub to_process: String,
+    pub correlator: String,
+}
+
+/// Reserved for M29 correlation-transition metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct CorrelationTransition {
+    pub correlator: String,
+    pub channel: String,
+}
+
+/// One hop in a value-origin chain (spec §4.1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct OriginHop {
+    pub kind: OriginKind,
+    pub target_expr: String,
+    pub source_expr: String,
+    pub source_variable: Option<String>,
+    pub location: Location,
+    pub source_text: String,
+    pub step_id: i64,
+    #[serde(default)]
+    pub frame_transition: Option<FrameTransition>,
+    #[serde(default)]
+    pub operand_snapshots: Vec<OperandSnapshot>,
+    #[serde(default)]
+    pub truncated_operands: bool,
+    pub confidence: f32,
+    /// Classifier provenance string (`built-in: ...` / `personal: ...` /
+    /// `trace-local: ...` / `embedded: <lib>: ...`). None for synthesised
+    /// hops (`unknown` terminators).
+    #[serde(default)]
+    pub classification_provenance: Option<String>,
+    #[serde(default)]
+    pub correlation_transition: Option<CorrelationTransition>,
+}
+
+/// Per-chain metrics returned alongside the hops (spec §4.1 `metrics`).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct OriginMetrics {
+    pub steps_scanned: u64,
+    pub elapsed_ms: u64,
+    pub classifier_hits: u32,
+}
+
+/// The full origin chain (spec §4.1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct OriginChain {
+    pub query_variable: String,
+    pub query_step_id: i64,
+    pub hops: Vec<OriginHop>,
+    pub terminator: Terminator,
+    pub truncated: bool,
+    #[serde(default)]
+    pub continuation_token: Option<String>,
+    #[serde(default)]
+    pub metrics: OriginMetrics,
+    /// Reserved for M29; always empty in M2.
+    #[serde(default)]
+    pub cross_process_spans: Vec<CrossProcessSpan>,
+    /// Minimum per-hop confidence; see spec §6.1.5.
+    pub confidence: f32,
+}
+
+impl OriginChain {
+    pub fn terminator_only(terminator: TerminatorKind, query_variable: &str, query_step_id: i64) -> Self {
+        OriginChain {
+            query_variable: query_variable.to_string(),
+            query_step_id,
+            hops: Vec::new(),
+            terminator: Terminator::new(terminator),
+            truncated: false,
+            continuation_token: None,
+            metrics: OriginMetrics::default(),
+            cross_process_spans: Vec::new(),
+            confidence: 0.0,
+        }
+    }
+}
+
+/// Compact summary attached to every value-bearing response (spec §4.1
+/// `OriginSummary`). Powers the inline badge in §3.2.1 / §3.2.3.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct OriginSummary {
+    pub terminator_kind: TerminatorKindWire,
+    pub terminator_expr: String,
+    pub terminator_function: Option<String>,
+    pub hop_count: u32,
+    pub confidence: f32,
+    pub is_placeholder: bool,
+    pub placeholder_token: Option<String>,
+}
+
+/// Wire-side default-able terminator kind so `OriginSummary::default()` is
+/// well-defined (placeholders).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminatorKindWire {
+    #[default]
+    UnknownSource,
+    Literal,
+    Computational,
+    ParameterAtRecordStart,
+    ReadFromExternal,
+    RecordingStart,
+    UnknownVariable,
+    DepthLimit,
+    OutOfBudget,
+}
+
+impl From<TerminatorKind> for TerminatorKindWire {
+    fn from(k: TerminatorKind) -> Self {
+        match k {
+            TerminatorKind::Literal => TerminatorKindWire::Literal,
+            TerminatorKind::Computational => TerminatorKindWire::Computational,
+            TerminatorKind::ParameterAtRecordStart => TerminatorKindWire::ParameterAtRecordStart,
+            TerminatorKind::ReadFromExternal => TerminatorKindWire::ReadFromExternal,
+            TerminatorKind::RecordingStart => TerminatorKindWire::RecordingStart,
+            TerminatorKind::UnknownSource => TerminatorKindWire::UnknownSource,
+            TerminatorKind::UnknownVariable => TerminatorKindWire::UnknownVariable,
+            TerminatorKind::DepthLimit => TerminatorKindWire::DepthLimit,
+            TerminatorKind::OutOfBudget => TerminatorKindWire::OutOfBudget,
+        }
+    }
+}
+
+/// Args for the batch placeholder-fill endpoint `ct/originSummary`
+/// (spec §5.3.2).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct CtOriginSummaryArguments {
+    pub tokens: Vec<String>,
+}
+
+/// Response for `ct/originSummary` — parallel-array of filled summaries.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct CtOriginSummaryResponse {
+    pub summaries: Vec<OriginSummary>,
+}
+
+/// Response body wrapper for `ct/load-locals` extended with origin
+/// summaries (spec §3.2.3).
+#[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CtLoadLocalsWithOriginsBody {
+    pub locals: Vec<Variable>,
+    /// Parallel array of per-variable origin summaries. Same length as
+    /// `locals`. Eager-mode entries are fully populated; placeholder-mode
+    /// entries carry only `is_placeholder` + `placeholder_token`.
+    #[serde(default)]
+    pub origin_summaries: Vec<OriginSummary>,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
