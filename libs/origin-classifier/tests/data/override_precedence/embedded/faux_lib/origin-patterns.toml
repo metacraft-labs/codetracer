@@ -1,0 +1,9 @@
+# Embedded library pattern (layer 3 per spec §7.4).
+# Treats `forward($value)` as a TrivialCopy forwarder whose
+# continuation is the wrapped argument.
+
+[[forwarder]]
+match = "forward($value)"
+continuation = "$value"
+language = "python"
+description = "faux_lib.forward returns its argument unchanged"

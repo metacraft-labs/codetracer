@@ -1,0 +1,10 @@
+# Test fixture for `test_classifier_continuation_capture_validation`:
+# the continuation `$undeclared` references a capture name that is not
+# bound by the matcher. The loader MUST reject this at load time and
+# surface the file path + rule index in the diagnostic
+# (spec §7.4 "Pattern file schema").
+
+[[forwarder]]
+match = "wrapper($x)"
+continuation = "$undeclared"
+description = "Intentional bad rule for the continuation-validation test"

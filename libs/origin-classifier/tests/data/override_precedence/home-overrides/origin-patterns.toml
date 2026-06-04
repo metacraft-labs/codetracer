@@ -1,0 +1,9 @@
+# Personal override (layer 2 per spec §7.4). Same call shape as the
+# embedded faux_lib rule, but with a distinct description so the
+# precedence test can assert which layer won.
+
+[[forwarder]]
+match = "forward($value)"
+continuation = "$value"
+language = "python"
+description = "Personal override — forward() forwards its argument"

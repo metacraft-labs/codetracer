@@ -1,0 +1,20 @@
+# Test fixture for `test_classifier_project_pattern_overrides`.
+# Exercises spec §7.4 schema rows for trivial_copy + computational
+# with an explicit `continuation` field.
+
+# ActiveRecord-style accessor (Ruby) — treat `record.attributes[key]`
+# as a trivial copy with continuation `record`.
+[[trivial_copy]]
+match = "$base.attributes[$_]"
+continuation = "$base"
+language = "ruby"
+description = "ActiveRecord attribute accessor"
+
+# Python computational override: anything routed through
+# `validators.normalize($x)` should be Computational rather than a
+# default TrivialCopy. No continuation (computational uses operand
+# snapshots).
+[[computational]]
+match = "validators.normalize($_)"
+language = "python"
+description = "Single-arg call that transforms its input"

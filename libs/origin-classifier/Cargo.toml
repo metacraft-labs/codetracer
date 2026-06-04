@@ -1,0 +1,44 @@
+[package]
+name = "origin-classifier"
+version = "0.1.0"
+edition = "2021"
+description = "Source-language assignment classifier for CodeTracer's Value Origin Tracking feature (spec §7)."
+license = "MIT OR Apache-2.0"
+
+# The classifier is consumed at replay time by the db-backend; recorders
+# do NOT depend on it. See codetracer-specs/Planned-Features/
+# Value-Origin-Tracking.milestones.org §M1 and GUI spec §7.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Tree-sitter 0.25 is the version used by the in-tree tree-sitter-nim
+# crate (libs/tree-sitter-nim/bindings/rust/Cargo.toml); pinning matches
+# so the linker sees a single tree-sitter ABI across the workspace.
+tree-sitter = "0.25"
+tree-sitter-python = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-go = "0.23"
+# Nim grammar is shipped in-tree; the smart-contract languages will be
+# added when their per-language overrides land (spec §7.2 footnote: M16).
+tree-sitter-nim = { path = "../tree-sitter-nim/bindings/rust" }
+
+# TOML loader for embedded / user / trace-local pattern files
+# (spec §7.4 "Pattern file schema").
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+
+# Deterministic SHA-256 hashing for the pattern-set fingerprint that
+# M2's continuation-token integrity check (spec §5.3.1) consumes.
+sha2 = "0.10"
+
+# Diagnostic errors for the pattern loader.
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

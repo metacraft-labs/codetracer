@@ -1,0 +1,4 @@
+# Trace-local override (layer 1 per spec §7.4). This file is empty —
+# the precedence test loads it so the layer is present but
+# non-matching, exercising the "personal-override wins when trace
+# layer doesn't match" half of the rule.
