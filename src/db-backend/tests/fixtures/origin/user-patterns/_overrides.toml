@@ -1,0 +1,20 @@
+# Trace-local override stub.
+#
+# At record time, the recorder produces a `.ct` container; the
+# `meta_dat/origin-patterns/_overrides.toml` inside that container is
+# what the classifier reads as the highest-precedence override layer
+# (spec §7.4 "Override precedence" #1).
+#
+# Because M0 does not yet wire the recorder's pattern-embedding step,
+# this file is committed alongside the source program as a
+# placeholder documenting the format. Later milestones MUST copy this
+# file into the recorded trace at `meta_dat/origin-patterns/_overrides.toml`
+# rather than leaving it next to the source.
+
+# Example override: bump the classification of forward() back to
+# Computational. With this override active, the chain terminates at the
+# call expression instead of continuing through `$value`.
+
+# [[computational]]
+# match = "forward($_)"
+# description = "Local override — treat forward() as a transformation"

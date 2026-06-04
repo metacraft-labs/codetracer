@@ -1,0 +1,23 @@
+# Personal-overrides file (spec §7.4 layer #2).
+#
+# When the replaying user has a file at
+# ~/.config/codetracer/origin-patterns.toml the classifier loads it
+# between the trace-local overrides (`_overrides.toml`) and the embedded
+# library patterns. The tests in this fixture symlink this file into a
+# private $HOME during the assertion run so the home-layer precedence
+# is exercised end-to-end without polluting the developer's real
+# config.
+
+[[trivial_copy]]
+match = "$x.cached_property"
+continuation = "$x"
+description = "Personal override — treat .cached_property as a trivial-copy view of the receiver"
+
+# Personal override for the faux-library forwarder: keep the forwarder
+# behaviour but tag it with the personal-override description so the
+# Variable State Pane's "Show pattern provenance" affordance can
+# distinguish which layer matched.
+[[forwarder]]
+match = "forward($value)"
+continuation = "$value"
+description = "Personal override — forward() forwards its argument (matches embedded faux_lib pattern; takes precedence)"

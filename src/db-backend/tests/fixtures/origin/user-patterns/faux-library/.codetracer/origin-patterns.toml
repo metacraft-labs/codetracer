@@ -1,0 +1,9 @@
+# origin-patterns.toml — faux library
+#
+# Picked up at record time by the recorder's dependency-root walk and
+# embedded into the trace under meta_dat/origin-patterns/faux_lib/.
+
+[[forwarder]]
+match = "forward($value)"
+continuation = "$value"
+description = "faux_lib.forward returns its argument unchanged — trivial copy"
