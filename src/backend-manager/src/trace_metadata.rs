@@ -44,6 +44,7 @@ pub struct TraceMetadata {
     /// Recording identifier (UUIDv7, canonical lowercase hyphenated
     /// 36-char form per RFC 9562).  Introduced in M-REC-1 and surfaced
     /// through `meta.dat` v3+.
+    #[allow(dead_code)]
     pub recording_id: String,
 
     /// Detected programming language of the traced program.

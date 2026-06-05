@@ -23,6 +23,7 @@
 
 use std::error::Error;
 use std::fmt;
+#[cfg(test)]
 use std::path::Path;
 
 // ── meta.dat constants ───────────────────────────────────────────────────
@@ -457,6 +458,7 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 
 // ── meta.dat serializer (test-only convenience) ────────────────────────
 
+#[allow(dead_code)]
 fn encode_varint(value: u64, out: &mut Vec<u8>) {
     let mut v = value;
     loop {
@@ -472,11 +474,13 @@ fn encode_varint(value: u64, out: &mut Vec<u8>) {
     }
 }
 
+#[allow(dead_code)]
 fn write_string(s: &str, out: &mut Vec<u8>) {
     encode_varint(s.len() as u64, out);
     out.extend_from_slice(s.as_bytes());
 }
 
+#[allow(dead_code)]
 pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(64);
     out.extend_from_slice(&META_DAT_MAGIC);
@@ -604,7 +608,7 @@ pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u6
         return Err("not a valid CTFS file (bad magic)".to_string());
     }
     let version = data[5];
-    if !matches!(version, 2 | 3 | 4) {
+    if !matches!(version, 2..=4) {
         return Err(format!("unsupported CTFS version {version}"));
     }
     let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")?;
@@ -635,7 +639,7 @@ pub fn read_meta_dat_from_ctfs(data: &[u8]) -> Result<Vec<u8>, String> {
         return Err("not a valid CTFS file (bad magic)".to_string());
     }
     let version = data[5];
-    if !matches!(version, 2 | 3 | 4) {
+    if !matches!(version, 2..=4) {
         return Err(format!("unsupported CTFS version {version}"));
     }
     let block_size = read_u32_le(data, 8).ok_or("CTFS header truncated at block_size")?;

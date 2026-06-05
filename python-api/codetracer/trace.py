@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from codetracer.connection import DaemonConnection
+from codetracer.origin import OriginChain
 from codetracer.types import (
     Call,
     Event,
@@ -415,6 +416,71 @@ class Trace:
             )
         body = response.get("body", {})
         return body.get("result", "")
+
+    def value_origin(
+        self,
+        expression: str,
+        *,
+        step: Optional[int] = None,
+        frame: Optional[int] = None,
+        max_hops: int = 16,
+        lazy: bool = False,
+        continuation_token: Optional[str] = None,
+    ) -> OriginChain:
+        """Walk the backward dataflow chain for *expression*.
+
+        Sends a ``ct/py-origin-chain`` request to the daemon, which
+        forwards it to the backend's ``ct/originChain`` handler.  The
+        backward search follows trivial copies / parameter passes /
+        return captures / field-or-index accesses until it hits a
+        computational expression, a literal, a parameter at the
+        recording boundary, or another terminator (see spec §4.1).
+
+        Parameters:
+            expression: The identifier to query.  V1 is identifier-only;
+                dotted paths are reserved for a future milestone.
+            step: Optional step id at which to query.  Defaults to the
+                trace's current execution point.
+            frame: Optional DAP frame id.  Defaults to the topmost frame.
+            max_hops: Maximum hops to walk in a single request
+                (default 16).  Bumping this above ~32 is rarely useful;
+                use *lazy* + the response's ``continuation_token``
+                instead.
+            lazy: When *True*, the server may return early with a
+                continuation token so the chain can be lazily extended.
+            continuation_token: Opaque cursor previously returned in
+                ``OriginChain.continuation_token`` — resumes the walk
+                from where the prior request stopped.
+
+        Returns:
+            An :class:`~codetracer.origin.OriginChain` whose attributes
+            mirror the wire fields documented in the spec §4.1 table.
+
+        Raises:
+            TraceError: When the daemon reports an error.
+        """
+        args: dict = {
+            "tracePath": self._path,
+            "variableName": expression,
+            "maxHops": max_hops,
+            "lazy": bool(lazy),
+        }
+        if step is not None:
+            args["stepId"] = int(step)
+        if frame is not None:
+            args["frameId"] = int(frame)
+        if continuation_token is not None:
+            args["continuationToken"] = str(continuation_token)
+
+        response = self._connection.send_request("ct/py-origin-chain", args)
+        if not response.get("success"):
+            raise TraceError(
+                response.get("message", f"value_origin({expression!r}) failed")
+            )
+
+        body = response.get("body", {}) or {}
+        # The daemon returns the OriginChain JSON verbatim (camelCase).
+        return OriginChain.from_wire(body)
 
     def stack_trace(self) -> list[Frame]:
         """Return the full call stack at the current execution point.

@@ -342,6 +342,22 @@ pub enum PendingPyRequestKind {
     /// `ct/tracepoint-results` event.  The event interception in
     /// `backend_manager.rs` resolves this pending request.
     RunTracepoints,
+    /// `ct/py-origin-chain` -> backend `ct/originChain`.
+    ///
+    /// Powers the `Trace.value_origin(...)` Python binding and the
+    /// `get_value_origin` MCP tool (M8 of the Value Origin Tracking
+    /// milestones). The backend's `OriginChain` body is forwarded
+    /// verbatim — no normalisation — because the spec §4.1 wire shape
+    /// is the public contract.
+    OriginChain,
+    /// `ct/py-resolve-variable-step` -> backend `ct/load-history`.
+    ///
+    /// Powers the `resolve_variable_step` MCP helper tool: given a
+    /// variable name, returns the latest step at which that variable
+    /// was assigned. Implemented by reusing the existing history-walk
+    /// path the materialised DB backend already exposes; the formatter
+    /// extracts the most recent assignment hit.
+    ResolveVariableStep,
     /// Fire-and-forget commands (e.g., `setBreakpoints`, `setDataBreakpoints`)
     /// whose backend responses should be silently consumed and not forwarded
     /// to any client.
@@ -587,26 +603,24 @@ pub fn format_evaluate_response(backend_response: &Value, expression: &str) -> (
     // backend uses `name`.  Try an exact match first, then fall back
     // to the first entry for backward compatibility (e.g., mock
     // backends that prepend watch results).
-    let matching_local = locals_raw
-        .and_then(Value::as_array)
-        .and_then(|arr| {
-            if expression.is_empty() {
-                // No expression specified — take the first entry.
-                return arr.first();
-            }
-            arr.iter()
-                .find(|local| {
-                    let name = local
-                        .get("expression")
-                        .or_else(|| local.get("name"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    name == expression
-                })
-                // Fall back to first local if no match found (e.g., mock
-                // backend that already prepends the watch result).
-                .or_else(|| arr.first())
-        });
+    let matching_local = locals_raw.and_then(Value::as_array).and_then(|arr| {
+        if expression.is_empty() {
+            // No expression specified — take the first entry.
+            return arr.first();
+        }
+        arr.iter()
+            .find(|local| {
+                let name = local
+                    .get("expression")
+                    .or_else(|| local.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                name == expression
+            })
+            // Fall back to first local if no match found (e.g., mock
+            // backend that already prepends the watch result).
+            .or_else(|| arr.first())
+    });
 
     match matching_local {
         Some(local) => {
@@ -970,6 +984,110 @@ pub fn format_select_process_response(backend_response: &Value) -> (bool, Value)
     }
 
     (true, serde_json::json!({}))
+}
+
+/// Forward a backend `ct/originChain` response body verbatim to the
+/// Python client (M8 of the Value Origin Tracking milestones).
+///
+/// The wire shape defined in `db_backend::task::OriginChain` (spec §4.1)
+/// is the public contract surfaced through the `Trace.value_origin(...)`
+/// Python binding and the standalone `get_value_origin` MCP tool, so we
+/// deliberately do NOT re-shape any fields here — only the success /
+/// error envelope.
+pub fn format_origin_chain_response(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("originChain failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let body = backend_response
+        .get("body")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    (true, body)
+}
+
+/// Format a backend `ct/load-history` response into the
+/// `ct/py-resolve-variable-step` response body.
+///
+/// Walks the `updates` array and returns the most recent assignment hit
+/// — the latest step at which any update touched the queried variable.
+/// If no matching update is found, returns success=false so the caller
+/// surfaces `TraceError`.
+///
+/// The wire shape mirrors `task::HistoryUpdate` (most recent update
+/// last); the formatter scans from the tail.
+pub fn format_resolve_variable_step_response(
+    backend_response: &Value,
+    variable_name: &str,
+) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !success {
+        let message = backend_response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("load-history failed");
+        return (false, serde_json::json!({"message": message}));
+    }
+
+    let body = backend_response.get("body").unwrap_or(&Value::Null);
+
+    let updates = body
+        .get("updates")
+        .or_else(|| body.get("history"))
+        .or_else(|| body.get("steps"))
+        .and_then(Value::as_array);
+
+    // Walk in reverse to find the latest assignment to `variable_name`.
+    if let Some(updates) = updates {
+        for update in updates.iter().rev() {
+            let name = update
+                .get("expression")
+                .or_else(|| update.get("name"))
+                .or_else(|| update.get("variable"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if name == variable_name {
+                let location = update.get("location").cloned().unwrap_or(Value::Null);
+                let step_id = update
+                    .get("stepId")
+                    .or_else(|| update.get("step"))
+                    .or_else(|| update.get("rrTicks"))
+                    .or_else(|| update.get("location").and_then(|loc| loc.get("rrTicks")))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                return (
+                    true,
+                    serde_json::json!({
+                        "stepId": step_id,
+                        "variable": variable_name,
+                        "location": location,
+                    }),
+                );
+            }
+        }
+    }
+
+    (
+        false,
+        serde_json::json!({
+            "message": format!(
+                "no assignment recorded for variable {variable_name:?}"
+            ),
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1525,7 +1643,10 @@ mod tests {
             "elements": [1, 2, 3]
         });
         let result = extract_value_str(Some(&composite_val));
-        assert!(!result.is_empty(), "composite types should not return empty string");
+        assert!(
+            !result.is_empty(),
+            "composite types should not return empty string"
+        );
         // The result should be a valid JSON representation.
         let parsed: Result<Value, _> = serde_json::from_str(&result);
         assert!(parsed.is_ok(), "result should be valid JSON");
@@ -2121,5 +2242,94 @@ mod tests {
         let (success, body) = format_select_process_response(&backend_resp);
         assert!(!success);
         assert_eq!(body["message"], "invalid process ID");
+    }
+
+    // ----- format_origin_chain_response tests (M8) -----
+
+    #[test]
+    fn test_format_origin_chain_response_forwards_body_verbatim() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "queryVariable": "c",
+                "queryStepId": 42,
+                "hops": [{"kind": "trivialCopy", "targetExpr": "c"}],
+                "terminator": {"kind": "literal", "expression": "10"},
+                "truncated": false,
+                "confidence": 0.9,
+            }
+        });
+        let (success, body) = format_origin_chain_response(&backend_resp);
+        assert!(success);
+        // Body must be the wire shape verbatim — `OriginChain.from_wire`
+        // depends on exact field names (camelCase).
+        assert_eq!(body["queryVariable"], "c");
+        assert_eq!(body["terminator"]["kind"], "literal");
+        assert_eq!(body["hops"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_format_origin_chain_response_failure() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": false,
+            "message": "variable not found",
+        });
+        let (success, body) = format_origin_chain_response(&backend_resp);
+        assert!(!success);
+        assert_eq!(body["message"], "variable not found");
+    }
+
+    // ----- format_resolve_variable_step_response tests (M8) -----
+
+    #[test]
+    fn test_format_resolve_variable_step_finds_latest_assignment() {
+        // Wire shape mirrors `task::HistoryUpdate` — the formatter
+        // walks the array in reverse to find the most recent match.
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {
+                "updates": [
+                    {
+                        "expression": "x",
+                        "stepId": 5,
+                        "location": {"path": "main.py", "line": 1},
+                    },
+                    {
+                        "expression": "x",
+                        "stepId": 7,
+                        "location": {"path": "main.py", "line": 3},
+                    },
+                    {
+                        "expression": "y",
+                        "stepId": 9,
+                        "location": {"path": "main.py", "line": 5},
+                    },
+                ]
+            }
+        });
+        let (success, body) = format_resolve_variable_step_response(&backend_resp, "x");
+        assert!(success, "expected success, got body={body}");
+        assert_eq!(body["stepId"], 7);
+        assert_eq!(body["variable"], "x");
+        assert_eq!(body["location"]["line"], 3);
+    }
+
+    #[test]
+    fn test_format_resolve_variable_step_no_match() {
+        let backend_resp = json!({
+            "type": "response",
+            "success": true,
+            "body": {"updates": []},
+        });
+        let (success, body) = format_resolve_variable_step_response(&backend_resp, "x");
+        assert!(!success);
+        let msg = body["message"].as_str().unwrap_or("");
+        assert!(
+            msg.contains("no assignment recorded"),
+            "expected no-assignment error, got: {msg}"
+        );
     }
 }

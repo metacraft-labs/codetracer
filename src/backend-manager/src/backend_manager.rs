@@ -1,9 +1,9 @@
-use std::{
-    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
-};
 #[cfg(windows)]
 #[allow(unused_imports)]
 use std::os::windows::process::CommandExt;
+use std::{
+    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
+};
 
 /// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
 /// a visible console window when spawned as child processes.
@@ -11,6 +11,12 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use serde_json::{Value, json};
+#[cfg(unix)]
+use tokio::fs::remove_file;
+#[cfg(windows)]
+use tokio::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
@@ -21,12 +27,6 @@ use tokio::{
     },
     time::sleep,
 };
-#[cfg(unix)]
-use tokio::fs::remove_file;
-#[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
-#[cfg(windows)]
-use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(unix)]
 use crate::errors::SocketPathError;
@@ -283,7 +283,11 @@ impl BackendManager {
         // Write the port number so the frontend can discover it.
         tokio::fs::write(&port_file, port.to_string()).await?;
 
-        info!("TCP listening on: 127.0.0.1:{} (port file: {})", port, port_file.display());
+        info!(
+            "TCP listening on: 127.0.0.1:{} (port file: {})",
+            port,
+            port_file.display()
+        );
 
         let mut socket_read;
         let mut socket_write;
@@ -609,7 +613,11 @@ impl BackendManager {
 
         // Write the port number to the port file so clients can discover it.
         tokio::fs::write(&socket_path, port.to_string()).await?;
-        info!("Daemon listening on: 127.0.0.1:{} (port file: {})", port, socket_path.display());
+        info!(
+            "Daemon listening on: 127.0.0.1:{} (port file: {})",
+            port,
+            socket_path.display()
+        );
 
         // --- Accept loop: spawns per-client read and write tasks. ---
         let mgr_accept = mgr.clone();
@@ -1315,9 +1323,8 @@ impl BackendManager {
                                             .get("first")
                                             .and_then(Value::as_str)
                                             .unwrap_or("");
-                                        let value = python_bridge::extract_value_str(
-                                            local.get("second"),
-                                        );
+                                        let value =
+                                            python_bridge::extract_value_str(local.get("second"));
                                         json!({"name": name, "value": value})
                                     })
                                     .collect()
@@ -1340,10 +1347,7 @@ impl BackendManager {
                     })
                     .collect();
 
-                let errors = body
-                    .get("errors")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+                let errors = body.get("errors").cloned().unwrap_or_else(|| json!({}));
 
                 let py_response = serde_json::json!({
                     "type": "response",
@@ -1531,6 +1535,15 @@ impl BackendManager {
                     }
                     PendingPyRequestKind::SelectProcess => {
                         python_bridge::format_select_process_response(msg)
+                    }
+                    PendingPyRequestKind::OriginChain => {
+                        python_bridge::format_origin_chain_response(msg)
+                    }
+                    PendingPyRequestKind::ResolveVariableStep => {
+                        python_bridge::format_resolve_variable_step_response(
+                            msg,
+                            &pending.expression,
+                        )
                     }
                     PendingPyRequestKind::RunTracepoints => {
                         // RunTracepoints is resolved via event interception
@@ -2415,6 +2428,11 @@ impl BackendManager {
                     "ct/py-read-source" => self.handle_py_read_source(seq, args).await,
                     "ct/py-processes" => self.handle_py_processes(seq, args).await,
                     "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
+                    // Value Origin Tracking — M8 Python binding + helper tool.
+                    "ct/py-origin-chain" => self.handle_py_origin_chain(seq, args).await,
+                    "ct/py-resolve-variable-step" => {
+                        self.handle_py_resolve_variable_step(seq, args).await
+                    }
                     "ct/open-trace" => self.handle_open_trace(seq, args).await,
                     "ct/trace-info" => self.handle_trace_info(seq, args),
                     "ct/exec-script" => self.handle_exec_script(seq, args),
@@ -3289,6 +3307,250 @@ impl BackendManager {
     }
 
     // -----------------------------------------------------------------------
+    // ct/py-origin-chain handler (Value Origin Tracking — M8)
+    //
+    // Forwards a `trace.value_origin(...)` Python call to the backend's
+    // `ct/originChain` handler (spec §5.3). The wire shape mirrors
+    // `task::CtOriginChainArguments`: variableName + optional stepId,
+    // frameId, maxHops, lazy, continuationToken. The response body —
+    // an OriginChain (spec §4.1) — is forwarded verbatim to the client.
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-origin-chain` requests from Python clients (M8).
+    ///
+    /// Translates the simplified Python-side payload into the backend's
+    /// `ct/originChain` command and registers a pending request so the
+    /// backend's response can be forwarded back as-is.
+    async fn handle_py_origin_chain(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let variable_name = match args
+            .and_then(|a| a.get("variableName"))
+            .and_then(Value::as_str)
+        {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    "missing 'variableName' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    &self.no_session_error_message(&trace_path_str),
+                );
+                return Ok(());
+            }
+        };
+
+        // Reset TTL for this trace (origin queries count as activity).
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Optional fields — defaults mirror `CtOriginChainArguments`
+        // (`default_no_step`, `default_no_frame`, `default_max_hops`).
+        // The backend treats negative step_id / frame_id as
+        // "use current".
+        let step_id = args
+            .and_then(|a| a.get("stepId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let frame_id = args
+            .and_then(|a| a.get("frameId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let max_hops = args
+            .and_then(|a| a.get("maxHops"))
+            .and_then(Value::as_u64)
+            .unwrap_or(16) as u32;
+        let lazy = args
+            .and_then(|a| a.get("lazy"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let continuation_token = args
+            .and_then(|a| a.get("continuationToken"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        let mut origin_args = serde_json::json!({
+            "variableName": variable_name,
+            "variablePath": [],
+            "frameId": frame_id,
+            "stepId": step_id,
+            "threadId": 0,
+            "maxHops": max_hops,
+            "lazy": lazy,
+            "sessionId": "",
+            "classifySource": true,
+        });
+        if let Some(token) = continuation_token {
+            origin_args["continuationToken"] = serde_json::Value::String(token);
+        }
+
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/originChain",
+            "seq": dap_seq,
+            "arguments": origin_args,
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-origin-chain",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::OriginChain,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-origin-chain".to_string(),
+                expression: variable_name,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-resolve-variable-step` requests (M8 helper tool).
+    ///
+    /// Sends a `ct/load-history` request to the backend, scoped to the
+    /// queried variable. The response formatter walks the returned
+    /// `updates` array in reverse order to find the most-recent
+    /// assignment hit and returns its `stepId` + `location` to the
+    /// client.
+    async fn handle_py_resolve_variable_step(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-resolve-variable-step",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+        let variable_name = match args
+            .and_then(|a| a.get("variableName"))
+            .and_then(Value::as_str)
+        {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-resolve-variable-step",
+                    "missing 'variableName' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-resolve-variable-step",
+                    &self.no_session_error_message(&trace_path_str),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        let frame_id = args
+            .and_then(|a| a.get("frameId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/load-history",
+            "seq": dap_seq,
+            "arguments": {
+                "expression": variable_name,
+                "frameId": frame_id,
+            },
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-resolve-variable-step",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::ResolveVariableStep,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-resolve-variable-step".to_string(),
+                expression: variable_name,
+            });
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // ct/py-add-breakpoint, ct/py-remove-breakpoint,
     // ct/py-add-watchpoint, ct/py-remove-watchpoint handlers
     // -----------------------------------------------------------------------
@@ -3916,10 +4178,7 @@ impl BackendManager {
             }
         };
 
-        let source_path = match args
-            .and_then(|a| a.get("path"))
-            .and_then(Value::as_str)
-        {
+        let source_path = match args.and_then(|a| a.get("path")).and_then(Value::as_str) {
             Some(p) => p.to_string(),
             None => {
                 self.send_py_command_error(
@@ -3931,10 +4190,7 @@ impl BackendManager {
             }
         };
 
-        let line = match args
-            .and_then(|a| a.get("line"))
-            .and_then(Value::as_i64)
-        {
+        let line = match args.and_then(|a| a.get("line")).and_then(Value::as_i64) {
             Some(l) => l,
             None => {
                 self.send_py_command_error(
@@ -5244,9 +5500,7 @@ impl BackendManager {
 
             // Clear accumulated breakpoint/watchpoint state from previous
             // script runs so the new script starts with a clean slate.
-            ds.py_bridge
-                .breakpoint_state_mut(&trace_path)
-                .clear_all();
+            ds.py_bridge.breakpoint_state_mut(&trace_path).clear_all();
 
             if let Some(info) = ds.session_manager.get_session(&trace_path) {
                 let backend_id = info.backend_id;
@@ -5358,14 +5612,13 @@ impl BackendManager {
             .unwrap_or_else(|_| "replay-server".to_string());
 
         // Build the arguments: the backend command + "dap-server" subcommand.
-        let backend_args_owned: Vec<String> = if backend_cmd.contains("backend-manager")
-            || backend_cmd.contains("session-manager")
-        {
-            // For mock-dap-backend, the subcommand is `mock-dap-backend`.
-            vec!["mock-dap-backend".to_string()]
-        } else {
-            vec!["dap-server".to_string()]
-        };
+        let backend_args_owned: Vec<String> =
+            if backend_cmd.contains("backend-manager") || backend_cmd.contains("session-manager") {
+                // For mock-dap-backend, the subcommand is `mock-dap-backend`.
+                vec!["mock-dap-backend".to_string()]
+            } else {
+                vec!["dap-server".to_string()]
+            };
         let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
 
         // Spawn the backend process (raw, without installing channels).
@@ -5455,7 +5708,10 @@ impl BackendManager {
                     });
 
                 if let Some(ref exe) = rr_support_cmd {
-                    info!("RR trace detected, using ct-native-replay: {}", exe.display());
+                    info!(
+                        "RR trace detected, using ct-native-replay: {}",
+                        exe.display()
+                    );
                     opts.ct_rr_worker_exe = rr_support_cmd;
                 } else {
                     warn!(

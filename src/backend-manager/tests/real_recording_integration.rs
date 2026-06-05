@@ -182,7 +182,9 @@ use tokio::time::{sleep, timeout};
 /// On Unix, connects directly to the Unix socket at `socket_path`.
 /// On Windows, reads the TCP port from the port file at `socket_path` and
 /// connects to `127.0.0.1:<port>`.
-async fn connect_to_daemon_socket(socket_path: &Path) -> Result<UnixStream, Box<dyn std::error::Error>> {
+async fn connect_to_daemon_socket(
+    socket_path: &Path,
+) -> Result<UnixStream, Box<dyn std::error::Error>> {
     #[cfg(unix)]
     {
         Ok(tokio::net::UnixStream::connect(socket_path).await?)
@@ -281,9 +283,7 @@ fn find_db_backend() -> Option<PathBuf> {
     // platform executable suffix and canonicalize so the returned path is
     // a real, OS-spawnable binary.
     for name in ["replay-server", "db-backend"] {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(name)
-            .output()
+        if let Ok(output) = std::process::Command::new("which").arg(name).output()
             && output.status.success()
         {
             let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -327,9 +327,7 @@ fn find_ct_rr_support() -> Option<PathBuf> {
 
     // Check PATH — try new name first, then legacy.
     for bin_name in ["ct-native-replay", "ct-rr-support"] {
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(bin_name)
-            .output()
+        if let Ok(output) = std::process::Command::new("which").arg(bin_name).output()
             && output.status.success()
         {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -530,7 +528,10 @@ async fn start_daemon_with_real_backend(
         // each test gets its own isolated instance.  On macOS the default
         // path (~/Library/Caches/…) ignores TMPDIR and would collide with
         // a running production daemon.
-        .env("CODETRACER_DAEMON_SOCKET", socket_path.to_string_lossy().as_ref())
+        .env(
+            "CODETRACER_DAEMON_SOCKET",
+            socket_path.to_string_lossy().as_ref(),
+        )
         .env("CODETRACER_REPLAY_SERVER_CMD", &db_backend_str)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -852,11 +853,9 @@ fn check_rr_prerequisites() -> Result<(PathBuf, PathBuf), String> {
             .map(|v| v == "1")
             .unwrap_or(false);
     if !rr_backend_detected && !require_real_recordings() {
-        return Err(
-            "CODETRACER_RR_BACKEND_PATH not set \
+        return Err("CODETRACER_RR_BACKEND_PATH not set \
              (codetracer-native-backend sibling not detected, skipping RR tests)"
-                .to_string(),
-        );
+            .to_string());
     }
 
     let ct_rr_support = match find_ct_rr_support() {
@@ -3016,7 +3015,9 @@ async fn test_real_custom_navigate_continue_forward() {
             Some(p) => p,
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
-                println!("test_real_custom_navigate_continue_forward: SKIP (ruby recorder not found)");
+                println!(
+                    "test_real_custom_navigate_continue_forward: SKIP (ruby recorder not found)"
+                );
                 return Ok(());
             }
         };
@@ -4070,7 +4071,9 @@ async fn test_real_custom_locals_returns_variables() {
             Some(p) => p,
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
-                println!("test_real_custom_locals_returns_variables: SKIP (ruby recorder not found)");
+                println!(
+                    "test_real_custom_locals_returns_variables: SKIP (ruby recorder not found)"
+                );
                 return Ok(());
             }
         };
@@ -4131,9 +4134,9 @@ async fn test_real_custom_locals_returns_variables() {
                 // If we hit EOT, step back one to land on a valid position
                 // where locals are available.
                 if eot {
-                    let back_resp = navigate(
-                        &mut client, seq, &trace_dir, "step_back", None, &log_path,
-                    ).await?;
+                    let back_resp =
+                        navigate(&mut client, seq, &trace_dir, "step_back", None, &log_path)
+                            .await?;
                     seq += 1;
                     let (bp, bl, _, _, _) = extract_nav_location(&back_resp)?;
                     log_line(
@@ -4305,9 +4308,8 @@ async fn test_real_custom_evaluate_expression() {
             );
             if eot {
                 // Step back from EOT so variables are available.
-                let back_resp = navigate(
-                    &mut client, seq, &trace_dir, "step_back", None, &log_path,
-                ).await?;
+                let back_resp =
+                    navigate(&mut client, seq, &trace_dir, "step_back", None, &log_path).await?;
                 seq += 1;
                 let (bp, bl, _, _, _) = extract_nav_location(&back_resp)?;
                 log_line(
@@ -4378,7 +4380,10 @@ async fn test_real_custom_evaluate_expression() {
                 "unexpected error from evaluate on custom trace \
                  (expected 'not supported' or 'no variables found'): {error_msg}"
             );
-            log_line(&log_path, &format!("evaluate correctly reported acceptable error: {error_msg}"));
+            log_line(
+                &log_path,
+                &format!("evaluate correctly reported acceptable error: {error_msg}"),
+            );
         }
 
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -5644,7 +5649,9 @@ async fn test_real_custom_breakpoint_stops_execution() {
 
         // The Ruby test program has steps at lines 6, 7, 1, 2, 3, 7.
         // Use the real source path from the recording.
-        let source_path = test_dir.join("test.rb").canonicalize()
+        let source_path = test_dir
+            .join("test.rb")
+            .canonicalize()
             .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
         let source_path = source_path.to_string_lossy().to_string();
         let bp_line: i64 = 2; // `result = a * 2` inside compute()
@@ -5978,7 +5985,9 @@ async fn test_real_custom_multiple_breakpoints() {
 
         // The Ruby test program steps at lines: 6, 7, 1, 2, 3, 7.
         // Set breakpoints at line 2 (inside compute) and line 3 (return).
-        let source_path = test_dir.join("test.rb").canonicalize()
+        let source_path = test_dir
+            .join("test.rb")
+            .canonicalize()
             .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
         let source_path = source_path.to_string_lossy().to_string();
         let bp_line_1: i64 = 2;
@@ -6810,7 +6819,9 @@ async fn test_real_custom_flow_returns_steps() {
         );
 
         // Derive the source path from the recording.
-        let source_path = test_dir.join("test.rb").canonicalize()
+        let source_path = test_dir
+            .join("test.rb")
+            .canonicalize()
             .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
@@ -7913,7 +7924,10 @@ async fn test_real_rr_events_pagination() {
 
         log_line(
             &log_path,
-            &format!("page1: requested count=3, got {} events", page1_events.len()),
+            &format!(
+                "page1: requested count=3, got {} events",
+                page1_events.len()
+            ),
         );
 
         // The requested count is 3, so we must get at most 3 events.
@@ -7927,7 +7941,10 @@ async fn test_real_rr_events_pagination() {
         if page1_events.is_empty() {
             // The trace might genuinely have no events (unlikely for
             // our test program).  Log and accept.
-            log_line(&log_path, "page1 returned 0 events -- no further pagination checks");
+            log_line(
+                &log_path,
+                "page1 returned 0 events -- no further pagination checks",
+            );
             shutdown_daemon(&mut client, &mut daemon).await;
             return Ok(());
         }
@@ -7937,8 +7954,8 @@ async fn test_real_rr_events_pagination() {
             &mut client,
             50_002,
             &trace_dir,
-            3,  // start (past page 1)
-            3,  // count
+            3, // start (past page 1)
+            3, // count
             &log_path,
         )
         .await?;
@@ -7981,7 +7998,10 @@ async fn test_real_rr_events_pagination() {
 
         log_line(
             &log_path,
-            &format!("page3: start=999999 count=10, got {} events", page3_events.len()),
+            &format!(
+                "page3: start=999999 count=10, got {} events",
+                page3_events.len()
+            ),
         );
 
         assert!(
@@ -8341,7 +8361,9 @@ async fn test_real_custom_calltrace_returns_calls() {
             Some(p) => p,
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
-                println!("test_real_custom_calltrace_returns_calls: SKIP (ruby recorder not found)");
+                println!(
+                    "test_real_custom_calltrace_returns_calls: SKIP (ruby recorder not found)"
+                );
                 return Ok(());
             }
         };
@@ -8846,7 +8868,9 @@ async fn test_real_custom_terminal_returns_output() {
             Some(p) => p,
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
-                println!("test_real_custom_terminal_returns_output: SKIP (ruby recorder not found)");
+                println!(
+                    "test_real_custom_terminal_returns_output: SKIP (ruby recorder not found)"
+                );
                 return Ok(());
             }
         };
@@ -11009,7 +11033,9 @@ async fn test_real_custom_mcp_read_source_file() {
         );
 
         // Derive the source path from the recording.
-        let source_path = test_dir.join("test.rb").canonicalize()
+        let source_path = test_dir
+            .join("test.rb")
+            .canonicalize()
             .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
         let source_file = source_path.to_string_lossy().to_string();
 
@@ -12274,7 +12300,9 @@ async fn test_real_custom_mcp_resource_read_source() {
             Some(p) => p,
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
-                println!("test_real_custom_mcp_resource_read_source: SKIP (ruby recorder not found)");
+                println!(
+                    "test_real_custom_mcp_resource_read_source: SKIP (ruby recorder not found)"
+                );
                 return Ok(());
             }
         };
@@ -12287,7 +12315,9 @@ async fn test_real_custom_mcp_resource_read_source() {
         );
 
         // Derive the source path from the recording.
-        let source_path = test_dir.join("test.rb").canonicalize()
+        let source_path = test_dir
+            .join("test.rb")
+            .canonicalize()
             .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
@@ -12321,10 +12351,7 @@ async fn test_real_custom_mcp_resource_read_source() {
 
         // Send resources/read for the source file.
         let trace_path_str = trace_dir.to_string_lossy().to_string();
-        let source_uri = format!(
-            "trace://{}/source/{}",
-            trace_path_str, source_path_str
-        );
+        let source_uri = format!("trace://{}/source/{}", trace_path_str, source_path_str);
         let req = json!({
             "jsonrpc": "2.0",
             "id": 14201,
@@ -12768,7 +12795,9 @@ async fn test_real_custom_example_scripts_execute() {
             Some(p) => p,
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
-                println!("test_real_custom_example_scripts_execute: SKIP (ruby recorder not found)");
+                println!(
+                    "test_real_custom_example_scripts_execute: SKIP (ruby recorder not found)"
+                );
                 return Ok(());
             }
         };
@@ -14434,7 +14463,10 @@ async fn test_rr_trace_opens_without_trace_metadata_json() {
             ct_path.exists(),
             "trace.ct should exist (canonical metadata container; M-REC-1.5)"
         );
-        log_line(&log_path, "confirmed: trace.ct exists, no trace_metadata.json");
+        log_line(
+            &log_path,
+            "confirmed: trace.ct exists, no trace_metadata.json",
+        );
 
         // Start daemon and query trace info via DAP.
         let ct_rr_support_str = ct_rr_support.to_string_lossy().to_string();

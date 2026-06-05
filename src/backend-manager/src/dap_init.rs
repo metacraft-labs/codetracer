@@ -309,8 +309,8 @@ pub async fn run_dap_init(
 
     // Replay-worker bundles (RR, TTD) carry a metadata-only `.ct`
     // sidecar that must NOT be advertised as the trace file.
-    let is_replay_worker_bundle = trace_folder.join("rr").is_dir()
-        || trace_folder.join("ttd-trace-manifest.json").is_file();
+    let is_replay_worker_bundle =
+        trace_folder.join("rr").is_dir() || trace_folder.join("ttd-trace-manifest.json").is_file();
 
     let ctfs_file = if is_replay_worker_bundle {
         None
@@ -327,10 +327,8 @@ pub async fn run_dap_init(
 
     let trace_file = if trace_folder.join("trace.bin").is_file() {
         "trace.bin"
-    } else if let Some(ct_name) = ctfs_file.as_deref() {
-        ct_name
     } else {
-        "trace.json"
+        ctfs_file.as_deref().unwrap_or("trace.json")
     };
 
     let mut launch_args = json!({

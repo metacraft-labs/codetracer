@@ -23,6 +23,17 @@ from codetracer.exceptions import (
     NavigationError,
     ExpressionError,
 )
+from codetracer.origin import (
+    OriginChain,
+    OriginHop,
+    OperandSnapshot,
+    FrameTransition,
+    Terminator,
+    OriginMetrics,
+    OriginKind,
+    TerminatorKind,
+    FrameTransitionKind,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -44,4 +55,14 @@ __all__ = [
     "TraceNotFoundError",
     "NavigationError",
     "ExpressionError",
+    # Value Origin Tracking (M8)
+    "OriginChain",
+    "OriginHop",
+    "OperandSnapshot",
+    "FrameTransition",
+    "Terminator",
+    "OriginMetrics",
+    "OriginKind",
+    "TerminatorKind",
+    "FrameTransitionKind",
 ]

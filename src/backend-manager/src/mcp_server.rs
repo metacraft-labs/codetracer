@@ -243,6 +243,85 @@ fn find_recording_by_id_tool() -> Value {
     })
 }
 
+/// Returns the JSON schema for the `get_value_origin` tool
+/// (M8 of the Value Origin Tracking milestones).
+///
+/// Returns the canonical `OriginChain` JSON described in
+/// `db_backend::task::OriginChain` (spec §4.1) for a queried variable.
+///
+/// The tool description deliberately steers callers toward the
+/// `exec_script` scripting workflow as the preferred multi-step path —
+/// `Trace.value_origin(...)` composes with the rest of the Python
+/// replay API (locals, history walks, breakpoints), while
+/// `get_value_origin` is a one-shot fallback for callers that only want
+/// a single chain.
+fn get_value_origin_tool() -> Value {
+    json!({
+        "name": "get_value_origin",
+        "description": "Return the backward dataflow chain (an `OriginChain`) for `variable` at a given step in a CodeTracer trace. PREFERRED multi-step path: send a Python script through the `exec_script` tool and call `trace.value_origin(\"<variable>\", step=..., frame=..., max_hops=...)` — this composes with `trace.locals()`, `trace.history()`, breakpoints and watchpoints, and reuses the loaded trace + classifier pattern set across calls. Use this `get_value_origin` tool only when you need a single one-shot origin chain without writing a script. The response JSON matches the wire shape in spec §4.1 (`hops`, `terminator`, `truncated`, `metrics`, `confidence`).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "trace_path": {
+                    "type": "string",
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL (see `exec_script` for URL format)."
+                },
+                "variable": {
+                    "type": "string",
+                    "description": "Variable identifier to query. V1 is identifier-only; dotted paths reserved for a future milestone."
+                },
+                "step": {
+                    "type": "integer",
+                    "description": "Optional step id. Defaults to the current execution point of the session."
+                },
+                "frame": {
+                    "type": "integer",
+                    "description": "Optional DAP frame id. Defaults to the topmost frame."
+                },
+                "max_hops": {
+                    "type": "integer",
+                    "description": "Maximum hops in this batch (default 16). Bump only when you genuinely need more — prefer `lazy` + `continuation_token` instead.",
+                    "default": 16
+                },
+                "lazy": {
+                    "type": "boolean",
+                    "description": "When true, the backend may return early with a `continuationToken`.",
+                    "default": false
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session identifier — when reused across calls, the trace and classifier pattern set are kept loaded, avoiding a re-load. Same semantics as `exec_script.session_id`."
+                }
+            },
+            "required": ["trace_path", "variable"]
+        }
+    })
+}
+
+/// Returns the JSON schema for the `resolve_variable_step` helper tool
+/// (M8 of the Value Origin Tracking milestones).
+///
+/// Maps a `(variable, frame?)` query to the most recent step at which
+/// the variable was assigned. Designed to be chained with
+/// `get_value_origin` when the caller wants the chain at a specific
+/// historic assignment.
+fn resolve_variable_step_tool() -> Value {
+    json!({
+        "name": "resolve_variable_step",
+        "description": "Return the most recent step id at which `variable` was assigned in the trace. Pair with `get_value_origin` when you want the chain at the assignment site rather than the current step.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "trace_path": {"type": "string"},
+                "variable": {"type": "string"},
+                "frame": {"type": "integer"},
+                "session_id": {"type": "string"}
+            },
+            "required": ["trace_path", "variable"]
+        }
+    })
+}
+
 /// Returns the JSON schema for the `read_source_file` tool.
 fn read_source_file_tool() -> Value {
     json!({
@@ -992,6 +1071,8 @@ fn handle_tools_list(id: &Value) -> Value {
                 read_source_file_tool(),
                 find_recordings_by_window_tool(),
                 find_recording_by_id_tool(),
+                get_value_origin_tool(),
+                resolve_variable_step_tool(),
             ]
         }),
     )
@@ -1021,6 +1102,10 @@ async fn handle_tools_call(
         "read_source_file" => handle_read_source_file(id, arguments, config).await,
         "find_recordings_by_window" => handle_find_recordings_by_window(id, arguments).await,
         "find_recording_by_id" => handle_find_recording_by_id(id, arguments).await,
+        "get_value_origin" => handle_get_value_origin(id, arguments, config, loaded_traces).await,
+        "resolve_variable_step" => {
+            handle_resolve_variable_step(id, arguments, config, loaded_traces).await
+        }
         _ => jsonrpc_error(id, -32602, &format!("Unknown tool: {tool_name}")),
     }
 }
@@ -2366,6 +2451,7 @@ async fn handle_read_source_file(
 /// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
 ///    parent (e.g. trace at `/tmp/foo/trace/`, source at
 ///    `/tmp/foo/program/src/main.py`).
+///
 /// Strip the root of an absolute path so it can be re-rooted under another
 /// directory (e.g. a trace's `files/` embed dir).
 ///
@@ -2685,6 +2771,287 @@ async fn handle_find_recording_by_id(id: &Value, arguments: Option<&Value>) -> V
 }
 
 // ---------------------------------------------------------------------------
+// Value Origin Tracking — M8 standalone + helper tools.
+//
+// Both handlers connect to the daemon, ensure the trace is open
+// (idempotent if already loaded — same caching behaviour as
+// `handle_trace_info`/`handle_exec_script`), forward the request to the
+// db-backend via the daemon's "unknown command" fallback (it routes the
+// `ct/originChain` / `ct/load-history` requests to the selected
+// replay), and surface the response either as canonical JSON
+// (`get_value_origin`) or as a `{stepId, location, variable}` envelope
+// (`resolve_variable_step`).
+// ---------------------------------------------------------------------------
+
+/// Open the trace (idempotent) and cache its metadata in
+/// `loaded_traces` so subsequent calls re-use the loaded backend and
+/// the resource-listing surface sees it.
+///
+/// Returns the canonical trace-path string suitable for forwarding to
+/// the backend, or an error message ready to be wrapped in a
+/// `tool_result_error_*` envelope.
+async fn ensure_trace_open(
+    stream: &mut UnixStream,
+    raw_trace_path: &str,
+    config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
+) -> Result<String, String> {
+    let trace_path = resolve_trace_path_or_url(raw_trace_path).await?;
+
+    // Avoid the round-trip when the cache already knows about this
+    // trace — session affinity is a soft contract (the daemon TTL may
+    // still expire the backend) but for an in-flight MCP session this
+    // is enough to keep the second call free of a re-load.
+    let already_loaded = loaded_traces.contains_key(&trace_path);
+
+    if !already_loaded {
+        let open_resp = dap_request(
+            stream,
+            "ct/open-trace",
+            1,
+            json!({"tracePath": trace_path}),
+            180,
+        )
+        .await
+        .map_err(|e| format!("failed to open trace: {e}"))?;
+        if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+            let message = open_resp
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("failed to open trace");
+            return Err(message.to_string());
+        }
+
+        if let Ok(meta) = fetch_trace_metadata(config, &trace_path).await {
+            loaded_traces.insert(trace_path.clone(), meta);
+        }
+    }
+
+    Ok(trace_path)
+}
+
+/// Handles the `get_value_origin` MCP tool (M8 secondary surface).
+async fn handle_get_value_origin(
+    id: &Value,
+    arguments: Option<&Value>,
+    config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
+) -> Value {
+    let start = Instant::now();
+    let args = match arguments {
+        Some(a) => a,
+        None => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing arguments for get_value_origin"),
+            );
+        }
+    };
+
+    let raw_trace_path = match args.get("trace_path").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing required argument: trace_path"),
+            );
+        }
+    };
+    let variable = match args.get("variable").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(id, tool_result_error("Missing required argument: variable"));
+        }
+    };
+
+    let step_id = args.get("step").and_then(Value::as_i64).unwrap_or(-1);
+    let frame_id = args.get("frame").and_then(Value::as_i64).unwrap_or(-1);
+    let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(16) as u32;
+    let lazy = args.get("lazy").and_then(Value::as_bool).unwrap_or(false);
+    let session_id = args
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let mut stream = match connect_to_daemon(config).await {
+        Ok(s) => s,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(
+                id,
+                tool_result_error_with_timing(
+                    &format!("Cannot connect to daemon: {e}"),
+                    duration_ms,
+                ),
+            );
+        }
+    };
+
+    let trace_path =
+        match ensure_trace_open(&mut stream, raw_trace_path, config, loaded_traces).await {
+            Ok(p) => p,
+            Err(e) => {
+                let duration_ms = start.elapsed().as_millis();
+                return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+            }
+        };
+
+    let chain_resp = match dap_request(
+        &mut stream,
+        "ct/originChain",
+        2,
+        json!({
+            "tracePath": trace_path,
+            "variableName": variable,
+            "variablePath": [],
+            "frameId": frame_id,
+            "stepId": step_id,
+            "threadId": 0,
+            "maxHops": max_hops,
+            "lazy": lazy,
+            "sessionId": session_id,
+            "classifySource": true,
+            "replay-id": 0,
+        }),
+        60,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(
+                id,
+                tool_result_error_with_timing(
+                    &format!("ct/originChain request failed: {e}"),
+                    duration_ms,
+                ),
+            );
+        }
+    };
+
+    if chain_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
+        let message = chain_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("ct/originChain failed");
+        return jsonrpc_result(id, tool_result_error_with_timing(message, duration_ms));
+    }
+
+    let body = chain_resp.get("body").cloned().unwrap_or(json!({}));
+    let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+    let duration_ms = start.elapsed().as_millis();
+    jsonrpc_result(id, tool_result_text_with_timing(&pretty, duration_ms))
+}
+
+/// Handles the `resolve_variable_step` MCP helper tool (M8).
+async fn handle_resolve_variable_step(
+    id: &Value,
+    arguments: Option<&Value>,
+    config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
+) -> Value {
+    let start = Instant::now();
+    let args = match arguments {
+        Some(a) => a,
+        None => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing arguments for resolve_variable_step"),
+            );
+        }
+    };
+    let raw_trace_path = match args.get("trace_path").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return jsonrpc_result(
+                id,
+                tool_result_error("Missing required argument: trace_path"),
+            );
+        }
+    };
+    let variable = match args.get("variable").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return jsonrpc_result(id, tool_result_error("Missing required argument: variable"));
+        }
+    };
+    let frame_id = args.get("frame").and_then(Value::as_i64).unwrap_or(-1);
+
+    let mut stream = match connect_to_daemon(config).await {
+        Ok(s) => s,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(
+                id,
+                tool_result_error_with_timing(
+                    &format!("Cannot connect to daemon: {e}"),
+                    duration_ms,
+                ),
+            );
+        }
+    };
+
+    let trace_path =
+        match ensure_trace_open(&mut stream, raw_trace_path, config, loaded_traces).await {
+            Ok(p) => p,
+            Err(e) => {
+                let duration_ms = start.elapsed().as_millis();
+                return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+            }
+        };
+
+    let history_resp = match dap_request(
+        &mut stream,
+        "ct/load-history",
+        2,
+        json!({
+            "tracePath": trace_path,
+            "expression": variable,
+            "frameId": frame_id,
+            "replay-id": 0,
+        }),
+        30,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(
+                id,
+                tool_result_error_with_timing(&format!("ct/load-history failed: {e}"), duration_ms),
+            );
+        }
+    };
+
+    if history_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let duration_ms = start.elapsed().as_millis();
+        let message = history_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("ct/load-history failed");
+        return jsonrpc_result(id, tool_result_error_with_timing(message, duration_ms));
+    }
+
+    let (success, body) =
+        crate::python_bridge::format_resolve_variable_step_response(&history_resp, &variable);
+    let duration_ms = start.elapsed().as_millis();
+    if success {
+        let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+        jsonrpc_result(id, tool_result_text_with_timing(&pretty, duration_ms))
+    } else {
+        let msg = body
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("resolve_variable_step failed");
+        jsonrpc_result(id, tool_result_error_with_timing(msg, duration_ms))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
 
@@ -2760,8 +3127,8 @@ mod tests {
     fn test_handle_tools_list() {
         let resp = handle_tools_list(&json!(2));
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        // 4 trace tools + 2 observability-discovery tools.
-        assert_eq!(tools.len(), 6);
+        // 4 trace tools + 2 observability-discovery tools + 2 origin tools (M8).
+        assert_eq!(tools.len(), 8);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"exec_script"));
@@ -2770,6 +3137,8 @@ mod tests {
         assert!(names.contains(&"read_source_file"));
         assert!(names.contains(&"find_recordings_by_window"));
         assert!(names.contains(&"find_recording_by_id"));
+        assert!(names.contains(&"get_value_origin"));
+        assert!(names.contains(&"resolve_variable_step"));
 
         // Verify each tool has an inputSchema.
         for tool in tools {
@@ -2778,6 +3147,41 @@ mod tests {
                 "tool missing inputSchema"
             );
         }
+    }
+
+    /// M8 verification test #11 — the standalone `get_value_origin`
+    /// tool's description must steer callers toward the `exec_script`
+    /// scripting workflow as the preferred multi-step path.
+    #[test]
+    fn test_mcp_get_value_origin_description_points_at_scripting() {
+        let tool = get_value_origin_tool();
+        let description = tool
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(
+            description.contains("exec_script"),
+            "get_value_origin description must reference exec_script (got: {description})"
+        );
+        assert!(
+            description.contains("value_origin"),
+            "get_value_origin description must mention the trace.value_origin method (got: {description})"
+        );
+    }
+
+    /// M8 verification test — the `resolve_variable_step` helper tool
+    /// must register with `trace_path` and `variable` required.
+    #[test]
+    fn test_mcp_resolve_variable_step_schema_shape() {
+        let tool = resolve_variable_step_tool();
+        let required = tool
+            .get("inputSchema")
+            .and_then(|s| s.get("required"))
+            .and_then(Value::as_array)
+            .expect("required array");
+        let names: Vec<&str> = required.iter().filter_map(Value::as_str).collect();
+        assert!(names.contains(&"trace_path"));
+        assert!(names.contains(&"variable"));
     }
 
     #[test]

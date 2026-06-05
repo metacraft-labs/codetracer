@@ -9,8 +9,9 @@ mod errors;
 pub mod mcp_server;
 mod meta_dat;
 pub mod observability_fetch;
+pub mod origin_renderer;
 mod paths;
-mod python_bridge;
+pub mod python_bridge;
 mod script_executor;
 mod session;
 mod trace_metadata;
@@ -173,10 +174,78 @@ enum TraceAction {
         #[arg(long)]
         session_close: Option<String>,
     },
+    /// Execute a Python script against a trace (M8 scripting parity).
+    ///
+    /// Convenience alias of `ct trace query` shaped for the
+    /// `ct trace exec --script <file.py> <recording>` recipe documented
+    /// in the M8 milestone. The script body sees the same `trace`
+    /// binding (`codetracer.Trace` instance) as the MCP `exec_script`
+    /// tool, so the same `value_origin(...)` script body runs
+    /// end-to-end from a terminal.
+    Exec {
+        /// Path to the trace directory or recording id.
+        trace_path: PathBuf,
+
+        /// Python script file to execute.
+        ///
+        /// Optional — when omitted, behaves like `ct trace query` and
+        /// reads the script from stdin.
+        #[arg(long = "script", short = 's')]
+        script: Option<PathBuf>,
+
+        /// Inline Python code to execute (alternative to `--script`).
+        #[arg(short = 'c', long = "code")]
+        code: Option<String>,
+
+        /// Execution timeout in seconds (default: 120).
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+
+        /// Reusable session identifier for stateful debugging — see
+        /// the matching flag on `ct trace query`.
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Print trace metadata (language, events, source files).
     Info {
         /// Path to the trace directory.
         trace_path: PathBuf,
+    },
+    /// Print the value-origin chain for a variable (M8 specialised CLI).
+    ///
+    /// Walks the backward dataflow chain for `--variable` ending at the
+    /// first computational origin / literal / parameter-at-record-start
+    /// terminator. Drives the same `ct/originChain` DAP request as the
+    /// `Trace.value_origin(...)` Python binding and the `get_value_origin`
+    /// MCP tool.
+    Origin {
+        /// Path to the trace directory.
+        trace_path: PathBuf,
+
+        /// Variable identifier to query (V1 is identifier-only).
+        #[arg(long)]
+        variable: String,
+
+        /// Optional step id (defaults to "current").
+        #[arg(long)]
+        step: Option<i64>,
+
+        /// Optional DAP frame id (defaults to "topmost frame").
+        #[arg(long)]
+        frame: Option<i64>,
+
+        /// Maximum hops in this batch (default 16).
+        #[arg(long, default_value_t = 16)]
+        max_hops: u32,
+
+        /// Output format.
+        #[arg(long, default_value = "text", value_parser = ["json", "markdown", "text"])]
+        format: String,
+
+        /// Allow the backend to return a continuation token when the
+        /// chain doesn't fit in `max_hops`.
+        #[arg(long)]
+        lazy: bool,
     },
     /// Start the MCP (Model Context Protocol) server on stdio.
     ///
@@ -2530,6 +2599,178 @@ async fn run_trace_info(
     Ok(())
 }
 
+/// Implements `ct trace origin` (M8 specialised CLI subcommand).
+///
+/// Opens the trace, issues a `ct/originChain` DAP request, and emits the
+/// resulting chain in the requested format (json / markdown / text).
+/// The text and markdown renderers live in
+/// [`crate::origin_renderer`] so the CLI output is identical to the
+/// strings the Python `OriginChain.to_text()` / `to_markdown()`
+/// methods produce.
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+async fn run_trace_origin(
+    trace_path: &std::path::Path,
+    variable: &str,
+    step: Option<i64>,
+    frame: Option<i64>,
+    max_hops: u32,
+    format: &str,
+    lazy: bool,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
+
+    // Open the trace first (idempotent if already open). Reuses the
+    // generous timeout from `run_trace_info` because large traces can
+    // take a while to load.
+    let open_resp = cli_dap_request(
+        &mut stream,
+        "ct/open-trace",
+        1,
+        json!({"tracePath": trace_path_str}),
+        180,
+    )
+    .await?;
+    if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = open_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("failed to open trace");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let mut origin_args = json!({
+        "variableName": variable,
+        "variablePath": [],
+        "frameId": frame.unwrap_or(-1),
+        "stepId": step.unwrap_or(-1),
+        "threadId": 0,
+        "maxHops": max_hops,
+        "lazy": lazy,
+        "sessionId": "",
+        "classifySource": true,
+    });
+    // Forward through the daemon → backend bridge. The daemon does NOT
+    // own a `ct/originChain` route today (see `backend_manager.rs`); it
+    // falls back to forwarding unknown commands to the currently
+    // selected replay. That is exactly what we want: the request
+    // reaches the db-backend, which honours the `meta_dat` + project
+    // overlay (`meta_dat/origin-patterns/`) loaded at session start
+    // (commit ea6f55c3).
+    origin_args["replay-id"] = json!(0);
+
+    let origin_resp = cli_dap_request(&mut stream, "ct/originChain", 2, origin_args, 30).await?;
+    if origin_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = origin_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("ct/originChain failed");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let body = origin_resp.get("body").cloned().unwrap_or(json!({}));
+
+    match format {
+        "json" => {
+            // Emit canonical JSON exactly as the backend produced it —
+            // pretty-printed for human consumption but byte-stable so
+            // CI tests can diff it.
+            let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+            println!("{pretty}");
+        }
+        "markdown" => {
+            println!("{}", origin_renderer::render_markdown(&body));
+        }
+        _ => {
+            // "text" or anything unrecognised — render the spec §3.2
+            // ASCII chain layout.
+            println!("{}", origin_renderer::render_text(&body));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+async fn run_trace_origin(
+    trace_path: &std::path::Path,
+    variable: &str,
+    step: Option<i64>,
+    frame: Option<i64>,
+    max_hops: u32,
+    format: &str,
+    lazy: bool,
+    daemon_socket_path: &PathBuf,
+    daemon_pid_path: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let mut stream = ensure_daemon_connected(daemon_socket_path, daemon_pid_path).await?;
+
+    let trace_path_str = resolve_cli_trace_path(trace_path).await?;
+    let open_resp = cli_dap_request(
+        &mut stream,
+        "ct/open-trace",
+        1,
+        json!({"tracePath": trace_path_str}),
+        180,
+    )
+    .await?;
+    if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = open_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("failed to open trace");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let mut origin_args = json!({
+        "variableName": variable,
+        "variablePath": [],
+        "frameId": frame.unwrap_or(-1),
+        "stepId": step.unwrap_or(-1),
+        "threadId": 0,
+        "maxHops": max_hops,
+        "lazy": lazy,
+        "sessionId": "",
+        "classifySource": true,
+    });
+    origin_args["replay-id"] = json!(0);
+
+    let origin_resp = cli_dap_request(&mut stream, "ct/originChain", 2, origin_args, 30).await?;
+    if origin_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let message = origin_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("ct/originChain failed");
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
+
+    let body = origin_resp.get("body").cloned().unwrap_or(json!({}));
+
+    match format {
+        "json" => {
+            let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+            println!("{pretty}");
+        }
+        "markdown" => {
+            println!("{}", origin_renderer::render_markdown(&body));
+        }
+        _ => {
+            println!("{}", origin_renderer::render_text(&body));
+        }
+    }
+
+    Ok(())
+}
+
 /// Implements `ct trace query` on Windows (TCP-based daemon connection).
 #[cfg(windows)]
 async fn run_trace_query(
@@ -2834,6 +3075,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
             #[cfg(windows)]
             TraceAction::Info { trace_path } => {
                 return run_trace_info(trace_path, &daemon_socket_path, &daemon_pid_path).await;
+            }
+            TraceAction::Exec {
+                trace_path,
+                script,
+                code,
+                timeout,
+                session,
+            } => {
+                return run_trace_query(
+                    trace_path,
+                    script.as_deref(),
+                    code.as_deref(),
+                    *timeout,
+                    session.as_deref(),
+                    &daemon_socket_path,
+                    &daemon_pid_path,
+                )
+                .await;
+            }
+            TraceAction::Origin {
+                trace_path,
+                variable,
+                step,
+                frame,
+                max_hops,
+                format,
+                lazy,
+            } => {
+                return run_trace_origin(
+                    trace_path,
+                    variable,
+                    *step,
+                    *frame,
+                    *max_hops,
+                    format,
+                    *lazy,
+                    &daemon_socket_path,
+                    &daemon_pid_path,
+                )
+                .await;
             }
             TraceAction::Mcp => {
                 // MCP server: redirect all logging to stderr only.
