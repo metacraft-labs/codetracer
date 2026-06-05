@@ -67,6 +67,13 @@ pub mod origin_query;
 pub mod paths;
 pub mod program_search_tool;
 pub mod query;
+// M11 — RR-driver origin chain algorithm (spec §6.3).
+// Sits between `recreator_session::RecreatorReplaySession` (which owns
+// the worker transport) and `dap_handler::Handler::origin_chain` (which
+// dispatches `ct/originChain` requests). Kept in its own module so the
+// algorithm stays focused on the watchpoint-loop + stack-slot reuse
+// guard + cross-thread guard + operand re-execution helper.
+pub mod recreator_origin;
 pub mod recreator_session;
 pub mod replay;
 // M-DWARF-4: DWARF CFI walker for multi-frame stack unwinding.

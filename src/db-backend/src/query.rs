@@ -88,6 +88,52 @@ pub enum ReplayQuery {
     /// multi-process recording so that VS Code / DAP clients show one thread
     /// per recorded process instead of a single synthetic thread.
     GetProcessInfo,
+    // -----------------------------------------------------------------
+    // Value-Origin (M11) — RR-driver primitives.
+    //
+    // These mirror the same-named queries on the native-backend worker
+    // (`codetracer-native-backend/src/query.rs`). The db-backend
+    // `recreator_session::origin_chain` implementation in spec §6.3
+    // forwards through `dispatch_replay_query` so existing transport
+    // wiring (UnixStream / TcpStream) carries them verbatim.
+    // -----------------------------------------------------------------
+    /// Resolve the address and size of `expression` at the current
+    /// replay tick. The worker walks DWARF to find the variable's
+    /// storage location and returns `{ "address": u64, "size": usize }`
+    /// (per spec §6.3 "evaluate_with_address").
+    EvaluateWithAddress {
+        expression: String,
+    },
+    /// Install a hardware watchpoint at `(address, size)` and fire on
+    /// `is_write`. The worker returns a numeric watchpoint id which the
+    /// caller must pass to `DeleteWatchpoint` for cleanup.
+    AddWatchpoint {
+        address: u64,
+        size: usize,
+        is_write: bool,
+    },
+    /// Remove the watchpoint identified by `id`. Defensive cleanup —
+    /// the M11 origin loop calls this on every hop transition AND on
+    /// error.
+    DeleteWatchpoint {
+        id: i64,
+    },
+    /// Reverse-continue until any breakpoint/watchpoint fires or the
+    /// recording start is reached. Worker returns a stop-reason record
+    /// `{ "reason": "watchpoint" | "recording-start" | ..., "watchpointId": i64 }`.
+    ReverseContinue,
+    /// Read the current program counter — used for the stack-slot
+    /// reuse guard (spec §6.3 "verify the writing instruction").
+    CurrentPc,
+    /// Read the currently-selected thread id. Used by the cross-thread
+    /// guard (spec §6.3) to detect writes from a non-querying thread.
+    CurrentThread,
+    /// Switch the replay session to thread `tid`. Used after the
+    /// cross-thread guard fires so the operand-snapshot read targets
+    /// the writing thread's frame.
+    SelectThread {
+        tid: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

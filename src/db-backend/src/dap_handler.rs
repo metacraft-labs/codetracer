@@ -1375,12 +1375,18 @@ impl Handler {
         args: task::CtOriginChainArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        // Build the per-request budget. Defaults from spec §6.1.7.
-        let budget = task::OriginBudget {
+        // Build the per-request budget. Defaults from spec §6.1.7. The
+        // recreator (RR) backend caps `max_hops` lower than the
+        // materialized backend per M11 spec §6.3 — half (8 vs 16) —
+        // because each RR hop costs a reverse-continue.
+        let mut budget = task::OriginBudget {
             max_hops: args.max_hops,
             wall_clock_ms: task::DEFAULT_ORIGIN_WALL_CLOCK_MS,
             max_steps_scanned: task::DEFAULT_ORIGIN_MAX_STEPS_SCANNED,
         };
+        if self.trace_kind == TraceKind::Recreator && budget.max_hops > crate::recreator_origin::RR_DEFAULT_MAX_HOPS {
+            budget.max_hops = crate::recreator_origin::RR_DEFAULT_MAX_HOPS;
+        }
         let result = match self.trace_kind {
             TraceKind::Materialized => {
                 let patterns = self.load_origin_patterns();
@@ -1390,9 +1396,11 @@ impl Handler {
             TraceKind::Emulator => Err(crate::origin_query::OriginError::unsupported_backend(
                 "emulator (Materialized path is the only V1 backend; emulator support lands in M18)",
             )),
-            TraceKind::Recreator => Err(crate::origin_query::OriginError::unsupported_backend(
-                "recreator (RR support lands in M11)",
-            )),
+            TraceKind::Recreator => {
+                let patterns = self.load_origin_patterns();
+                let meta_dat_sources_root = self.meta_dat_sources_root();
+                self.recreator_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
+            }
         };
         match result {
             Ok(chain) => {
@@ -1457,6 +1465,41 @@ impl Handler {
             }
             None => Err(crate::origin_query::OriginError::unsupported_backend(
                 "non-materialized backend (downcast failed)",
+            )),
+        }
+    }
+
+    /// M11 — dispatch to the RR-driver origin algorithm (spec §6.3).
+    ///
+    /// Mirrors [`Self::materialized_origin_chain`] but routes through
+    /// the `RecreatorReplaySession` worker transport. The actual
+    /// algorithm lives in [`crate::recreator_origin::run_rr_origin_chain`];
+    /// this helper is just the trait-object down-cast + argument plumbing.
+    ///
+    /// When the down-cast fails (the backend was constructed for a
+    /// non-Recreator trace kind despite `self.trace_kind ==
+    /// TraceKind::Recreator`) we surface DAP error 6103 so the frontend
+    /// renders the "coming soon" affordance instead of a misleading
+    /// stack trace.
+    fn recreator_origin_chain(
+        &mut self,
+        args: &task::CtOriginChainArguments,
+        budget: &task::OriginBudget,
+        patterns: &origin_classifier::PatternSet,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Result<task::OriginChain, crate::origin_query::OriginError> {
+        let any_session = self.replay.as_any_mut();
+        match any_session.downcast_mut::<RecreatorReplaySession>() {
+            Some(session) => crate::recreator_origin::run_rr_origin_chain(
+                session,
+                args,
+                budget,
+                &mut self.expr_loader,
+                patterns,
+                meta_dat_sources_root,
+            ),
+            None => Err(crate::origin_query::OriginError::unsupported_backend(
+                "recreator (downcast failed — handler initialised for a non-recreator trace kind)",
             )),
         }
     }

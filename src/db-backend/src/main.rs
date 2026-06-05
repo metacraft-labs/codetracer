@@ -48,6 +48,7 @@ mod origin_query;
 mod paths;
 mod program_search_tool;
 mod query;
+mod recreator_origin;
 mod recreator_session;
 mod replay;
 mod step_lines_loader;

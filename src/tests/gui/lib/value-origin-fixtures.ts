@@ -51,7 +51,7 @@ const fixtureRoot = path.join(
  * `<repo>/src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py`.
  */
 export function originFixturePath(
-  language: "python" | "ruby" | "javascript",
+  language: "python" | "ruby" | "javascript" | "rust" | "c" | "cpp" | "nim" | "go" | "d",
   scenario: string,
 ): string {
   const fileName = (() => {
@@ -62,6 +62,18 @@ export function originFixturePath(
         return "main.rb";
       case "javascript":
         return "main.js";
+      case "rust":
+        return "main.rs";
+      case "c":
+        return "main.c";
+      case "cpp":
+        return "main.cpp";
+      case "nim":
+        return "main.nim";
+      case "go":
+        return "main.go";
+      case "d":
+        return "main.d";
     }
   })();
   return path.join(fixtureRoot, language, scenario, fileName);
@@ -212,4 +224,59 @@ export function javascriptSpecSkipReason(): string | null {
       " — run `just build-once` to produce the Electron build the M5 specs drive";
   }
   return javascriptRecorderUnavailableReason();
+}
+
+/**
+ * M11 — RR-backed origin specs (Rust + C + C++ + Nim + Go).
+ *
+ * The native-backend pipeline drives `rr` for record/replay and
+ * `ct-native-replay` (formerly `ct-rr-support`) as the worker that
+ * bridges to db-backend. The GUI launches a recorded RR trace via
+ * `launchMode: "trace"`, so the spec needs the full toolchain present
+ * when it asks the harness to record on demand.
+ *
+ * The probe checks:
+ *
+ *   - `ct` binary built (mirrors the other languages).
+ *   - `rr` on PATH.
+ *   - `ct-native-replay` on PATH.
+ *   - Per-language compiler on PATH.
+ *
+ * Returns null when all probes pass; otherwise returns a human-readable
+ * sentinel that the spec emits via `test.skip(!!reason, reason)`.
+ */
+export function rrToolchainUnavailableReason(): string | null {
+  if (findOnPath("rr") === null) {
+    return "rr binary not on PATH (install rr to run RR-backed origin tests)";
+  }
+  if (findOnPath("ct-native-replay") === null && findOnPath("ct-rr-support") === null) {
+    return "ct-native-replay not on PATH (M11 RR specs need the native-backend replay worker)";
+  }
+  return null;
+}
+
+export function rustRrSpecSkipReason(): string | null {
+  if (!isCtBinaryAvailable()) {
+    return "ct binary missing at " + ctBinaryPath() +
+      " — run `just build-once` to produce the Electron build the M11 specs drive";
+  }
+  const tc = rrToolchainUnavailableReason();
+  if (tc !== null) return tc;
+  if (findOnPath("rustc") === null) {
+    return "rustc not on PATH (M11 Rust RR spec needs the Rust compiler)";
+  }
+  return null;
+}
+
+export function cRrSpecSkipReason(): string | null {
+  if (!isCtBinaryAvailable()) {
+    return "ct binary missing at " + ctBinaryPath() +
+      " — run `just build-once` to produce the Electron build the M11 specs drive";
+  }
+  const tc = rrToolchainUnavailableReason();
+  if (tc !== null) return tc;
+  if (findOnPath("gcc") === null) {
+    return "gcc not on PATH (M11 C RR spec needs a C compiler)";
+  }
+  return null;
 }

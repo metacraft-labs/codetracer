@@ -178,3 +178,6 @@ winget
 asyncio
 doctests
 deepreview
+memcpy
+watchpoint
+writeln
