@@ -287,10 +287,21 @@ impl<'a> TraceProcessor<'a> {
             }
 
             TraceLowLevelEvent::BindVariable(_record) => {
-                unimplemented!() // experimental, not ready
+                // M15: BindVariable events become a no-op at indexer time
+                // until the Path A classifier extension lands (tracked in
+                // M11/M16-series).  The events still ride the wire and are
+                // available to downstream consumers (e.g. `ct print
+                // --json-events`).  Returning here ensures Python-recorder
+                // traces with Assignment events replay cleanly through the
+                // existing Path B classifier.
             }
             TraceLowLevelEvent::Assignment(_record) => {
-                unimplemented!() // experimental, not ready
+                // M15: see BindVariable arm above.  Path A activation is
+                // tracked separately; the materialized DB's per-query
+                // classifier today still uses Path B for Python and Ruby
+                // traces (spec §6.1).  Once the classifier learns to
+                // consume `assignments_by_var` (spec §6.2), the indexer
+                // will populate that index from this arm.
             }
             TraceLowLevelEvent::DropVariables(variable_ids) => {
                 if self.depth > 0 {
