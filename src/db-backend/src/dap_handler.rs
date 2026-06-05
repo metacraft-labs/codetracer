@@ -3696,14 +3696,17 @@ mod tests {
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(1),
+                column: None,
             }),
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(2),
+                column: None,
             }),
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(3),
+                column: None,
             }),
         ];
         let trace_metadata = TraceMetadata {
@@ -3767,10 +3770,12 @@ mod tests {
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(2),
+                column: None,
             }),
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(3),
+                column: None,
             }),
         ];
         let mut trace: Vec<TraceLowLevelEvent> = vec![
@@ -3787,6 +3792,7 @@ mod tests {
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(1),
+                column: None,
             }),
         ];
         for _ in 0..size {
@@ -3823,6 +3829,7 @@ mod tests {
             events.push(TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(i as i64 + 1),
+                column: None,
             }));
         }
         let trace = events;
