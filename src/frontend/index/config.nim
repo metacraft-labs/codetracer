@@ -498,9 +498,10 @@ proc editModeHiddenContentIds(): seq[int] =
     ord(Content.AgentActivity),
     ord(Content.AgentActivityDeepReview),
     ord(Content.DeepReview),
-    ord(Content.FrameViewer),
+    # Content.FrameViewer removed in M3 — pane no longer dispatched.
     ord(Content.PixelHistory),
-    ord(Content.ShaderDebug)
+    ord(Content.ShaderDebug),
+    ord(Content.VideoPlayer)
   ]
 
 proc stringifyJson(value: js): cstring {.importjs: "JSON.stringify(#)".}

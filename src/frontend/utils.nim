@@ -914,9 +914,11 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
   )
   data.registerComponent(result, Content.CaptionBarProgress)
 
-proc makeFrameViewerComponent*(data: Data, id: int): FrameViewerComponent =
-  result = FrameViewerComponent(id: id)
-  data.registerComponent(result, Content.FrameViewer)
+## ``makeFrameViewerComponent`` was retired in M3 — Content.FrameViewer is no
+## longer a registered pane.  The Video Player pane now owns the rendered
+## frame and wraps the same ``FrameViewerVM`` for data loading.  The
+## ``FrameViewerComponent`` type definition is kept in ``types.nim`` so legacy
+## persisted layouts can still parse without throwing during the transition.
 
 proc makePixelHistoryComponent*(data: Data, id: int): PixelHistoryComponent =
   result = PixelHistoryComponent(id: id)
@@ -1005,7 +1007,11 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.DeepReview:      data.makeDeepReviewComponent(id)
   of Content.AgentWorkspace:  data.makeAgentWorkspaceComponent(id)
   of Content.CaptionBarProgress: data.makeCaptionBarProgressComponent(id)
-  of Content.FrameViewer:     data.makeFrameViewerComponent(id)
+  # Content.FrameViewer dispatch removed in M3 — see the comment above
+  # ``makePixelHistoryComponent``.  If a stale layout still references the
+  # FrameViewer content id, ``makeComponent`` falls through to the catch-all
+  # ``raise`` branch below; the additive walker ensures fresh sessions never
+  # emit one.
   of Content.PixelHistory:    data.makePixelHistoryComponent(id)
   of Content.ShaderDebug:     data.makeShaderDebugComponent(id)
   of Content.VideoPlayer:     data.makeVideoPlayerComponent(id)

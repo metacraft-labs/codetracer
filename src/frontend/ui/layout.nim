@@ -558,7 +558,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
       Content.AgentWorkspace,
-      Content.FrameViewer,
+      # Content.FrameViewer was retired in M3 — the Video Player pane
+      # supersedes it.  ``FrameViewerVM`` remains as the data source the
+      # Video Player wraps; see ``viewmodel/viewmodels/frame_viewer_vm.nim``.
       Content.PixelHistory,
       Content.ShaderDebug,
       Content.VideoPlayer,
@@ -771,10 +773,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             AgentWorkspaceComponent(component))
           agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
 
-        if state.content == Content.FrameViewer:
-          frame_viewer.syncVisualReplaySessionIntoVM()
-          frame_viewer.tryMountIsoNimFrameViewerPanel(
-            FrameViewerComponent(component))
+        # Content.FrameViewer pane dispatch was retired in M3.  The legacy
+        # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
+        # other panes (Video Player, Pixel History, Shader Debug) share.
 
         if state.content == Content.PixelHistory:
           pixel_history.tryMountIsoNimPixelHistoryPanel(

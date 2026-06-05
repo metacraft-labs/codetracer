@@ -1,16 +1,25 @@
+## Legacy Video-Replay glue around the standalone Frame Viewer pane.
+##
+## M3 retired the dedicated ``Content.FrameViewer`` pane: the Video Player
+## (``ui/video_player.nim``) is now the user-facing surface for visual replay
+## and embeds the rendered frame canvas directly.  What survives in this file
+## is the bootstrap for the singleton ``FrameViewerVM`` instance — the same
+## VM the Video Player wraps — together with the JS test hooks the Playwright
+## suite uses to drive synthetic GEID transitions through that VM.  Pane
+## registration (``register*``, ``tryMountIsoNimFrameViewerPanel``) lived here
+## historically and is intentionally absent now.
+
 import
   ui_imports,
   ../communication,
   ../viewmodel/store/replay_data_store,
   ../viewmodel/viewmodels/[frame_viewer_vm, visual_replay_client],
-  ../viewmodel/views/isonim_frame_viewer_view,
   pixel_history,
   shader_debug,
   visual_replay_client_factory
 
 import std/options
 import isonim/core/signals
-import isonim/web/dom_api as dom_api
 
 when defined(js):
   proc installFrameViewerTestHooks(applyGeid: proc(geid: int)) {.importjs: """
@@ -23,12 +32,13 @@ when defined(js):
   """.}
 
 var frameViewerVMInstance: FrameViewerVM
-var frameViewerComponentRef: FrameViewerComponent
-var isoNimFrameViewerMounted*: bool = false
 
 const initialVisualReplayIndexingDraw = 999
 
 proc syncVisualReplaySessionIntoVM*() =
+  ## Refresh the shared FrameViewerVM with the latest visual-replay session
+  ## state.  Safe to call whenever the active session changes — early-returns
+  ## if the VM has not been constructed yet.
   if frameViewerVMInstance.isNil:
     return
   let session = data.activeSession
@@ -76,6 +86,10 @@ proc initFrameViewerVM(store: ReplayDataStore = nil) =
   syncVisualReplaySessionIntoVM()
 
 proc initFrameViewerVMWithStore*(store: ReplayDataStore) =
+  ## Initialises the shared VM and the downstream Pixel History / Shader Debug
+  ## VMs that consume its selection callbacks.  ``ui_js.nim`` invokes this
+  ## once the active session VM is ready so the data plane is online before
+  ## the panes mount.
   initFrameViewerVM(store)
   pixel_history.initPixelHistoryVMWithStore(store)
   shader_debug.initShaderDebugVMWithStore(store)
@@ -84,45 +98,3 @@ proc initFrameViewerVMWithStore*(store: ReplayDataStore) =
       installFrameViewerTestHooks(proc(geid: int) =
         if geid > 0:
           store.updateCurrentGeid(some(uint64(geid))))
-
-proc tryMountIsoNimFrameViewerPanel*(component: FrameViewerComponent = nil) =
-  if not component.isNil and frameViewerComponentRef.isNil:
-    frameViewerComponentRef = component
-  if frameViewerVMInstance.isNil:
-    initFrameViewerVM()
-  if isoNimFrameViewerMounted or frameViewerVMInstance.isNil:
-    return
-  if frameViewerComponentRef.isNil:
-    return
-
-  let key = cstring("frameViewerComponent-" & $frameViewerComponentRef.id)
-  var retryCount = 0
-  proc doMount() =
-    if isoNimFrameViewerMounted:
-      return
-    retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimFrameViewerPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimFrameViewerMounted = true
-    try:
-      mountIsoNimFrameViewer(container, frameViewerVMInstance)
-    except:
-      cerror "tryMountIsoNimFrameViewerPanel: mount EXCEPTION: " &
-        getCurrentExceptionMsg()
-
-  doMount()
-
-method register*(self: FrameViewerComponent, api: MediatorWithSubscribers) =
-  self.api = api
-  initFrameViewerVM()
-  tryMountIsoNimFrameViewerPanel(self)

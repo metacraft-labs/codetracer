@@ -1300,6 +1300,73 @@ proc followMouse(event: dom.Event) =
   #   #  updateTelemetryLog()
   #    telemetryBackupIndex = 0
 
+proc resolvedConfigToJsonNode(config: GoldenLayoutResolvedConfig): JsonNode =
+  ## Bridge between the JS-side GoldenLayout config object and Nim's parsed
+  ## ``JsonNode`` tree so the pure helpers in ``visual_replay_layout`` can
+  ## operate on it.  Returns ``nil`` if the config is missing or unparsable.
+  if config.isNil:
+    return nil
+  let raw = $cast[cstring](JSON.stringify(config))
+  if raw.len == 0:
+    return nil
+  try:
+    parseJson(raw)
+  except CatchableError:
+    nil
+
+proc jsonNodeToResolvedConfig(node: JsonNode): GoldenLayoutResolvedConfig =
+  ## Inverse of ``resolvedConfigToJsonNode`` — round-trips a Nim ``JsonNode``
+  ## back into the JS object shape GoldenLayout expects.
+  if node.isNil:
+    return nil
+  cast[GoldenLayoutResolvedConfig](JSON.parse(cstring($node)))
+
+proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
+  ## Wire the additive walker into the trace-load path.  When the freshly
+  ## loaded trace exposes visual-replay artefacts, the Video Player /
+  ## Pixel History / Shader Debug tabs are inserted into the user's existing
+  ## layout (either the pre-trace welcome layout already in
+  ## ``data.ui.resolvedConfig`` or, when a layout is already live, the
+  ## currently-rendered tree).  When the trace lacks artefacts but the
+  ## previous trace had them mounted, the tabs are pruned again.
+  ##
+  ## Idempotent on repeat invocation — both ``addVisualReplayTabs`` and
+  ## ``removeVisualReplayTabs`` are no-ops when there is nothing to do.
+  let visualAvailable = not data.activeSession.isNil and
+    data.activeSession.visualReplayAvailable
+  let layoutLive = not data.ui.layout.isNil
+
+  var sourceConfig =
+    if layoutLive:
+      try:
+        data.ui.layout.saveLayout()
+      except CatchableError:
+        data.ui.resolvedConfig
+    else:
+      data.ui.resolvedConfig
+
+  let layoutNode = resolvedConfigToJsonNode(sourceConfig)
+  if layoutNode.isNil:
+    return
+
+  let updated =
+    if visualAvailable:
+      addVisualReplayTabs(layoutNode)
+    else:
+      removeVisualReplayTabs(layoutNode)
+
+  let newConfig = jsonNodeToResolvedConfig(updated)
+  if newConfig.isNil:
+    return
+  data.ui.resolvedConfig = newConfig
+
+  if layoutLive:
+    try:
+      data.ui.layout.loadLayout(newConfig)
+    except CatchableError:
+      cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
+        getCurrentExceptionMsg()
+
 proc tryInitLayout*(data: Data) =
   if data.ui.pageLoaded and data.ui.initEventReceived:
     if data.ui.layout.isNil:
@@ -1897,9 +1964,7 @@ proc onTraceLoaded(
     else: response.visualReplayPlayerError
   frame_viewer.syncVisualReplaySessionIntoVM()
   video_player.syncVisualReplaySessionIntoPlayerVM()
-  if data.activeSession.visualReplayAvailable and data.ui.layout.isNil:
-    data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](
-      JSON.parse(cstring(defaultVisualReplayLayoutJson)))
+  applyVisualReplayTabsToResolvedConfig(data)
 
   if data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
     data.startOptions.loading = false
