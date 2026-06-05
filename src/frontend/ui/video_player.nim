@@ -210,6 +210,45 @@ when defined(js):
     })(#);
   """.}
 
+  ## M5-followup hook: light-/dark-theme toggle for the storybook
+  ## Playwright spec.  Flips the ``theme-light`` / ``theme-dark``
+  ## classes on ``<body>`` which the CSS-variable override block in
+  ## ``styles/components/video_player.styl`` keys off.  Kept inside
+  ## the ``inTest`` install path so production builds never see it —
+  ## the broader app's runtime theme switch (``loadTheme`` in
+  ## ``renderer.nim``) swaps the ``<link id='theme'>`` stylesheet
+  ## instead and is unaffected.
+  ##
+  ## Accepts the names ``light`` / ``dark`` (case-insensitive).
+  ## Unrecognised names clear both classes — defensive fallback that
+  ## leaves the page in the un-overridden state so a typo in a spec
+  ## doesn't leak into the next scenario.
+  proc installVideoPlayerThemeHook() {.importjs: """
+    (function() {
+      window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+      window.__CODETRACER_TEST__.setTheme = function(name) {
+        try {
+          var body = document.body;
+          if (!body) return false;
+          var raw = (name == null) ? "" : String(name).toLowerCase().trim();
+          body.classList.remove("theme-light");
+          body.classList.remove("theme-dark");
+          if (raw === "light") {
+            body.classList.add("theme-light");
+            return true;
+          }
+          if (raw === "dark") {
+            body.classList.add("theme-dark");
+            return true;
+          }
+          return false;
+        } catch (_err) {
+          return false;
+        }
+      };
+    })();
+  """.}
+
 else:
   proc installVideoPlayerFocusTracker(panel: cstring) = discard
   proc videoPlayerHasFocus*(): bool = false
@@ -217,6 +256,7 @@ else:
       dispatch: proc(name: cstring): bool) = discard
   proc installVideoPlayerStateHook(
       apply: proc(scenarioJson: cstring)) = discard
+  proc installVideoPlayerThemeHook() = discard
 
 proc initVideoPlayerVMWithStore*(store: ReplayDataStore) =
   initVideoPlayerVM(store)
@@ -238,6 +278,12 @@ proc initVideoPlayerVMWithStore*(store: ReplayDataStore) =
         if vm.isNil:
           return false
         return dispatchVideoPlayerAction(vm, parsed.get))
+
+      ## M5-followup: install the dark/light theme toggle hook so the
+      ## storybook spec can capture light-theme snapshots without a
+      ## Stylus rebuild.  See ``styles/components/video_player.styl``
+      ## for the CSS variable override the toggle keys off.
+      installVideoPlayerThemeHook()
 
       installVideoPlayerStateHook(proc(scenarioJson: cstring) =
         ## Apply a Playwright-supplied scenario JSON to the live VM

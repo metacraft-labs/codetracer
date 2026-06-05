@@ -1,7 +1,42 @@
 // Video Player pane — Visual Replay GUI.
 // Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md
+//
+// Theming strategy
+// ----------------
+// The pane chrome (transport bar, scrubber, text) is themed via CSS
+// custom properties scoped to ``.video-player-component`` so the colours
+// can swap at runtime without a Stylus rebuild.  Production users see
+// dark theme (the only theme the Electron host currently ships), and
+// the defaults below mirror the historical compile-time Stylus
+// values exactly — pixel-identical for dark theme.
+//
+// Light theme is enabled by adding ``theme-light`` to ``<body>``; the
+// override block below switches the same CSS variables to the values
+// used by ``default_white_theme.styl``.  The storybook Playwright spec
+// (``video-player-storybook.spec.ts``) uses the
+// ``__CODETRACER_TEST__.setTheme`` hook installed by
+// ``ui/video_player.nim`` to flip the class and capture light-theme
+// snapshots without recompiling the Stylus bundle.
+//
+// Milestone: codetracer-specs/GUI/Debugging-Features/Visual-Replay.milestones.org
+//            §M5-followup: light-theme storybook coverage.
 
 .video-player-component
+  // Dark-theme defaults — sourced from the surrounding Stylus
+  // variables so the production look-and-feel keeps tracking the
+  // global theme tokens.  The whole pane reads colours via
+  // ``var(--video-player-*)``; the override block at the bottom of
+  // this file swaps the values when ``<body>`` carries
+  // ``theme-light``.
+  --video-player-fg: TEXT_CONTENT_COLOR
+  --video-player-bg: BACKGROUND_COLOR
+  --video-player-chrome-bg: HEADER_PANEL_BACKGROUND_COLOR
+  --video-player-chrome-border: ACTIVE_MENU_BACKGROUND
+  --video-player-button-hover-bg: ACTIVE_MENU_BACKGROUND
+  --video-player-button-active-bg: ACTIVE_MENU_BACKGROUND
+  --video-player-divider: ACTIVE_MENU_BACKGROUND
+  --video-player-scrub-labels-fg: VALUE_TYPE_COLOR
+
   display: flex
   flex-direction: column
   height: 100%
@@ -9,8 +44,8 @@
   min-height: 0
   box-sizing: border-box
   overflow: hidden
-  color: TEXT_CONTENT_COLOR
-  background: BACKGROUND_COLOR
+  color: var(--video-player-fg)
+  background: var(--video-player-bg)
   font-family: "FiraCode"
   font-size: 13px
   line-height: 20px
@@ -187,8 +222,8 @@
     align-items: center
     gap: 6px
     padding: 6px 10px
-    border-top: 1px solid ACTIVE_MENU_BACKGROUND
-    background: HEADER_PANEL_BACKGROUND_COLOR
+    border-top: 1px solid var(--video-player-chrome-border)
+    background: var(--video-player-chrome-bg)
 
     // M5 spec §Status Indicators / "Player error": controls disabled.
     // The opacity + pointer-events: none combination greys every button
@@ -208,25 +243,25 @@
     border: 1px solid transparent
     border-radius: 4px
     background: transparent
-    color: TEXT_CONTENT_COLOR
+    color: var(--video-player-fg)
     cursor: pointer
     font-size: 14px
     line-height: 1
     user-select: none
 
     &:hover
-      background: ACTIVE_MENU_BACKGROUND
+      background: var(--video-player-button-hover-bg)
 
     &:active,
     &.pressed
-      background: ACTIVE_MENU_BACKGROUND
+      background: var(--video-player-button-active-bg)
       border-color: rgba(80, 160, 255, 0.85)
       color: #ffffff
 
   .video-player-divider
     width: 1px
     height: 18px
-    background: ACTIVE_MENU_BACKGROUND
+    background: var(--video-player-divider)
     margin: 0 4px
 
   .video-player-rate-badge
@@ -269,8 +304,8 @@
   .video-player-scrubber
     flex: 0 0 auto
     padding: 4px 10px 8px
-    background: HEADER_PANEL_BACKGROUND_COLOR
-    border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    background: var(--video-player-chrome-bg)
+    border-top: 1px solid var(--video-player-chrome-border)
     position: relative
 
   .video-player-scrub-range
@@ -306,9 +341,32 @@
     justify-content: space-between
     gap: 12px
     margin-top: 2px
-    color: VALUE_TYPE_COLOR
+    color: var(--video-player-scrub-labels-fg)
     font-size: 11px
     line-height: 14px
 
   .video-player-selected-pixel
-    color: TEXT_CONTENT_COLOR
+    color: var(--video-player-fg)
+
+// --- Light theme override (M5-followup) -------------------------------
+// Activated by adding ``theme-light`` to ``<body>``.  Today this is
+// driven exclusively by the storybook Playwright spec via the
+// ``__CODETRACER_TEST__.setTheme`` hook in ``ui/video_player.nim``;
+// when the broader app gains a runtime theme switch the same class
+// will light up the override.
+//
+// Colour values mirror ``default_white_theme.styl`` for the
+// corresponding global tokens so the panel reads visually consistent
+// with the hypothetical light-themed shell.  ``PRIMARY_TEXT_COLOR``
+// is undefined in that file, so ``VALUE_TYPE_COLOR`` falls back to
+// ``TEXT_CONTENT_COLOR`` here (the closest meaningful approximation
+// for "secondary text on a light background").
+body.theme-light .video-player-component
+  --video-player-fg: #464646
+  --video-player-bg: #F5F5F5
+  --video-player-chrome-bg: #b8c0cf
+  --video-player-chrome-border: #9aa3b5
+  --video-player-button-hover-bg: rgba(0, 0, 0, 0.08)
+  --video-player-button-active-bg: rgba(0, 0, 0, 0.14)
+  --video-player-divider: rgba(0, 0, 0, 0.18)
+  --video-player-scrub-labels-fg: #464646
