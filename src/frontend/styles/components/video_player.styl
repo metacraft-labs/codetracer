@@ -36,6 +36,16 @@
     user-select: none
     pointer-events: none
 
+  // Hidden mirror canvas at 1:1 source resolution — backs the magnifier
+  // loupe's getImageData() reads. Kept in the DOM so the 2D context
+  // survives across renders; never participates in layout.
+  .video-player-mirror-canvas
+    display: none !important
+    position: absolute
+    width: 0
+    height: 0
+    pointer-events: none
+
   .video-player-empty,
   .video-player-loading,
   .video-player-error
@@ -89,6 +99,14 @@
     border-radius: 3px
     white-space: nowrap
     text-align: center
+
+  // RGBA channel readout sits directly under the coordinates readout. The
+  // distinct class keeps room for future styling (e.g. swatch chip) without
+  // disturbing the existing coords line.
+  .video-player-loupe-rgba
+    margin-top: 2px
+    font-variant-numeric: tabular-nums
+    color: #f4f4f4
 
   // --- Transport bar ----------------------------------------------------
   .video-player-transport

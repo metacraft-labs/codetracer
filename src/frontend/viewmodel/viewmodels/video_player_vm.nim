@@ -60,6 +60,10 @@ type
 
     pickerState*: Signal[VideoPlayerPickerState]
     magnifier*: Signal[Option[MagnifierPosition]]
+    ## RGBA channel values (0..1) sampled from the mirror canvas at the
+    ## magnifier centre. Populated by the view's JS sampling routine and
+    ## surfaced here so the loupe footer can render it reactively.
+    magnifierCenterColor*: Signal[Option[VisualReplayPixelColor]]
 
     bufferingDegraded*: Signal[bool]
 
@@ -218,6 +222,16 @@ proc enterPickerMode*(vm: VideoPlayerVM) =
 proc exitPickerMode*(vm: VideoPlayerVM) =
   vm.pickerState.val = PickerOff
   vm.magnifier.val = none(MagnifierPosition)
+  vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
+
+proc cancelPicker*(vm: VideoPlayerVM) =
+  ## Spec: "Press Escape, or click the Picker button again. → Exit picker mode
+  ## without committing." (Visual-Replay.md §Pixel Picker Mode → Activation).
+  ##
+  ## A pure no-op when picker mode is already off so callers wired to a global
+  ## Escape handler don't accidentally fight other consumers of the key.
+  if vm.pickerState.val != PickerActive: return
+  vm.exitPickerMode()
 
 proc togglePicker*(vm: VideoPlayerVM) =
   if vm.pickerState.val == PickerActive:
@@ -234,6 +248,7 @@ proc updateMagnifier*(vm: VideoPlayerVM;
   if renderedWidth <= 0 or renderedHeight <= 0 or
       vm.frameVm.frameWidth.val <= 0 or vm.frameVm.frameHeight.val <= 0:
     vm.magnifier.val = none(MagnifierPosition)
+    vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
     return
   let sx = int(renderedX / renderedWidth * float(vm.frameVm.frameWidth.val))
   let sy = int(renderedY / renderedHeight * float(vm.frameVm.frameHeight.val))
@@ -275,6 +290,7 @@ proc createVideoPlayerVM*(frameVm: FrameViewerVM): VideoPlayerVM =
       resumeRate: Rate1x,
       pickerState: createSignal(PickerOff),
       magnifier: createSignal(none(MagnifierPosition)),
+      magnifierCenterColor: createSignal(none(VisualReplayPixelColor)),
       bufferingDegraded: createSignal(false),
       disposeProc: dispose,
     )

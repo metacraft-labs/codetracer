@@ -226,3 +226,176 @@ suite "VideoPlayerVM integration":
     let p = vm.frameVm.selectedPixel.val.get
     check p.x == 100
     check p.y == 50
+
+# ---------------------------------------------------------------------------
+# Pixel-picker / loupe — M2 deliverables.
+# ---------------------------------------------------------------------------
+
+suite "VideoPlayerVM pixel picker":
+  test "pixel-picker/edge-clamping — magnifier source coords stay in-bounds at all four corners":
+    ## Spec (Visual-Replay.md §Loupe Specification): "when the cursor is
+    ## within five source pixels of the frame edge, the loupe samples are
+    ## clamped … and the centre marker stays under the cursor."
+    ## The VM is responsible for the clamp; out-of-bounds *sample* fill is
+    ## the JS render routine's job (and is exercised by the playwright
+    ## suite once it lands in M2).
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    let w = 320
+    let h = 240
+    vm.frameVm.frameWidth.val = w
+    vm.frameVm.frameHeight.val = h
+    vm.enterPickerMode()
+
+    ## Top-left corner (0, 0): cursor coordinate maps exactly to source (0,0).
+    vm.updateMagnifier(0.0, 0.0, float(w), float(h))
+    check vm.magnifier.val.isSome
+    let tl = vm.magnifier.val.get
+    check tl.sourceX == 0
+    check tl.sourceY == 0
+    check tl.sourceX >= 0
+    check tl.sourceY >= 0
+    check tl.sourceX <= w - 1
+    check tl.sourceY <= h - 1
+
+    ## Top-right corner (W-1, 0): cursor at right edge of display rect.
+    vm.updateMagnifier(float(w) - 0.001, 0.0, float(w), float(h))
+    check vm.magnifier.val.isSome
+    let tr = vm.magnifier.val.get
+    check tr.sourceX == w - 1
+    check tr.sourceY == 0
+    check tr.sourceX <= w - 1
+    check tr.sourceY >= 0
+
+    ## Bottom-left corner (0, H-1).
+    vm.updateMagnifier(0.0, float(h) - 0.001, float(w), float(h))
+    check vm.magnifier.val.isSome
+    let bl = vm.magnifier.val.get
+    check bl.sourceX == 0
+    check bl.sourceY == h - 1
+    check bl.sourceX >= 0
+    check bl.sourceY <= h - 1
+
+    ## Bottom-right corner (W-1, H-1).
+    vm.updateMagnifier(float(w) - 0.001, float(h) - 0.001, float(w), float(h))
+    check vm.magnifier.val.isSome
+    let br = vm.magnifier.val.get
+    check br.sourceX == w - 1
+    check br.sourceY == h - 1
+
+    ## Past-edge cursor (should still clamp instead of yielding negatives or
+    ## values past the frame extents — defends against fractional rounding in
+    ## the JS bridge and against future regressions of the int truncation).
+    vm.updateMagnifier(-5.0, -5.0, float(w), float(h))
+    check vm.magnifier.val.isSome
+    let neg = vm.magnifier.val.get
+    check neg.sourceX >= 0
+    check neg.sourceY >= 0
+
+    vm.updateMagnifier(float(w) + 50.0, float(h) + 50.0, float(w), float(h))
+    check vm.magnifier.val.isSome
+    let over = vm.magnifier.val.get
+    check over.sourceX <= w - 1
+    check over.sourceY <= h - 1
+
+  test "pixel-picker/loupe-coordinates — mapping is invariant under canvas resize":
+    ## Spec: pixel-picker/loupe-coordinates — "source-pixel coordinates
+    ## remain correct under arbitrary canvas zoom (window resizing)."
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    vm.frameVm.frameWidth.val = 200
+    vm.frameVm.frameHeight.val = 100
+    vm.enterPickerMode()
+
+    ## Cursor at (75, 25) on a 150×50 canvas → 75/150*200 = 100, 25/50*100 = 50.
+    vm.updateMagnifier(75.0, 25.0, 150.0, 50.0)
+    check vm.magnifier.val.isSome
+    let small = vm.magnifier.val.get
+    check small.sourceX == 100
+    check small.sourceY == 50
+
+    ## Same cursor coordinates on a 300×100 canvas → 75/300*200 = 50,
+    ## 25/100*100 = 25. The display coords are identical but the source
+    ## coords have to halve because the canvas doubled.
+    vm.updateMagnifier(75.0, 25.0, 300.0, 100.0)
+    check vm.magnifier.val.isSome
+    let big = vm.magnifier.val.get
+    check big.sourceX == 50
+    check big.sourceY == 25
+
+    ## And a non-uniform stretch (canvas wider in X than tall): mapping
+    ## treats X and Y independently.
+    vm.updateMagnifier(400.0, 25.0, 800.0, 50.0)
+    check vm.magnifier.val.isSome
+    let stretched = vm.magnifier.val.get
+    check stretched.sourceX == 100
+    check stretched.sourceY == 50
+
+  test "pixel-picker/escape-cancels-via-vm — cancelPicker exits without committing":
+    ## VM-level hook for the DOM Escape handler. The DOM-side wiring lives
+    ## in installEscapeHandler (isonim_video_player_view.nim) and is covered
+    ## by the playwright spec; this test pins the VM contract.
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    vm.frameVm.frameWidth.val = 64
+    vm.frameVm.frameHeight.val = 64
+    vm.enterPickerMode()
+    vm.updateMagnifier(10.0, 10.0, 64.0, 64.0)
+    check vm.pickerState.val == PickerActive
+    check vm.magnifier.val.isSome
+    let beforePixel = vm.frameVm.selectedPixel.val
+    vm.cancelPicker()
+    check vm.pickerState.val == PickerOff
+    check vm.magnifier.val.isNone
+    check vm.magnifierCenterColor.val.isNone
+    ## Cancel must not commit a pixel selection.
+    check vm.frameVm.selectedPixel.val == beforePixel
+
+  test "pixel-picker/escape-cancels-via-vm — cancelPicker is a no-op when picker is inactive":
+    ## A defensive contract for the global key handler: invoking cancel
+    ## while picker mode is off must not perturb other VM state.
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    let stateBefore = vm.pickerState.val
+    let magBefore = vm.magnifier.val
+    let colorBefore = vm.magnifierCenterColor.val
+    vm.cancelPicker()
+    check vm.pickerState.val == stateBefore
+    check vm.magnifier.val == magBefore
+    check vm.magnifierCenterColor.val == colorBefore
+
+  test "pixel-picker/auto-pause — entering picker mode preserves resume state":
+    ## M2 deliverable: "verify the existing behaviour and ensure the
+    ## resume-state (direction, rate) is correctly preserved so M1's
+    ## togglePlay-after-cancel still works."
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    vm.fastForward()              ## forward 1x
+    vm.fastForward()              ## forward 2x
+    check vm.playState.val == Playing
+    check vm.direction.val == Forward
+    check vm.rate.val == Rate2x
+    vm.enterPickerMode()          ## must auto-pause
+    check vm.pickerState.val == PickerActive
+    check vm.playState.val == Paused
+    ## Cancelling and resuming via togglePlay must return us to forward 2x.
+    vm.cancelPicker()
+    vm.togglePlay()
+    check vm.playState.val == Playing
+    check vm.direction.val == Forward
+    check vm.rate.val == Rate2x
+
+  test "pixel-picker/centre-color-tracks-magnifier — signal is settable as the JS bridge does":
+    ## Centre-color sampling happens in JS via canvas reads; here we
+    ## simulate the bridge by setting the signal directly and verify it
+    ## clears when picker mode exits.
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    vm.frameVm.frameWidth.val = 16
+    vm.frameVm.frameHeight.val = 16
+    vm.enterPickerMode()
+    vm.updateMagnifier(8.0, 8.0, 16.0, 16.0)
+    ## Bridge would compute and assign these values:
+    let known = VisualReplayPixelColor(r: 0.94, g: 0.71, b: 0.13, a: 1.0)
+    vm.magnifierCenterColor.val = some(known)
+    check vm.magnifierCenterColor.val.isSome
+    check vm.magnifierCenterColor.val.get == known
+    ## Cancelling picker mode clears the cached color so the next entry
+    ## starts blank (otherwise the loupe would flash stale RGBA before the
+    ## first mousemove).
+    vm.cancelPicker()
+    check vm.magnifierCenterColor.val.isNone

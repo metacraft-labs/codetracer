@@ -21,6 +21,25 @@ import ../viewmodels/frame_viewer_vm
 import ../viewmodels/video_player_vm
 import ../viewmodels/visual_replay_client
 
+## Loupe geometry — keep these in lockstep with .video-player-loupe-canvas
+## in styles/components/video_player.styl.
+##
+## Spec (Visual-Replay.md §Loupe Specification):
+##   "Diameter: 120 px (configurable). Magnification: 8× (samples an 11×11
+##    pixel neighbourhood…)"
+##
+## With an 11×11 grid at 8× we cover 88 px of the 120 px canvas; the
+## remaining 32 px (16 on each side) is margin between the magnified pixels
+## and the circular border, leaving room for the 2 px border + ring without
+## visually crowding the centre marker.
+const
+  LoupeCanvasSize* = 120
+  LoupeGridRadius* = 5            ## (11 - 1) / 2 — pixels on either side of centre
+  LoupeGridSize* = LoupeGridRadius * 2 + 1   ## 11×11 sample grid
+  LoupePixelScale* = 8           ## device pixels per source pixel
+  LoupeGridPixels* = LoupeGridSize * LoupePixelScale   ## 88
+  LoupeGridOffset* = (LoupeCanvasSize - LoupeGridPixels) div 2  ## 16
+
 # ---------------------------------------------------------------------------
 # Display helpers.
 # ---------------------------------------------------------------------------
@@ -114,6 +133,14 @@ proc magnifierReadout(vm: VideoPlayerVM): string =
   let m = vm.magnifier.val.get
   &"x={m.sourceX} y={m.sourceY}  frame {vm.frameVm.currentFrame.val}"
 
+proc magnifierColorReadout(vm: VideoPlayerVM): string =
+  ## RGBA readout per spec: "RGBA channel values (0–1, four decimals)".
+  ## Visual-Replay.md §Loupe Specification.
+  let c = vm.magnifierCenterColor.val
+  if c.isNone: return ""
+  let v = c.get
+  &"RGBA {v.r:0.4f} {v.g:0.4f} {v.b:0.4f} {v.a:0.4f}"
+
 proc selectedPixelText(vm: VideoPlayerVM): string =
   let pixel = vm.frameVm.selectedPixel.val
   if pixel.isSome:
@@ -174,6 +201,14 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
             src = vm.frameVm.frameImageSrc.val,
             alt = "Visual replay frame",
             display = frameImageDisplay(vm))
+        ## Hidden mirror canvas at 1:1 source resolution. The frame image is
+        ## blitted here once per frame so the loupe can sample 11×11 pixel
+        ## neighbourhoods cheaply (getImageData) without bouncing through
+        ## another image load. Spec: Visual-Replay.md §Loupe Specification —
+        ## "The source pixels come from a hidden <canvas> that mirrors the
+        ## frame image at 1:1."
+        canvas(class = "video-player-mirror-canvas"):
+          text ""
         ## Picker mode overlay — the click handler installed in mount lifts
         ## the click into commitPickedPixel() via the magnifier coordinates.
         tdiv(class = canvasOverlayClass(vm)):
@@ -191,6 +226,8 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
             text ""
           tdiv(class = "video-player-loupe-readout"):
             text magnifierReadout(vm)
+          tdiv(class = "video-player-loupe-readout video-player-loupe-rgba"):
+            text magnifierColorReadout(vm)
       ## --- Transport bar ---------------------------------------------------
       tdiv(class = "video-player-transport"):
         button(class = "video-player-button video-player-jump-start",
@@ -325,6 +362,193 @@ when defined(js):
   proc isNilElement(node: isonim_dom.Element): bool
       {.importjs: "# == null".}
 
+  ## Install the mirror-canvas binding + loupe renderer on the panel. The
+  ## image's onload handler resizes the mirror to source resolution and
+  ## blits the frame into it (the source for all loupe samples). The
+  ## returned-as-a-side-effect `panel.__videoPlayerLoupe.render(...)`
+  ## function is invoked from a reactive effect whenever the magnifier
+  ## position or frame source changes.
+  ##
+  ## onCenterColor receives the RGBA channel values (0..1) of the centre
+  ## sample so the VM can surface them to the loupe footer.
+  proc installLoupeBindings(
+      panel: isonim_dom.Element;
+      gridRadius, pixelScale, gridOffset, canvasSize: int;
+      onCenterColor: proc(r, g, b, a: float; valid: bool) {.closure.})
+      {.importjs: """
+        (function(panel, gridRadius, pixelScale, gridOffset, canvasSize, onCenterColor) {
+          var image = panel.querySelector(".video-player-image");
+          var mirror = panel.querySelector(".video-player-mirror-canvas");
+          var loupe = panel.querySelector(".video-player-loupe-canvas");
+          if (!image || !mirror || !loupe) return;
+
+          // Hide the mirror canvas from layout but keep it in the DOM so its
+          // 2D context survives across renders. We use !important via the
+          // CSS rule for .video-player-mirror-canvas to win against any
+          // sibling :nth-child styles.
+          mirror.style.display = "none";
+
+          var mirrorCtx = mirror.getContext("2d", { willReadFrequently: true });
+          var loupeCtx = loupe.getContext("2d");
+          if (!mirrorCtx || !loupeCtx) return;
+          loupeCtx.imageSmoothingEnabled = false;
+          mirrorCtx.imageSmoothingEnabled = false;
+
+          function blitFrameToMirror() {
+            // Source resolution is the natural size of the frame image.
+            var w = image.naturalWidth | 0;
+            var h = image.naturalHeight | 0;
+            if (w <= 0 || h <= 0) return;
+            if (mirror.width !== w) mirror.width = w;
+            if (mirror.height !== h) mirror.height = h;
+            mirrorCtx.clearRect(0, 0, w, h);
+            try {
+              mirrorCtx.drawImage(image, 0, 0);
+            } catch (err) {
+              // drawImage can throw for cross-origin images; we fail silent
+              // and let the loupe remain blank rather than break the panel.
+              console.warn("video player: mirror blit failed:", err);
+            }
+          }
+
+          image.addEventListener("load", blitFrameToMirror);
+          // If the image is already cached and complete, blit immediately.
+          if (image.complete && image.naturalWidth > 0) {
+            blitFrameToMirror();
+          }
+
+          function relativeLuminance(r, g, b) {
+            // sRGB luminance; we only use it to pick the centre marker
+            // colour, so the simple linear approximation is enough.
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          }
+
+          function clearLoupe() {
+            loupeCtx.clearRect(0, 0, canvasSize, canvasSize);
+            onCenterColor(0, 0, 0, 0, false);
+          }
+
+          panel.__videoPlayerLoupe = {
+            render: function(sourceX, sourceY) {
+              var w = mirror.width;
+              var h = mirror.height;
+              if (w <= 0 || h <= 0) {
+                clearLoupe();
+                return;
+              }
+
+              // The 11×11 sample window starts at (sourceX - gridRadius,
+              // sourceY - gridRadius). Per spec edge handling we read each
+              // pixel individually, leaving out-of-bounds samples as the
+              // transparent black we just cleared the loupe to.
+              loupeCtx.clearRect(0, 0, canvasSize, canvasSize);
+
+              var startX = sourceX - gridRadius;
+              var startY = sourceY - gridRadius;
+
+              // Compute the intersection of the sample window with the
+              // mirror so we only call getImageData once for the in-bounds
+              // region — much faster than 121 1×1 reads.
+              var sx = Math.max(0, startX);
+              var sy = Math.max(0, startY);
+              var ex = Math.min(w, startX + (gridRadius * 2 + 1));
+              var ey = Math.min(h, startY + (gridRadius * 2 + 1));
+              if (ex > sx && ey > sy) {
+                var src = mirrorCtx.getImageData(sx, sy, ex - sx, ey - sy);
+                // Paint each in-bounds sample as an 8×8 (pixelScale)
+                // filled rect on the loupe.
+                for (var gy = 0; gy < src.height; gy++) {
+                  for (var gx = 0; gx < src.width; gx++) {
+                    var idx = (gy * src.width + gx) * 4;
+                    var r = src.data[idx];
+                    var g = src.data[idx + 1];
+                    var b = src.data[idx + 2];
+                    var a = src.data[idx + 3] / 255;
+                    var dx = gridOffset + (sx + gx - startX) * pixelScale;
+                    var dy = gridOffset + (sy + gy - startY) * pixelScale;
+                    loupeCtx.fillStyle = "rgba(" + r + "," + g + "," + b + "," + a + ")";
+                    loupeCtx.fillRect(dx, dy, pixelScale, pixelScale);
+                  }
+                }
+              }
+
+              // Centre marker: 1 px ring around the central pixel block.
+              // Colour inverts based on the underlying pixel luminance so it
+              // remains visible on both light and dark samples (spec:
+              // "highlighted with a 1 px white ring on black, inverting if
+              // the underlying pixel is light").
+              var centreInBounds = (sourceX >= 0 && sourceY >= 0 &&
+                                    sourceX < w && sourceY < h);
+              var cr = 0, cg = 0, cb = 0, ca = 0;
+              if (centreInBounds) {
+                var centrePixel = mirrorCtx.getImageData(sourceX, sourceY, 1, 1).data;
+                cr = centrePixel[0];
+                cg = centrePixel[1];
+                cb = centrePixel[2];
+                ca = centrePixel[3];
+                onCenterColor(cr / 255, cg / 255, cb / 255, ca / 255, true);
+              } else {
+                onCenterColor(0, 0, 0, 0, false);
+              }
+
+              var ringColour =
+                centreInBounds && relativeLuminance(cr, cg, cb) > 140
+                  ? "rgb(0,0,0)" : "rgb(255,255,255)";
+              var rx = gridOffset + gridRadius * pixelScale;
+              var ry = gridOffset + gridRadius * pixelScale;
+              loupeCtx.lineWidth = 1;
+              loupeCtx.strokeStyle = ringColour;
+              // Pixel-aligned half-step keeps the 1 px stroke crisp.
+              loupeCtx.strokeRect(rx + 0.5, ry + 0.5, pixelScale - 1, pixelScale - 1);
+            },
+            clear: clearLoupe,
+          };
+        })(#, #, #, #, #, #);
+      """.}
+
+  proc renderLoupeAt(panel: isonim_dom.Element; sourceX, sourceY: int)
+      {.importjs: """
+        (function(p, x, y) {
+          if (p.__videoPlayerLoupe) p.__videoPlayerLoupe.render(x, y);
+        })(#, #, #);
+      """.}
+
+  proc clearLoupe(panel: isonim_dom.Element)
+      {.importjs: """
+        (function(p) {
+          if (p.__videoPlayerLoupe) p.__videoPlayerLoupe.clear();
+        })(#);
+      """.}
+
+  ## Global Escape handler used while picker mode is active. The handler is
+  ## removed by invoking the returned `cleanup` proc on unmount (currently the
+  ## panel itself has no unmount lifecycle in this codebase, but the proc is
+  ## stashed on the panel for future symmetry and unit-test inspection).
+  ##
+  ## Spec (Visual-Replay.md §Pixel Picker Mode → Activation):
+  ##   "Press Escape … → Exit picker mode without committing."
+  ##
+  ## The handler ignores Escape when the picker is inactive so it does not
+  ## compete with other Escape consumers (modals, search bars, etc.).
+  proc installEscapeHandler(
+      panel: isonim_dom.Element;
+      onEscape: proc() {.closure.})
+      {.importjs: """
+        (function(panel, onEscape) {
+          var handler = function(event) {
+            if (event.key !== "Escape" && event.keyCode !== 27) return;
+            // The Nim closure decides whether picker mode is active and
+            // returns early when it isn't; we still avoid preventDefault so
+            // other handlers see the key when we choose not to consume it.
+            onEscape();
+          };
+          window.addEventListener("keydown", handler, true);
+          panel.__videoPlayerEscape = function() {
+            window.removeEventListener("keydown", handler, true);
+          };
+        })(#, #);
+      """.}
+
   proc renderVideoPlayerPanel*(r: WebRenderer;
                                vm: VideoPlayerVM): isonim_dom.Element =
     renderVideoPlayerPanelImpl(r, vm,
@@ -341,6 +565,7 @@ when defined(js):
         ## mouseleave reports (-1, -1, 0, 0); treat as "hide magnifier".
         if renderedWidth <= 0 or renderedHeight <= 0:
           vm.magnifier.val = none(MagnifierPosition)
+          vm.magnifierCenterColor.val = none(VisualReplayPixelColor)
           return
         vm.updateMagnifier(renderedX, renderedY, renderedWidth, renderedHeight),
       proc(renderedX, renderedY, renderedWidth, renderedHeight: float) =
@@ -359,3 +584,35 @@ when defined(js):
     let scrub = querySelector(panel, cstring".video-player-scrub-range")
     if not isNilElement(scrub):
       setScrubRangeHandler(scrub, vm)
+
+    ## Loupe pixel-grid rendering. The JS side owns the mirror canvas and
+    ## the per-frame blit; the Nim side drives it from a reactive effect
+    ## that reads both the magnifier signal and frameImageSrc (so a frame
+    ## change re-renders the loupe under a stationary cursor).
+    installLoupeBindings(panel,
+      LoupeGridRadius, LoupePixelScale, LoupeGridOffset, LoupeCanvasSize,
+      proc(r, g, b, a: float; valid: bool) =
+        if valid:
+          vm.magnifierCenterColor.val = some(VisualReplayPixelColor(
+            r: r, g: g, b: b, a: a))
+        else:
+          vm.magnifierCenterColor.val = none(VisualReplayPixelColor))
+
+    createEffect proc() =
+      ## Re-render whenever cursor moves OR the underlying frame image
+      ## source changes (the latter so the loupe stays accurate when the
+      ## frame advances under a stationary cursor — e.g. during scrub).
+      let mag = vm.magnifier.val
+      let imageSrc = vm.frameVm.frameImageSrc.val
+      if mag.isNone or imageSrc.len == 0:
+        clearLoupe(panel)
+        return
+      let m = mag.get
+      renderLoupeAt(panel, m.sourceX, m.sourceY)
+
+    ## Global Escape → cancelPicker. The handler is a closure over `vm`,
+    ## not a global, so multiple Video Player instances would each install
+    ## their own — only the active picker (at most one in practice) will
+    ## actually respond.
+    installEscapeHandler(panel,
+      proc() = vm.cancelPicker())
