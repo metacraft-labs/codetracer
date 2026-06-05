@@ -46,6 +46,43 @@ interface SoftwareGlConfig {
 }
 
 /**
+ * Prepend the contents of ``CODETRACER_EXTRA_LD_LIBRARY_PATH`` (a
+ * colon-separated list) to a base ``LD_LIBRARY_PATH`` value.
+ *
+ * Why an indirection rather than just letting the user set
+ * ``LD_LIBRARY_PATH`` directly in .env?  direnv's nix-direnv flake
+ * shell rewrites ``LD_LIBRARY_PATH`` to inject the dev-shell paths it
+ * needs (Nim runtime, sibling FFI libraries, etc.).  An .env-level
+ * ``LD_LIBRARY_PATH`` override would either get clobbered by direnv
+ * (if it runs first) or clobber the dev-shell paths (if it runs last)
+ * — in both cases breaking the dev shell.
+ *
+ * Indirect through a dedicated variable so the harness can fold both
+ * sets safely.  The merge prepends user-supplied paths so they win
+ * over any conflicts, and de-duplicates so a repeated invocation does
+ * not grow the path indefinitely.
+ *
+ * Typical use case on hosts where ct-native-replay's RUNPATH is
+ * broken (the binary was linked against an `outputs/out/lib`
+ * directory that no install step populates): point this at the lldb
+ * + gcc-libs lib dirs from the active nix store.
+ */
+function mergeExtraLdLibraryPath(base: string): string {
+  const extra = (process.env.CODETRACER_EXTRA_LD_LIBRARY_PATH ?? "").trim();
+  if (extra.length === 0) return base;
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const segment of [...extra.split(":"), ...base.split(":")]) {
+    const trimmed = segment.trim();
+    if (trimmed.length === 0) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    merged.push(trimmed);
+  }
+  return merged.join(":");
+}
+
+/**
  * Resolve the Mesa software-GL configuration for the visual-replay fixture.
  *
  * Opt-in via ``CODETRACER_VISUAL_REPLAY_SOFTWARE_GL=1`` (typically set in
@@ -106,11 +143,14 @@ function resolveSoftwareGlConfig(): SoftwareGlConfig {
   };
   // LD_LIBRARY_PATH must be prepended, not overwritten — other libraries
   // may already be on the path (e.g. test fixtures linking against
-  // sibling artifacts).
+  // sibling artifacts).  We also fold in CODETRACER_EXTRA_LD_LIBRARY_PATH
+  // here so the Mesa libs and any user-supplied paths land together in a
+  // single coherent prefix.
   const existingLdPath = process.env.LD_LIBRARY_PATH ?? "";
-  env.LD_LIBRARY_PATH = existingLdPath.split(":").includes(libPath)
+  const withMesa = existingLdPath.split(":").includes(libPath)
     ? existingLdPath
     : (existingLdPath.length > 0 ? `${libPath}:${existingLdPath}` : libPath);
+  env.LD_LIBRARY_PATH = mergeExtraLdLibraryPath(withMesa);
   const intervalRaw = process.env.CODETRACER_VISUAL_REPLAY_RECORDER_CHECKPOINT_MS;
   const checkpointIntervalMs = intervalRaw && intervalRaw.length > 0
     ? Number(intervalRaw)
@@ -331,8 +371,20 @@ function configureVisualReplayTestLicense(tempRoot: string): void {
   ];
 
   console.log(`# generating visual replay test license: ${licenseFile}`);
+  // ct-native-replay was linked with RUNPATH=outputs/out/lib which the
+  // codetracer-visual-replay build does not actually populate in dev
+  // shells.  On such hosts the binary fails to dlopen liblldb /
+  // libstdc++ at runtime.  Fold CODETRACER_EXTRA_LD_LIBRARY_PATH into
+  // LD_LIBRARY_PATH for this spawn so users can supply the missing
+  // dirs from .env without polluting the dev-shell-managed
+  // LD_LIBRARY_PATH globally.  No-op when the variable is unset.
+  const childLdPath = mergeExtraLdLibraryPath(process.env.LD_LIBRARY_PATH ?? "");
+  const childEnv = childLdPath.length > 0
+    ? { ...process.env, LD_LIBRARY_PATH: childLdPath }
+    : process.env;
   const result = childProcess.spawnSync(ctNativeReplay, args, {
     encoding: "utf-8",
+    env: childEnv,
     maxBuffer: 20 * 1024 * 1024,
   });
 
@@ -395,6 +447,15 @@ function configureVisualReplayToolEnv(visualTrace: RealVisualTrace): void {
         process.env[key] = value;
       }
     }
+  }
+  // Even when software-GL is off, fold CODETRACER_EXTRA_LD_LIBRARY_PATH
+  // into process.env so the downstream Electron → ct_gfx_player spawn
+  // inherits the user-supplied lib dirs (typical case: lldb +
+  // gcc-libs paths that ct-native-replay's broken RUNPATH would
+  // otherwise miss).
+  const mergedLdPath = mergeExtraLdLibraryPath(process.env.LD_LIBRARY_PATH ?? "");
+  if (mergedLdPath.length > 0) {
+    process.env.LD_LIBRARY_PATH = mergedLdPath;
   }
   if (visualTrace.tempRoot) {
     configureVisualReplayTestLicense(visualTrace.tempRoot);
