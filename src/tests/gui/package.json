@@ -6,6 +6,7 @@
     "test": "playwright test"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "1.56.1",
     "typescript": "^5.0.0"
   }
