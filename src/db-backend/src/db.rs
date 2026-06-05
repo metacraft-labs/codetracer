@@ -1809,7 +1809,7 @@ use crate::task::{
     Terminator, TerminatorKind,
 };
 use codetracer_trace_types::Line as TraceLine;
-use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, parse_assignment};
+use origin_classifier::{Classification, Lang as ClassifierLang, PatternSet, parse_assignment, parse_call_arguments};
 
 /// Result of the inner backward scan inside one hop.
 #[derive(Debug)]
@@ -2000,7 +2000,13 @@ impl MaterializedReplaySession {
                     metrics.steps_scanned += steps_scanned;
                     // The variable entered the frame as a parameter.
                     // Transition to the caller via the existing Call event.
-                    let resolved = self.resolve_caller_argument(current_frame, &current_var_name, call_step);
+                    let resolved = self.resolve_caller_argument(
+                        current_frame,
+                        &current_var_name,
+                        call_step,
+                        expr_loader,
+                        meta_dat_sources_root,
+                    );
                     match resolved {
                         Some((arg_name, caller_frame, caller_step)) => {
                             // Synthesise a ParameterPass hop for the
@@ -2085,16 +2091,57 @@ impl MaterializedReplaySession {
             } else {
                 PathBuf::from(&path_str)
             };
-            // Spec §6.1.0 monotonicity: the snapshot of a variable's new
-            // value appears at the per-line `Step` record. For the
-            // per-line recorders called out in §6.1.1 the snapshot step
-            // and the write step share the same `(path, line)`.
+            // Spec §6.1.0 monotonicity: `last_change_step` is the step at
+            // which the post-write value first becomes observable in
+            // `Db.variables`. For recorders that snapshot variables
+            // *before* the named line executes (Python's
+            // `sys.monitoring` `on_line` callback fires at line entry —
+            // see Value-Origin-Tracking.md §6.1.0 / §6.1.1), the
+            // statement that produced the value is on the *previous*
+            // step's source line, not on `last_change_step.line`.
+            //
+            // We resolve the source line in two passes:
+            //   pass 1: try `last_change_step.line` — correct for
+            //           recorders that snapshot after the line executes.
+            //   pass 2: if pass 1 doesn't parse as an assignment whose
+            //           LHS matches `current_var_name`, retry with the
+            //           previous step in the same frame (Python's
+            //           pre-execution snapshot case).
             //
             // The existing `expr_loader.file_lines` is 1-indexed (the
             // implementation inserts an empty string at index 0); we
             // therefore pass the trace's 1-based line number directly.
+            let classifier_lang = classifier_lang_for_path(&path_str);
             let row = step_record.line.0.max(0) as usize;
-            let (line_text, source_origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+            let (mut line_text, mut source_origin) =
+                expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+            // Pre-execution snapshot fallback: when the line at
+            // `last_change_step` does not parse as an assignment that
+            // names `current_var_name`, walk to the immediately
+            // preceding step in the same frame and try its line. Only
+            // accept the fallback when the new line parses to an
+            // assignment whose LHS matches the target — this protects
+            // against spurious matches from unrelated nearby lines.
+            let line_matches_target = classifier_lang
+                .and_then(|lang| parse_assignment(&line_text, lang))
+                .map(|ast| ast.targets_variable(&current_var_name))
+                .unwrap_or(false);
+            if !line_matches_target
+                && let Some((_prev_step, prev_line_text, prev_origin)) = self.resolve_previous_frame_source_line(
+                    last_change_step,
+                    current_frame,
+                    &probe_path,
+                    meta_dat_sources_root,
+                    expr_loader,
+                )
+                && classifier_lang
+                    .and_then(|lang| parse_assignment(&prev_line_text, lang))
+                    .map(|ast| ast.targets_variable(&current_var_name))
+                    .unwrap_or(false)
+            {
+                line_text = prev_line_text;
+                source_origin = prev_origin;
+            }
 
             // Spec §5.3.1: capture digest for the chain's continuation
             // token. Bundled paths get the bundled digest; filesystem
@@ -2125,7 +2172,6 @@ impl MaterializedReplaySession {
             }
 
             // (3) Parse with the classifier.
-            let classifier_lang = classifier_lang_for_path(&path_str);
             // `classify` runs against the *full source line* but stores
             // byte offsets into that line, so the `slice` calls below
             // resolve correctly against `line_text`.
@@ -2444,29 +2490,97 @@ impl MaterializedReplaySession {
     /// `Call` event for `callee_frame`, finds the argument with that
     /// name, and returns the (argument name, caller frame, caller step)
     /// triple the chain should resume from.
+    ///
+    /// The trace records `call.args[i].variable_id` as the *callee's*
+    /// parameter binding, which means its `variable_name` is the
+    /// parameter's name (e.g. `p`) and not the caller's expression
+    /// text (e.g. `value`). To recover the caller's expression we
+    /// parse the call site's source line and pick out the matching
+    /// positional argument. When the call line cannot be parsed (e.g.
+    /// inlined complex expression, missing source bundle) we fall back
+    /// to the parameter name — the chain will then terminate at
+    /// `UnknownSource` rather than walking the wrong variable.
     fn resolve_caller_argument(
         &self,
         callee_frame: CallKey,
         param_name: &str,
         _callee_entry_step: StepId,
+        expr_loader: &mut ExprLoader,
+        meta_dat_sources_root: Option<&Path>,
     ) -> Option<(String, CallKey, StepId)> {
         let call = self.reader.call(callee_frame)?;
         // The trace format already aligns the call's `args` (in
         // declaration order) with the callee's parameters because the
         // recorder emits one `FullValueRecord` per parameter at call
-        // time. We match by name (the recorder ascribes the same
-        // `VariableId` to the callee's parameter binding).
-        let arg = call
+        // time. The arg's `variable_id` is the callee's parameter
+        // binding so its name equals `param_name` directly.
+        let arg_index = call
             .args
             .iter()
-            .find(|a| self.var_name_matches(a.variable_id, param_name))?;
+            .position(|a| self.var_name_matches(a.variable_id, param_name))?;
         let caller_frame = call.parent_key;
         let caller_step = StepId(call.step_id.0 - 1);
+
+        // Try to recover the caller's argument expression text by
+        // parsing the call site line. This is necessary because the
+        // trace doesn't preserve the caller-side expression: it only
+        // records the value bound to the callee's parameter.
+        let caller_expr =
+            self.caller_argument_expression(caller_frame, caller_step, arg_index, expr_loader, meta_dat_sources_root);
+
         Some((
-            self.reader.variable_name(arg.variable_id).unwrap_or("").to_string(),
+            // Prefer the caller-side textual expression when we found
+            // one; otherwise fall back to the parameter name. The
+            // fallback is a conservative degradation — the chain will
+            // hit `UnknownSource` in the caller's frame rather than
+            // silently following the wrong variable.
+            caller_expr.unwrap_or_else(|| {
+                self.reader
+                    .variable_name(call.args[arg_index].variable_id)
+                    .unwrap_or("")
+                    .to_string()
+            }),
             caller_frame,
             caller_step,
         ))
+    }
+
+    /// Read the source line for `caller_step` inside `caller_frame`,
+    /// parse it as a call expression, and return the `arg_index`-th
+    /// positional argument's source text.
+    ///
+    /// Used by [`Self::resolve_caller_argument`] to surface the caller's
+    /// expression (e.g. `value` in `receive(value)`) rather than the
+    /// callee's parameter name. Returns `None` when the source line
+    /// can't be loaded, doesn't parse as a call, or has too few
+    /// positional arguments.
+    fn caller_argument_expression(
+        &self,
+        caller_frame: CallKey,
+        caller_step: StepId,
+        arg_index: usize,
+        expr_loader: &mut ExprLoader,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Option<String> {
+        let step = self.reader.step(caller_step).copied()?;
+        if step.call_key != caller_frame {
+            return None;
+        }
+        let path_str = self.reader.path(step.path_id)?.to_string();
+        let workdir_path = self.reader.workdir().join(&path_str);
+        let probe_path = if workdir_path.exists() {
+            workdir_path
+        } else {
+            PathBuf::from(&path_str)
+        };
+        let row = step.line.0.max(0) as usize;
+        let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+        if origin == SourceOrigin::Unavailable || line_text.trim().is_empty() {
+            return None;
+        }
+        let lang = classifier_lang_for_path(&path_str)?;
+        let args = parse_call_arguments(&line_text, lang)?;
+        args.get(arg_index).cloned()
     }
 
     /// Spec §6.1 helper `resolve_return_capture`.
@@ -2518,6 +2632,60 @@ impl MaterializedReplaySession {
         // record carrying a name; otherwise just synthesise "result".
         let _call = self.reader.call(call_key)?;
         Some("result".to_string())
+    }
+
+    /// Walk back from `last_change_step` within `frame` to find the
+    /// most recent preceding step whose source line is non-empty, and
+    /// return `(step, line_text, source_origin)`. Returns `None` when
+    /// no such step exists (frame entry, recording start, or
+    /// source-line unavailable everywhere).
+    ///
+    /// Used by the source-line resolution fallback in
+    /// `origin_chain_inferred`: per spec §6.1.0, Python-style recorders
+    /// snapshot variables *before* the named line executes, so the
+    /// statement that produced the value lives at the source line of
+    /// the previous step rather than at `last_change_step.line`. The
+    /// helper exists separately so the fallback stays out of the main
+    /// loop's body.
+    fn resolve_previous_frame_source_line(
+        &self,
+        last_change_step: StepId,
+        frame: CallKey,
+        probe_path: &Path,
+        meta_dat_sources_root: Option<&Path>,
+        expr_loader: &mut ExprLoader,
+    ) -> Option<(StepId, String, SourceOrigin)> {
+        // Walk back step-by-step looking for the most recent step
+        // inside `frame`. Steps belonging to nested callee frames are
+        // skipped — the caller (an assignment whose RHS includes a
+        // function call) is in `frame`'s control flow regardless of
+        // how many sub-frame steps execute in between.
+        //
+        // We stop when we reach a step whose `call_key.0` is *smaller*
+        // than `frame.0`: that step is outside any descendant of
+        // `frame`, meaning we've walked past `frame`'s entry without
+        // finding an in-frame step (frame-entry scenario, handled by
+        // the caller via `FrameEntryReached`).
+        let mut step_idx = last_change_step.0 - 1;
+        while step_idx >= 0 {
+            let sid = StepId(step_idx);
+            let step = self.reader.step(sid).copied()?;
+            if step.call_key == frame {
+                let row = step.line.0.max(0) as usize;
+                let (line_text, origin) =
+                    expr_loader.get_source_line_v2(&probe_path.to_path_buf(), row, meta_dat_sources_root);
+                if origin != SourceOrigin::Unavailable && !line_text.trim().is_empty() {
+                    return Some((sid, line_text, origin));
+                }
+            } else if step.call_key.0 < frame.0 {
+                // Walked past `frame`'s entry without finding an
+                // in-frame predecessor step.
+                return None;
+            }
+            // Step belongs to a nested callee — skip and keep walking.
+            step_idx -= 1;
+        }
+        None
     }
 
     /// Look up the function name for a given `CallKey`. Empty string

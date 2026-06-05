@@ -31,7 +31,7 @@ pub mod classify;
 pub mod kinds;
 pub mod patterns;
 
-pub use ast::{parse_assignment, AssignmentAst, NodeLocator};
+pub use ast::{parse_assignment, parse_call_arguments, AssignmentAst, NodeLocator};
 pub use classify::{classify, Classification, ClassificationSource};
 pub use kinds::{Lang, OriginKind};
 pub use patterns::{

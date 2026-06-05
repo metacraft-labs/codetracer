@@ -975,6 +975,33 @@ impl DapStdioTestClient {
         self.writer.send(msg).map_err(|e| format!("failed to send: {}", e))
     }
 
+    // ---------------------------------------------------------------
+    // Public adapters used by the per-language `ct/originChain` tests
+    // (M3 - see `tests/common/origin_dap.rs`). These expose the
+    // underlying `DapClient` for sequence numbering, plus thin
+    // wrappers around `send`/`read_until_response` so the helper
+    // module can build and dispatch ad-hoc DAP requests without
+    // needing access to private fields.
+    // ---------------------------------------------------------------
+
+    /// Borrow the inner `DapClient` so callers can build requests with
+    /// monotonically increasing sequence numbers.
+    pub fn dap_client_mut(&mut self) -> &mut DapClient {
+        &mut self.client
+    }
+
+    /// Public wrapper around the private `send` helper.
+    pub fn send_message(&mut self, msg: &DapMessage) -> Result<(), String> {
+        self.send(msg)
+    }
+
+    /// Public wrapper around the private `read_until_response` helper -
+    /// returns the matching response message, surfacing timeouts as
+    /// formatted error strings.
+    pub fn read_until_response_msg(&mut self, command: &str, timeout: Duration) -> Result<DapMessage, String> {
+        self.read_until_response(command, timeout)
+    }
+
     fn read_next(&mut self, timeout: Duration) -> Result<DapMessage, String> {
         match self.reader_rx.recv_timeout(timeout) {
             Ok(Ok(msg)) => Ok(msg),
@@ -4254,18 +4281,39 @@ impl TestRecording {
     /// CBOR+Zstd) and `"ctfs"` (the `.ct` CTFS container format).
     ///
     /// For interpreted languages, the "binary_path" is the source path itself.
+    ///
+    /// The temp-dir name is a function of `(language, trace_format,
+    /// version_label, process_id, source_path_hash)` so concurrent
+    /// tests within the same crate get distinct trace bundles. The
+    /// M3 origin-DAP test suites in particular invoke this helper
+    /// multiple times per process (once per fixture); reusing a
+    /// single `temp_dir` made concurrent tests stomp on each other's
+    /// trace artefacts and racing the `/tmp/codetracer/last` symlink.
     pub fn create_db_trace_with_format(
         source_path: &Path,
         language: Language,
         version_label: &str,
         trace_format: &str,
     ) -> Result<Self, String> {
+        // Hash the absolute source path so concurrent tests within
+        // the same process (same pid) get distinct trace bundles.
+        // `DefaultHasher` is sufficient here — we only need
+        // collision-resistance across the small set of fixtures the
+        // test crate exercises.
+        let source_hash = {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            source_path.hash(&mut h);
+            format!("{:016x}", h.finish())
+        };
         let temp_dir = std::env::temp_dir().join(format!(
-            "flow_test_{}_{}_{}_{}",
+            "flow_test_{}_{}_{}_{}_{}",
             language.extension(),
             trace_format,
             version_label.replace('.', "_"),
-            std::process::id()
+            std::process::id(),
+            source_hash
         ));
 
         // Clean up any existing temp directory. In sandboxed builds (nix),

@@ -496,6 +496,38 @@ fn classify_universal(
             operand_snapshots: collect_identifier_leaves(effective, source),
         },
 
+        // Composite literal / tuple / list / array / dict / set
+        // constructors classify as Computational with the identifier
+        // leaves of the constructor as the operand snapshot set
+        // (spec §7.1 row 4 — "single-result computation").
+        //
+        // Without this the universal table would fall through to
+        // `Unknown` for `pair = (11, 22)`, `xs = [a, b]`, etc., and
+        // the chain would terminate with a confidence-0 hop even
+        // though the source line clearly produced the value.
+        "tuple"
+        | "list"
+        | "array"
+        | "dictionary"
+        | "set"
+        | "list_expression"
+        | "array_expression"
+        | "dictionary_expression"
+        | "tuple_expression"
+        | "expression_list"
+        | "literal_value"
+        | "composite_literal" => Classification {
+            target,
+            rhs: NodeLocator::from_node(rhs),
+            kind: OriginKind::Computational,
+            source_variable: None,
+            confidence: 0.9,
+            source: ClassificationSource::UniversalTable {
+                node_kind: kind.to_string(),
+            },
+            operand_snapshots: collect_identifier_leaves(effective, source),
+        },
+
         // Cast: `(int)x` in C is treated as TrivialCopy with
         // confidence 0.9 (spec §7.2 C/C++ table).
         "cast_expression" => {

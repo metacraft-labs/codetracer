@@ -121,6 +121,48 @@ impl AssignmentAst {
     pub fn text_at(&self, locator: NodeLocator) -> &str {
         locator.slice(&self.source)
     }
+
+    /// Return `true` when the parsed assignment's LHS *names* the
+    /// requested variable — either directly (single-target assignment
+    /// `c = …`) or as one of the destructured leaves (`a, c = …`,
+    /// `{c} = …`, `[c] = …`, etc.).
+    ///
+    /// Used by callers that need to verify a source line really is the
+    /// assignment that produced the value they're tracking (e.g. the
+    /// db-backend Value-Origin algorithm falls back to the previous
+    /// step's source line for Python-style pre-execution snapshot
+    /// recorders only if the previous line is provably an assignment
+    /// to the variable being tracked).
+    pub fn targets_variable(&self, name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+        let Some(lhs) = self.node_at(self.lhs) else {
+            return false;
+        };
+        let source = self.source.as_str();
+        // For a non-destructuring LHS the whole LHS text must equal
+        // `name`. For destructuring patterns we accept any leaf
+        // identifier descendant whose text matches.
+        let lhs_text = &source[lhs.byte_range()];
+        if lhs_text == name {
+            return true;
+        }
+        contains_identifier_named(lhs, name, source)
+    }
+}
+
+fn contains_identifier_named(node: Node<'_>, name: &str, source: &str) -> bool {
+    if &source[node.byte_range()] == name && node.named_child_count() == 0 {
+        return true;
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if contains_identifier_named(child, name, source) {
+            return true;
+        }
+    }
+    false
 }
 
 fn find_node_by_range<'a>(
@@ -153,6 +195,70 @@ fn walk_for_exact<'a>(
     if cursor.goto_first_child() {
         loop {
             if let Some(hit) = walk_for_exact(cursor, locator) {
+                return Some(hit);
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+    None
+}
+
+/// Parse `line` as `lang` and return the positional argument
+/// expressions of the first call expression in document order.
+///
+/// Each entry is the source-text slice of one positional argument
+/// (keyword-argument forms like `key=value` are skipped in the
+/// returned list).
+///
+/// Used by the db-backend Value-Origin algorithm to translate a
+/// callee's parameter name into the caller's argument *expression*
+/// (e.g. `receive(value)` → `["value"]`). Returns `None` when no
+/// call is found at all.
+pub fn parse_call_arguments(line: &str, lang: Lang) -> Option<Vec<String>> {
+    let mut parser = Parser::new();
+    parser.set_language(&lang.tree_sitter_language()).ok()?;
+    let tree = parser.parse(line, None)?;
+    let root = tree.root_node();
+    let call = locate_call(root)?;
+    let args = call
+        .child_by_field_name("arguments")
+        .or_else(|| call.child_by_field_name("argument_list"))?;
+    let mut out = Vec::new();
+    let mut cursor = args.walk();
+    for child in args.named_children(&mut cursor) {
+        // Skip keyword/named arguments — those forms have the parameter
+        // name baked in so the caller-side resolver doesn't need them.
+        match child.kind() {
+            "keyword_argument" | "named_argument" => continue,
+            _ => {}
+        }
+        let slice = &line[child.byte_range()];
+        if !slice.is_empty() {
+            out.push(slice.to_string());
+        }
+    }
+    Some(out)
+}
+
+fn locate_call<'a>(root: Node<'a>) -> Option<Node<'a>> {
+    let mut cursor = root.walk();
+    walk_call(&mut cursor)
+}
+
+fn walk_call<'a>(cursor: &mut tree_sitter::TreeCursor<'a>) -> Option<Node<'a>> {
+    let node = cursor.node();
+    // Tree-sitter exposes call-expression nodes under multiple kind
+    // names depending on grammar; cover the common shapes.
+    match node.kind() {
+        "call" | "call_expression" | "method_invocation" => return Some(node),
+        _ => {}
+    }
+    if cursor.goto_first_child() {
+        loop {
+            if let Some(hit) = walk_call(cursor) {
                 return Some(hit);
             }
             if !cursor.goto_next_sibling() {

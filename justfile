@@ -1049,6 +1049,58 @@ test-ruby-flow:
   cd src/db-backend && cargo nextest run --no-capture test_ruby_flow
   echo "Ruby flow test passed!"
 
+# Value Origin Tracking per-language headless DAP tests on materialized
+# traces (M3 of the Value Origin Tracking milestones).
+#
+# Each language's test file drives the real recorder against the M0
+# fixture programs and asserts the per-hop chain shape against the
+# per-fixture ANSWERS.md.
+#
+# The CT_TEST_LANGS environment variable filters which language test
+# files are exercised. Accepts a comma-separated allowlist (case
+# insensitive); unset or "all" runs every language.
+#
+# Examples:
+#   CT_TEST_LANGS=python  just test-origin-dap
+#   CT_TEST_LANGS=python,ruby just test-origin-dap
+#   CT_TEST_LANGS=all just test-origin-dap   # same as unset
+#
+# Tests skip cleanly when the per-language recorder isn't on PATH; M3
+# CI runs against an image with every recorder present.
+test-origin-dap:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running Value Origin Tracking per-language DAP tests..."
+  langs="${CT_TEST_LANGS:-all}"
+  langs_lower="$(echo "$langs" | tr '[:upper:]' '[:lower:]')"
+  want_python=0; want_ruby=0; want_javascript=0
+  if [ "$langs_lower" = "all" ] || [ -z "$langs_lower" ]; then
+    want_python=1; want_ruby=1; want_javascript=1
+  else
+    IFS=',' read -ra parts <<< "$langs_lower"
+    for p in "${parts[@]}"; do
+      case "$(echo "$p" | xargs)" in
+        python|py)            want_python=1 ;;
+        ruby|rb)              want_ruby=1 ;;
+        javascript|js|node)   want_javascript=1 ;;
+        "")                   ;;
+        *) echo "WARNING: ignoring unknown CT_TEST_LANGS value '$p'" ;;
+      esac
+    done
+  fi
+  cd src/db-backend
+  selected=()
+  [ "$want_python" -eq 1 ]     && selected+=(--test origin_python_dap_test)
+  [ "$want_ruby" -eq 1 ]       && selected+=(--test origin_ruby_dap_test)
+  [ "$want_javascript" -eq 1 ] && selected+=(--test origin_javascript_dap_test)
+  if [ ${#selected[@]} -eq 0 ]; then
+    echo "No origin-DAP language test files selected by CT_TEST_LANGS='$langs'; nothing to do."
+    exit 0
+  fi
+  echo "Running: cargo test ${selected[*]}"
+  cargo test "${selected[@]}" -- --nocapture
+  echo "Value Origin Tracking DAP tests passed!"
+
 # Elixir materialized trace DAP flow integration test (DB-based, no rr required).
 # Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
 # (legacy CODETRACER_ELIXIR_RECORDER_PATH still honored during the BEAM rename
