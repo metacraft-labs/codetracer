@@ -39,6 +39,96 @@ const requiredGfxArtifacts = [
   "gfx_frames.idx",
 ];
 
+interface SoftwareGlConfig {
+  enabled: boolean;
+  env: Record<string, string>;
+  checkpointIntervalMs: number;
+}
+
+/**
+ * Resolve the Mesa software-GL configuration for the visual-replay fixture.
+ *
+ * Opt-in via ``CODETRACER_VISUAL_REPLAY_SOFTWARE_GL=1`` (typically set in
+ * the project's ``.env`` so direnv loads it).  When unset (the default on
+ * any GPU-equipped host), this returns ``enabled: false`` and the harness
+ * runs unchanged — there is NO automatic forcing of software rendering,
+ * so real-GPU coverage is never silently lost.
+ *
+ * When opt-in, the user must also point ``CODETRACER_MESA_ROOT`` at a
+ * Mesa derivation (e.g. the active nix-store path).  We derive the four
+ * standard Mesa env vars (``LIBGL_DRIVERS_PATH``, ``LD_LIBRARY_PATH``,
+ * ``__EGL_VENDOR_LIBRARY_DIRS``, ``EGL_PLATFORM=surfaceless``) from that
+ * root and inject them into ct_cli + gl_scene subprocess spawns.  An
+ * explicit override of any individual variable in the environment still
+ * wins (last-write-wins semantics, no surprise overwrites).
+ *
+ * Software shader execution generates an order of magnitude more events
+ * than hardware-rendered scenes, so the recorder's ring buffer overflows
+ * with the default checkpoint interval.  When opt-in we also add
+ * ``--checkpoint-interval <ms>`` (250 ms is enough headroom for the
+ * gl_scene fixture per local validation) to keep the recorder under
+ * its trace-writer budget.
+ *
+ * See ``.env.example`` for the documented opt-in template.
+ */
+function resolveSoftwareGlConfig(): SoftwareGlConfig {
+  const enabled = isTruthy(process.env.CODETRACER_VISUAL_REPLAY_SOFTWARE_GL);
+  if (!enabled) {
+    return { enabled: false, env: {}, checkpointIntervalMs: 0 };
+  }
+  const mesaRoot = process.env.CODETRACER_MESA_ROOT?.trim() ?? "";
+  if (mesaRoot.length === 0) {
+    throw new Error(
+      `CODETRACER_VISUAL_REPLAY_SOFTWARE_GL is enabled but CODETRACER_MESA_ROOT is not set.\n`
+      + `Set CODETRACER_MESA_ROOT to a Mesa derivation (e.g. /nix/store/<hash>-mesa-X.Y.Z) `
+      + `in .env so the harness can derive LIBGL_DRIVERS_PATH, LD_LIBRARY_PATH, and `
+      + `__EGL_VENDOR_LIBRARY_DIRS.  See .env.example for the template.`,
+    );
+  }
+  const driversPath = path.join(mesaRoot, "lib", "dri");
+  const libPath = path.join(mesaRoot, "lib");
+  const vendorDir = path.join(mesaRoot, "share", "glvnd", "egl_vendor.d");
+  for (const required of [driversPath, libPath, vendorDir]) {
+    if (!fs.existsSync(required)) {
+      throw new Error(
+        `CODETRACER_MESA_ROOT=${mesaRoot} does not look like a Mesa derivation.\n`
+        + `Missing expected directory: ${required}\n`
+        + `Hint: run \`ls /nix/store/ | grep '^[a-z0-9]\\{32\\}-mesa-'\` to find the right path.`,
+      );
+    }
+  }
+  const env: Record<string, string> = {
+    LIBGL_ALWAYS_SOFTWARE: process.env.LIBGL_ALWAYS_SOFTWARE ?? "1",
+    EGL_PLATFORM: process.env.EGL_PLATFORM ?? "surfaceless",
+    LIBGL_DRIVERS_PATH: process.env.LIBGL_DRIVERS_PATH ?? driversPath,
+    __EGL_VENDOR_LIBRARY_DIRS:
+      process.env.__EGL_VENDOR_LIBRARY_DIRS ?? vendorDir,
+  };
+  // LD_LIBRARY_PATH must be prepended, not overwritten — other libraries
+  // may already be on the path (e.g. test fixtures linking against
+  // sibling artifacts).
+  const existingLdPath = process.env.LD_LIBRARY_PATH ?? "";
+  env.LD_LIBRARY_PATH = existingLdPath.split(":").includes(libPath)
+    ? existingLdPath
+    : (existingLdPath.length > 0 ? `${libPath}:${existingLdPath}` : libPath);
+  const intervalRaw = process.env.CODETRACER_VISUAL_REPLAY_RECORDER_CHECKPOINT_MS;
+  const checkpointIntervalMs = intervalRaw && intervalRaw.length > 0
+    ? Number(intervalRaw)
+    : 250;
+  if (Number.isNaN(checkpointIntervalMs) || checkpointIntervalMs <= 0) {
+    throw new Error(
+      `CODETRACER_VISUAL_REPLAY_RECORDER_CHECKPOINT_MS must be a positive number, got: ${intervalRaw}`,
+    );
+  }
+  return { enabled: true, env, checkpointIntervalMs };
+}
+
+function isTruthy(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === "1" || trimmed === "true" || trimmed === "yes" || trimmed === "on";
+}
+
 function isExecutable(filePath: string): boolean {
   try {
     fs.accessSync(filePath, fs.constants.X_OK);
@@ -292,6 +382,20 @@ function configureVisualReplayToolEnv(visualTrace: RealVisualTrace): void {
   process.env.CODETRACER_CT_MCR_CMD = ctMcr;
   process.env.CODETRACER_CT_GFX_PLAYER_CMD = gfxPlayer;
   process.env.CODETRACER_CT_GFX_PLAYER_BACKEND ??= "software";
+  // Propagate the software-GL env to subsequent process spawns
+  // (Electron → ct_gfx_player).  ``configureVisualReplayToolEnv`` is the
+  // last surface that touches process.env before the Playwright runner
+  // launches Electron, so mutating it here is sufficient for the player
+  // to inherit Mesa's surfaceless EGL configuration.  On GPU hosts (opt-in
+  // unset) this is a no-op.
+  const softwareGl = resolveSoftwareGlConfig();
+  if (softwareGl.enabled) {
+    for (const [key, value] of Object.entries(softwareGl.env)) {
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  }
   if (visualTrace.tempRoot) {
     configureVisualReplayTestLicense(visualTrace.tempRoot);
   }
@@ -325,9 +429,24 @@ function recordGlFixtureTrace(): RealVisualTrace {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ct-real-visual-trace-"));
   const tracePath = path.join(tempRoot, "trace.ct");
   const frameOutputBase = path.join(tempRoot, "gl_scene");
-  const args = ["record", "--use-interpose", "-o", tracePath, "--", glScene, frameOutputBase];
+  const softwareGl = resolveSoftwareGlConfig();
+  // Software shader execution generates far more memcpy/syscall events
+  // than hardware rendering, which overflows the trace-writer ring buffer
+  // unless the recorder checkpoints often.  Only inject the extra flag
+  // when the software-GL opt-in is active so GPU hosts keep their
+  // current, unchanged recording profile.
+  const ctMcrArgs = softwareGl.enabled
+    ? ["record", "--use-interpose", "--checkpoint-interval", String(softwareGl.checkpointIntervalMs), "-o", tracePath, "--", glScene, frameOutputBase]
+    : ["record", "--use-interpose", "-o", tracePath, "--", glScene, frameOutputBase];
+  const args = ctMcrArgs;
   const timeoutMs = Number(process.env.CODETRACER_REAL_VISUAL_TRACE_RECORD_TIMEOUT_MS ?? "180000");
 
+  if (softwareGl.enabled) {
+    console.log(
+      `# software-GL opt-in active (CODETRACER_VISUAL_REPLAY_SOFTWARE_GL=1); `
+      + `injecting Mesa env + checkpoint-interval=${softwareGl.checkpointIntervalMs}ms`,
+    );
+  }
   console.log(`# recording fallback visual trace: ${tracePath}`);
   const result = childProcess.spawnSync(ctMcr, args, {
     encoding: "utf-8",
@@ -335,6 +454,7 @@ function recordGlFixtureTrace(): RealVisualTrace {
       ...process.env,
       LIBGL_ALWAYS_SOFTWARE: process.env.LIBGL_ALWAYS_SOFTWARE ?? "1",
       LP_NUM_THREADS: process.env.LP_NUM_THREADS ?? "1",
+      ...softwareGl.env,
     },
     maxBuffer: 20 * 1024 * 1024,
     timeout: timeoutMs,
