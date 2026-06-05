@@ -13,9 +13,10 @@
 ## Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md
 ## Milestone: codetracer-specs/GUI/Debugging-Features/Visual-Replay.milestones.org M5.
 
-import std/[options, unittest]
+import std/[json, options, unittest]
 
 import isonim/core/signals
+import isonim/viewmodel
 import vm_test_helpers
 import viewmodels/frame_viewer_vm
 import viewmodels/video_player_vm
@@ -392,3 +393,132 @@ suite "VideoPlayerVM scrub-slider clear-frame ticks":
     check ticks[0].frame == 0
     check ticks[1].frame == 200
     check ticks[1].leftPercent == 100.0
+
+# ---------------------------------------------------------------------------
+# M5-followup (Visual-Replay.milestones.org "M5-followup: clear-frame ticks
+# need /info endpoint extension"): end-to-end glue tests asserting that the
+# clear-frame indices the backend reports on ``/info`` flow through
+# ``VisualReplayInfo`` → ``FrameViewerVM.clearFrames`` so the view can feed
+# them into ``layoutScrubTicks`` with no further wiring.
+# ---------------------------------------------------------------------------
+
+suite "VisualReplayInfo clearFrames parsing":
+  test "infoFromJson parses the clearFrames array":
+    let payload = parseJson("""
+      {
+        "frameCount": 600,
+        "width": 1280,
+        "height": 720,
+        "clearFrames": [0, 50, 150, 300]
+      }
+    """)
+    let info = infoFromJson(payload)
+    check info.frameCount == 600
+    check info.width == 1280
+    check info.height == 720
+    check info.clearFrames == @[0, 50, 150, 300]
+
+  test "infoFromJson treats missing clearFrames as an empty seq":
+    # Legacy / pre-M5-followup players omit the field entirely.  We
+    # MUST degrade to an empty seq rather than raising — the GUI's
+    # scrub slider then simply renders no ticks via
+    # ``layoutScrubTicks``'s early return on empty input.
+    let payload = parseJson("""
+      {"frameCount": 4, "width": 320, "height": 200}
+    """)
+    let info = infoFromJson(payload)
+    check info.clearFrames.len == 0
+
+  test "infoFromJson silently drops non-integer clearFrames entries":
+    # Defensive parsing: a malformed entry (string / null / object)
+    # must not poison the whole payload.  ``layoutScrubTicks`` will
+    # filter out-of-range integers separately.
+    let payload = parseJson("""
+      {
+        "frameCount": 10,
+        "clearFrames": [0, "garbage", null, 5, {"oops": true}, 9]
+      }
+    """)
+    let info = infoFromJson(payload)
+    check info.clearFrames == @[0, 5, 9]
+
+suite "FrameViewerVM clearFrames signal":
+  test "loadInfo populates clearFrames from the /info response":
+    # Build a minimal client whose ``getInfoProc`` returns a fixed
+    # clearFrames list; drive ``loadInfo`` and assert the signal
+    # picks up the value.  This pins the full client-to-VM glue
+    # required for the scrub-slider tick marks to render.
+    let stubFrame = VisualReplayFrame(
+      imageSrc: "stub", geid: some(0'u64), frame: some(0),
+      width: 64, height: 64)
+    let client = VisualReplayClient(
+      playerUrl: "http://stub/",
+      getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
+        newCompletedFuture(VisualReplayInfo(
+          frameCount: 300, width: 1280, height: 720,
+          clearFrames: @[10, 50, 200])),
+      getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
+        newCompletedFuture(stubFrame),
+      getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
+        newCompletedFuture(stubFrame),
+      getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+        newCompletedFuture(stubFrame),
+      getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+        newCompletedFuture(newSeq[VisualReplayDrawCall]()),
+      getPixelHistoryProc: proc(x, y, frame: int):
+          VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
+        newCompletedFuture(newSeq[VisualReplayPixelHistoryEntry]()),
+      getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+          VisualReplayFuture[VisualReplayShaderDebugInfo] =
+        newCompletedFuture(VisualReplayShaderDebugInfo()))
+
+    let vm = createFrameViewerVM(client)
+    check vm.clearFrames.val.len == 0
+    vm.loadInfo()
+    drain()
+
+    check vm.frameCount.val == 300
+    check vm.clearFrames.val == @[10, 50, 200]
+    ## Verify the seq drives ``layoutScrubTicks`` end-to-end — every
+    ## input frame is in range and the percentages distribute across
+    ## the 0..299 timeline.
+    let ticks = layoutScrubTicks(vm.clearFrames.val, vm.frameCount.val)
+    check ticks.len == 3
+    check ticks[0].frame == 10
+    check ticks[1].frame == 50
+    check ticks[2].frame == 200
+
+    vm.dispose()
+
+  test "loadInfo with an empty clearFrames list leaves the signal empty":
+    # Legacy / no-clear-metadata path: the signal must remain empty so
+    # the scrub slider renders zero ticks.
+    let stubFrame = VisualReplayFrame(
+      imageSrc: "stub", geid: some(0'u64), frame: some(0),
+      width: 64, height: 64)
+    let client = VisualReplayClient(
+      playerUrl: "http://stub/",
+      getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
+        newCompletedFuture(VisualReplayInfo(
+          frameCount: 4, width: 320, height: 200, clearFrames: @[])),
+      getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
+        newCompletedFuture(stubFrame),
+      getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
+        newCompletedFuture(stubFrame),
+      getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
+        newCompletedFuture(stubFrame),
+      getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+        newCompletedFuture(newSeq[VisualReplayDrawCall]()),
+      getPixelHistoryProc: proc(x, y, frame: int):
+          VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
+        newCompletedFuture(newSeq[VisualReplayPixelHistoryEntry]()),
+      getShaderDebugProc: proc(request: VisualReplayShaderDebugRequest):
+          VisualReplayFuture[VisualReplayShaderDebugInfo] =
+        newCompletedFuture(VisualReplayShaderDebugInfo()))
+
+    let vm = createFrameViewerVM(client)
+    vm.loadInfo()
+    drain()
+    check vm.clearFrames.val.len == 0
+    check layoutScrubTicks(vm.clearFrames.val, vm.frameCount.val).len == 0
+    vm.dispose()

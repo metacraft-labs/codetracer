@@ -57,6 +57,13 @@ type
     selectedDrawCall*: Signal[Option[int]]
     onPixelSelected*: FrameViewerPixelSelectionHandler
 
+    ## M5-followup (Visual-Replay.milestones.org): clear-frame indices
+    ## from ``/info``, fed into ``layoutScrubTicks`` to render scrub-
+    ## slider tick marks at scene boundaries.  Updated once per
+    ## ``loadInfo``; empty seq on legacy traces / traces with no
+    ## flagged frames.
+    clearFrames*: Signal[seq[int]]
+
     ## Median fetch latency over the last FrameFetchWindowSize samples
     ## (milliseconds).  Updated each time a frame request completes; -1
     ## when no samples have been recorded yet so consumers can
@@ -247,7 +254,12 @@ proc loadInfo*(vm: FrameViewerVM) =
     onSuccess = proc(info: VisualReplayInfo) =
       vm.frameCount.val = info.frameCount
       if vm.frameWidth.val == 0: vm.frameWidth.val = info.width
-      if vm.frameHeight.val == 0: vm.frameHeight.val = info.height,
+      if vm.frameHeight.val == 0: vm.frameHeight.val = info.height
+      ## M5-followup: surface the clear-frame indices so the scrub
+      ## slider can render tick marks.  An empty seq is the normal
+      ## case for legacy traces — the view degrades to no ticks via
+      ## ``layoutScrubTicks``'s empty-input early return.
+      vm.clearFrames.val = info.clearFrames,
     onError = proc(message: string) = vm.error.val = message)
 
 proc selectPixel*(vm: FrameViewerVM; x, y: int) =
@@ -345,6 +357,7 @@ proc createFrameViewerVM*(client: VisualReplayClient;
       drawCalls: createSignal(newSeq[VisualReplayDrawCall]()),
       selectedDrawCall: createSignal(none(int)),
       medianFetchMs: createSignal(-1),
+      clearFrames: createSignal(newSeq[int]()),
       disposeProc: dispose,
     )
     vm.bindReplayStore(store)

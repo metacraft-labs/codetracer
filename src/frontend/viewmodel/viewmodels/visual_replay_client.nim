@@ -14,6 +14,14 @@ type
     frameCount*: int
     width*: int
     height*: int
+    clearFrames*: seq[int]
+      ## M5-followup (Visual-Replay.milestones.org "M5-followup:
+      ## clear-frame ticks need /info endpoint extension"): frame
+      ## indices flagged ``clearMask == 1`` in the FRM2/FRM3/FRM4 frame
+      ## index, used to render tick marks under the scrub slider.  May
+      ## be empty for legacy traces (gaMetal / VK with all-zero
+      ## clearMasks / pre-FRM2 streams) — callers must treat an empty
+      ## seq as "no ticks", never as an error.
 
   VisualReplayFrame* = object
     imageSrc*: string
@@ -251,11 +259,26 @@ proc frameFromJson*(node: JsonNode): VisualReplayFrame =
     result.frame = some(node["frame"].getInt)
 
 proc infoFromJson*(node: JsonNode): VisualReplayInfo =
-  VisualReplayInfo(
+  ## Parse the ``/info`` response.  Legacy / pre-M5-followup players
+  ## omit the ``clearFrames`` field entirely; treat that as an empty
+  ## seq so the GUI degrades to "no ticks" rather than erroring.
+  ## Non-integer / out-of-range entries are skipped defensively — the
+  ## scrub-slider helper (``layoutScrubTicks``) already filters values
+  ## outside ``[0, frameCount)`` so we only need to keep the parsing
+  ## resilient.
+  result = VisualReplayInfo(
     frameCount: node{"frameCount"}.getInt(node{"frames"}.getInt(0)),
     width: node{"width"}.getInt(0),
     height: node{"height"}.getInt(0),
   )
+  let clearFrames = node{"clearFrames"}
+  if not clearFrames.isNil and clearFrames.kind == JArray:
+    for item in clearFrames.items:
+      case item.kind
+      of JInt:
+        result.clearFrames.add(int(item.getBiggestInt))
+      else:
+        discard
 
 proc stringValueFromJson(node: JsonNode): string =
   if node.isNil:

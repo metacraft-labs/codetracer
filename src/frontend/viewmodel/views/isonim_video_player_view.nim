@@ -348,15 +348,21 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
       ## --- Scrub slider ----------------------------------------------------
       tdiv(class = "video-player-scrubber"):
         ## Clear-frame tick marks (Visual-Replay.md §Scrub Slider).
-        ## Today we render an empty list — the /info endpoint does not
-        ## surface the clear-frame index.  When it does, feed the seq
-        ## into ``layoutScrubTicks`` from video_player_vm.nim and emit
-        ## one ``.video-player-scrub-tick`` per element positioned via
-        ## ``left: <leftPercent>%`` on the wrapper.  See
-        ## Visual-Replay.milestones.org "M5-followup: clear-frame ticks
-        ## need /info endpoint extension" for the backend work.
+        ## ``layoutScrubTicks`` (video_player_vm.nim) maps the frame
+        ## indices into 0..100 % positions across the track; each tick
+        ## is an absolutely-positioned div whose ``left: <pct>%`` is
+        ## set inline (CSS handles size + colour via
+        ## ``.video-player-scrub-tick``).  The seq is fed by
+        ## ``FrameViewerVM.clearFrames`` (M5-followup; populated by
+        ## ``loadInfo`` from the ``/info`` ``clearFrames`` field).
+        ## Empty input (legacy traces, no clear-frame metadata) →
+        ## no ticks via the helper's early return.
         tdiv(class = "video-player-scrub-ticks"):
-          text ""
+          for tick in layoutScrubTicks(
+              vm.frameVm.clearFrames.val, vm.frameVm.frameCount.val):
+            tdiv(class = "video-player-scrub-tick",
+                 style = "left: " & $tick.leftPercent & "%"):
+              text ""
         input(class = "video-player-scrub-range",
               `type` = "range",
               min = "0",
