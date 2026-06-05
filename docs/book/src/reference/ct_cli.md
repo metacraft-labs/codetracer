@@ -129,6 +129,74 @@ ct run [options] <program> [-- <program-args>]
 
 Accepts the same options as `ct record`.
 
+### ct trace origin
+
+Prints the backward dataflow chain (an "origin chain") for a variable.
+Walks assignments / parameter passes / return captures / field-or-index
+accesses backward from the queried `(variable, step, frame)` until a
+terminator (computational expression, literal, parameter at the
+recording boundary, etc.) is reached. Drives the same `ct/originChain`
+DAP request as the `Trace.value_origin(...)` Python binding and the
+`get_value_origin` MCP tool.
+
+```
+ct trace origin <trace-path> --variable <NAME> [options]
+```
+
+**Options:**
+
+| Flag                              | Description                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `<trace-path>`                    | Path to the trace directory (required positional argument).                                       |
+| `--variable <NAME>`               | Variable identifier to query. V1 is identifier-only; dotted paths are reserved. **Required.**     |
+| `--step <N>`                      | Step id at which to query. Defaults to the trace's current execution point.                       |
+| `--frame <N>`                     | DAP frame id at which to query. Defaults to the topmost frame.                                    |
+| `--max-hops <N>`                  | Maximum hops in this batch. Default: `16`.                                                        |
+| `--format <json\|markdown\|text>` | Output renderer. Default: `text`.                                                                 |
+| `--lazy`                          | Allow the backend to return a `continuationToken` instead of walking the full chain in one shot.  |
+
+**Formats:**
+
+- `text` — ASCII layout matching spec §3.2 (newest hop first, terminator
+  at the bottom, frame-transition glyphs inline). Good for terminal
+  copy-paste.
+- `markdown` — fenced chain with classification badges and a per-hop
+  table. Paste straight into a bug report.
+- `json` — canonical `OriginChain` wire schema, pretty-printed. Use for
+  scripting or downstream tooling.
+
+**Example:**
+
+```bash
+ct trace origin /traces/my-bug.ct --variable total --step 137 --format text
+```
+
+For multi-step agent workflows that need to compose origin lookups with
+locals/history/breakpoints, prefer `ct trace exec --script <file.py>
+<trace-path>` and call `trace.value_origin(...)` inside the script — the
+trace stays loaded across calls and the classifier's pattern cache is
+reused.
+
+See [Value Origin Tracking](../usage_guide/value-origin-tracking.md) for
+the user-facing walkthrough.
+
+### ct trace exec
+
+Runs a Python replay-script against a recording. The script body is the
+same one consumed by the MCP `exec_script` tool, so the same logic runs
+from a terminal session and from an agent workflow.
+
+```
+ct trace exec --script <file.py> <trace-path>
+```
+
+Inside the script a `trace` object is pre-bound to the loaded recording.
+Methods include `trace.locals()`, `trace.history()`, navigation
+(`trace.step_over()` etc.), and `trace.value_origin(...)` for origin
+chains. See the
+[Python API reference](https://github.com/metacraft-labs/codetracer/tree/main/python-api)
+for the full surface.
+
 ### Environment Variables
 
 | Variable                        | Description                                                             |

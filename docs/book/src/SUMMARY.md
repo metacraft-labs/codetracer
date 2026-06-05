@@ -32,11 +32,13 @@
   - [Graphical interface](./usage_guide/gui.md)
   - [Visual recordings](./usage_guide/visual_recordings.md)
   - [Tracepoints](./usage_guide/tracepoints.md)
+  - [Value Origin Tracking](./usage_guide/value-origin-tracking.md)
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
 
 ## Reference
 
 - [ct CLI Reference](./reference/ct_cli.md)
+- [MCP Tool Reference](./reference/mcp-tools.md)
 - [Recorder CLI Reference](./reference/recorders.md)
 
 ## Building & packaging
