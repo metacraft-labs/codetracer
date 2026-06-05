@@ -4,7 +4,8 @@ import
   value, scratchpad,
   ../[ renderer, communication, dap, event_helpers],
   ../lib/isonim_styles,
-  ../../common/ct_event
+  ../../common/ct_event,
+  origin_chain_runtime
 
 from trace import getConfiguration
 
@@ -1736,6 +1737,50 @@ proc flowSimpleValue*(
     result.appendChild(arrowSpan)
 
     appendValueSpan(result, cstring(idAfter), &"flow-{flowMode}-value-box " & before, afterValue)
+
+  # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 2) — attach the
+  # icon-only origin badge per annotated value.  The per-value summary
+  # lives in ``FlowStep.origin_summaries`` (Rust wire shape — see
+  # ``task::FlowStep``) keyed by variable name; the Nim ``FlowStep``
+  # object does not yet carry a typed field so we recover it via
+  # ``extractOriginSummaryMap`` on the raw JsObject.  Placeholder
+  # badges (the §3.2.3 default for the omniscience-flow row) auto-
+  # enqueue via the lazy-fill observer.
+  if stepCount >= 0 and stepCount < self.flow.steps.len:
+    let step = self.flow.steps[stepCount]
+    let summaryEntries =
+      extractOriginSummaryMap(step.toJs[cstring("originSummaries")])
+    let nameKey = $name
+    var match: Option[OriginSummary]
+    for (key, summary) in summaryEntries:
+      if key == nameKey:
+        match = some(summary)
+        break
+    if match.isSome:
+      let summary = match.get
+      let originVM = originChainVM()
+      let prefs =
+        if originVM.isNil: defaultOriginPreferences()
+        else: originVM.preferences.val
+      let badge = renderBadgeDom(
+        parent = result,
+        summary = summary,
+        prefs = prefs,
+        atSidePanel = false,
+        iconOnly = true,
+        onClick = proc(token: string) =
+          if summary.isPlaceholder and token.len > 0:
+            enqueueOriginPlaceholderToken(token)
+            flushPlaceholdersNow()
+          elif not originVM.isNil:
+            let chainValue =
+              if afterValue.isNil: beforeValue else: afterValue
+            self.api.emit(
+              CtOriginChain,
+              ValueWithExpression(expression: name, value: chainValue))
+      )
+      if summary.isPlaceholder:
+        observePlaceholderBadge(badge)
 
 proc clearSliders(self: FlowComponent) =
   if not self.inExtension:

@@ -156,6 +156,87 @@ proc onRemoveChainClick(vm: ScratchpadVM; index: int): proc() =
   result = proc() = vm.removeChain(captured)
 
 # ---------------------------------------------------------------------------
+# Side-by-side chain diff (M4 deliverable §3.5 "side-by-side chain-diff
+# support" + spec §8.1 "Scratchpad data model").  Compares two chains
+# hop-by-hop and emits a diff row pairing each chain's hop, marking
+# mismatches so CSS can highlight them.  The diff algorithm is
+# intentionally naive — index-aligned comparison covers the common
+# "two recordings of the same code path with one altered intermediate"
+# scenario the spec calls out.  A future M5 pass can replace this with
+# a real LCS-style diff if telemetry shows the index-aligned variant
+# misses real-world cases.
+# ---------------------------------------------------------------------------
+
+const
+  ScratchpadChainDiffClass* = "scratchpad-chain-diff"
+  ScratchpadChainDiffColumnLeftClass* = "scratchpad-chain-diff-left"
+  ScratchpadChainDiffColumnRightClass* = "scratchpad-chain-diff-right"
+  ScratchpadChainDiffRowClass* = "scratchpad-chain-diff-row"
+  ScratchpadChainDiffChangedClass* = "scratchpad-chain-diff-changed"
+  ScratchpadChainDiffEmptyHopText* = "—"
+    ## Placeholder text rendered in the column whose chain has no hop
+    ## at the diff row's index (i.e. the chains have unequal lengths).
+
+type
+  ChainDiffRow* = object
+    ## One row in the side-by-side diff.  ``leftHop`` /``rightHop`` are
+    ## the textual previews of each chain's hop at this index — the
+    ## sentinel ``ScratchpadChainDiffEmptyHopText`` marks a missing
+    ## hop.  ``changed`` is true when the rendered previews differ.
+    leftHop*: string
+    rightHop*: string
+    changed*: bool
+
+proc chainHopSummaryText*(hop: OriginHop): string =
+  ## Textual hop preview used inside the diff cell — kept symmetric
+  ## with the folded-card "first/last" preview so the diff stays
+  ## readable next to the folded summary.
+  hop.targetExpr & " = " & hop.sourceExpr
+
+proc chainDiffRows*(left, right: ScratchpadChainEntry): seq[ChainDiffRow] =
+  ## Index-align ``left`` and ``right`` and emit one diff row per hop
+  ## index.  Mismatched hops are flagged with ``changed = true``; a
+  ## missing hop (one chain shorter than the other) is rendered with
+  ## the placeholder ``—`` text in the empty column and is also
+  ## flagged as changed.  The terminator row is always appended so
+  ## callers can see where each chain bottomed out.
+  let maxHops = max(left.chain.hops.len, right.chain.hops.len)
+  for i in 0 ..< maxHops:
+    let leftText =
+      if i < left.chain.hops.len: chainHopSummaryText(left.chain.hops[i])
+      else: ScratchpadChainDiffEmptyHopText
+    let rightText =
+      if i < right.chain.hops.len: chainHopSummaryText(right.chain.hops[i])
+      else: ScratchpadChainDiffEmptyHopText
+    result.add(ChainDiffRow(
+      leftHop: leftText,
+      rightHop: rightText,
+      changed: leftText != rightText,
+    ))
+  # Terminator row.  Always rendered so the user can see the final
+  # classification side-by-side.  Marked as ``changed`` when the
+  # terminator expressions differ.
+  let leftTerm = left.chain.terminator.expression
+  let rightTerm = right.chain.terminator.expression
+  result.add(ChainDiffRow(
+    leftHop: "[terminator] " & leftTerm,
+    rightHop: "[terminator] " & rightTerm,
+    changed: leftTerm != rightTerm,
+  ))
+
+proc diffRowClass*(row: ChainDiffRow): string =
+  ## CSS class for a single diff row — adds the ``changed`` modifier
+  ## when the two hops differ so CSS can highlight the row.
+  if row.changed: ScratchpadChainDiffRowClass & " " &
+    ScratchpadChainDiffChangedClass
+  else: ScratchpadChainDiffRowClass
+
+proc diffHeading*(left, right: ScratchpadChainEntry): string =
+  ## One-line caption rendered above the diff table so the user knows
+  ## which two chains are being compared.
+  left.chain.queryVariable & " ↔ " & right.chain.queryVariable
+
+# ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
@@ -186,6 +267,33 @@ proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
                   span(class = "value-expanded-text"):
                     text cell
   row
+
+proc renderChainDiffMock(r: MockRenderer; left, right: ScratchpadChainEntry;
+                         pairIndex: int): MockNode =
+  ## Render one side-by-side diff between ``left`` and ``right``.
+  ## ``pairIndex`` is recorded as the ``data-pair-index`` attribute so
+  ## the headless tests can identify the i-th diff block deterministically.
+  ##
+  ## The ``rows`` seq is indexed (rather than iterated with ``for row in
+  ## rows``) so the DSL closure captures the index — capturing the lent
+  ## row directly would violate memory safety on the native test backend.
+  let rows = chainDiffRows(left, right)
+  let dataPair = $pairIndex
+  let card = ui(r):
+    tdiv(class = ScratchpadChainDiffClass,
+         `data-pair-index` = dataPair):
+      tdiv(class = "scratchpad-chain-diff-heading"):
+        text diffHeading(left, right)
+      tdiv(class = "scratchpad-chain-diff-table"):
+        tdiv(class = ScratchpadChainDiffColumnLeftClass):
+          for idx in 0 ..< rows.len:
+            tdiv(class = diffRowClass(rows[idx])):
+              text rows[idx].leftHop
+        tdiv(class = ScratchpadChainDiffColumnRightClass):
+          for idx in 0 ..< rows.len:
+            tdiv(class = diffRowClass(rows[idx])):
+              text rows[idx].rightHop
+  card
 
 proc renderChainRowMock(r: MockRenderer; vm: ScratchpadVM;
                         entry: ScratchpadChainEntry; index: int): MockNode =
@@ -227,6 +335,7 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
   ## changes and also toggles the empty-state placeholder.
   var listContainer: MockNode
   var chainListContainer: MockNode
+  var diffContainer: MockNode
   var emptyContainer: MockNode
 
   let panel = ui(r):
@@ -234,6 +343,8 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
       tdiv(ref = listContainer, class = "value-components-container"):
         discard
       tdiv(ref = chainListContainer, class = "chain-components-container"):
+        discard
+      tdiv(ref = diffContainer, class = "chain-diffs-container"):
         discard
       tdiv(ref = emptyContainer, class = "empty-overlay"):
         text ScratchpadEmptyStateText
@@ -249,6 +360,16 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
     for i, entry in chains:
       let card = renderChainRowMock(r, vm, entry, i)
       r.appendChild(chainListContainer, card)
+
+    # M4 deliverable §3.5 + Gap 5: render side-by-side diffs between
+    # every adjacent pair of pinned chains.  N chains produce N-1
+    # diff blocks; chain[i] (left) vs chain[i+1] (right).  A single
+    # chain produces no diff (nothing to compare against).
+    r.clearChildren(diffContainer)
+    if chains.len >= 2:
+      for i in 0 ..< chains.len - 1:
+        let diff = renderChainDiffMock(r, chains[i], chains[i + 1], i)
+        r.appendChild(diffContainer, diff)
 
     # Toggle the empty-overlay via a class instead of remove/insert so
     # the held ``emptyContainer`` reference stays stable across
@@ -333,6 +454,34 @@ when defined(js):
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(valueRoot))
     row
 
+  proc renderChainDiffWeb(left, right: ScratchpadChainEntry;
+                          pairIndex: int): isonim_dom.Element =
+    ## Web-DOM counterpart of ``renderChainDiffMock``.  Same shape.
+    let rows = chainDiffRows(left, right)
+    let card = createWebElement("div", ScratchpadChainDiffClass)
+    isonim_dom.setAttribute(card, cstring"data-pair-index",
+                            cstring($pairIndex))
+    let heading = createWebElement("div", "scratchpad-chain-diff-heading")
+    appendWebText(heading, diffHeading(left, right))
+    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(heading))
+
+    let table = createWebElement("div", "scratchpad-chain-diff-table")
+    let leftCol = createWebElement("div", ScratchpadChainDiffColumnLeftClass)
+    let rightCol = createWebElement("div", ScratchpadChainDiffColumnRightClass)
+    for row in rows:
+      let leftRow = createWebElement("div", diffRowClass(row))
+      appendWebText(leftRow, row.leftHop)
+      isonim_dom.appendChild(isonim_dom.Node(leftCol),
+                             isonim_dom.Node(leftRow))
+      let rightRow = createWebElement("div", diffRowClass(row))
+      appendWebText(rightRow, row.rightHop)
+      isonim_dom.appendChild(isonim_dom.Node(rightCol),
+                             isonim_dom.Node(rightRow))
+    isonim_dom.appendChild(isonim_dom.Node(table), isonim_dom.Node(leftCol))
+    isonim_dom.appendChild(isonim_dom.Node(table), isonim_dom.Node(rightCol))
+    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(table))
+    card
+
   proc renderChainRowWeb(vm: ScratchpadVM; entry: ScratchpadChainEntry;
                          index: int): isonim_dom.Element =
     ## DOM version of `renderChainRowMock`.  Same shape; close handler
@@ -379,6 +528,7 @@ when defined(js):
     ## that rebuilds the list and toggles the empty-state placeholder.
     var listContainer: isonim_dom.Element
     var chainListContainer: isonim_dom.Element
+    var diffContainer: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
 
     let panel = ui(r):
@@ -386,6 +536,8 @@ when defined(js):
         tdiv(ref = listContainer, class = "value-components-container"):
           discard
         tdiv(ref = chainListContainer, class = "chain-components-container"):
+          discard
+        tdiv(ref = diffContainer, class = "chain-diffs-container"):
           discard
         tdiv(ref = emptyContainer, class = "empty-overlay"):
           text ScratchpadEmptyStateText
@@ -403,6 +555,13 @@ when defined(js):
         let card = renderChainRowWeb(vm, entry, i)
         isonim_dom.appendChild(isonim_dom.Node(chainListContainer),
                                isonim_dom.Node(card))
+
+      clearWebChildren(diffContainer)
+      if chains.len >= 2:
+        for i in 0 ..< chains.len - 1:
+          let diff = renderChainDiffWeb(chains[i], chains[i + 1], i)
+          isonim_dom.appendChild(isonim_dom.Node(diffContainer),
+                                 isonim_dom.Node(diff))
 
       if entries.len == 0 and chains.len == 0:
         isonim_dom.setAttribute(emptyContainer, cstring"class",

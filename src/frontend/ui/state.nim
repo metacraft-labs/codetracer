@@ -23,6 +23,7 @@ from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_state_view import
   mountIsoNimStatePanel
 import isonim_origin_chain
+import origin_chain_runtime
 
 # Module-level StateVM instance. Created once in `register()` and
 # fed data whenever the legacy event-bus handlers fire.  Rendering
@@ -151,6 +152,34 @@ proc tryMountIsoNimStatePanel() =
     isoNimStateMounted = true
     mountIsoNimStatePanel(container, stateVMInstance)
     cerror "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
+    # M4 deliverable §3.2.3 + Gap 4 — install the
+    # IntersectionObserver-driven lazy-fill bridge once the panel is
+    # mounted.  A reactive effect re-walks the State Pane each time
+    # the per-row ``originSummaries`` signal changes (which is also
+    # the only moment placeholder badges can appear) and registers
+    # every fresh placeholder pill with the shared observer.  The
+    # observer auto-un-observes each pill on first intersection, so
+    # re-walking on later updates only picks up newly-rendered
+    # placeholders.
+    let panelContainer = container
+    createEffect proc() =
+      # Reading the signal subscribes us so we re-fire whenever a new
+      # batch of locals (and therefore a new batch of placeholder
+      # tokens) arrives.
+      discard stateVMInstance.originSummaries.val
+      # Defer the DOM walk via setTimeout(0) so the IsoNim reactive
+      # effect that rebuilds the row list has a chance to finish
+      # appending the new badge nodes before we querySelectorAll for
+      # them.  Without this defer we'd race the render and miss new
+      # placeholder pills.
+      discard setTimeout(proc() =
+        let containerEl = panelContainer
+        let nodeList = containerEl.toJs.querySelectorAll(
+          cstring"button.ct-origin-badge.ct-origin-badge-placeholder")
+        let count = nodeList.length.to(int)
+        for i in 0 ..< count:
+          observePlaceholderBadgeJs(nodeList[i])
+      , 0)
 
   doMount()
 
@@ -299,6 +328,11 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   # §3.2.3).
   originChainVMInstance = createOriginChainVM(store)
   wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+  # Publish the VM through the shared runtime so other surfaces
+  # (history popover in ``ui/value.nim``, omniscience-flow overlay in
+  # ``ui/flow.nim``, scratchpad chain cards) can enqueue placeholder
+  # tokens into the same lazy-fill batch (spec §3.2.3).
+  setOriginChainVM(originChainVMInstance)
   tryMountOriginSidePanel()
   cerror "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
   clog "StateVM: parallel ViewModel instance created (shared store)"
@@ -336,6 +370,7 @@ proc initStateVM() =
   # (M4 deliverable §3.2.1 + §3.2.3) even on the stub-backend code path.
   originChainVMInstance = createOriginChainVM(stateVMStore)
   wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+  setOriginChainVM(originChainVMInstance)
   tryMountOriginSidePanel()
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()

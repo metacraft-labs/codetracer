@@ -47,7 +47,7 @@ import ../../viewmodels/[
   scratchpad_vm,
   command_palette_vm,
 ]
-import ../../views/[state_view, isonim_state_view]
+import ../../views/[state_view, isonim_state_view, isonim_scratchpad_view]
 
 proc drain() =
   try:
@@ -753,4 +753,225 @@ suite "M4 — State Pane renders inline origin badge per row":
       let req = mock.findCommand("ct/originChain")
       check req.isSome
       check req.get.args["variableName"].getStr == "pending"
+      dispose()
+
+# ---------------------------------------------------------------------------
+# M4 fix-up Gap 1 / Gap 2 — wire-shape extractors that ``ui/value.nim``
+# (history popover) and ``ui/flow.nim`` (omniscience-flow overlay) use
+# to recover the per-entry / per-annotation ``originSummary`` from the
+# raw JsObject the wire deserialiser hands them.
+#
+# The JS-side ``extractOriginSummary`` / ``extractOriginSummaryMap``
+# helpers live in ``ui/origin_badge.nim`` (gated by ``when defined(js)``
+# because they touch ``std/jsffi``).  This headless test exercises the
+# JSON-side primitives ``parseOriginSummary`` does so the wire contract
+# is asserted in lock-step with the badge-rendering surfaces.
+# ---------------------------------------------------------------------------
+
+suite "M4 — wire-shape originSummary extraction for value-rendering surfaces":
+
+  test "history popover per-entry originSummary parses through parseOriginSummary":
+    ## Mirrors the JsObject path ``ui/value.nim::renderHistoryTableDom``
+    ## walks: a per-entry ``originSummary`` field comes back over the
+    ## wire as JSON, gets decoded into ``OriginSummary``, and is
+    ## consumed by ``renderBadgeDom`` with ``iconOnly = true``.
+    let payload = parseJson("""
+      [
+        {"location": {"path": "a.py", "line": 3}, "value": {},
+         "time": 0, "description": "",
+         "originSummary": {"terminatorKind": "literal",
+                           "terminatorExpr": "10", "hopCount": 1}},
+        {"location": {"path": "a.py", "line": 4}, "value": {},
+         "time": 0, "description": "",
+         "originSummary": {"terminatorKind": "unknownSource",
+                           "isPlaceholder": true,
+                           "placeholderToken": "tok-history-A"}}
+      ]
+    """)
+    var summaries: seq[OriginSummary] = @[]
+    for entry in payload:
+      summaries.add(parseOriginSummary(entry{"originSummary"}))
+    check summaries.len == 2
+    check summaries[0].terminatorKind == tkwLiteral
+    check summaries[0].terminatorExpr == "10"
+    check not summaries[0].isPlaceholder
+    check summaries[1].isPlaceholder
+    check summaries[1].placeholderToken == some("tok-history-A")
+    # The badge class for the eager entry carries the per-terminator
+    # icon class; the placeholder entry carries the
+    # ``ct-origin-badge-placeholder`` modifier.
+    check "ct-origin-icon-quotation" in badgeClassFor(summaries[0])
+    check "ct-origin-badge-placeholder" in badgeClassFor(summaries[1])
+    # The icon-only variant adds the ``ct-origin-badge-icon-only``
+    # modifier (spec §3.2.3 row "Omniscience-Flow overlay"
+    # icon-only badge; the history popover also renders icon-only per
+    # the §3.2.3 V1 defaults).
+    check "ct-origin-badge-icon-only" in badgeClassFor(
+      summaries[0], iconOnly = true)
+
+  test "flow overlay per-step origin_summaries map parses correctly":
+    ## Mirrors the JsObject path ``ui/flow.nim::flowSimpleValue`` walks
+    ## per annotated value: ``FlowStep.origin_summaries`` is keyed by
+    ## variable name and emits one ``OriginSummary`` per key.  The Nim
+    ## ``FlowStep`` doesn't carry the field as a typed slot, so we
+    ## recover it from the raw JSON shape and run each entry through
+    ## ``parseOriginSummary`` (the same pipeline
+    ## ``extractOriginSummaryMap`` runs on the JS side).
+    let payload = parseJson("""
+      {
+        "originSummaries": {
+          "x": {"terminatorKind": "literal", "terminatorExpr": "42",
+                "hopCount": 1},
+          "y": {"terminatorKind": "computational",
+                "terminatorExpr": "x+1", "hopCount": 2}
+        }
+      }
+    """)
+    var entries: seq[(string, OriginSummary)] = @[]
+    let summariesNode = payload{"originSummaries"}
+    for key, value in summariesNode.pairs:
+      entries.add((key, parseOriginSummary(value)))
+    # Order is map-iteration order; sort for stable assertions.
+    var byKey = initTable[string, OriginSummary]()
+    for (key, summary) in entries:
+      byKey[key] = summary
+    check byKey.hasKey("x")
+    check byKey.hasKey("y")
+    check byKey["x"].terminatorKind == tkwLiteral
+    check byKey["y"].terminatorKind == tkwComputational
+    check byKey["y"].terminatorExpr == "x+1"
+
+  test "extractor returns an empty seq when origin_summaries is absent":
+    ## Older backends (and non-materialized traces) omit the field.
+    ## Both extractors must tolerate the empty case so the surfaces
+    ## render the value without a badge.
+    let payload = parseJson("""{}""")
+    let summariesNode = payload{"originSummaries"}
+    check summariesNode.isNil
+    # ``parseOriginSummary`` returns a default (zeroed)
+    # ``OriginSummary`` for a nil/non-object JsonNode so the badge
+    # rendering path can short-circuit on
+    # ``terminatorKind == tkwUnknownSource``.
+    let summary = parseOriginSummary(summariesNode)
+    check summary.terminatorKind == tkwUnknownSource
+
+# ---------------------------------------------------------------------------
+# M4 fix-up Gap 5 — Scratchpad side-by-side chain diff.  The pure
+# algorithm tests assert on the diff rows ``chainDiffRows`` emits; the
+# MockRenderer test renders the panel with two pinned chains and walks
+# the DOM to confirm the diff block carries one ``data-pair-index`` per
+# adjacent pair.
+# ---------------------------------------------------------------------------
+
+proc makeFixtureChain(queryVariable: string;
+                      hopExprs: openArray[(string, string)];
+                      terminatorExpr: string;
+                      terminatorKind: TerminatorKindWire =
+                        tkwLiteral): OriginChain =
+  ## Minimal chain fixture for the diff tests.  Each ``(target, source)``
+  ## pair becomes one ``TrivialCopy`` hop; the terminator carries the
+  ## supplied expression + kind.
+  var hops: seq[OriginHop] = @[]
+  for (target, source) in hopExprs:
+    hops.add(OriginHop(
+      kind: okTrivialCopy,
+      targetExpr: target,
+      sourceExpr: source,
+      stepId: 0,
+      location: OriginLocation(path: "fixture.py", line: 1),
+    ))
+  OriginChain(
+    queryVariable: queryVariable,
+    queryStepId: 0,
+    hops: hops,
+    terminator: Terminator(kind: terminatorKind, expression: terminatorExpr),
+  )
+
+suite "M4 — Scratchpad side-by-side chain diff (Gap 5)":
+
+  test "chainDiffRows pairs hops by index and flags mismatches":
+    let left = ScratchpadChainEntry(chain: makeFixtureChain(
+      "total",
+      [("c", "b"), ("b", "a"), ("a", "10")],
+      "10"))
+    let right = ScratchpadChainEntry(chain: makeFixtureChain(
+      "total",
+      [("c", "b"), ("b", "x"), ("x", "20")],
+      "20"))
+    let rows = chainDiffRows(left, right)
+    # 3 hops + 1 terminator row.
+    check rows.len == 4
+    # First hop is identical → not flagged as changed.
+    check not rows[0].changed
+    check rows[0].leftHop == "c = b"
+    check rows[0].rightHop == "c = b"
+    # Second hop differs (sources b/a vs b/x).
+    check rows[1].changed
+    check rows[1].leftHop == "b = a"
+    check rows[1].rightHop == "b = x"
+    # Third hop differs (a=10 vs x=20).
+    check rows[2].changed
+    # Terminator row differs (10 vs 20) and is always emitted last.
+    check rows[3].leftHop.startsWith("[terminator] ")
+    check rows[3].rightHop.startsWith("[terminator] ")
+    check rows[3].changed
+
+  test "chainDiffRows handles unequal-length chains with placeholder text":
+    let left = ScratchpadChainEntry(chain: makeFixtureChain(
+      "total",
+      [("c", "b"), ("b", "a")],
+      "literal"))
+    let right = ScratchpadChainEntry(chain: makeFixtureChain(
+      "total",
+      [("c", "b"), ("b", "a"), ("a", "1"), ("a_prev", "0")],
+      "literal"))
+    let rows = chainDiffRows(left, right)
+    # max(2, 4) = 4 hops + 1 terminator
+    check rows.len == 5
+    check not rows[0].changed
+    check not rows[1].changed
+    # Left ran out at index 2 — placeholder text appears on the left.
+    check rows[2].leftHop == ScratchpadChainDiffEmptyHopText
+    check rows[2].changed
+    check rows[3].leftHop == ScratchpadChainDiffEmptyHopText
+    # Terminator expressions match → terminator row not flagged.
+    check not rows[4].changed
+
+  test "diffRowClass appends the changed modifier when the row differs":
+    let unchanged = ChainDiffRow(leftHop: "x = 1", rightHop: "x = 1",
+                                 changed: false)
+    let changed = ChainDiffRow(leftHop: "x = 1", rightHop: "x = 2",
+                               changed: true)
+    check diffRowClass(unchanged) == ScratchpadChainDiffRowClass
+    check ScratchpadChainDiffChangedClass in diffRowClass(changed)
+
+  test "Scratchpad panel renders side-by-side diff blocks for adjacent pinned chains":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let scratchVM = createScratchpadVM(store)
+      let r = MockRenderer()
+      let panel = renderScratchpadPanel(r, scratchVM)
+      # One chain → no diff block.
+      scratchVM.addChain(makeFixtureChain(
+        "total", [("c", "b")], "10"))
+      check findAllByClass(panel, "scratchpad-chain-diff").len == 0
+      # Two chains → one diff block (chain[0] vs chain[1]).
+      scratchVM.addChain(makeFixtureChain(
+        "total", [("c", "x")], "20"))
+      let diffs = findAllByClass(panel, "scratchpad-chain-diff")
+      check diffs.len == 1
+      check diffs[0].attributes.getOrDefault("data-pair-index", "") == "0"
+      # Three chains → two diff blocks (0↔1, 1↔2).
+      scratchVM.addChain(makeFixtureChain(
+        "total", [("c", "y")], "30"))
+      let diffsAfter = findAllByClass(panel, "scratchpad-chain-diff")
+      check diffsAfter.len == 2
+      check diffsAfter[0].attributes.getOrDefault("data-pair-index", "") == "0"
+      check diffsAfter[1].attributes.getOrDefault("data-pair-index", "") == "1"
+      # The first diff block carries the differing-hop modifier on the
+      # one hop row (c = b vs c = x).
+      let changedRows = findAllByClass(diffsAfter[0],
+                                       ScratchpadChainDiffChangedClass)
+      check changedRows.len > 0
       dispose()
