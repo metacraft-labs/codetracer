@@ -211,6 +211,65 @@ jobs:
               "Falling back to pinned download"
             )
 
+  # M13: Windows TTD origin-DAP per-PR subset (python + rust + MCP/CLI smoke).
+  # Per the M13 scope-control text, TTD test runs are 5–10x slower than RR on
+  # equivalent hardware, so per-PR full-matrix is not practical. Full matrix
+  # runs nightly via origin-dap-windows-nightly below.
+  #
+  # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org §M13.
+  origin-dap-windows:
+    runs-on: windows-latest
+    name: origin-DAP (per-PR subset, Windows)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        shell: pwsh
+        run: |
+          choco install just -y
+          just --version
+
+      - name: Run origin-DAP per-PR subset (python + rust)
+        shell: bash
+        env:
+          CT_TEST_LANGS: python,rust
+        run: just test-origin-dap
+
+  # M13: Windows nightly full matrix — runs every supported language.
+  # Gated on schedule / workflow_dispatch events because TTD runs are slow.
+  origin-dap-windows-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    name: origin-DAP (nightly full matrix, Windows)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        shell: pwsh
+        run: |
+          choco install just -y
+          just --version
+
+      - name: Run origin-DAP full matrix (all languages)
+        shell: bash
+        env:
+          CT_TEST_LANGS: all
+        run: just test-origin-dap
+
   windows-named-pipe-tests:
     runs-on: windows-latest
     steps:
