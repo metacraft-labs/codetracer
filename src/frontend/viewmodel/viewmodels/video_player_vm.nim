@@ -46,6 +46,24 @@ type
     displayX*: float
     displayY*: float
 
+  VideoPlayerAction* = enum
+    ## Enumerates the M4 keyboard shortcuts so the dispatcher can be unit-
+    ## tested independently of the global ClientAction enum and the JS-only
+    ## handler-array wiring in ui_js.nim.  The names mirror the ClientAction
+    ## entries one-for-one — see ``frontend.nim`` (codetracer_features) — but
+    ## live here because the VM dispatcher is what executes them.
+    VpaTogglePlay,
+    VpaRewind,
+    VpaFastForward,
+    VpaStepFrameBack,
+    VpaStepFrameForward,
+    VpaStepDrawBack,
+    VpaStepDrawForward,
+    VpaJumpStart,
+    VpaJumpEnd,
+    VpaTogglePicker,
+    VpaCancelPicker
+
   VideoPlayerVM* = ref object of ViewModel
     frameVm*: FrameViewerVM
     reactiveOwner: OwnerBase
@@ -273,6 +291,87 @@ proc commitPickedPixel*(vm: VideoPlayerVM) =
 # ---------------------------------------------------------------------------
 # Construction.
 # ---------------------------------------------------------------------------
+
+proc parseVideoPlayerActionName*(name: string): Option[VideoPlayerAction] =
+  ## Parse a spec-defined ClientAction name into a typed VideoPlayerAction.
+  ## Used by the JS-side ``__CODETRACER_TEST__.videoPlayerAction`` hook so
+  ## Playwright specs can drive every shortcut by name without depending on
+  ## focused-and-hovered Video Player state.  Accepts the names verbatim
+  ## (case sensitive) to match the spec table in Visual-Replay.md.
+  case name
+  of "VideoPlayerTogglePlay":       some(VpaTogglePlay)
+  of "VideoPlayerRewind":           some(VpaRewind)
+  of "VideoPlayerFastForward":      some(VpaFastForward)
+  of "VideoPlayerStepFrameBack":    some(VpaStepFrameBack)
+  of "VideoPlayerStepFrameForward": some(VpaStepFrameForward)
+  of "VideoPlayerStepDrawBack":     some(VpaStepDrawBack)
+  of "VideoPlayerStepDrawForward":  some(VpaStepDrawForward)
+  of "VideoPlayerJumpStart":        some(VpaJumpStart)
+  of "VideoPlayerJumpEnd":          some(VpaJumpEnd)
+  of "VideoPlayerTogglePicker":     some(VpaTogglePicker)
+  of "VideoPlayerCancelPicker":     some(VpaCancelPicker)
+  else: none(VideoPlayerAction)
+
+proc dispatchVideoPlayerAction*(vm: VideoPlayerVM;
+                                action: VideoPlayerAction): bool =
+  ## Route an M4 keyboard ClientAction onto the matching VideoPlayerVM proc.
+  ##
+  ## Returns ``true`` when the action was consumed (handler ran), ``false``
+  ## when the dispatcher chose to let the key fall through.  The only
+  ## fall-through case today is ``VpaCancelPicker`` while picker mode is
+  ## inactive — Escape must reach other consumers (modals, search bars, the
+  ## debugger) in that situation.  All other actions return ``true`` even
+  ## when the underlying VM proc is a documented no-op (e.g. stepFrame while
+  ## playing); the key was meant for the Video Player.
+  ##
+  ## Pure with respect to focus scoping — caller is expected to gate this
+  ## proc on Video Player focus before invoking.  Lives here (not in
+  ## ``ui_js.nim``) so it can be unit-tested without a DOM.
+  ##
+  ## Spec: Visual-Replay.md §Keyboard Shortcuts.
+  if vm.isNil: return false
+  case action
+  of VpaTogglePlay:
+    vm.togglePlay()
+    true
+  of VpaRewind:
+    vm.rewind()
+    true
+  of VpaFastForward:
+    vm.fastForward()
+    true
+  of VpaStepFrameBack:
+    ## Spec: "(paused only)".  The VM proc itself enforces this contract
+    ## (no-op while playing); we still report consumption so the key does
+    ## not bubble to debugger handlers that would step the wrong subsystem.
+    vm.stepFrame(-1)
+    true
+  of VpaStepFrameForward:
+    vm.stepFrame(1)
+    true
+  of VpaStepDrawBack:
+    vm.stepDrawCall(-1)
+    true
+  of VpaStepDrawForward:
+    vm.stepDrawCall(1)
+    true
+  of VpaJumpStart:
+    vm.jumpToStart()
+    true
+  of VpaJumpEnd:
+    vm.jumpToEnd()
+    true
+  of VpaTogglePicker:
+    vm.togglePicker()
+    true
+  of VpaCancelPicker:
+    ## Only consume Escape when picker mode is actually active; otherwise the
+    ## key must fall through to other Escape consumers (modals, search bars,
+    ## conventional Component.onEscape methods).
+    if vm.pickerState.val != PickerActive:
+      return false
+    vm.cancelPicker()
+    true
 
 proc createVideoPlayerVM*(frameVm: FrameViewerVM): VideoPlayerVM =
   ## Wrap an existing FrameViewerVM with the playback chrome state. The

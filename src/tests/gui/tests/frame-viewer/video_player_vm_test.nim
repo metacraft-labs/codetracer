@@ -380,6 +380,94 @@ suite "VideoPlayerVM pixel picker":
     check vm.direction.val == Forward
     check vm.rate.val == Rate2x
 
+  test "video-player/keyboard-dispatch — every action routes onto a VM proc":
+    ## M4 deliverable: ``dispatchVideoPlayerAction`` is the pure routing
+    ## layer for ClientAction.videoPlayerXxx → VideoPlayerVM proc.  Exercise
+    ## every variant so the wiring stays comprehensive across refactors.
+    ## Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md
+    ## §Keyboard Shortcuts.
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    vm.frameVm.frameCount.val = 10
+    vm.frameVm.currentFrame.val = 5
+
+    check dispatchVideoPlayerAction(vm, VpaTogglePlay)
+    check vm.playState.val == Playing
+    check dispatchVideoPlayerAction(vm, VpaTogglePlay)
+    check vm.playState.val == Paused
+
+    check dispatchVideoPlayerAction(vm, VpaFastForward)
+    check vm.playState.val == Playing
+    check vm.direction.val == Forward
+    check vm.rate.val == Rate1x
+    check dispatchVideoPlayerAction(vm, VpaFastForward)
+    check vm.rate.val == Rate2x
+
+    check dispatchVideoPlayerAction(vm, VpaRewind)
+    check vm.direction.val == Reverse
+    check vm.rate.val == Rate1x
+
+    ## Step actions are no-ops while playing (per spec).  Pause first.
+    vm.togglePlay()                    ## now paused
+    check vm.playState.val == Paused
+    vm.frameVm.currentFrame.val = 5
+    check dispatchVideoPlayerAction(vm, VpaStepFrameForward)
+    check vm.frameVm.currentFrame.val == 6
+    check dispatchVideoPlayerAction(vm, VpaStepFrameBack)
+    check vm.frameVm.currentFrame.val == 5
+
+    ## Draw stepping delegates to FrameViewerVM.loadFrameForDraw.  We can't
+    ## inspect the request stream cheaply, but the call must not raise.
+    check dispatchVideoPlayerAction(vm, VpaStepDrawForward)
+    check dispatchVideoPlayerAction(vm, VpaStepDrawBack)
+
+    check dispatchVideoPlayerAction(vm, VpaJumpStart)
+    check vm.frameVm.currentFrame.val == 0
+    check dispatchVideoPlayerAction(vm, VpaJumpEnd)
+    check vm.frameVm.currentFrame.val == 9
+
+    check dispatchVideoPlayerAction(vm, VpaTogglePicker)
+    check vm.pickerState.val == PickerActive
+    check dispatchVideoPlayerAction(vm, VpaTogglePicker)
+    check vm.pickerState.val == PickerOff
+
+  test "video-player/keyboard-dispatch — CancelPicker falls through when picker is off":
+    ## Spec contract: ``VideoPlayerCancelPicker`` must NOT consume Escape
+    ## when picker mode is inactive — the dispatcher returns ``false`` so
+    ## the shortcuts overlay can fall through to ``aEscape`` (active focus
+    ## onEscape, modal dismiss, etc.).
+    let vm = createVideoPlayerVM(createFrameViewerVM(makeMinimalClient()))
+    check vm.pickerState.val == PickerOff
+    check not dispatchVideoPlayerAction(vm, VpaCancelPicker)
+    check vm.pickerState.val == PickerOff
+    ## Entering picker mode and cancelling consumes the key (returns true).
+    vm.enterPickerMode()
+    check vm.pickerState.val == PickerActive
+    check dispatchVideoPlayerAction(vm, VpaCancelPicker)
+    check vm.pickerState.val == PickerOff
+    ## Second cancel returns to fall-through behaviour.
+    check not dispatchVideoPlayerAction(vm, VpaCancelPicker)
+
+  test "video-player/keyboard-dispatch — nil VM is a safe no-op fall-through":
+    ## Defensive contract for the global handler: pressing a player key
+    ## before the panel mounts (or after it is disposed) must not crash
+    ## and must report the key as not-consumed so the binding falls
+    ## through to whatever else might handle it.
+    let nilVm: VideoPlayerVM = nil
+    for action in VideoPlayerAction:
+      check not dispatchVideoPlayerAction(nilVm, action)
+
+  test "video-player/action-name-parser — known names map, unknown rejected":
+    ## The Playwright test hook exposes string names; verify the parser
+    ## covers every spec-defined entry verbatim.
+    check parseVideoPlayerActionName("VideoPlayerTogglePlay") ==
+      some(VpaTogglePlay)
+    check parseVideoPlayerActionName("VideoPlayerFastForward") ==
+      some(VpaFastForward)
+    check parseVideoPlayerActionName("VideoPlayerCancelPicker") ==
+      some(VpaCancelPicker)
+    check parseVideoPlayerActionName("Bogus").isNone
+    check parseVideoPlayerActionName("").isNone
+
   test "pixel-picker/centre-color-tracks-magnifier — signal is settable as the JS bridge does":
     ## Centre-color sampling happens in JS via canvas reads; here we
     ## simulate the bridge by setting the signal directly and verify it

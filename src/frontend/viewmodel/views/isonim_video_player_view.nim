@@ -520,34 +520,17 @@ when defined(js):
         })(#);
       """.}
 
-  ## Global Escape handler used while picker mode is active. The handler is
-  ## removed by invoking the returned `cleanup` proc on unmount (currently the
-  ## panel itself has no unmount lifecycle in this codebase, but the proc is
-  ## stashed on the panel for future symmetry and unit-test inspection).
-  ##
-  ## Spec (Visual-Replay.md §Pixel Picker Mode → Activation):
-  ##   "Press Escape … → Exit picker mode without committing."
-  ##
-  ## The handler ignores Escape when the picker is inactive so it does not
-  ## compete with other Escape consumers (modals, search bars, etc.).
-  proc installEscapeHandler(
-      panel: isonim_dom.Element;
-      onEscape: proc() {.closure.})
-      {.importjs: """
-        (function(panel, onEscape) {
-          var handler = function(event) {
-            if (event.key !== "Escape" && event.keyCode !== 27) return;
-            // The Nim closure decides whether picker mode is active and
-            // returns early when it isn't; we still avoid preventDefault so
-            // other handlers see the key when we choose not to consume it.
-            onEscape();
-          };
-          window.addEventListener("keydown", handler, true);
-          panel.__videoPlayerEscape = function() {
-            window.removeEventListener("keydown", handler, true);
-          };
-        })(#, #);
-      """.}
+  ## M2 historical note: a raw window-level Escape keydown handler used to
+  ## live here (``installEscapeHandler``).  M4 retired it in favour of the
+  ## standard ClientAction pipeline — ``ClientAction.videoPlayerCancelPicker``
+  ## is registered through ``configureVideoPlayerShortcuts`` in
+  ## ``ui/shortcuts.nim`` and routed onto ``VideoPlayerVM.cancelPicker`` via
+  ## ``dispatchVideoPlayerAction``.  The new wiring respects focus scoping
+  ## (only fires when the Video Player is focused or hovered) and falls
+  ## through to ``aEscape`` when picker mode is inactive, so it can coexist
+  ## with the other Escape consumers (modals, search bars, the active focus
+  ## component's ``onEscape``).
+  ## Spec: Visual-Replay.md §Pixel Picker Mode → Activation.
 
   proc renderVideoPlayerPanel*(r: WebRenderer;
                                vm: VideoPlayerVM): isonim_dom.Element =
@@ -610,9 +593,8 @@ when defined(js):
       let m = mag.get
       renderLoupeAt(panel, m.sourceX, m.sourceY)
 
-    ## Global Escape → cancelPicker. The handler is a closure over `vm`,
-    ## not a global, so multiple Video Player instances would each install
-    ## their own — only the active picker (at most one in practice) will
-    ## actually respond.
-    installEscapeHandler(panel,
-      proc() = vm.cancelPicker())
+    ## Escape → cancelPicker now flows through the standard ClientAction
+    ## pipeline registered in ``ui/shortcuts.nim`` (M4).  No raw keydown
+    ## listener is installed here — the global Mousetrap wrapper for
+    ## ``ClientAction.videoPlayerCancelPicker`` queries
+    ## ``videoPlayerHasFocus()`` and ``vm.pickerState`` before delegating.

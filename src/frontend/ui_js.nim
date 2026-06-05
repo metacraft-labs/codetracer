@@ -12,6 +12,7 @@ import
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
   viewmodel/store/replay_data_store,
+  viewmodel/viewmodels/video_player_vm,
   ../common/ct_logging,
   property_test / test,
   event_helpers,
@@ -3691,6 +3692,50 @@ var actions*: array[ClientAction, ClientActionHandler] = [
       cstring(cgpDriver.presetName),
       cstring(cgpHost.presetName)]),
   proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), # aTimeline
+  # --- M4 Visual Replay / Video Player handlers ----------------------------
+  # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
+  # VideoPlayerVM instance.  Focus scoping is enforced *by the Mousetrap
+  # overlay* registered in ``ui/shortcuts.nim`` (``configureVideoPlayerShortcuts``)
+  # — the overlay checks ``videoPlayerHasFocus()`` before calling these
+  # handlers, so the handlers themselves do not re-check focus.  This keeps
+  # the handlers usable from menus, the command palette, and the Playwright
+  # test hook (``__CODETRACER_TEST__.videoPlayerAction``) without requiring a
+  # focused panel.  When the VM is not constructed (no visual recording
+  # loaded) the handlers are silent no-ops.
+  # Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md §Keyboard Shortcuts.
+  proc(actionData: JsObject) = # videoPlayerTogglePlay
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaTogglePlay),
+  proc(actionData: JsObject) = # videoPlayerRewind
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaRewind),
+  proc(actionData: JsObject) = # videoPlayerFastForward
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaFastForward),
+  proc(actionData: JsObject) = # videoPlayerStepFrameBack
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepFrameBack),
+  proc(actionData: JsObject) = # videoPlayerStepFrameForward
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepFrameForward),
+  proc(actionData: JsObject) = # videoPlayerStepDrawBack
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepDrawBack),
+  proc(actionData: JsObject) = # videoPlayerStepDrawForward
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaStepDrawForward),
+  proc(actionData: JsObject) = # videoPlayerJumpStart
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaJumpStart),
+  proc(actionData: JsObject) = # videoPlayerJumpEnd
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaJumpEnd),
+  proc(actionData: JsObject) = # videoPlayerTogglePicker
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaTogglePicker),
+  proc(actionData: JsObject) = # videoPlayerCancelPicker
+    let vm = video_player.currentVideoPlayerVM()
+    if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaCancelPicker),
 ]
 
 data.actions = actions

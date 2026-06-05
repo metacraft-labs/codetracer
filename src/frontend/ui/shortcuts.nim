@@ -1,6 +1,10 @@
 import
   jsffi,
-  ui_imports, trace
+  std/strutils,
+  isonim/core/signals,
+  ui_imports, trace,
+  ./video_player,
+  ../viewmodel/viewmodels/video_player_vm
 
 const
   NO_CODE: int = -1
@@ -70,6 +74,140 @@ proc bindShortcut(action: ClientAction, renderer: cstring) =
   Mousetrap.`bind`(renderer) do ():
     cdebug "shortcuts: global handle " & $renderer & " " & $action
     data.actions[action](nil)
+
+# ---------------------------------------------------------------------------
+# Video Player keyboard overlay (M4).
+#
+# Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md §Keyboard
+#       Shortcuts.
+# Milestones: Visual-Replay.milestones.org §M4.
+#
+# The visual replay player shares several keys with conventional bindings
+# (Esc / Home / End / arrow keys collide with aEscape / gotoStart / gotoEnd
+# / goLeft / goRight; Space / arrow keys would also disrupt Monaco when an
+# editor is focused).  The current ShortcutMap loader (config.nim
+# ``initShortcutMap``) is one-action-per-key, so we cannot rely on the YAML
+# entries alone to satisfy the spec.  The overlay below installs a single
+# Mousetrap handler per Video Player key.  The handler:
+#
+#   1. Dispatches the Video Player ClientAction when the Video Player panel
+#      is focused (or the cursor is hovering its frame canvas).
+#   2. Otherwise falls back to the prior ClientAction bound to the same key
+#      via the YAML config — preserving F10 → Step Over for the debugger,
+#      Esc → onEscape for the active focus component, etc.
+#   3. Returns ``false`` (preventDefault + stopPropagation) only when the
+#      Video Player action ran, so Monaco still receives arrow keys, Esc,
+#      Home / End when it has focus.
+#
+# Keep this list in lockstep with the spec's keyboard table and with the
+# YAML entries under ``videoPlayer*`` in ``default_config.yaml``.
+
+const videoPlayerOverlayBindings: array[11, tuple[
+    renderer: cstring; action: ClientAction]] = [
+  (cstring"space", ClientAction.videoPlayerTogglePlay),
+  (cstring"k",     ClientAction.videoPlayerTogglePlay),
+  (cstring"j",     ClientAction.videoPlayerRewind),
+  (cstring"l",     ClientAction.videoPlayerFastForward),
+  (cstring"left",  ClientAction.videoPlayerStepFrameBack),
+  (cstring"right", ClientAction.videoPlayerStepFrameForward),
+  (cstring"shift+left",  ClientAction.videoPlayerStepDrawBack),
+  (cstring"shift+right", ClientAction.videoPlayerStepDrawForward),
+  (cstring"home",  ClientAction.videoPlayerJumpStart),
+  (cstring"end",   ClientAction.videoPlayerJumpEnd),
+  (cstring"p",     ClientAction.videoPlayerTogglePicker),
+  # ``videoPlayerCancelPicker`` is handled separately below because Esc
+  # collides with ``aEscape`` and the fall-through logic is asymmetric (the
+  # dispatcher returns ``false`` from the wrapper handler when picker mode
+  # is off so other Escape consumers still see the key).
+]
+
+const videoPlayerCancelBinding: tuple[
+    renderer: cstring; action: ClientAction] =
+  (cstring"esc", ClientAction.videoPlayerCancelPicker)
+
+proc invokeFallbackForKey(renderer: cstring): bool =
+  ## When the Video Player overlay decides NOT to consume a key, route the
+  ## key to whatever ClientAction the YAML config originally assigned to it
+  ## (if any).  Returns ``true`` when a fallback ran so the wrapper can
+  ## decide whether to preventDefault.  Skips the Video Player actions
+  ## themselves to prevent infinite recursion if a user re-binds e.g. Esc
+  ## to ``videoPlayerCancelPicker`` in a custom config.
+  if data.config.isNil or data.config.shortcutMap.shortcutActions.isNil:
+    return false
+  let upper = ($renderer).toUpperAscii.cstring
+  if not data.config.shortcutMap.shortcutActions.hasKey(upper):
+    return false
+  let action = data.config.shortcutMap.shortcutActions[upper]
+  case action
+  of ClientAction.videoPlayerTogglePlay,
+     ClientAction.videoPlayerRewind,
+     ClientAction.videoPlayerFastForward,
+     ClientAction.videoPlayerStepFrameBack,
+     ClientAction.videoPlayerStepFrameForward,
+     ClientAction.videoPlayerStepDrawBack,
+     ClientAction.videoPlayerStepDrawForward,
+     ClientAction.videoPlayerJumpStart,
+     ClientAction.videoPlayerJumpEnd,
+     ClientAction.videoPlayerTogglePicker,
+     ClientAction.videoPlayerCancelPicker:
+    return false
+  else:
+    let handler = data.actions[action]
+    if handler.isNil:
+      return false
+    cdebug "shortcuts: video-player overlay falling back to " & $action
+    handler(nil)
+    return true
+
+proc bindVideoPlayerOverlay(renderer: cstring; action: ClientAction) =
+  ## Install a single video player overlay handler for one key.  Extracted
+  ## into its own proc so each closure captures its own (renderer, action)
+  ## without the ``capture`` macro tripping over tuple destructuring.
+  Mousetrap.`bind`(renderer) do () -> bool:
+    if videoPlayerHasFocus():
+      let handler = data.actions[action]
+      if not handler.isNil:
+        handler(nil)
+      ## Returning ``false`` tells Mousetrap to preventDefault /
+      ## stopPropagation — appropriate when we actually consumed the
+      ## key for the Video Player.
+      return false
+    ## Not focused on the Video Player — let the original binding take over.
+    ## We invoke it manually here because Mousetrap's bind() replaced the
+    ## YAML-driven handler with this wrapper.
+    let ran = invokeFallbackForKey(renderer)
+    if ran:
+      return false
+    ## Return ``true`` to let the browser handle the key normally
+    ## (important for arrow keys reaching Monaco, etc.).
+    return true
+
+proc bindVideoPlayerCancelOverlay(renderer: cstring; action: ClientAction) =
+  ## Esc gets its own wrapper because the dispatcher signals fall-through via
+  ## a bool return when picker mode is inactive.  Spec: Visual-Replay.md
+  ## §Pixel Picker Mode — "Press Escape … → Exit picker mode without
+  ## committing." but only when picker is active.
+  Mousetrap.`bind`(renderer) do () -> bool:
+    if videoPlayerHasFocus():
+      let vm = currentVideoPlayerVM()
+      if not vm.isNil and vm.pickerState.val == PickerActive:
+        data.actions[action](nil)
+        return false
+    ## Either the Video Player isn't focused or picker mode is off — fall
+    ## through to the YAML-defined Esc binding (aEscape -> activeFocus.onEscape).
+    let ran = invokeFallbackForKey(renderer)
+    if ran:
+      return false
+    return true
+
+proc configureVideoPlayerShortcuts() =
+  ## Install one Mousetrap binding per spec-defined Video Player key.  Must
+  ## run AFTER the YAML-driven ``bindShortcut`` loop in ``configureShortcuts``
+  ## so the wrapper handlers shadow any prior bindings on the same keys.
+  for entry in videoPlayerOverlayBindings:
+    bindVideoPlayerOverlay(entry.renderer, entry.action)
+  bindVideoPlayerCancelOverlay(
+    videoPlayerCancelBinding.renderer, videoPlayerCancelBinding.action)
 
 proc configureShortcuts* =
   if data.config.shortcutMap.conflictList.len > 0:
@@ -167,3 +305,9 @@ proc configureShortcuts* =
 
   Mousetrap.`bind`("ctrl+alt+d") do ():
     data.ipc.send("CODETRACER::open-devtools", JsObject{})
+
+  ## Visual Replay / Video Player keyboard overlay must register LAST so its
+  ## wrappers shadow any prior bindings on shared keys (Esc, Home, End, arrow
+  ## keys).  Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md
+  ## §Keyboard Shortcuts.
+  configureVideoPlayerShortcuts()

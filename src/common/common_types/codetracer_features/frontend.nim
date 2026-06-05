@@ -192,7 +192,25 @@ type
     aTraceMacroAtCursor,      # Trace macro expansion at the editor cursor
     aTraceStaticBlockAtCursor, # Trace `static:` block at the editor cursor
     aCollabInvite,            # Create/copy/revoke a collaboration invite URL
-    aTimeline                 # Open the Timeline panel
+    aTimeline,                # Open the Timeline panel
+    # Visual Replay / Video Player keyboard shortcuts — M4.  Routed through the
+    # standard ClientAction mechanism but scoped to the Video Player component
+    # (handlers query a focus marker before delegating to VideoPlayerVM).  See
+    # codetracer-specs/GUI/Debugging-Features/Visual-Replay.md §Keyboard
+    # Shortcuts and Visual-Replay.milestones.org §M4.  Appended at the end of
+    # the enum so existing ordinal-keyed arrays (notably the `actions` array in
+    # `ui_js.nim`) stay layout-stable.
+    videoPlayerTogglePlay,        # Space / K — Play / Pause
+    videoPlayerRewind,            # J — Rewind / cycle reverse speed
+    videoPlayerFastForward,       # L — Fast forward / cycle speed
+    videoPlayerStepFrameBack,     # ← — Previous frame (paused only)
+    videoPlayerStepFrameForward,  # → — Next frame (paused only)
+    videoPlayerStepDrawBack,      # Shift+← — Previous draw call
+    videoPlayerStepDrawForward,   # Shift+→ — Next draw call
+    videoPlayerJumpStart,         # Home — Seek to first frame
+    videoPlayerJumpEnd,           # End — Seek to last frame
+    videoPlayerTogglePicker,      # P — Enter / exit picker mode
+    videoPlayerCancelPicker       # Esc (picker on) — Cancel picker without commit
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

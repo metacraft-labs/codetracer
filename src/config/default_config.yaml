@@ -110,6 +110,23 @@ bindings:
   findSymbol: "CTRL+T"
   aRestart: "CTRL+F4"
 
+  # Visual Replay / Video Player keyboard shortcuts (spec: GUI/Debugging-Features/Visual-Replay.md §Keyboard Shortcuts).
+  # Each handler in ui_js.nim guards on `videoPlayerHasFocus()` so the
+  # bindings only fire when the Video Player panel is focused or the cursor
+  # is hovering its frame canvas.  This prevents collisions with the
+  # debugger's global F10/F11 step shortcuts and with Monaco's arrow keys.
+  videoPlayerTogglePlay: "Space K"
+  videoPlayerRewind: "J"
+  videoPlayerFastForward: "L"
+  videoPlayerStepFrameBack: "Left"
+  videoPlayerStepFrameForward: "Right"
+  videoPlayerStepDrawBack: "SHIFT+Left"
+  videoPlayerStepDrawForward: "SHIFT+Right"
+  videoPlayerJumpStart: "Home"
+  videoPlayerJumpEnd: "End"
+  videoPlayerTogglePicker: "P"
+  videoPlayerCancelPicker: "Esc"
+
 rrBackend:
   enabled: false
   path: ""

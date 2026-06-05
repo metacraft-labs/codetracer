@@ -27,6 +27,14 @@ var videoPlayerVMInstance: VideoPlayerVM
 var videoPlayerComponentRef: VideoPlayerComponent
 var isoNimVideoPlayerMounted*: bool = false
 
+proc currentVideoPlayerVM*(): VideoPlayerVM =
+  ## Accessor used by the global ClientAction dispatcher in ``ui_js.nim`` to
+  ## route Visual Replay shortcuts onto the live VM.  Returns ``nil`` when the
+  ## Video Player panel has not been mounted yet (no visual recording loaded,
+  ## or the user closed the pane); callers must treat ``nil`` as "no-op,
+  ## let the key fall through".
+  videoPlayerVMInstance
+
 ## Initial draw index used when the session first connects to a player. Matches
 ## the value used by frame_viewer.nim so the two panes start on the same frame.
 const initialVisualReplayIndexingDraw = 999
@@ -84,10 +92,119 @@ proc initVideoPlayerVM(store: ReplayDataStore = nil) =
   videoPlayerVMInstance = createVideoPlayerVM(videoPlayerFrameVMInstance)
   syncVisualReplaySessionIntoPlayerVM()
 
+when defined(js):
+  ## Focus / hover marker for keyboard-shortcut scoping (M4).
+  ##
+  ## Spec (Visual-Replay.md §Keyboard Shortcuts):
+  ##   "All shortcuts are scoped to the Video Player component when it has
+  ##    focus; the player must be focused (or the cursor must be over the
+  ##    frame canvas) for them to fire — this prevents collisions with the
+  ##    global step shortcuts (F10/F11) used by the Debugger Controls."
+  ##
+  ## We attach a tiny per-panel tracker that the global ClientAction handlers
+  ## in ``ui_js.nim`` consult via ``videoPlayerHasFocus()`` before delegating
+  ## the key to the VM.  Mouse hover is the OR side of the scope — the panel
+  ## itself rarely receives the platform "focus" event because it has no
+  ## tabindex, so a cursor over the frame canvas is the user's primary signal
+  ## of intent.
+  proc installVideoPlayerFocusTracker(panel: cstring) {.importjs: """
+    (function(panelSelector) {
+      window.__codetracer__ = window.__codetracer__ || {};
+      var state = window.__codetracer__.videoPlayerFocusState =
+        window.__codetracer__.videoPlayerFocusState ||
+        { hovering: false, panels: [] };
+
+      function findPanel() {
+        return document.querySelector(panelSelector);
+      }
+
+      var panel = findPanel();
+      if (!panel) return;
+      if (state.panels.indexOf(panel) !== -1) return;
+      state.panels.push(panel);
+
+      function onEnter() { state.hovering = true; }
+      function onLeave() { state.hovering = false; }
+      panel.addEventListener("mouseenter", onEnter);
+      panel.addEventListener("mouseleave", onLeave);
+
+      // Establish the focus query.  Re-installs are idempotent — the first
+      // tracker wins; later panels just add their listeners and contribute
+      // their nodes to the live containment check below.
+      if (typeof window.__codetracer__.videoPlayerHasFocus !== "function") {
+        window.__codetracer__.videoPlayerHasFocus = function() {
+          if (state.hovering) return true;
+          var active = document.activeElement;
+          if (!active) return false;
+          for (var i = 0; i < state.panels.length; i++) {
+            var p = state.panels[i];
+            if (p === active) return true;
+            if (typeof p.contains === "function" && p.contains(active)) {
+              return true;
+            }
+          }
+          return false;
+        };
+      }
+    })(#);
+  """.}
+
+  proc videoPlayerHasFocus*(): bool {.importjs: """
+    (function() {
+      try {
+        if (typeof window.__codetracer__ === "undefined") return false;
+        if (typeof window.__codetracer__.videoPlayerHasFocus !== "function") {
+          return false;
+        }
+        return !!window.__codetracer__.videoPlayerHasFocus();
+      } catch (_err) {
+        return false;
+      }
+    })()
+  """.}
+
+  ## Playwright hook — bypasses focus scoping so specs can dispatch every
+  ## ClientAction without coordinating a real focused-and-hovered Video
+  ## Player.  Mirrors the existing ``__CODETRACER_TEST__.fakeMcrStepGeid``
+  ## pattern in ``ui/frame_viewer.nim``.  Returns ``true``/``false`` matching
+  ## the dispatcher's consumption signal so tests can also exercise the
+  ## fall-through contract on Escape.
+  proc installVideoPlayerTestHooks(
+      dispatch: proc(name: cstring): bool) {.importjs: """
+    (function(dispatch) {
+      window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+      window.__CODETRACER_TEST__.videoPlayerAction = function(name) {
+        return !!dispatch(String(name || ""));
+      };
+    })(#);
+  """.}
+
+else:
+  proc installVideoPlayerFocusTracker(panel: cstring) = discard
+  proc videoPlayerHasFocus*(): bool = false
+  proc installVideoPlayerTestHooks(
+      dispatch: proc(name: cstring): bool) = discard
+
 proc initVideoPlayerVMWithStore*(store: ReplayDataStore) =
   initVideoPlayerVM(store)
   pixel_history.initPixelHistoryVMWithStore(store)
   shader_debug.initShaderDebugVMWithStore(store)
+  when defined(js):
+    if data.startOptions.inTest:
+      ## Playwright hook: bypass focus scoping and route the named
+      ## ClientAction straight onto the VM dispatcher.  Returns the
+      ## dispatcher's consumption bool so the test can also assert the
+      ## fall-through contract on Escape.  Mirrors the
+      ## ``__CODETRACER_TEST__.fakeMcrStepGeid`` shape installed by
+      ## ``ui/frame_viewer.nim``.
+      installVideoPlayerTestHooks(proc(name: cstring): bool =
+        let parsed = parseVideoPlayerActionName($name)
+        if parsed.isNone:
+          return false
+        let vm = currentVideoPlayerVM()
+        if vm.isNil:
+          return false
+        return dispatchVideoPlayerAction(vm, parsed.get))
 
 proc tryMountIsoNimVideoPlayerPanel*(
     component: VideoPlayerComponent = nil) =
@@ -124,6 +241,12 @@ proc tryMountIsoNimVideoPlayerPanel*(
     except:
       cerror "tryMountIsoNimVideoPlayerPanel: mount EXCEPTION: " &
         getCurrentExceptionMsg()
+    when defined(js):
+      ## Install the focus / hover tracker on the just-mounted panel so the
+      ## global ClientAction handlers (in ``ui_js.nim``) can gate keys on
+      ## Video Player focus.  The tracker selector matches the root class
+      ## the view renders (see ``renderVideoPlayerPanel``).
+      installVideoPlayerFocusTracker(cstring".video-player-component")
 
   doMount()
 
