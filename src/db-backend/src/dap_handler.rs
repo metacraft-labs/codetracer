@@ -45,6 +45,36 @@ use crate::value::{Type, Value, to_ct_value};
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
 
+/// Resolve the personal-overrides path for origin patterns per spec §7.4.
+///
+/// Honours `$XDG_CONFIG_HOME` when set; otherwise falls back to
+/// `$HOME/.config/codetracer/origin-patterns.toml`. Returns `None` only
+/// when neither variable is set (an unusual hermetic environment) — in
+/// every other case we return a path, and the caller is responsible for
+/// gating on `.exists()`.
+fn personal_origin_patterns_path() -> Option<std::path::PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.is_empty()
+    {
+        return Some(
+            std::path::PathBuf::from(xdg)
+                .join("codetracer")
+                .join("origin-patterns.toml"),
+        );
+    }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return Some(
+            std::path::PathBuf::from(home)
+                .join(".config")
+                .join("codetracer")
+                .join("origin-patterns.toml"),
+        );
+    }
+    None
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McrLiveStepArguments {
@@ -1353,7 +1383,7 @@ impl Handler {
         };
         let result = match self.trace_kind {
             TraceKind::Materialized => {
-                let patterns = origin_classifier::PatternSet::built_in();
+                let patterns = self.load_origin_patterns();
                 let meta_dat_sources_root = self.meta_dat_sources_root();
                 self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
             }
@@ -1449,7 +1479,7 @@ impl Handler {
             classify_source: true,
         };
         let budget = task::OriginBudget::default();
-        let patterns = origin_classifier::PatternSet::built_in();
+        let patterns = self.load_origin_patterns();
         let meta_dat_sources_root = self.meta_dat_sources_root();
         let chain = self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())?;
         Ok(origin_chain_to_summary(&chain, false))
@@ -1489,6 +1519,55 @@ impl Handler {
     fn meta_dat_sources_root(&self) -> Option<std::path::PathBuf> {
         let candidate = self.reader.workdir().join("meta_dat").join("sources");
         if candidate.is_dir() { Some(candidate) } else { None }
+    }
+
+    /// Load the layered origin-pattern set per spec §7.4.
+    ///
+    /// Honours, in precedence order:
+    ///
+    /// 1. The trace's `meta_dat/origin-patterns/_overrides.toml`
+    ///    (trace-local overrides).
+    /// 2. The user's `~/.config/codetracer/origin-patterns.toml`
+    ///    (personal overrides).
+    /// 3. Embedded library patterns under
+    ///    `meta_dat/origin-patterns/<library>/...` inside the trace.
+    /// 4. The built-in catalogue (spec §7.3).
+    ///
+    /// On any load error we fall back to the built-in catalogue so the
+    /// chain query still succeeds — the alternative of failing the
+    /// whole DAP request because one TOML file has a typo would be a
+    /// worse UX.
+    fn load_origin_patterns(&self) -> origin_classifier::PatternSet {
+        let patterns_root = self.reader.workdir().join("meta_dat").join("origin-patterns");
+        let trace_overrides = patterns_root.join("_overrides.toml");
+        let trace_overrides_path = if trace_overrides.exists() {
+            Some(trace_overrides.as_path())
+        } else {
+            None
+        };
+        let embedded_root = if patterns_root.is_dir() {
+            Some(patterns_root.as_path())
+        } else {
+            None
+        };
+
+        let personal_overrides_buf = personal_origin_patterns_path();
+        let personal_overrides_path = personal_overrides_buf
+            .as_ref()
+            .filter(|p| p.exists())
+            .map(|p| p.as_path());
+
+        match origin_classifier::PatternSet::load_layered(trace_overrides_path, personal_overrides_path, embedded_root)
+        {
+            Ok(set) => set,
+            Err(e) => {
+                log::warn!(
+                    "origin-patterns layered load failed at {}: {e}; falling back to built-in catalogue",
+                    patterns_root.display()
+                );
+                origin_classifier::PatternSet::built_in()
+            }
+        }
     }
 
     /// Compute the per-variable origin summary for an *eager* surface
@@ -1545,7 +1624,7 @@ impl Handler {
             classify_source: true,
         };
         let budget = task::OriginBudget::default();
-        let patterns = origin_classifier::PatternSet::built_in();
+        let patterns = self.load_origin_patterns();
         let meta_dat_sources_root = self.meta_dat_sources_root();
         let summary = match self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
         {
@@ -1584,7 +1663,7 @@ impl Handler {
             current_var_name: var_name.to_string(),
             hops_emitted: 0,
             max_hops: task::DEFAULT_ORIGIN_MAX_HOPS,
-            patterns_fingerprint: origin_classifier::PatternSet::built_in().fingerprint().hex.clone(),
+            patterns_fingerprint: self.load_origin_patterns().fingerprint().hex.clone(),
             source_digests: Vec::new(),
             issued_at: 0,
         };
