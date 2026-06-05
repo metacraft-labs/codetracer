@@ -3,7 +3,8 @@ import
   value,
   ../communication,
   ../event_helpers,
-  ../../common/ct_event
+  ../../common/ct_event,
+  ../viewmodel/viewmodels/origin_chain_types
 
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
 
@@ -15,9 +16,13 @@ import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/viewmodels/state_vm
+import ../viewmodel/viewmodels/origin_chain_vm
+import ../viewmodel/viewmodels/origin_chain_types
+import isonim/core/[signals, computation]
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_state_view import
   mountIsoNimStatePanel
+import isonim_origin_chain
 
 # Module-level StateVM instance. Created once in `register()` and
 # fed data whenever the legacy event-bus handlers fire.  Rendering
@@ -26,6 +31,15 @@ var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
 var stateHistoryBridge: proc(expression: string)
 var isoNimStateMounted: bool = false
+
+# Value Origin Tracking (M4): a single module-level OriginChainVM
+# instance is created alongside the StateVM so the State Pane's inline
+# badge click handler can both expand the row AND dispatch the
+# placeholder-resolve / chain-fetch request through the same VM the
+# side-panel uses. The instance is kept module-local because the State
+# Pane is the primary entry-point — other surfaces (scratchpad,
+# editor) read from the same VM via the host bridges.
+var originChainVMInstance: OriginChainVM
 
 # let MIN_NAME_WIDTH: float = 15 #%
 # let MAX_NAME_WIDTH: float = 85 #%
@@ -140,6 +154,131 @@ proc tryMountIsoNimStatePanel() =
 
   doMount()
 
+# ---------------------------------------------------------------------------
+# Origin Chain side-panel mount (M4 deliverable #9). The panel lives
+# in a floating overlay element on document.body rather than as a
+# GoldenLayout pane because the GL ``Content`` enum + component
+# registry would require schema migration of saved layouts. The
+# overlay approach matches the visual treatment described in the spec
+# §3.2.2 (a side panel that opens/closes from the editor zone) and
+# keeps the saved-layout schema stable.
+# ---------------------------------------------------------------------------
+
+when defined(js):
+  import std/dom as kdom_state
+  var originSidePanelHost: kdom_state.Node
+  var originSidePanelState = newOriginChainPanel()
+  var originSidePanelEffectInstalled = false
+
+  proc ensureOriginSidePanelHost(): kdom_state.Node =
+    ## Return the singleton overlay container. Created lazily inside
+    ## the document body on first use; subsequent calls reuse it.
+    if not originSidePanelHost.isNil:
+      return originSidePanelHost
+    let host = kdom_state.document.createElement(cstring"aside")
+    host.setAttribute(cstring"id", cstring"ct-origin-chain-side-panel")
+    host.setAttribute(cstring"class", cstring"ct-origin-chain-side-panel")
+    host.setAttribute(cstring"aria-label", cstring"Value origin chain panel")
+    host.setAttribute(cstring"role", cstring"complementary")
+    host.style.display = cstring"none"
+    kdom_state.document.body.appendChild(host)
+    # ↑/↓/Enter/→/←/Esc per spec §13.0 — wire once on host creation.
+    proc onKey(ev: kdom_state.Event) =
+      let keyEv = cast[kdom_state.KeyboardEvent](ev)
+      let key = $keyEv.key
+      if originChainVMInstance.isNil:
+        return
+      let chainOpt = originChainVMInstance.activeChain.val
+      if chainOpt.isNone:
+        return
+      let chain = chainOpt.get
+      case key
+      of "ArrowDown":
+        focusNextHop(originSidePanelState, chain)
+      of "ArrowUp":
+        focusPrevHop(originSidePanelState, chain)
+      of "Enter":
+        enterHop(originSidePanelState, chain, originChainVMInstance)
+      of "ArrowRight":
+        expandFocusedOperands(originSidePanelState, chain)
+      of "ArrowLeft":
+        collapseFocusedOperands(originSidePanelState)
+      of "Escape":
+        dismissPanel(originSidePanelState)
+        originChainVMInstance.closeSidePanel()
+      else:
+        return
+    host.addEventListener(cstring"keydown", onKey)
+    host.setAttribute(cstring"tabindex", cstring"-1")
+    originSidePanelHost = host
+    host
+
+  proc renderOriginSidePanelDomReactive() =
+    ## Mount or refresh the side panel.  Driven by an isonim render
+    ## effect: subscribes to ``sidePanelOpen`` + ``activeChain`` and
+    ## re-emits the DOM whenever either changes.
+    if originChainVMInstance.isNil:
+      return
+    if originSidePanelEffectInstalled:
+      return
+    originSidePanelEffectInstalled = true
+    createEffect proc() =
+      let open = originChainVMInstance.sidePanelOpen.val
+      let chain = originChainVMInstance.activeChain.val
+      let host = ensureOriginSidePanelHost()
+      if open and chain.isSome:
+        host.style.display = cstring"block"
+        renderPanelDom(host, originChainVMInstance, originSidePanelState)
+        # focus the host so keyboard nav is immediately active
+        try:
+          host.focus()
+        except:
+          discard
+      else:
+        host.style.display = cstring"none"
+        while not host.firstChild.isNil:
+          host.removeChild(host.firstChild)
+
+proc tryMountOriginSidePanel*() =
+  ## Public entry-point invoked once the OriginChainVM is created.
+  ## Idempotent — safe to call multiple times.
+  when defined(js):
+    renderOriginSidePanelDomReactive()
+
+proc wireOriginChainBridges(stateVM: StateVM; originVM: OriginChainVM) =
+  ## Wire the StateVM → OriginChainVM bridges so the State Pane's
+  ## inline origin badge click handler dispatches the same
+  ## ``ct/originChain`` request the side-panel uses (M4 deliverable
+  ## §3.2.1 + §3.2.3). The chain-lookup bridge lets the per-row
+  ## expansion block (M4 deliverable §3.2.2 "expanded chain") render
+  ## as soon as the active chain matches the row's variable name.
+  # Construct the bridge closure by capturing the OriginChainVM via
+  # the surrounding scope.  The ``Location`` type the StateVM's
+  # ``onShowOriginProc`` field uses is
+  # ``viewmodel/store/types.Location``; we reach it through the
+  # StateVM's own field type so the JS backend resolves the symbol
+  # unambiguously.
+  type StateLocation = typeof(stateVM.store.debugger.val.location)
+  proc forwardShowOrigin(expression: string; location: StateLocation) =
+    originVM.onShowOrigin(expression, location)
+  stateVM.onShowOriginProc = forwardShowOrigin
+  stateVM.originChainLookup = proc(name: string): origin_chain_types.Option[OriginChain] =
+    # NB: ``origin_chain_types`` re-exports ``std/options``, which is
+    # how we reach ``Option``/``some``/``none`` here without pulling
+    # ``std/options`` directly (importing it in this file would
+    # introduce a ``data`` ambiguity with the legacy global from
+    # ``frontend/types.nim``).
+    let active = originVM.activeChain.val
+    if active.isSome and active.get.queryVariable == name:
+      active
+    else:
+      origin_chain_types.none(OriginChain)
+  # Sync the OriginChainVM preferences signal into the StateVM mirror
+  # so badge text / icon / function-suffix follow the user's chosen
+  # style.  The OriginChainVM owns the canonical preferences; the
+  # StateVM mirror is read by the row renderer.
+  stateVM.originPreferences.val = originVM.preferences.val
+
 proc initStateVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel StateVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel
@@ -154,6 +293,13 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   stateVMStore = store
   stateVMInstance = createStateVM(store)
   stateVMInstance.onToggleHistory = stateHistoryBridge
+  # Create the companion OriginChainVM and wire the bridges so the
+  # State Pane row renderer can dispatch ``ct/originChain`` requests
+  # through the same VM the side-panel uses (M4 deliverable §3.2.1 +
+  # §3.2.3).
+  originChainVMInstance = createOriginChainVM(store)
+  wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+  tryMountOriginSidePanel()
   cerror "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
   clog "StateVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimStatePanel()
@@ -185,6 +331,12 @@ proc initStateVM() =
 
   stateVMStore = createReplayDataStore(stubBackend)
   stateVMInstance = createStateVM(stateVMStore)
+  # Companion OriginChainVM + bridges so the inline badge click
+  # handler can dispatch through the same VM the side-panel uses
+  # (M4 deliverable §3.2.1 + §3.2.3) even on the stub-backend code path.
+  originChainVMInstance = createOriginChainVM(stateVMStore)
+  wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+  tryMountOriginSidePanel()
   clog "StateVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimStatePanel()
 
@@ -331,12 +483,43 @@ proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int;
   syncStoreCodeStateLine(path, line)
   cerror fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
 
+proc jsObjectToJson(raw: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+  ## Round-trip a JS object to its JSON serialisation. Used by the
+  ## origin-summary bridge below to feed the per-row ``originSummary``
+  ## payload into the Nim ``parseOriginSummary`` decoder.
+
+proc syncOriginSummaries(response: CtLoadLocalsResponseBody) =
+  ## Value Origin Tracking (M4) — mirror the per-variable
+  ## ``originSummary`` field the backend attaches to every
+  ## ``ct/load-locals`` response (spec §3.2.3) into the StateVM so
+  ## the IsoNim view's inline badge renders correctly. The wire field
+  ## is JSON-encoded (because ``CtLoadLocalsResponseBody.locals`` is
+  ## the JS-only ``Variable`` ref-object that does not yet carry the
+  ## summary as a typed field — extending the ref-object would ripple
+  ## through every consumer), so we walk the raw JS object and decode
+  ## each summary through ``parseOriginSummary``. The fall-back behaviour
+  ## when the field is missing (older backends, non-materialized
+  ## traces) is an empty per-row table — the view then renders no
+  ## badge for that row, matching the legacy contract.
+  if stateVMInstance.isNil:
+    return
+  var summaries: seq[(string, OriginSummary)] = @[]
+  for localVariable in response.locals:
+    let expression = $localVariable.expression
+    let raw = localVariable.toJs[cstring("originSummary")]
+    if raw.isNil or raw.isUndefined:
+      continue
+    let asJson = parseJson($jsObjectToJson(raw))
+    summaries.add((expression, parseOriginSummary(asJson)))
+  stateVMInstance.updateOriginSummaries(summaries)
+
 proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
   clog fmt"registerLocals"
   self.locals = response.locals
 
   # Feed the same data into the parallel ViewModel store.
   syncStoreLocals(response.locals)
+  syncOriginSummaries(response)
   for localVariable in response.locals:
     let expression = localVariable.expression
 

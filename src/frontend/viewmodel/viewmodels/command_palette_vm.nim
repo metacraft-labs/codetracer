@@ -91,6 +91,13 @@ type
     activeCommandName*: Signal[string]
     onResultRun*: proc(index: int)
 
+    # Value Origin Tracking (M4) — extra command-palette entry the
+    # IsoNim view appends to the always-on commands list. Mirrors
+    # the spec §3.6 "Command palette → CodeTracer: Show Value Origin"
+    # entry point. The host installs `onShowValueOrigin` to forward
+    # into `StateVM.onShowOrigin` once the user picks a variable.
+    onShowValueOrigin*: proc(expression: string)
+
     # -- Derived state --
     hasResults*: Memo[bool]
     resultCount*: Memo[int]
@@ -192,6 +199,16 @@ proc setInputPlaceholder*(vm: CommandPaletteVM; placeholder: string) =
   ## the legacy ``changePlaceholder`` helper can refresh just the
   ## hint without re-clamping the selection.
   vm.inputPlaceholder.val = placeholder
+
+proc requestShowValueOrigin*(vm: CommandPaletteVM; expression: string) =
+  ## Invoked when the "CodeTracer: Show Value Origin" command is
+  ## picked from the palette. Forwards into the host-installed
+  ## `onShowValueOrigin` proc which routes the request through
+  ## `StateVM.onShowOrigin`. The palette is closed so the user can
+  ## see the resulting side panel.
+  if not vm.onShowValueOrigin.isNil:
+    vm.onShowValueOrigin(expression)
+  vm.close()
 
 proc setActiveCommandName*(vm: CommandPaletteVM; name: string) =
   ## Push the active "parent" command name.  Mirrors the legacy

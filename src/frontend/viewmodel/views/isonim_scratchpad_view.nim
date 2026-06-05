@@ -48,6 +48,11 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/scratchpad_vm
+import ../viewmodels/origin_chain_types
+
+# Re-export so callers can `import isonim_scratchpad_view` and reach
+# the helpers exercised by the headless tests.
+export origin_chain_types
 
 const ScratchpadContainerClass* = "component-container active-state"
   ## Verbatim string the legacy ``componentContainerClass(
@@ -115,6 +120,42 @@ proc onCloseClick(vm: ScratchpadVM; index: int): proc() =
   result = proc() = vm.removeValue(captured)
 
 # ---------------------------------------------------------------------------
+# Origin-chain entry rendering (M4 deliverable §3.5 + spec §8.1
+# "Scratchpad data model (new entry kind)") — folded card per chain.
+# ---------------------------------------------------------------------------
+
+const ScratchpadChainRowClass* = "scratchpad-chain-view"
+  ## Outer wrapper class for a pinned-chain card.  Distinct from the
+  ## value-row class so CSS can give the card its own visual
+  ## treatment (spec §8.1 calls for a folded card with side-by-side
+  ## chain-diff support).
+const ScratchpadChainTerminatorClass* = "scratchpad-chain-terminator"
+const ScratchpadChainHopSummaryClass* = "scratchpad-chain-hop-summary"
+const ScratchpadChainCloseClass* =
+  "ct-button-image-sm-secondary ct-mr-2 scratchpad-chain-close"
+
+proc chainCardLabel*(entry: ScratchpadChainEntry): string =
+  ## Heading text for a chain card: `<queryVariable>: <hopCount> hops →
+  ## <terminator.expression>`.  Exposed as a pure helper so headless
+  ## tests can assert against the exact string the view emits.
+  let hops = entry.chain.hops.len
+  let suffix =
+    if entry.chain.terminator.expression.len > 0:
+      " → " & entry.chain.terminator.expression
+    else: ""
+  entry.chain.queryVariable & ": " & $hops & " hops" & suffix
+
+proc chainTerminatorIconClass*(entry: ScratchpadChainEntry): string =
+  ## Convenience accessor used by the view + tests.  Returns the same
+  ## CSS class the inline badge / side-panel terminator row attach so
+  ## the chain card visually identifies the terminator kind.
+  iconClassForTerminator(entry.chain.terminator.kind)
+
+proc onRemoveChainClick(vm: ScratchpadVM; index: int): proc() =
+  let captured = index
+  result = proc() = vm.removeChain(captured)
+
+# ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
@@ -146,6 +187,37 @@ proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
                     text cell
   row
 
+proc renderChainRowMock(r: MockRenderer; vm: ScratchpadVM;
+                        entry: ScratchpadChainEntry; index: int): MockNode =
+  ## Folded chain card.  Layout (spec §8.1):
+  ##   div.scratchpad-chain-view
+  ##     button.scratchpad-chain-close
+  ##     div.scratchpad-chain-terminator
+  ##       span.{terminator-icon-class}
+  ##       span : "{queryVariable}: N hops → {terminator.expression}"
+  ##     div.scratchpad-chain-hop-summary  (one line per first/last hop)
+  let onClick = onRemoveChainClick(vm, index)
+  let card = ui(r):
+    tdiv(class = ScratchpadChainRowClass):
+      button(class = ScratchpadChainCloseClass, id = "chain-close-element",
+             onclick = onClick):
+        discard
+      tdiv(class = ScratchpadChainTerminatorClass):
+        span(class = chainTerminatorIconClass(entry)):
+          discard
+        span(class = "scratchpad-chain-label"):
+          text chainCardLabel(entry)
+      tdiv(class = ScratchpadChainHopSummaryClass):
+        if entry.chain.hops.len > 0:
+          let first = entry.chain.hops[0]
+          span(class = "scratchpad-chain-hop"):
+            text "first: " & first.targetExpr & " = " & first.sourceExpr
+        if entry.chain.hops.len > 1:
+          let last = entry.chain.hops[^1]
+          span(class = "scratchpad-chain-hop"):
+            text "last: " & last.targetExpr & " = " & last.sourceExpr
+  card
+
 proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
   ## Render the Scratchpad panel for the Mock renderer.
   ##
@@ -154,27 +226,36 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
   ## ``createRenderEffect`` rebuilds the row list whenever ``entries``
   ## changes and also toggles the empty-state placeholder.
   var listContainer: MockNode
+  var chainListContainer: MockNode
   var emptyContainer: MockNode
 
   let panel = ui(r):
     tdiv(class = ScratchpadContainerClass, id = "scratchpadComponent-0"):
       tdiv(ref = listContainer, class = "value-components-container"):
         discard
+      tdiv(ref = chainListContainer, class = "chain-components-container"):
+        discard
       tdiv(ref = emptyContainer, class = "empty-overlay"):
         text ScratchpadEmptyStateText
 
   createRenderEffect proc() =
     let entries = vm.entries.val
+    let chains = vm.chainEntries.val
     r.clearChildren(listContainer)
     for i, entry in entries:
       let row = renderRowMock(r, vm, entry, i)
       r.appendChild(listContainer, row)
+    r.clearChildren(chainListContainer)
+    for i, entry in chains:
+      let card = renderChainRowMock(r, vm, entry, i)
+      r.appendChild(chainListContainer, card)
 
     # Toggle the empty-overlay via a class instead of remove/insert so
     # the held ``emptyContainer`` reference stays stable across
     # reactive updates (matches the trace_log / request_panel
-    # placeholder pattern).
-    if entries.len == 0:
+    # placeholder pattern).  The overlay hides as soon as EITHER list
+    # has rows so a pinned chain alone is enough to hide it.
+    if entries.len == 0 and chains.len == 0:
       r.setAttribute(emptyContainer, "class", "empty-overlay")
     else:
       r.setAttribute(emptyContainer, "class", "empty-overlay hidden")
@@ -252,30 +333,78 @@ when defined(js):
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(valueRoot))
     row
 
+  proc renderChainRowWeb(vm: ScratchpadVM; entry: ScratchpadChainEntry;
+                         index: int): isonim_dom.Element =
+    ## DOM version of `renderChainRowMock`.  Same shape; close handler
+    ## wired via `addEventListener`.
+    let card = createWebElement("div", ScratchpadChainRowClass)
+
+    let closeBtn = createWebElement("button", ScratchpadChainCloseClass,
+                                    "chain-close-element")
+    let onClick = onRemoveChainClick(vm, index)
+    isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
+                                proc(ev: isonim_dom.Event) = onClick())
+    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(closeBtn))
+
+    let term = createWebElement("div", ScratchpadChainTerminatorClass)
+    let icon = createWebElement("span", chainTerminatorIconClass(entry))
+    isonim_dom.appendChild(isonim_dom.Node(term), isonim_dom.Node(icon))
+    let label = createWebElement("span", "scratchpad-chain-label")
+    appendWebText(label, chainCardLabel(entry))
+    isonim_dom.appendChild(isonim_dom.Node(term), isonim_dom.Node(label))
+    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(term))
+
+    let summary = createWebElement("div", ScratchpadChainHopSummaryClass)
+    if entry.chain.hops.len > 0:
+      let first = entry.chain.hops[0]
+      let firstSpan = createWebElement("span", "scratchpad-chain-hop")
+      appendWebText(firstSpan,
+        "first: " & first.targetExpr & " = " & first.sourceExpr)
+      isonim_dom.appendChild(isonim_dom.Node(summary),
+                             isonim_dom.Node(firstSpan))
+    if entry.chain.hops.len > 1:
+      let last = entry.chain.hops[^1]
+      let lastSpan = createWebElement("span", "scratchpad-chain-hop")
+      appendWebText(lastSpan,
+        "last: " & last.targetExpr & " = " & last.sourceExpr)
+      isonim_dom.appendChild(isonim_dom.Node(summary),
+                             isonim_dom.Node(lastSpan))
+    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(summary))
+    card
+
   proc renderScratchpadPanel*(r: WebRenderer;
                               vm: ScratchpadVM): isonim_dom.Element =
     ## Render the Scratchpad panel for the real DOM.  Same dispatch
     ## shape as the Mock variant — outer wrapper plus a render-effect
     ## that rebuilds the list and toggles the empty-state placeholder.
     var listContainer: isonim_dom.Element
+    var chainListContainer: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
 
     let panel = ui(r):
       tdiv(class = ScratchpadContainerClass, id = "scratchpadComponent-0"):
         tdiv(ref = listContainer, class = "value-components-container"):
           discard
+        tdiv(ref = chainListContainer, class = "chain-components-container"):
+          discard
         tdiv(ref = emptyContainer, class = "empty-overlay"):
           text ScratchpadEmptyStateText
 
     createRenderEffect proc() =
       let entries = vm.entries.val
+      let chains = vm.chainEntries.val
       clearWebChildren(listContainer)
       for i, entry in entries:
         let row = renderRowWeb(vm, entry, i)
         isonim_dom.appendChild(isonim_dom.Node(listContainer),
                                isonim_dom.Node(row))
+      clearWebChildren(chainListContainer)
+      for i, entry in chains:
+        let card = renderChainRowWeb(vm, entry, i)
+        isonim_dom.appendChild(isonim_dom.Node(chainListContainer),
+                               isonim_dom.Node(card))
 
-      if entries.len == 0:
+      if entries.len == 0 and chains.len == 0:
         isonim_dom.setAttribute(emptyContainer, cstring"class",
                                 cstring"empty-overlay")
       else:

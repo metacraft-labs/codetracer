@@ -61,6 +61,7 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
+import origin_chain_types
 
 type
   ScratchpadVM* = ref object of ViewModel
@@ -70,6 +71,12 @@ type
     # -- Mutable state --
     entries*: Signal[seq[ScratchpadValueEntry]]
     localsByExpression*: Signal[Table[string, ScratchpadValueEntry]]
+
+    # Value Origin Tracking (M4) — sibling variant of
+    # `ScratchpadValueEntry` per spec §8.1 "Scratchpad data model
+    # (new entry kind)". Renders the chain as a folded card with
+    # side-by-side chain-diff support.
+    chainEntries*: Signal[seq[ScratchpadChainEntry]]
 
     # -- Derived state --
     isEmpty*: Memo[bool]
@@ -121,6 +128,29 @@ proc setLocals*(vm: ScratchpadVM;
     lookup[e.expression] = e
   vm.localsByExpression.val = lookup
 
+proc addChain*(vm: ScratchpadVM; chain: OriginChain) =
+  ## Append a captured chain entry to the scratchpad list (M4
+  ## deliverable §3.5 + spec §8.1). The legacy
+  ## `ScratchpadComponent.registerValue` flow remains unchanged for
+  ## value pins; chains travel through this dedicated proc so the
+  ## view can render them as folded cards with chain-diff support.
+  var existing = vm.chainEntries.val
+  existing.add(ScratchpadChainEntry(chain: chain))
+  vm.chainEntries.val = existing
+
+proc removeChain*(vm: ScratchpadVM; index: int) =
+  let existing = vm.chainEntries.val
+  if index < 0 or index >= existing.len:
+    return
+  var updated = newSeqOfCap[ScratchpadChainEntry](existing.len - 1)
+  for i, e in existing:
+    if i != index:
+      updated.add(e)
+  vm.chainEntries.val = updated
+
+proc clearChains*(vm: ScratchpadVM) =
+  vm.chainEntries.val = @[]
+
 proc addFromExpression*(vm: ScratchpadVM; expression: string) =
   ## Look up ``expression`` in the locals table and append the
   ## corresponding entry to the scratchpad.  Mirrors the legacy
@@ -146,17 +176,19 @@ proc createScratchpadVM*(store: ReplayDataStore): ScratchpadVM =
     let entries = createSignal(newSeq[ScratchpadValueEntry]())
     let localsByExpression =
       createSignal(initTable[string, ScratchpadValueEntry]())
+    let chainEntries = createSignal(newSeq[ScratchpadChainEntry]())
 
     let isEmpty = createMemo[bool] proc(): bool =
-      entries.val.len == 0
+      entries.val.len == 0 and chainEntries.val.len == 0
 
     let rowCount = createMemo[int] proc(): int =
-      entries.val.len
+      entries.val.len + chainEntries.val.len
 
     ScratchpadVM(
       store: store,
       entries: entries,
       localsByExpression: localsByExpression,
+      chainEntries: chainEntries,
       isEmpty: isEmpty,
       rowCount: rowCount,
       disposeProc: dispose,

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Recording start">
+  <title>Recording start</title>
+  <circle cx="7" cy="7" r="5" />
+  <path d="M7 4 V7 L5 8" />
+  <path d="M2 3 L2 6 L5 6" />
+</svg>

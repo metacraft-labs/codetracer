@@ -228,6 +228,37 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
 
 
   viewsApi.subscribe(CtNotification, proc(kind: CtEventKind, value: Notification, sub: Subscriber) = viewsApi.emit(CtNotification, value))
+
+  # Value Origin Tracking (M4) — forward the frontend-initiated
+  # `CtOriginChain` / `CtOriginSummary` events to the DAP layer. The
+  # right-click context-menu item and the "Show origin" history-popover
+  # item both emit `CtOriginChain` with a `ValueWithExpression` payload;
+  # the middleware unwraps that into the canonical
+  # `CtOriginChainArguments` JSON shape the backend expects. The
+  # backend's response arrives on `CtOriginChainResponse` which
+  # `dapApi.on` (further down) routes back to subscribers.
+  when not defined(ctInExtension):
+    viewsApi.subscribe(CtOriginChain, proc(kind: CtEventKind,
+                                           value: ValueWithExpression,
+                                           sub: Subscriber) =
+      let args = js{
+        variableName: value.expression,
+        variablePath: [],
+        frameId: -1,
+        stepId: -1,
+        threadId: 0,
+        maxHops: 16,
+        lazy: false,
+        sessionId: "",
+        classifySource: true,
+      }
+      dapApi.sendCtRequest(CtOriginChain, args)
+    )
+    dapApi.on(CtUpdatedOriginChain, proc(kind: CtEventKind,
+                                         value: JsObject) =
+      viewsApi.emit(CtUpdatedOriginChain, value)
+    )
+
   viewsApi.subscribe(DapStepIn, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapStepOut, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))
   viewsApi.subscribe(DapNext, proc(kind: CtEventKind, value: DapStepArguments, sub: Subscriber) = dapApi.sendCtRequest(kind, value.toJs))

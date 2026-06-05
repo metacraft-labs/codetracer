@@ -455,6 +455,7 @@ proc update*(self: ChartComponent, values: seq[Value], replace: bool) =
 
 proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: Value, ev: Event): seq[ContextMenuItem] =
   var addToScratchpad:  ContextMenuItem
+  var showValueOrigin: ContextMenuItem
   var contextMenu: seq[ContextMenuItem]
 
   addToScratchpad = ContextMenuItem(
@@ -465,6 +466,23 @@ proc createHistoryContextMenu(self: ValueComponent, expression: cstring, value: 
   )
 
   contextMenu &= addToScratchpad
+
+  # Value Origin Tracking (M4) — "Show value origin" affordance on
+  # every history popover row (spec §3.1 entry-point "Click on a
+  # history entry in the value-history popover → 'Show origin'").
+  # The handler reuses the legacy event bus to forward into the
+  # backend via `CtOriginChain`; the response wires back into
+  # `OriginChainVM.activeChain` via the dap.nim dispatch table.
+  showValueOrigin = ContextMenuItem(
+    name: "Show value origin",
+    hint: "Ctrl+Shift+O",
+    handler: proc(e: Event) =
+      self.state.api.emit(CtOriginChain,
+                          ValueWithExpression(expression: expression,
+                                              value: value))
+  )
+
+  contextMenu &= showValueOrigin
 
   return contextMenu
 
@@ -1137,6 +1155,7 @@ method delete*(self: ValueComponent) {.async.} =
 
 proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem] =
   var showHistory:  ContextMenuItem
+  var showValueOrigin: ContextMenuItem
   var contextMenu:  seq[ContextMenuItem]
 
   if not self.isScratchpadValue:
@@ -1148,6 +1167,21 @@ proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[
     )
 
     contextMenu &= showHistory
+
+    # Value Origin Tracking (M4) — right-click affordance per spec
+    # §3.1 + §3.2.1: opens the chain in the dedicated side panel
+    # (not the in-row expansion). Reuses the legacy event bus
+    # (`CtOriginChain`) so the dap.nim dispatch table routes the
+    # request through `BackendService.send("ct/originChain", ...)`.
+    showValueOrigin = ContextMenuItem(
+      name: "Show value origin",
+      hint: "Ctrl+Shift+O",
+      handler: proc(e: Event) =
+        self.api.emit(CtOriginChain,
+                      ValueWithExpression(expression: self.baseExpression,
+                                          value: value))
+    )
+    contextMenu &= showValueOrigin
 
   return contextMenu
 

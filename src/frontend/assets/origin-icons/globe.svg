@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Read from external">
+  <title>Read from external</title>
+  <circle cx="7" cy="7" r="5" />
+  <path d="M2 7 H12 M7 2 Q4 7 7 12 M7 2 Q10 7 7 12" />
+</svg>

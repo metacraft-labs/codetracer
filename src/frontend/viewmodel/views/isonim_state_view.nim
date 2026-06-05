@@ -22,6 +22,8 @@
 ## blocks; per-row content is also expressed via the DSL inside the
 ## `indexEach` body so the structure is visible at a glance.
 
+import std/options
+
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
 import isonim/dsl/components
@@ -32,7 +34,13 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/state_vm
+import ../viewmodels/origin_chain_types
 import ../views/state_view
+
+# Re-export the shared origin types so the headless tests that ``import
+# views/isonim_state_view`` can read ``OriginSummary`` / ``placeholderSummary``
+# without an extra import line (same convenience the scratchpad view uses).
+export origin_chain_types
 
 # ---------------------------------------------------------------------------
 # Static label / class helpers
@@ -136,6 +144,107 @@ proc atomTypeVisible(item: proc(): VariableViewState): bool =
   (not (v.hasChildren and v.isExpanded)) and v.typeName.len > 0
 
 # ---------------------------------------------------------------------------
+# Value Origin Tracking (M4 deliverable #3 + #4) — per-row badge helpers.
+# The badge component (`ui/origin_badge.nim::renderBadgeDom`) is JS-only
+# because it touches `std/dom`. The IsoNim DSL is renderer-agnostic, so
+# we emit the same DOM shape directly from the DSL block using the pure
+# logic helpers exposed by `origin_chain_types` (`badgeClassFor`,
+# `badgeTextForSummary`, `ariaLabelForSummary`, `tokenForSummary`).
+# This keeps the Mock + Web renderers in lock-step with what the legacy
+# `renderBadgeDom` proc would produce per spec §3.2.3.
+# ---------------------------------------------------------------------------
+
+proc badgeRowId*(item: VariableViewState): VariableId =
+  ## Composite identity used for ``expandedOrigins`` lookups. The path
+  ## doubles as the scope path so shadowed locals stay distinct.
+  VariableId(name: item.name, scopePath: item.path)
+
+proc summaryFor(vm: StateVM; item: VariableViewState): Option[OriginSummary] =
+  ## Per-row summary lookup. Keyed by ``item.name`` to match the wire
+  ## shape ``ct/load-locals`` emits (see ``syncOriginSummaries`` in
+  ## ``ui/state.nim``).
+  vm.originSummaryFor(item.name)
+
+proc rowHasBadge(vm: StateVM; item: VariableViewState): bool =
+  vm.summaryFor(item).isSome
+
+proc badgeClassForRow(vm: StateVM; item: VariableViewState): string =
+  ## Compose the CSS class string for the badge button. Returns an
+  ## empty string when the row has no summary so the DSL block emits a
+  ## hidden button (display: none) and Playwright tests can still
+  ## select on the wrapper.
+  let summary = vm.summaryFor(item)
+  if summary.isNone:
+    return ""
+  badgeClassFor(summary.get)
+
+proc badgeTextForRow(vm: StateVM; item: VariableViewState): string =
+  let summary = vm.summaryFor(item)
+  if summary.isNone:
+    return ""
+  badgeTextForSummary(summary.get, vm.originPreferences.val)
+
+proc badgeAriaForRow(vm: StateVM; item: VariableViewState): string =
+  let summary = vm.summaryFor(item)
+  if summary.isNone:
+    return ""
+  ariaLabelForSummary(summary.get, vm.originPreferences.val)
+
+proc badgeTokenForRow(vm: StateVM; item: VariableViewState): string =
+  let summary = vm.summaryFor(item)
+  if summary.isNone:
+    return ""
+  tokenForSummary(summary.get)
+
+proc badgeDisplay(vm: StateVM; item: VariableViewState): string =
+  ## Used by the DSL's ``display = …`` attribute so the badge button is
+  ## hidden when no summary is available without removing it from the
+  ## DOM (lets reactive updates pick it back up).
+  if vm.rowHasBadge(item): "inline-flex" else: "none"
+
+proc onToggleOriginBadge(vm: StateVM; item: proc(): VariableViewState): proc() =
+  ## Per-row click handler. For eager summaries this just toggles the
+  ## in-row expansion (spec §3.2.1); for placeholder summaries it ALSO
+  ## enqueues the placeholder token for the next batched
+  ## ``ct/originSummary`` fill (spec §3.2.3) via the host-provided
+  ## bridge. The bridge is installed by ``state.nim`` once the
+  ## ``OriginChainVM`` is available — without it the click just toggles
+  ## expansion, which is the desired fallback when running headless.
+  result = proc() =
+    let row = item()
+    let id = badgeRowId(row)
+    vm.toggleOriginExpansion(id)
+    let summary = vm.summaryFor(row)
+    if summary.isSome and summary.get.isPlaceholder:
+      # Bridge into the OriginChainVM via the host-installed
+      # ``onShowOriginProc``; ``state.nim`` wires it so the placeholder
+      # click both expands the row AND resolves the placeholder.
+      if not vm.onShowOriginProc.isNil and not vm.store.isNil:
+        let loc = vm.store.debugger.val.location
+        vm.onShowOriginProc(row.name, loc)
+
+# ---------------------------------------------------------------------------
+# In-row expanded-chain helpers (spec §3.2.1 collapsed → expanded).
+# Renders below the value cell when the row is in ``expandedOrigins``.
+# The chain itself is looked up via the host bridge
+# ``StateVM.originChainLookup`` so the State Pane does not need to
+# import the OriginChainVM.
+# ---------------------------------------------------------------------------
+
+proc rowExpanded(vm: StateVM; item: VariableViewState): bool =
+  vm.isOriginExpanded(badgeRowId(item))
+
+proc chainForRow(vm: StateVM; item: VariableViewState): Option[OriginChain] =
+  if vm.originChainLookup.isNil:
+    return none(OriginChain)
+  vm.originChainLookup(item.name)
+
+proc hopLineText(hop: OriginHop): string =
+  ## Single-line preview the in-row block emits per hop — matches the
+  ## semantics the side-panel renders for the same data shape.
+  hop.targetExpr & " = " & hop.sourceExpr
+
+# ---------------------------------------------------------------------------
 # Click handler factories
 # ---------------------------------------------------------------------------
 
@@ -178,11 +287,27 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
   ##           span.value-expanded-text : "{value}"
   ##           if atomTypeVisible:
   ##             span.value-type : "{typeName}"
+  ##           button#value-history
+  ##           button.ct-origin-badge[.{terminator-icon}|.ct-origin-badge-placeholder]
+  ##             span.ct-origin-badge-icon
+  ##             span.ct-origin-badge-text
+  ##         (when expandedOrigins contains row id)
+  ##         div.ct-origin-inline-chain
+  ##           ol > li.ct-origin-inline-chain-hop (one per hop) — text "lhs = rhs"
+  ##           li.ct-origin-inline-chain-terminator
+  ##
+  ## Per spec §3.2.1 + M4 deliverable #3, the badge is appended to the
+  ## value cell on every row. The placeholder variant (spec §3.2.1
+  ## "[?]" pill) is emitted automatically by ``badgeClassFor`` when
+  ## the row's ``OriginSummary.isPlaceholder`` is true. Per
+  ## M4 deliverable #4 the in-row expanded chain is rendered below
+  ## the value cell when the row is in ``StateVM.expandedOrigins``.
   ##
   ## Every attribute and text expression that reads `item()` becomes
   ## reactive via the DSL macro — the row is rebuilt incrementally as
   ## the underlying VariableViewState signal updates.
   let onToggle = onToggleExpand(vm, item)
+  let onBadgeClick = onToggleOriginBadge(vm, item)
   ui(r):
     tdiv(class = rowClass(item),
          `data-variable-name` = item().name,
@@ -210,6 +335,40 @@ template renderVariableRowImpl(r, vm, item: untyped): untyped =
                    onclick = proc() = vm.toggleHistory(item().path)):
               tdiv(class = "custom-tooltip"):
                 text "Toggle history value"
+            # per spec §3.2.1 + M4 deliverable #3: inline origin badge.
+            # The badge is the same DOM contract that
+            # ``ui/origin_badge.nim::renderBadgeDom`` would emit. We
+            # build it via the DSL so both Mock + Web renderers stay
+            # in lock-step and the headless tests can walk the tree.
+            button(class = badgeClassForRow(vm, item()),
+                   `aria-label` = badgeAriaForRow(vm, item()),
+                   `data-token` = badgeTokenForRow(vm, item()),
+                   `data-variable-name` = item().name,
+                   display = badgeDisplay(vm, item()),
+                   onclick = onBadgeClick):
+              span(class = "ct-origin-badge-icon"):
+                discard
+              span(class = "ct-origin-badge-text"):
+                text badgeTextForRow(vm, item())
+          # per M4 deliverable #4: in-row expanded chain block. Hidden
+          # via ``display: none`` while collapsed so the placeholder
+          # stays present in the DOM (matches the empty-overlay /
+          # loading-indicator pattern the same view already uses).
+          tdiv(class = "ct-origin-inline-chain",
+               display = (if rowExpanded(vm, item()): "block" else: "none")):
+            let chain = chainForRow(vm, item())
+            if chain.isSome:
+              for i, hop in chain.get.hops:
+                tdiv(class = "ct-origin-inline-chain-hop"):
+                  span(class = iconClassForKind(hop.kind)):
+                    discard
+                  span(class = "ct-origin-inline-chain-hop-text"):
+                    text hopLineText(hop)
+              tdiv(class = "ct-origin-inline-chain-terminator"):
+                span(class = iconClassForTerminator(chain.get.terminator.kind)):
+                  discard
+                span(class = "ct-origin-inline-chain-terminator-text"):
+                  text chain.get.terminator.expression
 
 proc renderVariableRow*(r: MockRenderer; vm: StateVM;
                         item: proc(): VariableViewState): MockNode =

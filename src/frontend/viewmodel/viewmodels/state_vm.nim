@@ -23,13 +23,15 @@
 ##   vm.selectTab(stGlobals)
 ##   echo vm.currentVariables.val # globals from the store
 
-import std/[json, options, sets]
+import std/[json, options, sets, tables, strutils]
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
+import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types]
+import origin_chain_types
 
 type
   StateTab* = enum
@@ -76,6 +78,39 @@ type
       ## Optional bridge installed by StateComponent so the IsoNim
       ## value-history button can still enter the legacy history
       ## request pipeline.
+
+    # -- Value Origin Tracking (M4, spec §3.2.1 + §3.2.3) --
+    expandedOrigins*: Signal[HashSet[VariableId]]
+      ## Per-row inline expansion state for the origin chain in the
+      ## State Pane. The State Pane subscribes per row to decide
+      ## whether to render the in-row hop chain. Mirrors the
+      ## `OriginChainVM.expandedOrigins` signal so the legacy
+      ## state-pane bridge can mutate either side without dragging
+      ## the OriginChainVM into every component that already imports
+      ## StateVM.
+    breadcrumbStack*: Signal[seq[BreadcrumbEntry]]
+      ## Breadcrumb navigation state (spec §3.3). Mirrored from
+      ## `OriginChainVM.breadcrumbStack` for the same reason as
+      ## `expandedOrigins` above.
+    originSummaries*: Signal[Table[string, OriginSummary]]
+      ## Per-row `originSummary` keyed by variable name. Populated
+      ## from the `ct/load-locals` response per spec §3.2.3.
+    originPreferences*: Signal[OriginPreferences]
+      ## Per-pane mirror of the user-mutable origin badge / chain
+      ## preferences (spec §3.7). Defaults to
+      ## ``defaultOriginPreferences()``; the host bridges any updates
+      ## from ``OriginChainVM.preferences`` into this signal so the
+      ## State-Pane row renderer can pick the right badge variant
+      ## without dragging the OriginChainVM into the State component.
+    originChainLookup*: proc(name: string): Option[OriginChain]
+      ## Optional bridge installed by the host (`state.nim`) so the
+      ## per-row expanded chain (spec §3.2.1 collapsed → expanded) can
+      ## look up the active chain for a variable. Returns ``none`` when
+      ## no chain has been fetched yet — the row then renders the
+      ## badge only and waits for the response.
+    onShowOriginProc*: proc(expression: string; location: Location)
+      ## Optional bridge invoked by `onShowOrigin` — installed by
+      ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -132,12 +167,41 @@ proc selectPath*(vm: StateVM; path: string) =
     return
   vm.selectedPath.val = path
 
+proc isOriginWatch*(expression: string): bool =
+  ## Value Origin Tracking (M4) — `origin(expr)` watch prefix per
+  ## spec §3.1 "Watch expression with the prefix `origin(expr)`".
+  ## The watch evaluator routes any matching expression through the
+  ## `ct/originChain` path instead of `ct/load-locals`.
+  let trimmed = expression.strip
+  trimmed.startsWith("origin(") and trimmed.endsWith(")")
+
+proc unwrapOriginWatch*(expression: string): string =
+  ## Return the inner expression for an `origin(...)` watch. Returns
+  ## the original string when the watch is not an origin watch.
+  let trimmed = expression.strip
+  if not isOriginWatch(trimmed):
+    return expression
+  trimmed[len("origin(") ..< trimmed.len - 1].strip
+
 proc addWatch*(vm: StateVM; expression: string) =
   ## Add a watch expression. Duplicates are silently ignored.
   ## After adding, the auto-load effect will re-request locals with
   ## the updated watch list on the next rrTicks change.
+  ##
+  ## Value Origin Tracking (M4) — when `expression` is an
+  ## `origin(...)` watch (spec §3.1), the addition is recorded
+  ## verbatim so subsequent navigation through the trace re-evaluates
+  ## the origin chain. The actual `ct/originChain` dispatch is wired
+  ## via the host bridge so the `OriginChainVM` observes the same
+  ## response and updates its `activeChain` signal.
   if expression.len == 0:
     return
+  if isOriginWatch(expression) and not vm.onShowOriginProc.isNil and
+     not vm.store.isNil:
+    let inner = unwrapOriginWatch(expression)
+    if inner.len > 0:
+      let loc = vm.store.debugger.val.location
+      vm.onShowOriginProc(inner, loc)
   if not vm.collabCore.isNil:
     if vm.collabCore.liveWatchForExpression(expression).isSome:
       return
@@ -190,6 +254,87 @@ proc toggleHistory*(vm: StateVM; expression: string) =
     vm.onToggleHistory(expression)
 
 # ---------------------------------------------------------------------------
+# Value Origin Tracking (M4) actions — keep adjacent to `toggleHistory`
+# because each variable row exposes both an "open history" and an
+# "open origin" affordance per spec §3.2.1 / §3.2.3.
+# ---------------------------------------------------------------------------
+
+proc onShowOrigin*(vm: StateVM; expression: string; location: Location) =
+  ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
+  ## at `location`. Sends the request directly via `BackendService.send`
+  ## so the call site does not need to import the OriginChainVM, and
+  ## also invokes the optional `onShowOriginProc` bridge that the host
+  ## installs to keep the OriginChainVM in sync.
+  ##
+  ## The host bridge is invoked AFTER the wire send so that the
+  ## OriginChainVM observes the request fire-and-forget — it tracks
+  ## the response via its own event handler.
+  if not vm.store.isNil and not vm.store.backend.isNil:
+    let args = originChainArgs(expression = expression)
+    discard vm.store.backend.send("ct/originChain", args)
+  if not vm.onShowOriginProc.isNil:
+    vm.onShowOriginProc(expression, location)
+
+proc toggleOriginExpansion*(vm: StateVM; row: VariableId) =
+  ## Toggle the in-row inline chain expansion for `row`. The State
+  ## Pane subscribes per row and renders the chain when the row's id
+  ## is present (spec §3.2.1 collapsed → expanded).
+  var expanded = vm.expandedOrigins.val
+  if row in expanded:
+    expanded.excl(row)
+  else:
+    expanded.incl(row)
+  vm.expandedOrigins.val = expanded
+
+proc pushBreadcrumb*(vm: StateVM; entry: BreadcrumbEntry) =
+  ## Push a breadcrumb entry — used by the right-click context menu
+  ## that opens the chain in the dedicated side panel (spec §3.3).
+  var stack = vm.breadcrumbStack.val
+  stack.add(entry)
+  vm.breadcrumbStack.val = stack
+
+proc popBreadcrumb*(vm: StateVM): Option[BreadcrumbEntry] =
+  var stack = vm.breadcrumbStack.val
+  if stack.len == 0:
+    return none(BreadcrumbEntry)
+  let last = stack[^1]
+  stack.setLen(stack.len - 1)
+  vm.breadcrumbStack.val = stack
+  some(last)
+
+proc updateOriginSummaries*(vm: StateVM;
+                            summaries: openArray[(string, OriginSummary)]) =
+  ## Bulk-replace the per-row origin-summary table. Called by the
+  ## legacy `registerLocals` bridge so the IsoNim view sees the same
+  ## data the legacy DOM consumes via the `ct/load-locals` response.
+  var t = initTable[string, OriginSummary]()
+  for (name, summary) in summaries:
+    t[name] = summary
+  vm.originSummaries.val = t
+
+proc upsertOriginSummary*(vm: StateVM; name: string; summary: OriginSummary) =
+  ## Update a single entry — used when a `ct/originSummary`
+  ## placeholder fill arrives.
+  var t = vm.originSummaries.val
+  t[name] = summary
+  vm.originSummaries.val = t
+
+proc originSummaryFor*(vm: StateVM; name: string): Option[OriginSummary] =
+  ## Look up the per-row origin summary for ``name``. Returns
+  ## ``none`` when no summary has arrived yet — the State-Pane row
+  ## renderer skips the badge in that case.
+  let t = vm.originSummaries.val
+  if t.hasKey(name):
+    some(t[name])
+  else:
+    none(OriginSummary)
+
+proc isOriginExpanded*(vm: StateVM; row: VariableId): bool =
+  ## Convenience predicate used by the row renderer to decide whether
+  ## to attach the in-row expanded chain block below the value cell.
+  row in vm.expandedOrigins.val
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -208,6 +353,10 @@ proc createStateVM*(store: ReplayDataStore;
     let expandedPaths = createSignal(initHashSet[string]())
     let selectedPath = createSignal("")
     let watchExpressions = createSignal(newSeq[string]())
+    let expandedOrigins = createSignal(initHashSet[VariableId]())
+    let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
+    let originSummaries = createSignal(initTable[string, OriginSummary]())
+    let originPreferences = createSignal(defaultOriginPreferences())
 
     # Derived: pick the right variable list based on the active tab.
     let currentVariables = createMemo[seq[Variable]] proc(): seq[Variable] =
@@ -245,6 +394,10 @@ proc createStateVM*(store: ReplayDataStore;
       currentVariables: currentVariables,
       isLoading: isLoading,
       codeStateLine: codeStateLine,
+      expandedOrigins: expandedOrigins,
+      breadcrumbStack: breadcrumbStack,
+      originSummaries: originSummaries,
+      originPreferences: originPreferences,
       disposeProc: dispose,
     )
 

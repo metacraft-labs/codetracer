@@ -187,6 +187,17 @@ const MAX_WHITESPACE_WIDTH = 8
 type
   EventOptionalColumn* = enum FullPath, LowLevelLocation
 
+  OriginHopLineRef* = object
+    ## Value Origin Tracking (M4) — per-hop `(path, line)` reference
+    ## used by `ui/editor.nim` to colour origin-chain hop lines
+    ## with the spec §8.1 `ct-origin-hop-gutter` /
+    ## `ct-origin-hop-line` decorations. Kept here so the JS-only
+    ## `EditorViewComponent` field that holds them does not pull in
+    ## the platform-neutral ViewModel types.
+    path*: cstring
+    line*: int
+    stepId*: int64
+
   Service* = ref object of RootObj
     data*: Data
     rrTicks*: int
@@ -1115,6 +1126,17 @@ type
     testDom*: JsAssoc[int, kdom.Node]
     testLines*: JsAssoc[int, FlowLine]
     activeTestId*: cstring
+
+    # Value Origin Tracking (M4) — list of `(path, line)` decorated by
+    # the active origin chain. Populated by the
+    # `OriginChainVM.activeChain` subscriber installed on the editor
+    # component; consumed by `originHopStyleLines` in `ui/editor.nim`
+    # to emit `ct-origin-hop-gutter` / `ct-origin-hop-line` Monaco
+    # decorations alongside (not on top of) the existing
+    # `line-flow-hit` / `line-flow-skip` / `flow-taken` /
+    # `flow-not-taken` layers. The gutter is wide enough to render
+    # both glyphs side-by-side (spec §8.1).
+    activeOriginHopLines*: seq[OriginHopLineRef]
 
   # LowLevelComponent* = ref object of Component
     # levels*:        array[LowLevelView, LLViewComponent]

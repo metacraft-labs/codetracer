@@ -87,6 +87,11 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   # `ct/updated-history` so the frontend can react to lazy
   # continuations of an origin chain.
   "ct/updated-origin-chain",
+  # Value Origin Tracking (M4) — frontend-initiated requests. The
+  # backend dispatch lives in `src/db-backend/src/dap_server.rs` (see
+  # the `ct/originChain` / `ct/originSummary` arms).
+  "ct/originChain",
+  "ct/originSummary",
 ]
 
 let VALID_DAP_COMMANDS*: HashSet[string] = VALID_DAP_COMMANDS_SEQ.toHashSet

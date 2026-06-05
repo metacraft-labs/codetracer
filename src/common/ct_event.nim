@@ -86,6 +86,14 @@ type
     # Value Origin Tracking (M2). See
     # codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md §5.2.
     CtUpdatedOriginChain,
+    # Value Origin Tracking (M4) — frontend-initiated requests
+    # (spec §5.3 / §5.3.2). Listed here so the Karax / IsoNim event
+    # router can dispatch them through the same DapApi pipeline as
+    # every other ct/* command.
+    CtOriginChain,
+    CtOriginChainResponse,
+    CtOriginSummary,
+    CtOriginSummaryResponse,
 
 when defined(js):
   import std / jsffi

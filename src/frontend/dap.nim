@@ -131,6 +131,14 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   # `ct/originChain` response so frontends can react to lazy continuations
   # without re-issuing the request (spec §5.2).
   CtUpdatedOriginChain: "ct/updated-origin-chain",
+  # Value Origin Tracking (M4) — frontend-initiated requests
+  # (spec §5.3 + §5.3.2). The response CtEventKinds use empty strings
+  # because the dispatch table only maps the request side; responses
+  # are routed via `toCtDapResponseEventKind` below.
+  CtOriginChain: "ct/originChain",
+  CtOriginChainResponse: "",
+  CtOriginSummary: "ct/originSummary",
+  CtOriginSummaryResponse: "",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
@@ -171,6 +179,9 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   of CtLiveRestoreAt: CtLiveRestoreAt
   of CtMcrLiveStep: CtMcrLiveStep
   of CtSeekToGeid: CtSeekToGeid
+  # Value Origin Tracking (M4)
+  of CtOriginChain: CtOriginChainResponse
+  of CtOriginSummary: CtOriginSummaryResponse
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
@@ -204,6 +215,9 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   of "ct/live-restore-at": CtLiveRestoreAt
   of "ct/mcr-live-step": CtMcrLiveStep
   of "ct/seek-to-geid": CtSeekToGeid
+  # Value Origin Tracking (M4)
+  of "ct/originChain": CtOriginChainResponse
+  of "ct/originSummary": CtOriginSummaryResponse
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")

@@ -624,13 +624,40 @@ proc deepReviewDiffStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
       break
   lines
 
+proc originHopStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
+  ## Value Origin Tracking (M4) — co-exist with omniscience-flow
+  ## decorations via distinct CSS classes (`ct-origin-hop-gutter` /
+  ## `ct-origin-hop-line`) per spec §8.1. The gutter is wide enough
+  ## to render both a flow glyph and an origin glyph side-by-side, so
+  ## the two layers do not overwrite each other.
+  ##
+  ## The chain's per-hop locations are read from the shared
+  ## `OriginChainVM.activeChain` signal via the host bridge stored on
+  ## the editor view component. Until the bridge is installed (e.g.
+  ## in standalone unit tests of the editor view) the proc returns an
+  ## empty seq so the existing flow / condition / diff layers remain
+  ## untouched.
+  result = @[]
+  if self.activeOriginHopLines.len == 0:
+    return
+  let tabPath = self.tabInfo.location.path
+  for hopLine in self.activeOriginHopLines:
+    if hopLine.path == tabPath and hopLine.line > 0:
+      result.add(MonacoLineStyle(line: hopLine.line,
+                                 class: cstring"ct-origin-hop-gutter",
+                                 inlineClass: cstring"ct-origin-hop-line"))
+
 proc applyEventualStylesLines(self: EditorViewComponent) =
   var colorLineList = self.colorLines()
   var conditionFlowLines = self.conditionStyleLines()
   # var diffLineList = self.diffStyleLines()
   var flowLineList = self.flowStyleLines(conditionFlowLines)
   var deepReviewDiffLines = self.deepReviewDiffStyleLines()
-  let lines = concat(colorLineList, concat(flowLineList, concat(conditionFlowLines, deepReviewDiffLines)))
+  var originHopLines = self.originHopStyleLines()
+  let lines = concat(colorLineList,
+                     concat(flowLineList,
+                            concat(conditionFlowLines,
+                                   concat(deepReviewDiffLines, originHopLines))))
 
   self.styleLines(self.monacoEditor, lines)
 
@@ -703,6 +730,46 @@ proc redrawFlow(self: EditorViewComponent) =
   if self.flow.flow.isNil:
     return
 
+proc applyOriginChainHopLines*(self: EditorViewComponent, chain: JsObject) =
+  ## Value Origin Tracking (M4) — populate `self.activeOriginHopLines`
+  ## from the decoded `ct/updated-origin-chain` event body so the
+  ## existing `originHopStyleLines` proc emits Monaco decorations on
+  ## the hop lines.  The wire body matches the typed
+  ## `OriginChain` JSON shape (spec §4.1); we walk `hops[i].location`
+  ## fields directly because the editor only needs `(path, line, stepId)`.
+  ##
+  ## Coexists with the omniscience-flow / condition / diff decoration
+  ## layers — `applyEventualStylesLines` concatenates all four lists
+  ## with distinct CSS classes per spec §8.1.
+  self.activeOriginHopLines = @[]
+  if chain.isNil:
+    return
+  let hops = chain[cstring"hops"]
+  if hops.isNil or hops.isUndefined:
+    return
+  let length = cast[int](hops.length)
+  for i in 0 ..< length:
+    let hop = hops[i]
+    if hop.isNil or hop.isUndefined:
+      continue
+    let loc = hop[cstring"location"]
+    if loc.isNil or loc.isUndefined:
+      continue
+    let path = cast[cstring](loc[cstring"path"])
+    let line = cast[int](loc[cstring"line"])
+    let stepId =
+      if hop[cstring"stepId"].isNil or hop[cstring"stepId"].isUndefined: 0'i64
+      else: cast[int64](hop[cstring"stepId"])
+    if path.isNil or path.len == 0 or line <= 0:
+      continue
+    self.activeOriginHopLines.add(
+      OriginHopLineRef(path: path, line: line, stepId: stepId))
+  # Re-apply the Monaco line styles so the new hop decorations land in
+  # the editor — same trigger the flow / diff layers use after they
+  # update their own state.
+  if not self.monacoEditor.isNil:
+    self.applyEventualStylesLines()
+
 method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
@@ -710,6 +777,12 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   )
   api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
     discard self.onUpdatedFlow(response)
+  )
+  # Value Origin Tracking (M4) — keep the editor's `activeOriginHopLines`
+  # in sync with the active chain so `originHopStyleLines` returns
+  # non-empty when a chain is live (spec §8.1 editor decorations).
+  api.subscribe(CtUpdatedOriginChain, proc(kind: CtEventKind, response: JsObject, sub: Subscriber) =
+    self.applyOriginChainHopLines(response)
   )
   api.emit(InternalLastCompleteMove, EmptyArg())
   self.scheduleInitialFlowLoad()

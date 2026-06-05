@@ -4,7 +4,9 @@ import
   isonim/core/signals,
   ui_imports, trace,
   ./video_player,
-  ../viewmodel/viewmodels/video_player_vm
+  ../viewmodel/viewmodels/video_player_vm,
+  ../../common/ct_event,
+  ../dap
 
 const
   NO_CODE: int = -1
@@ -305,6 +307,74 @@ proc configureShortcuts* =
 
   Mousetrap.`bind`("ctrl+alt+d") do ():
     data.ipc.send("CODETRACER::open-devtools", JsObject{})
+
+  # Value Origin Tracking (M4) — `CodeTracer: Show Value Origin`
+  # default keybinding per spec §3.7 / M4 deliverable. Ctrl+Shift+O
+  # on Linux/Windows; Cmd+Shift+O on macOS (Mousetrap maps "command"
+  # automatically). The handler reads the focused editor's word at
+  # the cursor (mirrors the right-click "Show value origin" context
+  # menu entry in `ui/value.nim`) and forwards a `ct/originChain`
+  # request through the existing DAP transport.
+  proc dispatchShowValueOrigin() =
+    ## Shared handler for the `CodeTracer: Show Value Origin`
+    ## keybindings. Reads the focused editor's selection (or word
+    ## under the cursor) and forwards a `ct/originChain` request
+    ## through `data.dapApi`. Mirrors the right-click "Show value
+    ## origin" entry in `ui/value.nim`.
+    if data.isNil or data.activeSessionIndex < 0:
+      return
+    var expression: cstring = cstring""
+    let activeEditorName = data.services.editor.active
+    if not activeEditorName.isNil and
+       data.ui.editors.hasKey(activeEditorName):
+      let editor = data.ui.editors[activeEditorName]
+      if not editor.isNil and not editor.monacoEditor.isNil:
+        let monacoEditor = editor.monacoEditor
+        let model = monacoEditor.toJs.getModel()
+        let selection = monacoEditor.toJs.getSelection()
+        if not selection.isNil:
+          let selected = cast[cstring](
+            model.getValueInRange(selection))
+          if ($selected).strip().len > 0:
+            expression = selected
+        if expression.len == 0:
+          let position = monacoEditor.toJs.getPosition()
+          if not position.isNil:
+            let wordInfo = model.getWordAtPosition(position)
+            if not wordInfo.isNil:
+              expression = cast[cstring](wordInfo.word)
+    if expression.len == 0:
+      cwarn "shortcuts: Show Value Origin — no editor selection " &
+            "or word under cursor; ignoring"
+      return
+    # Build the `ct/originChain` payload identical to the one
+    # `middleware.nim`'s `CtOriginChain` subscriber assembles. The
+    # shortcut works from any focused surface because we go directly
+    # through `data.dapApi`.
+    let args = js{
+      variableName: expression,
+      variablePath: [],
+      frameId: -1,
+      stepId: -1,
+      threadId: 0,
+      maxHops: 16,
+      lazy: false,
+      sessionId: "",
+      classifySource: true,
+    }
+    data.dapApi.sendCtRequest(CtOriginChain, args)
+
+  # Value Origin Tracking (M4) — `CodeTracer: Show Value Origin`
+  # default keybinding per spec §3.7 / M4 deliverable. Ctrl+Shift+O
+  # on Linux/Windows; Cmd+Shift+O (`command+shift+o`) on macOS, which
+  # Mousetrap recognises as the Meta key.
+  Mousetrap.`bind`("ctrl+shift+o") do ():
+    cdebug "shortcuts: Ctrl+Shift+O — Show Value Origin"
+    dispatchShowValueOrigin()
+
+  Mousetrap.`bind`("command+shift+o") do ():
+    cdebug "shortcuts: Cmd+Shift+O — Show Value Origin"
+    dispatchShowValueOrigin()
 
   ## Visual Replay / Video Player keyboard overlay must register LAST so its
   ## wrappers shadow any prior bindings on shared keys (Esc, Home, End, arrow
