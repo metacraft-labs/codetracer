@@ -1,12 +1,22 @@
 ## FrameViewerVM — ViewModel for MCR visual replay frames.
 
-import std/[options, strutils]
+import std/[algorithm, options, strutils]
 
 import isonim/core/[async_compat, computation, graph, owner, signals]
 import isonim/viewmodel
 
 import ../store/replay_data_store
 import visual_replay_client
+
+const
+  FrameFetchWindowSize* = 8
+    ## Ring-buffer size for fetch-latency samples.  Eight samples is wide
+    ## enough to dampen single-frame jitter (one slow request followed by
+    ## seven fast ones won't trip the degrade flag) but narrow enough to
+    ## react inside ~150 ms at 60 fps so the buffering signal feels live.
+    ## Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md
+    ## §Frame Rate and Buffering — "median fetch time over the last N
+    ## frames".
 
 type
   FrameViewerPixel* = object
@@ -16,12 +26,21 @@ type
   FrameViewerPixelSelectionHandler* = proc(x, y, frame: int;
                                            geid: Option[uint64])
 
+  FrameFetchRing* = object
+    ## Pure ring-buffer of fetch durations in milliseconds.  Kept as a
+    ## value-type so the median-detection helpers can be unit-tested
+    ## without instantiating a FrameViewerVM.
+    samples*: array[FrameFetchWindowSize, int]
+    count*: int             ## Number of valid samples (<= FrameFetchWindowSize).
+    nextSlot*: int          ## Write cursor; wraps modulo window size.
+
   FrameViewerVM* = ref object of ViewModel
     client*: VisualReplayClient
     store*: ReplayDataStore
     reactiveOwner: OwnerBase
     frameRequestSerial: int
     lastStoreGeid: Option[uint64]
+    fetchRing: FrameFetchRing
 
     visualReplayAvailable*: Signal[bool]
     playerUrl*: Signal[string]
@@ -37,6 +56,83 @@ type
     drawCalls*: Signal[seq[VisualReplayDrawCall]]
     selectedDrawCall*: Signal[Option[int]]
     onPixelSelected*: FrameViewerPixelSelectionHandler
+
+    ## Median fetch latency over the last FrameFetchWindowSize samples
+    ## (milliseconds).  Updated each time a frame request completes; -1
+    ## when no samples have been recorded yet so consumers can
+    ## distinguish "no data" from "0 ms" without an extra signal.
+    ##
+    ## Consumed by VideoPlayerVM to drive the M5 buffering detection.
+    medianFetchMs*: Signal[int]
+
+# ---------------------------------------------------------------------------
+# Pure ring-buffer helpers (no signals, no I/O) — unit-tested directly.
+# ---------------------------------------------------------------------------
+
+proc recordFetchSample*(ring: var FrameFetchRing; durationMs: int) =
+  ## Append a fetch duration sample to the ring buffer, evicting the
+  ## oldest sample when the window is full.  Negative durations are
+  ## clamped to 0 — the only time we'd see one is from a clock-skew
+  ## hiccup, and reporting a negative would propagate as a phantom
+  ## "instant" sample to the median which is worse than the clamp.
+  let clamped = if durationMs < 0: 0 else: durationMs
+  ring.samples[ring.nextSlot] = clamped
+  ring.nextSlot = (ring.nextSlot + 1) mod FrameFetchWindowSize
+  if ring.count < FrameFetchWindowSize:
+    inc ring.count
+
+proc medianFetchMsFromRing*(ring: FrameFetchRing): int =
+  ## Compute the median of the buffered samples; returns ``-1`` when the
+  ## ring is empty so callers can distinguish "no data" from "0 ms".
+  if ring.count == 0:
+    return -1
+  var values: seq[int] = @[]
+  for i in 0 ..< ring.count:
+    values.add(ring.samples[i])
+  values.sort()
+  if (ring.count and 1) == 1:
+    values[ring.count div 2]
+  else:
+    ## Average of the two middle samples for an even-sized window.  Using
+    ## integer division here is fine — the buffering threshold below
+    ## uses an explicit hysteresis margin so a 1 ms truncation never
+    ## flips the flag on its own.
+    (values[ring.count div 2 - 1] + values[ring.count div 2]) div 2
+
+proc resetFetchRing*(ring: var FrameFetchRing) =
+  ## Drop every pending sample.  Used when the underlying player URL
+  ## changes (a new player means historical latencies are meaningless).
+  ring.count = 0
+  ring.nextSlot = 0
+  for i in 0 ..< FrameFetchWindowSize:
+    ring.samples[i] = 0
+
+# ---------------------------------------------------------------------------
+# Cross-platform monotonic millisecond clock for fetch-latency timing.
+# ---------------------------------------------------------------------------
+#
+# JS uses ``performance.now()`` (monotonic, sub-millisecond resolution).
+# Native uses ``epochTime() * 1000`` from std/times — adequate for tests
+# and the desktop-Nim CLI path.  Both are exposed as plain floats so the
+# (now - start) subtraction in onSuccess closures stays trivial.
+
+when defined(js):
+  proc nowMs*(): float {.importjs: "performance.now()".}
+else:
+  import std/times
+  proc nowMs*(): float =
+    epochTime() * 1000.0
+
+proc recordFetchLatency(vm: FrameViewerVM; startMs: float) =
+  ## Wrap the ring-buffer write + signal update so all three frame
+  ## fetchers share the same accounting.  ``startMs`` is captured before
+  ## the request is issued; we subtract from ``nowMs()`` once the async
+  ## callback fires (success or failure path — both feed the median so a
+  ## slow error response still triggers degradation rather than
+  ## hiding the network problem).
+  let elapsed = int(nowMs() - startMs)
+  vm.fetchRing.recordFetchSample(elapsed)
+  vm.medianFetchMs.val = medianFetchMsFromRing(vm.fetchRing)
 
 proc setFrame(vm: FrameViewerVM; frame: VisualReplayFrame) =
   vm.frameImageSrc.val = frame.imageSrc
@@ -79,33 +175,39 @@ proc loadDrawCalls*(vm: FrameViewerVM) =
 
 proc loadFrameForGeid*(vm: FrameViewerVM; geid: uint64) =
   let serial = vm.beginFrameLoad()
+  let startMs = nowMs()
   vm.currentGeid.val = some(geid)
   let fut = vm.client.getFrameByGeid(geid)
   async_compat.onComplete(fut,
     onSuccess = proc(frame: VisualReplayFrame) =
+      vm.recordFetchLatency(startMs)
       if not vm.isCurrentFrameRequest(serial):
         return
       vm.setFrame(frame)
       vm.loading.val = false
       vm.loadDrawCalls(),
     onError = proc(message: string) =
+      vm.recordFetchLatency(startMs)
       if vm.isCurrentFrameRequest(serial):
         vm.failFrame(message))
 
 proc loadFrameByIndex*(vm: FrameViewerVM; frame: int) =
   let nextFrame = max(frame, 0)
   let serial = vm.beginFrameLoad()
+  let startMs = nowMs()
   vm.currentFrame.val = nextFrame
   vm.currentGeid.val = none(uint64)
   let fut = vm.client.getFrameByFrame(nextFrame)
   async_compat.onComplete(fut,
     onSuccess = proc(frameData: VisualReplayFrame) =
+      vm.recordFetchLatency(startMs)
       if not vm.isCurrentFrameRequest(serial):
         return
       vm.setFrame(frameData)
       vm.loading.val = false
       vm.loadDrawCalls(),
     onError = proc(message: string) =
+      vm.recordFetchLatency(startMs)
       if vm.isCurrentFrameRequest(serial):
         vm.failFrame(message))
 
@@ -114,12 +216,14 @@ proc loadFrameForDraw*(vm: FrameViewerVM; draw: int;
                        sourceGeid: Option[uint64] = none(uint64)) =
   let nextDraw = max(draw, 0)
   let serial = vm.beginFrameLoad()
+  let startMs = nowMs()
   vm.selectedDrawCall.val = some(nextDraw)
   if sourceGeid.isSome:
     vm.lastStoreGeid = sourceGeid
   let fut = vm.client.getFrameByDraw(nextDraw)
   async_compat.onComplete(fut,
     onSuccess = proc(frame: VisualReplayFrame) =
+      vm.recordFetchLatency(startMs)
       if not vm.isCurrentFrameRequest(serial):
         return
       vm.setFrame(frame)
@@ -133,6 +237,7 @@ proc loadFrameForDraw*(vm: FrameViewerVM; draw: int;
           vm.store.requestSeekToGeid(targetGeid.get)
       vm.loadDrawCalls(),
     onError = proc(message: string) =
+      vm.recordFetchLatency(startMs)
       if vm.isCurrentFrameRequest(serial):
         vm.failFrame(message))
 
@@ -239,6 +344,7 @@ proc createFrameViewerVM*(client: VisualReplayClient;
       selectedPixel: createSignal(none(FrameViewerPixel)),
       drawCalls: createSignal(newSeq[VisualReplayDrawCall]()),
       selectedDrawCall: createSignal(none(int)),
+      medianFetchMs: createSignal(-1),
       disposeProc: dispose,
     )
     vm.bindReplayStore(store)

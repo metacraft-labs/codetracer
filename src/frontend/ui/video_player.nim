@@ -18,7 +18,7 @@ import
   shader_debug,
   visual_replay_client_factory
 
-import std/options
+import std/[json, options]
 import isonim/core/signals
 import isonim/web/dom_api as dom_api
 
@@ -179,11 +179,44 @@ when defined(js):
     })(#);
   """.}
 
+  ## M5 hook: deterministic state setter for the storybook Playwright
+  ## spec.  Accepts a JSON-encoded scenario descriptor that lists which
+  ## VM signals to overwrite so each story renders a known pixel-stable
+  ## state without needing to drive the underlying HTTP fixture
+  ## through the same exact sequence on every run.
+  ##
+  ## Allowed keys (all optional):
+  ##   - ``playState``: "playing" | "paused"
+  ##   - ``rate``: 1 | 2 | 4 | 8
+  ##   - ``direction``: "forward" | "reverse"
+  ##   - ``buffering``: true | false
+  ##   - ``picker``: true | false
+  ##   - ``currentFrame``: int
+  ##   - ``frameCount``: int
+  ##   - ``error``: string (sets frameVm.error)
+  ##   - ``imageSrc``: data URL forced as the frame image source
+  ##   - ``visualReplayAvailable``: bool
+  ##   - ``playerUrl``: string
+  proc installVideoPlayerStateHook(
+      apply: proc(scenarioJson: cstring)) {.importjs: """
+    (function(apply) {
+      window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+      window.__CODETRACER_TEST__.videoPlayerSetState = function(scenario) {
+        var encoded = (typeof scenario === "string")
+          ? scenario
+          : JSON.stringify(scenario || {});
+        apply(encoded);
+      };
+    })(#);
+  """.}
+
 else:
   proc installVideoPlayerFocusTracker(panel: cstring) = discard
   proc videoPlayerHasFocus*(): bool = false
   proc installVideoPlayerTestHooks(
       dispatch: proc(name: cstring): bool) = discard
+  proc installVideoPlayerStateHook(
+      apply: proc(scenarioJson: cstring)) = discard
 
 proc initVideoPlayerVMWithStore*(store: ReplayDataStore) =
   initVideoPlayerVM(store)
@@ -205,6 +238,55 @@ proc initVideoPlayerVMWithStore*(store: ReplayDataStore) =
         if vm.isNil:
           return false
         return dispatchVideoPlayerAction(vm, parsed.get))
+
+      installVideoPlayerStateHook(proc(scenarioJson: cstring) =
+        ## Apply a Playwright-supplied scenario JSON to the live VM
+        ## signals so the storybook spec can render a deterministic
+        ## state per visual diff entry.  Wrapped in a try/except so a
+        ## malformed scenario never panics the panel under test.
+        let vm = currentVideoPlayerVM()
+        if vm.isNil: return
+        try:
+          let scenario = parseJson($scenarioJson)
+          if scenario.kind != JObject: return
+          if scenario.hasKey("playState"):
+            case scenario["playState"].getStr("")
+            of "playing": vm.playState.val = video_player_vm.Playing
+            of "paused":  vm.playState.val = video_player_vm.Paused
+            else: discard
+          if scenario.hasKey("direction"):
+            case scenario["direction"].getStr("")
+            of "forward": vm.direction.val = video_player_vm.Forward
+            of "reverse": vm.direction.val = video_player_vm.Reverse
+            else: discard
+          if scenario.hasKey("rate"):
+            case scenario["rate"].getInt(1)
+            of 1: vm.rate.val = video_player_vm.Rate1x
+            of 2: vm.rate.val = video_player_vm.Rate2x
+            of 4: vm.rate.val = video_player_vm.Rate4x
+            of 8: vm.rate.val = video_player_vm.Rate8x
+            else: discard
+          if scenario.hasKey("buffering"):
+            vm.bufferingDegraded.val = scenario["buffering"].getBool(false)
+          if scenario.hasKey("picker"):
+            vm.pickerState.val =
+              if scenario["picker"].getBool(false): video_player_vm.PickerActive
+              else: video_player_vm.PickerOff
+          if scenario.hasKey("currentFrame"):
+            vm.frameVm.currentFrame.val = scenario["currentFrame"].getInt(0)
+          if scenario.hasKey("frameCount"):
+            vm.frameVm.frameCount.val = scenario["frameCount"].getInt(0)
+          if scenario.hasKey("error"):
+            vm.frameVm.error.val = scenario["error"].getStr("")
+          if scenario.hasKey("imageSrc"):
+            vm.frameVm.frameImageSrc.val = scenario["imageSrc"].getStr("")
+          if scenario.hasKey("visualReplayAvailable"):
+            vm.frameVm.visualReplayAvailable.val =
+              scenario["visualReplayAvailable"].getBool(false)
+          if scenario.hasKey("playerUrl"):
+            vm.frameVm.playerUrl.val = scenario["playerUrl"].getStr("")
+        except CatchableError:
+          discard)
 
 proc tryMountIsoNimVideoPlayerPanel*(
     component: VideoPlayerComponent = nil) =

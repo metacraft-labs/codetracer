@@ -47,8 +47,7 @@
     pointer-events: none
 
   .video-player-empty,
-  .video-player-loading,
-  .video-player-error
+  .video-player-loading
     position: absolute
     top: 50%
     left: 50%
@@ -58,8 +57,81 @@
     text-align: center
     pointer-events: none
 
+  // --- M5: Startup spinner overlay (spec §Status Indicators) -----------
+  // Centred over the canvas while ct_gfx_player is launching and /info
+  // hasn't yet succeeded.  Pure CSS spinner — no SVG asset, no JS.
+  .video-player-startup
+    position: absolute
+    top: 50%
+    left: 50%
+    transform: translate(-50%, -50%)
+    display: flex
+    flex-direction: column
+    align-items: center
+    gap: 10px
+    padding: 14px 22px
+    border-radius: 6px
+    background: rgba(20, 20, 20, 0.78)
+    color: #f5f5f5
+    font-size: 13px
+    line-height: 18px
+    pointer-events: none
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45)
+
+  .video-player-startup-spinner
+    width: 28px
+    height: 28px
+    border-radius: 50%
+    border: 3px solid rgba(255, 255, 255, 0.18)
+    border-top-color: rgba(120, 180, 255, 0.95)
+    animation: video-player-startup-spin 0.9s linear infinite
+
+  .video-player-startup-label
+    color: #eaeaea
+    font-weight: 500
+
+  @keyframes video-player-startup-spin
+    from
+      transform: rotate(0deg)
+    to
+      transform: rotate(360deg)
+
+  // --- M5: Player-error badge (spec §Status Indicators) ----------------
+  // Bottom-left red banner when ct_gfx_player exits or /info reports an
+  // error.  Sits above the canvas, leaves the transport bar to its
+  // disabled styling.
   .video-player-error
-    color: #ff6b6b
+    position: absolute
+    left: 10px
+    bottom: 10px
+    max-width: calc(100% - 20px)
+    display: flex
+    align-items: flex-start
+    gap: 8px
+    padding: 8px 12px
+    border-radius: 4px
+    background: rgba(168, 27, 27, 0.92)
+    color: #fff5f5
+    font-size: 12px
+    line-height: 16px
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4)
+    pointer-events: auto
+
+  .video-player-error-icon
+    width: 18px
+    height: 18px
+    border-radius: 50%
+    background: #fff5f5
+    color: #a81b1b
+    font-weight: 700
+    font-size: 12px
+    line-height: 18px
+    text-align: center
+    flex: 0 0 auto
+
+  .video-player-error-message
+    white-space: pre-wrap
+    word-break: break-word
 
   .video-player-canvas-overlay
     position: absolute
@@ -118,6 +190,14 @@
     border-top: 1px solid ACTIVE_MENU_BACKGROUND
     background: HEADER_PANEL_BACKGROUND_COLOR
 
+    // M5 spec §Status Indicators / "Player error": controls disabled.
+    // The opacity + pointer-events: none combination greys every button
+    // visually and inertly in one place — no per-button disabled state
+    // to keep in sync with the VM error signal.
+    &.disabled
+      opacity: 0.45
+      pointer-events: none
+
   .video-player-button
     display: inline-flex
     align-items: center
@@ -160,11 +240,30 @@
     text-transform: uppercase
     white-space: nowrap
 
+  // M5 polish: yellow dot next to the rate badge.  The bullet glyph
+  // ("●") in the markup is sized via font-size; the colour and
+  // pulsing animation are CSS so the indicator reads as "active
+  // network problem" rather than "static badge".
   .video-player-buffering
+    display: inline-flex
+    align-items: center
+    justify-content: center
     margin-left: 6px
-    color: #ffcc55
-    font-size: 14px
+    width: 14px
+    height: 14px
+    border-radius: 50%
+    background: #ffcc55
+    color: transparent
+    font-size: 0
     line-height: 1
+    box-shadow: 0 0 0 2px rgba(255, 204, 85, 0.25)
+    animation: video-player-buffering-pulse 1.4s ease-in-out infinite
+
+  @keyframes video-player-buffering-pulse
+    0%, 100%
+      box-shadow: 0 0 0 2px rgba(255, 204, 85, 0.18)
+    50%
+      box-shadow: 0 0 0 5px rgba(255, 204, 85, 0.28)
 
   // --- Scrub slider -----------------------------------------------------
   .video-player-scrubber
@@ -172,10 +271,34 @@
     padding: 4px 10px 8px
     background: HEADER_PANEL_BACKGROUND_COLOR
     border-top: 1px solid ACTIVE_MENU_BACKGROUND
+    position: relative
 
   .video-player-scrub-range
     width: 100%
     accent-color: rgba(80, 160, 255, 0.85)
+
+    &:disabled
+      cursor: not-allowed
+      opacity: 0.5
+
+  // M5 placeholder for clear-frame tick marks.  Today the contents
+  // are empty (the /info endpoint doesn't expose clear-frame info —
+  // see Visual-Replay.milestones.org M5-followup).  When the
+  // backend lands, the view emits one .video-player-scrub-tick per
+  // tick with ``left: <leftPercent>%`` inline-styled from
+  // ``layoutScrubTicks`` in video_player_vm.nim.
+  .video-player-scrub-ticks
+    position: relative
+    height: 4px
+    margin: 0 6px
+
+  .video-player-scrub-tick
+    position: absolute
+    top: 0
+    width: 2px
+    height: 4px
+    background: rgba(200, 200, 200, 0.65)
+    transform: translateX(-50%)
 
   .video-player-scrub-labels
     display: flex

@@ -19,6 +19,25 @@ import isonim/viewmodel
 import frame_viewer_vm
 import visual_replay_client
 
+const
+  ## Nominal frame rate the recording is paced at.  Spec
+  ## (Visual-Replay.md §Frame Rate and Buffering):
+  ##   "The base rate (1×) targets the recording's nominal frame rate
+  ##    read from gfxfrm.idx (typically 60 fps)."
+  ##
+  ## The /info endpoint does not surface this number today, so we hold
+  ## it as a constant here.  When the backend learns to report the
+  ## nominal rate, pipe it onto FrameViewerVM and read from a signal
+  ## instead — the tick math below already accepts a parameterised
+  ## interval.
+  NominalFrameRateHz* = 60
+
+  ## Hysteresis: the buffering flag is sticky for this many milliseconds
+  ## after the median falls back below threshold so the indicator
+  ## doesn't flicker on a single fast frame.  Spec calls for "1 s"
+  ## hysteresis; we use 1000 ms exactly.
+  BufferingClearHysteresisMs* = 1_000
+
 type
   VideoPlayerDirection* = enum
     Forward, Reverse
@@ -84,6 +103,23 @@ type
     magnifierCenterColor*: Signal[Option[VisualReplayPixelColor]]
 
     bufferingDegraded*: Signal[bool]
+    ## Timestamp (ms from the JS monotonic clock) of the last tick at
+    ## which the median fetch latency was *below* the inter-frame
+    ## interval.  Used to drive the 1-second hysteresis on the buffering
+    ## flag — once latency drops back under threshold, the flag stays
+    ## sticky until this much time has passed.  -1 means "never seen a
+    ## fast tick since the last degrade".
+    bufferingLastUnderMs*: float
+    ## Time of the previous rAF tick.  0.0 sentinels "this is the first
+    ## tick after Playing was entered" so the math doesn't burn a single
+    ## huge frame jump from a stale "now".
+    lastTickMs*: float
+    ## Floating accumulator for partial-frame advance — at 8× we tick a
+    ## new frame every two rAF callbacks; at 1× we tick approximately
+    ## every callback.  Carrying the fractional remainder over keeps the
+    ## perceived rate stable instead of dropping every other frame at
+    ## low rates.
+    frameAccumulator*: float
 
 # ---------------------------------------------------------------------------
 # Pure state-machine helpers (no I/O, no signals — easy to unit-test).
@@ -140,6 +176,243 @@ proc pressTogglePlay*(
   else:
     (Paused, resumeDirection, resumeRate)
 
+proc isStartupSpinnerVisible*(
+    visualReplayAvailable: bool;
+    playerUrl: string;
+    frameCount: int;
+    errorMessage: string): bool =
+  ## Spec (Visual-Replay.md §Status Indicators / "Player connecting"):
+  ##   "Spinner badge over centre of canvas, 'Starting player…'.
+  ##    ct_gfx_player process launched; waiting for /info to succeed."
+  ##
+  ## Pure decision so the view can call this from a reactive computed
+  ## without smuggling DOM state into the rule.  Visible iff the
+  ## session is visual-capable, a player URL exists, /info hasn't
+  ## reported a frame count yet, and no terminal error is showing.
+  visualReplayAvailable and playerUrl.len > 0 and frameCount == 0 and
+    errorMessage.len == 0
+
+proc previousRate*(rate: VideoPlayerRate): VideoPlayerRate =
+  ## Inverse of nextRate — used by buffering detection to downgrade one
+  ## step when the fetch latency outpaces the inter-frame interval.
+  ## At Rate1x there is no slower step in the spec'd cycle; we stay at
+  ## 1× and let the caller cap the buffering flag instead.
+  case rate
+  of Rate1x: Rate1x
+  of Rate2x: Rate1x
+  of Rate4x: Rate2x
+  of Rate8x: Rate4x
+
+proc nominalIntervalMs*(rate: VideoPlayerRate;
+                        nominalRateHz: int = NominalFrameRateHz): float =
+  ## Wall-clock ms between successive frames at the given playback rate.
+  ## At 60 fps base: 1× → 16.66 ms, 2× → 8.33 ms, 4× → 4.16 ms, 8× → 2.08 ms.
+  ## Spec: Visual-Replay.md §Frame Rate and Buffering.
+  let safeHz = max(1, nominalRateHz)
+  1000.0 / (float(safeHz) * float(int(rate)))
+
+type
+  BufferingDetectionInput* = object
+    medianFetchMs*: int
+    rate*: VideoPlayerRate
+    nominalRateHz*: int
+    playing*: bool
+    currentlyDegraded*: bool
+    lastUnderMs*: float
+    nowMs*: float
+
+  BufferingDetectionOutcome* = object
+    ## Result of a single buffering-detection tick.
+    ## - ``newDegraded``:  the value to write to bufferingDegraded.val.
+    ## - ``shouldDegrade``: rate should drop one step.
+    ## - ``lastUnderMs``:  the value to write back to bufferingLastUnderMs.
+    newDegraded*: bool
+    shouldDegrade*: bool
+    lastUnderMs*: float
+
+proc detectBuffering*(input: BufferingDetectionInput;
+                      clearHysteresisMs: int = BufferingClearHysteresisMs):
+                      BufferingDetectionOutcome =
+  ## Pure decision function for the buffering indicator + degrade step.
+  ##
+  ## Inputs:
+  ## - ``medianFetchMs``: most recent median latency.  -1 = no samples yet.
+  ## - ``rate``: current playback rate.
+  ## - ``nominalRateHz``: 60 today; piped through for testability.
+  ## - ``playing``: paused → clear the flag immediately.
+  ## - ``currentlyDegraded``: the previous bufferingDegraded value.
+  ## - ``lastUnderMs``: timestamp of the last under-threshold tick;
+  ##   ``-1.0`` sentinels "never seen one since last degrade".
+  ## - ``nowMs``: monotonic clock.
+  ##
+  ## Outputs:
+  ## - ``newDegraded``: write back to bufferingDegraded.val.
+  ## - ``shouldDegrade``: caller should drop the rate one step.
+  ## - ``lastUnderMs``: write back to bufferingLastUnderMs.
+  ##
+  ## Hysteresis (spec): the indicator stays on for clearHysteresisMs
+  ## (1 s default) after latency falls back below threshold so a single
+  ## fast frame doesn't blink the flag off.
+  ##
+  ## Spec: Visual-Replay.md §Frame Rate and Buffering — "If frame fetch
+  ## latency exceeds the inter-frame interval at the current rate, the
+  ## player visibly degrades to the next-lower rate and shows a yellow
+  ## buffering indicator next to the rate badge."
+  if not input.playing:
+    return BufferingDetectionOutcome(
+      newDegraded: false, shouldDegrade: false, lastUnderMs: -1.0)
+
+  if input.medianFetchMs < 0:
+    ## No samples — preserve the previous state.  Don't clear; don't
+    ## degrade; don't perturb the hysteresis timer.
+    return BufferingDetectionOutcome(
+      newDegraded: input.currentlyDegraded,
+      shouldDegrade: false,
+      lastUnderMs: input.lastUnderMs)
+
+  let intervalMs = nominalIntervalMs(input.rate, input.nominalRateHz)
+  let over = float(input.medianFetchMs) > intervalMs
+
+  if over:
+    ## Degrade exactly once per over-threshold transition; don't keep
+    ## stepping the rate down on every tick because the median is
+    ## sampled across multiple frames and one step reliably halves the
+    ## work per second.  Subsequent ticks just keep the indicator on.
+    let shouldDrop = not input.currentlyDegraded and input.rate != Rate1x
+    return BufferingDetectionOutcome(
+      newDegraded: true, shouldDegrade: shouldDrop, lastUnderMs: -1.0)
+
+  ## Under threshold.  Start the hysteresis clock if this is the first
+  ## under-threshold tick since a degrade, otherwise check whether
+  ## clearHysteresisMs have elapsed and drop the flag if so.
+  if not input.currentlyDegraded:
+    return BufferingDetectionOutcome(
+      newDegraded: false, shouldDegrade: false, lastUnderMs: input.nowMs)
+  let lastUnder =
+    if input.lastUnderMs < 0: input.nowMs else: input.lastUnderMs
+  let elapsedUnder = input.nowMs - lastUnder
+  if elapsedUnder >= float(clearHysteresisMs):
+    BufferingDetectionOutcome(
+      newDegraded: false, shouldDegrade: false, lastUnderMs: -1.0)
+  else:
+    BufferingDetectionOutcome(
+      newDegraded: true, shouldDegrade: false, lastUnderMs: lastUnder)
+
+type
+  PlaybackTickInput* = object
+    rate*: VideoPlayerRate
+    direction*: VideoPlayerDirection
+    nominalRateHz*: int
+    currentFrame*: int
+    frameCount*: int
+    accumulator*: float       ## carried from the previous tick
+    elapsedMs*: float         ## now - lastTickMs
+
+  PlaybackTickOutcome* = object
+    ## Result of the pure tick math.
+    ## - ``targetFrame``: where to seek (or the unchanged currentFrame
+    ##   if no whole-frame advance happened this tick).
+    ## - ``advanced``: true when targetFrame differs from currentFrame.
+    ## - ``accumulator``: write back to vm.frameAccumulator.
+    ## - ``shouldPause``: clamp triggered (start or end of timeline);
+    ##   caller should call ``pause()``.
+    targetFrame*: int
+    advanced*: bool
+    accumulator*: float
+    shouldPause*: bool
+
+proc computeTickAdvance*(input: PlaybackTickInput): PlaybackTickOutcome =
+  ## Pure rAF tick math.  Computes how many frames to advance the
+  ## current frame index given the rate, direction, elapsed wall-clock
+  ## milliseconds since the last tick, and any fractional carry from
+  ## the previous tick.
+  ##
+  ## Formula (per spec §Frame Rate and Buffering):
+  ##   delta = (elapsedMs / nominalIntervalMs(1×)) × rate × directionSign
+  ##         = elapsedMs × nominalRateHz × rate / 1000  × directionSign
+  ##
+  ## The integer portion seeks; the fractional portion is carried over
+  ## via ``accumulator`` so a 1× playback at 60 fps doesn't blink
+  ## every-other-frame just because of sub-millisecond rAF jitter.
+  ##
+  ## Clamps at ``[0, frameCount-1]`` and reports ``shouldPause = true``
+  ## so the caller can park playback at the timeline edge (spec: "If
+  ## the target is at the timeline edge, clamp and pause.").
+  let safeHz = max(1, input.nominalRateHz)
+  let directionSign = (if input.direction == Forward: 1.0 else: -1.0)
+  let perFrameMs = 1000.0 / float(safeHz)
+  ## Fractional frames covered by this tick.  Same formula in both
+  ## directions; the sign rides on directionSign so negative values
+  ## walk the accumulator backwards.
+  let deltaFrames = directionSign *
+    (input.elapsedMs / perFrameMs) * float(int(input.rate))
+  let accum = input.accumulator + deltaFrames
+  ## Take the integer whole-frame portion and leave the fraction in
+  ## the accumulator.  ``int`` truncates towards zero which is what we
+  ## want — the sign rides on the carry, never on the seek count.
+  let wholeFrames = int(accum)
+  let remainder = accum - float(wholeFrames)
+  let rawTarget = input.currentFrame + wholeFrames
+
+  if input.frameCount <= 0:
+    ## We don't have a frame count yet (the /info handshake hasn't
+    ## completed).  Advance the integer count anyway so test
+    ## scaffolding without a frame count can still exercise the math,
+    ## but don't pretend we hit a clamp.
+    return PlaybackTickOutcome(
+      targetFrame: max(0, rawTarget),
+      advanced: wholeFrames != 0,
+      accumulator: remainder,
+      shouldPause: false)
+
+  let lastFrame = input.frameCount - 1
+  if rawTarget < 0:
+    ## Walked past the start of the timeline — clamp to 0, pause, drop
+    ## the carry so a subsequent resume doesn't immediately re-trigger.
+    PlaybackTickOutcome(
+      targetFrame: 0, advanced: input.currentFrame != 0,
+      accumulator: 0.0, shouldPause: true)
+  elif rawTarget > lastFrame:
+    ## Walked past the end of the timeline — clamp to the last frame
+    ## and pause.
+    PlaybackTickOutcome(
+      targetFrame: lastFrame,
+      advanced: input.currentFrame != lastFrame,
+      accumulator: 0.0, shouldPause: true)
+  else:
+    ## Inside the timeline — advance (possibly by 0) and carry the
+    ## fractional remainder for the next tick.
+    PlaybackTickOutcome(
+      targetFrame: rawTarget, advanced: wholeFrames != 0,
+      accumulator: remainder, shouldPause: false)
+
+type
+  ScrubTick* = object
+    ## Layout descriptor for one tick mark under the scrub slider.
+    ## Pure data so the tests can pin the math without a DOM.
+    frame*: int          ## frame index in the timeline
+    leftPercent*: float  ## position as 0..100 % across the slider track
+
+proc layoutScrubTicks*(clearFrames: openArray[int]; frameCount: int):
+    seq[ScrubTick] =
+  ## Compute the geometry of clear-frame tick marks under the scrub
+  ## slider.  The spec wants ticks at frames flagged ``clear`` in
+  ## ``gfxfrm.idx``; the backend doesn't expose that flag through
+  ## ``/info`` today (see Visual-Replay.milestones.org M5-followup),
+  ## so the live view feeds an empty seq and renders no ticks.
+  ##
+  ## This helper is unit-tested with stub indices so the rendering
+  ## code path is ready the moment the backend learns to report the
+  ## clear-frame index.  The view's tick template can then consume the
+  ## returned sequence verbatim.
+  if frameCount <= 1 or clearFrames.len == 0:
+    return @[]
+  let lastFrame = frameCount - 1
+  for f in clearFrames:
+    if f < 0 or f > lastFrame: continue
+    let pct = float(f) / float(lastFrame) * 100.0
+    result.add(ScrubTick(frame: f, leftPercent: pct))
+
 proc stepFrameDelta*(direction: int; currentFrame, frameCount: int): int =
   ## Compute the target frame for a Step-Frame press. direction is ±1.
   ## Clamps at [0, frameCount-1] when frameCount > 0; otherwise allows any
@@ -157,12 +430,29 @@ proc stepFrameDelta*(direction: int; currentFrame, frameCount: int): int =
 proc applyPlayState(vm: VideoPlayerVM; state: VideoPlayerPlayState;
                     direction: VideoPlayerDirection;
                     rate: VideoPlayerRate) =
+  let wasPlaying = vm.playState.val == Playing
   vm.playState.val = state
   vm.direction.val = direction
   vm.rate.val = rate
   if state == Playing:
     vm.resumeDirection = direction
     vm.resumeRate = rate
+    if not wasPlaying:
+      ## Reset tick state when entering Playing so the first ``tickPlayback``
+      ## call captures ``now`` as the baseline (avoids a huge initial jump
+      ## if the rAF callback fires with a stale ``lastTickMs`` from a
+      ## previous Playing session).  ``-1.0`` is the "no baseline yet"
+      ## sentinel — ``performance.now()`` can legitimately return 0.0.
+      vm.lastTickMs = -1.0
+      vm.frameAccumulator = 0.0
+  else:
+    ## Paused: clear the buffering flag and tick state.  Same contract as
+    ## ``pause()`` so callers (togglePlay, fastForward → reverse flip,
+    ## etc.) get a consistent "no playback, no indicator" baseline.
+    vm.bufferingDegraded.val = false
+    vm.bufferingLastUnderMs = -1.0
+    vm.lastTickMs = -1.0
+    vm.frameAccumulator = 0.0
 
 proc fastForward*(vm: VideoPlayerVM) =
   let next = pressFastForward(vm.playState.val, vm.direction.val, vm.rate.val)
@@ -187,6 +477,82 @@ proc pause*(vm: VideoPlayerVM) =
     vm.resumeDirection = vm.direction.val
     vm.resumeRate = vm.rate.val
     vm.playState.val = Paused
+  ## Spec: "When paused, clear bufferingDegraded immediately."  The flag is
+  ## meaningless when no requests are being issued, and a stale yellow dot
+  ## while paused would confuse users into thinking the player is broken.
+  vm.bufferingDegraded.val = false
+  vm.bufferingLastUnderMs = -1.0
+  vm.lastTickMs = -1.0
+  vm.frameAccumulator = 0.0
+
+proc tickPlayback*(vm: VideoPlayerVM; nowMs: float) =
+  ## Pure-side rAF tick entry point.  The JS rAF loop installed in the
+  ## view calls this on every frame; the math is delegated to
+  ## ``computeTickAdvance`` and ``detectBuffering`` so the logic can be
+  ## unit-tested headlessly via ``video_player_polish_test.nim``.
+  ##
+  ## Spec: Visual-Replay.md §Frame Rate and Buffering.
+  if vm.playState.val != Playing:
+    return
+  if vm.frameVm.error.val.len > 0:
+    ## Errors during playback should park us at the error overlay;
+    ## the controls are visibly disabled per spec.
+    vm.pause()
+    return
+  ## First tick after entering Playing — capture the timestamp and
+  ## skip the advance so the next tick has a meaningful elapsed-ms.
+  ## ``-1.0`` is the explicit "no baseline yet" sentinel; a literal
+  ## 0.0 ``nowMs`` is a valid timestamp (some hosts seed
+  ## ``performance.now()`` from page-load time).
+  if vm.lastTickMs < 0.0:
+    vm.lastTickMs = nowMs
+    return
+
+  let elapsed = nowMs - vm.lastTickMs
+  vm.lastTickMs = nowMs
+
+  ## Sample the median BEFORE the new fetch — if a slow request is
+  ## already in flight from a previous tick, ``frameVm.medianFetchMs``
+  ## already reflects the past samples, and the detector should use
+  ## those rather than risk being poisoned by the (potentially fast)
+  ## stub completion of the request we're about to issue on this tick.
+  let medianAtTick = vm.frameVm.medianFetchMs.val
+
+  let advance = computeTickAdvance(PlaybackTickInput(
+    rate: vm.rate.val,
+    direction: vm.direction.val,
+    nominalRateHz: NominalFrameRateHz,
+    currentFrame: vm.frameVm.currentFrame.val,
+    frameCount: vm.frameVm.frameCount.val,
+    accumulator: vm.frameAccumulator,
+    elapsedMs: elapsed,
+  ))
+  vm.frameAccumulator = advance.accumulator
+
+  let detect = detectBuffering(BufferingDetectionInput(
+    medianFetchMs: medianAtTick,
+    rate: vm.rate.val,
+    nominalRateHz: NominalFrameRateHz,
+    playing: true,
+    currentlyDegraded: vm.bufferingDegraded.val,
+    lastUnderMs: vm.bufferingLastUnderMs,
+    nowMs: nowMs,
+  ))
+  vm.bufferingDegraded.val = detect.newDegraded
+  vm.bufferingLastUnderMs = detect.lastUnderMs
+  if detect.shouldDegrade:
+    vm.rate.val = previousRate(vm.rate.val)
+    vm.resumeRate = vm.rate.val
+
+  ## Issue the frame request after the detection decision so the new
+  ## sample only influences the *next* tick, never the one that
+  ## triggered it.
+  if advance.advanced and
+      advance.targetFrame != vm.frameVm.currentFrame.val:
+    vm.frameVm.loadFrameByIndex(advance.targetFrame)
+
+  if advance.shouldPause:
+    vm.pause()
 
 proc stepFrame*(vm: VideoPlayerVM; delta: int) =
   ## Step-Frame (±1). No-op when playing — the spec ties this to the paused
@@ -391,6 +757,9 @@ proc createVideoPlayerVM*(frameVm: FrameViewerVM): VideoPlayerVM =
       magnifier: createSignal(none(MagnifierPosition)),
       magnifierCenterColor: createSignal(none(VisualReplayPixelColor)),
       bufferingDegraded: createSignal(false),
+      bufferingLastUnderMs: -1.0,
+      lastTickMs: -1.0,
+      frameAccumulator: 0.0,
       disposeProc: dispose,
     )
     vm

@@ -86,13 +86,54 @@ proc frameImageDisplay(vm: VideoPlayerVM): string =
 proc loadingDisplay(vm: VideoPlayerVM): string =
   displayIf(vm.frameVm.loading.val)
 
-proc errorDisplay(vm: VideoPlayerVM): string =
+proc errorDisplay(vm: VideoPlayerVM): string {.used.} =
+  ## Retained for tests that still query the old helper directly.
+  ## Wired in M1; the M5 redesign replaces the centred error placeholder
+  ## with a bottom-left red badge driven by ``playerErrorDisplay`` /
+  ## ``transportDisabledClass``.
   displayIf(vm.frameVm.error.val.len > 0)
 
 proc emptyDisplay(vm: VideoPlayerVM): string =
+  ## "No visual recording loaded" — only when none of the other overlays
+  ## (loading / error / startup spinner) are taking precedence and there
+  ## is no image to show.
   displayIf(vm.frameVm.frameImageSrc.val.len == 0 and
             not vm.frameVm.loading.val and
-            vm.frameVm.error.val.len == 0)
+            vm.frameVm.error.val.len == 0 and
+            not isStartupSpinnerVisible(
+              vm.frameVm.visualReplayAvailable.val,
+              vm.frameVm.playerUrl.val,
+              vm.frameVm.frameCount.val,
+              vm.frameVm.error.val))
+
+proc startupSpinnerDisplay(vm: VideoPlayerVM): string =
+  ## Spec §Status Indicators — Player connecting: "Spinner badge over
+  ## centre of canvas, 'Starting player…'.  ct_gfx_player process
+  ## launched; waiting for /info to succeed."
+  displayIf(isStartupSpinnerVisible(
+    vm.frameVm.visualReplayAvailable.val,
+    vm.frameVm.playerUrl.val,
+    vm.frameVm.frameCount.val,
+    vm.frameVm.error.val))
+
+proc playerErrorDisplay(vm: VideoPlayerVM): string =
+  ## Red badge bottom-left when the player process exits or returns an
+  ## error.  Spec §Status Indicators / "Player error".
+  displayIf(vm.frameVm.error.val.len > 0)
+
+proc transportDisabledClass(vm: VideoPlayerVM): string =
+  ## Spec §Status Indicators / "Player error": "controls disabled".
+  ## Toggle a class on the whole transport bar; the CSS sets opacity
+  ## and ``pointer-events: none`` so every button is greyed and
+  ## inert in one place.
+  if vm.frameVm.error.val.len > 0:
+    "video-player-transport disabled"
+  else:
+    "video-player-transport"
+
+proc scrubDisabledAttr(vm: VideoPlayerVM): string =
+  ## Disable the scrub slider when the player has errored.
+  if vm.frameVm.error.val.len > 0: "disabled" else: ""
 
 proc magnifierDisplay(vm: VideoPlayerVM): string =
   displayIf(vm.pickerState.val == PickerActive and vm.magnifier.val.isSome)
@@ -195,8 +236,26 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
           text "No visual recording loaded"
         tdiv(class = "video-player-loading", display = loadingDisplay(vm)):
           text "Loading frame…"
-        tdiv(class = "video-player-error", display = errorDisplay(vm)):
-          text vm.frameVm.error.val
+        ## M5: startup spinner overlay — centred badge over the canvas
+        ## while /info has not yet succeeded.  Spec §Status Indicators
+        ## / "Player connecting".  The spinning ring is pure CSS
+        ## (see styles/components/video_player.styl
+        ## .video-player-startup-spinner).
+        tdiv(class = "video-player-startup",
+             display = startupSpinnerDisplay(vm)):
+          tdiv(class = "video-player-startup-spinner"):
+            text ""
+          tdiv(class = "video-player-startup-label"):
+            text "Starting player…"
+        ## M5: player-error badge — bottom-left red banner.  Spec
+        ## §Status Indicators / "Player error".  The transport bar is
+        ## visibly disabled in parallel via ``transportDisabledClass``.
+        tdiv(class = "video-player-error",
+             display = playerErrorDisplay(vm)):
+          tdiv(class = "video-player-error-icon"):
+            text "!"
+          tdiv(class = "video-player-error-message"):
+            text vm.frameVm.error.val
         img(class = "video-player-image",
             src = vm.frameVm.frameImageSrc.val,
             alt = "Visual replay frame",
@@ -229,7 +288,11 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
           tdiv(class = "video-player-loupe-readout video-player-loupe-rgba"):
             text magnifierColorReadout(vm)
       ## --- Transport bar ---------------------------------------------------
-      tdiv(class = "video-player-transport"):
+      ## Class flips to ``video-player-transport disabled`` when the
+      ## player has errored — CSS sets opacity + pointer-events: none
+      ## so every button is greyed and inert in one place.  Spec
+      ## §Status Indicators / "Player error".
+      tdiv(class = transportDisabledClass(vm)):
         button(class = "video-player-button video-player-jump-start",
                title = "Jump to start (Home)",
                onclick = onJumpStartClick(vm)):
@@ -284,11 +347,22 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
           text "●"
       ## --- Scrub slider ----------------------------------------------------
       tdiv(class = "video-player-scrubber"):
+        ## Clear-frame tick marks (Visual-Replay.md §Scrub Slider).
+        ## Today we render an empty list — the /info endpoint does not
+        ## surface the clear-frame index.  When it does, feed the seq
+        ## into ``layoutScrubTicks`` from video_player_vm.nim and emit
+        ## one ``.video-player-scrub-tick`` per element positioned via
+        ## ``left: <leftPercent>%`` on the wrapper.  See
+        ## Visual-Replay.milestones.org "M5-followup: clear-frame ticks
+        ## need /info endpoint extension" for the backend work.
+        tdiv(class = "video-player-scrub-ticks"):
+          text ""
         input(class = "video-player-scrub-range",
               `type` = "range",
               min = "0",
               max = maxFrameValue(vm),
-              value = currentFrameValue(vm))
+              value = currentFrameValue(vm),
+              disabled = scrubDisabledAttr(vm))
         tdiv(class = "video-player-scrub-labels"):
           tdiv(class = "video-player-frame-label"):
             text currentFrameLabel(vm)
@@ -513,6 +587,39 @@ when defined(js):
         })(#, #, #);
       """.}
 
+  ## Install a single self-rescheduling requestAnimationFrame loop on
+  ## the panel.  ``onTick`` is called with ``performance.now()`` on
+  ## every frame; it is a no-op when paused (see
+  ## ``VideoPlayerVM.tickPlayback``).  The handle is stowed on the
+  ## panel so the harness can cancel it on unmount, even though the
+  ## panel itself rarely unmounts in practice.
+  ##
+  ## Spec (Visual-Replay.md §Frame Rate and Buffering):
+  ##   "Playback is paced by requestAnimationFrame; the player issues
+  ##    HTTP frame requests with a coalescing serial so only the most
+  ##    recent request's image is rendered."
+  proc installPlaybackTickLoop(
+      panel: isonim_dom.Element;
+      onTick: proc(nowMs: float) {.closure.})
+      {.importjs: """
+        (function(panel, onTick) {
+          if (panel.__videoPlayerTickHandle) return;
+          var raf = (typeof window !== "undefined" &&
+                     typeof window.requestAnimationFrame === "function")
+            ? window.requestAnimationFrame.bind(window)
+            : function(cb) { return setTimeout(function() { cb(Date.now()); }, 16); };
+          function tick(now) {
+            try {
+              onTick(typeof now === "number" ? now : Date.now());
+            } catch (err) {
+              console.warn("video player tick error:", err);
+            }
+            panel.__videoPlayerTickHandle = raf(tick);
+          }
+          panel.__videoPlayerTickHandle = raf(tick);
+        })(#, #);
+      """.}
+
   proc clearLoupe(panel: isonim_dom.Element)
       {.importjs: """
         (function(p) {
@@ -592,6 +699,14 @@ when defined(js):
         return
       let m = mag.get
       renderLoupeAt(panel, m.sourceX, m.sourceY)
+
+    ## M5: install the rAF auto-advance loop.  ``tickPlayback`` is a
+    ## no-op when paused so the loop is cheap to keep running across
+    ## the panel's lifetime — no install/uninstall on play/pause.
+    ## Spec: Visual-Replay.md §Frame Rate and Buffering.
+    installPlaybackTickLoop(panel,
+      proc(nowMs: float) =
+        vm.tickPlayback(nowMs))
 
     ## Escape → cancelPicker now flows through the standard ClientAction
     ## pipeline registered in ``ui/shortcuts.nim`` (M4).  No raw keydown
