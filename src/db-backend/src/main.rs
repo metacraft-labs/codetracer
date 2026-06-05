@@ -37,6 +37,21 @@ mod dap_types;
 mod db;
 mod diff;
 mod distinct_vec;
+// M17 — the lib already exports these via `lib.rs`; the bin needs its
+// own copies because dap_handler.rs is `mod dap_handler` here rather
+// than a re-export from the lib. The lib's `#![allow(clippy::expect_used)]`
+// does not flow into the bin compilation unit, so we suppress
+// `expect_used` / `unwrap_used` / `panic` locally on the affected
+// modules — they were not authored under the bin's stricter rules and
+// the bin only depends on them transitively through dap_handler's
+// M17 dispatch.
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod dwarf_index;
+mod emulator_ffi;
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod emulator_origin;
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod emulator_session;
 mod event_db;
 mod expr_loader;
 mod flow_preloader;
@@ -51,6 +66,8 @@ mod query;
 mod recreator_origin;
 mod recreator_session;
 mod replay;
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod stack_unwinder;
 mod step_lines_loader;
 mod task;
 mod trace_processor;

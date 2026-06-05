@@ -103,14 +103,120 @@ unsafe extern "C" {
 
     /// Monotonic instruction counter incremented by `mcrStep`/`mcrRun`.
     pub fn mcrGetStepCounter() -> u64;
+
+    // -----------------------------------------------------------------
+    // M17 — value-origin hybrid origin tier (undo-map last-mile +
+    // breakpoint fallback). See spec §6.4 of
+    // `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`.
+    //
+    // The Nim shim lives at
+    // `codetracer-native-recorder/ct_emulator/src/ct_emulator/origin_undo_ffi.nim`.
+    //
+    // These entry points are split into:
+    //
+    //   * an admin surface (`mcrUndoMapReset`, `mcrUndoMapSetWindow`,
+    //     `mcrUndoMapPushWrite`) that the M17 algorithm uses to seed the
+    //     Nim-side state from Rust fixtures so the Tier 1 path can be
+    //     exercised without a live emulator pipeline;
+    //   * a query surface (`mcrUndoMapWriteCoverage`,
+    //     `mcrUndoMapLastWriteBefore` + the per-field
+    //     `mcrUndoMapLastWriteResult*` getters) that the Tier 1 hop
+    //     algorithm calls on each iteration; and
+    //   * the Tier 2 reverse-step driver
+    //     (`mcrLastMileReverseStepReset`, `mcrLastMileReverseStep`, plus
+    //     the cursor getters) used when Tier 1 reports
+    //     "out-of-window".
+    //
+    // All entry points are SAFE to call against an uninitialised Nim
+    // runtime in the sense that they will return 0 (false) rather than
+    // crash; the caller is still responsible for invoking `NimMain`
+    // once via the `EmulatorReplaySession` bring-up before any of these
+    // are exercised.
+    // -----------------------------------------------------------------
+
+    /// Reset the Nim-side undo map state used by the M17 hybrid
+    /// algorithm. Idempotent — safe to call multiple times.
+    pub fn mcrUndoMapReset();
+
+    /// Pin the active undo window. Tier 1 coverage queries consult this
+    /// range; ticks outside `[start, end]` fall through to Tier 2.
+    pub fn mcrUndoMapSetWindow(start_tick: u64, end_tick: u64);
+
+    /// Append a synthetic write record to the undo log. Used by tests
+    /// and by the Rust-side window-extension helper to repopulate Tier
+    /// 1 after a window flip. Returns 0 on success, -1 if `size` is out
+    /// of the 1..=8 byte range.
+    pub fn mcrUndoMapPushWrite(
+        pc: u64,
+        tick_before: u64,
+        address: u64,
+        size: c_int,
+        old_value: u64,
+        new_value: u64,
+    ) -> c_int;
+
+    /// Returns 1 iff `(address, tick)` is inside the active undo window.
+    /// `address` is reserved for future per-address windowing schemes
+    /// and is ignored today.
+    pub fn mcrUndoMapWriteCoverage(address: u64, tick: u64) -> c_int;
+
+    /// Scan the live undo log backwards for the most recent write whose
+    /// target range overlaps `[address, address+size)` with
+    /// `tick_before < tick`. Returns 1 on hit, 0 on miss. The hit's
+    /// fields are read via the `mcrUndoMapLastWriteResult*` getters
+    /// (one call per scalar field — keeps the FFI struct-free).
+    pub fn mcrUndoMapLastWriteBefore(address: u64, size: c_int, tick: u64) -> c_int;
+
+    /// PC of the last-write hit returned by `mcrUndoMapLastWriteBefore`.
+    pub fn mcrUndoMapLastWriteResultPc() -> u64;
+
+    /// Tick of the last-write hit (i.e. `tickBefore`).
+    pub fn mcrUndoMapLastWriteResultTick() -> u64;
+
+    /// Address of the last-write hit (the base of the write, not the
+    /// query base).
+    pub fn mcrUndoMapLastWriteResultAddress() -> u64;
+
+    /// Size of the last-write hit in bytes.
+    pub fn mcrUndoMapLastWriteResultSize() -> c_int;
+
+    /// Pre-write value at the hit, zero-extended to 64 bits little-endian.
+    pub fn mcrUndoMapLastWriteResultValue() -> u64;
+
+    /// Seed the Tier-2 reverse-step driver with a budget + initial
+    /// `(pc, tick)` cursor.
+    pub fn mcrLastMileReverseStepReset(budget: c_int, pc: u64, tick: u64);
+
+    /// Take one reverse-step on the Tier-2 controller. Returns:
+    /// - 0 on success (cursor advanced backwards by one tick),
+    /// - 1 if the budget has been exhausted,
+    /// - 2 if the recording start has been reached.
+    pub fn mcrLastMileReverseStep() -> c_int;
+
+    /// Current tick of the Tier-2 cursor (post-`mcrLastMileReverseStep`).
+    pub fn mcrLastMileReverseStepCurrentTick() -> u64;
+
+    /// Current PC of the Tier-2 cursor.
+    pub fn mcrLastMileReverseStepCurrentPc() -> u64;
+
+    /// Number of reverse-steps taken since the last
+    /// `mcrLastMileReverseStepReset` call.
+    pub fn mcrLastMileReverseStepCount() -> c_int;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
+    use std::sync::{Mutex, Once};
 
     static NIM_MAIN: Once = Once::new();
+    /// All `mcr*` FFI symbols read/write Nim-global module-local state.
+    /// Cargo runs tests in parallel by default, so without a single
+    /// shared lock the M17 tests race on `gOriginUndoLog` and the
+    /// existing F5c-1 smoke would race on `gInitialized`. The mutex
+    /// is global to every test in this module so the FFI surface
+    /// stays serially exclusive.
+    pub(crate) static FFI_LOCK: Mutex<()> = Mutex::new(());
 
     fn init_nim_runtime() {
         // SAFETY: NimMain is idempotent at the C level but our Once guard
@@ -126,6 +232,7 @@ mod tests {
     #[test]
     fn ffi_round_trip_returns_zero_before_init() {
         init_nim_runtime();
+        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // SAFETY: mcrInit and the getters are safe to call against the
         // freshly-initialised Nim runtime; mcrInit resets gInitialized=false
         // so every getter must return 0.
@@ -136,6 +243,91 @@ mod tests {
             assert_eq!(mcrGetRegister(0), 0, "rax must be 0 before registers are set");
             assert_eq!(mcrGetRegister(17), 0, "rflags must be 0 before registers are set");
             assert_eq!(mcrGetStepCounter(), 0, "step counter resets to 0");
+        }
+    }
+
+    /// M17 — coverage returns 0 against an empty undo map (no records,
+    /// no window).
+    #[test]
+    fn m17_coverage_is_zero_on_empty_undo_log() {
+        init_nim_runtime();
+        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // SAFETY: reset is idempotent and the coverage query is
+        // side-effect-free apart from reading the module-local state
+        // the reset just cleared.
+        unsafe {
+            mcrUndoMapReset();
+            assert_eq!(mcrUndoMapWriteCoverage(0x1000, 42), 0);
+        }
+    }
+
+    /// M17 — Tier-1 round-trip: push a synthetic write into the undo
+    /// log, query for it via `mcrUndoMapLastWriteBefore`, and confirm
+    /// the per-field getters surface the same values.
+    #[test]
+    fn m17_tier_one_round_trip_finds_synthetic_write() {
+        init_nim_runtime();
+        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // SAFETY: every entry point is guarded by the module-local
+        // state machine; the reset/push/query order matches the
+        // documented contract.
+        unsafe {
+            mcrUndoMapReset();
+            mcrUndoMapSetWindow(0, 1000);
+            let rc = mcrUndoMapPushWrite(0xDEAD_BEEF, 100, 0x4000, 4, 0x1111, 0x2222);
+            assert_eq!(rc, 0, "pushing a 4-byte write should succeed");
+
+            assert_eq!(
+                mcrUndoMapWriteCoverage(0x4000, 500),
+                1,
+                "(addr, tick=500) is within [0, 1000]"
+            );
+            assert_eq!(
+                mcrUndoMapWriteCoverage(0x4000, 2000),
+                0,
+                "(addr, tick=2000) is OUTSIDE the active undo window"
+            );
+
+            let hit = mcrUndoMapLastWriteBefore(0x4000, 4, 200);
+            assert_eq!(hit, 1, "the synthetic write must be discoverable");
+            assert_eq!(mcrUndoMapLastWriteResultPc(), 0xDEAD_BEEF);
+            assert_eq!(mcrUndoMapLastWriteResultTick(), 100);
+            assert_eq!(mcrUndoMapLastWriteResultAddress(), 0x4000);
+            assert_eq!(mcrUndoMapLastWriteResultSize(), 4);
+            assert_eq!(mcrUndoMapLastWriteResultValue(), 0x1111);
+
+            // A query strictly older than the write's `tickBefore`
+            // must NOT surface it — the algorithm needs the strict-`<`
+            // contract so the same query can drive successive hops
+            // without re-finding the same record.
+            let earlier = mcrUndoMapLastWriteBefore(0x4000, 4, 100);
+            assert_eq!(earlier, 0, "queries at tick == tickBefore must miss");
+        }
+    }
+
+    /// M17 — Tier-2 reverse-step driver advances the cursor and reports
+    /// budget exhaustion / recording-start sentinels distinctly.
+    #[test]
+    fn m17_tier_two_reverse_step_reports_sentinels() {
+        init_nim_runtime();
+        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // SAFETY: per the module contract `mcrLastMileReverseStepReset`
+        // is the only legal way to (re-)seed the cursor; subsequent
+        // step calls are scalar and side-effect-bounded to the
+        // module-local cursor fields.
+        unsafe {
+            mcrLastMileReverseStepReset(3, 0x4000_0000, 5);
+            assert_eq!(mcrLastMileReverseStep(), 0, "step 1 ok");
+            assert_eq!(mcrLastMileReverseStepCurrentTick(), 4);
+            assert_eq!(mcrLastMileReverseStep(), 0, "step 2 ok");
+            assert_eq!(mcrLastMileReverseStep(), 0, "step 3 ok");
+            assert_eq!(mcrLastMileReverseStep(), 1, "budget exhausted on step 4");
+            assert_eq!(mcrLastMileReverseStepCount(), 3);
+
+            mcrLastMileReverseStepReset(10, 0x4000_0000, 1);
+            assert_eq!(mcrLastMileReverseStep(), 0, "step 1 ok");
+            assert_eq!(mcrLastMileReverseStepCurrentTick(), 0);
+            assert_eq!(mcrLastMileReverseStep(), 2, "recording-start at tick 0");
         }
     }
 }

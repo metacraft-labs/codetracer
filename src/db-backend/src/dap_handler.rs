@@ -1387,15 +1387,19 @@ impl Handler {
         if self.trace_kind == TraceKind::Recreator && budget.max_hops > crate::recreator_origin::RR_DEFAULT_MAX_HOPS {
             budget.max_hops = crate::recreator_origin::RR_DEFAULT_MAX_HOPS;
         }
+        // M17 — MCR backend caps `max_hops` at the raised default of 32
+        // (per spec §12). Requests carrying a higher `args.max_hops`
+        // are clamped down here so the per-tier latency stays bounded.
+        if self.trace_kind == TraceKind::Emulator && budget.max_hops > crate::emulator_origin::MCR_DEFAULT_MAX_HOPS {
+            budget.max_hops = crate::emulator_origin::MCR_DEFAULT_MAX_HOPS;
+        }
         let result = match self.trace_kind {
             TraceKind::Materialized => {
                 let patterns = self.load_origin_patterns();
                 let meta_dat_sources_root = self.meta_dat_sources_root();
                 self.materialized_origin_chain(&args, &budget, &patterns, meta_dat_sources_root.as_deref())
             }
-            TraceKind::Emulator => Err(crate::origin_query::OriginError::unsupported_backend(
-                "emulator (Materialized path is the only V1 backend; emulator support lands in M18)",
-            )),
+            TraceKind::Emulator => self.emulator_origin_chain(&args, &budget),
             TraceKind::Recreator => {
                 let patterns = self.load_origin_patterns();
                 let meta_dat_sources_root = self.meta_dat_sources_root();
@@ -1500,6 +1504,32 @@ impl Handler {
             ),
             None => Err(crate::origin_query::OriginError::unsupported_backend(
                 "recreator (downcast failed — handler initialised for a non-recreator trace kind)",
+            )),
+        }
+    }
+
+    /// M17 — dispatch to the MCR hybrid origin algorithm (spec §6.4).
+    ///
+    /// Mirrors [`Self::recreator_origin_chain`] but routes through the
+    /// `EmulatorReplaySession` (which wraps the in-process Nim MCR
+    /// emulator) and the M17-side [`crate::emulator_origin::
+    /// run_mcr_origin_chain`] driver. When the down-cast fails — i.e.
+    /// `self.trace_kind == TraceKind::Emulator` but the handler was
+    /// constructed with a placeholder session that is NOT an
+    /// `EmulatorReplaySession` — we surface DAP error 6103 so the
+    /// frontend renders the "coming soon" affordance instead of a
+    /// misleading stack trace.
+    fn emulator_origin_chain(
+        &mut self,
+        args: &task::CtOriginChainArguments,
+        budget: &task::OriginBudget,
+    ) -> Result<task::OriginChain, crate::origin_query::OriginError> {
+        let any_session = self.replay.as_any_mut();
+        match any_session.downcast_mut::<crate::emulator_session::EmulatorReplaySession>() {
+            Some(session) => crate::emulator_origin::run_mcr_origin_chain(session, args, budget),
+            None => Err(crate::origin_query::OriginError::unsupported_backend(
+                "emulator (downcast failed — handler initialised for a non-emulator trace kind, \
+                 or the F5c-4 browser-replay session wasn't supplied)",
             )),
         }
     }

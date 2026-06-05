@@ -487,6 +487,21 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
                 mcrGetRegister;\n\
                 mcrReadMemory;\n\
                 mcrGetStepCounter;\n\
+                mcrUndoMapReset;\n\
+                mcrUndoMapSetWindow;\n\
+                mcrUndoMapPushWrite;\n\
+                mcrUndoMapWriteCoverage;\n\
+                mcrUndoMapLastWriteBefore;\n\
+                mcrUndoMapLastWriteResultPc;\n\
+                mcrUndoMapLastWriteResultTick;\n\
+                mcrUndoMapLastWriteResultAddress;\n\
+                mcrUndoMapLastWriteResultSize;\n\
+                mcrUndoMapLastWriteResultValue;\n\
+                mcrLastMileReverseStepReset;\n\
+                mcrLastMileReverseStep;\n\
+                mcrLastMileReverseStepCurrentTick;\n\
+                mcrLastMileReverseStepCurrentPc;\n\
+                mcrLastMileReverseStepCount;\n\
             local:\n\
                 *;\n\
         };\n",

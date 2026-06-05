@@ -1590,6 +1590,15 @@ pub struct OriginMetrics {
     pub steps_scanned: u64,
     pub elapsed_ms: u64,
     pub classifier_hits: u32,
+    /// M17 — number of hops served by Tier 1 (Nim undo-map last-mile
+    /// lookup). Zero on any non-MCR backend; defaulted to keep
+    /// pre-M17 traces deserialising unchanged.
+    #[serde(default)]
+    pub tier_one_hops: u32,
+    /// M17 — number of hops served by Tier 2 (RR-style data-breakpoint
+    /// + reverse-execution fallback). Zero on any non-MCR backend.
+    #[serde(default)]
+    pub tier_two_hops: u32,
 }
 
 /// The full origin chain (spec §4.1).

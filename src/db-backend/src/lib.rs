@@ -46,6 +46,10 @@ pub mod dwarf_index;
 // are identical across targets; build.rs hands the linker a target-
 // appropriate artifact in either case.
 pub mod emulator_ffi;
+// M17 — MCR hybrid origin tier (undo-map last-mile + breakpoint
+// fallback). Sits next to the emulator-session module so it can share
+// the Nim runtime bring-up state and the per-trace FFI surface.
+pub mod emulator_origin;
 pub mod emulator_session;
 // Stubs for the few libc symbols that the wasm-targeted Nim runtime
 // references but that `c_compat.rs` does not already cover (currently
