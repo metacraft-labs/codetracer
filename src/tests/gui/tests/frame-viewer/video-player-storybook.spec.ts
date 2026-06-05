@@ -64,6 +64,57 @@ type ThemeName = "dark" | "light";
 const STUB_FRAME =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFklEQVQIW2P8z8DwnwEEGNFEYRwQDQAxYwL/r3FfggAAAABJRU5ErkJggg==";
 
+async function activateVideoPlayerTab(ctPage: any): Promise<void> {
+  // GoldenLayout marks inactive stack siblings ``display: none``.  The
+  // Video Player tab is appended after the editor (M3 additive placement)
+  // so the editor is the active tab.  Click the tab to bring the player
+  // forward — once it's the active tab in its stack, the storybook
+  // snapshots capture an actually-visible component instead of an empty
+  // hidden div.
+  const tab = ctPage.locator(".lm_tab", { hasText: "VIDEO PLAYER" });
+  await expect(tab).toBeVisible();
+  // GoldenLayout overlays a close-X on the right of each tab; for tabs
+  // with long titles ("VIDEO PLAYER") the close button covers most of
+  // the click area.  Aim at the left edge so the title — not the
+  // close-X — receives the click.
+  await tab.click({ position: { x: 6, y: 8 } });
+
+  // The default test layout places the Video Player in the FILES stack
+  // (the editor-stack heuristic falls through because the bundled
+  // layout has no editor entry — see ``visual_replay_layout.nim``
+  // §addVisualReplayTabs documentation).  That stack is only ~254 px
+  // wide, which is enough for the tab strip but causes the transport
+  // bar to overflow horizontally — ``overflow: hidden`` on the player
+  // root clips the rate badge / buffering dot off-screen, which
+  // breaks both ``toBeVisible`` assertions and ``toHaveScreenshot``.
+  // Pin the panel into a fixed-position overlay sized to fit the
+  // entire transport bar so the snapshots capture the production
+  // chrome (rate badge, buffering dot) instead of a narrow strip.
+  // Test-only tweak; the production placement is unaffected.
+  await ctPage.evaluate(() => {
+    const panel = document.querySelector(".video-player-component") as HTMLElement | null;
+    if (!panel) return;
+    panel.style.position = "fixed";
+    panel.style.top = "60px";
+    panel.style.left = "20px";
+    panel.style.width = "1200px";
+    panel.style.height = "640px";
+    panel.style.zIndex = "9999";
+    panel.style.background = "#1e1e1e";
+    // Make sure the inner flex children re-flow against the new
+    // 1200 px width.  Without these explicit ``minWidth`` hints the
+    // transport bar honours its original 254 px host stack and the
+    // rate badge / buffering dot stay clipped.
+    const stage = panel.querySelector(".video-player-stage") as HTMLElement | null;
+    if (stage) stage.style.minWidth = "1180px";
+    const transport = panel.querySelector(".video-player-transport") as HTMLElement | null;
+    if (transport) transport.style.minWidth = "1180px";
+    const scrubber = panel.querySelector(".video-player-scrubber") as HTMLElement | null;
+    if (scrubber) scrubber.style.minWidth = "1180px";
+  });
+  await ctPage.waitForTimeout(150);
+}
+
 async function applyTheme(ctPage: any, theme: ThemeName): Promise<void> {
   // The ``setTheme`` hook is installed alongside the Video Player VM
   // when ``data.startOptions.inTest`` (see ``ui/video_player.nim``),
@@ -288,6 +339,7 @@ test.describe("Visual Replay Video Player storybook", () => {
   test.describe("dark theme", () => {
     for (const scenario of SCENARIOS) {
       test(scenario.description, async ({ ctPage }) => {
+        await activateVideoPlayerTab(ctPage);
         await expect(ctPage.locator(".video-player-component")).toBeVisible();
         await applyTheme(ctPage, "dark");
         await withScenario(ctPage, scenario.state);
@@ -306,6 +358,7 @@ test.describe("Visual Replay Video Player storybook", () => {
   test.describe("light theme", () => {
     for (const scenario of SCENARIOS) {
       test(scenario.description, async ({ ctPage }) => {
+        await activateVideoPlayerTab(ctPage);
         await expect(ctPage.locator(".video-player-component")).toBeVisible();
         await applyTheme(ctPage, "light");
         await withScenario(ctPage, scenario.state);

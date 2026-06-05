@@ -37,6 +37,11 @@ test.describe("MCR visual replay keyboard shortcuts", () => {
   });
 
   test("video-player/keyboard-shortcuts drive the VM", async ({ ctPage }) => {
+    // The Video Player tab is appended after the editor tab in the same
+    // stack (M3 additive placement).  GoldenLayout hides the inactive
+    // tab's component via ``display: none``; click the tab to bring it
+    // forward before asserting on the chrome.
+    await ctPage.locator(".lm_tab", { hasText: "VIDEO PLAYER" }).click();
     // Wait for the Video Player panel and the test hook to exist.
     await expect(ctPage.locator(".video-player-component")).toBeVisible();
     await expect

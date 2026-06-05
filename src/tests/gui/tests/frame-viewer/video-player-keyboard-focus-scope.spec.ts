@@ -47,6 +47,9 @@ test.describe("MCR visual replay keyboard focus scoping", () => {
 
   test("F10 still drives the debugger when focus is in the source editor",
        async ({ ctPage }) => {
+    // Bring the Video Player tab to front so its component is no longer
+    // ``display: none`` (M3 additive placement leaves the editor active).
+    await ctPage.locator(".lm_tab", { hasText: "VIDEO PLAYER" }).click();
     await expect(ctPage.locator(".video-player-component")).toBeVisible();
     await expect(ctPage.locator(".monaco-editor").first()).toBeVisible();
 
@@ -81,6 +84,10 @@ test.describe("MCR visual replay keyboard focus scoping", () => {
 
   test("ArrowLeft in the source editor does not move the Video Player frame",
        async ({ ctPage }) => {
+    // Bring the Video Player tab forward; otherwise its DOM is
+    // ``display: none`` per GoldenLayout and the visibility check
+    // below would fail.
+    await ctPage.locator(".lm_tab", { hasText: "VIDEO PLAYER" }).click();
     await expect(ctPage.locator(".video-player-component")).toBeVisible();
     await expect
       .poll(async () =>

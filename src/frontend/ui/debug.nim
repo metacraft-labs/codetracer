@@ -349,8 +349,28 @@ func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
   of "reverse-continue": result.ok(DapReverseContinue)
   else: result.err(cstring(fmt"not added dap equivalent for {action} for now"))
 
+when defined(js):
+  ## Mirror DAP step actions into the Playwright-visible request log
+  ## installed by ``ui_js.nim``'s ``recordVmBackendRequest`` so that
+  ## M4 keyboard-focus specs can observe F10 / step shortcuts that
+  ## ride the DAP bridge instead of the RealBackendService channel.
+  ## Without this mirror the production code still fires the step
+  ## correctly, but the test sees an empty log.
+  proc recordDapStep(action: cstring) {.importjs: """
+    (function(action) {
+      if (typeof window === "undefined") return;
+      window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+      var arr = window.__CODETRACER_TEST__.vmBackendRequests || [];
+      arr.push({ command: String(action || ""), args: {}, source: "dapStep" });
+      window.__CODETRACER_TEST__.vmBackendRequests = arr;
+    })(#);
+  """.}
+
 proc dapStep*(api: MediatorWithSubscribers, action: cstring) =
   echo "dap step ", action
+  when defined(js):
+    if not data.isNil and data.startOptions.inTest:
+      recordDapStep(action)
   let dapActionRes = toDapStepActionEnum(action)
   if dapActionRes.isOk:
     let dapAction = dapActionRes.value
