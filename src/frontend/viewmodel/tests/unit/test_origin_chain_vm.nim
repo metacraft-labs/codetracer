@@ -755,6 +755,119 @@ suite "M4 — State Pane renders inline origin badge per row":
       check req.get.args["variableName"].getStr == "pending"
       dispose()
 
+  test "test_state_pane_row_context_menu_dispatches_show_value_origin":
+    ## M4 deliverable §3.1 — right-click on a State Pane variable row
+    ## opens a context menu whose "Show value origin" entry routes
+    ## through ``StateVM.onShowOrigin``, which (a) dispatches
+    ## ``ct/originChain`` via the backend and (b) opens the dedicated
+    ## side panel by setting ``OriginChainVM.sidePanelOpen.val = true``
+    ## and populating ``activeChain`` once the DAP response lands.
+    ##
+    ## The test exercises Option-A from the brief: it fires
+    ## ``contextmenu`` on the rendered row's MockNode so the
+    ## handler attached by ``renderVariableRowImpl`` actually runs (the
+    ## menu items appear in ``StateVM.lastContextMenu``), then invokes
+    ## the "Show value origin" action proc and asserts the wire side
+    ## effects via the same ``MockBackendService`` /
+    ## ``applyChainResponse`` pattern the prior tests use.
+    createRoot proc(dispose: proc()) =
+      let (originVM, stateVM, store, mock) = makeOriginVM()
+      let r = MockRenderer()
+      store.updateLocals(@[
+        makeVariable("total", "42", "int"),
+      ])
+      stateVM.updateOriginSummaries(@[
+        ("total", OriginSummary(terminatorKind: tkwLiteral,
+                                terminatorExpr: "10", hopCount: 1)),
+      ])
+      # Install the host bridge ``state.nim`` would install so the
+      # action's call to ``stateVM.onShowOrigin`` flows through to
+      # ``OriginChainVM.onShowOrigin`` — that's where the side-panel
+      # signal flips and the breadcrumb is pushed.
+      stateVM.onShowOriginProc = proc(expression: string;
+                                      location: Location) =
+        originVM.onShowOrigin(expression, location)
+
+      let panel = renderStatePanel(r, stateVM)
+      # Locate the row by its ``data-variable-name`` attribute.
+      var row: MockNode = nil
+      proc findRow(node: MockNode) =
+        if row != nil:
+          return
+        if node.kind == mnkElement and
+            node.attributes.getOrDefault("data-variable-name", "") == "total":
+          row = node
+          return
+        for child in node.children:
+          findRow(child)
+      findRow(panel)
+      check row != nil
+
+      # Verify the row carries the renderer-agnostic ``contextmenu``
+      # listener (registered via the DSL's ``oncontextmenu = handler``
+      # rewrite — see ``isonim/dsl/transform.nim::eventName``).  Without
+      # this the handler is silently absent and the menu wouldn't open.
+      check "contextmenu" in row.eventListeners or
+            "contextmenu" in row.eventHandlers
+      # Fire the right-click — the handler reads the row's live state
+      # and publishes the menu through ``StateVM.lastContextMenu`` so
+      # tests can interrogate the entries without touching the
+      # JS-only ``showContextMenu`` primitive.
+      row.fireEvent("contextmenu")
+      let menu = stateVM.lastContextMenu.val
+      check menu.len >= 1
+      var showOriginEntry: OriginContextMenuEntry
+      var found = false
+      for entry in menu:
+        if entry.label == "Show value origin":
+          showOriginEntry = entry
+          found = true
+      check found
+      check showOriginEntry.hint == "Ctrl+Shift+O"
+      check not showOriginEntry.action.isNil
+
+      # Pre-condition: side panel is closed and the backend log is
+      # empty (we cleared it during ``makeOriginVM``).
+      check not originVM.sidePanelOpen.val
+      check mock.findCommand("ct/originChain").isNone
+
+      # Invoke the menu's "Show value origin" action — same code path
+      # the JS-side ``showContextMenu`` would trigger when the user
+      # clicks the menu item.
+      showOriginEntry.action()
+      drain()
+
+      # 1. ``StateVM.onShowOrigin`` dispatches ``ct/originChain``
+      #    through ``BackendService.send`` with the variable name.
+      let req = mock.findCommand("ct/originChain")
+      check req.isSome
+      check req.get.args["variableName"].getStr == "total"
+      # 2. The host bridge forwarded the call to ``OriginChainVM`` which
+      #    opens the dedicated side panel per spec §3.2.2.
+      check originVM.sidePanelOpen.val == true
+      # 3. ``activeChain`` becomes Some after the DAP response lands.
+      #    The mock returns ``%*{}`` so we synthesise the response the
+      #    real db-backend would dispatch through ``applyChainResponse``
+      #    (same pattern the existing ``activeChain`` test uses).
+      check originVM.activeChain.val.isNone
+      let chain = OriginChain(
+        queryVariable: "total",
+        queryStepId: -1,
+        hops: @[
+          OriginHop(kind: okTrivialCopy, targetExpr: "total",
+                    sourceExpr: "10", stepId: -1,
+                    location: OriginLocation(path: "fixture.py", line: 1),
+                    confidence: 1.0),
+        ],
+        terminator: Terminator(kind: tkwLiteral, expression: "10"),
+        confidence: 1.0,
+      )
+      originVM.applyChainResponse(chain)
+      check originVM.activeChain.val.isSome
+      check originVM.activeChain.val.get.queryVariable == "total"
+      check originVM.activeChain.val.get.terminator.kind == tkwLiteral
+      dispose()
+
 # ---------------------------------------------------------------------------
 # M4 fix-up Gap 1 / Gap 2 — wire-shape extractors that ``ui/value.nim``
 # (history popover) and ``ui/flow.nim`` (omniscience-flow overlay) use

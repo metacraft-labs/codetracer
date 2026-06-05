@@ -111,6 +111,34 @@ type
     onShowOriginProc*: proc(expression: string; location: Location)
       ## Optional bridge invoked by `onShowOrigin` — installed by
       ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
+    lastContextMenu*: Signal[seq[OriginContextMenuEntry]]
+      ## Renderer-agnostic mirror of the most recently dispatched
+      ## right-click context menu (M4 deliverable §3.1 "right-click
+      ## context menu on State Pane variable rows"). The State Pane
+      ## row's ``contextmenu`` handler populates this signal before
+      ## the JS-only ``showContextMenu`` primitive is invoked so
+      ## headless tests can inspect the menu items and exercise the
+      ## "Show value origin" action proc without running a real DOM.
+
+  OriginContextMenuEntry* = object
+    ## Renderer-agnostic context-menu item used by the State Pane
+    ## row's right-click handler.  Mirrors the relevant fields of the
+    ## JS-only ``ContextMenuItem`` (``frontend/types.nim``) so the
+    ## Mock-side test can build + invoke menu items without depending
+    ## on the legacy ``kdom.Event`` shape.  The JS-side row handler
+    ## adapts each entry into a ``ContextMenuItem`` before passing the
+    ## menu list to ``showContextMenu``.
+    label*: string
+      ## Visible menu-item label, e.g. ``"Show value origin"``.
+    hint*: string
+      ## Optional keyboard-shortcut hint shown right-aligned in the
+      ## menu (matches the legacy ``ContextMenuItem.hint`` semantics).
+    action*: proc()
+      ## Action invoked when the user clicks the menu item.  For the
+      ## "Show value origin" item this calls back into
+      ## ``StateVM.onShowOrigin`` so the host bridge dispatches a
+      ## ``ct/originChain`` request AND opens the side panel through
+      ## the ``OriginChainVM`` (spec §3.1 + §3.2.2).
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -357,6 +385,7 @@ proc createStateVM*(store: ReplayDataStore;
     let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
     let originSummaries = createSignal(initTable[string, OriginSummary]())
     let originPreferences = createSignal(defaultOriginPreferences())
+    let lastContextMenu = createSignal(newSeq[OriginContextMenuEntry]())
 
     # Derived: pick the right variable list based on the active tab.
     let currentVariables = createMemo[seq[Variable]] proc(): seq[Variable] =
@@ -398,6 +427,7 @@ proc createStateVM*(store: ReplayDataStore;
       breadcrumbStack: breadcrumbStack,
       originSummaries: originSummaries,
       originPreferences: originPreferences,
+      lastContextMenu: lastContextMenu,
       disposeProc: dispose,
     )
 
