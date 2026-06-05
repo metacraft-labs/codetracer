@@ -456,6 +456,92 @@ suite "PixelHistoryVM":
 
       dispose()
 
+  # M6: explicit source-jump entry-point tests.  The whole-row click path
+  # exercised by ``selectEntry`` above is the user-facing affordance, but the
+  # public ``jumpToSourceForEntry`` proc is the contract any future
+  # alternative trigger (icon button, context menu, keyboard shortcut)
+  # should call.  These tests pin the input → backend-command shape and the
+  # defensive edge cases the spec leaves underspecified.
+  test "jumpToSourceForEntry dispatches ct/seek-to-geid for the entry's GEID":
+    createRoot proc(dispose: proc()) =
+      let fake = makeFakeClient()
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createPixelHistoryVM(fake.client, store)
+
+      vm.loadPixelHistory(10, 20, 0)
+      drain()
+      let dispatched = vm.jumpToSourceForEntry(0)
+
+      check dispatched
+      # The whole-row click handler is NOT triggered here — we only
+      # exercise ``jumpToSourceForEntry`` — so ``selectedEntry`` stays
+      # at its initial ``none`` and the seek command is the only call
+      # routed through the store.
+      check vm.selectedEntry.val.isNone
+      check mock.receivedCommands.len == 1
+      check mock.receivedCommands[0].command == SeekToGeidCommand
+      check mock.receivedCommands[0].args["geid"].getBiggestInt == 101
+
+      dispose()
+
+  test "jumpToSourceForEntry is a no-op for out-of-range indices":
+    createRoot proc(dispose: proc()) =
+      let fake = makeFakeClient()
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createPixelHistoryVM(fake.client, store)
+
+      vm.loadPixelHistory(10, 20, 0)
+      drain()
+
+      check not vm.jumpToSourceForEntry(-1)
+      check not vm.jumpToSourceForEntry(999)
+      check mock.receivedCommands.len == 0
+
+      dispose()
+
+  test "jumpToSourceForEntry skips entries with no source mapping (geid == 0)":
+    createRoot proc(dispose: proc()) =
+      let fake = makeFakeClient()
+      let mock = newMockBackendService(autoRespond = true)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createPixelHistoryVM(fake.client, store)
+
+      # Inject a synthetic entry whose GEID is 0 — this models a draw
+      # call that the backend could not resolve to a source location
+      # (e.g. a generated shader-compile step that has no user-facing
+      # line).  The spec leaves the UX undefined; the defensive choice
+      # is a silent no-op rather than misleading the editor.
+      vm.entries.val = @[
+        VisualReplayPixelHistoryEntry(
+          geid: 0'u64,
+          drawCallIndex: 7,
+          passed: true,
+          testStatus: VisualReplayPixelTestStatus(
+            depth: "pass", stencil: "pass", blend: "applied", cull: "pass"))]
+
+      check not vm.jumpToSourceForEntry(0)
+      check mock.receivedCommands.len == 0
+
+      dispose()
+
+  test "jumpToSourceForEntry is a no-op when no replay store is wired":
+    # When the PixelHistoryVM is constructed without a ReplayDataStore
+    # (e.g. early bootstrap or unit tests that don't need backend
+    # plumbing), the source-jump path must remain inert — there is no
+    # transport to dispatch ``ct/seek-to-geid`` on — but it must still
+    # be safe to call from view code.
+    let fake = makeFakeClient()
+    let vm = createPixelHistoryVM(fake.client)
+
+    vm.loadPixelHistory(10, 20, 0)
+    drain()
+
+    check not vm.jumpToSourceForEntry(0)
+
+    vm.dispose()
+
 suite "ShaderDebugVM":
   test "parses real ct_gfx_player shader debug response":
     let payload = parseJson("""

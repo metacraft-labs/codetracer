@@ -74,8 +74,18 @@ template renderPixelHistoryPanelImpl(r, vm, rootClass: untyped): untyped =
           text "Click a frame pixel"
       tdiv(class = "pixel-history-list"):
         for i, entry in vm.entries.val:
+          # M6: the whole row is the "jump to source" affordance — clicking
+          # routes through ``selectEntry`` which calls
+          # ``jumpToSourceForEntry`` and, via the backend's
+          # ``ct/seek-to-geid`` → ``complete-move`` chain, opens the source
+          # file at the line that issued this draw call.  The ``title`` is
+          # the discoverability cue the spec asks for ("click an entry...
+          # to jump the editor"); entries with no source mapping
+          # (``geid == 0``) are silently no-ops at the VM layer.
           button(class = entryClass(vm, i),
                  `data-geid` = $entry.geid,
+                 title = "Click to jump to the source line that issued draw " &
+                          $entry.drawCallIndex,
                  onclick = onEntryClick(vm, i)):
             tdiv(class = "pixel-history-entry-main"):
               span(class = "pixel-history-draw"):
