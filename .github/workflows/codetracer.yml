@@ -504,6 +504,63 @@ jobs:
       - name: Run Reprobuild macOS smoke
         run: nix develop . --command just test-reprobuild-macos-smoke
 
+  # M12: macOS verification pass for Value Origin Tracking.
+  # Per-PR subset: Python materialized + Rust RR + MCP/CLI smoke. The full
+  # per-language matrix (Ruby, JS, C, C++, Nim, Go, smart-contract languages)
+  # runs nightly via origin-dap-macos-nightly below.
+  #
+  # Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org
+  # §M12. The CT_TEST_LANGS env var is read by the just test-origin-dap
+  # target as a comma-separated allowlist (default 'all').
+  origin-dap-macos:
+    runs-on: [self-hosted, darwin, nix-darwin, aarch64-darwin]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Run origin-DAP per-PR subset (python + rust)
+        env:
+          CT_TEST_LANGS: python,rust
+        run: nix develop . --command just test-origin-dap
+
+  # M12: macOS nightly full matrix — runs every supported language. Scheduled
+  # via the cron job at the top of this workflow (or manually via workflow_dispatch).
+  origin-dap-macos-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, darwin, nix-darwin, aarch64-darwin]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Run origin-DAP full matrix (all languages)
+        env:
+          CT_TEST_LANGS: all
+        run: nix develop . --command just test-origin-dap
+
   push-gpg-public-key:
     runs-on: [self-hosted, nixos]
     steps:
