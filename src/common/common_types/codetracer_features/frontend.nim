@@ -282,7 +282,8 @@ type
     VCS = 41,
     FrameViewer = 42,
     PixelHistory = 43,
-    ShaderDebug = 44
+    ShaderDebug = 44,
+    VideoPlayer = 45
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

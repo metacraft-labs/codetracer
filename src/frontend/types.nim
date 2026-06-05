@@ -1004,6 +1004,12 @@ type
 
   ShaderDebugComponent* = ref object of Component
 
+  VideoPlayerComponent* = ref object of Component
+    ## Video-player UI for visual replay traces. Wraps the existing
+    ## FrameViewerVM with playback chrome (Play/Pause/scrub/FF/RW/Step)
+    ## and a colour-picker-style pixel selector.
+    ## See codetracer-specs/GUI/Debugging-Features/Visual-Replay.md.
+
   AgentActivityDeepReviewComponent* = ref object of Component
     ## Enhanced agent activity pane that displays DeepReview data
     ## (coverage summary, test results, traced functions) alongside

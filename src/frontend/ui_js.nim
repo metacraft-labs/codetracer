@@ -8,7 +8,7 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
-      pixel_history, shader_debug],
+      pixel_history, shader_debug, video_player],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
   viewmodel/store/replay_data_store,
@@ -1542,6 +1542,8 @@ when not defined(ctInExtension):
         pixel_history.initPixelHistoryVMWithStore(activeSessionVM.store)
       initPanelVM("initShaderDebugVMWithStore"):
         shader_debug.initShaderDebugVMWithStore(activeSessionVM.store)
+      initPanelVM("initVideoPlayerVMWithStore"):
+        video_player.initVideoPlayerVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityVMWithStore"):
         agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
       initPanelVM("initAgentActivityDeepReviewVMWithStore"):
@@ -1894,6 +1896,7 @@ proc onTraceLoaded(
     if response.visualReplayPlayerError.isNil: cstring""
     else: response.visualReplayPlayerError
   frame_viewer.syncVisualReplaySessionIntoVM()
+  video_player.syncVisualReplaySessionIntoPlayerVM()
   if data.activeSession.visualReplayAvailable and data.ui.layout.isNil:
     data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](
       JSON.parse(cstring(defaultVisualReplayLayoutJson)))

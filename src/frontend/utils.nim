@@ -926,6 +926,10 @@ proc makeShaderDebugComponent*(data: Data, id: int): ShaderDebugComponent =
   result = ShaderDebugComponent(id: id)
   data.registerComponent(result, Content.ShaderDebug)
 
+proc makeVideoPlayerComponent*(data: Data, id: int): VideoPlayerComponent =
+  result = VideoPlayerComponent(id: id)
+  data.registerComponent(result, Content.VideoPlayer)
+
 proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
   ## Create a new AgentActivityDeepReviewComponent.
   ## Starts with empty DeepReview data and waits for notifications from
@@ -1004,6 +1008,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.FrameViewer:     data.makeFrameViewerComponent(id)
   of Content.PixelHistory:    data.makePixelHistoryComponent(id)
   of Content.ShaderDebug:     data.makeShaderDebugComponent(id)
+  of Content.VideoPlayer:     data.makeVideoPlayerComponent(id)
   of Content.AgentActivityDeepReview: data.makeAgentActivityDeepReviewComponent(id)
   of Content.RequestPanel:    data.makeRequestPanelComponent(id)
   of Content.VCS:             data.makeVCSComponent(id)

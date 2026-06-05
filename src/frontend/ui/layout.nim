@@ -3,7 +3,7 @@ import
   state, editor, debug, menu, status, command, search_results, shell, deepreview, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
-  frame_viewer, pixel_history, shader_debug,
+  frame_viewer, pixel_history, shader_debug, video_player,
   vcs,
   agent_activity, agent_activity_deepreview, agent_workspace,
   session_switch, panel_transfer, auto_hide, auto_hide_overlay,
@@ -561,6 +561,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.FrameViewer,
       Content.PixelHistory,
       Content.ShaderDebug,
+      Content.VideoPlayer,
     }
 
     var containerId: cstring
@@ -782,6 +783,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if state.content == Content.ShaderDebug:
           shader_debug.tryMountIsoNimShaderDebugPanel(
             ShaderDebugComponent(component))
+
+        if state.content == Content.VideoPlayer:
+          video_player.syncVisualReplaySessionIntoPlayerVM()
+          video_player.tryMountIsoNimVideoPlayerPanel(
+            VideoPlayerComponent(component))
 
         # CaptionBarProgress: render via IsoNim WebRenderer directly
         # into the GL container. Progress and hover mutation paths refresh

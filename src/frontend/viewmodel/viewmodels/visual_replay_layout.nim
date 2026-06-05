@@ -33,6 +33,7 @@ const
   FrameViewerContentId* = 42
   PixelHistoryContentId* = 43
   ShaderDebugContentId* = 44
+  VideoPlayerContentId* = 45
 
 proc joinTracePath(dir, name: string): string =
   if dir.len == 0:
@@ -70,6 +71,16 @@ const defaultVisualReplayLayoutJson* = """{
             "type": "stack",
             "size": "62%",
             "content": [
+              {
+                "type": "component",
+                "componentType": "genericUiComponent",
+                "componentState": {
+                  "id": 0,
+                  "label": "videoPlayerComponent-0",
+                  "content": 45
+                },
+                "title": "genericUiComponent"
+              },
               {
                 "type": "component",
                 "componentType": "genericUiComponent",
