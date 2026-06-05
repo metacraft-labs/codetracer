@@ -396,15 +396,11 @@ type
 proc layoutScrubTicks*(clearFrames: openArray[int]; frameCount: int):
     seq[ScrubTick] =
   ## Compute the geometry of clear-frame tick marks under the scrub
-  ## slider.  The spec wants ticks at frames flagged ``clear`` in
-  ## ``gfxfrm.idx``; the backend doesn't expose that flag through
-  ## ``/info`` today (see Visual-Replay.milestones.org M5-followup),
-  ## so the live view feeds an empty seq and renders no ticks.
-  ##
-  ## This helper is unit-tested with stub indices so the rendering
-  ## code path is ready the moment the backend learns to report the
-  ## clear-frame index.  The view's tick template can then consume the
-  ## returned sequence verbatim.
+  ## slider.  Returns one ``ScrubTick`` per frame flagged ``clear`` in
+  ## ``gfxfrm.idx`` (i.e. scene boundaries / framebuffer-cleared
+  ## frames); the indices arrive on ``VisualReplayInfo.clearFrames``
+  ## via the ``/info`` endpoint and ride to the view through
+  ## ``FrameViewerVM.clearFrames``.
   if frameCount <= 1 or clearFrames.len == 0:
     return @[]
   let lastFrame = frameCount - 1
