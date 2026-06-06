@@ -618,6 +618,50 @@ fn ctfs_error(msg: impl Into<String>) -> Box<dyn Error> {
     msg.into().into()
 }
 
+/// M20 — attempt to load the M19 origin-metadata extension namespaces
+/// (`originmeta.tc` + `source_exprs.tc`) from a CTFS container. Returns
+/// the parsed [`OriginMetadataDecoder`] on success; `None` when either
+/// file is absent or malformed.
+///
+/// The reader is deliberately tolerant: a missing `originmeta.tc` (the
+/// common case today, since the recorder-side indexer integration is a
+/// follow-on milestone) simply produces a Mode-2 trace (omniscient log
+/// only) — origin queries still flow through the M20 algorithm but the
+/// classifier-fabricated fallback is invoked per hop.
+///
+/// Malformed bytes are logged via `eprintln!` and the decoder is left
+/// as `None` so the rest of the session continues to load cleanly.
+fn load_origin_metadata_decoder(
+    ctfs: &mut crate::ctfs_trace_reader::ctfs_container::CtfsReader,
+) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
+    let originmeta_bytes = match ctfs.read_file(crate::origin_metadata_indexer::CTFS_ORIGINMETA_FILE) {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        _ => return None,
+    };
+    let source_exprs_bytes = match ctfs.read_file(crate::origin_metadata_indexer::CTFS_SOURCE_EXPRS_FILE) {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        _ => {
+            eprintln!(
+                "warning: EmulatorReplaySession found `{}` without `{}`; metadata decoder disabled",
+                crate::origin_metadata_indexer::CTFS_ORIGINMETA_FILE,
+                crate::origin_metadata_indexer::CTFS_SOURCE_EXPRS_FILE
+            );
+            return None;
+        }
+    };
+    match crate::origin_metadata_indexer::OriginMetadataDecoder::load(&originmeta_bytes, &source_exprs_bytes) {
+        Some(decoder) => Some(decoder),
+        None => {
+            eprintln!(
+                "warning: EmulatorReplaySession could not parse `{}` / `{}`; metadata decoder disabled",
+                crate::origin_metadata_indexer::CTFS_ORIGINMETA_FILE,
+                crate::origin_metadata_indexer::CTFS_SOURCE_EXPRS_FILE
+            );
+            None
+        }
+    }
+}
+
 /// `ReplaySession` backed by the Nim MCR emulator.
 ///
 /// Construct with [`new`](Self::new) for an empty emulator (used by the
@@ -715,6 +759,18 @@ pub struct EmulatorReplaySession {
     /// [`crate::omniscient_db::OmniscientDb`] trait is also imported
     /// at module top-level so `is_present()` resolves here.
     omniscient_handle: crate::omniscient_db::FfiOmniscientDb,
+    /// M20 — origin-metadata decoder produced by the M19 indexer (or
+    /// loaded from the CTFS `originmeta.tc` + `source_exprs.tc`
+    /// namespaces). `None` when the trace ships only the M18
+    /// omniscient log (Mode 2); `Some(_)` when both the log and the
+    /// metadata extension are present (Mode 3).
+    ///
+    /// The dispatcher in
+    /// [`crate::dap_handler::Handler::emulator_origin_chain`] reads
+    /// this through [`Self::origin_metadata_decoder`] to decide
+    /// whether to route to the M20 omniscient tier (metadata-driven,
+    /// no per-hop classifier) or the M17 hybrid fallback.
+    origin_metadata_decoder: Option<crate::origin_metadata_indexer::OriginMetadataDecoder>,
 }
 
 use crate::omniscient_db::OmniscientDb as _;
@@ -813,7 +869,35 @@ impl EmulatorReplaySession {
             // pushes data into it.
             omniscient_present: false,
             omniscient_handle: crate::omniscient_db::FfiOmniscientDb::new(),
+            // M20 — empty sessions never ship `originmeta.tc`; the
+            // decoder slot stays empty until the test driver installs
+            // one via [`Self::install_origin_metadata_decoder`] or
+            // the CTFS loader populates it.
+            origin_metadata_decoder: None,
         }
+    }
+
+    /// M20 — install an [`crate::origin_metadata_indexer::OriginMetadataDecoder`]
+    /// onto the session. The M20 dispatcher consults this through
+    /// [`Self::origin_metadata_decoder`] to decide whether to take the
+    /// metadata-driven §6.8.2 path (when present) or the §6.5
+    /// write-log + classifier fallback (when absent).
+    ///
+    /// Production callers populate this from the CTFS namespaces at
+    /// `new_from_ctfs_bytes` time; the integration tests install a
+    /// synthetic decoder produced via the M19 indexer so the algorithm
+    /// is exercisable end-to-end without a recorded trace.
+    pub fn install_origin_metadata_decoder(&mut self, decoder: crate::origin_metadata_indexer::OriginMetadataDecoder) {
+        self.origin_metadata_decoder = Some(decoder);
+    }
+
+    /// M20 — read-only accessor for the installed origin-metadata
+    /// decoder. `None` when the trace's CTFS container has no
+    /// `originmeta.tc` namespace (Mode 1 or Mode 2). The dispatcher
+    /// reads this together with [`Self::omniscient_db`] (the M18
+    /// trait surface) to pick the highest-quality available tier.
+    pub fn origin_metadata_decoder(&self) -> Option<&crate::origin_metadata_indexer::OriginMetadataDecoder> {
+        self.origin_metadata_decoder.as_ref()
     }
 
     /// Create a session from raw CTFS bytes (typically the in-memory
@@ -953,6 +1037,13 @@ impl EmulatorReplaySession {
             breakpoint_static_pcs: HashSet::new(),
             omniscient_present,
             omniscient_handle: crate::omniscient_db::FfiOmniscientDb::new(),
+            // M20 — attempt to load the `originmeta.tc` +
+            // `source_exprs.tc` CTFS namespaces. When both are present
+            // and parse cleanly the decoder routes origin queries
+            // through the metadata-driven §6.8.2 path. Missing or
+            // malformed namespaces fall back to the M18-only path
+            // (Mode 2 — write log + classifier at query time).
+            origin_metadata_decoder: load_origin_metadata_decoder(&mut ctfs),
         })
     }
 

@@ -964,6 +964,38 @@ impl OriginMetadataDecoder {
             }
         }
     }
+
+    /// Look up the origin metadata for a specific write — i.e. require
+    /// an **exact** `(address, tick)` match (Native) or
+    /// `(VariableId, StepId)` match (Materialized). Returns `None`
+    /// when the keyed write isn't in the per-trace metadata namespace
+    /// (the "partial coverage" case of spec §6.8.5).
+    ///
+    /// M20's omniscient origin algorithm already has a `WriteRecord`
+    /// from the omniscient log; it only wants the metadata for that
+    /// exact write. The "at-or-before" semantics of
+    /// [`Self::origin_metadata_at`] are right for the
+    /// `last_record_before` spec walk, but they'd produce false
+    /// positives when the algorithm wants to detect "this exact write
+    /// is uncovered" so it can fall back to the classifier path.
+    pub fn origin_metadata_exact(&self, key: OriginMetadataKey) -> Option<OriginMetadataRecord> {
+        match key {
+            OriginMetadataKey::Native { address, tick } => {
+                let list = self.native_by_address.get(&address)?;
+                let pos = list.partition_point(|(t, _)| *t < tick);
+                if pos < list.len() && list[pos].0 == tick {
+                    Some(list[pos].1)
+                } else {
+                    None
+                }
+            }
+            OriginMetadataKey::Materialized { variable_id, step_id } => {
+                // Materialized is already an exact-match lookup — reuse
+                // the existing code path verbatim.
+                self.origin_metadata_at(OriginMetadataKey::Materialized { variable_id, step_id })
+            }
+        }
+    }
 }
 
 /// Per-trace origin config persisted in `meta_dat/origin-config.toml`.

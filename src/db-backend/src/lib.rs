@@ -68,6 +68,12 @@ pub mod nim_mangling;
 // owns the storage; this module exposes it through a Rust trait that
 // origin queries (M20) and `db.rs::load_history` can consume.
 pub mod omniscient_db;
+// M20 — MCR omniscient origin tier (consumes the M19 metadata
+// extension). Sits next to the M17 hybrid module
+// ([`emulator_origin`]) and the M18 omniscient surface
+// ([`omniscient_db`]); the dispatcher in [`dap_handler`] prefers this
+// tier whenever both the omniscient log + originmeta.tc are present.
+pub mod omniscient_origin;
 // M19 — Origin-metadata streams (opt-in, all TraceKinds). Adds the
 // `originmeta.tc` / `source_exprs.tc` / `varwrites.tc` CTFS namespaces,
 // the materialized + native indexers that produce them, the reader-side

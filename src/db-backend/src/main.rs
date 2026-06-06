@@ -65,6 +65,12 @@ mod nim_mangling;
 // the `crate::omniscient_db` path.
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod omniscient_db;
+// M20 — MCR omniscient origin tier. Mirrors the lib.rs declaration
+// above; the bin needs its own copy so the dispatcher in
+// `dap_handler::Handler::emulator_origin_chain` can route to the M20
+// driver.
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod omniscient_origin;
 mod origin_metadata_indexer;
 mod origin_query;
 mod paths;

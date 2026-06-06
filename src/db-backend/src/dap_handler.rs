@@ -1508,17 +1508,32 @@ impl Handler {
         }
     }
 
-    /// M17 — dispatch to the MCR hybrid origin algorithm (spec §6.4).
+    /// M17 / M20 — dispatch to the appropriate MCR-backend origin
+    /// algorithm.
     ///
-    /// Mirrors [`Self::recreator_origin_chain`] but routes through the
-    /// `EmulatorReplaySession` (which wraps the in-process Nim MCR
-    /// emulator) and the M17-side [`crate::emulator_origin::
-    /// run_mcr_origin_chain`] driver. When the down-cast fails — i.e.
-    /// `self.trace_kind == TraceKind::Emulator` but the handler was
-    /// constructed with a placeholder session that is NOT an
-    /// `EmulatorReplaySession` — we surface DAP error 6103 so the
-    /// frontend renders the "coming soon" affordance instead of a
-    /// misleading stack trace.
+    /// **Tier selection (spec §6.7 dispatch summary):**
+    ///
+    /// 1. **M20 omniscient tier** (spec §6.5 + §6.8.2) — selected when
+    ///    the session surfaces an [`crate::omniscient_db::OmniscientDb`]
+    ///    via [`crate::replay::ReplaySession::omniscient_db`]. The M19
+    ///    [`crate::origin_metadata_indexer::OriginMetadataDecoder`]
+    ///    routes us through the metadata-driven §6.8.2 path when also
+    ///    present (Mode 3); otherwise we fall through to the §6.5
+    ///    write-log + classifier shape (Mode 2). The omniscient log
+    ///    supersedes both M17 tiers — no data-breakpoint or
+    ///    reverse-step work is needed.
+    ///
+    /// 2. **M17 hybrid tier** (spec §6.4) — fallback when no
+    ///    omniscient DB is attached to the trace. This keeps the
+    ///    M17-era undo-map + reverse-step path live for traces
+    ///    recorded before the omniscient indexer landed on the
+    ///    recorder side.
+    ///
+    /// When the down-cast fails — i.e. `self.trace_kind ==
+    /// TraceKind::Emulator` but the handler was constructed with a
+    /// placeholder session that is NOT an `EmulatorReplaySession` —
+    /// we surface DAP error 6103 so the frontend renders the
+    /// "coming soon" affordance instead of a misleading stack trace.
     fn emulator_origin_chain(
         &mut self,
         args: &task::CtOriginChainArguments,
@@ -1526,7 +1541,46 @@ impl Handler {
     ) -> Result<task::OriginChain, crate::origin_query::OriginError> {
         let any_session = self.replay.as_any_mut();
         match any_session.downcast_mut::<crate::emulator_session::EmulatorReplaySession>() {
-            Some(session) => crate::emulator_origin::run_mcr_origin_chain(session, args, budget),
+            Some(session) => {
+                // Tier-select per spec §6.7. The omniscient log
+                // supersedes M17's hybrid path whenever the trace
+                // ships one; the metadata decoder is optional and
+                // routes us through the §6.8.2 metadata-driven path
+                // when present.
+                //
+                // The decoder is read first so the borrow doesn't
+                // overlap with the mutable session borrow `run_*`
+                // takes. We clone the decoder out via
+                // `OriginMetadataDecoder: Clone`; the decoder owns its
+                // sorted indexes so the clone is cheap relative to the
+                // omniscient query work that follows.
+                // Tier-select per spec §6.7. The omniscient log
+                // supersedes M17's hybrid path whenever the trace
+                // ships one; the metadata decoder is optional and
+                // routes us through the §6.8.2 metadata-driven path
+                // when present.
+                //
+                // `OmniscientDb` is consulted in a sequenced borrow:
+                // we copy the (zero-sized) FFI handle out by value so
+                // the M20 driver can be called with the session
+                // unborrowed. The session itself isn't touched by the
+                // omniscient driver — the algorithm is pure against
+                // the trait surface.
+                if session.omniscient_db().is_some_and(|db| db.is_present()) {
+                    let handle = crate::omniscient_db::FfiOmniscientDb::new();
+                    let decoder = session.origin_metadata_decoder().cloned();
+                    return crate::omniscient_origin::run_omniscient_origin_chain(
+                        &handle,
+                        decoder.as_ref(),
+                        args,
+                        budget,
+                    );
+                }
+                // No omniscient log on the trace — fall back to the
+                // M17 hybrid path (undo-map last-mile + breakpoint
+                // fallback).
+                crate::emulator_origin::run_mcr_origin_chain(session, args, budget)
+            }
             None => Err(crate::origin_query::OriginError::unsupported_backend(
                 "emulator (downcast failed — handler initialised for a non-emulator trace kind, \
                  or the F5c-4 browser-replay session wasn't supplied)",
