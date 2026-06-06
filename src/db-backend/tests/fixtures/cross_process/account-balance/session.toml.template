@@ -1,0 +1,19 @@
+# Cross-Process Origin E2E — Fixture A session manifest template.
+# `regenerate.sh` fills in the per-recording UUIDv7 ids when it
+# refreshes the trace pair.
+version = 1
+
+[[trace]]
+recording_id = "{{frontend_recording_id}}"
+path = "./frontend.ct"
+role = "frontend"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "{{backend_recording_id}}"
+path = "./backend.ct"
+role = "backend"
+default_thread_prefix = "be"
+
+[correlation]
+correlation_index_mode = "eager"

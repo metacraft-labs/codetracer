@@ -32,6 +32,10 @@ mod core;
 // because `main.rs::run_correlations_subcommand` reaches in directly.
 mod correlation_index;
 mod correlation_markers;
+// M29 — Cross-process origin chain extender. Mirror of the lib.rs
+// declaration above so the bin's `dap_handler` can reach the
+// extender via the `crate::cross_process_origin` path.
+mod cross_process_origin;
 mod ctfs_trace_reader;
 mod dap;
 mod dap_error;
@@ -198,6 +202,37 @@ enum TraceOp {
         /// the marker scanner; useful for the diagnostic-only flow
         /// recommended in spec §10.
         session_or_source: std::path::PathBuf,
+    },
+    /// M29 — `ct trace origin <session.toml> --variable <name>` prints
+    /// the value-origin chain for a queried variable, with each hop
+    /// labelled by the owning process so multi-trace sessions surface
+    /// the cross-process boundary. The session manifest is the entry
+    /// point so the command works the same on single-trace and multi-
+    /// trace sessions. Per the M29 ship-core directive the command
+    /// currently emits the chain shape derived from the session's
+    /// markers + the synthetic chain placeholders the M29 milestone
+    /// uses for verification; full per-backend chain compute lands
+    /// once each backend's recorder fixture is plumbed through to the
+    /// CLI (deferred per M29 PROPERTIES).
+    Origin {
+        /// Path to a `session.toml` manifest. A single `.ct` is
+        /// equivalent to a single-trace manifest.
+        session: std::path::PathBuf,
+        /// Variable / expression to query.
+        #[arg(long)]
+        variable: String,
+        /// Optional thread tag (e.g. `fe:thread-1`). Defaults to the
+        /// first thread of the first trace.
+        #[arg(long)]
+        thread: Option<String>,
+        /// Optional step id; negative means "session current step".
+        #[arg(long, default_value_t = -1i64)]
+        step: i64,
+        /// Output format. Defaults to `text` (human-readable). `json`
+        /// emits the canonical `OriginChain` JSON; `markdown` emits
+        /// the renderer-side markdown shape.
+        #[arg(long, value_parser = ["text", "json", "markdown"], default_value = "text")]
+        format: String,
     },
 }
 
@@ -397,6 +432,15 @@ fn run_trace_subcommand(op: TraceOp) -> Result<(), Box<dyn Error>> {
         TraceOp::Correlations { session_or_source } => {
             run_correlations_subcommand(&session_or_source)?;
         }
+        TraceOp::Origin {
+            session,
+            variable,
+            thread,
+            step,
+            format,
+        } => {
+            run_origin_subcommand(&session, &variable, thread.as_deref(), step, &format)?;
+        }
     }
     Ok(())
 }
@@ -472,6 +516,213 @@ fn run_correlations_subcommand(path: &std::path::Path) -> Result<(), Box<dyn Err
     print!("{}", report.render());
     for diag in result.diagnostics {
         eprintln!("diagnostic {}:{}: {}", diag.path.display(), diag.line, diag.error,);
+    }
+    Ok(())
+}
+
+/// M29 — `ct trace origin <session.toml> --variable <name> ...`
+/// renders the value-origin chain for a queried variable, with each
+/// hop labelled by the owning process.
+///
+/// **Scope per the M29 ship-core directive.** The recorder-driven
+/// fixture infrastructure described in the E2E design doc §3.4
+/// (frontend Vite plugin + per-backend recorder + `record.sh`) is
+/// deferred — without it, the CLI cannot drive a live per-backend
+/// single-trace chain compute. The command therefore emits the
+/// chain shape derived from the session's correlation markers + a
+/// synthetic per-trace skeleton drawn from the markers themselves.
+/// The text/json/markdown rendering paths are exercised end-to-end;
+/// each rendered hop carries the owning process's role + recording
+/// id so multi-trace surfaces are visible.
+fn run_origin_subcommand(
+    session: &std::path::Path,
+    variable: &str,
+    thread: Option<&str>,
+    step: i64,
+    format: &str,
+) -> Result<(), Box<dyn Error>> {
+    use crate::correlation_index::{MarkerEventView, PairIndex};
+    use crate::correlation_markers::{MarkerPayload, MarkerScanner};
+    use crate::cross_process_origin::{SiblingContinuation, TraceIdentity, apply_cross_process_clause};
+    use crate::session_manifest::SessionManifest;
+    use crate::task::{Location, OriginChain, OriginHop, OriginKind, OriginMetrics, Terminator, TerminatorKind};
+
+    let manifest = SessionManifest::load(session)
+        .map_err(|e| -> Box<dyn Error> { format!("failed to load session manifest: {e}").into() })?;
+
+    // Scan the session's source root for correlation markers so the
+    // CLI can identify which traces participate in cross-process
+    // chains.
+    let scan_result = MarkerScanner::scan_roots(&[manifest.base_dir.as_path()]);
+    let mut events: Vec<MarkerEventView> = Vec::new();
+    for (idx, decl) in scan_result.markers.iter().enumerate() {
+        // Best-effort recording-id assignment: scan markers under
+        // each trace's role label. The marker's source file path is
+        // used as a hint for which trace owns it.
+        let owning_recording_id = manifest
+            .traces
+            .iter()
+            .find(|t| decl.location.path.contains(&t.role) || decl.location.path.contains(&t.recording_id.0))
+            .map(|t| t.recording_id.0.clone())
+            .unwrap_or_else(|| {
+                manifest
+                    .traces
+                    .first()
+                    .map(|t| t.recording_id.0.clone())
+                    .unwrap_or_default()
+            });
+        let payload = MarkerPayload {
+            marker_id: idx,
+            boundary_id: decl.boundary_id.clone(),
+            direction: decl.direction,
+            key_text: decl.key_text.clone(),
+            key_value: decl.key_text.clone(),
+            show_text: decl.show_text.clone(),
+            show_value: decl.show_text.clone(),
+            description: decl.description.clone(),
+            format: decl.format.clone(),
+        };
+        events.push(MarkerEventView::new(
+            owning_recording_id,
+            idx as i64,
+            decl.location.path.clone(),
+            decl.location.line,
+            payload,
+        ));
+    }
+    let pair_index = PairIndex::build(&events);
+
+    // Build a synthetic frontend-side chain ending at the receive
+    // marker (when one is declared) so the cross-process composer
+    // can populate the cross-process spans.
+    let first_trace = manifest
+        .traces
+        .first()
+        .ok_or_else(|| -> Box<dyn Error> { "manifest has no [[trace]] entries".into() })?;
+    let hop = OriginHop {
+        kind: OriginKind::TrivialCopy,
+        target_expr: variable.to_string(),
+        source_expr: variable.to_string(),
+        source_variable: None,
+        location: Location {
+            path: format!("<session:{}>", first_trace.role),
+            line: 1,
+            ..Location::default()
+        },
+        source_text: format!("{variable} <- session origin entry point"),
+        step_id: step.max(0),
+        frame_transition: None,
+        operand_snapshots: Vec::new(),
+        truncated_operands: false,
+        confidence: 0.5,
+        classification_provenance: Some("M29 CLI: ct trace origin <session.toml>".to_string()),
+        correlation_transition: None,
+    };
+    let chain = OriginChain {
+        query_variable: variable.to_string(),
+        query_step_id: step,
+        hops: vec![hop],
+        terminator: Terminator::new(TerminatorKind::UnknownSource),
+        truncated: false,
+        continuation_token: None,
+        metrics: OriginMetrics::default(),
+        cross_process_spans: Vec::new(),
+        confidence: 0.5,
+    };
+
+    let identity = TraceIdentity::new(&first_trace.recording_id.0, &first_trace.role);
+    let mut noop_resolver = |_: &str, _: i64, _: &str| -> Option<SiblingContinuation> { None };
+    let (chain, _outcome) = apply_cross_process_clause(
+        chain,
+        &identity,
+        &pair_index,
+        &mut noop_resolver as crate::cross_process_origin::SiblingChainResolver,
+    );
+
+    match format {
+        "json" => {
+            let json = serde_json::to_string_pretty(&chain)?;
+            println!("{json}");
+        }
+        "markdown" => {
+            println!("# Origin chain — `{}`", variable);
+            println!();
+            if let Some(thread) = thread {
+                println!("- **Thread:** `{}`", thread);
+            }
+            println!("- **Session:** `{}`", session.display());
+            println!("- **Trace count:** {}", manifest.traces.len());
+            println!();
+            println!("## Hops");
+            for (i, hop) in chain.hops.iter().enumerate() {
+                let owning_role = chain
+                    .cross_process_spans
+                    .iter()
+                    .find(|s| (s.first_hop_index as usize..=s.last_hop_index as usize).contains(&i))
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("?");
+                println!(
+                    "{}. **[{}]** {} = `{}` ({:?}) at `{}:{}`",
+                    i + 1,
+                    owning_role,
+                    hop.target_expr,
+                    hop.source_expr,
+                    hop.kind,
+                    hop.location.path,
+                    hop.location.line
+                );
+            }
+            println!();
+            println!("## Terminator");
+            println!("- **Kind:** `{:?}`", chain.terminator.kind);
+            if !chain.terminator.expression.is_empty() {
+                println!("- **Expression:** `{}`", chain.terminator.expression);
+            }
+        }
+        _ => {
+            // text (default)
+            println!("origin chain for `{}` in session `{}`", variable, session.display());
+            println!("--------------------------------------------------");
+            if let Some(thread) = thread {
+                println!("thread: {}", thread);
+            }
+            println!("traces: {}", manifest.traces.len());
+            for trace in &manifest.traces {
+                println!(
+                    "  - recording_id={} role={} prefix={}",
+                    trace.recording_id, trace.role, trace.default_thread_prefix
+                );
+            }
+            println!();
+            for (i, hop) in chain.hops.iter().enumerate() {
+                let owning_role = chain
+                    .cross_process_spans
+                    .iter()
+                    .find(|s| (s.first_hop_index as usize..=s.last_hop_index as usize).contains(&i))
+                    .map(|s| s.role.as_str())
+                    .unwrap_or("?");
+                println!(
+                    "hop {}: [{}] {:?} {} <- {} at {}:{}",
+                    i + 1,
+                    owning_role,
+                    hop.kind,
+                    hop.target_expr,
+                    hop.source_expr,
+                    hop.location.path,
+                    hop.location.line
+                );
+                if let Some(tx) = &hop.correlation_transition {
+                    println!(
+                        "    crosses to recording={} step={} (boundary={}, key={})",
+                        tx.correlated_recording_id, tx.correlated_step_id, tx.boundary_id, tx.match_key_value
+                    );
+                }
+            }
+            println!(
+                "terminator: {:?} {}",
+                chain.terminator.kind, chain.terminator.expression
+            );
+        }
     }
     Ok(())
 }

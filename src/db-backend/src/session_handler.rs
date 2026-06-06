@@ -102,7 +102,13 @@ pub fn decompose_thread_id(composed: i64) -> (TraceSlot, u32) {
 
 /// Per-slot snapshot for the `ct/listProcesses` response. The
 /// frontend renders one process-tree row per entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// M29 — `Serialize` / `Deserialize` derives + `camelCase` rename so
+/// the Nim `SessionVM.processTree` reader can ingest the JSON wire
+/// shape without additional translation. `defaultThreadPrefix`
+/// becomes `defaultThreadPrefix` on the wire, etc.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct ProcessListEntry {
     pub recording_id: String,
     pub role: String,

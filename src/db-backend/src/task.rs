@@ -1538,21 +1538,87 @@ pub enum FrameTransitionKind {
     ReturnCapture,
 }
 
-/// Reserved for M29 cross-process spans (spec §4.4). Carried so the wire
-/// shape never breaks when M29 lands.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// M29 cross-process span (spec §4.4). One per process the chain
+/// visits. The `first_hop_index` / `last_hop_index` are 0-based
+/// inclusive indices into `OriginChain.hops` identifying the
+/// contiguous range owned by this process. `recording_id` is the
+/// `session.toml` recording id; `role` is the manifest's role label
+/// ("frontend" / "backend" / ...). The legacy `from_process` /
+/// `to_process` / `correlator` fields are retained for wire
+/// backward-compatibility (defaulted to empty strings when the
+/// algorithm only populates the M29-aligned shape).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct CrossProcessSpan {
+    /// Recording id (UUIDv7 string from `session.toml`) of the process
+    /// that owns the contiguous hop range covered by this span.
+    #[serde(default)]
+    pub recording_id: String,
+    /// Manifest-level role label (e.g. "frontend", "backend").
+    #[serde(default)]
+    pub role: String,
+    /// 0-based inclusive index of the first hop in `OriginChain.hops`
+    /// owned by this process.
+    #[serde(default)]
+    pub first_hop_index: u32,
+    /// 0-based inclusive index of the last hop owned by this process.
+    /// When the span contains no hops yet the value equals
+    /// `first_hop_index` and the renderer treats it as a placeholder.
+    #[serde(default)]
+    pub last_hop_index: u32,
+    /// Legacy field retained for wire backward-compat; new producers
+    /// leave it empty.
+    #[serde(default)]
     pub from_process: String,
+    #[serde(default)]
     pub to_process: String,
+    #[serde(default)]
     pub correlator: String,
 }
 
-/// Reserved for M29 correlation-transition metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// M29 correlation-transition metadata attached to the boundary-
+/// crossing hop. Spec §4.4 mandates carrying the matched sibling-trace
+/// coordinates + the captured match-key + display-variable values so
+/// the frontend can render the boundary chip without round-tripping
+/// the pair index.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct CorrelationTransition {
+    /// Marker direction observed on the *current* hop's side. The
+    /// boundary-crossing hop sits on the Receive side of the wire;
+    /// the algorithm walks to the matched Send marker in the sibling
+    /// trace.
+    #[serde(default)]
+    pub direction: String,
+    /// Manifest-level recording id of the sibling trace the chain
+    /// jumped into (i.e. the process that sent the value).
+    #[serde(default)]
+    pub correlated_recording_id: String,
+    /// Step id inside the sibling trace at which the matched Send
+    /// marker fired.
+    #[serde(default)]
+    pub correlated_step_id: i64,
+    /// Boundary id from the marker (`session.toml` `[correlation]`
+    /// authored value).
+    #[serde(default)]
+    pub boundary_id: String,
+    /// Marker's match-key textual value (the user-authored key
+    /// expression evaluated at marker time).
+    #[serde(default)]
+    pub match_key_value: String,
+    /// Optional `show=<expr>` rendered value, when the marker declared
+    /// one.
+    #[serde(default)]
+    pub display_variable_value: Option<String>,
+    /// Optional human-friendly description (`desc=...`) the user
+    /// supplied on the marker declaration.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Legacy fields retained for wire backward-compat; new producers
+    /// can leave them empty.
+    #[serde(default)]
     pub correlator: String,
+    #[serde(default)]
     pub channel: String,
 }
 

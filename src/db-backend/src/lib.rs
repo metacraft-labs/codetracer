@@ -29,6 +29,11 @@ pub mod calltrace;
 // `correlation_index`.
 pub mod correlation_index;
 pub mod correlation_markers;
+// M29 — Cross-process origin chain extender (spec §14.3). Owns the
+// receive→send composer the dispatcher applies after the per-backend
+// single-trace algorithm. Lives next to `correlation_index` because
+// it consumes the M25 pair index.
+pub mod cross_process_origin;
 
 #[cfg(feature = "io-transport")]
 pub mod core;
