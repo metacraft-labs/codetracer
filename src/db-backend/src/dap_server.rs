@@ -1095,6 +1095,10 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             req.load_args::<crate::task::CtOriginSummaryArguments>()?,
             sender.clone(),
         )?,
+        // M21 — State Pane settings sub-menu indicator (spec §3.7 +
+        // M21 deliverable #4). Returns the active trace's eager-mode
+        // class as a string ("on" / "lazy" / "off" / "unavailable").
+        "ct/originMode" => handler.origin_mode(req.clone(), sender.clone())?,
         "ct/history-jump" => handler.history_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
         "ct/search-calltrace" => {
             handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?, sender.clone())?

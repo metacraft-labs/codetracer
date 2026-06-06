@@ -180,6 +180,26 @@ pub struct Handler {
     /// public type because it is a real signal — internal benchmarks
     /// and future telemetry can read it too.
     pub origin_summary_chain_builds: std::sync::atomic::AtomicUsize,
+
+    /// M21 — optional in-handler [`OriginMetadataDecoder`] used by
+    /// materialized traces that ship the M19 metadata namespace.
+    /// The browser-replay (Emulator) backend exposes its decoder
+    /// through `EmulatorReplaySession::origin_metadata_decoder`; for
+    /// materialized traces (where there's no session to hang the
+    /// decoder off) the handler holds the slot directly. Test
+    /// fixtures call [`Handler::install_materialized_origin_metadata_decoder`]
+    /// to seed it. The recorder-driven boot path lands with the
+    /// materialized recorder follow-on noted in M19's status block.
+    pub(crate) materialized_origin_metadata_decoder: Option<crate::origin_metadata_indexer::OriginMetadataDecoder>,
+
+    /// M21 — lazily computed pattern-fingerprint cache used by the
+    /// placeholder fast-path. The fingerprint is invariant for the
+    /// session (patterns don't reload), so we cache it once and reuse
+    /// it across every `ct/load-history` / `ct/load-flow` per-entry
+    /// placeholder. Without this cache, a 10 000-entry history pays
+    /// 10 000 TOML reads + classifier-pattern walks — the M21
+    /// performance budget (≤ 700 ms) is unreachable.
+    pub(crate) cached_patterns_fingerprint: Option<String>,
 }
 
 // two choices:
@@ -302,6 +322,8 @@ impl Handler {
             macro_sourcemaps: MacroSourceMapCollection::default(),
             origin_summary_cache: HashMap::new(),
             origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
+            materialized_origin_metadata_decoder: None,
+            cached_patterns_fingerprint: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -874,6 +896,26 @@ impl Handler {
         // variable name; the placeholder token captures the per-step
         // `(variable_name, step_id)` pair so each token round-trips
         // independently.
+        //
+        // M21 — when the trace is in Mode 3 (`classify_eager_mode`
+        // returns a class that `flips_eager()`), the per-annotation
+        // default flips to eager. The per-key lookup goes through the
+        // M19 metadata decoder; lazy intervals fall back to a
+        // placeholder so the frontend renders `[?]` until the
+        // background analyser finishes (spec §3.2.3).
+        //
+        // Performance: snapshot the per-call state once. Per-row
+        // helpers (e.g. `variable_id_for`) live on `self.reader`
+        // (cheap), but cloning the decoder per row is not — the
+        // decoder snapshot is taken once and the eager builder
+        // reuses it across every (variable, step) pair.
+        let eager_class = self.classify_eager_mode();
+        let decoder_snapshot = if self.trace_kind == TraceKind::Materialized && eager_class.flips_eager() {
+            self.clone_origin_metadata_decoder()
+        } else {
+            None
+        };
+        let patterns_fingerprint_snapshot = self.patterns_fingerprint_cached();
         let mut flow_update = flow_update;
         if self.trace_kind == TraceKind::Materialized {
             for view in flow_update.view_updates.iter_mut() {
@@ -889,7 +931,14 @@ impl Handler {
                         if step.origin_summaries.contains_key(&name) {
                             continue;
                         }
-                        let summary = self.build_origin_summary_placeholder_at(&name, step_id);
+                        let summary = build_flow_eager_or_placeholder(
+                            &*self.reader,
+                            decoder_snapshot.as_ref(),
+                            eager_class,
+                            &patterns_fingerprint_snapshot,
+                            &name,
+                            step_id,
+                        );
                         step.origin_summaries.insert(name, summary);
                     }
                 }
@@ -1321,11 +1370,75 @@ impl Handler {
         // (variable_name, historic step_id) into the placeholder
         // token so the frontend can lazily fill it via
         // `ct/originSummary` (spec §5.3.2).
+        //
+        // M21 — when the trace is in Mode 3 (omniscient DB +
+        // origin metadata; see `classify_eager_mode`), the
+        // dispatcher flips the per-entry default to eager. Each
+        // history entry's summary is computed directly from the
+        // M19 metadata decoder. Lazy intervals (Mode 3 `lazy`)
+        // fall through to the placeholder so the frontend renders
+        // `[?]` until the background indexer fills the interval.
+        //
+        // Performance: we snapshot the per-call state ONCE (mode
+        // class, decoder, variable id, patterns fingerprint) before
+        // walking the entries.  The hot loop then makes zero
+        // additional calls into `Handler` slots that would otherwise
+        // re-read the trace's `meta_dat/` directory per row (which is
+        // unreachable within the M21 spec's 700 ms budget for a
+        // 10 000-entry history).
+        let eager_class = self.classify_eager_mode();
+        let decoder_snapshot = if self.trace_kind == TraceKind::Materialized && eager_class.flips_eager() {
+            self.clone_origin_metadata_decoder()
+        } else {
+            None
+        };
+        let variable_id_snapshot = if eager_class.flips_eager() {
+            self.reader.variable_id_for(&load_history_arg.expression)
+        } else {
+            None
+        };
+        let patterns_fingerprint_snapshot = self.patterns_fingerprint_cached();
+        let builder_class = eager_class;
         let mut history_results: Vec<HistoryResult> = Vec::with_capacity(history_results_with_records.len());
         for r in history_results_with_records.iter() {
             let entry_step_id = StepId(r.location.rr_ticks.0);
             let summary = if self.trace_kind == TraceKind::Materialized {
-                Some(self.build_origin_summary_placeholder_at(&load_history_arg.expression, entry_step_id))
+                // Try eager path when the trace is Mode 3 + the
+                // metadata decoder covers `(variable_id, step_id)`.
+                let eager = if builder_class.flips_eager() {
+                    if let (Some(var_id), Some(decoder)) = (variable_id_snapshot, decoder_snapshot.as_ref()) {
+                        crate::eager_origin_mode::EagerSummaryBuilder::new(Some(decoder), builder_class)
+                            .lookup_eager(var_id, entry_step_id)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                Some(eager.unwrap_or_else(|| {
+                    self.build_origin_summary_placeholder_with_fingerprint(
+                        &load_history_arg.expression,
+                        entry_step_id,
+                        &patterns_fingerprint_snapshot,
+                    )
+                }))
+            } else if eager_class.flips_eager() {
+                // Non-materialized backend in eager mode — same per-key
+                // decoder hit, otherwise placeholder so the frontend
+                // renders `[?]`.
+                let eager = if let (Some(var_id), Some(decoder)) = (variable_id_snapshot, decoder_snapshot.as_ref()) {
+                    crate::eager_origin_mode::EagerSummaryBuilder::new(Some(decoder), builder_class)
+                        .lookup_eager(var_id, entry_step_id)
+                } else {
+                    None
+                };
+                Some(eager.unwrap_or_else(|| {
+                    self.build_origin_summary_placeholder_with_fingerprint(
+                        &load_history_arg.expression,
+                        entry_step_id,
+                        &patterns_fingerprint_snapshot,
+                    )
+                }))
             } else {
                 None
             };
@@ -1697,6 +1810,82 @@ impl Handler {
         }
     }
 
+    /// M21 — classify the active trace's eager-mode state per spec
+    /// §6.8.6.  Combines the on-disk
+    /// `meta_dat/origin-config.toml` (M19 [`OriginConfig`]) with the
+    /// runtime omniscient-DB + metadata-decoder presence so the
+    /// dispatcher can flip `ct/load-history` / `ct/load-flow` defaults
+    /// to eager only when the trace genuinely supports it (Mode 3).
+    ///
+    /// The class also drives the State Pane "Origin metadata: …"
+    /// indicator surfaced through `ct/originMode`.
+    pub fn classify_eager_mode(&mut self) -> crate::eager_origin_mode::EagerModeClass {
+        let workdir = self.reader.workdir().to_path_buf();
+        let omniscient_present = self.replay.omniscient_db().is_some_and(|db| db.is_present());
+        let metadata_decoder_present = self.origin_metadata_decoder_present();
+        crate::eager_origin_mode::classify_eager_mode(&workdir, omniscient_present, metadata_decoder_present)
+    }
+
+    /// Whether the active session ships an
+    /// [`crate::origin_metadata_indexer::OriginMetadataDecoder`].
+    /// Browser-replay (Emulator) sessions surface the decoder via
+    /// [`crate::emulator_session::EmulatorReplaySession::origin_metadata_decoder`];
+    /// materialized traces (which have no session to hang the decoder
+    /// off) use the in-handler slot
+    /// [`Handler::materialized_origin_metadata_decoder`]. The helper
+    /// centralises probing so callers don't need to know which slot
+    /// the decoder lives in.
+    fn origin_metadata_decoder_present(&mut self) -> bool {
+        if self.materialized_origin_metadata_decoder.is_some() {
+            return true;
+        }
+        if let Some(session) = self
+            .replay
+            .as_any_mut()
+            .downcast_mut::<crate::emulator_session::EmulatorReplaySession>()
+        {
+            return session.origin_metadata_decoder().is_some();
+        }
+        false
+    }
+
+    /// M21 — install a materialized-trace
+    /// [`crate::origin_metadata_indexer::OriginMetadataDecoder`].
+    /// Used by the M21 verification fixture to inject a pre-populated
+    /// decoder; the production recorder-driven boot path replaces this
+    /// hook with an automatic decoder load alongside the
+    /// `meta_dat/origin-config.toml` read.
+    pub fn install_materialized_origin_metadata_decoder(
+        &mut self,
+        decoder: crate::origin_metadata_indexer::OriginMetadataDecoder,
+    ) {
+        self.materialized_origin_metadata_decoder = Some(decoder);
+    }
+
+    /// M21 — test/bench accessor: clone the active trace's
+    /// `OriginMetadataDecoder` (materialized slot, or browser-replay
+    /// session). Lets the M21 latency assertions exercise the
+    /// `EagerSummaryBuilder` against the same decoder the dispatcher
+    /// would use, without going through the DAP request/response
+    /// round-trip whose dominant cost (M2 step walks) is outside
+    /// M21's scope.
+    pub fn clone_origin_metadata_decoder_for_test(
+        &mut self,
+    ) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
+        self.clone_origin_metadata_decoder()
+    }
+
+    /// M21 — dispatcher handler for `ct/originMode`. Returns the
+    /// active trace's eager-mode indicator label (`"on"` / `"lazy"` /
+    /// `"off"` / `"unavailable"`) per spec §3.7 + M21 deliverable #4.
+    /// The State Pane settings sub-menu renders the literal value.
+    pub fn origin_mode(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        let class = self.classify_eager_mode();
+        let body = serde_json::json!({ "mode": class.indicator_label() });
+        self.respond_dap(req, body, sender)?;
+        Ok(())
+    }
+
     /// Compute the per-variable origin summary for an *eager* surface
     /// (e.g. `ct/load-locals`). On the materialized backend this is a
     /// truncated origin-chain query; on backends without origin support
@@ -1771,6 +1960,89 @@ impl Handler {
         self.build_origin_summary_placeholder_at(var_name, self.step_id)
     }
 
+    /// M21 — build the per-entry origin summary for `ct/load-history`.
+    /// On a Mode 3 trace returns the eager summary (decoder hit or
+    /// placeholder when the lazy interval isn't yet analysed); on
+    /// Mode 1 / Mode 2 falls back to the V1 placeholder default per
+    /// spec §3.2.3.
+    pub(crate) fn build_history_origin_summary(
+        &mut self,
+        class: crate::eager_origin_mode::EagerModeClass,
+        var_name: &str,
+        step_id: StepId,
+    ) -> task::OriginSummary {
+        if class.flips_eager() {
+            return self.build_eager_or_placeholder_summary(class, var_name, step_id);
+        }
+        self.build_origin_summary_placeholder_at(var_name, step_id)
+    }
+
+    /// M21 — build the per-annotation origin summary for
+    /// `ct/load-flow`. Same eager-vs-placeholder choice as
+    /// `build_history_origin_summary` but used by the flow overlay
+    /// pass.
+    pub(crate) fn build_flow_origin_summary(
+        &mut self,
+        class: crate::eager_origin_mode::EagerModeClass,
+        var_name: &str,
+        step_id: StepId,
+    ) -> task::OriginSummary {
+        if class.flips_eager() {
+            return self.build_eager_or_placeholder_summary(class, var_name, step_id);
+        }
+        self.build_origin_summary_placeholder_at(var_name, step_id)
+    }
+
+    /// M21 — shared resolver: ask the metadata decoder for an eager
+    /// summary; fall back to the V1 placeholder on a miss so the
+    /// frontend renders `[?]` for lazy-mode intervals that have not
+    /// yet been analysed (spec §3.2.3).
+    pub(crate) fn build_eager_or_placeholder_summary(
+        &mut self,
+        class: crate::eager_origin_mode::EagerModeClass,
+        var_name: &str,
+        step_id: StepId,
+    ) -> task::OriginSummary {
+        let var_id = self.reader.variable_id_for(var_name);
+        if let Some(var_id) = var_id {
+            // Clone the decoder so we can release the session borrow
+            // before mutating the placeholder fallback path. The
+            // decoder is `Clone` and owns its sorted indexes — the
+            // clone is cheap relative to the per-row dispatcher work
+            // that follows.
+            let decoder = self.clone_origin_metadata_decoder();
+            let builder = crate::eager_origin_mode::EagerSummaryBuilder::new(decoder.as_ref(), class);
+            if let Some(summary) = builder.lookup_eager(var_id, step_id) {
+                return summary;
+            }
+        }
+        // Either the variable name didn't resolve, the decoder isn't
+        // attached, or the (var, step) pair is in a not-yet-analysed
+        // lazy interval. Surface a placeholder so the frontend can
+        // either render `[?]` (lazy Mode 3) or fall back to the V1
+        // batch-fill path (Mode 1 / Mode 2).
+        self.build_origin_summary_placeholder_at(var_name, step_id)
+    }
+
+    /// Helper: clone the active trace's
+    /// [`crate::origin_metadata_indexer::OriginMetadataDecoder`] when
+    /// one is attached. Materialized traces hang the decoder off the
+    /// handler directly; browser-replay (Emulator) sessions surface it
+    /// through `EmulatorReplaySession::origin_metadata_decoder`.
+    fn clone_origin_metadata_decoder(&mut self) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
+        if let Some(decoder) = self.materialized_origin_metadata_decoder.as_ref() {
+            return Some(decoder.clone());
+        }
+        if let Some(session) = self
+            .replay
+            .as_any_mut()
+            .downcast_mut::<crate::emulator_session::EmulatorReplaySession>()
+        {
+            return session.origin_metadata_decoder().cloned();
+        }
+        None
+    }
+
     /// Build a placeholder summary for `(var_name, step_id)` — used by
     /// `ct/load-history` so each placeholder token round-trips through
     /// `ct/originSummary` with the *historic* variable+step pair (per
@@ -1781,6 +2053,38 @@ impl Handler {
         var_name: &str,
         step_id: StepId,
     ) -> task::OriginSummary {
+        let fingerprint = self.patterns_fingerprint_cached();
+        self.build_origin_summary_placeholder_with_fingerprint(var_name, step_id, &fingerprint)
+    }
+
+    /// Return the cached classifier-pattern fingerprint, computing it
+    /// lazily on first use. The fingerprint is invariant for the
+    /// session — patterns are loaded once at trace open and never
+    /// reloaded — so a per-session cache is safe and obviates the
+    /// per-entry TOML read in the M21 hot loops.
+    pub(crate) fn patterns_fingerprint_cached(&mut self) -> String {
+        if let Some(fp) = &self.cached_patterns_fingerprint {
+            return fp.clone();
+        }
+        let fp = self.load_origin_patterns().fingerprint().hex.clone();
+        self.cached_patterns_fingerprint = Some(fp.clone());
+        fp
+    }
+
+    /// M21 — fast-path variant of [`Self::build_origin_summary_placeholder_at`]
+    /// that takes the pre-computed pattern fingerprint as input. The
+    /// `ct/load-history` + `ct/load-flow` hot loops iterate over
+    /// thousands of entries — calling [`Self::load_origin_patterns`]
+    /// once per entry would re-read every TOML file off disk and walk
+    /// the classifier-pattern catalogue 10 000 times. Caching the
+    /// fingerprint at the loop's outer scope brings the per-entry
+    /// allocation down to a single `String::to_string`.
+    pub(crate) fn build_origin_summary_placeholder_with_fingerprint(
+        &mut self,
+        var_name: &str,
+        step_id: StepId,
+        patterns_fingerprint: &str,
+    ) -> task::OriginSummary {
         let token = crate::origin_query::OriginContinuationToken {
             v: crate::origin_query::OriginContinuationToken::CURRENT_VERSION,
             query_variable: var_name.to_string(),
@@ -1790,7 +2094,7 @@ impl Handler {
             current_var_name: var_name.to_string(),
             hops_emitted: 0,
             max_hops: task::DEFAULT_ORIGIN_MAX_HOPS,
-            patterns_fingerprint: self.load_origin_patterns().fingerprint().hex.clone(),
+            patterns_fingerprint: patterns_fingerprint.to_string(),
             source_digests: Vec::new(),
             issued_at: 0,
         };
@@ -3409,6 +3713,47 @@ pub(crate) fn origin_chain_to_summary(chain: &task::OriginChain, is_placeholder:
         is_placeholder,
         placeholder_token: None,
     }
+}
+
+/// M21 — free-standing helper that resolves the per-row eager / placeholder
+/// summary for `ct/load-flow` annotations.  Lives outside `impl Handler`
+/// so the flow hot loop can hold a borrow of `self.reader` without
+/// fighting Rust's mutable-borrow analyser inside the per-row body.
+///
+/// Returns an eager `OriginSummary` when the metadata decoder covers
+/// `(variable_id, step_id)`; otherwise a placeholder so the frontend
+/// either renders `[?]` (lazy Mode 3) or fills the summary lazily via
+/// `ct/originSummary` (Mode 1 / Mode 2).
+pub(crate) fn build_flow_eager_or_placeholder(
+    reader: &dyn TraceReader,
+    decoder: Option<&crate::origin_metadata_indexer::OriginMetadataDecoder>,
+    class: crate::eager_origin_mode::EagerModeClass,
+    patterns_fingerprint: &str,
+    var_name: &str,
+    step_id: StepId,
+) -> task::OriginSummary {
+    if class.flips_eager()
+        && let (Some(var_id), Some(decoder)) = (reader.variable_id_for(var_name), decoder)
+    {
+        let builder = crate::eager_origin_mode::EagerSummaryBuilder::new(Some(decoder), class);
+        if let Some(summary) = builder.lookup_eager(var_id, step_id) {
+            return summary;
+        }
+    }
+    let token = crate::origin_query::OriginContinuationToken {
+        v: crate::origin_query::OriginContinuationToken::CURRENT_VERSION,
+        query_variable: var_name.to_string(),
+        query_step_id: step_id.0,
+        current_step: step_id.0,
+        current_frame: -1,
+        current_var_name: var_name.to_string(),
+        hops_emitted: 0,
+        max_hops: task::DEFAULT_ORIGIN_MAX_HOPS,
+        patterns_fingerprint: patterns_fingerprint.to_string(),
+        source_digests: Vec::new(),
+        issued_at: 0,
+    };
+    crate::origin_query::placeholder_summary(token)
 }
 
 /// Default fallback summary used when a backend does not (yet) support

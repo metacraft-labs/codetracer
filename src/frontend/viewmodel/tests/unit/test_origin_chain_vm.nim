@@ -1088,3 +1088,29 @@ suite "M4 — Scratchpad side-by-side chain diff (Gap 5)":
                                        ScratchpadChainDiffChangedClass)
       check changedRows.len > 0
       dispose()
+
+# ---------------------------------------------------------------------------
+# M21 V#8 — StateVM origin-metadata mode indicator
+#
+# Exercises the per-trace mode indicator the State Pane settings sub-menu
+# renders (spec §3.7 + M21 deliverable #4). The default ("unavailable")
+# applies before the backend responds; `updateOriginMetadataMode` is the
+# entry-point the `ct/originMode` response bridge invokes.
+# ---------------------------------------------------------------------------
+
+suite "M21 — StateVM origin-metadata mode indicator":
+
+  test "default origin metadata mode label is unavailable":
+    let (_, stateVM, _, _) = makeOriginVM()
+    check stateVM.originMetadataModeLabel == "unavailable"
+
+  test "updateOriginMetadataMode flips the indicator label":
+    let (_, stateVM, _, _) = makeOriginVM()
+    stateVM.updateOriginMetadataMode("on")
+    check stateVM.originMetadataModeLabel == "on"
+    stateVM.updateOriginMetadataMode("lazy")
+    check stateVM.originMetadataModeLabel == "lazy"
+    stateVM.updateOriginMetadataMode("off")
+    check stateVM.originMetadataModeLabel == "off"
+    stateVM.updateOriginMetadataMode("unavailable")
+    check stateVM.originMetadataModeLabel == "unavailable"

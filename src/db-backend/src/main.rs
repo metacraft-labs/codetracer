@@ -72,6 +72,11 @@ mod omniscient_db;
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod omniscient_origin;
 mod origin_metadata_indexer;
+// M21 — Per-trace eager-mode classification (spec §6.8.6 + §3.2.3).
+// Mirrors the lib.rs declaration above; the bin needs its own copy
+// because `dap_handler` reaches for the module via the
+// `crate::eager_origin_mode` path.
+mod eager_origin_mode;
 mod origin_query;
 mod paths;
 mod program_search_tool;

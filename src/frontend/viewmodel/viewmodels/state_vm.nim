@@ -102,6 +102,13 @@ type
       ## from ``OriginChainVM.preferences`` into this signal so the
       ## State-Pane row renderer can pick the right badge variant
       ## without dragging the OriginChainVM into the State component.
+    originMetadataMode*: Signal[string]
+      ## M21 — active trace's origin-metadata mode label, surfaced by
+      ## the State Pane settings sub-menu indicator ("Origin metadata:
+      ## on / lazy / off / unavailable"). Bridged from the db-backend
+      ## via the new ``ct/originMode`` DAP request; defaults to
+      ## ``"unavailable"`` so the UI degrades cleanly when the backend
+      ## hasn't responded yet (e.g. pre-launch).
     originChainLookup*: proc(name: string): Option[OriginChain]
       ## Optional bridge installed by the host (`state.nim`) so the
       ## per-row expanded chain (spec §3.2.1 collapsed → expanded) can
@@ -357,6 +364,21 @@ proc originSummaryFor*(vm: StateVM; name: string): Option[OriginSummary] =
   else:
     none(OriginSummary)
 
+proc updateOriginMetadataMode*(vm: StateVM; modeLabel: string) =
+  ## M21 — update the origin-metadata mode indicator the State Pane
+  ## settings sub-menu surfaces. Bridged from the
+  ## ``ct/originMode`` DAP response in ``ui/state.nim``. The label is
+  ## one of ``"on"`` / ``"lazy"`` / ``"off"`` / ``"unavailable"``
+  ## (spec §3.7 + M21 deliverable #4).
+  vm.originMetadataMode.val = modeLabel
+
+proc originMetadataModeLabel*(vm: StateVM): string =
+  ## Read accessor for the State Pane settings sub-menu indicator.
+  ## Returns the literal label the backend supplied; falls back to
+  ## ``"unavailable"`` when no response has arrived yet (the default
+  ## set inside ``createStateVM``).
+  vm.originMetadataMode.val
+
 proc isOriginExpanded*(vm: StateVM; row: VariableId): bool =
   ## Convenience predicate used by the row renderer to decide whether
   ## to attach the in-row expanded chain block below the value cell.
@@ -385,6 +407,7 @@ proc createStateVM*(store: ReplayDataStore;
     let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
     let originSummaries = createSignal(initTable[string, OriginSummary]())
     let originPreferences = createSignal(defaultOriginPreferences())
+    let originMetadataMode = createSignal("unavailable")
     let lastContextMenu = createSignal(newSeq[OriginContextMenuEntry]())
 
     # Derived: pick the right variable list based on the active tab.
@@ -427,6 +450,7 @@ proc createStateVM*(store: ReplayDataStore;
       breadcrumbStack: breadcrumbStack,
       originSummaries: originSummaries,
       originPreferences: originPreferences,
+      originMetadataMode: originMetadataMode,
       lastContextMenu: lastContextMenu,
       disposeProc: dispose,
     )

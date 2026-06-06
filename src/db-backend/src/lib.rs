@@ -79,6 +79,12 @@ pub mod omniscient_origin;
 // the materialized + native indexers that produce them, the reader-side
 // decoder, and the per-trace mode toggle (`origin-config.toml`).
 pub mod origin_metadata_indexer;
+// M21 — Per-trace eager-mode classification (spec §6.8.6 + §3.2.3).
+// Reads the trace's `meta_dat/origin-config.toml` + the runtime
+// omniscient-DB / metadata-decoder presence to decide whether the
+// dispatcher flips `ct/load-history` / `ct/load-flow` / watch /
+// editor-hover defaults to eager origin summaries.
+pub mod eager_origin_mode;
 // Value Origin Tracking — M2 surface: trait + continuation-token codec +
 // DAP error codes 6101–6106. The per-backend implementations live next
 // to their `ReplaySession` impls (`db.rs`, `emulator_session.rs`,
