@@ -2,6 +2,7 @@
 extern crate log;
 
 mod backend_manager;
+pub mod browser_stream_receiver;
 mod config;
 mod dap_init;
 mod dap_parser;
