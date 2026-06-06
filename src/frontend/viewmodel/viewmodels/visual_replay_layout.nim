@@ -421,8 +421,18 @@ proc addVisualReplayTabs*(layout: JsonNode): JsonNode =
   if not editorStack.isNil:
     appendTabIfMissing(editorStack, videoPlayerLabel, VideoPlayerContentId)
 
-  let stateStack = findStackMatching(result["root"], proc(stack: JsonNode): bool =
-    stackContainsAnyContentId(stack, [StateContentId, FilesystemContentId]))
+  # Prefer the State stack (semantic home for variable / debugger inspection
+  # panes) over the Filesystem stack (sidebar).  Without this preference, a
+  # default layout where the sidebar (FILES + VCS) is the first stack
+  # containing a state-or-filesystem content id steals Pixel History and
+  # Shader Debug from the State pane, leaving them tucked into the file
+  # explorer column where the user (and the integration tests) does not
+  # expect them.
+  var stateStack = findStackMatching(result["root"], proc(stack: JsonNode): bool =
+    stackContainsAnyContentId(stack, [StateContentId]))
+  if stateStack.isNil:
+    stateStack = findStackMatching(result["root"], proc(stack: JsonNode): bool =
+      stackContainsAnyContentId(stack, [FilesystemContentId]))
   if not stateStack.isNil:
     appendTabIfMissing(stateStack, pixelHistoryLabel, PixelHistoryContentId)
     appendTabIfMissing(stateStack, shaderDebugLabel, ShaderDebugContentId)
