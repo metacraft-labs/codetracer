@@ -44,6 +44,8 @@
 
 use std::collections::HashMap;
 
+use crate::correlation_index::{MarkerEventView, PairIndex};
+use crate::correlation_markers::MarkerPayload;
 use crate::dap_handler::Handler;
 use crate::session_manifest::{RecordingId, SessionManifest, TraceEntry};
 
@@ -203,6 +205,48 @@ impl SessionHandler {
     /// internally by the `ct/listProcesses` response builder.
     pub fn slot_for_recording_id(&self, id: &RecordingId) -> Option<TraceSlot> {
         self.by_recording_id.get(id).copied()
+    }
+
+    /// M25 (spec §3.3) — build the pair index over every loaded
+    /// trace's marker firings. Walks each trace's
+    /// `event_db.firings_by_source_location` table, decodes the
+    /// marker payload from every firing's `ProgramEvent.metadata`
+    /// slot, and buckets the results by `(boundary_id, direction)`.
+    ///
+    /// Derived view — no internal cache. Spec §3.3 mandates that the
+    /// index is "lazily re-derived on next read", which means callers
+    /// can simply call this method again whenever the underlying
+    /// tracepoint cache has changed.
+    ///
+    /// The session-wide perspective is important: a Send marker in
+    /// trace A pairs with a Recv marker in trace B by their shared
+    /// `(boundary_id, key_value)` — without the cross-trace walk
+    /// here the pair index would only ever cover intra-trace markers
+    /// and the M29 cross-process origin chain would lose its
+    /// substrate.
+    pub fn pair_index(&self) -> PairIndex {
+        let mut events: Vec<MarkerEventView> = Vec::new();
+        for loaded in &self.traces {
+            let recording_id = loaded.entry.recording_id.0.as_str();
+            for (_, firings) in loaded.handler.event_db.firings_by_source_location.iter() {
+                for firing in firings {
+                    let Some(event) = loaded.handler.event_db.program_event_at(firing) else {
+                        continue;
+                    };
+                    let Some(payload) = MarkerPayload::decode(&event.metadata) else {
+                        continue;
+                    };
+                    events.push(MarkerEventView::new(
+                        recording_id,
+                        firing.step_id.0,
+                        event.high_level_path.clone(),
+                        event.high_level_line.max(0) as usize,
+                        payload,
+                    ));
+                }
+            }
+        }
+        PairIndex::build(&events)
     }
 
     /// Build the aggregated thread list returned by the DAP `threads`

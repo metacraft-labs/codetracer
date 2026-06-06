@@ -1,0 +1,969 @@
+//! M25 — Correlation markers (tracepoint-based; no protocol shims).
+//!
+//! Canonical spec:
+//! [`codetracer-specs/GUI/Debugging-Features/Correlation-Markers.md`].
+//! Milestone catalogue: M25 in
+//! [`codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`].
+//!
+//! # What this module owns
+//!
+//! - The [`MarkerDecl`] / [`MarkerDirection`] schema (§1 of the spec).
+//!   The marker rides on the existing tracepoint event mechanism —
+//!   **no new `TraceLowLevelEvent` variant is introduced**. The marker
+//!   metadata travels alongside the tracepoint payload as
+//!   `correlation_marker_id` + the marker fields.
+//! - The comment scanner (§3.1) — turns a per-language `codetracer:`
+//!   comment line into a `MarkerDecl`. The grammar itself is
+//!   language-agnostic; per-language behaviour is the comment prefix
+//!   the host language uses (table in §2.1 of the spec).
+//! - The TOML authoring path (§2.3) — `.codetracer/correlation-markers.toml`
+//!   produces the same [`MarkerDecl`] shape as the comment path.
+//!
+//! # What this module does NOT own
+//!
+//! - The hidden-tracepoint registration / source-location indexing
+//!   work lives in [`crate::event_db`] (extended with a
+//!   `(source_location, step)` lookup) and the production tracepoint
+//!   evaluator. M25 reaches into the event_db via `MarkerPayload` —
+//!   see [`MarkerPayload::encode`] for the on-the-wire shape.
+//! - The pairing index (§3.3) lives in
+//!   [`crate::correlation_index`]; it consumes `MarkerEventView`s
+//!   built from cached tracepoint firings.
+//! - The Event Log surface (§5) ships in M25b.
+//!
+//! # Per-language comment prefix table (spec §2.1)
+//!
+//! M25 ships the Python prefix end-to-end. The full per-language
+//! table lives in [`LANGUAGE_COMMENT_PREFIXES`] so each subsequent
+//! language addition is a 1-row change rather than a code-shape
+//! change.
+
+#![allow(clippy::expect_used)]
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// Direction of a correlation marker. Spec §2: send-side fires before
+/// a value crosses a boundary; recv-side fires when it lands on the
+/// other side. Two markers pair when they share `(boundary_id, key)`
+/// with opposite directions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkerDirection {
+    Send,
+    Recv,
+}
+
+impl MarkerDirection {
+    /// Parse the `<direction>` token from a comment line or TOML
+    /// entry. Spec §2.1 mandates lower-case `send` / `recv`; the
+    /// parser is strict so a misspelled `Send` (capitalised) hits the
+    /// skip-and-diagnose path rather than silently turning into a
+    /// `Send` marker.
+    pub fn parse(token: &str) -> Option<Self> {
+        match token {
+            "send" => Some(Self::Send),
+            "recv" => Some(Self::Recv),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Send => "send",
+            Self::Recv => "recv",
+        }
+    }
+
+    /// Opposite-direction counterpart used by the pairing index when
+    /// looking up the other side of a (boundary_id, key) match.
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Send => Self::Recv,
+            Self::Recv => Self::Send,
+        }
+    }
+}
+
+/// Optional render hint per spec §5.2. Currently accepted spellings:
+/// `text`, `json`, `hex`, `summary:<n>`. We keep the spec form as a
+/// `String` so M25b's Event Log renderer (which owns the actual
+/// rendering rules) can re-parse without coupling.
+pub type MarkerFormatSpec = String;
+
+/// One declared correlation marker — the output of the scanner per
+/// spec §3.1.  Source-location-keyed; the marker's hidden tracepoint
+/// is registered at `(location.path, location.line)` by the M25
+/// integration layer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkerDecl {
+    pub boundary_id: String,
+    pub direction: MarkerDirection,
+    pub key_text: String,
+    /// Optional separate display payload (§3.4). When `None` the
+    /// renderer falls back to the key value.
+    pub show_text: Option<String>,
+    pub description: Option<String>,
+    pub format: Option<MarkerFormatSpec>,
+    pub location: MarkerLocation,
+}
+
+/// Source-location pin for a [`MarkerDecl`]. Kept as a separate type
+/// from [`crate::task::SourceLocation`] so the marker schema can
+/// evolve (e.g. carrying a column or a function name from the TOML
+/// path) without touching every tracepoint consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MarkerLocation {
+    pub path: String,
+    pub line: usize,
+}
+
+impl MarkerLocation {
+    pub fn new(path: impl Into<String>, line: usize) -> Self {
+        Self {
+            path: path.into(),
+            line,
+        }
+    }
+}
+
+/// Payload embedded in a tracepoint firing for a hidden marker
+/// tracepoint. Stored as JSON inside the existing
+/// `ProgramEvent.metadata` slot — the marker rides on the existing
+/// tracepoint event mechanism per spec §1.  M25b decodes this back to
+/// a `MarkerEventView` for the Event Log surface; M29 decodes the
+/// same payload for the cross-process origin chain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkerPayload {
+    /// Stable id of the originating `MarkerDecl`. Indexes into the
+    /// scanner's emitted list; the index is also the
+    /// `correlation_marker_id` in the Event Log surface.
+    pub marker_id: usize,
+    pub boundary_id: String,
+    pub direction: MarkerDirection,
+    /// Textual form of the `key=<expr>` declaration. Kept alongside
+    /// the evaluated `key_value` so diagnostics can show "key
+    /// `envelope.id`" rather than just the value.
+    pub key_text: String,
+    pub key_value: String,
+    /// Textual form of the optional `show=<expr>` declaration.
+    pub show_text: Option<String>,
+    /// Evaluated `show=<expr>` value. `None` means show falls back to
+    /// the key value per spec §3.4.
+    pub show_value: Option<String>,
+    pub description: Option<String>,
+    pub format: Option<MarkerFormatSpec>,
+}
+
+impl MarkerPayload {
+    /// Encode the payload as a JSON string suitable for stashing into
+    /// the tracepoint event's `metadata` slot. The decode side
+    /// ([`MarkerPayload::decode`]) is the canonical inverse and is
+    /// exercised in the test suite.
+    pub fn encode(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    /// Decode a marker payload from the tracepoint event metadata
+    /// slot. Returns `None` when the slot is empty or carries a non-
+    /// marker payload — the consumer treats `None` as "not a marker
+    /// firing" and falls through to ordinary tracepoint handling.
+    pub fn decode(metadata: &str) -> Option<Self> {
+        if metadata.is_empty() {
+            return None;
+        }
+        serde_json::from_str(metadata).ok()
+    }
+}
+
+/// Per-language comment prefix table from spec §2.1. The marker
+/// grammar itself is language-agnostic; this table is the only
+/// language-aware piece of the scanner. M25 ships the Python prefix
+/// end-to-end (the spec-mandated primary path) and the table is
+/// trivially extensible to the other languages — each new row is one
+/// entry here plus a per-language test row in
+/// `test_marker_comment_scanner`.
+pub const LANGUAGE_COMMENT_PREFIXES: &[(&str, &[&str])] = &[
+    // Languages whose comments start with `#` (Python, Ruby, shell,
+    // YAML, TOML, Nim's hash-comment dialect). M25 ships Python end-
+    // to-end; the others fall out trivially because the marker
+    // grammar is language-agnostic once the comment is identified.
+    ("py", &["#"]),
+    ("rb", &["#"]),
+    ("sh", &["#"]),
+    ("bash", &["#"]),
+    ("yaml", &["#"]),
+    ("yml", &["#"]),
+    ("toml", &["#"]),
+    // Languages whose comments start with `//` (C, C++, Rust, Go,
+    // Java, Swift, JavaScript, TypeScript). Nim accepts both `#` and
+    // `//` in the spec but the table only handles the `#` form here
+    // because the rest of the Nim toolchain treats `//` as a
+    // mathematical operator; consumers wanting both spellings emit
+    // the `#` form via [`MarkerDecl`] and rely on Nim's `#` parser.
+    ("c", &["//"]),
+    ("h", &["//"]),
+    ("cc", &["//"]),
+    ("cpp", &["//"]),
+    ("cxx", &["//"]),
+    ("hpp", &["//"]),
+    ("rs", &["//"]),
+    ("go", &["//"]),
+    ("java", &["//"]),
+    ("swift", &["//"]),
+    ("js", &["//"]),
+    ("mjs", &["//"]),
+    ("jsx", &["//"]),
+    ("ts", &["//"]),
+    ("tsx", &["//"]),
+    ("nim", &["#"]),
+    // HTML / XML
+    ("html", &["<!--"]),
+    ("htm", &["<!--"]),
+    ("xml", &["<!--"]),
+    // Erlang / Elixir
+    ("erl", &["%"]),
+    ("ex", &["#"]),
+    ("exs", &["#"]),
+    // Pascal / Ada
+    ("pas", &["//"]),
+    ("pp", &["//"]),
+    ("adb", &["--"]),
+    ("ads", &["--"]),
+];
+
+/// Return the list of comment-prefix tokens for a path. Used by the
+/// scanner to decide which lines to feed to the marker grammar.
+pub fn comment_prefixes_for_path(path: &Path) -> &'static [&'static str] {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    for (extension, prefixes) in LANGUAGE_COMMENT_PREFIXES {
+        if *extension == ext.as_str() {
+            return prefixes;
+        }
+    }
+    // Default to no prefixes — the scanner skips files whose
+    // extension is unknown. Skip-and-diagnose at the caller.
+    &[]
+}
+
+/// Errors raised by [`MarkerDecl::parse_comment`] when a line claims
+/// to be a `codetracer:` marker but its body cannot be parsed. The
+/// scanner translates these into per-file diagnostics surfaced in the
+/// session-load banner; well-formed markers in the same file
+/// continue to load.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkerParseError {
+    /// The line is not a `codetracer:` clause (no marker tag,
+    /// non-marker comment, etc). Used as the "skip silently" signal.
+    NotAMarker,
+    MissingDirection,
+    UnknownDirection(String),
+    MissingBoundaryId,
+    UnterminatedQuotedString,
+    MissingKeyField,
+    UnknownField(String),
+    MalformedField(String),
+}
+
+impl std::fmt::Display for MarkerParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAMarker => write!(f, "not a codetracer marker comment"),
+            Self::MissingDirection => write!(f, "marker missing direction (`send` or `recv`)"),
+            Self::UnknownDirection(t) => write!(f, "marker has unknown direction `{t}`"),
+            Self::MissingBoundaryId => write!(f, "marker missing quoted boundary id"),
+            Self::UnterminatedQuotedString => write!(f, "marker has unterminated quoted string"),
+            Self::MissingKeyField => write!(f, "marker missing mandatory `key=` field"),
+            Self::UnknownField(n) => write!(f, "marker has unknown field `{n}`"),
+            Self::MalformedField(detail) => write!(f, "marker has malformed field: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for MarkerParseError {}
+
+impl MarkerDecl {
+    /// Parse a single marker comment line against the marker grammar
+    /// from spec §2.1:
+    ///
+    /// ```text
+    /// <prefix> codetracer: <direction> "<boundary_id>" <field>*
+    /// ```
+    ///
+    /// `line` is the **raw source line**; `prefix` is the comment
+    /// lead-in for the host language (`#`, `//`, `--`, `<!--`, `%`).
+    /// The body parser is language-agnostic — once the comment
+    /// boundary is identified the grammar is the same for every
+    /// language. Returns `Err(NotAMarker)` when the line is not a
+    /// `codetracer:` clause at all (silent skip); other variants
+    /// carry diagnostic detail surfaced in the session-load banner
+    /// per spec §9.
+    pub fn parse_comment(line: &str, prefix: &str, location: MarkerLocation) -> Result<Self, MarkerParseError> {
+        let trimmed = line.trim();
+        // Identify the comment prefix at the start of the trimmed line.
+        let after_prefix = trimmed.strip_prefix(prefix).ok_or(MarkerParseError::NotAMarker)?;
+        let body = after_prefix.trim_start();
+        // For HTML-style multi-line comments, allow the `-->` close.
+        let body = body.trim_end_matches("-->").trim_end_matches("*/").trim();
+        let body = body
+            .strip_prefix("codetracer:")
+            .ok_or(MarkerParseError::NotAMarker)?
+            .trim();
+        parse_marker_body(body, location)
+    }
+}
+
+/// Parse the body of a `codetracer:` clause — everything after the
+/// `codetracer:` keyword. Public so the TOML loader can reuse the
+/// field parser for the `key=<expr>` / `show=<expr>` / `desc=…` /
+/// `format=…` fields. (The TOML loader does field-by-field assembly
+/// directly, but parameterising the field parser keeps the grammar a
+/// single source of truth.)
+pub(crate) fn parse_marker_body(body: &str, location: MarkerLocation) -> Result<MarkerDecl, MarkerParseError> {
+    let mut tokens = Tokenizer::new(body);
+
+    let direction_tok = tokens.next_token()?.ok_or(MarkerParseError::MissingDirection)?;
+    let direction = MarkerDirection::parse(&direction_tok)
+        .ok_or_else(|| MarkerParseError::UnknownDirection(direction_tok.clone()))?;
+
+    let boundary_id = tokens.next_quoted()?.ok_or(MarkerParseError::MissingBoundaryId)?;
+
+    let mut key_text: Option<String> = None;
+    let mut show_text: Option<String> = None;
+    let mut description: Option<String> = None;
+    let mut format: Option<MarkerFormatSpec> = None;
+
+    while let Some((name, value)) = tokens.next_field()? {
+        match name.as_str() {
+            "key" => key_text = Some(value),
+            "show" => show_text = Some(value),
+            "desc" | "description" => description = Some(value),
+            "format" => format = Some(value),
+            other => return Err(MarkerParseError::UnknownField(other.to_string())),
+        }
+    }
+
+    let key_text = key_text.ok_or(MarkerParseError::MissingKeyField)?;
+
+    Ok(MarkerDecl {
+        boundary_id,
+        direction,
+        key_text,
+        show_text,
+        description,
+        format,
+        location,
+    })
+}
+
+/// Hand-rolled tokenizer for the marker body. We deliberately avoid
+/// pulling in `nom` / `combine` / `regex` here — the grammar is small
+/// and a focused tokenizer keeps the diagnostic surface tight.
+struct Tokenizer<'a> {
+    rest: &'a str,
+}
+
+impl<'a> Tokenizer<'a> {
+    fn new(rest: &'a str) -> Self {
+        Self { rest }
+    }
+
+    fn skip_ws(&mut self) {
+        self.rest = self.rest.trim_start();
+    }
+
+    fn next_token(&mut self) -> Result<Option<String>, MarkerParseError> {
+        self.skip_ws();
+        if self.rest.is_empty() {
+            return Ok(None);
+        }
+        let end = self
+            .rest
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '=')
+            .unwrap_or(self.rest.len());
+        let tok = self.rest[..end].to_string();
+        self.rest = &self.rest[end..];
+        Ok(Some(tok))
+    }
+
+    fn next_quoted(&mut self) -> Result<Option<String>, MarkerParseError> {
+        self.skip_ws();
+        if !self.rest.starts_with('"') {
+            return Ok(None);
+        }
+        self.rest = &self.rest[1..];
+        let end = self.rest.find('"').ok_or(MarkerParseError::UnterminatedQuotedString)?;
+        let value = self.rest[..end].to_string();
+        self.rest = &self.rest[end + 1..];
+        Ok(Some(value))
+    }
+
+    fn next_field(&mut self) -> Result<Option<(String, String)>, MarkerParseError> {
+        self.skip_ws();
+        if self.rest.is_empty() {
+            return Ok(None);
+        }
+        let eq_pos = self.rest.find('=').ok_or_else(|| {
+            MarkerParseError::MalformedField(format!("expected `name=value`, found `{}`", self.rest.trim_end()))
+        })?;
+        let name = self.rest[..eq_pos].trim().to_string();
+        self.rest = &self.rest[eq_pos + 1..];
+        if name.is_empty() {
+            return Err(MarkerParseError::MalformedField("empty field name".to_string()));
+        }
+        // Value may be quoted (`desc="..."`) or unquoted (`key=msg.id`).
+        let value = if self.rest.starts_with('"') {
+            self.next_quoted()?
+                .ok_or_else(|| MarkerParseError::MalformedField(format!("missing value for `{name}`")))?
+        } else {
+            self.skip_ws();
+            // Unquoted values are terminated by whitespace or the
+            // next `<name>=` token. We walk forward until the next
+            // whitespace + `=` shape to absorb expressions like
+            // `msg.id + 1`.
+            let mut end = self.rest.len();
+            let bytes = self.rest.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                let c = bytes[i] as char;
+                if c.is_whitespace() {
+                    // Peek ahead: if we see `<name>=` after the
+                    // whitespace, this value terminates.
+                    let after = self.rest[i..].trim_start();
+                    if after.is_empty() {
+                        end = i;
+                        break;
+                    }
+                    // Look for `<ident>=` to decide if this whitespace
+                    // ends the current value.
+                    let ident_end = after
+                        .find(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                        .unwrap_or(after.len());
+                    if ident_end > 0 && after[ident_end..].starts_with('=') {
+                        end = i;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            let value = self.rest[..end].trim().to_string();
+            self.rest = &self.rest[end..];
+            value
+        };
+        Ok(Some((name, value)))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Comment scanner
+// ---------------------------------------------------------------------------
+
+/// One diagnostic emitted by the scanner when a `codetracer:` clause
+/// fails to parse. Surfaced in the session-load banner per spec §9.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkerDiagnostic {
+    pub path: PathBuf,
+    pub line: usize,
+    pub error: MarkerParseError,
+}
+
+/// Output of [`scan_file_for_markers`] / [`MarkerScanner::scan`] —
+/// the markers that parsed cleanly plus any per-line diagnostics.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ScanResult {
+    pub markers: Vec<MarkerDecl>,
+    pub diagnostics: Vec<MarkerDiagnostic>,
+}
+
+impl ScanResult {
+    pub fn merge(&mut self, other: ScanResult) {
+        self.markers.extend(other.markers);
+        self.diagnostics.extend(other.diagnostics);
+    }
+}
+
+/// Scan a single source file for `codetracer:` marker comments. Uses
+/// the per-language comment prefix table from spec §2.1 to identify
+/// candidate lines, then runs the language-agnostic marker grammar.
+///
+/// One marker per parsed clause — spec §2.1 allows multiple markers
+/// on the same source line (e.g. a synchronous round-trip that's
+/// both a send-side and a recv-side boundary).
+pub fn scan_file_for_markers(path: &Path, source: &str) -> ScanResult {
+    let prefixes = comment_prefixes_for_path(path);
+    if prefixes.is_empty() {
+        return ScanResult::default();
+    }
+    let mut out = ScanResult::default();
+    for (lineno_zero, raw_line) in source.lines().enumerate() {
+        let line_number = lineno_zero + 1;
+        // A single source line can carry multiple comments — e.g.
+        // `code(); // codetracer: send "x" key=a /* codetracer: recv "y" key=b */`.
+        // For the M25 surface we handle one marker per comment block;
+        // additional `codetracer:` clauses on the same line repeat the
+        // prefix detection on the residue.
+        for prefix in prefixes {
+            // Find the comment lead-in on this line, repeat for
+            // multiple `<prefix> codetracer:` clauses on the same
+            // line (spec §2.1 allows this).
+            let mut residue = raw_line;
+            while let Some(idx) = residue.find(prefix) {
+                let candidate = &residue[idx..];
+                let location = MarkerLocation::new(path.to_string_lossy().into_owned(), line_number);
+                match MarkerDecl::parse_comment(candidate, prefix, location.clone()) {
+                    Ok(decl) => out.markers.push(decl),
+                    Err(MarkerParseError::NotAMarker) => {
+                        // Plain comment — silent skip per spec.
+                    }
+                    Err(err) => {
+                        out.diagnostics.push(MarkerDiagnostic {
+                            path: path.to_path_buf(),
+                            line: line_number,
+                            error: err,
+                        });
+                    }
+                }
+                // Move past the prefix to look for further
+                // `codetracer:` clauses on the same line.
+                let advance = idx + prefix.len();
+                if advance >= residue.len() {
+                    break;
+                }
+                residue = &residue[advance..];
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// TOML authoring path (spec §2.3)
+// ---------------------------------------------------------------------------
+
+/// On-disk TOML schema for `.codetracer/correlation-markers.toml`.
+/// Mirrors the comment grammar field-for-field (per spec §2.3) so a
+/// marker can move between authoring paths without renaming.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TomlMarkerFile {
+    #[serde(default, rename = "marker")]
+    markers: Vec<TomlMarker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TomlMarker {
+    /// Either `function` or `path` identifies the source location.
+    /// For M25 we accept the explicit `path` + `line` pair (the more
+    /// general shape) and treat `function` as an opaque label stashed
+    /// in the diagnostic surface when present.
+    #[serde(default)]
+    function: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    line: Option<usize>,
+    direction: String,
+    boundary_id: String,
+    key: String,
+    #[serde(default)]
+    show: Option<String>,
+    #[serde(default)]
+    desc: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
+}
+
+/// Errors emitted by [`load_toml_markers`]. The session-load layer
+/// surfaces these the same way it surfaces comment-scanner
+/// diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TomlMarkerError {
+    Parse(String),
+    MissingLocation(String),
+    UnknownDirection(String),
+}
+
+impl std::fmt::Display for TomlMarkerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(msg) => write!(f, "correlation-markers.toml parse failure: {msg}"),
+            Self::MissingLocation(b) => write!(f, "correlation-markers.toml marker `{b}` has no path+line"),
+            Self::UnknownDirection(d) => write!(f, "correlation-markers.toml marker has unknown direction `{d}`"),
+        }
+    }
+}
+
+impl std::error::Error for TomlMarkerError {}
+
+/// Parse a `.codetracer/correlation-markers.toml` document into
+/// `MarkerDecl`s. We use a minimal hand-rolled parser over the
+/// document text because the M25 crate already has `serde` but does
+/// not yet depend on the `toml` crate; for the V1 schema (one
+/// `[[marker]]` table at a time with flat scalar fields) the parser
+/// stays small and entirely focused on what the spec defines.
+pub fn parse_toml_markers(text: &str) -> Result<Vec<MarkerDecl>, TomlMarkerError> {
+    let mut markers: Vec<MarkerDecl> = Vec::new();
+    let mut current: Option<TomlMarker> = None;
+    for (lineno, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == "[[marker]]" {
+            if let Some(prev) = current.take() {
+                markers.push(toml_marker_into_decl(prev)?);
+            }
+            current = Some(TomlMarker {
+                function: None,
+                path: None,
+                line: None,
+                direction: String::new(),
+                boundary_id: String::new(),
+                key: String::new(),
+                show: None,
+                desc: None,
+                format: None,
+            });
+            continue;
+        }
+        let Some(eq) = line.find('=') else {
+            return Err(TomlMarkerError::Parse(format!(
+                "line {}: expected `key = value`, got `{line}`",
+                lineno + 1
+            )));
+        };
+        let name = line[..eq].trim();
+        let value_raw = line[eq + 1..].trim();
+        let value = value_raw.trim_start_matches('"').trim_end_matches('"').to_string();
+        let m = current.as_mut().ok_or_else(|| {
+            TomlMarkerError::Parse(format!(
+                "line {}: `{name}=...` appears before any `[[marker]]` table",
+                lineno + 1
+            ))
+        })?;
+        match name {
+            "function" => m.function = Some(value),
+            "path" => m.path = Some(value),
+            "line" => {
+                m.line = Some(value.parse::<usize>().map_err(|e| {
+                    TomlMarkerError::Parse(format!("line {}: line number not an integer ({e})", lineno + 1))
+                })?)
+            }
+            "direction" => m.direction = value,
+            "boundary_id" => m.boundary_id = value,
+            "key" => m.key = value,
+            "show" => m.show = Some(value),
+            "desc" => m.desc = Some(value),
+            "format" => m.format = Some(value),
+            other => {
+                return Err(TomlMarkerError::Parse(format!(
+                    "line {}: unknown marker field `{other}`",
+                    lineno + 1
+                )));
+            }
+        }
+    }
+    if let Some(last) = current.take() {
+        markers.push(toml_marker_into_decl(last)?);
+    }
+    Ok(markers)
+}
+
+fn toml_marker_into_decl(m: TomlMarker) -> Result<MarkerDecl, TomlMarkerError> {
+    let direction =
+        MarkerDirection::parse(&m.direction).ok_or(TomlMarkerError::UnknownDirection(m.direction.clone()))?;
+    let path = m
+        .path
+        .clone()
+        .or_else(|| m.function.clone())
+        .ok_or_else(|| TomlMarkerError::MissingLocation(m.boundary_id.clone()))?;
+    // When `function` is the only locator, line defaults to 1 — the
+    // session-load layer that owns the §3.1 source resolution
+    // upgrades this to the function's entry line through the
+    // existing function-index lookup. For M25 we keep the loader
+    // scoped to schema construction and leave the function→line
+    // resolution to the integrator.
+    let line = m.line.unwrap_or(1);
+    Ok(MarkerDecl {
+        boundary_id: m.boundary_id,
+        direction,
+        key_text: m.key,
+        show_text: m.show,
+        description: m.desc,
+        format: m.format,
+        location: MarkerLocation::new(path, line),
+    })
+}
+
+/// Scanner facade combining the comment-path and TOML-path inputs
+/// per spec §3.1. Inputs are loaded in priority order:
+///
+///   1. `meta_dat/sources/` inside the trace bundle (self-contained
+///      traces);
+///   2. The active workspace as resolved by the manifest;
+///   3. The recorded absolute paths the trace carries.
+///
+/// M25's surface here exposes the comment + TOML loaders as pure
+/// functions; the session-load integrator owns walking the three
+/// candidate roots, picking the highest-priority match per file, and
+/// feeding the results to the hidden-tracepoint registration layer.
+pub struct MarkerScanner;
+
+impl MarkerScanner {
+    /// Walk the on-disk roots in priority order and return all
+    /// markers discovered + per-file diagnostics. Path priority
+    /// matches spec §3.1 — duplicates between roots are resolved by
+    /// taking the first matching file.
+    pub fn scan_roots(roots: &[&Path]) -> ScanResult {
+        let mut combined = ScanResult::default();
+        // We dedupe per relative path so the same source file picked
+        // up from two roots is scanned only once (priority order).
+        let mut seen: HashMap<PathBuf, ()> = HashMap::new();
+        for root in roots {
+            if !root.is_dir() {
+                continue;
+            }
+            walk_dir(root, root, &mut seen, &mut combined);
+        }
+        combined
+    }
+
+    /// Convenience: scan a single file's contents. Used by the
+    /// per-file integration path (when the integrator already knows
+    /// which file to load) and by the tests.
+    pub fn scan_text(path: &Path, source: &str) -> ScanResult {
+        scan_file_for_markers(path, source)
+    }
+
+    /// Convenience: load + parse a TOML marker file from disk.
+    pub fn load_toml(path: &Path) -> Result<Vec<MarkerDecl>, TomlMarkerError> {
+        let text = fs::read_to_string(path).map_err(|e| TomlMarkerError::Parse(format!("read {path:?}: {e}")))?;
+        parse_toml_markers(&text)
+    }
+}
+
+fn walk_dir(root: &Path, dir: &Path, seen: &mut HashMap<PathBuf, ()>, out: &mut ScanResult) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_dir(root, &path, seen, out);
+            continue;
+        }
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        if seen.contains_key(&rel) {
+            continue;
+        }
+        let Ok(source) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let result = scan_file_for_markers(&path, &source);
+        if !result.markers.is_empty() || !result.diagnostics.is_empty() {
+            seen.insert(rel, ());
+            out.merge(result);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Load-progress DAP event protocol (spec §3.2.1.2)
+// ---------------------------------------------------------------------------
+
+/// Body of `ct/markerLoadStarted` emitted exactly once when the
+/// session-load marker pass begins. The Event Log surface (M25b)
+/// uses this to render the "loading correlation markers…" banner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkerLoadStartedEvent {
+    pub session_id: String,
+    pub total_declared: usize,
+}
+
+/// Body of `ct/markerLoadProgress` — emitted **throttled** to one
+/// event per 250 ms per session while hidden tracepoints fire into
+/// the cache. The emitter ([`MarkerLoadProgressThrottle`]) enforces
+/// the throttle so consumers don't have to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkerLoadProgressEvent {
+    pub session_id: String,
+    pub loaded: usize,
+    pub total: usize,
+}
+
+/// Body of `ct/markerLoadCompleted` emitted exactly once when every
+/// declared marker has finished evaluating across the session's
+/// covered range.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkerLoadCompletedEvent {
+    pub session_id: String,
+    pub final_loaded: usize,
+    pub duration_ms: u64,
+}
+
+/// Throttle wrapper for the §3.2.1.2 progress event. Consumers call
+/// [`MarkerLoadProgressThrottle::should_emit`] each time a marker
+/// fires and only emit an event when the call returns `Some`. The
+/// throttle interval is the spec-mandated 250 ms by default; M25
+/// owns the emission side and uses this surface in
+/// `session_handler::SessionHandler` once M25b's Event Log consumer
+/// is wired.
+///
+/// We deliberately keep the throttle generic over a clock so unit
+/// tests can drive it deterministically.
+pub struct MarkerLoadProgressThrottle {
+    /// Last instant at which an event was emitted, expressed as
+    /// milliseconds since session start so tests can drive a
+    /// monotonic virtual clock.
+    last_emit_ms: Option<u64>,
+    /// Spec-mandated throttle interval (250 ms by default).
+    pub interval_ms: u64,
+}
+
+impl MarkerLoadProgressThrottle {
+    pub fn new() -> Self {
+        Self {
+            last_emit_ms: None,
+            interval_ms: 250,
+        }
+    }
+
+    /// Decide whether an event should fire at `now_ms`. Returns
+    /// `true` and updates the last-emit timestamp; returns `false`
+    /// without state change when the previous event is within the
+    /// throttle window.
+    pub fn should_emit(&mut self, now_ms: u64) -> bool {
+        match self.last_emit_ms {
+            Some(last) if now_ms.saturating_sub(last) < self.interval_ms => false,
+            _ => {
+                self.last_emit_ms = Some(now_ms);
+                true
+            }
+        }
+    }
+}
+
+impl Default for MarkerLoadProgressThrottle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    fn loc(line: usize) -> MarkerLocation {
+        MarkerLocation::new("test.py", line)
+    }
+
+    #[test]
+    fn parse_comment_python_send_minimal() {
+        let line = r#"    # codetracer: send "order-processing" key=msg.id"#;
+        let decl = MarkerDecl::parse_comment(line, "#", loc(7)).unwrap();
+        assert_eq!(decl.direction, MarkerDirection::Send);
+        assert_eq!(decl.boundary_id, "order-processing");
+        assert_eq!(decl.key_text, "msg.id");
+        assert!(decl.show_text.is_none());
+        assert!(decl.description.is_none());
+        assert!(decl.format.is_none());
+        assert_eq!(decl.location.line, 7);
+    }
+
+    #[test]
+    fn parse_comment_python_recv_full() {
+        let line = r#"# codetracer: recv "envelope-flow" key=env.id show=env.body desc="Inbound" format=json"#;
+        let decl = MarkerDecl::parse_comment(line, "#", loc(11)).unwrap();
+        assert_eq!(decl.direction, MarkerDirection::Recv);
+        assert_eq!(decl.key_text, "env.id");
+        assert_eq!(decl.show_text.as_deref(), Some("env.body"));
+        assert_eq!(decl.description.as_deref(), Some("Inbound"));
+        assert_eq!(decl.format.as_deref(), Some("json"));
+    }
+
+    #[test]
+    fn parse_comment_rejects_misspelled_direction() {
+        let line = r#"# codetracer: Send "x" key=msg"#;
+        match MarkerDecl::parse_comment(line, "#", loc(1)) {
+            Err(MarkerParseError::UnknownDirection(d)) => assert_eq!(d, "Send"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_comment_skips_non_marker_comment() {
+        let line = "# regular comment";
+        match MarkerDecl::parse_comment(line, "#", loc(1)) {
+            Err(MarkerParseError::NotAMarker) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_comment_requires_key_field() {
+        let line = r#"# codetracer: send "x" show=msg.payload"#;
+        match MarkerDecl::parse_comment(line, "#", loc(1)) {
+            Err(MarkerParseError::MissingKeyField) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn marker_payload_roundtrip() {
+        let payload = MarkerPayload {
+            marker_id: 7,
+            boundary_id: "order".to_string(),
+            direction: MarkerDirection::Send,
+            key_text: "msg.id".to_string(),
+            key_value: "42".to_string(),
+            show_text: Some("msg.body".to_string()),
+            show_value: Some("hello".to_string()),
+            description: Some("test".to_string()),
+            format: Some("json".to_string()),
+        };
+        let encoded = payload.encode();
+        let decoded = MarkerPayload::decode(&encoded).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn comment_prefix_lookup_recognises_python() {
+        let p = Path::new("foo.py");
+        assert_eq!(comment_prefixes_for_path(p), &["#"]);
+    }
+
+    #[test]
+    fn toml_path_round_trip() {
+        let text = r#"
+[[marker]]
+direction = "send"
+boundary_id = "order-processing"
+path = "src/sender.py"
+line = 42
+key = "msg.id"
+show = "msg.body"
+desc = "Outbound"
+format = "json"
+"#;
+        let decls = parse_toml_markers(text).unwrap();
+        assert_eq!(decls.len(), 1);
+        assert_eq!(decls[0].boundary_id, "order-processing");
+        assert_eq!(decls[0].direction, MarkerDirection::Send);
+        assert_eq!(decls[0].location.path, "src/sender.py");
+        assert_eq!(decls[0].location.line, 42);
+        assert_eq!(decls[0].key_text, "msg.id");
+        assert_eq!(decls[0].show_text.as_deref(), Some("msg.body"));
+    }
+}

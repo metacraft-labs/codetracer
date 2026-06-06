@@ -10,6 +10,42 @@ use crate::task::{
     TraceValues, UpdateTableArgs,
 };
 
+/// M25 (spec §3.2.1.1) — composite key for the source-location index
+/// alongside the existing `tracepoint_id` lookup. The marker
+/// derivation depends on O(1) lookup of "every firing at this source
+/// line" — the same surface benefits every other tracepoint consumer
+/// at the same time.
+///
+/// Kept as a small struct (rather than a tuple) so callers don't
+/// have to memorise the field order — the verification test for
+/// correlation-marker scenarios looks up firings by `(path, line)`.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct TracepointSourceLocation {
+    pub path: String,
+    pub line: i64,
+}
+
+impl TracepointSourceLocation {
+    pub fn new(path: impl Into<String>, line: i64) -> Self {
+        Self {
+            path: path.into(),
+            line,
+        }
+    }
+}
+
+/// One indexed firing — the minimum data the M25 marker derivation
+/// (and any future source-location-based tracepoint consumer) needs
+/// to look up the originating `ProgramEvent` in
+/// `EventDb::single_tables`. Kept lean so the index stays cheap to
+/// maintain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceLocationFiring {
+    pub single_table_id: SingleTableId,
+    pub index_in_table: IndexInSingleTable,
+    pub step_id: StepId,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SingleTable {
     pub kind: DbEventKind,
@@ -22,10 +58,10 @@ impl SingleTable {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SingleTableId(pub usize);
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IndexInSingleTable(pub usize);
 
 #[derive(Debug, Default, Clone)]
@@ -46,6 +82,12 @@ pub struct EventDb {
     pub visible_rows: Vec<usize>,
     pub selected_kinds: [bool; EVENT_KINDS_COUNT],
     pub trace_list: Vec<SingleTableId>,
+    /// M25 (spec §3.2.1.1) source-location -> firings index. Populated
+    /// alongside `tracepoint_values` whenever a tracepoint result is
+    /// registered. The marker pairing index (M25 `correlation_index`)
+    /// reads this map to derive its view without re-walking
+    /// `single_tables`.
+    pub firings_by_source_location: HashMap<TracepointSourceLocation, Vec<SourceLocationFiring>>,
 }
 
 impl EventDb {
@@ -59,7 +101,32 @@ impl EventDb {
             visible_rows: vec![],
             selected_kinds: [true; EVENT_KINDS_COUNT],
             trace_list: vec![SingleTableId(0)],
+            firings_by_source_location: HashMap::new(),
         }
+    }
+
+    /// M25 (spec §3.2.1.1) — O(1) lookup of every tracepoint firing
+    /// registered at a given `(path, line)` source location. Returns
+    /// an empty slice when no firing has been recorded at the
+    /// location. The marker pairing index uses this to project the
+    /// general tracepoint cache into a `(boundary_id, direction)`
+    /// view without re-scanning `single_tables`.
+    pub fn lookup_by_source_location(&self, key: &TracepointSourceLocation) -> &[SourceLocationFiring] {
+        self.firings_by_source_location
+            .get(key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Resolve a [`SourceLocationFiring`] back to its
+    /// [`ProgramEvent`] so the marker derivation can read the
+    /// payload metadata. Helper kept here so callers don't have to
+    /// memorise the `+ 1` offset between `tracepoint_id` and
+    /// `SingleTableId`.
+    pub fn program_event_at(&self, firing: &SourceLocationFiring) -> Option<&ProgramEvent> {
+        self.single_tables
+            .get(firing.single_table_id.0)
+            .and_then(|table| table.events.get(firing.index_in_table.0))
     }
 
     fn process_for_global(
@@ -216,7 +283,20 @@ impl EventDb {
             let event = self.convert_stop_to_program_event(result);
             self.register_in_global_table(std::slice::from_ref(&event), table_id);
             // sort global?
+            // M25 §3.2.1.1 — record the firing in the source-location
+            // index BEFORE pushing into `single_tables` so we can use
+            // the post-push length as the firing's index.
+            let location = TracepointSourceLocation::new(event.high_level_path.clone(), event.high_level_line);
+            let next_index = self.single_tables.get(table_id.0).map(|t| t.events.len()).unwrap_or(0);
             self.insert_in_single_table(event, table_id.0);
+            self.firings_by_source_location
+                .entry(location)
+                .or_default()
+                .push(SourceLocationFiring {
+                    single_table_id: table_id,
+                    index_in_table: IndexInSingleTable(next_index),
+                    step_id: StepId(result.rr_ticks as i64),
+                });
 
             self.tracepoint_values.entry(result.tracepoint_id).or_default();
             self.tracepoint_values
@@ -456,6 +536,15 @@ impl EventDb {
     pub fn reset_tracepoint_data(&mut self, tracepoint_id_list: &[usize]) {
         self.tracepoint_values = HashMap::new();
         self.tracepoint_errors = HashMap::new();
+        // M25 §3.2.1.1 — the source-location index must drop firings
+        // for any tracepoint being reset, otherwise stale entries
+        // would surface on the next correlation lookup.
+        let cleared_table_ids: std::collections::HashSet<SingleTableId> =
+            tracepoint_id_list.iter().map(|id| SingleTableId(id + 1)).collect();
+        self.firings_by_source_location.retain(|_, firings| {
+            firings.retain(|f| !cleared_table_ids.contains(&f.single_table_id));
+            !firings.is_empty()
+        });
         for tracepoint_id in tracepoint_id_list {
             self.clear_single_table(SingleTableId(tracepoint_id + 1));
             self.refresh_global();

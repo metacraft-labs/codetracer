@@ -28,6 +28,10 @@ use std::{error::Error, panic};
 
 mod calltrace;
 mod core;
+// M25 — Correlation markers. Both modules belong to the bin's tree
+// because `main.rs::run_correlations_subcommand` reaches in directly.
+mod correlation_index;
+mod correlation_markers;
 mod ctfs_trace_reader;
 mod dap;
 mod dap_error;
@@ -176,6 +180,24 @@ enum TraceOp {
         trace_folder: std::path::PathBuf,
         #[arg(long, value_parser = ["off", "on", "lazy"])]
         mode: String,
+    },
+    /// M25 — Print the cross-trace correlation graph for a session.
+    /// Reports which Send markers pair with which Recv markers, plus
+    /// per-marker match/no-match/ambiguous counts. The session
+    /// manifest is the entry point so multi-trace correlations
+    /// surface immediately; for a single trace the manifest carries
+    /// one entry. Reads marker source comments + TOML authoring path
+    /// at command time so the output reflects the latest source
+    /// state, mirroring the session-load scanner's behaviour
+    /// (spec §3.1).
+    Correlations {
+        /// Path to a `session.toml` manifest, or a folder containing
+        /// source files with `# codetracer:` comments / a
+        /// `.codetracer/correlation-markers.toml`. When pointed at a
+        /// folder, the loader skips the manifest step and just runs
+        /// the marker scanner; useful for the diagnostic-only flow
+        /// recommended in spec §10.
+        session_or_source: std::path::PathBuf,
     },
 }
 
@@ -372,6 +394,84 @@ fn run_trace_subcommand(op: TraceOp) -> Result<(), Box<dyn Error>> {
             config.write_to_path(&config_path)?;
             println!("origin-metadata mode set to {}", new_mode.as_str());
         }
+        TraceOp::Correlations { session_or_source } => {
+            run_correlations_subcommand(&session_or_source)?;
+        }
+    }
+    Ok(())
+}
+
+/// M25 — `ct trace correlations <session.toml | source-dir>` prints
+/// the cross-trace correlation graph. We pre-walk the marker scanner
+/// inputs in the same priority order the session-load layer uses
+/// (spec §3.1) and surface a `CorrelationReport` rendered through
+/// [`crate::correlation_index::CorrelationReport::render`].
+///
+/// The diagnostic flow per spec §10 makes this command **read-only**:
+/// no tracepoint cache is mutated, no trace files are rewritten.
+fn run_correlations_subcommand(path: &std::path::Path) -> Result<(), Box<dyn Error>> {
+    use crate::correlation_index::{CorrelationReport, MarkerEventView, PairIndex};
+    use crate::correlation_markers::{MarkerPayload, MarkerScanner};
+
+    // Resolve the source root. When the caller passes a session.toml
+    // we use its parent directory; when they pass a folder we treat
+    // it directly as the source root. Both modes go through the
+    // same scanner.
+    let source_root = if path.is_file() {
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+
+    let result = MarkerScanner::scan_roots(&[source_root.as_path()]);
+
+    // Also pull in any `.codetracer/correlation-markers.toml`.
+    let toml_path = source_root.join(".codetracer").join("correlation-markers.toml");
+    let toml_markers = if toml_path.is_file() {
+        MarkerScanner::load_toml(&toml_path).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    // The CLI does not have a live recorder available, so we build
+    // a synthetic `MarkerEventView` from each declared marker as if
+    // it fired exactly once. This gives users a "what the report
+    // would look like when these markers fire" preview — the M25
+    // discipline is to ship the algorithm + report shape and let the
+    // recorder-integration follow-on flesh out live firings.
+    let mut events: Vec<MarkerEventView> = Vec::new();
+    let mut combined = result.markers.clone();
+    combined.extend(toml_markers);
+    for (counter, decl) in combined.into_iter().enumerate() {
+        let payload = MarkerPayload {
+            marker_id: counter,
+            boundary_id: decl.boundary_id.clone(),
+            direction: decl.direction,
+            key_text: decl.key_text.clone(),
+            // Synthetic key value: the textual key expression doubles
+            // as the value placeholder so the CLI can show ambiguous
+            // / matched buckets even without live recorder data.
+            key_value: decl.key_text.clone(),
+            show_text: decl.show_text.clone(),
+            show_value: decl.show_text.clone(),
+            description: decl.description.clone(),
+            format: decl.format.clone(),
+        };
+        events.push(MarkerEventView::new(
+            "(synthetic)",
+            counter as i64,
+            decl.location.path.clone(),
+            decl.location.line,
+            payload,
+        ));
+    }
+    let index = PairIndex::build(&events);
+    let report = CorrelationReport::from_index(&index);
+    print!("{}", report.render());
+    for diag in result.diagnostics {
+        eprintln!("diagnostic {}:{}: {}", diag.path.display(), diag.line, diag.error,);
     }
     Ok(())
 }

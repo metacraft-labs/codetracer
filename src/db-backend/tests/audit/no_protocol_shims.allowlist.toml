@@ -1,0 +1,61 @@
+# M25 — Negative deliverable: no protocol-specific shims in recorders.
+#
+# Spec: `codetracer-specs/GUI/Debugging-Features/Correlation-Markers.md` §1,
+# §3.2, §4. Milestone catalogue:
+# `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`
+# M25 — `test_no_protocol_specific_shims_in_recorders`.
+#
+# A repo-grep audit (Layer 1 verification entry of the same name)
+# asserts that no source file in any recorder repo contains shim code
+# intended to intercept and instrument network / IPC protocols for
+# the purpose of cross-process correlation. The grep target list
+# covers, at minimum:
+#
+# - `traceparent`, `fetch`, `XMLHttpRequest`, `WebSocket`, `gRPC`
+# - language-specific HTTP libraries CodeTracer recorders touch
+#   (`requests`, `aiohttp`, `http.server` for Python; `Net::HTTP`,
+#   `webrick` for Ruby; `http`, `axios` for Node)
+# - any module under a recorder's source tree whose directory or
+#   filename matches `boundary`, `shim`, `correlation_`.
+#
+# Each grep hit must be triaged: legitimate existing recorder
+# coverage (the test allowlists the recorder's pre-existing
+# intercepts where they predate the campaign), or new
+# cross-process-correlation code, which is a violation. The markers
+# are the only mechanism added by this campaign.
+#
+# The format below mirrors the §10 spec language. Each `[[allow]]`
+# entry is one waiver for an existing recorder feature that predates
+# the M25 campaign and is NOT part of the cross-process correlation
+# substrate (e.g. an HTTP recorder's existing ability to capture
+# request bodies as part of the trace, which is orthogonal to
+# correlation markers).
+#
+# When updating this list:
+#   - Cite the recorder repo + filename + reason.
+#   - The campaign goal is that this list shrinks over time, not
+#     grows; the M29 cross-process value-origin chain must continue
+#     to rely solely on user-placed markers.
+
+schema_version = 1
+
+# The verification test reads `targets` to know what to search for.
+# Hits outside `allow` are reported as violations.
+targets = [
+  "traceparent",
+  "XMLHttpRequest",
+  "WebSocket",
+  "gRPC",
+  "correlation_",
+  "boundary_shim",
+]
+
+# Per spec §10, the V1 allowlist is **empty**: M25 does not add any
+# protocol-specific shims to any recorder. The audit therefore
+# expects no hits across the recorder source trees.
+#
+# (As recorder integrations evolve, legitimate uses of e.g.
+# `WebSocket` for the recorder's own IPC may need an explicit
+# `[[allow]]` entry. Each waiver must cite the spec section that
+# permits it.)
+allow = []

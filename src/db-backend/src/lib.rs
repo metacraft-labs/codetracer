@@ -22,6 +22,13 @@ pub mod c_compat;
 pub mod vfs;
 
 pub mod calltrace;
+// M25 — Correlation markers (tracepoint-based; no protocol shims).
+// Spec: `codetracer-specs/GUI/Debugging-Features/Correlation-Markers.md`.
+// The scanner + per-language prefix table + TOML loader live here;
+// the pairing index over the general tracepoint cache lives in
+// `correlation_index`.
+pub mod correlation_index;
+pub mod correlation_markers;
 
 #[cfg(feature = "io-transport")]
 pub mod core;
