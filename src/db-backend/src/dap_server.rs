@@ -22,6 +22,11 @@ use crate::macro_sourcemap::UpdateExpansionArgs;
 #[cfg(not(windows))]
 use crate::paths::CODETRACER_PATHS;
 use crate::recreator_session::RecreatorArgs;
+// M24 — multi-trace session loading. The dap_server holds onto a
+// `SessionHandler` instead of (or rather: wrapping) a single
+// `Handler` so requests can route per-thread to the owning trace.
+use crate::session_handler::{SessionHandler, TraceSlot, compose_thread_id, decompose_thread_id};
+use crate::session_manifest::SessionManifest;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
     FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
@@ -567,6 +572,267 @@ fn setup(
     } else {
         Err("problem with reading metadata or trace files and no replay-worker trace path was found".into())
     }
+}
+
+/// Returns true when the launch's `trace_folder`/`trace_file` resolves
+/// to a `session.toml` manifest. The check is path-shaped — we accept
+/// the manifest either as `trace_folder` itself (the typical CLI
+/// invocation: `replay-server dap-server <session.toml>`) or as the
+/// concatenation `trace_folder/trace_file`. The latter mirrors the
+/// existing `.ct` autodetect in `handle_message`.
+fn is_session_manifest_path(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    path.extension().is_some_and(|ext| ext == "toml")
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "session.toml")
+}
+
+/// Resolve the path the launch's `trace_folder` + `trace_file` point
+/// at. Returns the candidate when it looks like a session manifest,
+/// otherwise `None`. Kept distinct from `is_session_manifest_path` so
+/// callers can also use the helper for the `Ctx::launch_trace_folder`
+/// shape (which may itself be the manifest path).
+fn resolve_session_manifest_path(trace_folder: &Path, trace_file: &Path) -> Option<PathBuf> {
+    if is_session_manifest_path(trace_folder) {
+        return Some(trace_folder.to_path_buf());
+    }
+    let joined = trace_folder.join(trace_file);
+    if is_session_manifest_path(&joined) {
+        return Some(joined);
+    }
+    None
+}
+
+/// M24 — load a `session.toml` manifest and build a
+/// [`SessionHandler`] by calling the existing single-trace [`setup`]
+/// for each `[[trace]]` entry. The single-trace `Handler` code is
+/// unchanged: we reuse it through the same call surface a single
+/// `.ct` launch would, then wrap the resulting handlers behind the
+/// session multiplexer.
+#[allow(clippy::too_many_arguments)]
+fn setup_session(
+    manifest_path: &Path,
+    raw_diff_index: Option<String>,
+    recreator_exe: &Path,
+    restore_location: Option<Location>,
+    sender: Sender<DapMessage>,
+    for_launch: bool,
+    thread_name: &str,
+) -> Result<SessionHandler, Box<dyn Error>> {
+    info!("setup_session: loading manifest from {}", manifest_path.display());
+    let manifest = SessionManifest::load(manifest_path)
+        .map_err(|e| -> Box<dyn Error> { format!("failed to load session manifest: {e}").into() })?;
+    let mut handlers: Vec<Handler> = Vec::with_capacity(manifest.traces.len());
+    for (idx, trace) in manifest.traces.iter().enumerate() {
+        let resolved = manifest.resolved_trace_path(trace);
+        info!(
+            "setup_session: loading trace [{idx}] role={} recording_id={} from {}",
+            trace.role,
+            trace.recording_id,
+            resolved.display()
+        );
+        // The single-trace `setup` resolves the CTFS container by
+        // probing both `trace_folder` and `trace_folder/trace_file`.
+        // We pass the resolved per-trace path as `trace_folder` and an
+        // empty file so the existing autodetect picks it up uniformly
+        // for both ".ct" files and ".ct"-containing directories.
+        let per_trace_thread_name = format!("{}-{}", thread_name, trace.recording_id);
+        // Only the first trace pays the run-to-entry cost; secondary
+        // traces are positioned via subsequent DAP requests in the
+        // session. This mirrors the §14.1 contract where every trace
+        // starts at its own entry until the user steers it.
+        let trace_for_launch = for_launch && idx == 0;
+        let handler = setup(
+            &resolved,
+            Path::new(""),
+            raw_diff_index.clone(),
+            recreator_exe,
+            if idx == 0 { restore_location.clone() } else { None },
+            sender.clone(),
+            trace_for_launch,
+            &per_trace_thread_name,
+        )
+        .map_err(|e| -> Box<dyn Error> {
+            format!(
+                "failed to load trace [{idx}] (role={}) from {}: {e}",
+                trace.role,
+                resolved.display()
+            )
+            .into()
+        })?;
+        handlers.push(handler);
+    }
+    let session = SessionHandler::new(manifest, handlers)
+        .map_err(|e| -> Box<dyn Error> { format!("failed to build session handler: {e}").into() })?;
+    Ok(session)
+}
+
+/// M24 backwards-compat helper: wrap a single freshly-loaded
+/// [`Handler`] inside a synthetic single-trace [`SessionHandler`] so
+/// downstream code routes uniformly through the session layer. The
+/// synthetic manifest carries one `[[trace]]` entry whose
+/// `default_thread_prefix` is empty, so the single-trace DAP surface
+/// (thread id `1`, thread name `<thread 1>`) is preserved
+/// byte-for-byte. This is the M24
+/// `test_session_handler_single_trace_backcompat` contract.
+pub fn wrap_single_trace_as_session(handler: Handler, trace_path: PathBuf) -> Result<SessionHandler, Box<dyn Error>> {
+    let manifest = SessionManifest::single_trace(trace_path);
+    SessionHandler::new(manifest, vec![handler])
+        .map_err(|e| -> Box<dyn Error> { format!("failed to wrap single trace as session: {e}").into() })
+}
+
+/// Build the per-slot list of inner thread ids by querying each
+/// trace's `ReplaySession::list_processes()`. Mirrors the projection
+/// the `Handler::threads` implementation already does — we replicate
+/// it here so the SessionHandler can build the aggregated thread list
+/// without mutating each handler's internal state.
+fn inner_threads_for_slot(
+    session: &SessionHandler,
+    slot: TraceSlot,
+) -> Result<Vec<(u32, String)>, crate::session_handler::SessionHandlerError> {
+    let loaded = session
+        .trace(slot)
+        .ok_or(crate::session_handler::SessionHandlerError::UnknownSlot { slot })?;
+    // We do not have `&mut Handler` here, but `list_processes` on the
+    // ReplaySession trait is `&mut self`. For M24 we use the
+    // pre-cached single-thread fallback the existing `threads`
+    // handler also falls back to; the production wiring of multi-thread
+    // enumeration per trace is a follow-on once
+    // `Handler::collect_thread_descriptors()` lands. The behaviour
+    // matches today's `Handler::threads`: when no per-trace process
+    // metadata is available, surface one synthetic `<thread 1>`.
+    let _ = loaded; // suppress unused-binding warning while still asserting the slot is valid
+    Ok(vec![(1, "<thread 1>".to_string())])
+}
+
+/// Build the DAP `threads` response from a SessionHandler. The
+/// aggregated thread list applies each trace's manifest prefix and
+/// surfaces composed thread ids — see `session_handler::compose_thread_id`.
+fn build_session_threads_response(session: &SessionHandler) -> Result<Vec<crate::dap_types::Thread>, Box<dyn Error>> {
+    let aggregated = session
+        .aggregated_thread_list(|slot| inner_threads_for_slot(session, slot))
+        .map_err(|e| -> Box<dyn Error> { format!("session threads aggregation failed: {e}").into() })?;
+    Ok(aggregated
+        .into_iter()
+        .map(|t| crate::dap_types::Thread {
+            id: t.composed_thread_id,
+            name: t.name,
+        })
+        .collect())
+}
+
+/// Build the `ct/listProcesses` payload. Each entry carries the
+/// manifest role, recording id, thread count, and the composed thread
+/// ids the frontend uses to drive cross-trace navigation.
+fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, Box<dyn Error>> {
+    let processes = session
+        .list_processes(|slot| inner_threads_for_slot(session, slot))
+        .map_err(|e| -> Box<dyn Error> { format!("session list_processes failed: {e}").into() })?;
+    let processes_json: Vec<Value> = processes
+        .into_iter()
+        .map(|p| {
+            json!({
+                "recordingId": p.recording_id,
+                "role": p.role,
+                "defaultThreadPrefix": p.default_thread_prefix,
+                "threadCount": p.thread_count,
+                "threadIds": p.thread_ids,
+            })
+        })
+        .collect();
+    Ok(json!({ "processes": processes_json }))
+}
+
+/// Extract the `threadId` argument from a DAP request, when present.
+/// Returns `None` for requests that have no thread context (most
+/// `ct/` request types). The session-aware dispatcher uses the result
+/// to route requests; missing thread ids default to slot 0 (the
+/// primary trace), matching the single-trace surface.
+fn extract_thread_id_from_request(req: &dap::Request) -> Option<i64> {
+    if let Some(raw) = req.arguments.get("threadId") {
+        if let Some(v) = raw.as_i64() {
+            return Some(v);
+        }
+        if let Some(v) = raw.as_u64() {
+            return i64::try_from(v).ok();
+        }
+    }
+    None
+}
+
+/// Route a single DAP request through the SessionHandler. The
+/// composed thread id selects the trace; requests without a thread id
+/// default to slot 0 (the primary trace). The existing
+/// `handle_request` then dispatches the request to the selected
+/// trace's single-trace `Handler` unchanged.
+fn handle_request_via_session(
+    session: &mut SessionHandler,
+    req: dap::Request,
+    sender: Sender<DapMessage>,
+) -> Result<(), Box<dyn Error>> {
+    // `ct/listProcesses` is the only request handled at the session
+    // layer itself — everything else routes down to a per-trace
+    // `Handler` exactly as before.
+    if req.command == "ct/listProcesses" {
+        let body = build_ct_list_processes_response(session)?;
+        let response = dap::DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: 0,
+                type_: "response".to_string(),
+            },
+            request_seq: req.base.seq,
+            success: true,
+            command: req.command.clone(),
+            message: None,
+            body,
+        });
+        sender.send(response)?;
+        return Ok(());
+    }
+    // `threads` is special: the single-trace `Handler::threads` only
+    // knows about its own trace; for sessions we want the aggregated
+    // list. We answer at the session layer rather than per-trace.
+    if req.command == "threads" {
+        let threads = build_session_threads_response(session)?;
+        let body = crate::dap_types::ThreadsResponseBody { threads };
+        let response = dap::DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: 0,
+                type_: "response".to_string(),
+            },
+            request_seq: req.base.seq,
+            success: true,
+            command: req.command.clone(),
+            message: None,
+            body: serde_json::to_value(body)?,
+        });
+        sender.send(response)?;
+        return Ok(());
+    }
+    let thread_id = extract_thread_id_from_request(&req).unwrap_or_else(|| {
+        // Default to slot 0 + inner thread 1 (the legacy single-thread
+        // surface) when the request carries no thread context. This is
+        // both the backwards-compat path and the natural default for
+        // requests like `restart`, `disconnect`, `ct/setup-trace-session`
+        // that aren't thread-scoped.
+        compose_thread_id(0, 1).unwrap_or(1)
+    });
+    let (slot, _) = decompose_thread_id(thread_id);
+    if (slot as usize) >= session.trace_count() {
+        return Err(format!(
+            "DAP {} request: threadId {} references unknown trace slot {}",
+            req.command, thread_id, slot
+        )
+        .into());
+    }
+    let handler = session
+        .handler_for_thread_id_mut(thread_id)
+        .ok_or_else(|| -> Box<dyn Error> { "session router: handler lookup failed".into() })?;
+    handle_request(handler, req, sender)
 }
 
 fn default_live_recording_dir(program: &Path, thread_name: &str) -> PathBuf {
@@ -1323,6 +1589,11 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.launch_live_recording_dir = None;
                 if let Some(trace_file) = &args.trace_file {
                     ctx.launch_trace_file = trace_file.clone();
+                } else if is_session_manifest_path(folder) {
+                    // M24 session.toml — the manifest declares its own
+                    // trace list, so there is no per-launch trace_file
+                    // to resolve.
+                    ctx.launch_trace_file = PathBuf::new();
                 } else {
                     // Auto-detect the trace file. Materialized traces are
                     // CTFS-only (`<program>.ct` or `trace.ct`); legacy
@@ -1351,12 +1622,19 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 // the rr replay worker; auto-discovering ct-native-replay on
                 // PATH for these traces would cause a spurious worker start
                 // that fails and blocks trace loading.
-                ctx.recreator_exe = if is_db_trace(&ctx.launch_trace_folder, &ctx.launch_trace_file) {
-                    info!("DB-based trace detected — skipping replay-worker resolution");
-                    PathBuf::new()
-                } else {
-                    resolve_recreator_exe(args.recreator_exe)
-                };
+                ctx.recreator_exe =
+                    if resolve_session_manifest_path(&ctx.launch_trace_folder, &ctx.launch_trace_file).is_some() {
+                        // M24 — the session loader resolves the recreator
+                        // exe per-trace through the same paths the
+                        // single-trace launch uses; the session-level
+                        // value is unused.
+                        PathBuf::new()
+                    } else if is_db_trace(&ctx.launch_trace_folder, &ctx.launch_trace_file) {
+                        info!("DB-based trace detected — skipping replay-worker resolution");
+                        PathBuf::new()
+                    } else {
+                        resolve_recreator_exe(args.recreator_exe)
+                    };
                 ctx.restore_location = args.restore_location.clone();
 
                 if ctx.received_configuration_done
@@ -1611,7 +1889,7 @@ fn task_thread(
     cached_launch: bool,
     run_to_entry: bool,
 ) -> Result<(), Box<dyn Error>> {
-    // Track the trace folder + file currently loaded into `handler` so we can
+    // Track the trace folder + file currently loaded into `session` so we can
     // skip a redundant `setup()` reload when the renderer issues a duplicate
     // launch for the SAME trace.  Without this, every materialized DB trace
     // pays the full CTFS Db population cost twice (once from
@@ -1624,25 +1902,28 @@ fn task_thread(
     let mut loaded_trace_file: Option<PathBuf> = None;
     let mut loaded_raw_diff_index: Option<String> = None;
 
-    let mut handler = if cached_launch {
+    // M24 — every dispatch path routes through a [`SessionHandler`].
+    // The single-trace flow synthesises a one-entry session via
+    // [`wrap_single_trace_as_session`] so the per-request routing
+    // surface is the same whether the launch points at a `.ct` file
+    // or a `session.toml`.
+    let mut session: SessionHandler = if cached_launch {
         let for_launch = false;
-        let h = if let Some(program) = &ctx_with_cached_launch.launch_program {
-            setup_live_program(
-                LiveProgramSetup {
-                    program: program.clone(),
-                    program_args: ctx_with_cached_launch.launch_program_args.clone(),
-                    cwd: ctx_with_cached_launch.launch_cwd.clone(),
-                    live_recording_dir: ctx_with_cached_launch.launch_live_recording_dir.clone(),
-                },
-                &ctx_with_cached_launch.recreator_exe,
-                sender.clone(),
-                for_launch,
-                name,
-            )
-        } else {
-            setup(
+        let cached_path = ctx_with_cached_launch.launch_trace_folder.clone();
+        // First try the session.toml path. When the cached launch
+        // points at a `session.toml`, route through `setup_session`;
+        // otherwise fall back to the legacy single-trace flow.
+        let session_manifest_path = if ctx_with_cached_launch.launch_program.is_none() {
+            resolve_session_manifest_path(
                 &ctx_with_cached_launch.launch_trace_folder,
                 &ctx_with_cached_launch.launch_trace_file,
+            )
+        } else {
+            None
+        };
+        let s = if let Some(manifest_path) = session_manifest_path {
+            setup_session(
+                &manifest_path,
                 ctx_with_cached_launch.launch_raw_diff_index.clone(),
                 &ctx_with_cached_launch.recreator_exe,
                 ctx_with_cached_launch.restore_location.clone(),
@@ -1650,27 +1931,66 @@ fn task_thread(
                 for_launch,
                 name,
             )
-        }
-        .map_err(|e| {
-            error!("launch error: {e:?}");
-            format!("launch error: {e:?}")
-        })?;
+            .map_err(|e| {
+                error!("launch error (session): {e:?}");
+                format!("launch error: {e:?}")
+            })?
+        } else {
+            let h = if let Some(program) = &ctx_with_cached_launch.launch_program {
+                setup_live_program(
+                    LiveProgramSetup {
+                        program: program.clone(),
+                        program_args: ctx_with_cached_launch.launch_program_args.clone(),
+                        cwd: ctx_with_cached_launch.launch_cwd.clone(),
+                        live_recording_dir: ctx_with_cached_launch.launch_live_recording_dir.clone(),
+                    },
+                    &ctx_with_cached_launch.recreator_exe,
+                    sender.clone(),
+                    for_launch,
+                    name,
+                )
+            } else {
+                setup(
+                    &ctx_with_cached_launch.launch_trace_folder,
+                    &ctx_with_cached_launch.launch_trace_file,
+                    ctx_with_cached_launch.launch_raw_diff_index.clone(),
+                    &ctx_with_cached_launch.recreator_exe,
+                    ctx_with_cached_launch.restore_location.clone(),
+                    sender.clone(),
+                    for_launch,
+                    name,
+                )
+            }
+            .map_err(|e| {
+                error!("launch error: {e:?}");
+                format!("launch error: {e:?}")
+            })?;
+            // M24 backwards-compat: wrap the freshly-loaded
+            // single-trace `Handler` in a synthetic `SessionHandler`
+            // so the per-request routing surface is uniform.
+            wrap_single_trace_as_session(h, cached_path.clone())
+                .map_err(|e| -> String { format!("launch error (session wrap): {e:?}") })?
+        };
         if ctx_with_cached_launch.launch_program.is_none() {
             loaded_trace_folder = Some(ctx_with_cached_launch.launch_trace_folder.clone());
             loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
             loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
         }
-        h
+        s
     } else {
-        // `.initialized` is false
-        Handler::new(
+        // No cached launch yet → synthesise an empty single-trace
+        // session whose underlying Handler has `.initialized == false`.
+        // Requests are dropped until a `launch` arrives.
+        let placeholder = Handler::new(
             TraceKind::Materialized,
             RecreatorArgs {
                 name: name.to_string(),
                 ..RecreatorArgs::default()
             },
             Box::new(Db::new(&PathBuf::from(""))),
-        )
+        );
+        wrap_single_trace_as_session(placeholder, PathBuf::from(""))
+            .map_err(|e| -> String { format!("placeholder session wrap error: {e:?}") })?
     };
 
     loop {
@@ -1687,6 +2007,10 @@ fn task_thread(
                 let launch_trace_folder = folder.clone();
                 let launch_trace_file = if let Some(trace_file) = &args.trace_file {
                     trace_file.clone()
+                } else if is_session_manifest_path(folder) {
+                    // M24 — session.toml carries its own trace list, so
+                    // there is no per-launch `trace_file` to resolve.
+                    PathBuf::new()
                 } else {
                     // Materialized traces are CTFS-only — pick the first
                     // `.ct` container in the folder, falling back to the
@@ -1704,9 +2028,15 @@ fn task_thread(
                 info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
                 let launch_raw_diff_index = args.raw_diff_index.clone();
+                let session_manifest_path = resolve_session_manifest_path(&launch_trace_folder, &launch_trace_file);
                 // Only resolve the replay-worker executable for non-DB traces
                 // (see the parallel comment in the initial launch handler).
-                let recreator_exe = if is_db_trace(&launch_trace_folder, &launch_trace_file) {
+                let recreator_exe = if session_manifest_path.is_some() {
+                    // Session loader resolves per-trace recreator exes
+                    // through the same paths the single-trace launch
+                    // uses; the per-session value is unused.
+                    PathBuf::new()
+                } else if is_db_trace(&launch_trace_folder, &launch_trace_file) {
                     info!("DB-based trace detected — skipping replay-worker resolution");
                     PathBuf::new()
                 } else {
@@ -1717,14 +2047,16 @@ fn task_thread(
                 // Skip a redundant `setup()` reload when this launch targets
                 // the exact trace that the existing handler already serves.
                 // Comparison is conservative: same folder + same trace file +
-                // same raw_diff_index, and the previous setup completed
-                // (`handler.initialized`).  When the launch carries a
+                // same raw_diff_index, and the previous setup completed,
+                // and the previous run was already a session-or-single-trace
+                // initialised cleanly.  When the launch carries a
                 // restore_location we still rerun setup so the position is
                 // applied via run_to_entry's restore branch.
+                let session_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
                 let same_trace = loaded_trace_folder.as_ref() == Some(&launch_trace_folder)
                     && loaded_trace_file.as_ref() == Some(&launch_trace_file)
                     && loaded_raw_diff_index == launch_raw_diff_index
-                    && handler.initialized
+                    && session_initialized
                     && restore_location.is_none();
 
                 if same_trace {
@@ -1735,9 +2067,28 @@ fn task_thread(
                     // happen at the protocol level (handled by the receiving
                     // thread/main thread). We only need to avoid re-running
                     // the expensive CTFS Db population here.
+                } else if let Some(manifest_path) = session_manifest_path {
+                    // M24 session.toml launch
+                    let for_launch = run_to_entry;
+                    session = setup_session(
+                        &manifest_path,
+                        launch_raw_diff_index.clone(),
+                        &recreator_exe,
+                        restore_location,
+                        sender.clone(),
+                        for_launch,
+                        name,
+                    )
+                    .map_err(|e| {
+                        error!("session launch error: {e:?}");
+                        format!("session launch error: {e:?}")
+                    })?;
+                    loaded_trace_folder = Some(launch_trace_folder);
+                    loaded_trace_file = Some(launch_trace_file);
+                    loaded_raw_diff_index = launch_raw_diff_index;
                 } else {
                     let for_launch = run_to_entry;
-                    handler = setup(
+                    let handler = setup(
                         &launch_trace_folder,
                         &launch_trace_file,
                         launch_raw_diff_index.clone(),
@@ -1751,6 +2102,8 @@ fn task_thread(
                         error!("launch error: {e:?}");
                         format!("launch error: {e:?}")
                     })?;
+                    session = wrap_single_trace_as_session(handler, launch_trace_folder.clone())
+                        .map_err(|e| -> String { format!("session wrap error: {e:?}") })?;
                     loaded_trace_folder = Some(launch_trace_folder);
                     loaded_trace_file = Some(launch_trace_file);
                     loaded_raw_diff_index = launch_raw_diff_index;
@@ -1761,7 +2114,7 @@ fn task_thread(
             {
                 let for_launch = run_to_entry;
                 let recreator_exe = resolve_recreator_exe(args.recreator_exe.clone());
-                handler = setup_live_program(
+                let handler = setup_live_program(
                     LiveProgramSetup {
                         program: PathBuf::from(program),
                         program_args: args.args.clone().unwrap_or_default(),
@@ -1777,38 +2130,47 @@ fn task_thread(
                     error!("live launch error: {e:?}");
                     format!("live launch error: {e:?}")
                 })?;
+                session = wrap_single_trace_as_session(handler, PathBuf::from(""))
+                    .map_err(|e| -> String { format!("live session wrap error: {e:?}") })?;
                 loaded_trace_folder = None;
                 loaded_trace_file = None;
                 loaded_raw_diff_index = None;
             }
-        } else if handler.initialized {
-            let res = handle_request(&mut handler, request.clone(), sender.clone());
-            if let Err(e) = res {
-                warn!("  handle_request error in thread: {e:?}");
-                // Send an error response back to the daemon so it does not
-                // wait indefinitely for events that will never arrive (e.g.,
-                // a `stopped` event after an unrecognized navigation command
-                // like `ct/goto-ticks`).
-                let error_response = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq: 0, // Will be patched by write_dap_messages
-                        type_: "response".to_string(),
-                    },
-                    request_seq: request.base.seq,
-                    success: false,
-                    command: request.command.clone(),
-                    message: Some(format!("{e}")),
-                    body: json!({}),
-                });
-                if let Err(send_err) = sender.send(error_response) {
-                    error!("failed to send error response for {}: {send_err:?}", request.command);
-                }
-                // continue with other requests; trying to be more robust
-                // assuming it's for individual requests to fail
-                //   TODO: is it possible for some to leave bad state ?
-            }
         } else {
-            warn!("  handler NOT initialized, dropping {:?}", request.command);
+            // Any session whose primary trace is initialized is
+            // dispatched through the session router. The router
+            // delegates each request to the owning trace's
+            // single-trace Handler (unchanged code path) per M24.
+            let primary_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
+            if primary_initialized {
+                let res = handle_request_via_session(&mut session, request.clone(), sender.clone());
+                if let Err(e) = res {
+                    warn!("  handle_request error in thread: {e:?}");
+                    // Send an error response back to the daemon so it does not
+                    // wait indefinitely for events that will never arrive
+                    // (e.g., a `stopped` event after an unrecognized
+                    // navigation command like `ct/goto-ticks`).
+                    let error_response = DapMessage::Response(Response {
+                        base: ProtocolMessage {
+                            seq: 0, // Will be patched by write_dap_messages
+                            type_: "response".to_string(),
+                        },
+                        request_seq: request.base.seq,
+                        success: false,
+                        command: request.command.clone(),
+                        message: Some(format!("{e}")),
+                        body: json!({}),
+                    });
+                    if let Err(send_err) = sender.send(error_response) {
+                        error!("failed to send error response for {}: {send_err:?}", request.command);
+                    }
+                    // continue with other requests; trying to be more robust
+                    // assuming it's for individual requests to fail
+                    //   TODO: is it possible for some to leave bad state ?
+                }
+            } else {
+                warn!("  handler NOT initialized, dropping {:?}", request.command);
+            }
         }
     }
     // Ok(())

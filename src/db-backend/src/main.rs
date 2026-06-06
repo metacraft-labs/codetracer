@@ -91,6 +91,11 @@ mod query;
 mod recreator_origin;
 mod recreator_session;
 mod replay;
+// M24 — Multi-trace session loading; mirror of the lib.rs declarations.
+// The bin needs its own copies because `dap_server` reaches for the
+// SessionHandler via the `crate::session_handler` path.
+mod session_handler;
+mod session_manifest;
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod stack_unwinder;
 mod step_lines_loader;
@@ -132,6 +137,20 @@ enum Commands {
     Trace {
         #[command(subcommand)]
         op: TraceOp,
+    },
+    /// M24 — `ct session <session.toml>` alias for the existing
+    /// launch command. Validates the manifest and prints the
+    /// resolved trace list (recording ids + paths + roles) so
+    /// users can sanity-check a manifest before handing it to the
+    /// DAP launch flow. The actual launch happens through
+    /// `DapServer` once the frontend sends a `launch` request
+    /// pointing at the manifest path.
+    Session {
+        /// Path to a `session.toml` manifest. The file is parsed
+        /// through the same `SessionManifest::load` entry point the
+        /// DAP launch flow uses, so any error surfaced here is
+        /// identical to the one the frontend would see.
+        manifest_path: std::path::PathBuf,
     },
 }
 
@@ -285,8 +304,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         Commands::Trace { op } => {
             run_trace_subcommand(op)?;
         }
+        Commands::Session { manifest_path } => {
+            run_session_subcommand(&manifest_path)?;
+        }
     }
 
+    Ok(())
+}
+
+/// M24 `ct session <session.toml>` alias — parses the manifest and
+/// prints a one-line summary per trace plus the correlation mode. The
+/// command is intentionally read-only so users can verify their
+/// manifest before launching the full DAP session through the
+/// frontend.
+fn run_session_subcommand(manifest_path: &std::path::Path) -> Result<(), Box<dyn Error>> {
+    use crate::session_manifest::SessionManifest;
+    let manifest = SessionManifest::load(manifest_path)
+        .map_err(|e| -> Box<dyn Error> { format!("failed to load session manifest: {e}").into() })?;
+    println!(
+        "session manifest {} — version {} ({} trace(s), correlation_index_mode={})",
+        manifest_path.display(),
+        manifest.version,
+        manifest.traces.len(),
+        manifest.correlation.index_mode.as_str(),
+    );
+    for (idx, trace) in manifest.traces.iter().enumerate() {
+        let resolved = manifest.resolved_trace_path(trace);
+        println!(
+            "  [{idx}] recording_id={} role={} prefix={} path={}",
+            trace.recording_id,
+            trace.role,
+            trace.default_thread_prefix,
+            resolved.display(),
+        );
+    }
     Ok(())
 }
 

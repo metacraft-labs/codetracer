@@ -107,6 +107,12 @@ pub mod query;
 pub mod recreator_origin;
 pub mod recreator_session;
 pub mod replay;
+// M24 — Multi-trace session loading. `session_manifest` owns the
+// `session.toml` loader; `session_handler` wraps
+// `HashMap<RecordingId, Handler>` and routes DAP requests to the
+// owning trace's handler. See spec §14.1 and the M24 milestone.
+pub mod session_handler;
+pub mod session_manifest;
 // M-DWARF-4: DWARF CFI walker for multi-frame stack unwinding.
 // Owns the parsed `.eh_frame` / `.debug_frame` sections and offers an
 // `unwind` entry point that the `EmulatorReplaySession::load_callstack`
