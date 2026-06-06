@@ -1297,11 +1297,29 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
 
   const ctStderr: string[] = [];
   const ctStdout: string[] = [];
+  // Optional realtime sink for ct host's stdout+stderr so a debugger can
+  // tail the trace-path import / server bootstrap output before the
+  // test teardown scrubs the temp dir.  Gated by env var; no-op when
+  // unset, so production runs are unchanged.
+  const ctOutputDumpPath = process.env.CODETRACER_TEST_CT_HOST_OUTPUT_PATH;
+  const appendCtOutput = (label: string, chunk: string) => {
+    if (!ctOutputDumpPath) return;
+    try {
+      require("node:fs").appendFileSync(
+        ctOutputDumpPath,
+        `[${label}] ${chunk}`,
+      );
+    } catch { /* ignore */ }
+  };
   ctProcess.stdout?.on("data", (chunk: Buffer) => {
-    ctStdout.push(chunk.toString());
+    const text = chunk.toString();
+    ctStdout.push(text);
+    appendCtOutput("ct.stdout", text);
   });
   ctProcess.stderr?.on("data", (chunk: Buffer) => {
-    ctStderr.push(chunk.toString());
+    const text = chunk.toString();
+    ctStderr.push(text);
+    appendCtOutput("ct.stderr", text);
   });
 
   await copyCompanionGfxStreamAfterTracePathImport(tracePath, ctStdout, ctProcess);

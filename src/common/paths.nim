@@ -88,21 +88,43 @@ when not defined(js):
 when defined(js) and not defined(ctRenderer):
   # On Windows (no Nix), use full paths so child_process.spawn works without
   # relying on PATH.  On Linux/macOS the Nix wrapper sets PATH to include
-  # the codetracer derivation's bin/, and CODETRACER_PREFIX points to
-  # runtime-deps (which does NOT contain ct), so bare names are correct.
-  # TODO(cross-compile): This is a compile-time check — index.js compiled on
-  # Linux will always use bare names, even if the JS bundle is later run on
-  # Windows.  This is fine while each platform compiles its own index.js, but
-  # would break if JS bundles are ever shared across platforms.  Consider a
-  # runtime check (e.g. process.platform == "win32") if that becomes needed.
-  when defined(windows):
-    let
-      codetracerExe* = codetracerExeDir / "bin" / "ct"
-      dbBackendRecordExe* = codetracerExeDir / "bin" / "db-backend-record"
-  else:
-    let
-      codetracerExe* = "ct"
-      dbBackendRecordExe* = "db-backend-record"
+  # the codetracer derivation's bin/, but downstream consumers (Playwright
+  # GUI test harness, dev shells without the wrapper, direct `ct host`
+  # invocations from a Justfile recipe, etc.) drop the wrapper's PATH
+  # additions when they spawn ct host as a subprocess — and then any
+  # nested `spawn("ct", ...)` for `trace-metadata` fails with ENOENT, the
+  # server's startup throws, and the renderer's socket.io transport
+  # closes before any CODETRACER:: events get delivered.
+  #
+  # Resolve to the absolute path when ``codetracerExeDir`` is known and
+  # the binary actually exists on disk; fall back to the bare name only
+  # when we have no better information.  This keeps the
+  # Nix-wrapper-PATH-only happy path working and removes the PATH
+  # assumption for everyone else.
+  proc resolveCodetracerExe(): cstring =
+    when defined(windows):
+      cstring(codetracerExeDir / "bin" / "ct")
+    else:
+      if codetracerExeDir.len > 0 and codetracerExeDir != "<unknown>":
+        let candidate = codetracerExeDir / "bin" / "ct"
+        # ``existsFile`` is unavailable on the JS target; ask Node directly.
+        proc nodeFsExistsSync(p: cstring): bool {.importjs: "require('fs').existsSync(#)".}
+        if nodeFsExistsSync(cstring(candidate)):
+          return cstring(candidate)
+      cstring("ct")
+  proc resolveDbBackendRecordExe(): cstring =
+    when defined(windows):
+      cstring(codetracerExeDir / "bin" / "db-backend-record")
+    else:
+      if codetracerExeDir.len > 0 and codetracerExeDir != "<unknown>":
+        let candidate = codetracerExeDir / "bin" / "db-backend-record"
+        proc nodeFsExistsSync(p: cstring): bool {.importjs: "require('fs').existsSync(#)".}
+        if nodeFsExistsSync(cstring(candidate)):
+          return cstring(candidate)
+      cstring("db-backend-record")
+  let
+    codetracerExe* = $resolveCodetracerExe()
+    dbBackendRecordExe* = $resolveDbBackendRecordExe()
 elif not defined(pythonPackage):
   let
     codetracerExe* = codetracerExeDir / "bin" / "ct"
