@@ -68,6 +68,11 @@ pub mod nim_mangling;
 // owns the storage; this module exposes it through a Rust trait that
 // origin queries (M20) and `db.rs::load_history` can consume.
 pub mod omniscient_db;
+// M19 — Origin-metadata streams (opt-in, all TraceKinds). Adds the
+// `originmeta.tc` / `source_exprs.tc` / `varwrites.tc` CTFS namespaces,
+// the materialized + native indexers that produce them, the reader-side
+// decoder, and the per-trace mode toggle (`origin-config.toml`).
+pub mod origin_metadata_indexer;
 // Value Origin Tracking — M2 surface: trait + continuation-token codec +
 // DAP error codes 6101–6106. The per-backend implementations live next
 // to their `ReplaySession` impls (`db.rs`, `emulator_session.rs`,

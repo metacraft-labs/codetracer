@@ -65,6 +65,7 @@ mod nim_mangling;
 // the `crate::omniscient_db` path.
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod omniscient_db;
+mod origin_metadata_indexer;
 mod origin_query;
 mod paths;
 mod program_search_tool;
@@ -108,6 +109,36 @@ enum Commands {
         structured_diff_path: std::path::PathBuf,
         trace_folder: std::path::PathBuf,
         // TODO: multitrace_folder: std::path::PathBuf,
+    },
+    /// M19 — `ct trace ...` subcommands for the origin-metadata streams.
+    Trace {
+        #[command(subcommand)]
+        op: TraceOp,
+    },
+}
+
+/// `ct trace` subcommand surface — `probe` reports the capability
+/// matrix, `origin-index` flips the mode (post-record CLI per
+/// spec §6.8.6).
+#[derive(Subcommand, Debug)]
+enum TraceOp {
+    /// Print the per-`VariableId` Path A / Path B / mixed capability
+    /// matrix recorded in `meta_dat/origin-config.toml` plus the
+    /// recorder name and version that produced the trace.
+    Probe {
+        /// Trace folder containing `meta_dat/origin-config.toml`.
+        trace_folder: std::path::PathBuf,
+    },
+    /// Flip a trace's `origin-metadata` mode after the fact. The CLI
+    /// dispatches to the materialized or native indexer based on the
+    /// trace's existing CTFS streams; for M19 the dispatch is a
+    /// metadata-only update (re-running the full indexer is a
+    /// follow-on that requires the recorder pipeline to be available
+    /// at re-index time).
+    OriginIndex {
+        trace_folder: std::path::PathBuf,
+        #[arg(long, value_parser = ["off", "on", "lazy"])]
+        mode: String,
     },
 }
 
@@ -233,7 +264,45 @@ fn main() -> Result<(), Box<dyn Error>> {
             let structured_diff = serde_json::from_str::<diff::Diff>(&raw)?;
             diff::index_diff(structured_diff, &trace_folder)?;
         }
+        Commands::Trace { op } => {
+            run_trace_subcommand(op)?;
+        }
     }
 
+    Ok(())
+}
+
+/// Dispatcher for the `ct trace ...` family.  Reads
+/// `meta_dat/origin-config.toml` (or creates an empty one when the
+/// trace lacks it) and applies the requested operation.
+fn run_trace_subcommand(op: TraceOp) -> Result<(), Box<dyn Error>> {
+    use crate::origin_metadata_indexer::{ORIGIN_CONFIG_FILE, OriginConfig, OriginMode, ProbeReport};
+    match op {
+        TraceOp::Probe { trace_folder } => {
+            let config_path = trace_folder.join("meta_dat").join(ORIGIN_CONFIG_FILE);
+            let config = if config_path.exists() {
+                OriginConfig::read_from_path(&config_path)?
+            } else {
+                OriginConfig::new(OriginMode::Off)
+            };
+            let report = ProbeReport::from_config(&config);
+            print!("{}", report.render());
+        }
+        TraceOp::OriginIndex { trace_folder, mode } => {
+            let new_mode =
+                OriginMode::parse(&mode).ok_or_else(|| -> Box<dyn Error> { "invalid --mode value".into() })?;
+            let meta_dat = trace_folder.join("meta_dat");
+            std::fs::create_dir_all(&meta_dat)?;
+            let config_path = meta_dat.join(ORIGIN_CONFIG_FILE);
+            let mut config = if config_path.exists() {
+                OriginConfig::read_from_path(&config_path)?
+            } else {
+                OriginConfig::new(OriginMode::Off)
+            };
+            config.set_mode(new_mode);
+            config.write_to_path(&config_path)?;
+            println!("origin-metadata mode set to {}", new_mode.as_str());
+        }
+    }
     Ok(())
 }
