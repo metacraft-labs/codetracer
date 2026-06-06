@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 #
-# Regenerate the Stylus DAP-test fixture in CTFS (.ct) format.
+# Regenerate the Stylus DAP-test fixture in CTFS (.ct) format via
+# the M27 generic WASM instrumentation pipeline (M28 deliverable).
+#
+# This is a thin shim around the canonical per-fixture script at
+# tests/fixtures/stylus-fund-trace/regenerate-stylus-fixture.sh —
+# both routes call the same M27-aware `stylus_fixture_rebuild`
+# harness. See that script for the full background; the short
+# version is: the recorded EVM trace data is committed as JSON
+# alongside the fixture, and this script repacks it into the
+# canonical `.ct` container via the M27 `ct instrument` pipeline
+# (rather than the legacy Stylus-node-only path the original
+# wazero recorder used).
 #
 # Background
 # ----------
@@ -48,6 +59,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
 cd "$REPO_ROOT/src/db-backend"
 exec cargo test --test stylus_fixture_rebuild -- \
-    --ignored \
-    --nocapture \
-    rebuild_stylus_ctfs_fixture
+	--ignored \
+	--nocapture \
+	rebuild_stylus_ctfs_fixture

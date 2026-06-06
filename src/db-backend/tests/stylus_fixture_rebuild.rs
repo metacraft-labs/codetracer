@@ -3,7 +3,16 @@
 //!
 //! Gated behind `#[ignore]` so a normal `cargo test` run does not touch
 //! the on-disk fixture. Invoked explicitly by
-//! `tests/fixtures/regenerate-stylus-fixture.sh`.
+//! `tests/fixtures/regenerate-stylus-fixture.sh` (or the per-fixture
+//! `tests/fixtures/stylus-fund-trace/regenerate-stylus-fixture.sh`).
+//!
+//! M28 note: this harness is the **M27-aware** repacker. The
+//! `vm_hooks` import surface it implicitly assumes is defined in
+//! `codetracer-evm-recorder/stylus/codetracer.toml` and exposed as a
+//! `PassThroughPlan` by the
+//! `codetracer-wasm-host-module-framework` crate. The legacy
+//! hand-written Go path (`codetracer-wasm-recorder/internal/stylus/`)
+//! is retired by M28 in favour of that data-driven surface.
 //!
 //! Background
 //! ----------
