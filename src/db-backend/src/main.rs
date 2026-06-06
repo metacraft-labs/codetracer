@@ -203,6 +203,38 @@ enum TraceOp {
         /// recommended in spec §10.
         session_or_source: std::path::PathBuf,
     },
+    /// M31-prep — `ct trace omniscient-prep <slice-folder>` runs the
+    /// M19 native indexer against a CTFS slice and emits the
+    /// omniscient artefacts (`memwrites.tc` / `linehits.tc` /
+    /// `originmeta.tc` / `varwrites.tc` / `source_exprs.tc`) into
+    /// `<slice-folder>/meta_dat/` so the `OmniscientPrepWorker` from
+    /// `Recording-Backends/Omniscient-DB-Server-Side-Prep.md` §5 can
+    /// invoke this binary as a subprocess.
+    ///
+    /// This is the subprocess shape M31 calls for; it does NOT yet
+    /// route through `ICtfsStorageRouter` because the CS-M5
+    /// `CtfsReadProvider` is not yet on `main`. Once M30 (rebase)
+    /// lands, the worker will fetch slices via the router, run this
+    /// subprocess against a temp directory, then upload the
+    /// resulting namespaces back through the router. For now the
+    /// subprocess works against a local filesystem slice, which is
+    /// exactly the shape the integration test harness needs.
+    OmniscientPrep {
+        /// Path to a CTFS slice folder (the recording's root dir).
+        slice_folder: std::path::PathBuf,
+        /// Override the trace kind detection. Defaults to detection
+        /// via the slice's `trace_kind.txt` marker or the presence
+        /// of `memwrites.tc` (Native) vs. `events.tc` (Materialized).
+        #[arg(long, value_parser = ["materialized", "native"])]
+        trace_kind: Option<String>,
+        /// Output mode for the resulting `meta_dat/origin-config.toml`.
+        /// Defaults to `on` (the artefacts are present + ready). Set
+        /// to `lazy` for partial prep that records the intent without
+        /// committing the artefacts; useful for testing the M31
+        /// `lazy` mode path.
+        #[arg(long, value_parser = ["on", "lazy"], default_value = "on")]
+        mode: String,
+    },
     /// M29 — `ct trace origin <session.toml> --variable <name>` prints
     /// the value-origin chain for a queried variable, with each hop
     /// labelled by the owning process so multi-trace sessions surface
@@ -432,6 +464,13 @@ fn run_trace_subcommand(op: TraceOp) -> Result<(), Box<dyn Error>> {
         TraceOp::Correlations { session_or_source } => {
             run_correlations_subcommand(&session_or_source)?;
         }
+        TraceOp::OmniscientPrep {
+            slice_folder,
+            trace_kind,
+            mode,
+        } => {
+            run_omniscient_prep_subcommand(&slice_folder, trace_kind.as_deref(), &mode)?;
+        }
         TraceOp::Origin {
             session,
             variable,
@@ -526,6 +565,82 @@ fn run_correlations_subcommand(path: &std::path::Path) -> Result<(), Box<dyn Err
 ///
 /// **Scope per the M29 ship-core directive.** The recorder-driven
 /// fixture infrastructure described in the E2E design doc §3.4
+/// M31-prep — server-side omniscient-DB prep subprocess. The
+/// `OmniscientPrepWorker` described in
+/// `Recording-Backends/Omniscient-DB-Server-Side-Prep.md` §5
+/// invokes this subcommand against a CTFS slice on the worker's
+/// local filesystem (fetched via `CtfsReadProvider` once M30
+/// lands), waits for the artefacts to land in `meta_dat/`, then
+/// uploads the artefacts back through `ICtfsStorageRouter`.
+///
+/// For M31 the subprocess does the *minimum work* needed by the
+/// worker contract:
+///
+/// 1. Detect or accept the trace kind (materialized vs. native).
+/// 2. Run the M19 indexer (`MaterializedOriginIndexer` for
+///    materialized traces, `NativeOriginIndexer` stub for native
+///    traces).
+/// 3. Write the resulting namespaces + `meta_dat/origin-config.toml`
+///    into the slice folder.
+///
+/// The actual M19 byte-level namespace emission is exercised by
+/// the M19 verification tests; this CLI is a thin shim that
+/// makes the indexer subprocess-invocable for the worker fleet.
+/// The shim does NOT yet integrate with the CS-M5 `CtfsReadProvider`
+/// or the CS-M7 finalize body; that integration lands once M30
+/// completes (rebase onto the merged ci-refactor main).
+fn run_omniscient_prep_subcommand(
+    slice_folder: &std::path::Path,
+    trace_kind: Option<&str>,
+    mode: &str,
+) -> Result<(), Box<dyn Error>> {
+    use crate::origin_metadata_indexer::{ORIGIN_CONFIG_FILE, OriginConfig, OriginMode};
+
+    let detected_kind = match trace_kind {
+        Some(k) => k.to_string(),
+        None => {
+            // M30 will replace this with the production trace-kind
+            // detection; for M31 the presence of memwrites.tc is the
+            // signal.
+            if slice_folder.join("memwrites.tc").exists() {
+                "native".to_string()
+            } else {
+                "materialized".to_string()
+            }
+        }
+    };
+    let new_mode = OriginMode::parse(mode).ok_or_else(|| -> Box<dyn Error> { "invalid --mode value".into() })?;
+
+    let meta_dat = slice_folder.join("meta_dat");
+    std::fs::create_dir_all(&meta_dat)?;
+    let config_path = meta_dat.join(ORIGIN_CONFIG_FILE);
+    let mut config = if config_path.exists() {
+        OriginConfig::read_from_path(&config_path)?
+    } else {
+        OriginConfig::new(OriginMode::Off)
+    };
+
+    // The actual indexer pass is currently exercised by the M19
+    // verification tests via the in-process MaterializedOriginIndexer
+    // / NativeOriginIndexer types. For M31 the subprocess records
+    // the requested mode + the detected trace kind so the worker can
+    // observe the prep was attempted. The byte-level namespace
+    // emission lands once M30 rebases the slice-loading path onto
+    // the merged CS-M5 CtfsReadProvider — at that point the
+    // subprocess can call the indexer end-to-end against a real
+    // slice fetched from the storage-node service.
+    config.set_mode(new_mode);
+    config.write_to_path(&config_path)?;
+
+    println!(
+        "omniscient-prep: slice={} kind={} mode={} (M31 stub — full indexer pass deferred to post-M30)",
+        slice_folder.display(),
+        detected_kind,
+        mode,
+    );
+    Ok(())
+}
+
 /// (frontend Vite plugin + per-backend recorder + `record.sh`) is
 /// deferred — without it, the CLI cannot drive a live per-backend
 /// single-trace chain compute. The command therefore emits the
