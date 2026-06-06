@@ -12,7 +12,14 @@ use tree_sitter::Language;
 /// Languages whose assignment statements this crate can parse.
 ///
 /// The V1 set per spec §7.2 covers Python, Ruby, JavaScript, C, C++,
-/// Rust, Nim, Go. Smart-contract languages are deferred to M16.
+/// Rust, Nim, Go. M23 extends the set with the smart-contract languages
+/// that already ship a `*_flow_dap_test.rs` baseline (Cairo, Stylus,
+/// Sway, Solana, Aiken, Leo, Circom, Noir). Their per-language
+/// overrides live in spec §7.2; Stylus / Solana / Noir all compile down
+/// to a Rust-syntax surface and reuse the [`Lang::Rust`] grammar
+/// internally (no new `Lang` variant needed for them).  Cairo, Sway,
+/// Aiken, Leo, and Circom have distinct tree-sitter grammars and so
+/// surface as their own `Lang` variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Lang {
     Python,
@@ -23,6 +30,24 @@ pub enum Lang {
     Rust,
     Nim,
     Go,
+    /// Cairo / StarkNet — felt252-typed bindings; see spec §7.2 M23
+    /// Cairo row (felt-vs-pointer distinction).
+    Cairo,
+    /// Sway / FuelVM — Rust-like surface syntax; see spec §7.2 M23
+    /// Sway row (storage-write override).
+    Sway,
+    /// Aiken / Cardano — Rust-like surface syntax with pipeline-`|>`;
+    /// see spec §7.2 M23 Aiken row.
+    Aiken,
+    /// Leo / Aleo — Rust-like surface syntax with record / circuit
+    /// types; see spec §7.2 M23 Leo row.
+    Leo,
+    /// Circom — `<==` signal-assignment idiom; see spec §7.2 M23
+    /// Circom row.  The classifier ships a dedicated splitter
+    /// because Circom's `assignment_expression` exposes its
+    /// children positionally rather than via `left`/`right`
+    /// fields.
+    Circom,
 }
 
 impl Lang {
@@ -38,6 +63,11 @@ impl Lang {
             Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
             Lang::Nim => tree_sitter_nim::LANGUAGE.into(),
             Lang::Go => tree_sitter_go::LANGUAGE.into(),
+            Lang::Cairo => tree_sitter_cairo::LANGUAGE.into(),
+            Lang::Sway => tree_sitter_sway::LANGUAGE.into(),
+            Lang::Aiken => tree_sitter_aiken::LANGUAGE.into(),
+            Lang::Leo => tree_sitter_leo::LANGUAGE.into(),
+            Lang::Circom => tree_sitter_circom::LANGUAGE.into(),
         }
     }
 
@@ -53,12 +83,26 @@ impl Lang {
             Lang::Rust => "rust",
             Lang::Nim => "nim",
             Lang::Go => "go",
+            Lang::Cairo => "cairo",
+            Lang::Sway => "sway",
+            Lang::Aiken => "aiken",
+            Lang::Leo => "leo",
+            Lang::Circom => "circom",
         }
     }
 
     /// Parse the canonical name back into a `Lang`. Returns `None`
     /// for unrecognised names so pattern-file loaders can surface
     /// helpful diagnostics rather than panic.
+    ///
+    /// Smart-contract languages that reuse a sibling grammar map onto
+    /// the sibling here so embedded pattern files written against
+    /// "stylus" / "solana" / "noir" still resolve at load time:
+    ///
+    /// - `stylus`, `solana`, `noir` → [`Lang::Rust`] (Rust-syntax
+    ///   surface; classifier rules already covered by the Rust row of
+    ///   spec §7.2).
+    /// - `aleo` → [`Lang::Leo`].
     pub fn from_canonical_name(name: &str) -> Option<Self> {
         Some(match name {
             "python" => Lang::Python,
@@ -69,6 +113,17 @@ impl Lang {
             "rust" | "rs" => Lang::Rust,
             "nim" => Lang::Nim,
             "go" => Lang::Go,
+            "cairo" => Lang::Cairo,
+            "sway" | "fuel" => Lang::Sway,
+            "aiken" | "cardano" => Lang::Aiken,
+            "leo" | "aleo" => Lang::Leo,
+            "circom" => Lang::Circom,
+            // Smart-contract languages whose source surface IS Rust
+            // (Stylus, Solana, Noir) — reuse the Rust splitter so
+            // built-in patterns keyed on `language = "rust"` still
+            // apply.  See spec §7.2 M23 rows for the override
+            // semantics.
+            "stylus" | "solana" | "noir" => Lang::Rust,
             _ => return None,
         })
     }

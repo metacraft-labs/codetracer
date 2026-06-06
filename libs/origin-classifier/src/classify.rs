@@ -337,6 +337,13 @@ fn classify_universal(
     let kind = effective.kind();
     match kind {
         // Literal terminators (spec §7.1 row 5).
+        // M23 additions: `number` (Cairo), `int` (Aiken),
+        // `int_literal` (Circom), `unsigned_literal` /
+        // `signed_literal` / `field_literal` (Leo's typed integer
+        // literals like `10u32`), `base10` / `base16` / `base2` /
+        // `base8` (Aiken's per-base integer leaves — when the
+        // surrounding `int` wrapper collapses on identical byte
+        // ranges, the locator round-trip lands on the base leaf).
         "integer"
         | "integer_literal"
         | "float"
@@ -349,7 +356,19 @@ fn classify_universal(
         | "null"
         | "string_literal"
         | "char_literal"
+        | "number"
         | "number_literal"
+        | "int"
+        | "int_literal"
+        | "base2"
+        | "base8"
+        | "base10"
+        | "base16"
+        | "unsigned_literal"
+        | "signed_literal"
+        | "field_literal"
+        | "boolean_literal_token"
+        | "address_literal"
         | "interpreted_string_literal"
         | "raw_string_literal"
         | "concatenated_string"
@@ -368,7 +387,9 @@ fn classify_universal(
         },
 
         // Bare identifier copy (spec §7.1 row 1).
-        "identifier" | "name" | "shorthand_variable" => Classification {
+        // M23 additions: `variable` (Leo) — tree-sitter-leo wraps
+        // identifier-only RHS expressions in a `variable` node.
+        "identifier" | "name" | "shorthand_variable" | "variable" => Classification {
             target,
             rhs: NodeLocator::from_node(rhs),
             kind: OriginKind::TrivialCopy,

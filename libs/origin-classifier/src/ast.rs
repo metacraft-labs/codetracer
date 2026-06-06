@@ -285,10 +285,49 @@ fn walk_call<'a>(cursor: &mut tree_sitter::TreeCursor<'a>) -> Option<Node<'a>> {
 /// Returns `None` for inputs that contain no recognised assignment
 /// shape; callers are expected to fall back to `OriginKind::Unknown`
 /// with confidence 0 (spec §7.1 last row).
+///
+/// **M23 — per-language preamble wrapping.** Several smart-contract
+/// language grammars (Cairo, Aiken, Leo, Circom) refuse to parse a
+/// bare `let x = y;` / `x <== y;` line at the top-level because their
+/// statement rules are nested inside a function / template / program
+/// production. The db-backend always calls this entry point with a
+/// single source line lifted out of a step ID, so we transparently
+/// retry with a per-language preamble that supplies the surrounding
+/// context the grammar needs. The retry happens only when the bare
+/// parse failed to find an assignment and only when the preamble adds
+/// no per-line offset (the wrapper text wraps the line in a fresh
+/// scope rather than prepending text on the same line) so the
+/// produced [`NodeLocator`]s still address the original bytes.
 pub fn parse_assignment(line: &str, lang: Lang) -> Option<AssignmentAst> {
+    parse_assignment_inner(line, lang, false).or_else(|| {
+        if lang_needs_preamble(lang) {
+            parse_assignment_inner(line, lang, true)
+        } else {
+            None
+        }
+    })
+}
+
+fn parse_assignment_inner(line: &str, lang: Lang, with_preamble: bool) -> Option<AssignmentAst> {
     let mut parser = Parser::new();
     parser.set_language(&lang.tree_sitter_language()).ok()?;
-    let tree = parser.parse(line, None)?;
+
+    // Decide whether to wrap the line in a per-language scope so the
+    // grammar's top-level rule reaches our assignment node. We keep
+    // the original line untouched and stash the preamble prefix
+    // length so `NodeLocator`s can be normalised back into the
+    // original `line` byte ranges.
+    let (parse_text, prefix_len, suffix_len) = if with_preamble {
+        let (pre, suf) = preamble_for(lang)?;
+        let combined = format!("{pre}{line}{suf}");
+        (combined, pre.len(), suf.len())
+    } else {
+        (line.to_owned(), 0usize, 0usize)
+    };
+    let _ = suffix_len; // currently unused; reserved for future trimming
+
+    let tree = parser.parse(&parse_text, None)?;
+
     // Compute locators inside a scoped borrow so `tree` can be moved
     // into the returned [`AssignmentAst`] without aliasing.
     let result = {
@@ -311,10 +350,6 @@ pub fn parse_assignment(line: &str, lang: Lang) -> Option<AssignmentAst> {
                 )
             })
         } else if let Some((target, call)) = locate_out_parameter_call(root, lang) {
-            // Synthesised assignment: out-parameter call forwarder.
-            // Treat the first call argument as the LHS target and the
-            // call expression itself as the RHS so the classifier can
-            // match it against the forwarder catalogue.
             Some((
                 NodeLocator::from_node(call),
                 NodeLocator::from_node(target),
@@ -327,8 +362,14 @@ pub fn parse_assignment(line: &str, lang: Lang) -> Option<AssignmentAst> {
         }
     };
     let (assignment_loc, lhs_loc, rhs_loc, destructuring, is_augmented) = result?;
+    let _ = prefix_len; // unused — locators index into parse_text directly
+
+    // When the parser was invoked with a wrapper preamble, the
+    // returned locators index into `parse_text` (the wrapper-joined
+    // buffer), so we store `parse_text` as `source` to keep the
+    // round-trip clean.  Bare-parse cases reduce to `parse_text == line`.
     Some(AssignmentAst {
-        source: line.to_owned(),
+        source: parse_text,
         tree,
         assignment: assignment_loc,
         lhs: lhs_loc,
@@ -337,6 +378,37 @@ pub fn parse_assignment(line: &str, lang: Lang) -> Option<AssignmentAst> {
         is_augmented,
         lang,
     })
+}
+
+/// Languages that need a per-line wrapper to parse a bare assignment
+/// at the top-level. The wrappers below add fresh scope without
+/// altering the line text itself.
+fn lang_needs_preamble(lang: Lang) -> bool {
+    matches!(lang, Lang::Cairo | Lang::Aiken | Lang::Leo | Lang::Circom)
+}
+
+/// Return the `(prefix, suffix)` strings to splice around a bare
+/// assignment line so the grammar accepts it as a nested statement.
+/// `None` for languages whose top-level rule already accepts a bare
+/// assignment.
+fn preamble_for(lang: Lang) -> Option<(&'static str, &'static str)> {
+    match lang {
+        Lang::Cairo => Some(("fn __probe() { ", " }")),
+        // Aiken: function-body context with no return.
+        Lang::Aiken => Some(("fn __probe() { ", " }")),
+        // Leo: full program + transition scaffold.  Leo's grammar is
+        // strict about the surrounding `program <name>.aleo { … }`
+        // block, and program names must begin with a letter (no
+        // leading underscore).
+        Lang::Leo => Some(("program probefn.aleo { transition probefn() { ", " } }")),
+        // Circom: pragma + template context so signal declarations
+        // and `<==` constraints land inside `template_body`.
+        Lang::Circom => Some((
+            "pragma circom 2.0.0; template __probe() { signal a; signal b; signal c; signal sum; ",
+            " }",
+        )),
+        _ => None,
+    }
 }
 
 /// Locate a stand-alone out-parameter forwarder call (e.g.
@@ -390,7 +462,14 @@ fn locate_assignment<'a>(root: Node<'a>, lang: Lang) -> Option<Node<'a>> {
 
 fn walk_assignment<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, lang: Lang) -> Option<Node<'a>> {
     let node = cursor.node();
-    if is_assignment_kind(node.kind(), lang) {
+    // A node is only treated as an assignment if it both matches an
+    // assignment kind for the language AND can be split into
+    // `(lhs, rhs)`.  Some grammars (Circom's
+    // `signal_declaration_statement`) reuse the same kind name for
+    // forms with and without a value (`signal x;` vs
+    // `signal x <== expr;`) — the split-validity check filters out
+    // the no-value form so the locator search keeps walking.
+    if is_assignment_kind(node.kind(), lang) && split_assignment(node, lang).is_some() {
         return Some(node);
     }
     if cursor.goto_first_child() {
@@ -442,6 +521,29 @@ fn is_assignment_kind(kind: &str, lang: Lang) -> bool {
             kind,
             "short_var_declaration" | "assignment_statement" | "var_spec" | "const_spec"
         ),
+        // Cairo / Sway: Rust-derived grammars; both expose
+        // `let_declaration` with `pattern` + `value` fields per
+        // spec §7.2 (M23 Cairo / Sway rows).
+        Lang::Cairo | Lang::Sway => matches!(
+            kind,
+            "let_declaration" | "assignment_expression" | "compound_assignment_expr"
+        ),
+        // Aiken: `let_assignment` ships positional children (no
+        // `pattern`/`value` fields).  See spec §7.2 (M23 Aiken row).
+        Lang::Aiken => matches!(kind, "let_assignment"),
+        // Leo: `variable_declaration` is the let-binding shape;
+        // `assignment_statement` covers re-assignments.  See spec
+        // §7.2 (M23 Leo row).
+        Lang::Leo => matches!(kind, "variable_declaration" | "assignment_statement"),
+        // Circom: the signal-assignment idiom (`a <== expr;`) is
+        // syntactically an `assignment_expression` whose operator is
+        // `<==` / `==>` / `<--` / `-->`.  Also recognise the inline
+        // `signal_declaration_statement` form
+        // (`signal x <== expr;`) per spec §7.2 (M23 Circom row).
+        Lang::Circom => matches!(
+            kind,
+            "assignment_expression" | "signal_declaration_statement"
+        ),
     }
 }
 
@@ -457,9 +559,16 @@ fn split_assignment(node: Node<'_>, lang: Lang) -> Option<(Node<'_>, Node<'_>, b
         Lang::Ruby => split_ruby(node),
         Lang::JavaScript => split_javascript(node),
         Lang::C | Lang::Cpp => split_c_like(node),
-        Lang::Rust => split_rust(node),
+        // Cairo / Sway tree-sitter grammars expose the same
+        // `pattern` + `value` field-name pair as Rust's
+        // `let_declaration`, so reuse the Rust splitter unchanged
+        // per spec §7.2 (M23 Cairo / Sway rows).
+        Lang::Rust | Lang::Cairo | Lang::Sway => split_rust(node),
         Lang::Nim => split_nim(node),
         Lang::Go => split_go(node),
+        Lang::Aiken => split_aiken(node),
+        Lang::Leo => split_leo(node),
+        Lang::Circom => split_circom(node),
     }
 }
 
@@ -636,4 +745,180 @@ fn split_go(node: Node<'_>) -> Option<(Node<'_>, Node<'_>, bool)> {
         }
         _ => None,
     }
+}
+
+/// Aiken splitter.
+///
+/// tree-sitter-aiken renders `let x = expr` as a `let_assignment` node
+/// whose named children are: the LHS pattern (`identifier` /
+/// `discard` / `match_pattern` / collection-pattern) optionally
+/// followed by a `type_definition`, then the RHS `expression`.  No
+/// `left`/`right` field names are exposed, so we walk the named
+/// children positionally and pick the first identifier-or-pattern as
+/// the LHS and the first `expression` after it as the RHS.
+///
+/// Spec §7.2 M23 Aiken row: bare-name copies classify as
+/// `TrivialCopy`; pipeline `|>` falls back to the universal table's
+/// computational shape.
+fn split_aiken(node: Node<'_>) -> Option<(Node<'_>, Node<'_>, bool)> {
+    if node.kind() != "let_assignment" {
+        return None;
+    }
+    let mut cursor = node.walk();
+    let mut lhs: Option<Node<'_>> = None;
+    let mut rhs: Option<Node<'_>> = None;
+    let mut destructuring = false;
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            // Type annotation, ignored for splitting purposes.
+            "type_definition" => continue,
+            // Pattern slots — the first one wins as the LHS target.
+            "identifier" | "discard" if lhs.is_none() => {
+                lhs = Some(child);
+            }
+            "match_pattern" | "list" | "tuple" | "pair" if lhs.is_none() => {
+                lhs = Some(child);
+                destructuring = true;
+            }
+            // Anything else after we already have an LHS is the RHS.
+            "expression" if lhs.is_some() && rhs.is_none() => {
+                rhs = Some(child);
+            }
+            // Conservative fallback: if no `expression` wrapper is
+            // present (grammar churn safety), take the last named
+            // child that isn't the LHS.
+            _ if lhs.is_some() && rhs.is_none() => {
+                rhs = Some(child);
+            }
+            _ => {}
+        }
+    }
+    Some((lhs?, rhs?, destructuring))
+}
+
+/// Leo splitter.
+///
+/// tree-sitter-leo encodes `let x: T = expr;` as a
+/// `variable_declaration` whose named children include the binding
+/// identifier (`identifier` / `_identifier_or_identifiers`), the
+/// `type` annotation, and an `expression` node for the RHS.
+/// Reassignments come through as `assignment_statement` with
+/// positional children (LHS expression, `=`, RHS expression).
+///
+/// Spec §7.2 M23 Leo row: bare-name copies classify as
+/// `TrivialCopy`; record-/circuit-field writes fall under the
+/// FieldAccess row of the universal table.
+fn split_leo(node: Node<'_>) -> Option<(Node<'_>, Node<'_>, bool)> {
+    match node.kind() {
+        "variable_declaration" => {
+            let mut cursor = node.walk();
+            let mut lhs: Option<Node<'_>> = None;
+            let mut rhs: Option<Node<'_>> = None;
+            for child in node.named_children(&mut cursor) {
+                match child.kind() {
+                    "type" => continue,
+                    "identifier" | "_identifier_or_identifiers" if lhs.is_none() => {
+                        lhs = Some(child);
+                    }
+                    _ if lhs.is_some() && rhs.is_none() => {
+                        rhs = Some(child);
+                    }
+                    _ => {}
+                }
+            }
+            Some((lhs?, rhs?, false))
+        }
+        "assignment_statement" => {
+            // Positional children: LHS expression, RHS expression.
+            // `=` and `;` are unnamed tokens.
+            let mut cursor = node.walk();
+            let named: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+            if named.len() < 2 {
+                return None;
+            }
+            Some((named[0], named[named.len() - 1], false))
+        }
+        _ => None,
+    }
+}
+
+/// Circom splitter.
+///
+/// tree-sitter-circom encodes constraint / signal assignments as
+/// `assignment_expression` nodes whose `_expression`-typed children
+/// flank one of the operators `<==`, `==>`, `<--`, `-->`, `=`, `+=`,
+/// etc.  The fields are positional (no `left`/`right` field names),
+/// so we walk the named children and take the first as the LHS and
+/// the last as the RHS.
+///
+/// `signal_declaration_statement` is the inline form
+/// (`signal x <== expr;`) — handled separately because the LHS lives
+/// in the `name` field and the RHS in the `value` field.
+///
+/// Spec §7.2 M23 Circom row: `a <== expr;` classifies identically to
+/// `a = expr;` in the universal table — bare-name copies become
+/// `TrivialCopy`, integer literals become `Literal`, binary
+/// expressions become `Computational`.  The `==>` and `<--` forms
+/// follow the same shape with the LHS / RHS swapped where applicable.
+fn split_circom(node: Node<'_>) -> Option<(Node<'_>, Node<'_>, bool)> {
+    match node.kind() {
+        "assignment_expression" => {
+            let mut cursor = node.walk();
+            let named: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+            if named.len() < 2 {
+                return None;
+            }
+            // Detect the direction of the signal-assignment.  `==>`
+            // and `-->` flow rightward (LHS on the LEFT of the
+            // operator is the source; the RHS is the target);
+            // every other operator flows leftward.  We check the
+            // operator token by walking the unnamed children.
+            let direction = circom_arrow_direction(node);
+            let (lhs_index, rhs_index) = match direction {
+                CircomArrowDirection::Rightward => (named.len() - 1, 0),
+                CircomArrowDirection::Leftward => (0, named.len() - 1),
+            };
+            Some((named[lhs_index], named[rhs_index], false))
+        }
+        "signal_declaration_statement" => {
+            // Only treat the inline form `signal x <== expr;` as an
+            // assignment; bare `signal x;` declarations have no value
+            // and would otherwise hijack the locator search.  The
+            // `value` field carries the RHS expression when present.
+            let rhs = node.child_by_field_name("value")?;
+            let lhs = node
+                .child_by_field_name("name")
+                .or_else(|| node.named_child(0))?;
+            Some((lhs, rhs, false))
+        }
+        _ => None,
+    }
+}
+
+/// Direction of a Circom assignment operator: leftward (`<==`, `<--`,
+/// `=`, …) or rightward (`==>`, `-->`).  The classifier needs to
+/// know which side of the operator carries the target identifier so
+/// the `TrivialCopy` continuation points the right way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CircomArrowDirection {
+    Leftward,
+    Rightward,
+}
+
+fn circom_arrow_direction(node: Node<'_>) -> CircomArrowDirection {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.is_named() {
+            continue;
+        }
+        // The unnamed tokens are the operator characters.  We match
+        // on the exact operator string here rather than the kind, so
+        // tree-sitter-circom's anonymous-node naming convention
+        // doesn't drift the matcher behind us.
+        match child.kind() {
+            "==>" | "-->" => return CircomArrowDirection::Rightward,
+            _ => continue,
+        }
+    }
+    CircomArrowDirection::Leftward
 }

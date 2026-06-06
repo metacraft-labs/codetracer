@@ -56,6 +56,7 @@ fn js_config(scenario: &str, version: &str, line: u32, variable: &str) -> Origin
         breakpoint_line: line,
         variable_name: variable.to_string(),
         max_hops: None,
+        breakpoint_source_path: None,
     }
 }
 

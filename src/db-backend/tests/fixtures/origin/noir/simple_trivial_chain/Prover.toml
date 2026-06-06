@@ -1,0 +1,5 @@
+# simple_trivial_chain — Noir input parameters
+#
+# The Noir program in `src/main.nr` takes no inputs (all bindings are
+# literals), so this file is intentionally empty.  Nargo still requires
+# its presence to run `nargo trace`.

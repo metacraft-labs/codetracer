@@ -57,7 +57,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-LANGUAGES_ALL=(python ruby javascript c rust nim go)
+LANGUAGES_ALL=(python ruby javascript c rust nim go cairo stylus sway solana aiken leo circom noir)
 
 if (($# > 0)); then
 	LANGUAGES=("$@")

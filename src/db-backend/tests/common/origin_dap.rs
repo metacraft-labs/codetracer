@@ -56,7 +56,11 @@ pub const MODULE_USAGE: &str = "see top-of-file include pattern in origin_python
 
 /// Configuration for one origin-chain DAP query against a recorded fixture.
 pub struct OriginQueryConfig {
-    /// Absolute path to the fixture's source program (e.g. `main.py`).
+    /// Absolute path the recorder is invoked against.  For most
+    /// languages this is the source file (`main.py` / `main.rb` /
+    /// `main.js`); for build-system-based recorders (Noir's
+    /// `nargo trace`, Sway's `forc build`) it is the project
+    /// directory containing the manifest.
     pub source_path: PathBuf,
     /// Language label for the recorder.
     pub language: Language,
@@ -71,6 +75,13 @@ pub struct OriginQueryConfig {
     pub variable_name: String,
     /// Optional maximum hops (defaults to [`DEFAULT_ORIGIN_MAX_HOPS`]).
     pub max_hops: Option<u32>,
+    /// Optional source-file override for the breakpoint.  When set,
+    /// the breakpoint is placed at this path rather than at the
+    /// `source_path` (used by recorders whose `source_path` is a
+    /// project directory — e.g. Noir / Sway — but whose breakpoints
+    /// must address the actual `.nr` / `.sw` file inside the
+    /// project).
+    pub breakpoint_source_path: Option<PathBuf>,
 }
 
 /// Result of a successful query: the recorded trace + the resolved chain.
@@ -108,7 +119,15 @@ pub fn load_fixture_and_query(config: &OriginQueryConfig) -> Result<OriginQueryR
     let recording = TestRecording::create_db_trace(&config.source_path, config.language, &config.version_label)
         .map_err(|e| format!("recording failed for {}: {}", config.source_path.display(), e))?;
 
-    let breakpoint_source = resolve_breakpoint_source(&recording, &config.source_path, config.language);
+    // When `breakpoint_source_path` is explicit (Noir / Sway / any
+    // recorder whose `source_path` is a project directory), use it
+    // verbatim; otherwise derive the breakpoint source from
+    // `source_path` via the per-language rules.
+    let breakpoint_source = if let Some(p) = &config.breakpoint_source_path {
+        p.clone()
+    } else {
+        resolve_breakpoint_source(&recording, &config.source_path, config.language)
+    };
 
     let mut client = DapStdioTestClient::start().map_err(|e| format!("failed to start DAP stdio client: {}", e))?;
     client

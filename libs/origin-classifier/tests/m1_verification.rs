@@ -528,3 +528,158 @@ fn test_classifier_unparseable_returns_unknown() {
         );
     }
 }
+
+// ===========================================================================
+// M23 — Smart-contract language per-language overrides
+//
+// Each test covers the canonical 3-hop `a -> b -> c -> Literal(10)`
+// trivial chain plus the language-specific override row called out in
+// spec §7.2 (M23 row).  The fixtures live under
+// `src/db-backend/tests/fixtures/origin/<lang>/simple_trivial_chain/`;
+// these unit tests pin the classifier surface independently so the
+// classifier crate is provable without the recorder + DAP stack.
+// ===========================================================================
+
+/// Cairo: `let <name>: <type> = <expr>` reuses the Rust splitter.  The
+/// felt-vs-pointer distinction (spec §7.2 M23 Cairo row) is exercised
+/// by checking that bare identifiers classify as `TrivialCopy` and
+/// `let b: felt252 = 10` classifies as `Literal`.
+#[test]
+fn test_classifier_cairo_simple_trivial_chain() {
+    let patterns = PatternSet::built_in();
+
+    // Hop 0: c = b — TrivialCopy.
+    let c = classify_full("let c: felt252 = b;", "c", Lang::Cairo, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("b"));
+
+    // Hop 1: b = a — TrivialCopy.
+    let c = classify_full("let b: felt252 = a;", "b", Lang::Cairo, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    // Hop 2: a = 10 — Literal terminator.
+    let c = classify_full("let a: felt252 = 10;", "a", Lang::Cairo, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal);
+
+    // Sanity: a binary expression still classifies as Computational.
+    let c = classify_full("let sum: felt252 = a + b;", "sum", Lang::Cairo, &patterns);
+    assert_eq!(c.kind, OriginKind::Computational);
+}
+
+/// Sway / FuelVM: reuses the Rust splitter; the FuelVM storage-write
+/// override (spec §7.2 M23 Sway row) only fires for
+/// `storage.<field>.write(x)` shapes which we leave to the recorder
+/// for V1.  The canonical chain checks local bindings.
+#[test]
+fn test_classifier_sway_simple_trivial_chain() {
+    let patterns = PatternSet::built_in();
+
+    let c = classify_full("let c: u64 = b;", "c", Lang::Sway, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("b"));
+
+    let c = classify_full("let b: u64 = a;", "b", Lang::Sway, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    let c = classify_full("let a: u64 = 10;", "a", Lang::Sway, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal);
+}
+
+/// Aiken / Cardano: `let_assignment` ships positional children so the
+/// classifier uses [`split_aiken`].  The canonical chain checks bare
+/// identifiers + integer literal.
+#[test]
+fn test_classifier_aiken_simple_trivial_chain() {
+    let patterns = PatternSet::built_in();
+
+    let c = classify_full("let c = b", "c", Lang::Aiken, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("b"));
+
+    let c = classify_full("let b = a", "b", Lang::Aiken, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    let c = classify_full("let a = 10", "a", Lang::Aiken, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal);
+}
+
+/// Leo / Aleo: `variable_declaration` carries the binding name + RHS
+/// `expression`.  The canonical chain exercises bare identifiers +
+/// integer-suffix literals.
+#[test]
+fn test_classifier_leo_simple_trivial_chain() {
+    let patterns = PatternSet::built_in();
+
+    let c = classify_full("let c: u32 = b;", "c", Lang::Leo, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("b"));
+
+    let c = classify_full("let b: u32 = a;", "b", Lang::Leo, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    let c = classify_full("let a: u32 = 10u32;", "a", Lang::Leo, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal);
+}
+
+/// Circom: signal-assignment via `<==` is the M23 override called out
+/// in spec §7.2.  `a <== b` classifies as `TrivialCopy` with
+/// continuation `b`; `a <== 10` classifies as `Literal`.  The
+/// rightward `==>` form swaps the LHS/RHS interpretation.
+#[test]
+fn test_classifier_circom_signal_assignment() {
+    let patterns = PatternSet::built_in();
+
+    // Leftward signal assignment, bare-identifier RHS — TrivialCopy.
+    let c = classify_full("c <== b;", "c", Lang::Circom, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("b"));
+
+    let c = classify_full("b <== a;", "b", Lang::Circom, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    // Leftward signal assignment, integer literal — Literal.
+    let c = classify_full("a <== 10;", "a", Lang::Circom, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal);
+
+    // Binary expression on RHS — Computational with operand snapshots.
+    let c = classify_full("sum <== a + b;", "sum", Lang::Circom, &patterns);
+    assert_eq!(c.kind, OriginKind::Computational);
+    assert!(c.operand_snapshots.iter().any(|s| s == "a"));
+    assert!(c.operand_snapshots.iter().any(|s| s == "b"));
+}
+
+/// Rust-syntax smart-contract languages: Stylus / Solana / Noir all
+/// surface through `Lang::Rust` via [`Lang::from_canonical_name`].
+/// The canonical chain is identical to the Rust row of spec §7.2.
+#[test]
+fn test_classifier_rust_syntax_smart_contract_languages() {
+    let patterns = PatternSet::built_in();
+
+    // The canonical-name → Lang mapping per spec §7.2 (M23 footnote):
+    // stylus / solana / noir all surface through `Lang::Rust`.
+    assert_eq!(Lang::from_canonical_name("stylus"), Some(Lang::Rust));
+    assert_eq!(Lang::from_canonical_name("solana"), Some(Lang::Rust));
+    assert_eq!(Lang::from_canonical_name("noir"), Some(Lang::Rust));
+    assert_eq!(Lang::from_canonical_name("aleo"), Some(Lang::Leo));
+    assert_eq!(Lang::from_canonical_name("fuel"), Some(Lang::Sway));
+    assert_eq!(Lang::from_canonical_name("cardano"), Some(Lang::Aiken));
+
+    // The canonical chain over Rust syntax — pinned here so the
+    // Stylus / Solana / Noir tests in `src/db-backend/tests/` can
+    // rely on the same classifier surface.
+    let c = classify_full("let c: u64 = b;", "c", Lang::Rust, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("b"));
+
+    let c = classify_full("let b: u64 = a;", "b", Lang::Rust, &patterns);
+    assert_eq!(c.kind, OriginKind::TrivialCopy);
+    assert_eq!(c.source_variable.as_deref(), Some("a"));
+
+    let c = classify_full("let a: u64 = 10;", "a", Lang::Rust, &patterns);
+    assert_eq!(c.kind, OriginKind::Literal);
+}

@@ -1194,14 +1194,19 @@ dependencies = [
  "thiserror 1.0.69",
  "toml",
  "tree-sitter",
+ "tree-sitter-aiken",
  "tree-sitter-c 0.23.4",
+ "tree-sitter-cairo",
+ "tree-sitter-circom",
  "tree-sitter-cpp",
  "tree-sitter-go 0.23.4",
  "tree-sitter-javascript 0.23.1",
+ "tree-sitter-leo",
  "tree-sitter-nim",
  "tree-sitter-python 0.23.6",
  "tree-sitter-ruby",
  "tree-sitter-rust 0.23.3",
+ "tree-sitter-sway",
 ]
 
 [[package]]

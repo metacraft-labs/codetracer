@@ -50,6 +50,7 @@ fn python_config(scenario: &str, line: u32, variable: &str, version: &str) -> Or
         breakpoint_line: line,
         variable_name: variable.to_string(),
         max_hops: None,
+        breakpoint_source_path: None,
     }
 }
 

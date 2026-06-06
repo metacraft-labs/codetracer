@@ -1,0 +1,7 @@
+[package]
+name = "simple_trivial_chain"
+type = "bin"
+authors = ["CodeTracer"]
+compiler_version = ">=0.30.0"
+
+[dependencies]

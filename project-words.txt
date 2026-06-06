@@ -181,3 +181,14 @@ deepreview
 memcpy
 watchpoint
 writeln
+circom
+Circom
+Circom's
+masm
+MASM
+materialise
+miden
+Miden
+recognises
+solana
+Solana

@@ -24,9 +24,19 @@ tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-rust = "0.23"
 tree-sitter-go = "0.23"
-# Nim grammar is shipped in-tree; the smart-contract languages will be
-# added when their per-language overrides land (spec §7.2 footnote: M16).
+# Nim grammar is shipped in-tree.
 tree-sitter-nim = { path = "../tree-sitter-nim/bindings/rust" }
+# Smart-contract languages per M23 — the canonical 3-hop `a -> b -> c`
+# fixture per language shares the Rust-let-binding shape, so the
+# Rust-syntax grammars (Cairo, Sway, Aiken, Leo) reuse the existing
+# Rust splitter at classify time. Circom is the outlier — its
+# `<==` signal-assignment operator demands a custom splitter (see
+# `ast::split_circom`).
+tree-sitter-cairo = { path = "../tree-sitter-cairo" }
+tree-sitter-sway = { path = "../tree-sitter-sway" }
+tree-sitter-aiken = { path = "../tree-sitter-aiken" }
+tree-sitter-leo = { path = "../tree-sitter-leo" }
+tree-sitter-circom = { path = "../tree-sitter-circom" }
 
 # TOML loader for embedded / user / trace-local pattern files
 # (spec §7.4 "Pattern file schema").
