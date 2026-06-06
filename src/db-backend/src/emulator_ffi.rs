@@ -275,6 +275,30 @@ unsafe extern "C" {
     /// Returns 0 on success, -1 on I/O or parse failure.
     pub fn mcrOmniscientLoadFromPath(path: *const std::os::raw::c_char) -> c_int;
 
+    /// Persist the in-shim store to disk. Writes the M18 `memwrites.tc`
+    /// namespace via the Nim `WriteLogWriter` and the line-hits sidecar
+    /// via the small binary format `LHTS|v1`. Either path may be NULL
+    /// to skip emission of that artefact.
+    ///
+    /// This is the M18 recorder-finalize hook the milestone tracker
+    /// flagged as the last piece needed to flip M18 from `in_progress`
+    /// to `completed`: with this entry in place, `ct-mcr` can emit a
+    /// real `memwrites.tc` alongside the recording at trace-finalize
+    /// time, and downstream consumers (this crate's
+    /// `mcrOmniscientLoadFromPath`) can load it without the synthetic
+    /// in-FFI fixture-seeding the M18 verification tests relied on.
+    ///
+    /// Returns 0 on success, -1 on argument error, -2 on I/O failure.
+    pub fn mcrOmniscientWriteToPath(
+        memwrites_path: *const std::os::raw::c_char,
+        linehits_path: *const std::os::raw::c_char,
+    ) -> c_int;
+
+    /// Load a `linehits.tc` sidecar back into the in-shim store. Sibling
+    /// of `mcrOmniscientLoadFromPath` for the line-hits artefact.
+    /// Returns 0 on success, -1 on argument error, -2 on I/O / parse failure.
+    pub fn mcrOmniscientLoadLineHitsFromPath(path: *const std::os::raw::c_char) -> c_int;
+
     /// Scan the in-shim store for the most recent write whose target
     /// range overlaps `[address, address+size)` STRICTLY before `tick`.
     /// Returns 1 on hit, 0 on miss. The hit's fields are read via the

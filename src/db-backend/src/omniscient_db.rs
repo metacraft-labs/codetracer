@@ -257,6 +257,54 @@ impl FfiOmniscientDb {
         // copies it before returning.
         unsafe { emulator_ffi::mcrOmniscientLoadFromPath(c_path.as_ptr()) == 0 }
     }
+
+    /// Persist the in-shim store to disk per the M18 recorder-finalize
+    /// hook. Writes `memwrites.tc` via the Nim `WriteLogWriter` and the
+    /// line-hits sidecar via the `LHTS|v1` binary format. Either path
+    /// may be `None` to skip that artefact.
+    ///
+    /// Returns `true` on success. This is the round-trip sibling of
+    /// [`Self::load_from_path`] + [`Self::load_line_hits_from_path`]
+    /// and is the M18-completion entry point: the recorder calls this
+    /// at trace-finalize time, the db-backend calls
+    /// `load_from_path` at replay time, and the FFI's
+    /// `mcrOmniscient*` query surface serves the chain.
+    pub fn write_to_path(
+        &self,
+        memwrites_path: Option<&std::path::Path>,
+        linehits_path: Option<&std::path::Path>,
+    ) -> bool {
+        let mem_c = match memwrites_path {
+            Some(p) => match CString::new(p.to_string_lossy().as_bytes()) {
+                Ok(c) => Some(c),
+                Err(_) => return false,
+            },
+            None => None,
+        };
+        let line_c = match linehits_path {
+            Some(p) => match CString::new(p.to_string_lossy().as_bytes()) {
+                Ok(c) => Some(c),
+                Err(_) => return false,
+            },
+            None => None,
+        };
+        let mem_ptr = mem_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        let line_ptr = line_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        // SAFETY: both C strings (when present) outlive the call.
+        unsafe { emulator_ffi::mcrOmniscientWriteToPath(mem_ptr, line_ptr) == 0 }
+    }
+
+    /// Load a previously-written `linehits.tc` sidecar into the
+    /// in-shim store. Sibling of [`Self::load_from_path`] for the
+    /// line-hits artefact.
+    pub fn load_line_hits_from_path(&self, path: &std::path::Path) -> bool {
+        let c_path = match CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        // SAFETY: the C string outlives the call.
+        unsafe { emulator_ffi::mcrOmniscientLoadLineHitsFromPath(c_path.as_ptr()) == 0 }
+    }
 }
 
 impl OmniscientDb for FfiOmniscientDb {

@@ -408,3 +408,159 @@ fn test_omniscient_db_xos_fixture_emits_write_log_cross_os() {
     assert_eq!(hit.address, 0xCAFE_F00D);
     assert_eq!(hit.new_value, 0xDECADE);
 }
+
+// ---------------------------------------------------------------------------
+// Test #8 — M18-completion round-trip: write → reset → load → query.
+// ---------------------------------------------------------------------------
+//
+// The recorder finalize hook (`mcrOmniscientWriteToPath`) is the last
+// piece M18's status note flagged as outstanding: with the writer in
+// place, `ct-mcr` can emit `memwrites.tc` + the line-hits sidecar
+// alongside the recording, and downstream consumers can load them
+// without the synthetic in-FFI seeding the earlier M18 tests rely on.
+//
+// This test seeds a synthetic write log, persists it to a tempdir,
+// resets the in-shim store, reloads from disk, and verifies the same
+// query returns the same record. The round-trip exercises both
+// directions of the FFI surface so a regression in either the
+// `WriteLogWriter`/`WriteLogReader` binary format OR the FFI's
+// state-resetting behaviour surfaces as a test failure rather than
+// a silent divergence.
+
+#[test]
+fn test_omniscient_db_write_to_path_round_trip() {
+    let _guard = omniscient_ffi_lock().lock().unwrap();
+
+    let db = FfiOmniscientDb::new();
+    db.reset();
+
+    // Seed two distinct addresses + a line-hits entry so the test
+    // covers the multi-write case and proves the per-address index
+    // survives the round-trip.
+    let recs = [
+        WriteRecord {
+            tick: 10,
+            pc: 0x1000,
+            address: 0xCAFE_1000,
+            size: 4,
+            old_value: 0,
+            new_value: 0xA,
+        },
+        WriteRecord {
+            tick: 20,
+            pc: 0x1004,
+            address: 0xCAFE_1000,
+            size: 4,
+            old_value: 0xA,
+            new_value: 0xB,
+        },
+        WriteRecord {
+            tick: 30,
+            pc: 0x2000,
+            address: 0xCAFE_2000,
+            size: 8,
+            old_value: 0,
+            new_value: 0xDEADBEEF,
+        },
+    ];
+    for rec in &recs {
+        assert!(db.push_write(*rec));
+    }
+    assert!(db.push_line_hit(42, 7, 10));
+    assert!(db.push_line_hit(42, 7, 30));
+    assert!(db.finalize());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mem_path = dir.path().join("memwrites.tc");
+    let line_path = dir.path().join("linehits.tc");
+
+    // Round-trip step 1: write the in-shim store to disk.
+    assert!(
+        db.write_to_path(Some(&mem_path), Some(&line_path)),
+        "write_to_path must succeed for a finalised store"
+    );
+    let mem_size = std::fs::metadata(&mem_path).expect("memwrites.tc").len();
+    let line_size = std::fs::metadata(&line_path).expect("linehits.tc").len();
+    assert!(
+        mem_size > 0,
+        "memwrites.tc must contain bytes — empty file means the writer ran but the records weren't drained"
+    );
+    assert!(line_size > 0, "linehits.tc must contain bytes");
+
+    // Round-trip step 2: reset the in-shim store + reload from disk.
+    db.reset();
+    // After reset the query must miss; this proves the load step
+    // actually moves data into the store rather than returning a stale
+    // pre-reset hit.
+    assert!(
+        db.last_write_before(0xCAFE_1000, 4, 100).is_none(),
+        "post-reset query must miss"
+    );
+    assert!(
+        db.load_from_path(&mem_path),
+        "load_from_path must succeed for the just-written file"
+    );
+
+    // Round-trip step 3: verify the records are queryable identically
+    // to the pre-write state.
+    let hit = db
+        .last_write_before(0xCAFE_1000, 4, 100)
+        .expect("address 0xCAFE_1000 must be discoverable post-reload");
+    assert_eq!(hit.tick, 20, "most recent write at 0xCAFE_1000 has tick=20");
+    assert_eq!(hit.new_value, 0xB);
+
+    let hit = db
+        .last_write_before(0xCAFE_2000, 8, 100)
+        .expect("address 0xCAFE_2000 must be discoverable post-reload");
+    assert_eq!(hit.tick, 30);
+    assert_eq!(hit.new_value, 0xDEADBEEF);
+
+    // The line-hits sidecar is loaded via its own entry point so the
+    // omniscient-DB load path stays orthogonal: a trace may carry only
+    // `memwrites.tc` (cheaper) or both. Verify the sidecar reload
+    // surfaces the hits via `source_line_hits`.
+    assert!(
+        db.load_line_hits_from_path(&line_path),
+        "load_line_hits_from_path must succeed for the just-written file"
+    );
+    let hits = db.source_line_hits(42, 7);
+    assert_eq!(hits, vec![10, 30], "round-tripped line hits must be intact");
+}
+
+// ---------------------------------------------------------------------------
+// Test #9 — write_to_path with NULL skip semantics.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_omniscient_db_write_to_path_honours_null_skip() {
+    let _guard = omniscient_ffi_lock().lock().unwrap();
+
+    let db = FfiOmniscientDb::new();
+    db.reset();
+    let rec = WriteRecord {
+        tick: 5,
+        pc: 0x1000,
+        address: 0x4000,
+        size: 4,
+        old_value: 0,
+        new_value: 42,
+    };
+    assert!(db.push_write(rec));
+    assert!(db.push_line_hit(1, 1, 5));
+    assert!(db.finalize());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mem_path = dir.path().join("memwrites.tc");
+
+    // Pass None for the line-hits path: only memwrites.tc must land.
+    assert!(db.write_to_path(Some(&mem_path), None));
+    assert!(mem_path.exists());
+    assert!(!dir.path().join("linehits.tc").exists());
+
+    // And the inverse: skip memwrites.tc, write only linehits.tc.
+    let dir2 = tempfile::tempdir().expect("tempdir");
+    let line_path = dir2.path().join("linehits.tc");
+    assert!(db.write_to_path(None, Some(&line_path)));
+    assert!(line_path.exists());
+    assert!(!dir2.path().join("memwrites.tc").exists());
+}
