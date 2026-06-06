@@ -538,6 +538,7 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     diffEditors: JsAssoc[cstring, DiffEditor]{},
     workspaceDir: cstring"",
     acpInitSent: false,
+    acpInitFailed: false,
     activeAgentMessageId: cstring""
   )
   data.registerComponent(result, Content.AgentActivity)

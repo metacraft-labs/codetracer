@@ -254,7 +254,15 @@ proc ensureAgentActivityRuntime(self: AgentActivityComponent) =
   self.commandInputId = if self.inCommandPalette: "-command" else: ""
   if not data.ui.commandPalette.isNil:
     data.ui.commandPalette.agent = self
-  if not self.acpInitSent:
+  # Only send the init once per component.  ``acpInitFailed`` blocks
+  # auto-retry after the main process returned ``acp-session-load-error``
+  # — without that guard the error handler's ``syncLegacyAgentActivityIntoVM``
+  # call re-enters this proc, immediately emits another init, gets another
+  # error back, and the loop floods the IPC channel until the renderer can
+  # no longer make progress on layout init (observed on web/trace-import
+  # boot when no ACP server is running).  Manual user retries clear the
+  # failed flag explicitly.
+  if not self.acpInitSent and not self.acpInitFailed:
     data.ipc.send("CODETRACER::acp-session-init", js{
       "clientSessionId": self.pendingSessionId
     })
@@ -829,7 +837,14 @@ proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
       cstring""
   let comp = componentBySessionId(clientSessionId)
   if not comp.isNil:
-    comp.acpInitSent = false
+    # Latch the failure so the next sync does not re-enter
+    # ``ensureAgentActivityRuntime`` and immediately fire another
+    # ``acp-session-init``.  Keep ``acpInitSent = true`` (the request
+    # WAS sent — we just got an error back), and gate retries on the
+    # explicit ``acpInitFailed`` flag instead.  syncLegacy below still
+    # refreshes the VM (so the view can show a "session unavailable"
+    # state if the panel exposes one) but no longer drives a retry.
+    comp.acpInitFailed = true
     comp.promptInFlight = false
     comp.syncLegacyAgentActivityIntoVM()
   # session load failed; keep component idle

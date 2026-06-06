@@ -874,13 +874,33 @@ function attachMainProcessCapture(
  * Also probes the page for any errors that occurred before attachment.
  */
 function attachErrorCollectors(page: Page, bucket: string[]): void {
+  const dumpPath = process.env.CODETRACER_TEST_CONSOLE_DUMP_PATH;
+  const dumpAll = process.env.CODETRACER_TEST_LOG_ALL_CONSOLE === "1";
   page.on("console", (msg) => {
     if (msg.type() === "error") {
       bucket.push(`[console.error] ${msg.text()}`);
+    } else if (dumpAll) {
+      bucket.push(`[console.${msg.type()}] ${msg.text()}`);
+    }
+    if (dumpPath) {
+      try {
+        require("node:fs").appendFileSync(
+          dumpPath,
+          `[console.${msg.type()}] ${msg.text()}\n`,
+        );
+      } catch { /* ignore */ }
     }
   });
   page.on("pageerror", (error) => {
     bucket.push(`[pageerror] ${error.message}`);
+    if (dumpPath) {
+      try {
+        require("node:fs").appendFileSync(
+          dumpPath,
+          `[pageerror] ${error.message}\n${error.stack ?? ""}\n`,
+        );
+      } catch { /* ignore */ }
+    }
   });
   // Check for script-load failures that happened before we attached.
   page.evaluate(() => {

@@ -915,6 +915,19 @@ type
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]
     acpInitSent*: bool
+    ## Latches once the per-component ``acp-session-init`` request has
+    ## been emitted to the main process.  Combined with ``acpInitFailed``
+    ## below to gate retries.
+    acpInitFailed*: bool
+    ## Set when the main process replies with ``acp-session-load-error``.
+    ## Prevents the runtime guard from re-emitting another init on the
+    ## next sync cycle — without this, the error handler's
+    ## ``syncLegacyAgentActivityIntoVM`` call re-enters
+    ## ``ensureAgentActivityRuntime``, immediately sends another
+    ## ``acp-session-init``, gets another error back, and the loop
+    ## floods the IPC channel until the renderer can no longer make
+    ## progress on layout init.  Manual retries (user action) should
+    ## clear this flag explicitly.
     activeAgentMessageId*: cstring
     commandInputId*: cstring
     inCommandPalette*: bool
