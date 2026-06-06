@@ -1278,6 +1278,17 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
 
   console.log(`# launching ct host for trace path ${tracePath} on port ${httpPort}`);
 
+  // When the ct-host stdout/stderr is being captured for diagnostics, also
+  // capture the ct_gfx_player's stderr (which is otherwise invisible — it
+  // lives inside the renderer's process tree).  Derive the path from the
+  // ct-host log so the two sit next to each other; respect an explicit
+  // override if the operator already supplied one.
+  const ctHostLogPath = process.env.CODETRACER_TEST_CT_HOST_OUTPUT_PATH;
+  if (ctHostLogPath && !process.env.CODETRACER_TEST_GFX_PLAYER_OUTPUT_PATH) {
+    process.env.CODETRACER_TEST_GFX_PLAYER_OUTPUT_PATH =
+      ctHostLogPath.replace(/\.log$/i, "") + ".gfx-player.log";
+  }
+
   const ctProcess = childProcess.spawn(
     codetracerPath,
     [

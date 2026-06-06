@@ -428,12 +428,23 @@ when defined(js):
         })(#, #, #);
       """.}
 
-  proc setScrubRangeHandler(input: isonim_dom.Element; vm: VideoPlayerVM)
-      {.importjs: """
-        #.addEventListener("input", function(event) {
-          #.scrubTo(Number(event.target.value || 0));
-        });
-      """.}
+  # Listen for both "input" (live drag) and "change" (final value) so the
+  # test harness's programmatic ``dispatchEvent("change")`` and a real
+  # user's drag both feed the VM.  Pass the seek closure through Nim
+  # rather than calling ``vm.scrubTo`` from raw JS — Nim's JS backend
+  # otherwise dead-code-strips ``scrubTo`` because the raw JS body is
+  # opaque to the compiler, leaving ``vm.scrubTo is not a function`` at
+  # runtime.
+  proc setScrubRangeHandler(input: isonim_dom.Element;
+                            onSeek: proc(frame: int)) {.importjs: """
+    (function(el, onSeek) {
+      const handler = function(event) {
+        onSeek(Number((event.target && event.target.value) || 0));
+      };
+      el.addEventListener("input", handler);
+      el.addEventListener("change", handler);
+    })(#, #);
+  """.}
 
   proc querySelector(node: isonim_dom.Element;
                      selector: cstring): isonim_dom.Element
@@ -694,7 +705,9 @@ when defined(js):
 
     let scrub = querySelector(panel, cstring".video-player-scrub-range")
     if not isNilElement(scrub):
-      setScrubRangeHandler(scrub, vm)
+      let capturedVm = vm
+      setScrubRangeHandler(scrub, proc(frame: int) =
+        capturedVm.scrubTo(frame))
 
     ## Loupe pixel-grid rendering. The JS side owns the mirror canvas and
     ## the per-frame blit; the Nim side drives it from a reactive effect

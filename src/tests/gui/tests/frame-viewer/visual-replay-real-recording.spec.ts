@@ -149,8 +149,14 @@ test.describe("MCR visual replay real recording GUI integration", () => {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }, targetFrame);
     await frameResponse;
+    // Software rendering through llvmpipe + the reactive signal update
+    // can lag a beat behind the network response — give the poll a real
+    // budget (the default 5 s here was too tight under software GL).
     await expect
-      .poll(async () => (await image.getAttribute("src")) ?? "")
+      .poll(
+        async () => (await image.getAttribute("src")) ?? "",
+        { timeout: 30_000 },
+      )
       .not.toBe(firstImageSrc);
 
     // Frame label updates to the new frame index.
@@ -201,11 +207,21 @@ test.describe("MCR visual replay real recording GUI integration", () => {
     ).toBeVisible();
 
     // Hover the image so the loupe overlay positions and reveals itself.
+    // The image itself sets pointer-events: none (loupe rendering lives on
+    // the canvas overlay underneath), which makes Playwright's standard
+    // hover actionability check fail because the topmost element at the
+    // image's coordinates is the stage div.  The hover handler is wired
+    // to the panel via event delegation, so hovering the stage at the
+    // image's coordinates yields the same effect; use the stage as the
+    // hover target.
     const imageBox = await image.boundingBox();
     expect(imageBox).not.toBeNull();
-    const hoverX = imageBox!.width * 0.25;
-    const hoverY = imageBox!.height * 0.25;
-    await image.hover({ position: { x: hoverX, y: hoverY } });
+    const stage = ctPage.locator(".video-player-stage");
+    const stageBox = await stage.boundingBox();
+    expect(stageBox).not.toBeNull();
+    const hoverX = imageBox!.x - stageBox!.x + imageBox!.width * 0.25;
+    const hoverY = imageBox!.y - stageBox!.y + imageBox!.height * 0.25;
+    await stage.hover({ position: { x: hoverX, y: hoverY } });
     // Loupe is hidden when no magnifier is set; once hover propagates a
     // magnifier signal it pops up.  Software-only renderers occasionally
     // delay the canvas sample by a frame; poll the display state.
@@ -237,7 +253,11 @@ test.describe("MCR visual replay real recording GUI integration", () => {
         && response.ok(),
       { timeout: 60_000 },
     );
-    await image.click({ position: { x: hoverX, y: hoverY } });
+    // Same actionability quirk as the hover above: the image has
+    // pointer-events: none, so click via the stage at the image's
+    // coordinates.  The panel-level click handler computes the
+    // image-relative coords itself.
+    await stage.click({ position: { x: hoverX, y: hoverY } });
     const pixelHistoryResponse = await pixelHistoryResponsePromise;
     const pixelHistoryPayload = await pixelHistoryResponse.json();
     expect(Array.isArray(pixelHistoryPayload)).toBe(true);

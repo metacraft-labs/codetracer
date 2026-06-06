@@ -25,6 +25,11 @@ type
     pid*: int
     terminateProc*: proc()
     runningProc*: proc(): bool
+    # Diagnostic snapshot of the player's accumulated stderr.  Optional —
+    # tests may supply nil.  Used to surface "why did the player exit?"
+    # context in failure messages without forcing a second probe of the
+    # process state.
+    stderrSnapshotProc*: proc(): string
 
   VisualReplayPlayerResult* = object
     ok*: bool
@@ -93,6 +98,11 @@ proc isRunning*(process: VisualReplayPlayerProcess): bool =
     return false
   process.runningProc()
 
+proc stderrSnapshot*(process: VisualReplayPlayerProcess): string =
+  if process.isNil or process.stderrSnapshotProc.isNil:
+    return ""
+  process.stderrSnapshotProc()
+
 proc shutdown*(lifecycle: VisualReplayPlayerLifecycle) =
   if lifecycle.isNil:
     return
@@ -133,9 +143,13 @@ proc startAsync(lifecycle: VisualReplayPlayerLifecycle):
 
     for attempt in 0 ..< lifecycle.readinessAttempts:
       if not lifecycle.process.isRunning():
-        return lifecycle.fail(
-          "Visual replay player exited before becoming ready at " &
-          infoUrl(lifecycle.url))
+        let stderrTail = lifecycle.process.stderrSnapshot()
+        var msg = "Visual replay player exited before becoming ready at " &
+          infoUrl(lifecycle.url)
+        if stderrTail.len > 0:
+          msg.add(": ")
+          msg.add(stderrTail)
+        return lifecycle.fail(msg)
       let ready = await lifecycle.deps.probeInfo(infoUrl(lifecycle.url))
       if ready:
         lifecycle.state = vrpReady
@@ -191,9 +205,13 @@ when defined(js):
 
       for attempt in 0 ..< lifecycle.readinessAttempts:
         if not lifecycle.process.isRunning():
-          return lifecycle.fail(
-            "Visual replay player exited before becoming ready at " &
-            infoUrl(lifecycle.url))
+          let stderrTail = lifecycle.process.stderrSnapshot()
+          var msg = "Visual replay player exited before becoming ready at " &
+            infoUrl(lifecycle.url)
+          if stderrTail.len > 0:
+            msg.add(": ")
+            msg.add(stderrTail)
+          return lifecycle.fail(msg)
         let ready = lifecycle.deps.probeInfo(infoUrl(lifecycle.url)).
           requireCompleted("probeInfo")
         if ready:
@@ -533,10 +551,42 @@ when defined(js):
           if (backendName.trim().length > 0) {
             playerArgs.push("--backend", backendName.trim());
           }
+          // Chromium's renderer process strips LD_LIBRARY_PATH from the
+          // env it inherits from the Electron main, so spawning
+          // ct_gfx_player with the raw renderer env loses the dynamic-
+          // linker paths that the player and its ct-native-replay
+          // entitlement checker need (liblldb, libzstd, gcc-libs, mesa
+          // libs, etc.).  Rebuild a fully-qualified LD_LIBRARY_PATH
+          // from the non-LD_ env vars Chromium *does* preserve
+          // (CT_LD_LIBRARY_PATH, CODETRACER_EXTRA_LD_LIBRARY_PATH,
+          // CODETRACER_LD_LIBRARY_PATH) and pass that explicitly to
+          // the child.  When all those are unset (production GPU host
+          // with a correct RUNPATH), this falls back to the renderer's
+          // (possibly empty) LD_LIBRARY_PATH and the spawn behaves
+          // exactly as before.
+          const ldSegments = [];
+          const pushSeg = (raw) => {
+            if (!raw) return;
+            for (const seg of String(raw).split(":")) {
+              if (seg && ldSegments.indexOf(seg) < 0) ldSegments.push(seg);
+            }
+          };
+          pushSeg(process.env.CT_LD_LIBRARY_PATH);
+          pushSeg(process.env.CODETRACER_EXTRA_LD_LIBRARY_PATH);
+          pushSeg(process.env.CODETRACER_LD_LIBRARY_PATH);
+          pushSeg(process.env.LD_LIBRARY_PATH);
+          const childEnv = Object.assign({}, process.env);
+          if (ldSegments.length > 0) {
+            childEnv.LD_LIBRARY_PATH = ldSegments.join(":");
+          }
           player = childProcess.spawn(
             gfxPlayerPath,
             playerArgs,
-            { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }
+            {
+              stdio: ["ignore", "ignore", "pipe"],
+              windowsHide: true,
+              env: childEnv,
+            }
           );
         } catch (error) {
           fail(
@@ -546,12 +596,82 @@ when defined(js):
           return;
         }
         let playerErr = { value: "" };
+        // Optional: mirror player stderr to a debug log file when the
+        // CODETRACER_TEST_GFX_PLAYER_OUTPUT_PATH env knob is set, or when
+        // running under CODETRACER_TEST=1 (fallback to a fixed path so the
+        // test harness always sees the spawn, even if env propagation got
+        // stripped at the renderer-process boundary).
+        let gfxStderrLogPath = process.env.CODETRACER_TEST_GFX_PLAYER_OUTPUT_PATH;
+        if (!gfxStderrLogPath && process.env.CODETRACER_TEST) {
+          gfxStderrLogPath = "/tmp/codetracer-gfx-player-test.log";
+        }
+        let gfxStderrFd = null;
+        if (gfxStderrLogPath) {
+          try {
+            gfxStderrFd = fs.openSync(gfxStderrLogPath, "a");
+          } catch (_) {
+            gfxStderrFd = null;
+          }
+        }
+        if (gfxStderrFd !== null) {
+          // Build the banner one piece at a time and catch each step so a
+          // bad property access (e.g., a sandboxed process.env field that
+          // throws on read) never silently nukes the entire diagnostic.
+          const safeEnv = (key) => {
+            try { return String(process.env[key] || ""); } catch (_) { return "<throw>"; }
+          };
+          const writeLine = (line) => {
+            try { fs.writeSync(gfxStderrFd, line + "\n"); } catch (_) {}
+          };
+          writeLine("");
+          writeLine("===== ct_gfx_player pid=" + ((player && player.pid) || 0) +
+            " spawn @ " + new Date().toISOString() + " =====");
+          try {
+            writeLine("argv: " + JSON.stringify([gfxPlayerPath].concat(playerArgs)));
+          } catch (_) {
+            writeLine("argv: <stringify failed>");
+          }
+          writeLine("LD_LIBRARY_PATH=" + safeEnv("LD_LIBRARY_PATH"));
+          try {
+            writeLine("child LD_LIBRARY_PATH=" + (childEnv.LD_LIBRARY_PATH || ""));
+          } catch (_) {}
+          writeLine("__EGL_VENDOR_LIBRARY_DIRS=" + safeEnv("__EGL_VENDOR_LIBRARY_DIRS"));
+          writeLine("LIBGL_DRIVERS_PATH=" + safeEnv("LIBGL_DRIVERS_PATH"));
+          writeLine("LIBGL_ALWAYS_SOFTWARE=" + safeEnv("LIBGL_ALWAYS_SOFTWARE"));
+          writeLine("EGL_PLATFORM=" + safeEnv("EGL_PLATFORM"));
+          writeLine("CODETRACER_LICENSE_FILE=" + safeEnv("CODETRACER_LICENSE_FILE"));
+          writeLine("CODETRACER_DEV_LICENSE_VERIFYING_KEY_BASE64=" +
+            safeEnv("CODETRACER_DEV_LICENSE_VERIFYING_KEY_BASE64"));
+          writeLine("CODETRACER_TEST=" + safeEnv("CODETRACER_TEST"));
+          writeLine("CODETRACER_TEST_GFX_PLAYER_OUTPUT_PATH=" +
+            safeEnv("CODETRACER_TEST_GFX_PLAYER_OUTPUT_PATH"));
+          writeLine("CODETRACER_EXTRA_LD_LIBRARY_PATH=" +
+            safeEnv("CODETRACER_EXTRA_LD_LIBRARY_PATH"));
+          writeLine("CT_LD_LIBRARY_PATH=" + safeEnv("CT_LD_LIBRARY_PATH"));
+          writeLine("CODETRACER_LD_LIBRARY_PATH=" +
+            safeEnv("CODETRACER_LD_LIBRARY_PATH"));
+        }
         player.stderr && player.stderr.on("data", (chunk) => {
-          playerErr.value += chunk.toString();
+          const text = chunk.toString();
+          playerErr.value += text;
+          if (gfxStderrFd !== null) {
+            try { fs.writeSync(gfxStderrFd, text); } catch (_) {}
+          }
         });
         player.on("error", (error) => fail("player error: " + error.message));
-        player.on("exit", () => {
+        player.on("exit", (code, signal) => {
           playerExited = true;
+          if (gfxStderrFd !== null) {
+            try {
+              fs.writeSync(
+                gfxStderrFd,
+                "\n===== ct_gfx_player exited code=" + code +
+                " signal=" + signal + " @ " + new Date().toISOString() + " =====\n"
+              );
+              fs.closeSync(gfxStderrFd);
+            } catch (_) {}
+            gfxStderrFd = null;
+          }
           cleanupDir();
           if (!settled) fail("player exited before spawn settled: " + playerErr.value);
         });
@@ -567,6 +687,9 @@ when defined(js):
             },
             runningProc: function() {
               return !!playerRef && !playerExited && !playerRef.killed;
+            },
+            stderrSnapshotProc: function() {
+              return playerErr.value || "";
             },
           });
         });
