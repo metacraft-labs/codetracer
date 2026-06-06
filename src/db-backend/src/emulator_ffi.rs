@@ -202,6 +202,145 @@ unsafe extern "C" {
     /// Number of reverse-steps taken since the last
     /// `mcrLastMileReverseStepReset` call.
     pub fn mcrLastMileReverseStepCount() -> c_int;
+
+    // -----------------------------------------------------------------
+    // M18 — Omniscient DB FFI surface. See spec §6.5 / §6.8.2 of
+    // `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`
+    // and §1 of
+    // `codetracer-specs/Recording-Backends/Multi-Core-Recorder/MCR-Omniscient-DB-Algorithms.md`.
+    //
+    // The Nim shim lives at
+    // `codetracer-native-recorder/ct_emulator/src/ct_emulator/omniscient_db_ffi.nim`.
+    //
+    // Entry points are split into:
+    //
+    //   * an admin surface (`mcrOmniscientReset`,
+    //     `mcrOmniscientPushWrite`, `mcrOmniscientPushLineHit`,
+    //     `mcrOmniscientFinalize`, `mcrOmniscientLoadFromPath`) that the
+    //     M18 trait + tests use to seed the omniscient store from Rust
+    //     fixtures (and that the production replay path uses to load an
+    //     on-disk `memwrites.tc` namespace);
+    //   * a query surface (`mcrOmniscientLastWriteBefore` +
+    //     per-field getters, `mcrOmniscientValueAt`,
+    //     `mcrOmniscientWritesInRange` + per-record getters,
+    //     `mcrOmniscientSourceLineHits` + per-entry getter) backing
+    //     `OmniscientDb::{last_write_before, value_at, writes_in_range,
+    //     source_line_hits}`;
+    //   * the lazy interval-analysis trigger
+    //     (`mcrOmniscientIntervalSchedule`,
+    //     `mcrOmniscientIntervalMarkAnalyzed`,
+    //     `mcrOmniscientIntervalIsAnalyzed`,
+    //     `mcrOmniscientIntervalScheduledCount`) that lets the trait
+    //     defer work for unanalysed intervals to a follow-on milestone
+    //     without changing the trait's surface;
+    //   * diagnostic accessors (`mcrOmniscientWriteCount`,
+    //     `mcrOmniscientLineHitCount`) that the trait's `is_present`
+    //     probe consults to detect a loaded `memwrites.tc` /
+    //     `linehits.tc` namespace.
+    //
+    // All entry points are safe against an uninitialised Nim runtime:
+    // they return zero rather than crash. The caller is still
+    // responsible for invoking `NimMain` once via the
+    // `EmulatorReplaySession` bring-up before any of these are
+    // exercised.
+    // -----------------------------------------------------------------
+
+    /// Reset the Nim-side omniscient DB state. Idempotent.
+    pub fn mcrOmniscientReset();
+
+    /// Append a synthetic write record to the in-shim store. The Rust
+    /// driver / production loader uses this to seed the store before
+    /// finalisation.
+    pub fn mcrOmniscientPushWrite(
+        tick: u64,
+        pc: u64,
+        address: u64,
+        size: c_int,
+        old_value: u64,
+        new_value: u64,
+    ) -> c_int;
+
+    /// Append a `(file_id, line, tick)` triple to the in-shim
+    /// source-line hits index.
+    pub fn mcrOmniscientPushLineHit(file_id: u32, line: u32, tick: u64) -> c_int;
+
+    /// Build the binary-search indexes from the accumulated writes /
+    /// hits. Idempotent — calling it after a no-op `Push` reuses the
+    /// existing indexes.
+    pub fn mcrOmniscientFinalize() -> c_int;
+
+    /// Load an on-disk `write_log.nim`-formatted file into the in-shim
+    /// store (production path: the recorder finalises a `memwrites.tc`
+    /// namespace and the replay-worker bridge points the FFI at it).
+    /// Returns 0 on success, -1 on I/O or parse failure.
+    pub fn mcrOmniscientLoadFromPath(path: *const std::os::raw::c_char) -> c_int;
+
+    /// Scan the in-shim store for the most recent write whose target
+    /// range overlaps `[address, address+size)` STRICTLY before `tick`.
+    /// Returns 1 on hit, 0 on miss. The hit's fields are read via the
+    /// `mcrOmniscientLastWriteResult*` getters.
+    pub fn mcrOmniscientLastWriteBefore(address: u64, size: c_int, tick: u64) -> c_int;
+
+    pub fn mcrOmniscientLastWriteResultTick() -> u64;
+    pub fn mcrOmniscientLastWriteResultPc() -> u64;
+    pub fn mcrOmniscientLastWriteResultAddress() -> u64;
+    pub fn mcrOmniscientLastWriteResultSize() -> c_int;
+    pub fn mcrOmniscientLastWriteResultOldValue() -> u64;
+    pub fn mcrOmniscientLastWriteResultNewValue() -> u64;
+
+    /// Resolve the value at `[address, address+size)` at `tick` and copy
+    /// up to `buf_len` bytes into `buf` little-endian. Returns 1 on hit
+    /// (a recorded write at-or-before `tick` was found), 0 on miss.
+    pub fn mcrOmniscientValueAt(address: u64, size: c_int, tick: u64, buf: *mut u8, buf_len: c_int) -> c_int;
+
+    /// Convenience accessor: the most recent `mcrOmniscientValueAt`
+    /// hit's value as a zero-extended `u64`.
+    pub fn mcrOmniscientValueResultLow64() -> u64;
+
+    /// Collect every write whose target range overlaps
+    /// `[address, address+size)` with `tick_min <= tick <= tick_max`,
+    /// sorted by ascending `tick`. Returns the number of records; each
+    /// record is read via `mcrOmniscientRangeRecord*Get` with an index
+    /// in `0..count`.
+    pub fn mcrOmniscientWritesInRange(address: u64, size: c_int, tick_min: u64, tick_max: u64) -> c_int;
+
+    pub fn mcrOmniscientRangeRecordTick(index: c_int) -> u64;
+    pub fn mcrOmniscientRangeRecordPc(index: c_int) -> u64;
+    pub fn mcrOmniscientRangeRecordAddress(index: c_int) -> u64;
+    pub fn mcrOmniscientRangeRecordSize(index: c_int) -> c_int;
+    pub fn mcrOmniscientRangeRecordOldValue(index: c_int) -> u64;
+    pub fn mcrOmniscientRangeRecordNewValue(index: c_int) -> u64;
+
+    /// Surface the per-line tick list for `(file_id, line)`. Returns
+    /// the number of recorded hits; individual ticks are read via
+    /// `mcrOmniscientSourceLineHitAt(index)`.
+    pub fn mcrOmniscientSourceLineHits(file_id: u32, line: u32) -> c_int;
+    pub fn mcrOmniscientSourceLineHitAt(index: c_int) -> u64;
+
+    /// Schedule interval analysis for the given interval id. Used by
+    /// the lazy-mode trigger when a query targets an unanalysed
+    /// interval.
+    pub fn mcrOmniscientIntervalSchedule(interval_id: u64) -> c_int;
+
+    /// Mark an interval as analysed. Called by the analyser stub
+    /// (synchronous fallback for M18) after the interval's writes have
+    /// been pushed.
+    pub fn mcrOmniscientIntervalMarkAnalyzed(interval_id: u64) -> c_int;
+
+    /// Returns 1 iff the given interval has been marked as analysed.
+    pub fn mcrOmniscientIntervalIsAnalyzed(interval_id: u64) -> c_int;
+
+    /// Diagnostic: number of intervals scheduled since the last reset.
+    pub fn mcrOmniscientIntervalScheduledCount() -> c_int;
+
+    /// Diagnostic: total number of writes currently held by the
+    /// in-shim store. The trait's `is_present` probe consults this to
+    /// decide whether a `memwrites.tc` namespace is loaded.
+    pub fn mcrOmniscientWriteCount() -> c_int;
+
+    /// Diagnostic: number of distinct `(file_id, line)` keys currently
+    /// held in the source-line hits index.
+    pub fn mcrOmniscientLineHitCount() -> c_int;
 }
 
 #[cfg(test)]

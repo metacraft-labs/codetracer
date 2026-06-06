@@ -63,6 +63,11 @@ pub mod in_memory_trace_reader;
 pub mod lang;
 pub mod macro_sourcemap;
 pub mod nim_mangling;
+// M18 — Omniscient DB trait + FFI-backed default impl. The Nim shim
+// at `codetracer-native-recorder/ct_emulator/src/ct_emulator/omniscient_db_ffi.nim`
+// owns the storage; this module exposes it through a Rust trait that
+// origin queries (M20) and `db.rs::load_history` can consume.
+pub mod omniscient_db;
 // Value Origin Tracking — M2 surface: trait + continuation-token codec +
 // DAP error codes 6101–6106. The per-backend implementations live next
 // to their `ReplaySession` impls (`db.rs`, `emulator_session.rs`,

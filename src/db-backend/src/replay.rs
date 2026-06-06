@@ -122,4 +122,14 @@ pub trait ReplaySession: std::fmt::Debug {
     /// The default implementation returns `None` so non-materialized
     /// sessions surface the DAP 6103 error without further plumbing.
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// M18 — surface the trace's omniscient DB when one is available
+    /// (i.e. the recorder shipped a `memwrites.tc` / `linehits.tc`
+    /// namespace in the CTFS container). Origin queries (M20) and
+    /// `db.rs::load_history` consult this through the trait so they
+    /// stay backend-agnostic; sessions without an omniscient log
+    /// return `None` and callers fall back to their per-backend path.
+    fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
+        None
+    }
 }

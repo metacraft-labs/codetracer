@@ -700,7 +700,24 @@ pub struct EmulatorReplaySession {
     /// runtime PC from `mcrGetPC` is rebased before lookup so PIE
     /// traces still hit their breakpoints after ASLR shifts.
     breakpoint_static_pcs: HashSet<u64>,
+    /// M18 — whether the trace's CTFS container declared at least one
+    /// of `memwrites.tc` / `linehits.tc` (the omniscient DB
+    /// namespaces). When `true`, [`Self::omniscient_db`] returns the
+    /// FFI-backed [`crate::omniscient_db::FfiOmniscientDb`] handle so
+    /// origin queries (M20) and `db.rs::load_history` can consult the
+    /// recorded write log. `false` for legacy traces; callers fall
+    /// back to per-backend paths.
+    omniscient_present: bool,
+    /// FFI handle to the Nim-side omniscient store. Zero-cost: the
+    /// store itself lives in Nim-global state and the handle is just
+    /// a routing strut to it. Held by value so trait pointers stay
+    /// valid as long as the session is alive. The
+    /// [`crate::omniscient_db::OmniscientDb`] trait is also imported
+    /// at module top-level so `is_present()` resolves here.
+    omniscient_handle: crate::omniscient_db::FfiOmniscientDb,
 }
+
+use crate::omniscient_db::OmniscientDb as _;
 
 /// Hard cap on the number of frames returned by `load_callstack`.
 ///
@@ -732,6 +749,7 @@ impl std::fmt::Debug for EmulatorReplaySession {
             .field("pc_rebase", &self.pc_rebase)
             .field("stack_unwinder", &self.stack_unwinder.as_ref().map(|_| "<present>"))
             .field("breakpoint_static_pcs_count", &self.breakpoint_static_pcs.len())
+            .field("omniscient_present", &self.omniscient_present)
             .finish()
     }
 }
@@ -789,6 +807,12 @@ impl EmulatorReplaySession {
             pc_rebase: None,
             stack_unwinder: None,
             breakpoint_static_pcs: HashSet::new(),
+            // M18 — empty sessions never ship a `memwrites.tc` /
+            // `linehits.tc` namespace; the handle stays inert until
+            // the integration test driver or the recorder loader
+            // pushes data into it.
+            omniscient_present: false,
+            omniscient_handle: crate::omniscient_db::FfiOmniscientDb::new(),
         }
     }
 
@@ -906,6 +930,17 @@ impl EmulatorReplaySession {
         // effort" snapshotting contract.
         Self::seed_emulator_from_cp0(&mut ctfs);
 
+        // M18 — surface the presence of the omniscient DB namespaces.
+        // The Nim recorder writes `memwrites.tc` / `linehits.tc` per
+        // `MCR-Omniscient-DB-Algorithms.md` §1; detecting either of
+        // them is sufficient to signal that the trace supports the
+        // omniscient query path. We do NOT eagerly stream the
+        // namespace bytes into the Nim shim: the production payload
+        // can be hundreds of MB. Lazy load lands when the first
+        // `OmniscientDb` query trips the lazy interval analyser
+        // (M18 deliverable §5).
+        let omniscient_present = crate::omniscient_db::ctfs_has_omniscient_namespaces(|name| ctfs.has_file(name));
+
         Ok(Self {
             meta,
             breakpoints: HashMap::new(),
@@ -916,6 +951,8 @@ impl EmulatorReplaySession {
             pc_rebase,
             stack_unwinder,
             breakpoint_static_pcs: HashSet::new(),
+            omniscient_present,
+            omniscient_handle: crate::omniscient_db::FfiOmniscientDb::new(),
         })
     }
 
@@ -1787,6 +1824,19 @@ impl ReplaySession for EmulatorReplaySession {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    /// M18 — expose the omniscient DB when the trace's CTFS container
+    /// declared at least one of `memwrites.tc` / `linehits.tc`. The
+    /// FFI handle itself is zero-cost; we only surface it when the
+    /// presence flag is set so callers don't accidentally query an
+    /// empty omniscient store on legacy traces.
+    fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
+        if self.omniscient_present || self.omniscient_handle.is_present() {
+            Some(&self.omniscient_handle)
+        } else {
+            None
+        }
     }
 }
 

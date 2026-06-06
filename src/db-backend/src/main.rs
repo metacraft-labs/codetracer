@@ -59,6 +59,12 @@ mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
 mod nim_mangling;
+// M18 — Omniscient DB trait + FFI-backed default impl. Mirrors the
+// lib.rs declaration above; the bin needs its own copy because
+// `dap_handler` (and the M20 successor) reach for the trait via
+// the `crate::omniscient_db` path.
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod omniscient_db;
 mod origin_query;
 mod paths;
 mod program_search_tool;

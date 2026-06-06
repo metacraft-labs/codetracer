@@ -502,6 +502,35 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
                 mcrLastMileReverseStepCurrentTick;\n\
                 mcrLastMileReverseStepCurrentPc;\n\
                 mcrLastMileReverseStepCount;\n\
+                mcrOmniscientReset;\n\
+                mcrOmniscientPushWrite;\n\
+                mcrOmniscientPushLineHit;\n\
+                mcrOmniscientFinalize;\n\
+                mcrOmniscientLoadFromPath;\n\
+                mcrOmniscientLastWriteBefore;\n\
+                mcrOmniscientLastWriteResultTick;\n\
+                mcrOmniscientLastWriteResultPc;\n\
+                mcrOmniscientLastWriteResultAddress;\n\
+                mcrOmniscientLastWriteResultSize;\n\
+                mcrOmniscientLastWriteResultOldValue;\n\
+                mcrOmniscientLastWriteResultNewValue;\n\
+                mcrOmniscientValueAt;\n\
+                mcrOmniscientValueResultLow64;\n\
+                mcrOmniscientWritesInRange;\n\
+                mcrOmniscientRangeRecordTick;\n\
+                mcrOmniscientRangeRecordPc;\n\
+                mcrOmniscientRangeRecordAddress;\n\
+                mcrOmniscientRangeRecordSize;\n\
+                mcrOmniscientRangeRecordOldValue;\n\
+                mcrOmniscientRangeRecordNewValue;\n\
+                mcrOmniscientSourceLineHits;\n\
+                mcrOmniscientSourceLineHitAt;\n\
+                mcrOmniscientIntervalSchedule;\n\
+                mcrOmniscientIntervalMarkAnalyzed;\n\
+                mcrOmniscientIntervalIsAnalyzed;\n\
+                mcrOmniscientIntervalScheduledCount;\n\
+                mcrOmniscientWriteCount;\n\
+                mcrOmniscientLineHitCount;\n\
             local:\n\
                 *;\n\
         };\n",
