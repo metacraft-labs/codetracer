@@ -341,7 +341,103 @@ unsafe extern "C" {
     /// Diagnostic: number of distinct `(file_id, line)` keys currently
     /// held in the source-line hits index.
     pub fn mcrOmniscientLineHitCount() -> c_int;
+
+    // -----------------------------------------------------------------
+    // M22 — WASM emulator data-watch FFI surface (browser-replay
+    // parity). See spec §6.6 of
+    // `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`.
+    //
+    // The Nim shim lives at
+    // `codetracer-native-recorder/ct_emulator/src/ct_emulator/data_watch_ffi.nim`.
+    //
+    // Entry points are split into:
+    //
+    //   * an admin surface (`mcrDataWatchReset`, `mcrDataWatchInstall`,
+    //     `mcrDataWatchClear`, `mcrDataWatchInstalledCount`) that the
+    //     `ReplaySession::data_watch_*` methods consume to arm + tear
+    //     down per-write data breakpoints from the origin algorithm;
+    //   * a probe surface (`mcrDataWatchCheckWrite` + per-field
+    //     `mcrDataWatchLastFire*` getters) that the emulator main loop
+    //     consults on each emulated write so an armed watch fires
+    //     precisely on the writing instruction;
+    //   * diagnostic accessors (`mcrDataWatchWriteCheckCount`,
+    //     `mcrDataWatchFireCount`) the M22 perf-overhead test uses to
+    //     compute per-write inner-loop cost independent of fire count.
+    //
+    // V1 ships with a cap of 32 simultaneous watches; install requests
+    // beyond the cap return [`MCR_DATA_WATCH_SLOTS_EXHAUSTED`] so the
+    // caller can map the failure to a clear "watch slots exhausted"
+    // error string. The probe surface short-circuits to 0 when no
+    // watches are armed so the inner-loop overhead with zero armed
+    // watches stays below the spec §12 budget (< 5% on the M18
+    // write-log-only baseline).
+    // -----------------------------------------------------------------
+
+    /// Tear down every armed watch and reset the M22 diagnostic
+    /// counters. Idempotent — safe to call at session bring-up.
+    pub fn mcrDataWatchReset();
+
+    /// Arm a new watch on `[address, address + size)`. Returns the
+    /// fresh watch handle on success (always > 0), [`MCR_DATA_WATCH_SLOTS_EXHAUSTED`]
+    /// when the V1 cap is reached, or [`MCR_DATA_WATCH_INVALID_ARG`]
+    /// on bad arguments (size out of `1..=8`).
+    pub fn mcrDataWatchInstall(address: u64, size: c_int) -> c_int;
+
+    /// Tear down the watch with `handle`. Returns 0 on success, -1 if
+    /// the handle is unknown (already cleared, or never installed).
+    pub fn mcrDataWatchClear(handle: c_int) -> c_int;
+
+    /// Diagnostic: number of watches currently armed.
+    pub fn mcrDataWatchInstalledCount() -> c_int;
+
+    /// Inner-loop per-write probe. Returns the firing handle on hit
+    /// (always > 0) or 0 on no fire. When no watches are armed this
+    /// short-circuits after a single counter bump + comparison so the
+    /// inner-loop overhead stays below the spec §12 budget.
+    pub fn mcrDataWatchCheckWrite(
+        tick: u64,
+        pc: u64,
+        address: u64,
+        size: c_int,
+        old_value: u64,
+        new_value: u64,
+    ) -> c_int;
+
+    /// Handle of the most-recent fire (0 if no fires since reset).
+    pub fn mcrDataWatchLastFireHandle() -> c_int;
+    pub fn mcrDataWatchLastFireTick() -> u64;
+    pub fn mcrDataWatchLastFirePc() -> u64;
+    pub fn mcrDataWatchLastFireAddress() -> u64;
+    pub fn mcrDataWatchLastFireSize() -> c_int;
+    pub fn mcrDataWatchLastFireOldValue() -> u64;
+    pub fn mcrDataWatchLastFireNewValue() -> u64;
+
+    /// Diagnostic: total number of `mcrDataWatchCheckWrite` calls
+    /// since the last reset (M22 perf-overhead test uses this).
+    pub fn mcrDataWatchWriteCheckCount() -> u64;
+
+    /// Diagnostic: total number of fires since the last reset.
+    pub fn mcrDataWatchFireCount() -> u64;
+
+    /// Number of fires currently held in the ring buffer (capped at
+    /// the shim's `MaxFireHistory` = 256).
+    pub fn mcrDataWatchHistoryLen() -> c_int;
+
+    /// Find the most-recent fire whose target range overlaps
+    /// `[address, address + size)` STRICTLY before `tick`. The hit's
+    /// fields are staged into the same per-field getters used by
+    /// `mcrDataWatchCheckWrite`. Returns 1 on hit, 0 on miss.
+    pub fn mcrDataWatchHistoryFindBefore(address: u64, size: c_int, tick: u64) -> c_int;
 }
+
+/// M22 — sentinel returned by [`mcrDataWatchInstall`] when the V1 cap
+/// of 32 simultaneous watches is reached. The caller maps this to a
+/// clear "watch slots exhausted" error string per the M22 acceptance
+/// test ``test_emulator_data_breakpoint_max_simultaneous_watches``.
+pub const MCR_DATA_WATCH_SLOTS_EXHAUSTED: c_int = -2;
+
+/// M22 — sentinel for invalid arguments (size out of `1..=8`).
+pub const MCR_DATA_WATCH_INVALID_ARG: c_int = -1;
 
 #[cfg(test)]
 mod tests {

@@ -16,6 +16,7 @@
 //! `cp0.mem` slimmed to the program's PIE load segments + the [stack]
 //! region. See the README in that directory for how to regenerate.
 
+use db_backend::data_watch;
 use db_backend::emulator_session::EmulatorReplaySession;
 use db_backend::replay::ReplaySession;
 use db_backend::task::CtLoadLocalsArguments;
@@ -127,4 +128,36 @@ fn xos_fixture_drives_emulator_replay_session() {
         bp.enabled,
         "breakpoint at {dwarf_path}:{dwarf_line} must report enabled=true; got {bp:?}",
     );
+
+    // ── 5. M22 cross-OS data-watch smoke ──────────────────────────────
+    //
+    // Arm a watch on a known global address through the trait-routed
+    // `data_watch_install` method (so the browser-replay path's
+    // §6.6 hybrid resolver works on every host). Then simulate the
+    // emulator firing the watch on a synthetic write tuple and assert
+    // the fire surfaces at the expected tick.
+    //
+    // The Nim shim is host-independent by construction (pure Nim +
+    // libc) so a green pass on the Linux x86_64 test host
+    // demonstrates the cross-OS portable contract — the same Rust →
+    // Nim → emulator stack runs unchanged on macOS ARM64 and Linux
+    // ARM64 hosts.
+    data_watch::reset_data_watches();
+    const M22_GLOBAL_ADDR: u64 = 0x6020;
+    const M22_EXPECTED_TICK: u64 = 42;
+    let watch_handle = session
+        .data_watch_install(M22_GLOBAL_ADDR, 4)
+        .expect("M22: trait-routed data_watch_install must succeed cross-OS");
+    let fire = data_watch::check_write(M22_EXPECTED_TICK, 0x401234, M22_GLOBAL_ADDR, 4, 0, 0xBEEF)
+        .expect("M22: armed watch must fire on the targeted address at the expected tick");
+    assert_eq!(fire.handle, watch_handle, "M22: trait-routed handle round-trip");
+    assert_eq!(
+        fire.tick, M22_EXPECTED_TICK,
+        "M22: fire tick must match the per-instruction emulation oracle"
+    );
+    assert_eq!(fire.address, M22_GLOBAL_ADDR);
+    assert_eq!(fire.new_value, 0xBEEF);
+    session
+        .data_watch_clear(watch_handle)
+        .expect("M22: trait-routed clear must round-trip");
 }

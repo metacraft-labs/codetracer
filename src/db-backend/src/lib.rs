@@ -51,6 +51,11 @@ pub mod emulator_ffi;
 // the Nim runtime bring-up state and the per-trace FFI surface.
 pub mod emulator_origin;
 pub mod emulator_session;
+// M22 — WASM emulator data-watch primitive (browser-replay parity).
+// Wraps the Nim-side `mcrDataWatch*` FFI surface in a typed Rust
+// surface the §6.6 hybrid origin path consumes for pre-window queries
+// when no omniscient log is shipped with the trace.
+pub mod data_watch;
 // Stubs for the few libc symbols that the wasm-targeted Nim runtime
 // references but that `c_compat.rs` does not already cover (currently
 // just `exit`). Linked only into the wasm32 binary.

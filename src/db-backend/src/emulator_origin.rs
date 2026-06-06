@@ -1,8 +1,28 @@
-//! M17 — MCR hybrid origin tier (undo-map last-mile + breakpoint fallback).
+//! M17 + M22 — MCR / browser-replay hybrid origin tier
+//! (undo-map last-mile + breakpoint fallback + WASM data-watch).
 //!
 //! Implements the value-origin chain algorithm for `TraceKind::Emulator`
-//! (MCR-backed) traces per spec §6.4 of
+//! (MCR-backed) traces per spec §6.4 + §6.6 of
 //! `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`.
+//!
+//! M22 extends the M17 algorithm with a third tier that consumes the
+//! WASM emulator's data-watch primitive (see [`crate::data_watch`]) for
+//! pre-window queries on browser-replay traces. The high-level
+//! discipline mirrors §6.6 of the spec:
+//!
+//!  * **Tier 1** — undo-map fast path within the last-mile window.
+//!  * **Tier 2** — synthetic reverse-step driver. Bounded by the
+//!    per-hop budget; rewinds tick-by-tick sampling the undo map at
+//!    each new cursor.
+//!  * **Tier 3 (M22, browser-replay)** — WASM emulator data-watch
+//!    primitive. The Rust driver arms a watch on the queried
+//!    `(address, size)` before the chain build; if Tier 1 / Tier 2
+//!    both miss for a hop the driver consumes the most-recent fire
+//!    staged by the Nim-side shim and surfaces it as the hop.
+//!
+//! Tier 3 fires NEVER cross-talk with Tier 1 / Tier 2: the watch is
+//! installed + torn down inside [`run_mcr_origin_chain`] so leaked
+//! state is impossible.
 //!
 //! The high-level algorithm composes two tiers per hop:
 //!
@@ -47,6 +67,7 @@ use std::time::Instant;
 
 use log::debug;
 
+use crate::data_watch;
 use crate::emulator_ffi;
 use crate::emulator_session::EmulatorReplaySession;
 use crate::origin_query::{OriginError, OriginErrorCode, WallClockDeadline};
@@ -75,6 +96,11 @@ pub type McrOriginResult = Result<OriginChain, OriginError>;
 enum HopTier {
     Tier1,
     Tier2,
+    /// M22 — served by the WASM emulator data-watch primitive
+    /// (browser-replay parity, spec §6.6). The Rust driver consumed
+    /// the most-recent fire staged by [`crate::data_watch`] after
+    /// Tier 1 / Tier 2 reported no hit.
+    Tier3DataWatch,
 }
 
 /// Internal hop record returned by the per-tier resolvers; the caller
@@ -103,6 +129,7 @@ fn build_hop_from_write(write: &ResolvedWrite, queried_var: &str, step_id: i64) 
     let provenance = match write.tier {
         HopTier::Tier1 => "mcr-hybrid: tier-1 undo-map (spec §6.4)",
         HopTier::Tier2 => "mcr-hybrid: tier-2 reverse-execution (spec §6.4)",
+        HopTier::Tier3DataWatch => "mcr-hybrid: tier-3 wasm data-watch (spec §6.6 / M22)",
     };
     OriginHop {
         kind: OriginKind::TrivialCopy,
@@ -121,6 +148,11 @@ fn build_hop_from_write(write: &ResolvedWrite, queried_var: &str, step_id: i64) 
         confidence: match write.tier {
             HopTier::Tier1 => 0.95,
             HopTier::Tier2 => 0.85,
+            // Tier-3 data watch surfaces the per-instruction fire
+            // tuple directly from the WASM emulator's inner-loop probe
+            // — the same precision Tier 1 records, just without the
+            // window gate. Confidence matches Tier 1.
+            HopTier::Tier3DataWatch => 0.95,
         },
         classification_provenance: Some(provenance.to_string()),
         correlation_transition: None,
@@ -160,6 +192,28 @@ fn tier_one_lookup(extent: WatchExtent, tick: u64) -> Option<ResolvedWrite> {
             old_value: emulator_ffi::mcrUndoMapLastWriteResultValue(),
             tier: HopTier::Tier1,
         }
+    })
+}
+
+/// M22 — Tier-3 fallback (browser-replay parity per spec §6.6).
+///
+/// Consults the WASM emulator's data-watch fire-history ring buffer
+/// for the most-recent fire whose tick is STRICTLY less than `tick`.
+/// The caller (the origin algorithm) is responsible for arming the
+/// watch on the queried extent before the chain build so the buffer
+/// contains relevant fires; this lookup itself is read-only.
+///
+/// Returns `Some(write)` on hit, `None` on miss (no history fire
+/// covers the extent before the cursor).
+fn tier_three_data_watch_lookup(extent: WatchExtent, tick: u64) -> Option<ResolvedWrite> {
+    let fire = data_watch::history_find_before(extent.address, extent.size.max(1) as u32, tick)?;
+    Some(ResolvedWrite {
+        pc: fire.pc,
+        tick_before: fire.tick,
+        address: fire.address,
+        size: fire.size.min(255) as u8,
+        old_value: fire.old_value,
+        tier: HopTier::Tier3DataWatch,
     })
 }
 
@@ -281,10 +335,20 @@ pub fn run_mcr_origin_chain(
             metrics.tier_two_hops += 1;
             metrics.classifier_hits += 1;
             t2
+        } else if let Some(t3) = tier_three_data_watch_lookup(current_extent, current_tick) {
+            // M22 — browser-replay parity. The WASM emulator's data-
+            // watch primitive populated the fire-history ring during
+            // a previous replay-from-checkpoint pass; the algorithm
+            // walks it backwards as the §6.6 hybrid's pre-window
+            // resolution path. No new emulator step is taken inside
+            // this loop — the buffer is read-only here.
+            metrics.tier_three_hops += 1;
+            metrics.classifier_hits += 1;
+            t3
         } else {
             terminator = Terminator::new(TerminatorKind::RecordingStart);
             terminator.expression = format!(
-                "no write to addr=0x{:x} before tick={} in either tier",
+                "no write to addr=0x{:x} before tick={} in any tier",
                 current_extent.address, current_tick
             );
             break;

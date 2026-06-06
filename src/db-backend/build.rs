@@ -531,6 +531,22 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
                 mcrOmniscientIntervalScheduledCount;\n\
                 mcrOmniscientWriteCount;\n\
                 mcrOmniscientLineHitCount;\n\
+                mcrDataWatchReset;\n\
+                mcrDataWatchInstall;\n\
+                mcrDataWatchClear;\n\
+                mcrDataWatchInstalledCount;\n\
+                mcrDataWatchCheckWrite;\n\
+                mcrDataWatchLastFireHandle;\n\
+                mcrDataWatchLastFireTick;\n\
+                mcrDataWatchLastFirePc;\n\
+                mcrDataWatchLastFireAddress;\n\
+                mcrDataWatchLastFireSize;\n\
+                mcrDataWatchLastFireOldValue;\n\
+                mcrDataWatchLastFireNewValue;\n\
+                mcrDataWatchWriteCheckCount;\n\
+                mcrDataWatchFireCount;\n\
+                mcrDataWatchHistoryLen;\n\
+                mcrDataWatchHistoryFindBefore;\n\
             local:\n\
                 *;\n\
         };\n",

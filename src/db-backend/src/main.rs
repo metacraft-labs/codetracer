@@ -52,6 +52,13 @@ mod emulator_ffi;
 mod emulator_origin;
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod emulator_session;
+// M22 — WASM emulator data-watch primitive (browser-replay parity).
+// Mirrors the lib.rs declaration above; the bin needs its own copy so
+// `emulator_origin` and the `ReplaySession` trait impl on
+// `EmulatorReplaySession` can reach the wrapper via the
+// `crate::data_watch` path. See spec §6.6 / M22 milestone.
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod data_watch;
 mod event_db;
 mod expr_loader;
 mod flow_preloader;

@@ -1599,6 +1599,12 @@ pub struct OriginMetrics {
     /// + reverse-execution fallback). Zero on any non-MCR backend.
     #[serde(default)]
     pub tier_two_hops: u32,
+    /// M22 — number of hops served by Tier 3 (WASM emulator data-watch
+    /// primitive — the browser-replay path's pre-window fallback per
+    /// spec §6.6). Zero on any non-MCR backend and zero whenever the
+    /// chain is served entirely by Tier 1 / Tier 2.
+    #[serde(default)]
+    pub tier_three_hops: u32,
 }
 
 /// The full origin chain (spec §4.1).

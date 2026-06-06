@@ -132,4 +132,40 @@ pub trait ReplaySession: std::fmt::Debug {
     fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
         None
     }
+
+    /// M22 — arm a per-write data breakpoint on
+    /// `[address, address + size)`. Returns the new handle on success.
+    /// Default impl returns
+    /// [`crate::data_watch::DataWatchError::InvalidSize`] so non-emulator
+    /// backends surface a typed error rather than crashing — they have
+    /// no per-write probe to wire into. The [`EmulatorReplaySession`]
+    /// override forwards to the Nim-side `mcrDataWatchInstall` shim per
+    /// spec §6.6 (browser-replay path).
+    fn data_watch_install(
+        &mut self,
+        address: u64,
+        size: u32,
+    ) -> Result<crate::data_watch::DataWatchHandle, crate::data_watch::DataWatchError> {
+        let _ = (address, size);
+        Err(crate::data_watch::DataWatchError::InvalidSize(size))
+    }
+
+    /// M22 — tear down a previously-installed data watch. Default impl
+    /// surfaces [`crate::data_watch::DataWatchError::UnknownHandle`]
+    /// because non-emulator backends never minted the handle in the
+    /// first place.
+    fn data_watch_clear(
+        &mut self,
+        handle: crate::data_watch::DataWatchHandle,
+    ) -> Result<(), crate::data_watch::DataWatchError> {
+        Err(crate::data_watch::DataWatchError::UnknownHandle(handle.raw()))
+    }
+
+    /// M22 — session-scoped reset: tear down every armed watch and
+    /// reset the per-session counters. Called by the origin algorithm
+    /// at the top of an origin-chain build to make sure leaked watches
+    /// from a previous query never cross-talk into the next one.
+    /// Default impl is a no-op for backends that don't support the
+    /// primitive.
+    fn data_watch_reset(&mut self) {}
 }

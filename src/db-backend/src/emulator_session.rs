@@ -1929,6 +1929,37 @@ impl ReplaySession for EmulatorReplaySession {
             None
         }
     }
+
+    /// M22 — arm a per-write data breakpoint on the WASM emulator. The
+    /// origin algorithm's §6.6 hybrid path consumes this to resolve
+    /// pre-window queries that would otherwise have to leave the
+    /// browser. Forwards to the typed [`crate::data_watch::install_data_watch`]
+    /// wrapper which carries the failure-mode discipline (slots
+    /// exhausted, invalid size).
+    fn data_watch_install(
+        &mut self,
+        address: u64,
+        size: u32,
+    ) -> Result<crate::data_watch::DataWatchHandle, crate::data_watch::DataWatchError> {
+        crate::data_watch::install_data_watch(address, size)
+    }
+
+    /// M22 — tear down a previously-installed data watch.
+    fn data_watch_clear(
+        &mut self,
+        handle: crate::data_watch::DataWatchHandle,
+    ) -> Result<(), crate::data_watch::DataWatchError> {
+        crate::data_watch::clear_data_watch(handle)
+    }
+
+    /// M22 — session-scoped reset: tear down every armed watch and
+    /// reset the per-session diagnostic counters. The origin algorithm
+    /// calls this at the top of an origin-chain build per spec §6.6 to
+    /// guarantee that watches leaked by an earlier query never
+    /// cross-talk into this query's fire stream.
+    fn data_watch_reset(&mut self) {
+        crate::data_watch::reset_data_watches();
+    }
 }
 
 #[cfg(test)]
