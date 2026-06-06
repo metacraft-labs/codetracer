@@ -148,6 +148,78 @@ when defined(js):
 # MockRenderer panel — simple structure for headless tests
 # ---------------------------------------------------------------------------
 
+proc markerBannerText*(vm: EventLogVM): string =
+  ## §5.4.1 banner text. Composed in a free proc so the DSL can bind
+  ## a single text node reactively.
+  let banner = vm.loadingBanner.val
+  case banner.phase
+  of mlbLoading:
+    "loading correlation markers… " & $banner.loaded & " / " & $banner.total & " firings"
+  of mlbDone, mlbIdle:
+    ""
+
+proc markerBannerDisplay*(vm: EventLogVM): string =
+  displayIf(vm.loadingBanner.val.phase == mlbLoading)
+
+proc markerEmptyStateText*(vm: EventLogVM): string =
+  ## §5.5 "N markers declared in source; none fired" banner. Empty
+  ## string when `mesHidden` — the surrounding div is hidden via the
+  ## display reactive binding.
+  let state = vm.emptyState.val
+  case state.kind
+  of mesHidden: ""
+  of mesDeclaredNoneFired:
+    $state.declaredCount & " correlation markers declared in source; none fired during this recording"
+
+proc markerEmptyStateDisplay*(vm: EventLogVM): string =
+  displayIf(vm.emptyState.val.kind == mesDeclaredNoneFired)
+
+proc markerToastText*(vm: EventLogVM): string =
+  ## §7 one-time discovery toast.
+  let toast = vm.toastState.val
+  case toast.kind
+  of mtHidden: ""
+  of mtVisible:
+    "CodeTracer discovered " & $toast.discoveredCount &
+      " correlation markers in your source — matched output appears in the Event Log"
+
+proc markerToastDisplay*(vm: EventLogVM): string =
+  displayIf(vm.toastState.val.kind == mtVisible)
+
+proc markerBoundaryChip*(row: MarkerEventRow): string =
+  ## §5.1 boundary chip text. Wrapped in brackets to match the spec's
+  ## "[order-processing]" example.
+  "[" & row.boundaryId & "]"
+
+template renderMarkerRowImpl(r, vm, item: untyped): untyped =
+  ## §5.1 marker row layout. Renders direction icon, boundary chip,
+  ## formatted show value, and the counterpart-set indicator. Each
+  ## attribute is reactive on the row's signal — the data binding is
+  ## entirely declarative.
+  ui(r):
+    tdiv(class = "marker-row marker-direction-" & directionWireText(item().direction),
+         `data-marker-id` = $item().markerId,
+         `data-boundary-id` = item().boundaryId,
+         `data-key-value` = item().keyValue,
+         `data-source-path` = item().sourcePath,
+         `data-source-line` = $item().sourceLine,
+         `data-step-id` = $item().stepId):
+      span(class = "marker-direction-icon"):
+        text directionDisplayIcon(item().direction)
+      span(class = "marker-boundary-chip"):
+        text markerBoundaryChip(item())
+      span(class = "marker-show-value"):
+        text formatShowValue(item())
+
+proc renderMarkerRow*(r: MockRenderer; vm: EventLogVM;
+                     item: proc(): MarkerEventRow): MockNode =
+  renderMarkerRowImpl(r, vm, item)
+
+when defined(js):
+  proc renderMarkerRow*(r: WebRenderer; vm: EventLogVM;
+                       item: proc(): MarkerEventRow): isonim_dom.Element =
+    renderMarkerRowImpl(r, vm, item)
+
 proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
   ## Render the full Event Log panel for headless tests.
   ##
@@ -155,21 +227,34 @@ proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
   ##   div.event-log-component
   ##     div.event-log-search-row
   ##       input.event-log-search-input
+  ##     div.event-log-marker-banner[display reactive]   §5.4.1 banner
+  ##     div.event-log-marker-toast[display reactive]    §7 toast
+  ##     div.event-log-marker-empty[display reactive]    §5.5 empty
   ##     div.event-log-header-row
   ##       span.column-header.column-{i}[.sort-active]   text reactive
   ##     div.event-log-loading[display reactive]
+  ##     div.event-log-marker-rows                       §5.1 marker rows
   ##     div.event-log-rows                             populated by indexEach
   ##     div.event-log-pagination
   ##       button.page-prev[disabled reactive]
   ##       span.page-indicator                         text reactive
   ##       button.page-next[disabled reactive]
-  var rowsContainer, prevBtn, nextBtn: MockNode
+  var rowsContainer, markerContainer, prevBtn, nextBtn: MockNode
 
   let panel = ui(r):
     tdiv(class = "event-log-component"):
       tdiv(class = "event-log-search-row"):
         input(class = "event-log-search-input",
               placeholder = "Search events...")
+      tdiv(class = "event-log-marker-banner",
+           display = markerBannerDisplay(vm)):
+        text markerBannerText(vm)
+      tdiv(class = "event-log-marker-toast",
+           display = markerToastDisplay(vm)):
+        text markerToastText(vm)
+      tdiv(class = "event-log-marker-empty",
+           display = markerEmptyStateDisplay(vm)):
+        text markerEmptyStateText(vm)
       tdiv(class = "event-log-header-row"):
         for i, name in COLUMN_NAMES:
           span(class = columnHeaderClass(vm, i),
@@ -178,6 +263,8 @@ proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
       tdiv(class = "event-log-loading",
            display = displayIf(vm.isLoading.val)):
         text "Loading..."
+      tdiv(ref = markerContainer, class = "event-log-marker-rows"):
+        discard
       tdiv(ref = rowsContainer, class = "event-log-rows"):
         discard
       tdiv(class = "event-log-pagination"):
@@ -197,6 +284,11 @@ proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
     proc(): seq[EventLogRow] = vm.eventRows.val,
     proc(item: proc(): EventLogRow, index: int): MockNode =
       renderEventRow(r, vm, item, index))
+
+  indexEach[MarkerEventRow, MockRenderer, MockNode](r, markerContainer,
+    proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,
+    proc(item: proc(): MarkerEventRow, index: int): MockNode =
+      renderMarkerRow(r, vm, item))
 
   panel
 

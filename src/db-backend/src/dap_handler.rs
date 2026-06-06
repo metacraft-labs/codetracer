@@ -200,6 +200,83 @@ pub struct Handler {
     /// 10 000 TOML reads + classifier-pattern walks — the M21
     /// performance budget (≤ 700 ms) is unreachable.
     pub(crate) cached_patterns_fingerprint: Option<String>,
+
+    /// M25b — instrumentation counter incremented each time the
+    /// marker decoder runs against an event's `metadata` slot inside
+    /// `event_load`. The DAP test
+    /// `test_dap_event_log_marker_response_serves_from_cache_post_load`
+    /// asserts this counter does **not** advance on repeat
+    /// `ct/event-load` calls — proving the marker rows are served
+    /// from the same in-memory `cached_events` slice without re-
+    /// decoding the metadata blob a second time.
+    pub marker_decode_calls: std::sync::atomic::AtomicUsize,
+
+    /// M25b — cached marker-row projection over `cached_events`.
+    /// Built once on the first `event_load` call after `cached_events`
+    /// is populated; subsequent `ct/event-load` requests serve from
+    /// this slice verbatim, satisfying the §3.2.1 one-time-evaluation
+    /// contract at the DAP layer.
+    pub(crate) cached_marker_rows: Option<Vec<MarkerEventRow>>,
+}
+
+/// M25b — Event-Log marker row returned by `ct/event-load`. The
+/// frontend decodes the `MarkerPayload` from this struct rather than
+/// re-decoding the raw `ProgramEvent.metadata` JSON. Carries the
+/// originating row's `event_index` so the consumer can correlate the
+/// marker metadata back to the standard event row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkerEventRow {
+    /// Index into the `events: [...]` array on the same response — the
+    /// frontend joins marker metadata to standard event rows via this
+    /// field rather than the more brittle `(path, line, rrTicks)`
+    /// triple.
+    pub event_index: usize,
+    pub marker_id: usize,
+    pub boundary_id: String,
+    pub direction: String,
+    pub key_text: String,
+    pub key_value: String,
+    pub show_text: Option<String>,
+    pub show_value: Option<String>,
+    pub description: Option<String>,
+    pub format: Option<String>,
+    pub source_path: String,
+    pub source_line: usize,
+    pub step_id: i64,
+}
+
+/// M25b — `ct/pairIndexLookup` request arguments. The frontend
+/// supplies the `(boundary_id, direction, key_value)` triple and gets
+/// back the list of counterparts (Recv firings when querying from a
+/// Send marker, and vice versa) per spec §5.3.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairIndexLookupArguments {
+    pub boundary_id: String,
+    pub direction: String,
+    pub key_value: String,
+}
+
+/// M25b — One counterpart entry returned by `ct/pairIndexLookup`.
+/// Shape kept symmetric with `MarkerEventRow` so a single frontend
+/// row-mapper can populate the Event Log columns regardless of
+/// whether the row originated from `ct/event-load` or the lookup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairIndexCounterpart {
+    pub recording_id: String,
+    pub step_id: i64,
+    pub source_path: String,
+    pub source_line: usize,
+    pub marker_id: usize,
+    pub boundary_id: String,
+    pub direction: String,
+    pub key_text: String,
+    pub key_value: String,
+    pub show_text: Option<String>,
+    pub show_value: Option<String>,
+    pub format: Option<String>,
 }
 
 // two choices:
@@ -324,6 +401,8 @@ impl Handler {
             origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
             materialized_origin_metadata_decoder: None,
             cached_patterns_fingerprint: None,
+            marker_decode_calls: std::sync::atomic::AtomicUsize::new(0),
+            cached_marker_rows: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -1258,6 +1337,21 @@ impl Handler {
         let raw_event_content = self.dap_client.updated_events_content(page_contents.clone())?;
         sender.send(raw_event_content)?;
 
+        // M25b — Event Log surface for correlation markers.
+        // Project the page's events into the marker-row view by
+        // decoding `ProgramEvent.metadata` for any row that carries a
+        // `MarkerPayload` shape. The decoded slice is cached so that
+        // repeat `ct/event-load` calls serve marker rows from cache
+        // without re-decoding (the §3.2.1 one-time-evaluation
+        // contract — verified by the M25b DAP test
+        // `test_dap_event_log_marker_response_serves_from_cache_post_load`).
+        //
+        // We index the cached projection by the *absolute* event index
+        // (the row's offset into `cached_events`) so that the page-
+        // local `event_index` field on each `MarkerEventRow` lines up
+        // with the consumer's row indices.
+        let marker_rows = self.collect_marker_rows_for_page(&page_events, start, count);
+
         // Include event data in the DAP response body so that
         // `session.customRequest("ct/event-load")` resolves with the data
         // (VS Code's customRequest returns the response body, not events).
@@ -1266,11 +1360,176 @@ impl Handler {
             serde_json::json!({
                 "events": page_events,
                 "content": page_contents,
+                "markers": marker_rows,
             }),
             sender,
         )?;
 
         Ok(())
+    }
+
+    /// M25b — Build the marker-row projection for the events served by
+    /// a single `ct/event-load` page. Honours the §3.2.1
+    /// one-time-evaluation contract: the projection over the full
+    /// `cached_events` slice is computed on the first call and cached;
+    /// repeat calls reuse the cached slice (filtered to the page) and
+    /// do NOT re-decode `ProgramEvent.metadata`. The
+    /// `marker_decode_calls` counter advances only on the first build.
+    fn collect_marker_rows_for_page(
+        &mut self,
+        page_events: &[ProgramEvent],
+        start: usize,
+        count: usize,
+    ) -> Vec<MarkerEventRow> {
+        if self.cached_marker_rows.is_none() {
+            let all_events = match self.cached_events.as_ref() {
+                Some(events) => events,
+                None => return Vec::new(),
+            };
+            let mut rows: Vec<MarkerEventRow> = Vec::new();
+            for (absolute_index, event) in all_events.iter().enumerate() {
+                self.marker_decode_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(payload) = crate::correlation_markers::MarkerPayload::decode(&event.metadata) else {
+                    continue;
+                };
+                rows.push(MarkerEventRow {
+                    event_index: absolute_index,
+                    marker_id: payload.marker_id,
+                    boundary_id: payload.boundary_id,
+                    direction: payload.direction.as_str().to_string(),
+                    key_text: payload.key_text,
+                    key_value: payload.key_value,
+                    show_text: payload.show_text,
+                    show_value: payload.show_value,
+                    description: payload.description,
+                    format: payload.format,
+                    source_path: event.high_level_path.clone(),
+                    source_line: event.high_level_line.max(0) as usize,
+                    step_id: event.direct_location_rr_ticks,
+                });
+            }
+            self.cached_marker_rows = Some(rows);
+        }
+        // Filter the cached projection to the page window. When the
+        // call uses the legacy "first 20" fallback the lower / upper
+        // bounds wrap the page's first/last absolute event index.
+        let (lower, upper) = if count > 0 {
+            (start, start.saturating_add(page_events.len()))
+        } else {
+            // Legacy fallback — pages slice `[0..min(20, len)]`.
+            (0usize, page_events.len())
+        };
+        self.cached_marker_rows
+            .as_ref()
+            .map(|all| {
+                all.iter()
+                    .filter(|row| row.event_index >= lower && row.event_index < upper)
+                    .map(|row| {
+                        let mut adjusted = row.clone();
+                        // Re-base `event_index` to be page-local so the
+                        // frontend's join against the `events: [...]`
+                        // array is correct.
+                        adjusted.event_index = row.event_index.saturating_sub(lower);
+                        adjusted
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// M25b — `ct/pairIndexLookup` handler. Returns the counterparts
+    /// of the queried `(boundary_id, direction, key_value)` triple by
+    /// walking this handler's local pair index. For a multi-trace
+    /// session, the request is routed to the trace that the frontend
+    /// resolved the marker against; cross-trace counterparts are
+    /// resolved by the session-level [`crate::session_handler::
+    /// SessionHandler::pair_index`] surface. This per-handler variant
+    /// keeps the single-trace path cheap and avoids a session-wide
+    /// re-derivation on every UI lookup.
+    pub fn pair_index_lookup(
+        &mut self,
+        req: dap::Request,
+        args: PairIndexLookupArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let direction =
+            crate::correlation_markers::MarkerDirection::parse(&args.direction).ok_or_else(|| -> Box<dyn Error> {
+                format!(
+                    "ct/pairIndexLookup: unknown direction `{}` (expected `send` or `recv`)",
+                    args.direction
+                )
+                .into()
+            })?;
+
+        let index = self.build_local_pair_index();
+        let opposite = direction.opposite();
+        let counterparts: Vec<PairIndexCounterpart> = index
+            .get(&args.boundary_id, opposite)
+            .iter()
+            .filter(|view| view.payload.key_value == args.key_value)
+            .map(|view| PairIndexCounterpart {
+                recording_id: view.recording_id.clone(),
+                step_id: view.step_id,
+                source_path: view.source_path.clone(),
+                source_line: view.source_line,
+                marker_id: view.payload.marker_id,
+                boundary_id: view.payload.boundary_id.clone(),
+                direction: view.payload.direction.as_str().to_string(),
+                key_text: view.payload.key_text.clone(),
+                key_value: view.payload.key_value.clone(),
+                show_text: view.payload.show_text.clone(),
+                show_value: view.payload.show_value.clone(),
+                format: view.payload.format.clone(),
+            })
+            .collect();
+
+        self.respond_dap(req, serde_json::json!({ "counterparts": counterparts }), sender)?;
+        Ok(())
+    }
+
+    /// Test-only setter for the per-handler `cached_events` slice.
+    /// Mirrors the M21 pattern (`install_materialized_origin_metadata_decoder`)
+    /// of seeding handler state without going through the full
+    /// `replay.load_events()` pipeline. The setter also invalidates
+    /// the M25b marker-row cache so subsequent `event_load` calls
+    /// re-derive against the freshly-installed events.
+    pub fn set_cached_events_for_tests(&mut self, events: Vec<ProgramEvent>) {
+        self.cached_events = Some(events);
+        self.cached_marker_rows = None;
+        self.marker_decode_calls.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Build the per-handler [`crate::correlation_index::PairIndex`]
+    /// by walking this handler's `event_db.firings_by_source_location`
+    /// table and decoding the marker payload from each firing's
+    /// `ProgramEvent.metadata` slot. Mirrors the session-level
+    /// [`crate::session_handler::SessionHandler::pair_index`] surface
+    /// scoped to a single trace — used by `pair_index_lookup` and by
+    /// the M25b DAP tests.
+    pub fn build_local_pair_index(&self) -> crate::correlation_index::PairIndex {
+        use crate::correlation_index::MarkerEventView;
+        use crate::correlation_markers::MarkerPayload;
+
+        let mut events: Vec<MarkerEventView> = Vec::new();
+        for (_, firings) in self.event_db.firings_by_source_location.iter() {
+            for firing in firings {
+                let Some(event) = self.event_db.program_event_at(firing) else {
+                    continue;
+                };
+                let Some(payload) = MarkerPayload::decode(&event.metadata) else {
+                    continue;
+                };
+                events.push(MarkerEventView::new(
+                    String::new(),
+                    firing.step_id.0,
+                    event.high_level_path.clone(),
+                    event.high_level_line.max(0) as usize,
+                    payload,
+                ));
+            }
+        }
+        crate::correlation_index::PairIndex::build(&events)
     }
 
     pub fn event_jump(
