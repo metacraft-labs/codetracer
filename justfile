@@ -454,7 +454,17 @@ test-rust:
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server
-  cargo nextest run --release --bin replay-server --run-ignored ignored-only
+  # Run ignored unit tests separately.  When the binary happens to
+  # have no #[ignore]'d tests at all, nextest exits with code 4
+  # ("no tests to run") which we don't want to surface as a failure
+  # of the whole ``just test`` invocation.  Tolerate that specific
+  # exit code while still failing on any real test failure.
+  cargo nextest run --release --bin replay-server --run-ignored ignored-only || \
+    if [ "$?" = "4" ]; then \
+      echo "  (no ignored tests in replay-server; treating as no-op)"; \
+    else \
+      exit "$?"; \
+    fi
   # Integration tests (tests/*.rs): DAP protocol, flow tests, etc.
   # Flow tests that need ct-rr-support/rr skip automatically when unavailable.
   # Shell/JS flow tests require sibling repos (codetracer-shell-recorders, etc.)
