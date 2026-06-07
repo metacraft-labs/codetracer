@@ -1447,6 +1447,7 @@ dependencies = [
  "tree-sitter-tolk",
  "tree-sitter-tracepoint",
  "tree-sitter-traversal2",
+ "ureq",
  "uuid",
  "vfs",
  "wasm-bindgen",

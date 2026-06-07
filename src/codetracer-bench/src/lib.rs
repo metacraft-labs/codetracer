@@ -141,6 +141,80 @@ impl LanguageProbe {
         if language == Language::Python && Self::python_recorder_reachable() {
             return Ok(());
         }
+        // C++ / C: the sibling-detection script names the recorder
+        // `ct-native-replay`. In addition, the C++ fixture needs g++
+        // and the `codetracer-native-test-programs` sibling for
+        // anything beyond the in-tree fixtures (the bench's omniscient-
+        // db-size fixtures don't actually need NATIVE_TEST_PROGRAMS;
+        // checking for it would over-gate the probe). We still
+        // surface a precise sentinel naming the missing dependency.
+        if language == Language::CPlusPlus || language == Language::C {
+            if which("ct-native-replay").is_some() {
+                if which("g++").is_some() || which("clang++").is_some() || language == Language::C {
+                    return Ok(());
+                }
+                return Err(
+                    "neither g++ nor clang++ on PATH (C++ fixture requires a C++ compiler; \
+                     run from `nix develop` shell)"
+                        .to_string(),
+                );
+            }
+            return Err(
+                "ct-native-replay not on PATH (run `nix develop` or `source \
+                 scripts/detect-siblings.sh` first — the sibling \
+                 codetracer-native-backend repo provides the binary)"
+                    .to_string(),
+            );
+        }
+        // Ruby: sibling-detection prepends the gem's bin/ to PATH and
+        // exports RUBY_RECORDER_ROOT. The binary check is the
+        // load-bearing gate; the env var hint surfaces in the sentinel
+        // when the binary is missing so the operator knows why.
+        if language == Language::Ruby {
+            if which("codetracer-ruby-recorder").is_some() {
+                if which("ruby").is_some() {
+                    return Ok(());
+                }
+                return Err(
+                    "ruby not on PATH (run from `nix develop` shell so the ruby \
+                     toolchain is available)"
+                        .to_string(),
+                );
+            }
+            let hint = match std::env::var_os("RUBY_RECORDER_ROOT") {
+                Some(p) => format!(
+                    "RUBY_RECORDER_ROOT={} but no codetracer-ruby-recorder binary on PATH \
+                     (run `just build-extension` in the sibling repo)",
+                    PathBuf::from(p).display()
+                ),
+                None => "codetracer-ruby-recorder not on PATH and RUBY_RECORDER_ROOT not \
+                         set (run `nix develop` or `source scripts/detect-siblings.sh` first)"
+                    .to_string(),
+            };
+            return Err(hint);
+        }
+        // JavaScript: sibling-detection prepends the node workspace's
+        // `node_modules/.bin/` to PATH so the `codetracer-js-recorder`
+        // shim resolves. Also need `node` on PATH for the JS recorder
+        // to execute.
+        if language == Language::JavaScript {
+            if which("codetracer-js-recorder").is_some() {
+                if which("node").is_some() {
+                    return Ok(());
+                }
+                return Err(
+                    "node not on PATH (the JS recorder shells out to node; run from \
+                     `nix develop` shell)"
+                        .to_string(),
+                );
+            }
+            return Err(
+                "codetracer-js-recorder not on PATH (run `npm install` in the sibling \
+                 codetracer-js-recorder repo, then `nix develop` or `source \
+                 scripts/detect-siblings.sh`)"
+                    .to_string(),
+            );
+        }
         // Fall through to the binary-on-PATH check below as the backup
         // path (e.g. a future build that ships the console script in
         // the venv).
@@ -476,12 +550,30 @@ impl FixtureRecorder {
         if language == Language::Python {
             return Self::record_python(program_path, trace_dir);
         }
+        // C++ requires a compilation step before the native recorder
+        // can attach to the binary; route through the specialized
+        // method that compiles via g++ (or clang++).
+        if language == Language::CPlusPlus {
+            return Self::record_cpp(program_path, trace_dir);
+        }
+        // Ruby and JS recorders are shell wrappers that invoke their
+        // respective interpreter; the dedicated methods double-check
+        // the runtime is available + surface a precise error.
+        if language == Language::Ruby {
+            return Self::record_ruby(program_path, trace_dir);
+        }
+        if language == Language::JavaScript {
+            return Self::record_javascript(program_path, trace_dir);
+        }
 
         let binary = LanguageProbe::expected_binary(language);
         let mut cmd = Command::new(binary);
         match language {
             Language::Python => unreachable!("handled above"),
-            Language::CPlusPlus | Language::C | Language::Rust => {
+            Language::CPlusPlus | Language::Ruby | Language::JavaScript => {
+                unreachable!("handled by per-language record_* methods above")
+            }
+            Language::C | Language::Rust => {
                 // `ct-native-replay record -o <out> -- <program>` —
                 // see tests/fixtures/origin/cpp/*/regenerate.sh.
                 cmd.arg("record")
@@ -490,7 +582,7 @@ impl FixtureRecorder {
                     .arg("--")
                     .arg(program_path);
             }
-            Language::Ruby | Language::JavaScript | Language::Nim | Language::Go => {
+            Language::Nim | Language::Go => {
                 cmd.arg("--out-dir")
                     .arg(trace_dir)
                     .arg("--")
@@ -511,6 +603,135 @@ impl FixtureRecorder {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             return Err(RecorderError::SubprocessFailed {
                 binary: binary.to_string(),
+                exit: output.status.code(),
+                stderr,
+            });
+        }
+        Ok(trace_dir.to_path_buf())
+    }
+
+    /// Record a C++ program by first compiling it with `g++` (or
+    /// `clang++` as a fallback) and then invoking the native recorder
+    /// against the resulting binary. The binary is produced under
+    /// `trace_dir/build/main` so the test artefacts live in one place.
+    /// Matches the per-fixture `regenerate.sh` contract — see
+    /// `fixtures/omniscient-db-size/c_plus_plus/short_loop/regenerate.sh`.
+    pub fn record_cpp(program_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let build_dir = trace_dir.join("build");
+        std::fs::create_dir_all(&build_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        // Choose the compiler. The detect-siblings hook does not pin a
+        // specific compiler, so we accept g++ (the campaign's
+        // regenerate.sh default) and clang++ (the macOS fallback).
+        let cxx_env = std::env::var_os("CXX");
+        let compiler = if let Some(c) = cxx_env.as_ref().and_then(|p| p.to_str()) {
+            c.to_string()
+        } else if which("g++").is_some() {
+            "g++".to_string()
+        } else if which("clang++").is_some() {
+            "clang++".to_string()
+        } else {
+            return Err(RecorderError::Unavailable(
+                "no C++ compiler on PATH (looked for g++ then clang++; set CXX to override)"
+                    .to_string(),
+            ));
+        };
+        let binary_path = build_dir.join("main");
+        let compile_output = Command::new(&compiler)
+            .arg("-O0")
+            .arg("-g")
+            .arg("-no-pie")
+            .arg("-o")
+            .arg(&binary_path)
+            .arg(program_path)
+            .output()
+            .map_err(|e| RecorderError::Io(format!("failed to spawn {compiler}: {e}")))?;
+        if !compile_output.status.success() {
+            let stderr = String::from_utf8_lossy(&compile_output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: compiler,
+                exit: compile_output.status.code(),
+                stderr,
+            });
+        }
+        let recorder = std::env::var_os("CT_NATIVE_REPLAY")
+            .or_else(|| std::env::var_os("CODETRACER_NATIVE_RECORDER"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("ct-native-replay"));
+        let output = Command::new(&recorder)
+            .arg("record")
+            .arg("-o")
+            .arg(trace_dir)
+            .arg("--")
+            .arg(&binary_path)
+            .output()
+            .map_err(|e| {
+                RecorderError::Io(format!("failed to spawn {}: {e}", recorder.display()))
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: recorder.display().to_string(),
+                exit: output.status.code(),
+                stderr,
+            });
+        }
+        Ok(trace_dir.to_path_buf())
+    }
+
+    /// Record a Ruby program by invoking the `codetracer-ruby-recorder`
+    /// shim (which itself shells out to a ruby interpreter). The shim
+    /// must be on PATH — checked by the probe — and the wrapper picks
+    /// up `RUBY_RECORDER_ROOT` when set so the operator can override
+    /// the gem location.
+    pub fn record_ruby(program_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let recorder = std::env::var_os("CODETRACER_RUBY_RECORDER")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codetracer-ruby-recorder"));
+        let output = Command::new(&recorder)
+            .arg("--out-dir")
+            .arg(trace_dir)
+            .arg("--")
+            .arg(program_path)
+            .output()
+            .map_err(|e| {
+                RecorderError::Io(format!("failed to spawn {}: {e}", recorder.display()))
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: recorder.display().to_string(),
+                exit: output.status.code(),
+                stderr,
+            });
+        }
+        Ok(trace_dir.to_path_buf())
+    }
+
+    /// Record a JS program via the `codetracer-js-recorder` shim. The
+    /// shim wraps a Node CLI; the probe confirms node is on PATH.
+    pub fn record_javascript(
+        program_path: &Path,
+        trace_dir: &Path,
+    ) -> Result<PathBuf, RecorderError> {
+        std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let recorder = std::env::var_os("CODETRACER_JS_RECORDER")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codetracer-js-recorder"));
+        let output = Command::new(&recorder)
+            .arg("--out-dir")
+            .arg(trace_dir)
+            .arg("--")
+            .arg(program_path)
+            .output()
+            .map_err(|e| {
+                RecorderError::Io(format!("failed to spawn {}: {e}", recorder.display()))
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: recorder.display().to_string(),
                 exit: output.status.code(),
                 stderr,
             });

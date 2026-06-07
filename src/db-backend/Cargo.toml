@@ -86,6 +86,14 @@ web-sys = { version = "0.3", optional = true, features = [
 
 vfs = "0.12"
 
+# P0.7: HTTP client for the LazyOmniscientPrepTrigger that POSTs to the
+# Monolith's /api/v1/storage/recordings/{id}/omniscient-prep/trigger
+# endpoint. `ureq` is a blocking, dependency-light client (no tokio
+# runtime); the trigger lives on the per-session dispatcher thread so
+# blocking I/O is fine. The crate is already in the transitive
+# dependency graph via codetracer_ctfs.
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+
 shellexpand = { version = "3.1.1", optional = true }
 
 # DWARF parsing (M-DWARF-1). These three crates form the de-facto pure-Rust

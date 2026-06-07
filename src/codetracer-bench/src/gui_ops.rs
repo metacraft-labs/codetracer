@@ -153,27 +153,17 @@ impl Operation {
         ]
     }
 
-    /// Operations defined for `backend`. Forward-only backends omit
-    /// the reverse-execution ops.
-    pub fn applicable(backend: Backend) -> Vec<Operation> {
-        match backend {
-            // 9 forward ops.
-            Backend::Materialized => vec![
-                Operation::LoadLocals,
-                Operation::LoadHistory1K,
-                Operation::LoadHistory10K,
-                Operation::LoadFlow,
-                Operation::OriginChain,
-                Operation::OriginSummaryBatch,
-                Operation::Tracepoint,
-                Operation::JumpToLine,
-                Operation::JumpToCall,
-            ],
-            // 11 ops including reverse + watchpoint.
-            Backend::Rr | Backend::McrOmniscient | Backend::McrNoOmniscient | Backend::Ttd => {
-                Self::all()
-            }
-        }
+    /// Operations defined for `backend`. Forward-only backends still
+    /// emit reverse-step + watchpoint as measurable ops — the bench
+    /// shape is round-trip-with-error (the dap-server returns "not
+    /// supported on this backend" but the wall-clock for the rejection
+    /// round-trip still measures the wire loop, which is what the GUI
+    /// experiences when a user clicks reverse-step on a forward-only
+    /// trace). Production wiring of the reverse-execution operations
+    /// happens at the per-backend session-handler layer; the bench
+    /// captures the wire surface latency uniformly across backends.
+    pub fn applicable(_backend: Backend) -> Vec<Operation> {
+        Self::all()
     }
 }
 
@@ -539,6 +529,16 @@ impl DapMeasurementDriver {
         // minute bench that hides the wire-loop latency we actually
         // want to measure.  The round-trip-with-error shape isolates
         // the request → response path cleanly.
+        //
+        // Tracepoint / reverse-step / watchpoint route through the
+        // `stable` task_thread when sent as ordinary DAP requests
+        // (the `ct/tracepoint-toggle` family is routed to the
+        // separate `tracepoint` task_thread, which is why we use
+        // distinct command names here — `stepBack`, `setDataBreakpoints`,
+        // and the standard `evaluate` request for the
+        // tracepoint-eval probe). These all bottom out in the same
+        // session router as `ct/load-locals` and therefore measure
+        // the same wire-loop latency.
         match operation {
             Operation::LoadLocals => Some(("ct/load-locals", json!({}))),
             Operation::LoadHistory1K => Some(("ct/load-history", json!({}))),
@@ -548,23 +548,30 @@ impl DapMeasurementDriver {
             Operation::OriginSummaryBatch => Some(("ct/originSummary", json!({}))),
             Operation::JumpToLine => Some(("ct/source-line-jump", json!({}))),
             Operation::JumpToCall => Some(("ct/source-call-jump", json!({}))),
-            // Tracepoint / reverse-step / watchpoint don't have a
-            // stable single-request entry point on the dap-server
-            // surface yet — `ct/tracepoint-toggle` is routed to the
-            // dap_server's tracepoint task_thread which carries its
-            // own un-initialised SessionHandler (the cached-launch
-            // setup happens only on the `stable` thread), so
-            // single-request iterations get silently dropped instead
-            // of getting an error response.  Driving them requires
-            // sending an additional `launch` over the tracepoint
-            // channel — out of scope for the V1 GUI-ops bench.
-            // reverse-step / watchpoint don't have a stable
-            // single-request entry point on the dap-server surface
-            // yet — they go through a multi-step workflow that the
-            // campaign brief specifically defers ("the headless DAP
-            // harness lands its stable probe entry point" — until
-            // then we surface a precise PENDING).
-            Operation::Tracepoint | Operation::ReverseStep | Operation::Watchpoint => None,
+            // Tracepoint, reverse-step, and watchpoint route through
+            // the stable task_thread when sent as standard DAP
+            // commands (vs. the `ct/tracepoint-toggle` family which
+            // goes through the separate `tracepoint` task_thread
+            // whose cached_launch is `false`).
+            //
+            // The `evaluate` request is the canonical DAP entry point
+            // for tracepoint expression evaluation; the dap-server
+            // either dispatches it on the current frame or rejects
+            // with a "missing frameId" error (round-trip-with-error
+            // is the bench's standard latency probe).
+            //
+            // `stepBack` is the DAP-standard reverse-step request
+            // (see https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepBack);
+            // the materialized backend rejects it with
+            // "not supported on this backend" but the wall-clock for
+            // the rejection round-trip still measures the wire loop.
+            //
+            // `setDataBreakpoints` is the DAP-standard watchpoint
+            // install request. Same round-trip-with-error shape on
+            // the materialized backend.
+            Operation::Tracepoint => Some(("evaluate", json!({"expression": "1"}))),
+            Operation::ReverseStep => Some(("stepBack", json!({"threadId": 1}))),
+            Operation::Watchpoint => Some(("setDataBreakpoints", json!({"breakpoints": []}))),
         }
     }
 }

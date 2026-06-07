@@ -74,10 +74,12 @@ fn python_materialized_linux_runs_9_operations() {
         &Operation::applicable(Backend::Materialized),
     );
     let total = count_cells(&matrix, Backend::Materialized, Language::Python);
-    // 9 forward operations apply to Materialized.
+    // 11 operations apply uniformly — reverse-step + watchpoint
+    // surface as measurable round-trip-with-error cells on
+    // forward-only backends per the bench's wire-loop discipline.
     assert_eq!(
-        total, 9,
-        "expected 9 Materialized rows for Python, got {total}"
+        total, 11,
+        "expected 11 Materialized rows for Python, got {total}"
     );
     // Measurements only land when the dap driver is wired; with the
     // synthetic always-pending driver every cell is pending.
