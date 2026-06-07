@@ -291,6 +291,32 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
+      - name: Resolve codetracer-native-recorder ref
+        id: resolve-mcr-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder
+        # src/db-backend/build.rs canonicalizes
+        # ``../../../codetracer-native-recorder`` and links the Nim
+        # ct_emulator into replay-server.  ``cargo build`` panics
+        # with ``expected sibling codetracer-native-recorder``
+        # without this clone.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'true'
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -636,6 +662,31 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-trace-format-nim
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
+
+      - name: Resolve codetracer-native-recorder ref
+        id: resolve-mcr-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder sibling
+        # src/db-backend/build.rs canonicalizes
+        # ``../../../codetracer-native-recorder`` to locate Nim
+        # ct_emulator sources; without the clone, ``cargo clippy``
+        # panics with ``expected sibling codetracer-native-recorder``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'true'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix

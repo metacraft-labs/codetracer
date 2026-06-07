@@ -128,6 +128,33 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
           submodules: 'false'
 
+      - name: Resolve codetracer-native-recorder ref
+        id: resolve-mcr-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder sibling
+        # src/db-backend/build.rs canonicalizes
+        # ``../../../codetracer-native-recorder`` to locate the Nim
+        # ct_emulator sources.  Without the sibling clone the
+        # ``cargo build`` invocations inside run-cross-repo-tests.sh
+        # panic with ``expected sibling codetracer-native-recorder
+        # repo: NotFound``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'true'
+
       - name: Build ct-native-replay
         run: |
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
