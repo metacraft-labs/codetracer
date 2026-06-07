@@ -2343,29 +2343,6 @@ async fn handle_read_source_file(
 // Filesystem fallback for source file reading
 // ---------------------------------------------------------------------------
 
-/// Reads a source file from a trace, trying multiple resolution strategies.
-///
-/// This function serves as a fallback when the daemon's `ct/read-source`
-/// command is not supported by the backend (e.g. replay-server for Python traces).
-///
-/// Resolution strategies (tried in order):
-///
-/// 1. **Embedded files**: Check `<trace_dir>/files/<path>`.  RR traces store
-///    copies of all source files at recording time under this directory.
-///    For example, `/home/user/project/main.rs` is stored at
-///    `<trace_dir>/files/home/user/project/main.rs`.
-///
-/// 2. **Absolute path on disk**: If `file_path` is absolute and exists on disk,
-///    read it directly.  This is the common case for DB traces (Python) where
-///    sources are still at their original recording-time locations.
-///
-/// 3. **Workdir-relative**: Resolve `file_path` against the `workdir`
-///    recorded in the trace's `meta.dat` (M-REC-1.5; previously read
-///    from the retired `trace_metadata.json` sidecar).
-///
-/// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
-///    parent (e.g. trace at `/tmp/foo/trace/`, source at
-///    `/tmp/foo/program/src/main.py`).
 /// Strip the root of an absolute path so it can be re-rooted under another
 /// directory (e.g. a trace's `files/` embed dir).
 ///
@@ -2391,6 +2368,29 @@ fn strip_path_root(file_path: &str) -> std::path::PathBuf {
     }
 }
 
+/// Reads a source file from a trace, trying multiple resolution strategies.
+///
+/// This function serves as a fallback when the daemon's `ct/read-source`
+/// command is not supported by the backend (e.g. replay-server for Python traces).
+///
+/// Resolution strategies (tried in order):
+///
+/// 1. **Embedded files**: Check `<trace_dir>/files/<path>`.  RR traces store
+///    copies of all source files at recording time under this directory.
+///    For example, `/home/user/project/main.rs` is stored at
+///    `<trace_dir>/files/home/user/project/main.rs`.
+///
+/// 2. **Absolute path on disk**: If `file_path` is absolute and exists on disk,
+///    read it directly.  This is the common case for DB traces (Python) where
+///    sources are still at their original recording-time locations.
+///
+/// 3. **Workdir-relative**: Resolve `file_path` against the `workdir`
+///    recorded in the trace's `meta.dat` (M-REC-1.5; previously read
+///    from the retired `trace_metadata.json` sidecar).
+///
+/// 4. **Parent-relative**: Resolve `file_path` against the trace directory's
+///    parent (e.g. trace at `/tmp/foo/trace/`, source at
+///    `/tmp/foo/program/src/main.py`).
 fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
     let trace_dir = std::path::Path::new(trace_path);
 

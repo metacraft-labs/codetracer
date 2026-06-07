@@ -5576,6 +5576,12 @@ impl BackendManager {
             "body": {
                 "tracePath": trace_path_str,
                 "backendId": backend_id,
+                // M-REC-1 / Recording-Identifier-Migration §6.6: the canonical
+                // recording identifier (UUIDv7) is surfaced through the DAP
+                // open-trace response so frontends, sharing UIs and
+                // observability integrations all see the same id without
+                // needing to re-parse `meta.dat`.
+                "recordingId": metadata.recording_id,
                 "language": metadata.language,
                 "totalEvents": metadata.total_events,
                 "sourceFiles": metadata.source_files,

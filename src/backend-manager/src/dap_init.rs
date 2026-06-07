@@ -327,10 +327,8 @@ pub async fn run_dap_init(
 
     let trace_file = if trace_folder.join("trace.bin").is_file() {
         "trace.bin"
-    } else if let Some(ct_name) = ctfs_file.as_deref() {
-        ct_name
     } else {
-        "trace.json"
+        ctfs_file.as_deref().unwrap_or("trace.json")
     };
 
     let mut launch_args = json!({

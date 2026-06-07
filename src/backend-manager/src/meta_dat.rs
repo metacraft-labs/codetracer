@@ -23,6 +23,10 @@
 
 use std::error::Error;
 use std::fmt;
+// std::path::Path is only referenced by the #[cfg(test)] helpers
+// (`write_minimal_ctfs` etc. at the bottom of this file); gating the
+// import the same way keeps non-test clippy clean.
+#[cfg(test)]
 use std::path::Path;
 
 // ── meta.dat constants ───────────────────────────────────────────────────
@@ -456,7 +460,15 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 }
 
 // ── meta.dat serializer (test-only convenience) ────────────────────────
+//
+// The serializer mirrors `parse_meta_dat` byte-for-byte so test fixtures
+// can synthesise a `meta.dat` payload from a `MetaDat` literal without
+// shelling out to the recorder.  Production code only ever READS
+// `meta.dat`; writing back is a recorder responsibility.  Gate the
+// whole block behind `#[cfg(test)]` so the unused-function clippy
+// lint doesn't trip in non-test builds.
 
+#[cfg(test)]
 fn encode_varint(value: u64, out: &mut Vec<u8>) {
     let mut v = value;
     loop {
@@ -472,11 +484,13 @@ fn encode_varint(value: u64, out: &mut Vec<u8>) {
     }
 }
 
+#[cfg(test)]
 fn write_string(s: &str, out: &mut Vec<u8>) {
     encode_varint(s.len() as u64, out);
     out.extend_from_slice(s.as_bytes());
 }
 
+#[cfg(test)]
 pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(64);
     out.extend_from_slice(&META_DAT_MAGIC);
@@ -604,7 +618,7 @@ pub fn ctfs_internal_file_size(data: &[u8], file_name: &str) -> Result<Option<u6
         return Err("not a valid CTFS file (bad magic)".to_string());
     }
     let version = data[5];
-    if !matches!(version, 2 | 3 | 4) {
+    if !matches!(version, 2..=4) {
         return Err(format!("unsupported CTFS version {version}"));
     }
     let max_entries = read_u32_le(data, 12).ok_or("CTFS header truncated at max_entries")?;
@@ -635,7 +649,7 @@ pub fn read_meta_dat_from_ctfs(data: &[u8]) -> Result<Vec<u8>, String> {
         return Err("not a valid CTFS file (bad magic)".to_string());
     }
     let version = data[5];
-    if !matches!(version, 2 | 3 | 4) {
+    if !matches!(version, 2..=4) {
         return Err(format!("unsupported CTFS version {version}"));
     }
     let block_size = read_u32_le(data, 8).ok_or("CTFS header truncated at block_size")?;
