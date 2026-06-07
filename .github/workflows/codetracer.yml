@@ -228,11 +228,40 @@ jobs:
   windows-rust-components:
     runs-on: windows-latest
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'true'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -1123,11 +1152,40 @@ jobs:
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format into libs/
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/libs/codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'true'
 
       # --- NixOS setup ---
       - name: Install Nix
@@ -1191,11 +1249,40 @@ jobs:
     runs-on: [self-hosted, nixos]
     timeout-minutes: 120
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format into libs/
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/libs/codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'true'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
