@@ -76,6 +76,7 @@ jobs:
           ref: ${{ steps.resolve-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-backend
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'true'
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has
