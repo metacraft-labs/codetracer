@@ -336,8 +336,21 @@ jobs:
         # feature set of replay-server, so plain ``cargo build`` pulls
         # in the writer_nim crate and that build script must find
         # ``nimble`` on PATH.
+        #
+        # ``choco install`` modifies the system PATH but the change is
+        # not reflected in subsequent step shells, so explicitly emit
+        # the Nim + nimble bin dirs into GITHUB_PATH so later steps
+        # (Build db-backend etc.) can find them.
         shell: pwsh
-        run: choco install nim -y
+        run: |
+          choco install nim -y
+          # nim installs to C:\tools\Nim\nim-X.Y.Z\bin and nimble's
+          # pkg dir lives at $HOME\.nimble\bin.  Resolve the actual nim
+          # bin via a wildcard so this keeps working across version
+          # bumps in the chocolatey package.
+          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
+          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
