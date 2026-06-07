@@ -178,6 +178,12 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-r
 	export CODETRACER_PYTHON_PURE_RECORDER_SRC="$_CT_WORKSPACE_ROOT/codetracer-python-recorder/codetracer-pure-python-recorder"
 	if [ -x "$_CT_ROOT_DIR/.python-recorder-venv/bin/python" ]; then
 		export CODETRACER_PYTHON_INTERPRETER="$_CT_ROOT_DIR/.python-recorder-venv/bin/python"
+	elif [ -x "$_CT_WORKSPACE_ROOT/codetracer/.python-recorder-venv/bin/python" ]; then
+		# Sibling repos that source this script (codetracer-ci,
+		# codetracer-specs) won't find the venv under their own repo
+		# root; fall back to the codetracer sibling's venv so the P1
+		# E2E test harness picks up the recorder.
+		export CODETRACER_PYTHON_INTERPRETER="$_CT_WORKSPACE_ROOT/codetracer/.python-recorder-venv/bin/python"
 	fi
 	_ct_detect_summary "codetracer-python-recorder"
 fi
