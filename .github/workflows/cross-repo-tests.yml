@@ -103,6 +103,31 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
           submodules: 'false'
 
+      - name: Resolve codetracer-trace-format-nim ref
+        id: resolve-trace-format-nim-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # codetracer_trace_writer_nim's build.rs reads
+        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``;
+        # nim-reader is a default feature of replay-server, so cargo
+        # builds the script and panics without this sibling.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'false'
+
       - name: Build ct-native-replay
         run: |
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
