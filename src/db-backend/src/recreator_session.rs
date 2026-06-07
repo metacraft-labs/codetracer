@@ -367,10 +367,10 @@ impl ReplayWorker {
                         }
                     }
                 }
-                thread::sleep(poll_interval);
-                continue;
             }
 
+            // Fallback: scan sibling run-* dirs whose worker manifest matches our
+            // <name>_<index> pair; the preferred run dir was already probed above.
             let mut candidates = Vec::new();
             if let Ok(run_dirs) = std::fs::read_dir(&tmp_path) {
                 for run_dir in run_dirs.flatten() {
@@ -396,7 +396,7 @@ impl ReplayWorker {
                 }
             }
 
-            candidates.sort_by(|a, b| b.1.cmp(&a.1));
+            candidates.sort_by_key(|c| std::cmp::Reverse(c.1));
 
             for (manifest_path, _) in candidates {
                 match std::fs::read_to_string(&manifest_path) {
