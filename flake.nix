@@ -122,6 +122,22 @@
       flake = false;
     };
 
+    # Non-flake inputs: needed by ``src/db-backend/build.rs`` and
+    # ``codetracer_trace_writer_nim``'s build.rs to materialise
+    # generated C / Nim FFI sources before the Rust crate links.  The
+    # build script canonicalises ``../../../codetracer-native-recorder``
+    # and ``../codetracer-trace-format-nim`` -- inside the Nix sandbox
+    # we have to seed those paths from these flake inputs.  ``.envrc``
+    # overrides each with a local checkout when present.
+    codetracer-native-recorder = {
+      url = "github:metacraft-labs/codetracer-native-recorder/main";
+      flake = false;
+    };
+    codetracer-trace-format-nim = {
+      url = "github:metacraft-labs/codetracer-trace-format-nim/main";
+      flake = false;
+    };
+
     # Non-flake input: the metacraft-labs/langserver fork (a.k.a. nim-langserver),
     # branch `codetracer`.  Carries patches on top of upstream nim-lang/langserver
     # that the CodeTracer GUI depends on — currently `nim/traceExpandMacro`

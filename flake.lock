@@ -113,6 +113,23 @@
         "type": "github"
       }
     },
+    "codetracer-native-recorder": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780840101,
+        "narHash": "sha256-tnOJOQVuLACbMXtAvWP03zJq37+i3AEVYe2j47+1iEg=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-native-recorder",
+        "rev": "658d4a1b2da65f47605fd78f559d86cc4cbcb7b6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "main",
+        "repo": "codetracer-native-recorder",
+        "type": "github"
+      }
+    },
     "codetracer-python-recorder": {
       "inputs": {
         "nixpkgs": [
@@ -216,6 +233,23 @@
         "owner": "metacraft-labs",
         "ref": "ffi-crate-and-format-fixes",
         "repo": "codetracer-trace-format",
+        "type": "github"
+      }
+    },
+    "codetracer-trace-format-nim": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780235114,
+        "narHash": "sha256-rpzAZQ8Q0uHc8AePJvUeHjKF274LpCRV98T94bXwktQ=",
+        "owner": "metacraft-labs",
+        "repo": "codetracer-trace-format-nim",
+        "rev": "00c59fded25f90652bf95cb59707ee5df9e87bcd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "main",
+        "repo": "codetracer-trace-format-nim",
         "type": "github"
       }
     },
@@ -2540,11 +2574,13 @@
       "inputs": {
         "appimage-channel": "appimage-channel",
         "codetracer-js-recorder": "codetracer-js-recorder",
+        "codetracer-native-recorder": "codetracer-native-recorder",
         "codetracer-python-recorder": "codetracer-python-recorder",
         "codetracer-ruby-recorder": "codetracer-ruby-recorder",
         "codetracer-shell-recorders": "codetracer-shell-recorders",
         "codetracer-toolchains": "codetracer-toolchains",
         "codetracer-trace-format": "codetracer-trace-format_3",
+        "codetracer-trace-format-nim": "codetracer-trace-format-nim",
         "fenix": "fenix_5",
         "flake-parts": "flake-parts_2",
         "flake-utils": "flake-utils_3",

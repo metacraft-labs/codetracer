@@ -630,6 +630,7 @@ fn build_wasm32(emulator_dir: &Path) {
 /// toolchain, and env.ps1 already puts nim/gcc on PATH for the parent
 /// `cargo build` process — which `bash` then inherits.
 fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
+    println!("cargo:rerun-if-env-changed=CODETRACER_DB_BACKEND_SKIP_DIRENV");
     eprintln!(
         "db-backend build.rs: generated C missing at {}; invoking {}",
         output_dir.display(),
@@ -653,13 +654,26 @@ fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
         let posix_arg = to_bash_posix_path(&script_path);
         Command::new("bash").arg(&posix_arg).status()
     };
+    // On POSIX we normally wrap the script in ``direnv exec`` so the
+    // recorder's Nim/Nimble env loads onto PATH.  Nix builds run in
+    // a sandbox where direnv isn't available (and ``use flake`` in
+    // the recorder's .envrc would not work even if it were);
+    // ``CODETRACER_DB_BACKEND_SKIP_DIRENV=1`` switches to a direct
+    // ``bash`` invocation that inherits the caller's PATH, on the
+    // assumption that the caller has already arranged for nim and
+    // nimble to be on it (e.g. via ``nativeBuildInputs``).
     #[cfg(not(target_os = "windows"))]
-    let status = Command::new("direnv")
-        .arg("exec")
-        .arg(&recorder_root)
-        .arg("bash")
-        .arg(emulator_dir.join(script_name))
-        .status();
+    let status = if std::env::var_os("CODETRACER_DB_BACKEND_SKIP_DIRENV").is_some() {
+        let _ = recorder_root; // silence the unused-variable lint on this branch
+        Command::new("bash").arg(emulator_dir.join(script_name)).status()
+    } else {
+        Command::new("direnv")
+            .arg("exec")
+            .arg(&recorder_root)
+            .arg("bash")
+            .arg(emulator_dir.join(script_name))
+            .status()
+    };
 
     match status {
         Ok(s) if s.success() => {}

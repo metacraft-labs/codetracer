@@ -399,6 +399,17 @@
               cp -r ${inputs.codetracer-trace-format} $sourceRoot/../codetracer-trace-format
               chmod -R u+w $sourceRoot/../codetracer-trace-format
 
+              # ``codetracer_trace_writer_nim``'s build.rs (inside the
+              # trace-format workspace) reads the Nim FFI entry point
+              # from ``../codetracer-trace-format-nim``; ``src/db-backend/build.rs``
+              # also canonicalises ``../../../codetracer-native-recorder``
+              # to locate Nim ct_emulator sources.  Seed both from the
+              # flake inputs.
+              cp -r ${inputs.codetracer-trace-format-nim} $sourceRoot/../codetracer-trace-format-nim
+              chmod -R u+w $sourceRoot/../codetracer-trace-format-nim
+              cp -r ${inputs.codetracer-native-recorder} $sourceRoot/../codetracer-native-recorder
+              chmod -R u+w $sourceRoot/../codetracer-native-recorder
+
               # Copy Cargo.lock to root for cargoSetupHook
               cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
             '';
