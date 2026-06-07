@@ -92,13 +92,27 @@ jobs:
         run: |
           set -uo pipefail
           PARENT="$(pwd)/../codetracer-native-backend"
-          for sub in $(git -C "$PARENT" submodule status --recursive 2>/dev/null \
-              | awk '$1 !~ /^-/ {print $2}'); do
+          # The self-hosted nixos runner's bash-interactive shell
+          # starts with a minimal PATH that doesn't include awk, so
+          # parse the ``submodule status --recursive`` output with
+          # pure bash instead.
+          while IFS= read -r line; do
+            # ``git submodule status`` prints e.g. ``+abc1234 libs/rr (...)``
+            # or ``-abc1234 libs/rr``.  A leading ``-`` marks an
+            # uninitialised submodule which we don't want to touch.
+            [[ -z "$line" ]] && continue
+            [[ "${line:0:1}" == "-" ]] && continue
+            # Strip the leading status char + sha, then take field 2
+            # (the path).
+            rest="${line:1}"
+            rest="${rest#* }"   # drop the sha (up to first space)
+            sub="${rest%% *}"   # take everything up to the next space
+            [[ -z "$sub" ]] && continue
             echo "  unfolding submodule native-backend/${sub}"
             rm -rf "$PARENT/${sub}/.git"
             git -C "$PARENT" rm -f --cached "${sub}" >/dev/null 2>&1 || true
             git -C "$PARENT" add -f "${sub}" 2>/dev/null || true
-          done
+          done < <(git -C "$PARENT" submodule status --recursive 2>/dev/null)
 
       - name: Resolve codetracer-trace-format ref
         id: resolve-trace-format-ref
