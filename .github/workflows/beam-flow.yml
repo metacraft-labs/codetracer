@@ -111,7 +111,10 @@ jobs:
           ref: ${{ steps.refs.outputs.trace-format-ref }}
           path: ${{ github.workspace }}/libs/codetracer-trace-format
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          # codetracer-trace-format has no .gitmodules; the upstream
+          # clone-repo action's sed step crashes on missing file when
+          # submodules: 'true' is set.
+          submodules: 'false'
 
       # Zero-test guard verification: prove that a non-existent test name
       # produces a "0 tests" cargo output and that the guard rejects it.
