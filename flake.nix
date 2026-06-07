@@ -35,16 +35,22 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Pin noir by full revision rather than the codetracer-temp
-    # branch.  Multiple self-hosted runners' Nix stores were caching
-    # the codetracer-temp tip under an old NAR hash, causing
-    # non-deterministic ``NAR hash mismatch in input ...?narHash=...``
-    # failures across lint-rust, lint-nix, push-gpg-public-key,
-    # appimage-build, dev-build, test-non-gui and test-ui-tests jobs.
-    # Pinning by ``ref=rev`` invalidates those branch-keyed cache
-    # entries on first evaluation.
+    # Fetch noir over git+https (cloning the repo) instead of GitHub's
+    # tarball API.  cache.metacraft-labs.com had a stale .narinfo for
+    # the GitHub-tarball form of metacraft-labs/noir@334c1ee9 with a
+    # different NAR hash than what the current upstream tarball
+    # actually produces; every job that re-evaluated the flake on a
+    # runner that hit that cached entry failed with
+    #
+    #   NAR hash mismatch in input 'github:metacraft-labs/noir/334c1ee9...':
+    #   expected 'sha256-gkp/0/sMp0...' but got 'sha256-sfBJqzD3...'.
+    #
+    # Switching the URL scheme bypasses the cached GitHub-tarball
+    # narinfo entirely; ``git+https`` content-addresses the repository
+    # snapshot from the actual ``git`` history rather than GitHub's
+    # archive endpoint.
     noir = {
-      url = "github:metacraft-labs/noir?ref=334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2";
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer-temp&rev=334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };

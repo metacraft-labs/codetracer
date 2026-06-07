@@ -2423,16 +2423,17 @@
       "locked": {
         "lastModified": 1779313947,
         "narHash": "sha256-sfBJqzD3AqY5szcGnj2fMK0CTDNVwOhJ+vXYWO5joqA=",
-        "owner": "metacraft-labs",
-        "repo": "noir",
+        "ref": "codetracer-temp",
         "rev": "334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2",
-        "type": "github"
+        "revCount": 5486,
+        "type": "git",
+        "url": "https://github.com/metacraft-labs/noir.git"
       },
       "original": {
-        "owner": "metacraft-labs",
-        "ref": "334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2",
-        "repo": "noir",
-        "type": "github"
+        "ref": "codetracer-temp",
+        "rev": "334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2",
+        "type": "git",
+        "url": "https://github.com/metacraft-labs/noir.git"
       }
     },
     "pre-commit-hooks": {
