@@ -35,8 +35,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Pin noir by full revision rather than the codetracer-temp
+    # branch.  Multiple self-hosted runners' Nix stores were caching
+    # the codetracer-temp tip under an old NAR hash, causing
+    # non-deterministic ``NAR hash mismatch in input ...?narHash=...``
+    # failures across lint-rust, lint-nix, push-gpg-public-key,
+    # appimage-build, dev-build, test-non-gui and test-ui-tests jobs.
+    # Pinning by ``ref=rev`` invalidates those branch-keyed cache
+    # entries on first evaluation.
     noir = {
-      url = "github:metacraft-labs/noir?ref=codetracer-temp";
+      url = "github:metacraft-labs/noir?ref=334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
