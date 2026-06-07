@@ -146,14 +146,15 @@ jobs:
         # ct_emulator sources.  Without the sibling clone the
         # ``cargo build`` invocations inside run-cross-repo-tests.sh
         # panic with ``expected sibling codetracer-native-recorder
-        # repo: NotFound``.
+        # repo: NotFound``.  codetracer-native-recorder has no
+        # .gitmodules, so pass submodules: 'false'.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-          submodules: 'true'
+          submodules: 'false'
 
       - name: Build ct-native-replay
         run: |

@@ -308,14 +308,17 @@ jobs:
         # ``../../../codetracer-native-recorder`` and links the Nim
         # ct_emulator into replay-server.  ``cargo build`` panics
         # with ``expected sibling codetracer-native-recorder``
-        # without this clone.
+        # without this clone.  codetracer-native-recorder has no
+        # .gitmodules, so pass submodules: 'false' to avoid the
+        # clone-repo action's unconditional ``sed -i ... .gitmodules``
+        # step (which fails with ``can't read .gitmodules``).
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -409,13 +412,16 @@ jobs:
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
       - name: Clone codetracer-native-recorder
+        # codetracer-native-recorder has no .gitmodules; pass
+        # submodules: 'false' so clone-repo's unconditional sed step
+        # doesn't fail with ``can't read .gitmodules``.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
 
       - name: Resolve codetracer-trace-format ref
         id: resolve-trace-format-ref
@@ -680,13 +686,15 @@ jobs:
         # ``../../../codetracer-native-recorder`` to locate Nim
         # ct_emulator sources; without the clone, ``cargo clippy``
         # panics with ``expected sibling codetracer-native-recorder``.
+        # codetracer-native-recorder has no .gitmodules, so pass
+        # submodules: 'false' to avoid clone-repo's unconditional sed.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
