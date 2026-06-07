@@ -1580,6 +1580,13 @@ jobs:
 
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
+        # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
+        # at ``$ROOT_DIR/../codetracer-trace-format`` (the dev-machine
+        # workspace-sibling layout).  In CI we already clone it into
+        # ``libs/codetracer-trace-format``; point TRACE_FORMAT_DIR there
+        # instead of duplicating the clone.
+        env:
+          TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
         run: ./non-nix-build/build.sh
 
       - name: Clone python-recorder (macOS)
