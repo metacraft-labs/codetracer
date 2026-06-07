@@ -77,6 +77,29 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-native-backend
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
+      - name: Unfold native-backend submodules into parent index
+        # codetracer-native-backend's flake.nix has
+        # ``rr-soft.url = "path:libs/rr"`` and ``delve-patched.url
+        # = "path:libs/delve"``.  Nix's path: flake-input resolver
+        # uses ``git ls-files`` to decide which files are visible,
+        # and the submodule contents aren't tracked in the parent
+        # (only the gitlink is), so ``nix develop <native-backend>``
+        # aborts with ``Path 'libs/delve/flake.nix' does not exist
+        # in Git repository``.  Drop the inner .git, remove the
+        # gitlink from the parent index, then ``git add -f`` the
+        # materialised files so ``git ls-files`` sees them.
+        shell: bash
+        run: |
+          set -uo pipefail
+          PARENT="$(pwd)/../codetracer-native-backend"
+          for sub in $(git -C "$PARENT" submodule status --recursive 2>/dev/null \
+              | awk '$1 !~ /^-/ {print $2}'); do
+            echo "  unfolding submodule native-backend/${sub}"
+            rm -rf "$PARENT/${sub}/.git"
+            git -C "$PARENT" rm -f --cached "${sub}" >/dev/null 2>&1 || true
+            git -C "$PARENT" add -f "${sub}" 2>/dev/null || true
+          done
+
       - name: Resolve codetracer-trace-format ref
         id: resolve-trace-format-ref
         shell: bash
