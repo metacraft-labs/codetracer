@@ -329,6 +329,16 @@ jobs:
         shell: pwsh
         run: choco install capnproto -y
 
+      - name: Install Nim toolchain
+        # codetracer_trace_writer_nim's build.rs invokes ``nimble
+        # install --depsOnly`` to resolve the .nimble requires before
+        # compiling the FFI sources.  nim-reader is in the default
+        # feature set of replay-server, so plain ``cargo build`` pulls
+        # in the writer_nim crate and that build script must find
+        # ``nimble`` on PATH.
+        shell: pwsh
+        run: choco install nim -y
+
       - name: Generate tree-sitter-nim parser
         shell: pwsh
         run: |
@@ -704,6 +714,19 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # src/db-backend/build.rs invokes ``direnv exec <recorder-root>
+        # bash ct_emulator/build_native_api.sh`` to materialise the
+        # generated C sources before the Rust build.  A fresh clone has
+        # its .envrc in the "blocked" state, so direnv refuses to run
+        # and the build script panics with ``build_native_api.sh exited
+        # with status exit status: 1``.  ``direnv allow`` is idempotent
+        # and only persists in the local direnv state dir on this
+        # self-hosted runner.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh"
 

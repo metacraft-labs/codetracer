@@ -156,6 +156,17 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
           submodules: 'false'
 
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # db-backend's build.rs (and the integration tests that build
+        # it transitively) invoke ``direnv exec <recorder> bash
+        # ct_emulator/build_native_api.sh`` to materialise generated C
+        # sources.  A fresh clone's .envrc is in the "blocked" state,
+        # so direnv refuses to run.  ``direnv allow`` whitelists it.
+        run: |
+          CLONE_DIR="$(pwd)/../codetracer-native-backend"
+          nix develop "$CLONE_DIR" --command \
+            direnv allow "$(pwd)/../codetracer-native-recorder"
+
       - name: Build ct-native-replay
         run: |
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
