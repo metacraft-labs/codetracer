@@ -352,18 +352,31 @@ jobs:
           if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
 
-      - name: Prepend Git Bash to PATH
+      - name: Remove WSL bash stub from System32
         # db-backend's build.rs runs ``Command::new("bash") ...
-        # build_native_api.sh`` on Windows.  Bare ``bash`` on
-        # windows-latest resolves to ``C:\Windows\System32\bash.exe``
-        # (the WSL stub), which fails with ``Windows Subsystem for
-        # Linux has no installed distributions``.  Prepending Git
-        # Bash's bin dir to GITHUB_PATH steers ``Command::new("bash")``
-        # to Git for Windows' ``bash.exe`` -- which is the shell the
-        # build.rs comment ("Ensure Git for Windows bash is on PATH")
-        # expects.
+        # build_native_api.sh`` on Windows.  Rust's
+        # ``Command::new`` uses ``CreateProcessW``, whose documented
+        # lookup order checks ``C:\Windows\System32`` BEFORE PATH.
+        # On windows-latest that directory contains a WSL launcher
+        # stub (``bash.exe``) which aborts with ``Windows Subsystem
+        # for Linux has no installed distributions``.  Even after
+        # prepending Git Bash to PATH the WSL stub still wins.
+        #
+        # We don't need WSL on this runner -- removing the stub
+        # lets CreateProcessW fall through to Git for Windows'
+        # ``bash.exe`` (added to PATH below), which is what the
+        # build.rs comment ("Ensure Git for Windows bash is on
+        # PATH") actually wants.
         shell: pwsh
-        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+        run: |
+          $wslStub = "$env:SystemRoot\System32\bash.exe"
+          if (Test-Path $wslStub) {
+            takeown /f $wslStub | Out-Null
+            icacls $wslStub /grant "Administrators:(F)" | Out-Null
+            Remove-Item -Force $wslStub
+          }
+          # Add Git Bash bin dir so ``bash`` resolves to Git for Windows.
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
