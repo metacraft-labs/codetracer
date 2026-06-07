@@ -393,7 +393,23 @@ jobs:
       - name: Test db-backend
         working-directory: src/db-backend
         shell: bash
-        run: cargo test
+        # The *_flow_*  tests under tests/ are end-to-end integration
+        # tests that drive sibling-language recorders through the DAP
+        # wire protocol; they need both the recorder binaries AND a
+        # matching language runtime (elixir/erlang/ruby/etc.) on the
+        # runner image.  windows-latest has none of those installed --
+        # the Cross-Repo Integration Tests workflow exercises the same
+        # code paths on a Linux self-hosted runner with the recorders
+        # + runtimes available.  Mirror the skip pattern used by the
+        # db-backend Nix derivation in nix/packages/default.nix.
+        run: |
+          cargo test -- \
+            --skip ruby_flow_integration \
+            --skip bash_flow_integration \
+            --skip zsh_flow_integration \
+            --skip javascript_flow_integration \
+            --skip e2e_codetracer_elixir \
+            --skip e2e_codetracer_erlang
 
       - name: Build backend-manager
         working-directory: src/backend-manager
