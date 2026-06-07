@@ -388,11 +388,27 @@ jobs:
       - name: Build db-backend
         working-directory: src/db-backend
         shell: bash
+        # The emulator's ``syscall_replay.nim`` imports
+        # ``stew/endians2`` but ``ct_emulator.nimble`` doesn't list
+        # ``stew`` as a dep, so on a fresh Windows runner Nim cannot
+        # resolve the module.  The Nix derivation sets
+        # ``CT_EMULATOR_EXTRA_NIM_PATHS`` to inject codetracer's
+        # vendored ``libs/nim-stew``; mirror that here so
+        # build_native_api.sh's ``--path:`` flags pick it up.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew
         run: cargo build
 
       - name: Test db-backend
         working-directory: src/db-backend
         shell: bash
+        # build_native_api.sh has already produced the C files in
+        # the Build step above; this env var only matters when
+        # regeneration is required, but we leave it set so a stale
+        # cache doesn't trigger a re-run that then fails for the
+        # same path-resolution reason.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew
         # The *_flow_*  tests under tests/ are end-to-end integration
         # tests that drive sibling-language recorders through the DAP
         # wire protocol; they need both the recorder binaries AND a
@@ -424,6 +440,11 @@ jobs:
       - name: Clippy db-backend
         working-directory: src/db-backend
         shell: bash
+        # Same rationale as Build db-backend above: keep the path
+        # variable set so any cached-state-invalidation triggers
+        # a regeneration with stew on the import path.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Clippy backend-manager
@@ -583,6 +604,12 @@ jobs:
       - name: Build db-backend
         working-directory: src/db-backend
         shell: bash
+        # Same CT_EMULATOR_EXTRA_NIM_PATHS rationale as the
+        # windows-rust-components job above; without it
+        # build_native_api.sh fails on a fresh runner with
+        # ``cannot open file: stew/endians2``.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew
         run: cargo build --release
 
       - name: Build backend-manager
