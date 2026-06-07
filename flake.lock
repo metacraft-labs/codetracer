@@ -1330,6 +1330,57 @@
         "type": "github"
       }
     },
+    "isonim": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780217876,
+        "narHash": "sha256-oxtjV/Fasq+mrUTo7LQQUKOLd5uy0IGtbwXsFzxAF/I=",
+        "owner": "metacraft-labs",
+        "repo": "isonim",
+        "rev": "bd9cffabb649cf6112b2859cd58e4ff875b01588",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "isonim",
+        "type": "github"
+      }
+    },
+    "isonim-gpui": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780216414,
+        "narHash": "sha256-HW6Bs6l8BXmdyMXttt2sShIHP+JqGfsERWk8pSBVnm4=",
+        "owner": "metacraft-labs",
+        "repo": "isonim-gpui",
+        "rev": "d9732de09319a6d50c8f95b4bb31e9122a341c24",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "isonim-gpui",
+        "type": "github"
+      }
+    },
+    "isonim-tui": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779113232,
+        "narHash": "sha256-8euG5ieq3ofaMbbL6z4faDSnnn1lq2vakN+N87O6Xw0=",
+        "owner": "metacraft-labs",
+        "repo": "isonim-tui",
+        "rev": "3eb636d62dc6f200fd3ba65794fc2e7b2d2316aa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "isonim-tui",
+        "type": "github"
+      }
+    },
     "microvm": {
       "inputs": {
         "nixpkgs": [
@@ -1353,6 +1404,23 @@
         "type": "github"
       }
     },
+    "nim-everywhere": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779955989,
+        "narHash": "sha256-XUfFnJU2ku7kRpJNM5uufI297MQ5l+fHwVQq0Zx9Iks=",
+        "owner": "metacraft-labs",
+        "repo": "nim-everywhere",
+        "rev": "d04c7d2f38cc95969724714666d3f4d7a37e5c1b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-everywhere",
+        "type": "github"
+      }
+    },
     "nim-langserver": {
       "flake": false,
       "locked": {
@@ -1367,6 +1435,40 @@
         "owner": "metacraft-labs",
         "ref": "codetracer",
         "repo": "langserver",
+        "type": "github"
+      }
+    },
+    "nim-pty": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778162196,
+        "narHash": "sha256-YkKMDOxR9FiJhjkCzb49k0G1b5Fb7gZh93stcqtYoSs=",
+        "owner": "metacraft-labs",
+        "repo": "nim-pty",
+        "rev": "42161785168f9b4d2bcb2423a62401b2e1c5a124",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-pty",
+        "type": "github"
+      }
+    },
+    "nim-termctl": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778558918,
+        "narHash": "sha256-3xIZ83xqQZ8qFY1Qvfhg4efsC155RYf8FDwg89tG5x8=",
+        "owner": "metacraft-labs",
+        "repo": "nim-termctl",
+        "rev": "87849a6721e00717018ca618053659213700f15d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-termctl",
         "type": "github"
       }
     },
@@ -2447,7 +2549,13 @@
         "flake-parts": "flake-parts_2",
         "flake-utils": "flake-utils_3",
         "git-hooks-nix": "git-hooks-nix",
+        "isonim": "isonim",
+        "isonim-gpui": "isonim-gpui",
+        "isonim-tui": "isonim-tui",
+        "nim-everywhere": "nim-everywhere",
         "nim-langserver": "nim-langserver",
+        "nim-pty": "nim-pty",
+        "nim-termctl": "nim-termctl",
         "nix-blockchain-development": "nix-blockchain-development",
         "nix-blockchain-development-sui": "nix-blockchain-development-sui",
         "nixpkgs": [

@@ -538,7 +538,11 @@ proc loadFilenames*(paths: seq[cstring], traceFolder: cstring, selfContained: bo
   var res: seq[string] = @[]
 
   if not selfContained:
-    for path in paths:
+    for pathLent in paths:
+      # ``for path in paths`` yields ``lent cstring`` on Nim 2.x and
+      # the async/await closure cannot capture a lent borrow.  Copy
+      # to a local owned cstring before passing into the closures.
+      let path = pathLent
       try:
         let repoCheck =
           await childProcessExec(cstring(&"git rev-parse --show-toplevel"), js{cwd: path})

@@ -136,6 +136,42 @@
       flake = false;
     };
 
+    # Non-flake inputs: the IsoNim view-layer used by the GUI, plus its
+    # support libraries.  ``nim.cfg`` carries
+    # ``path:"../isonim/src"`` / ``isonim-tui`` / ``isonim-gpui`` /
+    # ``nim-everywhere`` / ``nim-termctl`` / ``nim-pty`` so local dev
+    # shells pick up sibling checkouts; in CI / fresh ``nix build``
+    # invocations we need deterministic sources for these to resolve
+    # ``import isonim/web/web_renderer``, ``import nim_everywhere/platform``
+    # etc. when building ``ui.js`` and the other Nim derivations.
+    #
+    # ``.envrc`` can override each with
+    # ``--override-input isonim path:../isonim`` for local development.
+    isonim = {
+      url = "github:metacraft-labs/isonim/dev";
+      flake = false;
+    };
+    isonim-tui = {
+      url = "github:metacraft-labs/isonim-tui/dev";
+      flake = false;
+    };
+    isonim-gpui = {
+      url = "github:metacraft-labs/isonim-gpui/dev";
+      flake = false;
+    };
+    nim-everywhere = {
+      url = "github:metacraft-labs/nim-everywhere/dev";
+      flake = false;
+    };
+    nim-termctl = {
+      url = "github:metacraft-labs/nim-termctl/dev";
+      flake = false;
+    };
+    nim-pty = {
+      url = "github:metacraft-labs/nim-pty/dev";
+      flake = false;
+    };
+
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
   };

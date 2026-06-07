@@ -226,14 +226,29 @@
             nim-codetracer
           ];
 
-          buildPhase = ''
+          # See uiJavascript comment about isonim staging — the
+          # frontend ``index.nim`` and ``server_index.nim`` transitively
+          # import ``isonim`` modules through middleware/hmr_runtime.
+          buildPhase = prepareIsonimSiblings + ''
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
+              --path:"$ISONIM_STAGE/isonim/src" \
+              --path:"$ISONIM_STAGE/isonim-tui/src" \
+              --path:"$ISONIM_STAGE/isonim-gpui/src" \
+              --path:"$ISONIM_STAGE/nim-everywhere/src" \
+              --path:"$ISONIM_STAGE/nim-termctl/src" \
+              --path:"$ISONIM_STAGE/nim-pty/src" \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
+              --path:"$ISONIM_STAGE/isonim/src" \
+              --path:"$ISONIM_STAGE/isonim-tui/src" \
+              --path:"$ISONIM_STAGE/isonim-gpui/src" \
+              --path:"$ISONIM_STAGE/nim-everywhere/src" \
+              --path:"$ISONIM_STAGE/nim-termctl/src" \
+              --path:"$ISONIM_STAGE/nim-pty/src" \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
           '';
@@ -256,10 +271,17 @@
             nim-codetracer
           ];
 
-          buildPhase = ''
+          # See uiJavascript comment about isonim staging.
+          buildPhase = prepareIsonimSiblings + ''
 
             ${nim-codetracer}/bin/nim2 \
                 --hints:off --warnings:off \
+                --path:"$ISONIM_STAGE/isonim/src" \
+                --path:"$ISONIM_STAGE/isonim-tui/src" \
+                --path:"$ISONIM_STAGE/isonim-gpui/src" \
+                --path:"$ISONIM_STAGE/nim-everywhere/src" \
+                --path:"$ISONIM_STAGE/nim-termctl/src" \
+                --path:"$ISONIM_STAGE/nim-pty/src" \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
                 --out:./subwindow.js js src/frontend/subwindow.nim
@@ -273,6 +295,34 @@
           '';
         };
 
+        # Stage isonim sources in a writable sibling layout that
+        # mirrors ``../isonim`` etc. as expected by codetracer's
+        # ``nim.cfg`` path directives.  The flake inputs come from
+        # /nix/store and are read-only, but ``isonim/dsl/tailwind.nim``
+        # does ``staticRead("<isonim-root>/build/tailwind-styles.json")``;
+        # the JS-target branch tries to fall back to ``"{}"`` on
+        # failure but ``staticRead`` raises a compile-time Error that
+        # ``try/except`` cannot catch, so we have to seed an empty
+        # ``build/tailwind-styles.json`` next to the staged isonim
+        # sources before invoking nim.  The fallback ``{}`` lookup map
+        # is enough for the codetracer UI — there are no Tailwind
+        # utility classes consumed through this code path; the real
+        # CSS comes from codetracer/src/public/styles.
+        prepareIsonimSiblings = ''
+          export ISONIM_STAGE="$NIX_BUILD_TOP/isonim-stage"
+          mkdir -p "$ISONIM_STAGE"
+          cp -a ${inputs.isonim} "$ISONIM_STAGE/isonim"
+          cp -a ${inputs.isonim-tui} "$ISONIM_STAGE/isonim-tui"
+          cp -a ${inputs.isonim-gpui} "$ISONIM_STAGE/isonim-gpui"
+          cp -a ${inputs.nim-everywhere} "$ISONIM_STAGE/nim-everywhere"
+          cp -a ${inputs.nim-termctl} "$ISONIM_STAGE/nim-termctl"
+          cp -a ${inputs.nim-pty} "$ISONIM_STAGE/nim-pty"
+          chmod -R u+w "$ISONIM_STAGE"
+          mkdir -p "$ISONIM_STAGE/isonim/build"
+          [ -f "$ISONIM_STAGE/isonim/build/tailwind-styles.json" ] || \
+            echo '{}' > "$ISONIM_STAGE/isonim/build/tailwind-styles.json"
+        '';
+
         uiJavascript = stdenv.mkDerivation {
           name = "ui.js";
 
@@ -282,9 +332,21 @@
             nim-codetracer
           ];
 
-          buildPhase = ''
+          # ``nim.cfg`` adds ``path:"../isonim/src"`` etc. so dev-shell
+          # builds pick up the sibling checkouts.  Inside the Nix
+          # sandbox there is no ``../isonim`` for nim to find; stage
+          # the flake inputs into a writable sibling layout (see
+          # ``prepareIsonimSiblings`` above) and pass the staged paths
+          # to nim with ``--path:`` so the same imports resolve here.
+          buildPhase = prepareIsonimSiblings + ''
             ${nim-codetracer.out}/bin/nim2 \
               --hints:off --warnings:off \
+              --path:"$ISONIM_STAGE/isonim/src" \
+              --path:"$ISONIM_STAGE/isonim-tui/src" \
+              --path:"$ISONIM_STAGE/isonim-gpui/src" \
+              --path:"$ISONIM_STAGE/nim-everywhere/src" \
+              --path:"$ISONIM_STAGE/nim-termctl/src" \
+              --path:"$ISONIM_STAGE/nim-pty/src" \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
               --out:./ui.js js src/frontend/ui_js.nim
@@ -739,6 +801,17 @@
             mkdir -p $out/src/
             mv src/helpers.js $out/src/
             cp src/public/dist/frontend_bundle.js $out/src
+            # ``src/db-backend/test-programs/{erlang,elixir}`` etc. are
+            # workspace-relative symlinks to sibling repos (e.g.
+            # ``../../../../codetracer-beam-recorder/test-programs/erlang``).
+            # Inside the nix sandbox those targets don't exist and
+            # ``cp -L`` (follow symlinks) aborts with ``cannot stat``.
+            # Strip dangling symlinks from the source tree before the
+            # bulk copy so the package builds without those siblings.
+            # The runtime path resolves sibling sources directly from
+            # the dev shell, so dropping them from the packaged output
+            # is harmless for the distribution path.
+            find src -xtype l -delete 2>/dev/null || true
             cp -Lr src/* $out/src/
 
             mkdir -p $out/public/
