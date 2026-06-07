@@ -1,0 +1,88 @@
+name: Setup isonim siblings
+description: |
+  Clones the IsoNim sibling repos (isonim, isonim-tui, isonim-gpui,
+  nim-everywhere, nim-termctl, nim-pty) next to the codetracer
+  checkout so the dev-shell Nim builds can resolve
+
+    --path:"../isonim/src"          (et al.)
+
+  as declared in codetracer's top-level ``nim.cfg``.  Also seeds an
+  empty ``build/tailwind-styles.json`` in the isonim checkout so
+  ``isonim/dsl/tailwind.nim`` 's compile-time staticRead falls
+  through to its ``{}`` fallback instead of erroring out (its
+  ``try/except`` wrapper cannot catch ``staticRead`` errors).
+
+  In-sandbox Nix derivations stage these inputs through
+  ``prepareIsonimSiblings`` in ``nix/packages/default.nix``; this
+  action is for workflow steps that run nim *outside* the Nix
+  sandbox (dev-build, appimage-build, ...).
+
+inputs:
+  gh-token:
+    description: GitHub App token for clone-repo
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Clone isonim
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/isonim
+        ref: dev
+        path: ${{ github.workspace }}/../isonim
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone isonim-tui
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/isonim-tui
+        ref: dev
+        path: ${{ github.workspace }}/../isonim-tui
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone isonim-gpui
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/isonim-gpui
+        ref: dev
+        path: ${{ github.workspace }}/../isonim-gpui
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone nim-everywhere
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/nim-everywhere
+        ref: dev
+        path: ${{ github.workspace }}/../nim-everywhere
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone nim-termctl
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/nim-termctl
+        ref: dev
+        path: ${{ github.workspace }}/../nim-termctl
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone nim-pty
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/nim-pty
+        ref: dev
+        path: ${{ github.workspace }}/../nim-pty
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Seed isonim tailwind-styles.json placeholder
+      shell: bash
+      run: |
+        mkdir -p "${{ github.workspace }}/../isonim/build"
+        if [ ! -f "${{ github.workspace }}/../isonim/build/tailwind-styles.json" ]; then
+          echo '{}' > "${{ github.workspace }}/../isonim/build/tailwind-styles.json"
+        fi

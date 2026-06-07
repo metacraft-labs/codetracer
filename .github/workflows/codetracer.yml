@@ -881,78 +881,10 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - name: Clone isonim sibling
-        # ``nim.cfg`` adds ``path:"../isonim/src"`` etc. so the
-        # dev-shell ``ci/build/dev.sh`` -> ``tup generate`` -> ``nim c``
-        # pipeline can resolve ``import isonim/web/web_renderer``.
-        # The other Nim derivations stage these inputs through
-        # ``prepareIsonimSiblings`` (see nix/packages/default.nix), but
-        # dev-build runs nim *outside* the Nix sandbox so the siblings
-        # must live at the actual ``../isonim`` filesystem path.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      - name: Setup isonim siblings
+        uses: ./.github/actions/setup-isonim-siblings
         with:
-          repo: metacraft-labs/isonim
-          ref: dev
-          path: ${{ github.workspace }}/../isonim
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone isonim-tui sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/isonim-tui
-          ref: dev
-          path: ${{ github.workspace }}/../isonim-tui
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone isonim-gpui sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/isonim-gpui
-          ref: dev
-          path: ${{ github.workspace }}/../isonim-gpui
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone nim-everywhere sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/nim-everywhere
-          ref: dev
-          path: ${{ github.workspace }}/../nim-everywhere
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone nim-termctl sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/nim-termctl
-          ref: dev
-          path: ${{ github.workspace }}/../nim-termctl
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone nim-pty sibling
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/nim-pty
-          ref: dev
-          path: ${{ github.workspace }}/../nim-pty
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Seed isonim tailwind-styles.json placeholder
-        # ``isonim/dsl/tailwind.nim`` does
-        # ``staticRead("<isonim-root>/build/tailwind-styles.json")``;
-        # the JS-target fallback tries to recover from a missing file
-        # via ``try/except`` but ``staticRead`` raises a compile-time
-        # Error that the wrapper can't catch.  Seed an empty JSON.
-        run: |
-          mkdir -p "${{ github.workspace }}/../isonim/build"
-          if [ ! -f "${{ github.workspace }}/../isonim/build/tailwind-styles.json" ]; then
-            echo '{}' > "${{ github.workspace }}/../isonim/build/tailwind-styles.json"
-          fi
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1239,11 +1171,28 @@ jobs:
       - lint-rust
 
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup isonim siblings
+        # appimage-build runs nim *outside* the Nix sandbox via
+        # ``./ci/build/appimage.sh``; clone the isonim siblings next
+        # to the codetracer checkout so codetracer's ``nim.cfg``
+        # ``path:"../isonim/src"`` directives resolve.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1440,11 +1389,28 @@ jobs:
       - lint-nix
       - lint-rust
     steps:
+      - name: Generate CI token
+        if: matrix.platform == 'nixos'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup isonim siblings (nixos)
+        # ``just test`` -> ``test-nimsuggest`` needs the codetracer
+        # source to build, which pulls in ``../isonim/src`` siblings.
+        if: matrix.platform == 'nixos'
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       # --- NixOS setup ---
       - name: Install Nix
