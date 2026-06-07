@@ -19,6 +19,34 @@
         inherit pkgs;
         fenix = inputs.fenix;
       };
+
+      # Stage isonim sources in a writable sibling layout that mirrors
+      # ``../isonim`` etc. as expected by codetracer's ``nim.cfg`` path
+      # directives.  The flake inputs come from /nix/store and are
+      # read-only, but ``isonim/dsl/tailwind.nim`` does
+      # ``staticRead("<isonim-root>/build/tailwind-styles.json")``; the
+      # JS-target branch tries to fall back to ``"{}"`` on failure but
+      # ``staticRead`` raises a compile-time Error that ``try/except``
+      # cannot catch, so we seed an empty
+      # ``build/tailwind-styles.json`` next to the staged isonim sources
+      # before invoking nim.  The fallback ``{}`` lookup map is enough
+      # for the codetracer UI -- there are no Tailwind utility classes
+      # consumed through this code path; the real CSS comes from
+      # codetracer/src/public/styles.
+      prepareIsonimSiblings = ''
+        export ISONIM_STAGE="$NIX_BUILD_TOP/isonim-stage"
+        mkdir -p "$ISONIM_STAGE"
+        cp -a ${inputs.isonim} "$ISONIM_STAGE/isonim"
+        cp -a ${inputs.isonim-tui} "$ISONIM_STAGE/isonim-tui"
+        cp -a ${inputs.isonim-gpui} "$ISONIM_STAGE/isonim-gpui"
+        cp -a ${inputs.nim-everywhere} "$ISONIM_STAGE/nim-everywhere"
+        cp -a ${inputs.nim-termctl} "$ISONIM_STAGE/nim-termctl"
+        cp -a ${inputs.nim-pty} "$ISONIM_STAGE/nim-pty"
+        chmod -R u+w "$ISONIM_STAGE"
+        mkdir -p "$ISONIM_STAGE/isonim/build"
+        [ -f "$ISONIM_STAGE/isonim/build/tailwind-styles.json" ] || \
+          echo '{}' > "$ISONIM_STAGE/isonim/build/tailwind-styles.json"
+      '';
     in
     {
       packages = rec {
@@ -294,34 +322,6 @@
             cp ./subwindow.js $out/bin/
           '';
         };
-
-        # Stage isonim sources in a writable sibling layout that
-        # mirrors ``../isonim`` etc. as expected by codetracer's
-        # ``nim.cfg`` path directives.  The flake inputs come from
-        # /nix/store and are read-only, but ``isonim/dsl/tailwind.nim``
-        # does ``staticRead("<isonim-root>/build/tailwind-styles.json")``;
-        # the JS-target branch tries to fall back to ``"{}"`` on
-        # failure but ``staticRead`` raises a compile-time Error that
-        # ``try/except`` cannot catch, so we have to seed an empty
-        # ``build/tailwind-styles.json`` next to the staged isonim
-        # sources before invoking nim.  The fallback ``{}`` lookup map
-        # is enough for the codetracer UI — there are no Tailwind
-        # utility classes consumed through this code path; the real
-        # CSS comes from codetracer/src/public/styles.
-        prepareIsonimSiblings = ''
-          export ISONIM_STAGE="$NIX_BUILD_TOP/isonim-stage"
-          mkdir -p "$ISONIM_STAGE"
-          cp -a ${inputs.isonim} "$ISONIM_STAGE/isonim"
-          cp -a ${inputs.isonim-tui} "$ISONIM_STAGE/isonim-tui"
-          cp -a ${inputs.isonim-gpui} "$ISONIM_STAGE/isonim-gpui"
-          cp -a ${inputs.nim-everywhere} "$ISONIM_STAGE/nim-everywhere"
-          cp -a ${inputs.nim-termctl} "$ISONIM_STAGE/nim-termctl"
-          cp -a ${inputs.nim-pty} "$ISONIM_STAGE/nim-pty"
-          chmod -R u+w "$ISONIM_STAGE"
-          mkdir -p "$ISONIM_STAGE/isonim/build"
-          [ -f "$ISONIM_STAGE/isonim/build/tailwind-styles.json" ] || \
-            echo '{}' > "$ISONIM_STAGE/isonim/build/tailwind-styles.json"
-        '';
 
         uiJavascript = stdenv.mkDerivation {
           name = "ui.js";
