@@ -85,6 +85,13 @@ pub mod nim_mangling;
 // owns the storage; this module exposes it through a Rust trait that
 // origin queries (M20) and `db.rs::load_history` can consume.
 pub mod omniscient_db;
+// P0.7 — Lazy omniscient-prep trigger. The first omniscient query
+// against a sharded recording whose `omniscient_state == lazy_deferred`
+// HTTP-POSTs the Monolith's enqueue endpoint to schedule the per-slice
+// + coordinator jobs. The trait surface lives here so the db-backend
+// can stay HTTP-client-agnostic; production wires a concrete impl
+// via the cluster bootstrap.
+pub mod lazy_omniscient_prep_trigger;
 // M20 — MCR omniscient origin tier (consumes the M19 metadata
 // extension). Sits next to the M17 hybrid module
 // ([`emulator_origin`]) and the M18 omniscient surface

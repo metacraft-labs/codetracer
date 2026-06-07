@@ -508,7 +508,14 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
                 mcrOmniscientFinalize;\n\
                 mcrOmniscientLoadFromPath;\n\
                 mcrOmniscientWriteToPath;\n\
+                mcrOmniscientWriteSliceSummaryToPath;\n\
                 mcrOmniscientLoadLineHitsFromPath;\n\
+                mcrOmniscientLoadGlobalMemwritesFromPath;\n\
+                mcrOmniscientLoadPartialGlobalMemwritesFromPath;\n\
+                mcrOmniscientPartialGapCount;\n\
+                mcrOmniscientPartialGapTickLo;\n\
+                mcrOmniscientPartialGapTickHi;\n\
+                mcrOmniscientPartialGapSliceIndex;\n\
                 mcrOmniscientLastWriteBefore;\n\
                 mcrOmniscientLastWriteResultTick;\n\
                 mcrOmniscientLastWriteResultPc;\n\

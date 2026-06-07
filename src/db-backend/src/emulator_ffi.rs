@@ -294,10 +294,49 @@ unsafe extern "C" {
         linehits_path: *const std::os::raw::c_char,
     ) -> c_int;
 
+    /// P0.5 — emit a `slice-summary.tc` blob per the SSUM|v1 layout the
+    /// .NET `SliceSummaryCodec` decodes. Used by the recorder-side
+    /// per-slice prep to ship the side-car the M32 coordinator consumes.
+    /// Returns 0 on success, -1 on argument error, -2 on I/O failure.
+    pub fn mcrOmniscientWriteSliceSummaryToPath(
+        path: *const std::os::raw::c_char,
+        slice_index: c_int,
+        tick_lo: u64,
+        tick_hi: u64,
+    ) -> c_int;
+
     /// Load a `linehits.tc` sidecar back into the in-shim store. Sibling
     /// of `mcrOmniscientLoadFromPath` for the line-hits artefact.
     /// Returns 0 on success, -1 on argument error, -2 on I/O / parse failure.
     pub fn mcrOmniscientLoadLineHitsFromPath(path: *const std::os::raw::c_char) -> c_int;
+
+    /// P0.6 — load a server-emitted `global-memwrites.tc` blob (GMWR|v1)
+    /// back into the in-shim store. Used by the db-backend's sharded
+    /// trace open path so `OmniscientDb::last_write_before` can consult
+    /// the recording-wide write log before falling back to per-slice
+    /// `memwrites.tc`. Returns 0 on success, -1 on argument error,
+    /// -2 on I/O / parse failure.
+    pub fn mcrOmniscientLoadGlobalMemwritesFromPath(path: *const std::os::raw::c_char) -> c_int;
+
+    /// P0.6 — load a server-emitted `partial-global-memwrites.tc` blob
+    /// (PMWR|v1). Used when one or more per-slice preps failed; carries
+    /// a gap list the trait surfaces as `TerminatorKind::UnknownSource`.
+    /// Returns 0 on success, -1 on argument error, -2 on I/O / parse failure.
+    pub fn mcrOmniscientLoadPartialGlobalMemwritesFromPath(path: *const std::os::raw::c_char) -> c_int;
+
+    /// P0.6 — diagnostic count of gap entries from the most recent
+    /// `mcrOmniscientLoadPartialGlobalMemwritesFromPath` call.
+    pub fn mcrOmniscientPartialGapCount() -> c_int;
+
+    /// P0.6 — read the tick_lo of the gap at `index`.
+    pub fn mcrOmniscientPartialGapTickLo(index: c_int) -> u64;
+
+    /// P0.6 — read the tick_hi of the gap at `index`.
+    pub fn mcrOmniscientPartialGapTickHi(index: c_int) -> u64;
+
+    /// P0.6 — read the slice_index of the gap at `index`. Returns -1
+    /// when `index` is out of bounds.
+    pub fn mcrOmniscientPartialGapSliceIndex(index: c_int) -> c_int;
 
     /// Scan the in-shim store for the most recent write whose target
     /// range overlaps `[address, address+size)` STRICTLY before `tick`.

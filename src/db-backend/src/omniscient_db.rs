@@ -67,6 +67,18 @@ pub type Tick = u64;
 pub const CTFS_MEMWRITES_FILE: &str = "memwrites.tc";
 pub const CTFS_LINEHITS_FILE: &str = "linehits.tc";
 
+/// P0.6 — recording-wide M32 namespace names. Present in sharded
+/// recordings whose server-side coordinator emitted the cross-slice
+/// reduce artefacts. Detected via
+/// [`ctfs_has_global_omniscient_namespaces`].
+pub const CTFS_GLOBAL_MEMWRITES_FILE: &str = "global-memwrites.tc";
+pub const CTFS_GLOBAL_LINEHITS_FILE: &str = "global-linehits.tc";
+
+/// P0.6 — recording-wide partial-with-gaps namespace. Present when one
+/// or more per-slice preps failed permanently; carries a gap list the
+/// trait surfaces as `TerminatorKind::UnknownSource`.
+pub const CTFS_PARTIAL_GLOBAL_MEMWRITES_FILE: &str = "partial-global-memwrites.tc";
+
 /// A single recorded memory-write event. Mirrors `WriteRecord` in
 /// `write_log.nim`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,6 +317,113 @@ impl FfiOmniscientDb {
         // SAFETY: the C string outlives the call.
         unsafe { emulator_ffi::mcrOmniscientLoadLineHitsFromPath(c_path.as_ptr()) == 0 }
     }
+
+    /// P0.5 — emit a `slice-summary.tc` per the SSUM|v1 layout the
+    /// .NET `SliceSummaryCodec` decodes. Used by the recorder-side
+    /// per-slice prep to ship the side-car the M32 coordinator
+    /// consumes. Returns `true` on success.
+    pub fn write_slice_summary_to_path(
+        &self,
+        path: &std::path::Path,
+        slice_index: u32,
+        tick_lo: u64,
+        tick_hi: u64,
+    ) -> bool {
+        let c_path = match CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        // SAFETY: the C string outlives the call.
+        unsafe {
+            emulator_ffi::mcrOmniscientWriteSliceSummaryToPath(c_path.as_ptr(), slice_index as i32, tick_lo, tick_hi)
+                == 0
+        }
+    }
+
+    /// P0.6 — load a server-emitted `global-memwrites.tc` blob into
+    /// the in-shim store. Used by the db-backend's sharded trace open
+    /// path so [`OmniscientDb::last_write_before`] consults the
+    /// recording-wide write log before the per-slice fallback.
+    pub fn load_global_memwrites_from_path(&self, path: &std::path::Path) -> bool {
+        let c_path = match CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        // SAFETY: the C string outlives the call.
+        unsafe { emulator_ffi::mcrOmniscientLoadGlobalMemwritesFromPath(c_path.as_ptr()) == 0 }
+    }
+
+    /// P0.6 — load a server-emitted `partial-global-memwrites.tc`
+    /// blob into the in-shim store and accumulate the gap list.
+    /// Returns `true` on success.
+    pub fn load_partial_global_memwrites_from_path(&self, path: &std::path::Path) -> bool {
+        let c_path = match CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        // SAFETY: the C string outlives the call.
+        unsafe { emulator_ffi::mcrOmniscientLoadPartialGlobalMemwritesFromPath(c_path.as_ptr()) == 0 }
+    }
+
+    /// P0.6 — number of gap entries from the most recent
+    /// [`Self::load_partial_global_memwrites_from_path`] call. The
+    /// db-backend's origin dispatcher consults this when classifying a
+    /// query whose tick range crosses a known gap.
+    pub fn partial_gap_count(&self) -> i32 {
+        // SAFETY: scalar accessor.
+        unsafe { emulator_ffi::mcrOmniscientPartialGapCount() }
+    }
+
+    /// P0.6 — read the (tick_lo, tick_hi, slice_index) tuple of the
+    /// gap at `index`. Returns `None` when `index` is out of bounds.
+    pub fn partial_gap_at(&self, index: i32) -> Option<PartialGap> {
+        if index < 0 || index >= self.partial_gap_count() {
+            return None;
+        }
+        // SAFETY: scalar accessors; valid index range checked above.
+        unsafe {
+            let slice = emulator_ffi::mcrOmniscientPartialGapSliceIndex(index);
+            if slice < 0 {
+                return None;
+            }
+            Some(PartialGap {
+                slice_index: slice as u32,
+                tick_lo: emulator_ffi::mcrOmniscientPartialGapTickLo(index),
+                tick_hi: emulator_ffi::mcrOmniscientPartialGapTickHi(index),
+            })
+        }
+    }
+
+    /// P0.6 — return `true` when the supplied tick falls inside one of
+    /// the partial-failure gap ranges. The db-backend's origin
+    /// dispatcher uses this to surface
+    /// `TerminatorKind::UnknownSource` per spec §6.6.
+    pub fn tick_falls_in_partial_gap(&self, tick: u64) -> bool {
+        let count = self.partial_gap_count();
+        for i in 0..count {
+            if let Some(gap) = self.partial_gap_at(i)
+                && tick >= gap.tick_lo
+                && tick <= gap.tick_hi
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// P0.6 — descriptor of one PartialGlobalMemwrites gap entry surfaced by
+/// [`FfiOmniscientDb::partial_gap_at`]. The omniscient origin path
+/// classifies queries whose tick range overlaps a gap as
+/// `TerminatorKind::UnknownSource`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartialGap {
+    /// Index of the failed slice whose gap this describes.
+    pub slice_index: u32,
+    /// Inclusive lower bound of the gap's tick range.
+    pub tick_lo: u64,
+    /// Inclusive upper bound of the gap's tick range.
+    pub tick_hi: u64,
 }
 
 impl OmniscientDb for FfiOmniscientDb {
@@ -397,6 +516,26 @@ where
     F: Fn(&str) -> bool,
 {
     file_exists(CTFS_MEMWRITES_FILE) || file_exists(CTFS_LINEHITS_FILE)
+}
+
+/// P0.6 — CTFS namespace probe for the recording-wide M32 artefacts.
+/// Returns `true` when a CTFS container declares at least one of
+/// [`CTFS_GLOBAL_MEMWRITES_FILE`], [`CTFS_GLOBAL_LINEHITS_FILE`], or
+/// [`CTFS_PARTIAL_GLOBAL_MEMWRITES_FILE`], signalling that the trace
+/// is sharded and the coordinator emitted the cross-slice reduce
+/// artefacts.
+///
+/// The sharded-trace open path consults this before falling back to
+/// the per-slice [`ctfs_has_omniscient_namespaces`] probe. When this
+/// returns `true`, [`FfiOmniscientDb::load_global_memwrites_from_path`]
+/// (or its partial sibling) is the right loader to drive.
+pub fn ctfs_has_global_omniscient_namespaces<F>(file_exists: F) -> bool
+where
+    F: Fn(&str) -> bool,
+{
+    file_exists(CTFS_GLOBAL_MEMWRITES_FILE)
+        || file_exists(CTFS_GLOBAL_LINEHITS_FILE)
+        || file_exists(CTFS_PARTIAL_GLOBAL_MEMWRITES_FILE)
 }
 
 #[cfg(test)]
