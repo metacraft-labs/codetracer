@@ -1621,6 +1621,8 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Restore codetracer-visual-replay sibling pins
+        # Same awk-not-on-PATH constraint as Resolve codetracer-visual-replay
+        # ref above; replace awk with a pure-bash ``while read`` loop.
         shell: bash
         env:
           TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
@@ -1632,18 +1634,26 @@ jobs:
             exit 1
           fi
 
+          # Collect pin names into a bash array so we can check
+          # ``required`` entries without shelling out to awk/grep.
+          declare -A PIN_NAMES
+          while IFS=$' \t' read -r name _sha _branch; do
+            [[ -z "$name" ]] && continue
+            PIN_NAMES["$name"]=1
+          done < "$PINS"
+
           for required in \
             codetracer-native-backend \
             codetracer-native-recorder \
             codetracer-native-test-programs \
             codetracer-visual-replay-fixtures; do
-            if ! awk -v repo="$required" '$1 == repo { found = 1 } END { exit found ? 0 : 1 }' "$PINS"; then
+            if [[ -z "${PIN_NAMES[$required]:-}" ]]; then
               echo "Missing required visual replay sibling pin: $required" >&2
               exit 1
             fi
           done
 
-          while IFS=' ' read -r name sha branch; do
+          while IFS=$' \t' read -r name sha branch; do
             [[ -z "$name" ]] && continue
             dest="${{ github.workspace }}/../${name}"
             echo "Restoring ${name}@${sha}"
