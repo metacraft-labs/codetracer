@@ -159,15 +159,9 @@ pub fn parse_dive_in_url(url: &str) -> Result<DiveInUrl, String> {
         match k.as_str() {
             "trace_id" | "traceId" => trace_id = v,
             "span_id" | "spanId" => span_id = v,
-            "authToken" | "auth_token" => {
-                if !v.is_empty() {
-                    auth_token = Some(v);
-                }
-            }
-            "gatewayBaseUrl" | "gateway_base_url" => {
-                if !v.is_empty() {
-                    gateway_base_url_override = Some(v);
-                }
+            "authToken" | "auth_token" if !v.is_empty() => auth_token = Some(v),
+            "gatewayBaseUrl" | "gateway_base_url" if !v.is_empty() => {
+                gateway_base_url_override = Some(v)
             }
             _ => {}
         }
