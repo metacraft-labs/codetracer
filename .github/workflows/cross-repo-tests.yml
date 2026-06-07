@@ -77,6 +77,32 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-native-backend
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format sibling
+        # src/db-backend/Cargo.toml has path deps like
+        # ``../../../codetracer-trace-format/codetracer_ctfs``.  Without
+        # this clone the integration-tests step's cargo invocations
+        # abort during workspace resolution with ``failed to load
+        # source for dependency codetracer_ctfs``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'false'
+
       - name: Build ct-native-replay
         run: |
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
