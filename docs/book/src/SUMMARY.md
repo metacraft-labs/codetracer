@@ -34,6 +34,9 @@
   - [Tracepoints](./usage_guide/tracepoints.md)
   - [Value Origin Tracking](./usage_guide/value-origin-tracking.md)
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
+  - [Omniscient-DB size benchmark](./usage_guide/omniscient-db-size-bench.md)
+  - [Slice prep speed benchmark](./usage_guide/slice-prep-speed-bench.md)
+  - [GUI-ops latency matrix benchmark](./usage_guide/gui-ops-latency-bench.md)
 
 ## Reference
 

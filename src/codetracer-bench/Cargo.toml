@@ -1,0 +1,36 @@
+[package]
+name = "codetracer-bench"
+version = "0.1.0"
+edition = "2024"
+# Performance + E2E Coverage campaign P2 + P3 + P4 benchmarks.
+#
+# Standalone crate (no workspace; codetracer's other Rust crates are
+# independent — see ../db-backend/Cargo.toml and ../.cargo/config.toml).
+# Houses three benchmark suites that share the same harness:
+#   * P2 — omniscient-DB on-disk size per language.
+#   * P3 — slice generation speed + concurrent processing speedup.
+#   * P4 — GUI-feature latency matrix.
+#
+# Per the campaign spec, the tests verify the harness wiring while
+# operators run the full benchmarks via the `just bench-*` targets.
+
+[lib]
+name = "codetracer_bench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ct-bench"
+path = "src/bin/ct-bench.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# rayon backs the P3 prep-concurrency knob — std::thread::scope would
+# work but rayon's bounded thread pool gives us a knob we can dial
+# directly from the CLI flag.
+rayon = "1.10"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

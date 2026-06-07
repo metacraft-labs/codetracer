@@ -1589,3 +1589,24 @@ developer-setup *flags:
 # The results will be placed in test-results/readme-animations-review/
 capture-readme-animations-review:
   bash scripts/docs/capture-readme-animations.sh
+
+# Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
+#
+# Each target builds + drives the `ct-bench` CLI from
+# `src/codetracer-bench/`. The full bench runs against real recorders
+# on PATH; when a recorder is missing the bench skips it narrowly and
+# reports the missing dependency in the trailing log.
+#
+# Output lands in `src/codetracer-bench/target/codetracer-bench/<bench>/`.
+
+# P2 — omniscient-DB on-disk size per language.
+bench-omniscient-db-size *args:
+  cd src/codetracer-bench && cargo run --release --bin ct-bench -- omniscient-db-size {{args}}
+
+# P3 — slice generation speed + concurrent processing speedup.
+bench-slice-prep-speed *args:
+  cd src/codetracer-bench && cargo run --release --bin ct-bench -- slice-prep-speed {{args}}
+
+# P4 — GUI-feature latency matrix.
+bench-gui-ops *args:
+  cd src/codetracer-bench && cargo run --release --bin ct-bench -- gui-ops {{args}}
