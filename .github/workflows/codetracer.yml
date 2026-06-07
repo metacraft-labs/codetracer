@@ -1585,6 +1585,11 @@ jobs:
 
       - name: Resolve codetracer-visual-replay ref
         id: visual-replay-ref
+        # The self-hosted ``nixos`` runner's bash-interactive shell
+        # starts with a minimal PATH that doesn't include ``awk`` /
+        # ``cut`` from coreutils, so the previous ``awk`` parse failed
+        # with ``awk: command not found`` (exit 127).  Use pure bash
+        # parameter expansion instead -- no external tools required.
         shell: bash
         run: |
           set -euo pipefail
@@ -1593,7 +1598,13 @@ jobs:
             echo "Missing $PINS" >&2
             exit 1
           fi
-          REF="$(awk '$1 == "codetracer-visual-replay" { print $2; exit }' "$PINS")"
+          REF=""
+          while IFS=$' \t' read -r name sha _rest; do
+            if [[ "$name" == "codetracer-visual-replay" ]]; then
+              REF="$sha"
+              break
+            fi
+          done < "$PINS"
           if [[ -z "$REF" ]]; then
             echo "Missing codetracer-visual-replay pin in $PINS" >&2
             exit 1
@@ -1656,6 +1667,35 @@ jobs:
         run: |
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
 
+      - name: Stage sibling artifacts into workspace
+        # actions/upload-artifact@v5 forbids paths containing ``..``
+        # and absolute paths outside the workspace, so the previous
+        # config aborted with ``Invalid pattern '../codetracer-visual-replay/...':
+        # Relative pathing '.' and '..' is not allowed``.  Copy any
+        # sibling and /tmp artifacts into a workspace staging dir so
+        # the upload step can reference them via workspace-relative
+        # globs.
+        if: failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          STAGE="visual-replay-regression-staging"
+          mkdir -p "${STAGE}/sibling/tests/output" \
+                   "${STAGE}/sibling/bench-results" \
+                   "${STAGE}/tmp"
+          if [ -d ../codetracer-visual-replay/tests/output ]; then
+            cp -a ../codetracer-visual-replay/tests/output/. \
+                  "${STAGE}/sibling/tests/output/" 2>/dev/null || true
+          fi
+          if [ -d ../codetracer-visual-replay/bench-results ]; then
+            cp -a ../codetracer-visual-replay/bench-results/. \
+                  "${STAGE}/sibling/bench-results/" 2>/dev/null || true
+          fi
+          shopt -s nullglob
+          for f in /tmp/*_diff.rgba /tmp/*_sw.rgba /tmp/*_hw.rgba; do
+            cp -a "$f" "${STAGE}/tmp/" 2>/dev/null || true
+          done
+
       - name: Upload visual replay artifacts
         if: failure()
         uses: actions/upload-artifact@v5
@@ -1667,11 +1707,7 @@ jobs:
             src/tests/gui/test-stats/
             storybook/storybook-static/
             storybook/dist/
-            ../codetracer-visual-replay/tests/output/
-            ../codetracer-visual-replay/bench-results/
-            /tmp/*_diff.rgba
-            /tmp/*_sw.rgba
-            /tmp/*_hw.rgba
+            visual-replay-regression-staging/
           retention-days: 14
           if-no-files-found: ignore
 
