@@ -352,6 +352,19 @@ jobs:
           if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
 
+      - name: Prepend Git Bash to PATH
+        # db-backend's build.rs runs ``Command::new("bash") ...
+        # build_native_api.sh`` on Windows.  Bare ``bash`` on
+        # windows-latest resolves to ``C:\Windows\System32\bash.exe``
+        # (the WSL stub), which fails with ``Windows Subsystem for
+        # Linux has no installed distributions``.  Prepending Git
+        # Bash's bin dir to GITHUB_PATH steers ``Command::new("bash")``
+        # to Git for Windows' ``bash.exe`` -- which is the shell the
+        # build.rs comment ("Ensure Git for Windows bash is on PATH")
+        # expects.
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+
       - name: Generate tree-sitter-nim parser
         shell: pwsh
         run: |
