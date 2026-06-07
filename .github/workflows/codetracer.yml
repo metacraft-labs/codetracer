@@ -1683,6 +1683,17 @@ jobs:
 
           while IFS=$' \t' read -r name sha branch; do
             [[ -z "$name" ]] && continue
+            # Skip ``codetracer`` itself — visual-replay's sibling-pins
+            # lists codetracer as a sibling because VR depends on it,
+            # but here we ARE codetracer, and ``<workspace>/../codetracer``
+            # resolves to the very workspace we're running in.  Cloning
+            # over it fails with ``could not create work tree dir ...:
+            # File exists`` after the ``rm -rf`` no-ops on a non-empty
+            # active directory.
+            if [[ "$name" == "codetracer" ]]; then
+              echo "Skipping self-pin: codetracer"
+              continue
+            fi
             dest="${{ github.workspace }}/../${name}"
             echo "Restoring ${name}@${sha}"
             rm -rf "$dest"
