@@ -163,9 +163,22 @@ fi
 # The Python recorder is a pip-installable module. The nix shell hook uses
 # the _SRC vars to set up a venv with the recorder installed; the resulting
 # `codetracer-python-recorder` console script ends up on PATH via the venv.
+#
+# Additionally, when the codetracer dev-shell's
+# `.python-recorder-venv/bin/python` interpreter has already been
+# materialised by a previous `nix develop`, surface it via
+# `CODETRACER_PYTHON_INTERPRETER`. The campaign's P1/P2/P3/P4 harness
+# uses this var (vs. the `codetracer-python-recorder` console script on
+# PATH) so the bench / e2e test can invoke `python -m codetracer_python_recorder`
+# with `PYTHONPATH=$CODETRACER_PYTHON_RECORDER_SRC` directly — this is
+# the route that works from sibling repos (e.g. codetracer-ci) whose
+# own dev shell does not run the codetracer venv hook.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-recorder/codetracer-python-recorder" ]; then
 	export CODETRACER_PYTHON_RECORDER_SRC="$_CT_WORKSPACE_ROOT/codetracer-python-recorder/codetracer-python-recorder"
 	export CODETRACER_PYTHON_PURE_RECORDER_SRC="$_CT_WORKSPACE_ROOT/codetracer-python-recorder/codetracer-pure-python-recorder"
+	if [ -x "$_CT_ROOT_DIR/.python-recorder-venv/bin/python" ]; then
+		export CODETRACER_PYTHON_INTERPRETER="$_CT_ROOT_DIR/.python-recorder-venv/bin/python"
+	fi
 	_ct_detect_summary "codetracer-python-recorder"
 fi
 

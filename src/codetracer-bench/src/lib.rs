@@ -23,6 +23,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub mod dap_driver;
 pub mod gui_ops;
 pub mod omniscient_db_size;
 pub mod slice_prep_speed;
@@ -113,6 +114,17 @@ impl Language {
 /// broad heuristics like "any recorder missing" — per the M3 review,
 /// each SKIP message must name a single load-bearing dependency so
 /// operators can fix it.
+///
+/// ## Sibling-detection contract
+///
+/// The CodeTracer dev shell's `scripts/detect-siblings.sh` exports
+/// per-recorder env vars (`CODETRACER_PYTHON_INTERPRETER`,
+/// `CODETRACER_PYTHON_RECORDER_SRC`, ...).  When run inside the shell
+/// the probe consults those env vars *first*: this is the route that
+/// the campaign brief calls "Approach B" — the test/bench must be
+/// invoked from `nix develop` (or with `source scripts/detect-siblings.sh`
+/// in the calling environment) so the recorder is reachable without
+/// requiring it to be on the bare PATH.
 pub struct LanguageProbe;
 
 impl LanguageProbe {
@@ -122,18 +134,34 @@ impl LanguageProbe {
     /// names the missing binary or env var so callers can include it
     /// in their SKIP message.
     pub fn probe(language: Language) -> Result<(), String> {
+        // Python: prefer the dev-shell-exported interpreter so the
+        // sibling recorder's PyO3 extension can be loaded directly
+        // (the bench doesn't need a `codetracer-python-recorder` console
+        // script on PATH).
+        if language == Language::Python && Self::python_recorder_reachable() {
+            return Ok(());
+        }
+        // Fall through to the binary-on-PATH check below as the backup
+        // path (e.g. a future build that ships the console script in
+        // the venv).
         let binary = Self::expected_binary(language);
         if which(binary).is_some() {
             Ok(())
+        } else if language == Language::Python {
+            Err(
+                "CODETRACER_PYTHON_INTERPRETER not set (run `nix develop` or \
+                 `source scripts/detect-siblings.sh` first)"
+                    .to_string(),
+            )
         } else {
             Err(format!("{binary} not on PATH"))
         }
     }
 
-    /// Name of the binary the bench looks for. Operators can override
+    /// Returns the binary name the bench looks for. Operators can override
     /// per-language via env vars (the per-fixture `regenerate.sh`
     /// scripts honour the same env-var names).
-    fn expected_binary(language: Language) -> &'static str {
+    pub fn expected_binary(language: Language) -> &'static str {
         match language {
             Language::Python => "codetracer-python-recorder",
             Language::CPlusPlus | Language::C => "ct-native-replay",
@@ -145,6 +173,30 @@ impl LanguageProbe {
             Language::Cairo => "codetracer-cairo-recorder",
             Language::Solana => "codetracer-solana-recorder",
         }
+    }
+
+    /// The Python recorder is reachable when the dev shell exported
+    /// both:
+    ///
+    ///   * `CODETRACER_PYTHON_INTERPRETER` — a Python interpreter that
+    ///     can import the recorder once `PYTHONPATH` includes the
+    ///     recorder source dir.
+    ///   * `CODETRACER_PYTHON_RECORDER_SRC` — the recorder source dir
+    ///     (the package importable as `codetracer_python_recorder`).
+    ///
+    /// We additionally verify the interpreter path exists on disk; the
+    /// `import` step is exercised lazily by the recorder invocation in
+    /// [`FixtureRecorder::record`].
+    pub fn python_recorder_reachable() -> bool {
+        let interpreter = match std::env::var_os("CODETRACER_PYTHON_INTERPRETER") {
+            Some(p) => PathBuf::from(p),
+            None => return false,
+        };
+        let src = std::env::var_os("CODETRACER_PYTHON_RECORDER_SRC");
+        if src.is_none() {
+            return false;
+        }
+        interpreter.is_file()
     }
 }
 
@@ -161,10 +213,21 @@ pub fn which(binary: &str) -> Option<PathBuf> {
     None
 }
 
-/// Returns the path of the `ct` (or `replay-server`) binary the bench
-/// shells out to for the `omniscient-prep` subcommand. Honours the
-/// `CT_BIN` env var first; falls back to `ct` on PATH; finally tries
-/// `replay-server` (the db-backend binary name).
+/// Returns the path of the binary the bench shells out to for the
+/// `trace omniscient-prep` subcommand.
+///
+/// The campaign's omniscient-prep entry point lives on the
+/// `replay-server` binary built by `src/db-backend/`. The dev shell's
+/// `src/build-debug/bin/replay-server` is an older, pre-M19 build that
+/// does NOT carry the `trace` subcommand; the freshly-built artifact
+/// at `src/db-backend/target/debug/replay-server` does.
+///
+/// Resolution order:
+///   1. `CT_BIN` env var (full override; the operator picks the binary).
+///   2. `replay-server` on PATH that responds to `trace omniscient-prep`.
+///   3. The known build path `src/db-backend/target/debug/replay-server`
+///      relative to `CODETRACER_REPO_ROOT_PATH` (the env var
+///      `detect-siblings.sh` exports).
 pub fn ct_binary() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("CT_BIN") {
         let p = PathBuf::from(env);
@@ -172,10 +235,51 @@ pub fn ct_binary() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    if let Some(p) = which("ct") {
+
+    // Check the freshly-built db-backend replay-server first if the
+    // repo root is known. This is the binary that carries the `trace`
+    // subcommand on which the campaign depends.
+    if let Some(root) = std::env::var_os("CODETRACER_REPO_ROOT_PATH") {
+        let candidate = PathBuf::from(root)
+            .join("src")
+            .join("db-backend")
+            .join("target")
+            .join("debug")
+            .join("replay-server");
+        if candidate.is_file() && binary_supports_trace_omniscient_prep(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    if let Some(p) = which("replay-server")
+        && binary_supports_trace_omniscient_prep(&p)
+    {
         return Some(p);
     }
-    which("replay-server")
+
+    if let Some(p) = which("ct")
+        && binary_supports_trace_omniscient_prep(&p)
+    {
+        return Some(p);
+    }
+    None
+}
+
+/// Probe a candidate binary by spawning it with `trace omniscient-prep
+/// --help` and inspecting the exit status. Used by [`ct_binary`] to
+/// avoid surfacing the pre-M19 `replay-server` that doesn't carry the
+/// subcommand. The probe is best-effort: any spawn error returns false
+/// so we fall through to the next candidate.
+fn binary_supports_trace_omniscient_prep(binary: &Path) -> bool {
+    let Ok(output) = Command::new(binary)
+        .arg("trace")
+        .arg("omniscient-prep")
+        .arg("--help")
+        .output()
+    else {
+        return false;
+    };
+    output.status.success()
 }
 
 /// Outcome of a benchmark probe. Each driver returns one per fixture
@@ -363,15 +467,20 @@ impl FixtureRecorder {
         std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
         LanguageProbe::probe(language).map_err(RecorderError::Unavailable)?;
 
+        // Python takes the sibling-detected-interpreter route: invoke
+        // `python -m codetracer_python_recorder --out-dir <out> --
+        // <program>` rather than a binary on PATH, because the dev
+        // shell installs only the pure-Python recorder into its venv;
+        // the native Rust-backed recorder lives in the sibling repo's
+        // source tree and is imported via `PYTHONPATH`.
+        if language == Language::Python {
+            return Self::record_python(program_path, trace_dir);
+        }
+
         let binary = LanguageProbe::expected_binary(language);
         let mut cmd = Command::new(binary);
         match language {
-            Language::Python => {
-                cmd.arg("--out-dir")
-                    .arg(trace_dir)
-                    .arg("--")
-                    .arg(program_path);
-            }
+            Language::Python => unreachable!("handled above"),
             Language::CPlusPlus | Language::C | Language::Rust => {
                 // `ct-native-replay record -o <out> -- <program>` —
                 // see tests/fixtures/origin/cpp/*/regenerate.sh.
@@ -402,6 +511,64 @@ impl FixtureRecorder {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             return Err(RecorderError::SubprocessFailed {
                 binary: binary.to_string(),
+                exit: output.status.code(),
+                stderr,
+            });
+        }
+        Ok(trace_dir.to_path_buf())
+    }
+
+    /// Record a Python program by invoking the sibling-detected Python
+    /// interpreter against `codetracer_python_recorder` as a module.
+    /// The PYTHONPATH is augmented with the sibling source dir so the
+    /// recorder package (which lives in the sibling repo, not the venv)
+    /// is importable.
+    pub fn record_python(program_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        let interpreter = std::env::var_os("CODETRACER_PYTHON_INTERPRETER").ok_or_else(|| {
+            RecorderError::Unavailable(
+                "CODETRACER_PYTHON_INTERPRETER not set — run from `nix develop` shell".to_string(),
+            )
+        })?;
+        let recorder_src = std::env::var_os("CODETRACER_PYTHON_RECORDER_SRC").ok_or_else(|| {
+            RecorderError::Unavailable(
+                "CODETRACER_PYTHON_RECORDER_SRC not set — sibling recorder repo not detected"
+                    .to_string(),
+            )
+        })?;
+        // The recorder produces a single CTFS `.ct` file under
+        // `trace_dir/`. Some recordings need an empty target dir to
+        // disambiguate names; we keep the caller's existing dir.
+        let mut cmd = Command::new(&interpreter);
+        cmd.arg("-m")
+            .arg("codetracer_python_recorder")
+            .arg("--out-dir")
+            .arg(trace_dir)
+            .arg("--")
+            .arg(program_path);
+
+        // Splice the recorder source dir onto PYTHONPATH so the venv
+        // (which only ships the pure-Python recorder) still resolves
+        // the native `codetracer_python_recorder` package.
+        let mut pythonpath = std::ffi::OsString::from(&recorder_src);
+        if let Some(existing) = std::env::var_os("PYTHONPATH") {
+            pythonpath.push(":");
+            pythonpath.push(existing);
+        }
+        cmd.env("PYTHONPATH", pythonpath);
+
+        let output = cmd.output().map_err(|e| {
+            RecorderError::Io(format!(
+                "failed to spawn {} -m codetracer_python_recorder: {e}",
+                std::path::Path::new(&interpreter).display(),
+            ))
+        })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: format!(
+                    "{} -m codetracer_python_recorder",
+                    std::path::Path::new(&interpreter).display()
+                ),
                 exit: output.status.code(),
                 stderr,
             });
