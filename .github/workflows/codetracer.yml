@@ -261,7 +261,7 @@ jobs:
           ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -1185,7 +1185,7 @@ jobs:
           ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
           path: ${{ github.workspace }}/libs/codetracer-trace-format
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
 
       # --- NixOS setup ---
       - name: Install Nix
@@ -1282,7 +1282,7 @@ jobs:
           ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
           path: ${{ github.workspace }}/libs/codetracer-trace-format
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
