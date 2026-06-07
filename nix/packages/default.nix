@@ -375,6 +375,13 @@
               pkgs.rustc
               pkgs.cargo
               pkgs.rustPlatform.cargoSetupHook
+              # nim is needed because db-backend's build.rs shells out to
+              # codetracer-native-recorder/ct_emulator/build_native_api.sh,
+              # which runs ``nim c`` to generate native C files.  Outside
+              # the sandbox direnv loads the recorder's flake env; here we
+              # provide nim directly.
+              nim-codetracer
+              pkgs.gcc
             ];
 
             buildInputs = [ ];
@@ -384,6 +391,22 @@
               pkgs.ruby
               noir
             ];
+
+            # ``CODETRACER_DB_BACKEND_SKIP_DIRENV=1`` makes
+            # ``src/db-backend/build.rs::regenerate_c`` call ``bash``
+            # directly instead of ``direnv exec``.
+            #
+            # ``CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1`` makes
+            # ``codetracer_trace_writer_nim/build.rs`` skip the
+            # ``nimble install`` step, which needs network access.
+            #
+            # ``CT_EMULATOR_EXTRA_NIM_PATHS`` and
+            # ``CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS`` inject
+            # sibling-libs paths into the ``nim c`` invocations so
+            # ``requires "results" / "stew"`` resolve without a nimble
+            # pkg store.
+            CODETRACER_DB_BACKEND_SKIP_DIRENV = "1";
+            CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
 
             postUnpack = ''
               # Generate tree-sitter-nim parser
@@ -415,6 +438,25 @@
             '';
 
             preBuild = ''
+              # Inject the codetracer/libs Nim package directories so
+              # ``results`` and ``stew`` resolve when
+              # build_native_api.sh (ct_emulator) and writer_nim's
+              # build.rs (trace-format) run ``nim c``; ``$PWD`` is the
+              # unpacked codetracer source at this point.
+              if [ -d "$PWD/libs/nim-stew/stew" ]; then
+                # Use ``libs/nim-stew/stew`` only -- it ships the
+                # newer ``results.nim`` with proper ``Result[void,
+                # E]`` support that trace-format-nim and ct_emulator
+                # rely on (the older standalone libs/nim-result
+                # mishandles ``?`` on void results so we
+                # deliberately leave it off the path).  The stew
+                # path also provides ``stew/byteutils``, ``stew/io2``
+                # and the other modules the trace-format-nim sources
+                # transitively pull in.
+                NIM_PATHS_LIB="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
+                export CT_EMULATOR_EXTRA_NIM_PATHS="$NIM_PATHS_LIB"
+                export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="$NIM_PATHS_LIB"
+              fi
               cd src/db-backend
             '';
 
@@ -425,24 +467,52 @@
             '';
 
             installPhase = ''
-              mkdir -p $out/bin
+              mkdir -p $out/bin $out/lib
               cp target/release/replay-server $out/bin/
               cp target/release/virtualization-layers $out/bin/
               cp target/release/schema-generator $out/bin/
+
+              # ``cargo:rustc-link-arg=-Wl,-rpath,<out_dir>/...`` in
+              # ``src/db-backend/build.rs`` embeds the sandbox
+              # ``/build/...`` path into the binary's RPATH so it
+              # could dlopen ``libmcr_emulator.so`` at runtime from the
+              # cargo target dir.  Nix's fixupPhase then rejects the
+              # binary because /build/ is not allowed in store paths.
+              #
+              # Copy the .so into ``$out/lib`` and rewrite the RPATH so
+              # the runtime lookup uses an ``$ORIGIN/../lib`` reference
+              # instead of the sandbox path.
+              find target/release/build -name 'libmcr_emulator.so' -exec cp {} $out/lib/ \;
+              for bin in replay-server virtualization-layers schema-generator; do
+                ${pkgs.patchelf}/bin/patchelf \
+                  --set-rpath '$ORIGIN/../lib' \
+                  "$out/bin/$bin"
+              done
             '';
 
             doCheck = true;
             checkPhase = ''
               # nargo needs a writable HOME for its git-dependencies cache lock
               export HOME=$(mktemp -d)
-              cargo test --release --offline -- \
+              # Run only the in-crate unit tests (``--lib --bins``), not
+              # the cross-language end-to-end integration tests under
+              # ``tests/*_flow_*.rs``.  Those exercise sibling-language
+              # recorders (codetracer-ruby-recorder,
+              # codetracer-shell-recorders, codetracer-js-recorder,
+              # codetracer-beam-recorder, codetracer-flow-recorder for
+              # noir) through the DAP wire protocol; they require both
+              # the recorder binaries AND a matching language runtime
+              # (ruby/bash/zsh/node/elixir/erlang/nargo).  The
+              # codetracer-only Nix derivation has neither -- the
+              # Cross-Repo Integration Tests workflow exercises the same
+              # code paths with the recorders + runtimes actually
+              # installed.  ``--bins`` keeps the in-binary unit tests
+              # (e.g. the noir_executor handshake fixtures) in scope so
+              # nothing besides cross-repo plumbing gets dropped here.
+              cargo test --release --offline --lib --bins -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
-                --skip backend_dap_server \
-                --skip ruby_flow_integration \
-                --skip bash_flow_integration \
-                --skip zsh_flow_integration \
-                --skip javascript_flow_integration
+                --skip backend_dap_server
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {
