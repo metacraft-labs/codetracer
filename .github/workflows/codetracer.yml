@@ -767,6 +767,21 @@ jobs:
           nix develop .#devShells.x86_64-linux.default -c \
             direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
 
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh runs ``nim c ... ct_emulator.nim``
+        # whose .nimble declares ``requires "results"``.  A fresh
+        # nim install has no global ``results`` package, so the
+        # script aborts with ``cannot open file: results``.  Run
+        # ``nimble install --depsOnly`` once in ct_emulator (inside
+        # the recorder's direnv env so nim/nimble resolve from the
+        # recorder's flake) -- idempotent, mirrors what
+        # codetracer_trace_writer_nim's build.rs does in the trace-
+        # format crate.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
+
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh"
 
   reprobuild-macos-smoke:

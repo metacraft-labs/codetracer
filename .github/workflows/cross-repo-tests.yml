@@ -167,6 +167,18 @@ jobs:
           nix develop "$CLONE_DIR" --command \
             direnv allow "$(pwd)/../codetracer-native-recorder"
 
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh's ``nim c ... ct_emulator.nim`` requires
+        # the ``results`` nimble package (declared in ct_emulator.nimble);
+        # without ``nimble install --depsOnly`` the script aborts with
+        # ``cannot open file: results`` and db-backend's build.rs
+        # panics during the cross-repo integration test cargo runs.
+        run: |
+          RECORDER_DIR="$(pwd)/../codetracer-native-recorder"
+          nix develop "$(pwd)/../codetracer-native-backend" --command \
+            direnv exec "$RECORDER_DIR" \
+              bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
+
       - name: Build ct-native-replay
         run: |
           CLONE_DIR="$(pwd)/../codetracer-native-backend"
