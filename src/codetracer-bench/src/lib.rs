@@ -89,28 +89,13 @@ impl Language {
         vec![Language::Python, Language::CPlusPlus]
     }
 
-    /// Full matrix: the 8 languages with a working recorder binary
-    /// in the sibling ecosystem.
-    ///
-    /// Nim + Go fixtures live in `fixtures/omniscient-db-size/{nim,go}/`
-    /// for parity with the campaign spec's 10-language goal but are
-    /// excluded from `all()` because the recorder binaries the
-    /// fixtures' `regenerate.sh` scripts call (`codetracer-nim`,
-    /// `codetracer-go-recorder`) don't ship in the current
-    /// recorder ecosystem:
-    ///
-    ///   * `codetracer-nim` is a patched Nim compiler with
-    ///     `--sourcemap:on` (see
-    ///     `codetracer-specs/Nim-Compiler-Patches.md`); recording a
-    ///     Nim program needs a separate compile-then-record flow
-    ///     (compile with `nim --sourcemap:on`, record the binary
-    ///     with `ct-mcr`) the bench harness doesn't yet model.
-    ///   * `codetracer-go-recorder` has no sibling repo at all.
-    ///
-    /// Operators that want to extend the matrix can pass the
-    /// language explicitly via `--languages=nim,go` once the
-    /// integration story for those recorders ships; the FromStr
-    /// arm + fixtures are kept ready for that path.
+    /// Full matrix: the 10 languages the bench drives.  C, C++, Rust,
+    /// Nim, and Go all route through the Multi-Core Recorder per
+    /// `codetracer-specs/Recording-Backends/Multi-Core-Recorder/Multi-Core-Recorder.md`
+    /// §78 (MCR records any LLVM/GCC-compiled binary; the recorder is
+    /// language-agnostic at the binary level).  Python, Ruby,
+    /// JavaScript, Cairo, Solana each have a dedicated recorder shim
+    /// listed in `codetracer-specs/Recorder-CLI-Conventions.md` §1.
     pub fn all() -> Vec<Language> {
         vec![
             Language::Python,
@@ -119,6 +104,8 @@ impl Language {
             Language::JavaScript,
             Language::C,
             Language::Rust,
+            Language::Nim,
+            Language::Go,
             Language::Cairo,
             Language::Solana,
         ]
@@ -187,43 +174,29 @@ impl LanguageProbe {
         }
         // Ruby: sibling-detection prepends the gem's bin/ to PATH and
         // exports RUBY_RECORDER_ROOT. The binary check is the
-        // load-bearing gate; the env var hint surfaces in the sentinel
-        // when the binary is missing so the operator knows why.
-        // Additionally check that the Rust-backed native_tracer .so is
-        // built (the pure-Ruby fallback produces a legacy trace format
-        // the omniscient-prep step doesn't accept).
+        // load-bearing gate; runtime readiness (native_tracer.so etc.)
+        // is the recorder's own responsibility — the bench surfaces
+        // any subprocess error loudly so the operator can fix it,
+        // rather than silently SKIPping on "recorder not ready".
         if language == Language::Ruby {
             if which("codetracer-ruby-recorder").is_some() {
-                if which("ruby").is_none() {
-                    return Err(
-                        "ruby not on PATH (run from `nix develop` shell so the ruby \
-                         toolchain is available)"
-                            .to_string(),
-                    );
+                if which("ruby").is_some() {
+                    return Ok(());
                 }
-                if let Some(root) = std::env::var_os("RUBY_RECORDER_ROOT") {
-                    let so = PathBuf::from(&root)
-                        .join("gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.so");
-                    if !so.is_file() {
-                        return Err(format!(
-                            "codetracer_ruby_recorder.so native extension not built at \
-                             {} (the pure-Ruby fallback ships a legacy trace format \
-                             omniscient-prep rejects; run `just build-extension` in \
-                             codetracer-ruby-recorder)",
-                            so.display()
-                        ));
-                    }
-                }
-                return Ok(());
+                return Err(
+                    "ruby not on PATH (run from `nix develop` shell so the ruby \
+                     toolchain is available)"
+                        .to_string(),
+                );
             }
             let hint = match std::env::var_os("RUBY_RECORDER_ROOT") {
                 Some(p) => format!(
                     "RUBY_RECORDER_ROOT={} but no codetracer-ruby-recorder binary on PATH \
-                     (run `just build-extension` in the sibling repo)",
+                     (run `direnv exec ../codetracer-ruby-recorder just build` first)",
                     PathBuf::from(p).display()
                 ),
-                None => "codetracer-ruby-recorder not on PATH and RUBY_RECORDER_ROOT not \
-                         set (run `nix develop` or `source scripts/detect-siblings.sh` first)"
+                None => "codetracer-ruby-recorder not on PATH (run `direnv exec \
+                         ../codetracer-ruby-recorder just build` first)"
                     .to_string(),
             };
             return Err(hint);
@@ -231,87 +204,65 @@ impl LanguageProbe {
         // JavaScript: sibling-detection prepends the node workspace's
         // `node_modules/.bin/` to PATH so the `codetracer-js-recorder`
         // shim resolves. Also need `node` on PATH for the JS recorder
-        // to execute, plus the Rust-backed napi addon (`.node` file).
+        // to execute. Runtime readiness (the napi addon, instrumenter
+        // package state) is the recorder's own responsibility — the
+        // bench surfaces any subprocess error loudly so the operator
+        // can fix it, rather than silently SKIPping.
         if language == Language::JavaScript {
-            if let Some(shim) = which("codetracer-js-recorder") {
-                if which("node").is_none() {
-                    return Err(
-                        "node not on PATH (the JS recorder shells out to node; run from \
-                         `nix develop` shell)"
-                            .to_string(),
-                    );
-                }
-                // The shim lives under
-                // codetracer-js-recorder/packages/cli/.../bin/.
-                // The napi addon lives at
-                // codetracer-js-recorder/crates/recorder_native/index.node.
-                // Walk up from the shim path to find the workspace root.
-                let mut walk: Option<&Path> = Some(&shim);
-                while let Some(p) = walk {
-                    let candidate = p.join("crates").join("recorder_native").join("index.node");
-                    if candidate.is_file() {
-                        return Ok(());
-                    }
-                    walk = p.parent();
+            if which("codetracer-js-recorder").is_some() {
+                if which("node").is_some() {
+                    return Ok(());
                 }
                 return Err(
-                    "codetracer-js-recorder/crates/recorder_native/index.node not built \
-                     (run `just build-native` in codetracer-js-recorder; the JS recorder \
-                     needs the napi addon to instrument programs)"
+                    "node not on PATH (the JS recorder shells out to node; run from \
+                     `nix develop` shell)"
                         .to_string(),
                 );
             }
-            return Err(
-                "codetracer-js-recorder not on PATH (run `npm install` in the sibling \
-                 codetracer-js-recorder repo, then `nix develop` or `source \
-                 scripts/detect-siblings.sh`)"
-                    .to_string(),
-            );
+            return Err("codetracer-js-recorder not on PATH (run `direnv exec \
+                 ../codetracer-js-recorder just build` first)"
+                .to_string());
         }
-        // Cairo: needs CAIRO_CORELIB_DIR set + the recorder binary on
-        // PATH. The corelib is the Cairo language's stdlib distributed
-        // separately from the recorder (operators clone the Cairo
-        // source repo and set CAIRO_CORELIB_DIR).
-        if language == Language::Cairo {
-            if which("codetracer-cairo-recorder").is_none() {
-                return Err("codetracer-cairo-recorder not on PATH (build via `cd \
-                     codetracer-cairo-recorder && nix develop --command cargo build \
-                     --release`)"
-                    .to_string());
-            }
-            let corelib = std::env::var_os("CAIRO_CORELIB_DIR")
-                .map(PathBuf::from)
-                .filter(|p| p.is_dir());
-            if corelib.is_none() {
+        // Nim + Go: routed through the Multi-Core Recorder per
+        // `codetracer-specs/Recording-Backends/Multi-Core-Recorder/Multi-Core-Recorder.md`
+        // §78 (any LLVM/GCC-compiled binary is MCR-recordable).  The
+        // probe verifies the toolchain (nim or go) + ct-mcr are both
+        // reachable; FixtureRecorder::record_nim / record_go below
+        // compile the fixture and invoke `ct-mcr record` against the
+        // produced binary.
+        if language == Language::Nim {
+            if std::env::var_os("CODETRACER_CT_MCR_CMD").is_none() && which("ct-mcr").is_none() {
                 return Err(
-                    "CAIRO_CORELIB_DIR not set or directory missing (the cairo recorder \
-                     compiles .cairo source via the Cairo Sierra/CASM pipeline which \
-                     requires the Cairo stdlib `corelib`; clone github.com/starkware-libs/cairo \
-                     and set CAIRO_CORELIB_DIR to its `corelib/src` directory)"
+                    "ct-mcr (or CODETRACER_CT_MCR_CMD) not on PATH (run `direnv exec \
+                     ../codetracer-native-recorder just build-ct-mcr` first)"
+                        .to_string(),
+                );
+            }
+            if which("nim").is_none() {
+                return Err(
+                    "nim not on PATH (run from `nix develop` shell so the Nim toolchain \
+                     is available)"
                         .to_string(),
                 );
             }
             return Ok(());
         }
-        // Solana: needs a compiled .so ELF (produced by `cargo-build-sbf`)
-        // as input, not a Rust source file. The bench fixture ships a
-        // `main.rs`, so the recorder cannot run against it directly.
-        // Surface a precise sentinel until the fixture is updated to
-        // ship a precompiled .so or the bench wires a cargo-build-sbf
-        // compile step.
-        if language == Language::Solana {
-            if which("codetracer-solana-recorder").is_none() {
-                return Err("codetracer-solana-recorder not on PATH (build via `cd \
-                     codetracer-solana-recorder && nix develop --command cargo build \
-                     --release`)"
-                    .to_string());
+        if language == Language::Go {
+            if std::env::var_os("CODETRACER_CT_MCR_CMD").is_none() && which("ct-mcr").is_none() {
+                return Err(
+                    "ct-mcr (or CODETRACER_CT_MCR_CMD) not on PATH (run `direnv exec \
+                     ../codetracer-native-recorder just build-ct-mcr` first)"
+                        .to_string(),
+                );
             }
-            return Err(
-                "codetracer-solana-recorder consumes a compiled .so ELF (produced by \
-                 `cargo-build-sbf`), not a Rust source file; the bench fixture's main.rs \
-                 needs an SBF-targeted compile step that the harness doesn't yet model"
-                    .to_string(),
-            );
+            if which("go").is_none() {
+                return Err(
+                    "go not on PATH (run from `nix develop` shell so the Go toolchain \
+                     is available)"
+                        .to_string(),
+                );
+            }
+            return Ok(());
         }
         // Fall through to the binary-on-PATH check below as the backup
         // path (e.g. a future build that ships the console script in
@@ -333,15 +284,24 @@ impl LanguageProbe {
     /// Returns the binary name the bench looks for. Operators can override
     /// per-language via env vars (the per-fixture `regenerate.sh`
     /// scripts honour the same env-var names).
+    ///
+    /// C, C++, Rust, Nim, and Go all route through the Multi-Core
+    /// Recorder (`ct-mcr`) per Multi-Core-Recorder.md §78 — MCR is
+    /// language-agnostic at the binary level.  The bench's
+    /// `record_<lang>` methods compile the fixture with the language
+    /// toolchain (`nim c`, `go build`, `g++`/`clang++`) and then
+    /// invoke MCR against the resulting binary.  C++/C/Rust currently
+    /// use the older `ct-native-replay record` entry-point (the
+    /// `codetracer-native-backend` Rust binary that shells out to
+    /// MCR internally); Nim and Go use `ct-mcr` directly via
+    /// `CODETRACER_CT_MCR_CMD`.
     pub fn expected_binary(language: Language) -> &'static str {
         match language {
             Language::Python => "codetracer-python-recorder",
-            Language::CPlusPlus | Language::C => "ct-native-replay",
+            Language::CPlusPlus | Language::C | Language::Rust => "ct-native-replay",
             Language::Ruby => "codetracer-ruby-recorder",
             Language::JavaScript => "codetracer-js-recorder",
-            Language::Rust => "ct-native-replay",
-            Language::Nim => "codetracer-nim",
-            Language::Go => "codetracer-go-recorder",
+            Language::Nim | Language::Go => "ct-mcr",
             Language::Cairo => "codetracer-cairo-recorder",
             Language::Solana => "codetracer-solana-recorder",
         }
@@ -663,6 +623,16 @@ impl FixtureRecorder {
         if language == Language::JavaScript {
             return Self::record_javascript(program_path, trace_dir);
         }
+        // Nim + Go: route through the Multi-Core Recorder (MCR is
+        // language-agnostic per Multi-Core-Recorder.md §78).  Compile
+        // the source with the language toolchain, then invoke
+        // `ct-mcr record` against the resulting binary.
+        if language == Language::Nim {
+            return Self::record_nim(program_path, trace_dir);
+        }
+        if language == Language::Go {
+            return Self::record_go(program_path, trace_dir);
+        }
 
         let binary = LanguageProbe::expected_binary(language);
         let mut cmd = Command::new(binary);
@@ -671,17 +641,14 @@ impl FixtureRecorder {
             Language::CPlusPlus | Language::Ruby | Language::JavaScript => {
                 unreachable!("handled by per-language record_* methods above")
             }
+            Language::Nim | Language::Go => {
+                unreachable!("handled by per-language record_* methods above")
+            }
             Language::C | Language::Rust => {
                 // `ct-native-replay record -o <out> -- <program>` —
                 // see tests/fixtures/origin/cpp/*/regenerate.sh.
                 cmd.arg("record")
                     .arg("-o")
-                    .arg(trace_dir)
-                    .arg("--")
-                    .arg(program_path);
-            }
-            Language::Nim | Language::Go => {
-                cmd.arg("--out-dir")
                     .arg(trace_dir)
                     .arg("--")
                     .arg(program_path);
@@ -706,6 +673,100 @@ impl FixtureRecorder {
             });
         }
         Ok(trace_dir.to_path_buf())
+    }
+
+    /// Locate the MCR binary (ct-mcr) the bench should invoke.
+    /// `CODETRACER_CT_MCR_CMD` is exported by detect-siblings.sh and
+    /// points at codetracer-native-recorder's `ct_cli/ct_cli` build.
+    fn ct_mcr_command() -> PathBuf {
+        std::env::var_os("CODETRACER_CT_MCR_CMD")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("ct-mcr"))
+    }
+
+    /// Run `ct-mcr record -o <trace> -- <binary>` against an
+    /// already-compiled binary.  Shared by the Nim and Go paths.
+    fn record_via_mcr(binary_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        let recorder = Self::ct_mcr_command();
+        let trace_file = trace_dir.join("trace.ct");
+        let output = Command::new(&recorder)
+            .arg("record")
+            .arg("-o")
+            .arg(&trace_file)
+            .arg("--")
+            .arg(binary_path)
+            .output()
+            .map_err(|e| {
+                RecorderError::Io(format!("failed to spawn {}: {e}", recorder.display()))
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: recorder.display().to_string(),
+                exit: output.status.code(),
+                stderr,
+            });
+        }
+        Ok(trace_dir.to_path_buf())
+    }
+
+    /// Record a Nim program via MCR.  Compiles `main.nim` with
+    /// `nim c -d:release --out:<bin>` then invokes ct-mcr against the
+    /// produced binary.  The Multi-Core Recorder is language-agnostic
+    /// at the binary level (Multi-Core-Recorder.md §78), so the
+    /// recording path is identical to C/C++/Rust once the binary
+    /// exists.
+    pub fn record_nim(program_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let build_dir = trace_dir.join("build");
+        std::fs::create_dir_all(&build_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let binary_path = build_dir.join("main");
+        let compile = Command::new("nim")
+            .arg("c")
+            .arg("-d:release")
+            .arg("--mm:orc")
+            .arg(format!("--out:{}", binary_path.display()))
+            .arg(program_path)
+            .output()
+            .map_err(|e| RecorderError::Io(format!("failed to spawn nim: {e}")))?;
+        if !compile.status.success() {
+            let stderr = String::from_utf8_lossy(&compile.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: "nim".to_string(),
+                exit: compile.status.code(),
+                stderr,
+            });
+        }
+        Self::record_via_mcr(&binary_path, trace_dir)
+    }
+
+    /// Record a Go program via MCR.  Compiles `main.go` with
+    /// `go build -o <bin>` then invokes ct-mcr against the produced
+    /// binary.  The Multi-Core Recorder is language-agnostic at the
+    /// binary level (Multi-Core-Recorder.md §78); Go's default
+    /// static-binary output is explicitly listed there as a launch
+    /// target alongside Rust musl + BusyBox.
+    pub fn record_go(program_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let build_dir = trace_dir.join("build");
+        std::fs::create_dir_all(&build_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let binary_path = build_dir.join("main");
+        let compile = Command::new("go")
+            .arg("build")
+            .arg("-o")
+            .arg(&binary_path)
+            .arg(program_path)
+            .output()
+            .map_err(|e| RecorderError::Io(format!("failed to spawn go: {e}")))?;
+        if !compile.status.success() {
+            let stderr = String::from_utf8_lossy(&compile.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: "go".to_string(),
+                exit: compile.status.code(),
+                stderr,
+            });
+        }
+        Self::record_via_mcr(&binary_path, trace_dir)
     }
 
     /// Record a C++ program by first compiling it with `g++` (or
@@ -817,15 +878,18 @@ impl FixtureRecorder {
         let recorder = std::env::var_os("CODETRACER_JS_RECORDER")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("codetracer-js-recorder"));
-        // codetracer-js-recorder requires the `record` subcommand and
-        // `-o` for the trace output dir; the program path is a
-        // positional argument (no `--` separator — the parser treats
-        // anything after `--` as a "file required" error).
+        // codetracer-js-recorder per Recorder-CLI-Conventions §3 +
+        // its own packages/cli/src/record-cmd.ts: the program file is
+        // a positional argument BEFORE any `--` separator (anything
+        // after `--` is treated as application args), and the trace
+        // output dir is set via `--out-dir <dir>`.  Matches the
+        // canonical invocation used by codetracer-js-recorder's own
+        // tests/e2e/e2e.test.ts.
         let output = Command::new(&recorder)
             .arg("record")
-            .arg("-o")
-            .arg(trace_dir)
             .arg(program_path)
+            .arg("--out-dir")
+            .arg(trace_dir)
             .output()
             .map_err(|e| {
                 RecorderError::Io(format!("failed to spawn {}: {e}", recorder.display()))
