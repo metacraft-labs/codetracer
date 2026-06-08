@@ -245,7 +245,10 @@ test-results
 
 # macOS
 .DS_Store
-nim/
+# Anchored: only the top-level ``non-nix-build/deps/nim`` clone — a
+# generic ``nim/`` matches ``tests/fixtures/origin/nim/`` and hides
+# committed Nim-language origin-tracking fixtures.
+/non-nix-build/deps/nim/
 csources_v1/
 
 # Emacs
