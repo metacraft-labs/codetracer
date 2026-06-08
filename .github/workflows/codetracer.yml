@@ -1578,6 +1578,17 @@ jobs:
         if: matrix.platform == 'macos'
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup isonim siblings (macOS)
+        if: matrix.platform == 'macos'
+        # codetracer's nim.cfg ``--path:``s into ``../isonim/src`` and
+        # five other isonim sibling repos.  Without them the
+        # frontend build aborts with ``cannot open file:
+        # isonim/core/async_compat``.  Reuse the composite action
+        # the Linux jobs already use.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
         # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
