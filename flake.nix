@@ -50,7 +50,12 @@
     # snapshot from the actual ``git`` history rather than GitHub's
     # archive endpoint.
     noir = {
-      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer-temp&rev=334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2";
+      # Bumped from 334c1ee9 to 5e98f904 (empty commit) to side-step
+      # the stale narinfo on metacraft-labs-codetracer.cachix.org +
+      # the per-runner fetcher-cache-v2.sqlite which both pin
+      # 334c1ee9 to a NAR hash that no longer matches the actual
+      # git content.  See CI-stabilization §4.
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer-temp&rev=5e98f904cde508d574ba559da692a312476ff032";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
