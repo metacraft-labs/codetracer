@@ -144,12 +144,28 @@ pub fn discover_fixtures(fixtures_root: &Path, language: Language) -> Vec<Omnisc
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
-        let candidate = entry.path().join(format!("main.{extension}"));
+        // Solana fixtures are full Cargo projects (the recorder
+        // consumes the cargo-build-sbf-produced .so ELF); the
+        // discovery candidate is the project root rather than a
+        // single source file.
+        let candidate = if language == Language::Solana {
+            entry.path().join("Cargo.toml")
+        } else {
+            entry.path().join(format!("main.{extension}"))
+        };
         if candidate.is_file() {
+            // For Solana the recorder driver works against the
+            // project root; for every other language it works against
+            // the source file itself.
+            let source_path = if language == Language::Solana {
+                entry.path()
+            } else {
+                candidate
+            };
             out.push(OmniscientDbFixture {
                 language,
                 name,
-                source_path: candidate,
+                source_path,
             });
         }
     }

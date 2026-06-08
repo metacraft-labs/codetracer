@@ -633,6 +633,13 @@ impl FixtureRecorder {
         if language == Language::Go {
             return Self::record_go(program_path, trace_dir);
         }
+        // Solana: cargo-build-sbf compiles the fixture's Cargo project
+        // to an SBF `.so` ELF, then codetracer-solana-recorder records
+        // it through the SBF VM.  The fixture's `source_path` is the
+        // project root (contains `Cargo.toml` + `src/lib.rs`).
+        if language == Language::Solana {
+            return Self::record_solana(program_path, trace_dir);
+        }
 
         let binary = LanguageProbe::expected_binary(language);
         let mut cmd = Command::new(binary);
@@ -653,12 +660,13 @@ impl FixtureRecorder {
                     .arg("--")
                     .arg(program_path);
             }
-            Language::Cairo | Language::Solana => {
+            Language::Cairo => {
                 cmd.arg("record")
                     .arg("--out-dir")
                     .arg(trace_dir)
                     .arg(program_path);
             }
+            Language::Solana => unreachable!("handled by record_solana above"),
         }
 
         let output = cmd
@@ -767,6 +775,93 @@ impl FixtureRecorder {
             });
         }
         Self::record_via_mcr(&binary_path, trace_dir)
+    }
+
+    /// Record a Solana program by compiling it with `cargo-build-sbf`
+    /// (the Solana SBF toolchain) and then invoking
+    /// `codetracer-solana-recorder record <.so>` against the
+    /// produced ELF.  Per the recorder's own CLI, the ELF is
+    /// executed through the SBF VM with register tracing; the
+    /// resulting CTFS `.ct` lands in `trace_dir`.
+    ///
+    /// The fixture's `program_path` is the Cargo project root
+    /// (containing `Cargo.toml` + `src/lib.rs`).  `cargo-build-sbf`
+    /// writes the .so to `target/deploy/<crate>.so` under the
+    /// project root, so the bench's trace_dir is unrelated to the
+    /// cargo build dir.
+    pub fn record_solana(program_path: &Path, trace_dir: &Path) -> Result<PathBuf, RecorderError> {
+        std::fs::create_dir_all(trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
+        let project_root = program_path;
+        let cargo_toml = project_root.join("Cargo.toml");
+        if !cargo_toml.is_file() {
+            return Err(RecorderError::SubprocessFailed {
+                binary: "cargo-build-sbf".to_string(),
+                exit: None,
+                stderr: format!(
+                    "Solana fixture {} is missing Cargo.toml (expected an SBF cargo project)",
+                    project_root.display()
+                ),
+            });
+        }
+        let compile = Command::new("cargo-build-sbf")
+            .arg("--no-rustup-override")
+            .arg("--manifest-path")
+            .arg(&cargo_toml)
+            .output()
+            .map_err(|e| {
+                RecorderError::Io(format!("failed to spawn cargo-build-sbf: {e}"))
+            })?;
+        if !compile.status.success() {
+            let stderr = String::from_utf8_lossy(&compile.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: "cargo-build-sbf".to_string(),
+                exit: compile.status.code(),
+                stderr,
+            });
+        }
+        // cargo-build-sbf writes the .so to <project>/target/deploy/<crate>.so.
+        // We discover the produced ELF rather than reconstruct the crate
+        // name so this works for any fixture.
+        let deploy_dir = project_root.join("target").join("deploy");
+        let so_path = std::fs::read_dir(&deploy_dir)
+            .map_err(|e| {
+                RecorderError::Io(format!(
+                    "cargo-build-sbf produced no deploy dir at {}: {e}",
+                    deploy_dir.display()
+                ))
+            })?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|ext| ext == "so"))
+            .ok_or_else(|| RecorderError::SubprocessFailed {
+                binary: "cargo-build-sbf".to_string(),
+                exit: None,
+                stderr: format!(
+                    "no *.so artefact found in {} after cargo-build-sbf",
+                    deploy_dir.display()
+                ),
+            })?;
+        let recorder = std::env::var_os("CODETRACER_SOLANA_RECORDER")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codetracer-solana-recorder"));
+        let output = Command::new(&recorder)
+            .arg("record")
+            .arg(&so_path)
+            .arg("-o")
+            .arg(trace_dir)
+            .output()
+            .map_err(|e| {
+                RecorderError::Io(format!("failed to spawn {}: {e}", recorder.display()))
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(RecorderError::SubprocessFailed {
+                binary: recorder.display().to_string(),
+                exit: output.status.code(),
+                stderr,
+            });
+        }
+        Ok(trace_dir.to_path_buf())
     }
 
     /// Record a C++ program by first compiling it with `g++` (or

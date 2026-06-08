@@ -1,0 +1,20 @@
+[package]
+name = "ct_bench_solana_mid_length_compute"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program-entrypoint = "2"
+solana-account-info = "2"
+solana-program-error = "2"
+solana-pubkey = "2"
+solana-msg = "2"
+
+[profile.release]
+opt-level = 3
+lto = false
+overflow-checks = true
+strip = "symbols"

@@ -384,6 +384,67 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -f "$_CT_WORKSPACE_ROOT/codetracer-trace-fo
 	_ct_detect_summary "codetracer-trace-format-nim (Nim FFI library available for wazero)"
 fi
 
+# --- Solana SBF SDK + platform-tools ---
+# The codetracer-solana-recorder consumes an SBF `.so` ELF produced
+# by `cargo-build-sbf` (Solana SBF toolchain).  The Nix-packaged
+# `cargo-build-sbf` is missing its bundled `platform-tools-sdk/sbf`
+# layout (a packaging gap in nix-blockchain-development) so the
+# operator vendors the SDK as two sibling checkouts:
+#
+#   solana-platform-tools/  (download from
+#       github.com/anza-xyz/platform-tools/releases/v1.52)
+#   solana-sbf-sdk/
+#       dependencies/platform-tools -> ../solana-platform-tools
+#       scripts/{dump.sh,objcopy.sh,strip.sh}  (from agave v3.1.11
+#       platform-tools-sdk/sbf/scripts/)
+#
+# We export SBF_SDK_PATH so cargo-build-sbf finds the SDK layout,
+# RUSTC so it uses the platform-tools rustc (the Solana-patched one
+# with the `sbpf-solana-solana` target), and prepend the
+# platform-tools rust+llvm bin dirs to PATH so the helper scripts
+# resolve.  The dynamic binaries the SDK ships are patchelf'd on
+# first detection to use the Nix glibc interpreter + bundled
+# zlib/libstdc++ (idempotent — skips when the interpreter is already
+# /nix/store/...glibc...).
+if [ -n "$_CT_WORKSPACE_ROOT" ] &&
+	[ -d "$_CT_WORKSPACE_ROOT/solana-sbf-sdk/dependencies/platform-tools/rust/bin" ] &&
+	[ -d "$_CT_WORKSPACE_ROOT/solana-sbf-sdk/scripts" ]; then
+	_ct_sbf_pt="$_CT_WORKSPACE_ROOT/solana-sbf-sdk/dependencies/platform-tools"
+	# patchelf pass — only when the rustc binary still points at the
+	# generic-Linux interpreter (i.e. has never been patched).
+	if command -v patchelf >/dev/null 2>&1 && command -v file >/dev/null 2>&1 &&
+		file "$_ct_sbf_pt/rust/bin/rustc" 2>/dev/null | grep -q "/lib64/ld-linux"; then
+		_ct_sbf_glibc=""
+		if command -v nix >/dev/null 2>&1; then
+			_ct_sbf_glibc="$(nix build --no-link --print-out-paths nixpkgs#glibc.out 2>/dev/null)"
+			_ct_sbf_zlib="$(nix build --no-link --print-out-paths nixpkgs#zlib.out 2>/dev/null)"
+		fi
+		_ct_sbf_gcc=""
+		if command -v g++ >/dev/null 2>&1; then
+			_ct_sbf_gcc="$(g++ -print-file-name=libstdc++.so 2>/dev/null | xargs -r dirname || true)"
+		fi
+		if [ -n "$_ct_sbf_glibc" ] && [ -d "$_ct_sbf_glibc" ] && [ -n "$_ct_sbf_gcc" ]; then
+			_ct_sbf_rpath="$_ct_sbf_pt/rust/lib:$_ct_sbf_pt/llvm/lib:$_ct_sbf_zlib/lib:$_ct_sbf_gcc:$_ct_sbf_glibc/lib"
+			_ct_sbf_ld="$_ct_sbf_glibc/lib/ld-linux-x86-64.so.2"
+			find "$_ct_sbf_pt" -type f \( -executable -o -name '*.so*' \) 2>/dev/null | while read -r _ct_sbf_f; do
+				if file "$_ct_sbf_f" 2>/dev/null | grep -q 'dynamically linked\|ELF.*shared object'; then
+					if file "$_ct_sbf_f" 2>/dev/null | grep -q 'pie executable\|executable'; then
+						patchelf --set-interpreter "$_ct_sbf_ld" --set-rpath "$_ct_sbf_rpath" "$_ct_sbf_f" 2>/dev/null || true
+					else
+						patchelf --set-rpath "$_ct_sbf_rpath" "$_ct_sbf_f" 2>/dev/null || true
+					fi
+				fi
+			done
+		fi
+		unset _ct_sbf_glibc _ct_sbf_zlib _ct_sbf_gcc _ct_sbf_rpath _ct_sbf_ld _ct_sbf_f
+	fi
+	export SBF_SDK_PATH="$_CT_WORKSPACE_ROOT/solana-sbf-sdk"
+	export RUSTC="$_ct_sbf_pt/rust/bin/rustc"
+	export PATH="$_ct_sbf_pt/rust/bin:$_ct_sbf_pt/llvm/bin:$PATH"
+	_ct_detect_summary "solana-sbf-sdk (SBF_SDK_PATH + platform-tools)"
+	unset _ct_sbf_pt
+fi
+
 # --- Cairo corelib vendoring ---
 # The codetracer-cairo-recorder shells out to cairo-lang-compiler which
 # needs the Cairo stdlib (`corelib`) at compile time.  The corelib is
