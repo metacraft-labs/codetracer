@@ -1670,14 +1670,25 @@ jobs:
         # "Building artifacts from sibling repos".  That target's
         # ``.envrc`` does ``use flake``, so we need a working Nix
         # install on the runner first.
+        #
+        # We bypass the shared ``setup-nix`` composite because it
+        # pins ``cachix/install-nix-action@v27`` which on
+        # ``macos-latest`` (arm64) trips
+        # ``eDSRecordAlreadyExists`` while creating the
+        # ``_nixbld1`` build user -- the GitHub-hosted Apple Silicon
+        # image carries leftover Nix state from its base snapshot
+        # that the older installer can't recover from.
+        # DeterminateSystems/nix-installer-action is the
+        # recommended workaround on that runner image; cachix on
+        # nixos / darwin self-hosted runners stays on v27 because
+        # those don't trip the same state issue.
         if: matrix.platform == 'macos'
-        uses: ./.github/actions/setup-nix
+        uses: DeterminateSystems/nix-installer-action@main
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ steps.app-token.outputs.token }}
+          extra-conf: |
+            access-tokens = github.com=${{ steps.app-token.outputs.token }}
+            substituters = https://cache.nixos.org ${{ vars.SUBSTITUTERS }}
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.TRUSTED_PUBLIC_KEYS }}
 
       - name: Build ct-mcr in sibling clone (macOS)
         if: matrix.platform == 'macos'
