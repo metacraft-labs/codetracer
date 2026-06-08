@@ -1659,6 +1659,33 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
+      - name: Resolve codetracer-visual-replay ref (macOS)
+        if: matrix.platform == 'macos'
+        id: resolve-visual-replay-ref-macos
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-visual-replay ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-visual-replay sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``ct_cli`` (codetracer-native-recorder) pulls
+        # ``gfx_stream/ctfs_visual`` from codetracer-visual-replay/src
+        # at compile time; without this clone ``just build-ct-mcr``
+        # aborts with ``cannot open file: gfx_stream/ctfs_visual``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-visual-replay
+          ref: ${{ steps.resolve-visual-replay-ref-macos.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-visual-replay
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
       - name: Resolve codetracer-native-backend ref (macOS)
         if: matrix.platform == 'macos'
         id: resolve-native-backend-ref-macos
