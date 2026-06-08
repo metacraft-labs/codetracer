@@ -2,7 +2,12 @@
 
 set -e
 
-WANTED_NIM_VERSION=v1.6.20
+# Track the rest of the codebase (nix devshell + Windows toolchain
+# pin in non-nix-build/windows/toolchain-versions.env): Nim 2.2.
+# libs/NimYAML 2.x and the codetracer Nim sources use 2.0 features
+# (default field initialisers in object types) that 1.6.x cannot
+# parse.  Tested with 2.2.8; nim-2.2 csources live in csources_v3.
+WANTED_NIM_VERSION=v2.2.8
 
 if command -v nim &>/dev/null; then
 	echo "Nim is already installed"
@@ -14,19 +19,18 @@ fi
 : "${DEPS_DIR:=$PWD/deps}"
 cd "$DEPS_DIR"
 
-# based on https://forum.nim-lang.org/t/10373#69081: from Araq:
-# but for v1
+# based on https://forum.nim-lang.org/t/10373#69081: from Araq
 
-rm -rf csources_v1/
+rm -rf csources_v3/
 rm -rf nim/
 
-git clone https://github.com/nim-lang/csources_v1
-pushd csources_v1
+git clone https://github.com/nim-lang/csources_v3
+pushd csources_v3
 make -j 8
 popd
 
 git clone https://github.com/nim-lang/nim
-mv csources_v1/bin/nim nim/bin
+mv csources_v3/bin/nim nim/bin
 
 pushd nim
 git checkout $WANTED_NIM_VERSION
