@@ -1485,7 +1485,6 @@ mod tests {
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(2),
-                column: None,
             }),
             TraceLowLevelEvent::Value(FullValueRecord {
                 variable_id: VariableId(0),
@@ -1509,7 +1508,6 @@ mod tests {
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(6),
-                column: None,
             }),
             TraceLowLevelEvent::Value(FullValueRecord {
                 variable_id: VariableId(1),
@@ -1532,7 +1530,6 @@ mod tests {
             TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line(3),
-                column: None,
             }),
             // Return from main
             TraceLowLevelEvent::Return(ReturnRecord {
@@ -1722,7 +1719,6 @@ mod tests {
             events.push(TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(i % 10),
                 line: Line((i + 1) as i64),
-                column: None,
             }));
             events.push(TraceLowLevelEvent::Value(FullValueRecord {
                 variable_id: VariableId(0),
@@ -1991,7 +1987,6 @@ mod tests {
             events.push(TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
                 line: Line((i + 1) as i64),
-                column: None,
             }));
             events.push(TraceLowLevelEvent::Value(FullValueRecord {
                 variable_id: VariableId(0),

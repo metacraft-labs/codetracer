@@ -48,8 +48,8 @@ fn cpp_mcr_streaming_flow_variables_and_values() {
     );
 
     // --- record under MCR ---
-    let recording = TestRecording::create_mcr(&source_path, Language::Cpp, "mcr", &ct_rr_support)
-        .expect("MCR recording failed");
+    let recording =
+        TestRecording::create_mcr(&source_path, Language::Cpp, "mcr", &ct_rr_support).expect("MCR recording failed");
 
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
