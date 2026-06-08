@@ -1733,13 +1733,18 @@ jobs:
         run: |
           set -euo pipefail
           WS="${{ github.workspace }}/.."
+          # ``direnv allow`` errors out when the target has no .envrc
+          # (codetracer-trace-format-nim ships nothing direnv-shaped on
+          # purpose -- ``build-siblings.sh`` invokes its build via
+          # whatever direnv shell inherits from the parent).  Skip any
+          # sibling that's not direnv-managed.
           for sibling in \
             codetracer-native-recorder \
             codetracer-native-backend \
             codetracer-trace-format \
             codetracer-trace-format-nim
           do
-            if [ -d "$WS/$sibling" ]; then
+            if [ -f "$WS/$sibling/.envrc" ]; then
               nix run nixpkgs#direnv -- allow "$WS/$sibling"
             fi
           done
