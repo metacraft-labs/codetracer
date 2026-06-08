@@ -1538,6 +1538,17 @@ impl BackendManager {
                         // If we reach here, silently consume.
                         return;
                     }
+                    PendingPyRequestKind::OriginChain => {
+                        // Forward the OriginChain wire shape verbatim (spec §4.1).
+                        python_bridge::format_origin_chain_response(msg)
+                    }
+                    PendingPyRequestKind::ResolveVariableStep => {
+                        // The variable name was stashed in ``pending.expression``
+                        // at request-dispatch time (same convention as Evaluate),
+                        // so the formatter can pick the matching local from
+                        // the backend's history update.
+                        python_bridge::format_resolve_variable_step_response(msg, &pending.expression)
+                    }
                     PendingPyRequestKind::FireAndForget => {
                         // Already handled above; unreachable.
                         return;
