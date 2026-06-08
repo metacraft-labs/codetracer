@@ -27,9 +27,10 @@
 //! crate; the contract under test is the env-var plumbing and the
 //! socket-path computation, both of which are crate-local.
 
-use db_backend::paths::{
-    CODETRACER_RUN_ID_ENV, recreator_socket_path, reserve_run_id_for_recording, resolve_run_id_for_worker,
-};
+use db_backend::paths::reserve_run_id_for_recording;
+#[cfg(unix)]
+use db_backend::paths::{CODETRACER_RUN_ID_ENV, recreator_socket_path, resolve_run_id_for_worker};
+#[cfg(unix)]
 use std::process::Command;
 
 /// A pinned UUIDv7 used throughout this test.  Format matches the

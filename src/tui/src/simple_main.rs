@@ -121,15 +121,11 @@ impl App {
     fn process_dap_message(&mut self, msg: serde_json::Value) {
         if let Some(typ) = msg.get("type").and_then(|v| v.as_str()) {
             match typ {
-                "event" => {
-                    if msg.get("event").and_then(|v| v.as_str()) == Some("initialized") {
-                        self.initialized();
-                    }
+                "event" if msg.get("event").and_then(|v| v.as_str()) == Some("initialized") => {
+                    self.initialized();
                 }
-                "response" => {
-                    if msg.get("command").and_then(|v| v.as_str()) == Some("launch") {
-                        self.launch();
-                    }
+                "response" if msg.get("command").and_then(|v| v.as_str()) == Some("launch") => {
+                    self.launch();
                 }
                 _ => {}
             }

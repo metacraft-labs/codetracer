@@ -251,6 +251,14 @@ pub enum Language {
     Elixir,
     /// Erlang/BEAM: recorded by codetracer-beam-recorder
     Erlang,
+    /// D: native, built via `ldc2` by ct-native-replay, recorded by MCR.
+    D,
+    /// Fortran: native, built via `gfortran` by ct-native-replay, recorded by MCR.
+    Fortran,
+    /// Pascal: native, built via `fpc` by ct-native-replay, recorded by MCR.
+    Pascal,
+    /// Ada: native, built via `gnatmake` by ct-native-replay, recorded by MCR.
+    Ada,
 }
 
 impl Language {
@@ -284,6 +292,10 @@ impl Language {
             Language::Cadence => "cdc",
             Language::Elixir => "ex",
             Language::Erlang => "erl",
+            Language::D => "d",
+            Language::Fortran => "f90",
+            Language::Pascal => "pas",
+            Language::Ada => "adb",
         }
     }
 
@@ -1242,17 +1254,17 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     }
     #[cfg(windows)]
     {
-        if let Ok(output) = Command::new("where").arg(name).output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if !path.is_empty() {
-                    return Some(PathBuf::from(path));
-                }
+        if let Ok(output) = Command::new("where").arg(name).output()
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
             }
         }
     }

@@ -16,6 +16,8 @@ from codetracer.types import (
     Process,
     ValueTrace,
     ValueTraceStep,
+    MemoryDiffResult,
+    MemoryPageDiff,
 )
 from codetracer.exceptions import (
     TraceError,
@@ -51,6 +53,8 @@ __all__ = [
     "Call",
     "Event",
     "Process",
+    "MemoryDiffResult",
+    "MemoryPageDiff",
     "TraceError",
     "TraceNotFoundError",
     "NavigationError",

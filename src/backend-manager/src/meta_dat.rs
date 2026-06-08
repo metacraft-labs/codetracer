@@ -23,6 +23,9 @@
 
 use std::error::Error;
 use std::fmt;
+// std::path::Path is only referenced by the #[cfg(test)] helpers
+// (`write_minimal_ctfs` etc. at the bottom of this file); gating the
+// import the same way keeps non-test clippy clean.
 #[cfg(test)]
 use std::path::Path;
 
@@ -457,8 +460,15 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
 }
 
 // ── meta.dat serializer (test-only convenience) ────────────────────────
+//
+// The serializer mirrors `parse_meta_dat` byte-for-byte so test fixtures
+// can synthesise a `meta.dat` payload from a `MetaDat` literal without
+// shelling out to the recorder.  Production code only ever READS
+// `meta.dat`; writing back is a recorder responsibility.  Gate the
+// whole block behind `#[cfg(test)]` so the unused-function clippy
+// lint doesn't trip in non-test builds.
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn encode_varint(value: u64, out: &mut Vec<u8>) {
     let mut v = value;
     loop {
@@ -474,13 +484,13 @@ fn encode_varint(value: u64, out: &mut Vec<u8>) {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn write_string(s: &str, out: &mut Vec<u8>) {
     encode_varint(s.len() as u64, out);
     out.extend_from_slice(s.as_bytes());
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn serialize_meta_dat(meta: &MetaDat) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(64);
     out.extend_from_slice(&META_DAT_MAGIC);

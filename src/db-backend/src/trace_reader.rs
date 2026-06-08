@@ -784,10 +784,10 @@ pub trait TraceReader: std::fmt::Debug + Send {
         let normalized = path.replace('\\', "/");
 
         #[cfg(windows)]
-        if normalized != path {
-            if let Some(id) = self.path_id_for(&normalized) {
-                return Some(id);
-            }
+        if normalized != path
+            && let Some(id) = self.path_id_for(&normalized)
+        {
+            return Some(id);
         }
 
         // On Windows, paths are case-insensitive and the drive letter is
@@ -821,10 +821,10 @@ pub trait TraceReader: std::fmt::Debug + Send {
         {
             if let Some(rel_str) = relative_str {
                 let norm_rel = rel_str.replace('\\', "/");
-                if norm_rel != rel_str {
-                    if let Some(id) = self.path_id_for(&norm_rel) {
-                        return Some(id);
-                    }
+                if norm_rel != rel_str
+                    && let Some(id) = self.path_id_for(&norm_rel)
+                {
+                    return Some(id);
                 }
             }
         }

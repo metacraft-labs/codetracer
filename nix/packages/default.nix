@@ -19,6 +19,34 @@
         inherit pkgs;
         fenix = inputs.fenix;
       };
+
+      # Stage isonim sources in a writable sibling layout that mirrors
+      # ``../isonim`` etc. as expected by codetracer's ``nim.cfg`` path
+      # directives.  The flake inputs come from /nix/store and are
+      # read-only, but ``isonim/dsl/tailwind.nim`` does
+      # ``staticRead("<isonim-root>/build/tailwind-styles.json")``; the
+      # JS-target branch tries to fall back to ``"{}"`` on failure but
+      # ``staticRead`` raises a compile-time Error that ``try/except``
+      # cannot catch, so we seed an empty
+      # ``build/tailwind-styles.json`` next to the staged isonim sources
+      # before invoking nim.  The fallback ``{}`` lookup map is enough
+      # for the codetracer UI -- there are no Tailwind utility classes
+      # consumed through this code path; the real CSS comes from
+      # codetracer/src/public/styles.
+      prepareIsonimSiblings = ''
+        export ISONIM_STAGE="$NIX_BUILD_TOP/isonim-stage"
+        mkdir -p "$ISONIM_STAGE"
+        cp -a ${inputs.isonim} "$ISONIM_STAGE/isonim"
+        cp -a ${inputs.isonim-tui} "$ISONIM_STAGE/isonim-tui"
+        cp -a ${inputs.isonim-gpui} "$ISONIM_STAGE/isonim-gpui"
+        cp -a ${inputs.nim-everywhere} "$ISONIM_STAGE/nim-everywhere"
+        cp -a ${inputs.nim-termctl} "$ISONIM_STAGE/nim-termctl"
+        cp -a ${inputs.nim-pty} "$ISONIM_STAGE/nim-pty"
+        chmod -R u+w "$ISONIM_STAGE"
+        mkdir -p "$ISONIM_STAGE/isonim/build"
+        [ -f "$ISONIM_STAGE/isonim/build/tailwind-styles.json" ] || \
+          echo '{}' > "$ISONIM_STAGE/isonim/build/tailwind-styles.json"
+      '';
     in
     {
       packages = rec {
@@ -226,14 +254,29 @@
             nim-codetracer
           ];
 
-          buildPhase = ''
+          # See uiJavascript comment about isonim staging — the
+          # frontend ``index.nim`` and ``server_index.nim`` transitively
+          # import ``isonim`` modules through middleware/hmr_runtime.
+          buildPhase = prepareIsonimSiblings + ''
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
+              --path:"$ISONIM_STAGE/isonim/src" \
+              --path:"$ISONIM_STAGE/isonim-tui/src" \
+              --path:"$ISONIM_STAGE/isonim-gpui/src" \
+              --path:"$ISONIM_STAGE/nim-everywhere/src" \
+              --path:"$ISONIM_STAGE/nim-termctl/src" \
+              --path:"$ISONIM_STAGE/nim-pty/src" \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
+              --path:"$ISONIM_STAGE/isonim/src" \
+              --path:"$ISONIM_STAGE/isonim-tui/src" \
+              --path:"$ISONIM_STAGE/isonim-gpui/src" \
+              --path:"$ISONIM_STAGE/nim-everywhere/src" \
+              --path:"$ISONIM_STAGE/nim-termctl/src" \
+              --path:"$ISONIM_STAGE/nim-pty/src" \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
           '';
@@ -256,10 +299,17 @@
             nim-codetracer
           ];
 
-          buildPhase = ''
+          # See uiJavascript comment about isonim staging.
+          buildPhase = prepareIsonimSiblings + ''
 
             ${nim-codetracer}/bin/nim2 \
                 --hints:off --warnings:off \
+                --path:"$ISONIM_STAGE/isonim/src" \
+                --path:"$ISONIM_STAGE/isonim-tui/src" \
+                --path:"$ISONIM_STAGE/isonim-gpui/src" \
+                --path:"$ISONIM_STAGE/nim-everywhere/src" \
+                --path:"$ISONIM_STAGE/nim-termctl/src" \
+                --path:"$ISONIM_STAGE/nim-pty/src" \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
                 --out:./subwindow.js js src/frontend/subwindow.nim
@@ -282,9 +332,21 @@
             nim-codetracer
           ];
 
-          buildPhase = ''
+          # ``nim.cfg`` adds ``path:"../isonim/src"`` etc. so dev-shell
+          # builds pick up the sibling checkouts.  Inside the Nix
+          # sandbox there is no ``../isonim`` for nim to find; stage
+          # the flake inputs into a writable sibling layout (see
+          # ``prepareIsonimSiblings`` above) and pass the staged paths
+          # to nim with ``--path:`` so the same imports resolve here.
+          buildPhase = prepareIsonimSiblings + ''
             ${nim-codetracer.out}/bin/nim2 \
               --hints:off --warnings:off \
+              --path:"$ISONIM_STAGE/isonim/src" \
+              --path:"$ISONIM_STAGE/isonim-tui/src" \
+              --path:"$ISONIM_STAGE/isonim-gpui/src" \
+              --path:"$ISONIM_STAGE/nim-everywhere/src" \
+              --path:"$ISONIM_STAGE/nim-termctl/src" \
+              --path:"$ISONIM_STAGE/nim-pty/src" \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
               --out:./ui.js js src/frontend/ui_js.nim
@@ -313,6 +375,13 @@
               pkgs.rustc
               pkgs.cargo
               pkgs.rustPlatform.cargoSetupHook
+              # nim is needed because db-backend's build.rs shells out to
+              # codetracer-native-recorder/ct_emulator/build_native_api.sh,
+              # which runs ``nim c`` to generate native C files.  Outside
+              # the sandbox direnv loads the recorder's flake env; here we
+              # provide nim directly.
+              nim-codetracer
+              pkgs.gcc
             ];
 
             buildInputs = [ ];
@@ -322,6 +391,22 @@
               pkgs.ruby
               noir
             ];
+
+            # ``CODETRACER_DB_BACKEND_SKIP_DIRENV=1`` makes
+            # ``src/db-backend/build.rs::regenerate_c`` call ``bash``
+            # directly instead of ``direnv exec``.
+            #
+            # ``CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1`` makes
+            # ``codetracer_trace_writer_nim/build.rs`` skip the
+            # ``nimble install`` step, which needs network access.
+            #
+            # ``CT_EMULATOR_EXTRA_NIM_PATHS`` and
+            # ``CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS`` inject
+            # sibling-libs paths into the ``nim c`` invocations so
+            # ``requires "results" / "stew"`` resolve without a nimble
+            # pkg store.
+            CODETRACER_DB_BACKEND_SKIP_DIRENV = "1";
+            CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
 
             postUnpack = ''
               # Generate tree-sitter-nim parser
@@ -337,11 +422,41 @@
               cp -r ${inputs.codetracer-trace-format} $sourceRoot/../codetracer-trace-format
               chmod -R u+w $sourceRoot/../codetracer-trace-format
 
+              # ``codetracer_trace_writer_nim``'s build.rs (inside the
+              # trace-format workspace) reads the Nim FFI entry point
+              # from ``../codetracer-trace-format-nim``; ``src/db-backend/build.rs``
+              # also canonicalises ``../../../codetracer-native-recorder``
+              # to locate Nim ct_emulator sources.  Seed both from the
+              # flake inputs.
+              cp -r ${inputs.codetracer-trace-format-nim} $sourceRoot/../codetracer-trace-format-nim
+              chmod -R u+w $sourceRoot/../codetracer-trace-format-nim
+              cp -r ${inputs.codetracer-native-recorder} $sourceRoot/../codetracer-native-recorder
+              chmod -R u+w $sourceRoot/../codetracer-native-recorder
+
               # Copy Cargo.lock to root for cargoSetupHook
               cp $sourceRoot/src/db-backend/Cargo.lock $sourceRoot/Cargo.lock
             '';
 
             preBuild = ''
+              # Inject the codetracer/libs Nim package directories so
+              # ``results`` and ``stew`` resolve when
+              # build_native_api.sh (ct_emulator) and writer_nim's
+              # build.rs (trace-format) run ``nim c``; ``$PWD`` is the
+              # unpacked codetracer source at this point.
+              if [ -d "$PWD/libs/nim-stew/stew" ]; then
+                # Use ``libs/nim-stew/stew`` only -- it ships the
+                # newer ``results.nim`` with proper ``Result[void,
+                # E]`` support that trace-format-nim and ct_emulator
+                # rely on (the older standalone libs/nim-result
+                # mishandles ``?`` on void results so we
+                # deliberately leave it off the path).  The stew
+                # path also provides ``stew/byteutils``, ``stew/io2``
+                # and the other modules the trace-format-nim sources
+                # transitively pull in.
+                NIM_PATHS_LIB="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
+                export CT_EMULATOR_EXTRA_NIM_PATHS="$NIM_PATHS_LIB"
+                export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="$NIM_PATHS_LIB"
+              fi
               cd src/db-backend
             '';
 
@@ -352,24 +467,52 @@
             '';
 
             installPhase = ''
-              mkdir -p $out/bin
+              mkdir -p $out/bin $out/lib
               cp target/release/replay-server $out/bin/
               cp target/release/virtualization-layers $out/bin/
               cp target/release/schema-generator $out/bin/
+
+              # ``cargo:rustc-link-arg=-Wl,-rpath,<out_dir>/...`` in
+              # ``src/db-backend/build.rs`` embeds the sandbox
+              # ``/build/...`` path into the binary's RPATH so it
+              # could dlopen ``libmcr_emulator.so`` at runtime from the
+              # cargo target dir.  Nix's fixupPhase then rejects the
+              # binary because /build/ is not allowed in store paths.
+              #
+              # Copy the .so into ``$out/lib`` and rewrite the RPATH so
+              # the runtime lookup uses an ``$ORIGIN/../lib`` reference
+              # instead of the sandbox path.
+              find target/release/build -name 'libmcr_emulator.so' -exec cp {} $out/lib/ \;
+              for bin in replay-server virtualization-layers schema-generator; do
+                ${pkgs.patchelf}/bin/patchelf \
+                  --set-rpath '$ORIGIN/../lib' \
+                  "$out/bin/$bin"
+              done
             '';
 
             doCheck = true;
             checkPhase = ''
               # nargo needs a writable HOME for its git-dependencies cache lock
               export HOME=$(mktemp -d)
-              cargo test --release --offline -- \
+              # Run only the in-crate unit tests (``--lib --bins``), not
+              # the cross-language end-to-end integration tests under
+              # ``tests/*_flow_*.rs``.  Those exercise sibling-language
+              # recorders (codetracer-ruby-recorder,
+              # codetracer-shell-recorders, codetracer-js-recorder,
+              # codetracer-beam-recorder, codetracer-flow-recorder for
+              # noir) through the DAP wire protocol; they require both
+              # the recorder binaries AND a matching language runtime
+              # (ruby/bash/zsh/node/elixir/erlang/nargo).  The
+              # codetracer-only Nix derivation has neither -- the
+              # Cross-Repo Integration Tests workflow exercises the same
+              # code paths with the recorders + runtimes actually
+              # installed.  ``--bins`` keeps the in-binary unit tests
+              # (e.g. the noir_executor handshake fixtures) in scope so
+              # nothing besides cross-repo plumbing gets dropped here.
+              cargo test --release --offline --lib --bins -- \
                 --skip tracepoint_interpreter::tests::array_indexing \
                 --skip tracepoint_interpreter::tests::log_array \
-                --skip backend_dap_server \
-                --skip ruby_flow_integration \
-                --skip bash_flow_integration \
-                --skip zsh_flow_integration \
-                --skip javascript_flow_integration
+                --skip backend_dap_server
             '';
 
             cargoDeps = pkgs.rustPlatform.importCargoLock {
@@ -739,6 +882,17 @@
             mkdir -p $out/src/
             mv src/helpers.js $out/src/
             cp src/public/dist/frontend_bundle.js $out/src
+            # ``src/db-backend/test-programs/{erlang,elixir}`` etc. are
+            # workspace-relative symlinks to sibling repos (e.g.
+            # ``../../../../codetracer-beam-recorder/test-programs/erlang``).
+            # Inside the nix sandbox those targets don't exist and
+            # ``cp -L`` (follow symlinks) aborts with ``cannot stat``.
+            # Strip dangling symlinks from the source tree before the
+            # bulk copy so the package builds without those siblings.
+            # The runtime path resolves sibling sources directly from
+            # the dev shell, so dropping them from the packaged output
+            # is harmless for the distribution path.
+            find src -xtype l -delete 2>/dev/null || true
             cp -Lr src/* $out/src/
 
             mkdir -p $out/public/

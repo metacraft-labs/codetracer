@@ -16,5 +16,20 @@ f.close()
 obj = json.loads(contents)
 a = obj["nodes"][sys.argv[1]]["locked"]
 
-print(f"https://github.com/{a['owner']}/{a['repo']}.git")
+# Flake inputs can be locked under different node types: the
+# ``github`` type stores ``owner``/``repo`` separately while the
+# ``git`` type carries the full ``url`` and (optionally) a ``ref``.
+# Both forms map to the same ``git clone <url> && git checkout
+# <rev>`` recipe used by install_nargo.sh and install_wazero.sh, so
+# normalise to a clone URL here.
+node_type = a.get("type", "")
+if node_type == "github":
+    print(f"https://github.com/{a['owner']}/{a['repo']}.git")
+elif node_type == "git":
+    print(a["url"])
+else:
+    raise SystemExit(
+        f"unsupported flake.lock node type {node_type!r} for input "
+        f"{sys.argv[1]!r}; extend find_git_hash_from_lockfile.py"
+    )
 print(a["rev"])

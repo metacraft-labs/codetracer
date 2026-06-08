@@ -358,10 +358,15 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
         ## Empty input (legacy traces, no clear-frame metadata) →
         ## no ticks via the helper's early return.
         tdiv(class = "video-player-scrub-ticks"):
+          # ``for tick in seq[ScrubTick]`` yields ``lent ScrubTick`` on
+          # Nim 2.x, which cannot be captured by the closure inside
+          # ``tdiv(... style = "...")``.  Copy the field eagerly into a
+          # local ``float`` so the closure captures a plain value.
           for tick in layoutScrubTicks(
               vm.frameVm.clearFrames.val, vm.frameVm.frameCount.val):
+            let leftPercent = tick.leftPercent
             tdiv(class = "video-player-scrub-tick",
-                 style = "left: " & $tick.leftPercent & "%"):
+                 style = "left: " & $leftPercent & "%"):
               text ""
         input(class = "video-player-scrub-range",
               `type` = "range",

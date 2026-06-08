@@ -76,6 +76,146 @@ jobs:
           ref: ${{ steps.resolve-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-backend
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'true'
+
+      - name: Unfold native-backend submodules into parent index
+        # codetracer-native-backend's flake.nix has
+        # ``rr-soft.url = "path:libs/rr"`` and ``delve-patched.url
+        # = "path:libs/delve"``.  Nix's path: flake-input resolver
+        # uses ``git ls-files`` to decide which files are visible,
+        # and the submodule contents aren't tracked in the parent
+        # (only the gitlink is), so ``nix develop <native-backend>``
+        # aborts with ``Path 'libs/delve/flake.nix' does not exist
+        # in Git repository``.  Drop the inner .git, remove the
+        # gitlink from the parent index, then ``git add -f`` the
+        # materialised files so ``git ls-files`` sees them.
+        shell: bash
+        run: |
+          set -uo pipefail
+          PARENT="$(pwd)/../codetracer-native-backend"
+          # The self-hosted nixos runner's bash-interactive shell
+          # starts with a minimal PATH that doesn't include awk, so
+          # parse the ``submodule status --recursive`` output with
+          # pure bash instead.
+          while IFS= read -r line; do
+            # ``git submodule status`` prints e.g. ``+abc1234 libs/rr (...)``
+            # or ``-abc1234 libs/rr``.  A leading ``-`` marks an
+            # uninitialised submodule which we don't want to touch.
+            [[ -z "$line" ]] && continue
+            [[ "${line:0:1}" == "-" ]] && continue
+            # Strip the leading status char + sha, then take field 2
+            # (the path).
+            rest="${line:1}"
+            rest="${rest#* }"   # drop the sha (up to first space)
+            sub="${rest%% *}"   # take everything up to the next space
+            [[ -z "$sub" ]] && continue
+            echo "  unfolding submodule native-backend/${sub}"
+            rm -rf "$PARENT/${sub}/.git"
+            git -C "$PARENT" rm -f --cached "${sub}" >/dev/null 2>&1 || true
+            git -C "$PARENT" add -f "${sub}" 2>/dev/null || true
+          done < <(git -C "$PARENT" submodule status --recursive 2>/dev/null)
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format sibling
+        # src/db-backend/Cargo.toml has path deps like
+        # ``../../../codetracer-trace-format/codetracer_ctfs``.  Without
+        # this clone the integration-tests step's cargo invocations
+        # abort during workspace resolution with ``failed to load
+        # source for dependency codetracer_ctfs``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-trace-format-nim ref
+        id: resolve-trace-format-nim-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # codetracer_trace_writer_nim's build.rs reads
+        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``;
+        # nim-reader is a default feature of replay-server, so cargo
+        # builds the script and panics without this sibling.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-native-recorder ref
+        id: resolve-mcr-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder sibling
+        # src/db-backend/build.rs canonicalizes
+        # ``../../../codetracer-native-recorder`` to locate the Nim
+        # ct_emulator sources.  Without the sibling clone the
+        # ``cargo build`` invocations inside run-cross-repo-tests.sh
+        # panic with ``expected sibling codetracer-native-recorder
+        # repo: NotFound``.  codetracer-native-recorder has no
+        # .gitmodules, so pass submodules: 'false'.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'false'
+
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # db-backend's build.rs (and the integration tests that build
+        # it transitively) invoke ``direnv exec <recorder> bash
+        # ct_emulator/build_native_api.sh`` to materialise generated C
+        # sources.  A fresh clone's .envrc is in the "blocked" state,
+        # so direnv refuses to run.  ``direnv allow`` whitelists it.
+        run: |
+          CLONE_DIR="$(pwd)/../codetracer-native-backend"
+          nix develop "$CLONE_DIR" --command \
+            direnv allow "$(pwd)/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh's ``nim c ... ct_emulator.nim`` requires
+        # the ``results`` nimble package (declared in ct_emulator.nimble);
+        # without ``nimble install --depsOnly`` the script aborts with
+        # ``cannot open file: results`` and db-backend's build.rs
+        # panics during the cross-repo integration test cargo runs.
+        run: |
+          RECORDER_DIR="$(pwd)/../codetracer-native-recorder"
+          nix develop "$(pwd)/../codetracer-native-backend" --command \
+            direnv exec "$RECORDER_DIR" \
+              bash -c "cd '$RECORDER_DIR/ct_emulator' && nimble install --depsOnly -y"
 
       - name: Build ct-native-replay
         run: |

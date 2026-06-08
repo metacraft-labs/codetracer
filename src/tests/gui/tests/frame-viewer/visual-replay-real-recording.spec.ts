@@ -238,7 +238,11 @@ test.describe("MCR visual replay real recording GUI integration", () => {
     await expect(ctPage.locator(".video-player-loupe-readout").first()).toBeVisible();
 
     // Commit the pixel.  The handler fires the /pixel-history POST and
-    // /shader-debug POST against the real player.
+    // /shader-debug POST against the real player.  Both paths now
+    // route through the same ``replayToDrawCallTimed`` /
+    // ``catchUpFbsResources`` machinery that ``/frame`` uses, so the
+    // deep assertions below run on every host — including software
+    // GL (CODETRACER_VISUAL_REPLAY_SOFTWARE_GL=1).
     const pixelHistoryResponsePromise = ctPage.waitForResponse(
       (response) =>
         response.url().includes("/pixel-history")
@@ -316,6 +320,15 @@ test.describe("MCR visual replay real recording GUI integration", () => {
     // direction arrow and back.  The action hook is the canonical
     // invocation point: it bypasses focus scoping (which is tested in
     // ``video-player-keyboard-focus-scope.spec.ts``).
+    //
+    // Earlier in the spec, the pixel-history source-jump path
+    // dispatched ``ct/seek-to-geid`` and the resulting
+    // ``ct/complete-move`` opened the source file in the editor
+    // stack — which co-resides with the Video Player tab and hides
+    // it.  Bring the Video Player tab back to the front before
+    // exercising the keyboard shortcuts so subsequent visibility
+    // assertions on ``.video-player-component`` succeed.
+    await ctPage.locator(".lm_tab", { hasText: "VIDEO PLAYER" }).click();
     expect(await invokeAction("VideoPlayerTogglePlay")).toBeTruthy();
     await expect(ctPage.locator(".video-player-rate-badge")).toContainText(/[▶◀]/);
     expect(await invokeAction("VideoPlayerTogglePlay")).toBeTruthy();

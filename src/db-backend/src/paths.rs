@@ -115,13 +115,22 @@ impl PidLivenessProbe for PosixKillProbe {
         //   * returns -1 with errno == ESRCH → no such process.
         // See: https://pubs.opengroup.org/onlinepubs/9699919799/functions/kill.html
         #[cfg(unix)]
-        unsafe {
-            if libc::kill(pid as libc::pid_t, 0) == 0 {
+        {
+            // SAFETY: ``kill`` with signal 0 is a stateless POSIX
+            // syscall used purely to query whether ``pid`` exists --
+            // it neither dereferences pointers nor mutates process
+            // state.  The libc binding is unsafe only because all FFI
+            // is.
+            let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+            if rc == 0 {
                 return true;
             }
-            // Read errno via the libc accessor; ESRCH means dead,
-            // anything else (EPERM in particular) means alive.
-            let err = *libc::__errno_location();
+            // ESRCH means dead, anything else (EPERM in particular)
+            // means alive.  Read errno through ``io::Error`` so we
+            // don't have to pick the right per-libc accessor
+            // (``__errno_location`` on glibc, ``__error`` on darwin /
+            // bsd, ``errno`` on musl, ...).
+            let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             err != libc::ESRCH
         }
         #[cfg(not(unix))]

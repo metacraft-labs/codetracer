@@ -1,9 +1,9 @@
-#[cfg(windows)]
-#[allow(unused_imports)]
-use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
 };
+#[cfg(windows)]
+#[allow(unused_imports)]
+use std::os::windows::process::CommandExt;
 
 /// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
 /// a visible console window when spawned as child processes.
@@ -11,12 +11,6 @@ use std::{
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use serde_json::{Value, json};
-#[cfg(unix)]
-use tokio::fs::remove_file;
-#[cfg(windows)]
-use tokio::net::{TcpListener, TcpStream};
-#[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
@@ -27,6 +21,12 @@ use tokio::{
     },
     time::sleep,
 };
+#[cfg(unix)]
+use tokio::fs::remove_file;
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(unix)]
 use crate::errors::SocketPathError;
@@ -283,11 +283,7 @@ impl BackendManager {
         // Write the port number so the frontend can discover it.
         tokio::fs::write(&port_file, port.to_string()).await?;
 
-        info!(
-            "TCP listening on: 127.0.0.1:{} (port file: {})",
-            port,
-            port_file.display()
-        );
+        info!("TCP listening on: 127.0.0.1:{} (port file: {})", port, port_file.display());
 
         let mut socket_read;
         let mut socket_write;
@@ -613,11 +609,7 @@ impl BackendManager {
 
         // Write the port number to the port file so clients can discover it.
         tokio::fs::write(&socket_path, port.to_string()).await?;
-        info!(
-            "Daemon listening on: 127.0.0.1:{} (port file: {})",
-            port,
-            socket_path.display()
-        );
+        info!("Daemon listening on: 127.0.0.1:{} (port file: {})", port, socket_path.display());
 
         // --- Accept loop: spawns per-client read and write tasks. ---
         let mgr_accept = mgr.clone();
@@ -1323,8 +1315,9 @@ impl BackendManager {
                                             .get("first")
                                             .and_then(Value::as_str)
                                             .unwrap_or("");
-                                        let value =
-                                            python_bridge::extract_value_str(local.get("second"));
+                                        let value = python_bridge::extract_value_str(
+                                            local.get("second"),
+                                        );
                                         json!({"name": name, "value": value})
                                     })
                                     .collect()
@@ -1347,7 +1340,10 @@ impl BackendManager {
                     })
                     .collect();
 
-                let errors = body.get("errors").cloned().unwrap_or_else(|| json!({}));
+                let errors = body
+                    .get("errors")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
 
                 let py_response = serde_json::json!({
                     "type": "response",
@@ -1535,15 +1531,6 @@ impl BackendManager {
                     }
                     PendingPyRequestKind::SelectProcess => {
                         python_bridge::format_select_process_response(msg)
-                    }
-                    PendingPyRequestKind::OriginChain => {
-                        python_bridge::format_origin_chain_response(msg)
-                    }
-                    PendingPyRequestKind::ResolveVariableStep => {
-                        python_bridge::format_resolve_variable_step_response(
-                            msg,
-                            &pending.expression,
-                        )
                     }
                     PendingPyRequestKind::RunTracepoints => {
                         // RunTracepoints is resolved via event interception
@@ -2428,10 +2415,13 @@ impl BackendManager {
                     "ct/py-read-source" => self.handle_py_read_source(seq, args).await,
                     "ct/py-processes" => self.handle_py_processes(seq, args).await,
                     "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
-                    // Value Origin Tracking — M8 Python binding + helper tool.
-                    "ct/py-origin-chain" => self.handle_py_origin_chain(seq, args).await,
-                    "ct/py-resolve-variable-step" => {
-                        self.handle_py_resolve_variable_step(seq, args).await
+                    "ct/py-memory-diff" => self.handle_py_memory_diff(seq, args).await,
+                    "ct/mcrMemoryDiff" => self.handle_py_memory_diff(seq, args).await,
+                    "ct/py-memory-diff-record-vs-replay" => {
+                        self.handle_py_memory_diff_record_vs_replay(seq, args).await
+                    }
+                    "ct/mcrMemoryDiffRecordVsReplay" => {
+                        self.handle_py_memory_diff_record_vs_replay(seq, args).await
                     }
                     "ct/open-trace" => self.handle_open_trace(seq, args).await,
                     "ct/trace-info" => self.handle_trace_info(seq, args),
@@ -3307,250 +3297,6 @@ impl BackendManager {
     }
 
     // -----------------------------------------------------------------------
-    // ct/py-origin-chain handler (Value Origin Tracking — M8)
-    //
-    // Forwards a `trace.value_origin(...)` Python call to the backend's
-    // `ct/originChain` handler (spec §5.3). The wire shape mirrors
-    // `task::CtOriginChainArguments`: variableName + optional stepId,
-    // frameId, maxHops, lazy, continuationToken. The response body —
-    // an OriginChain (spec §4.1) — is forwarded verbatim to the client.
-    // -----------------------------------------------------------------------
-
-    /// Handles `ct/py-origin-chain` requests from Python clients (M8).
-    ///
-    /// Translates the simplified Python-side payload into the backend's
-    /// `ct/originChain` command and registers a pending request so the
-    /// backend's response can be forwarded back as-is.
-    async fn handle_py_origin_chain(
-        &mut self,
-        seq: i64,
-        args: Option<&Value>,
-    ) -> Result<(), Box<dyn Error>> {
-        let trace_path_str = match args
-            .and_then(|a| a.get("tracePath"))
-            .and_then(Value::as_str)
-        {
-            Some(p) => p.to_string(),
-            None => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-origin-chain",
-                    "missing 'tracePath' in arguments",
-                );
-                return Ok(());
-            }
-        };
-
-        let variable_name = match args
-            .and_then(|a| a.get("variableName"))
-            .and_then(Value::as_str)
-        {
-            Some(s) if !s.is_empty() => s.to_string(),
-            _ => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-origin-chain",
-                    "missing 'variableName' in arguments",
-                );
-                return Ok(());
-            }
-        };
-
-        let trace_path = PathBuf::from(&trace_path_str);
-
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
-            Some(id) => id,
-            None => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-origin-chain",
-                    &self.no_session_error_message(&trace_path_str),
-                );
-                return Ok(());
-            }
-        };
-
-        // Reset TTL for this trace (origin queries count as activity).
-        self.reset_ttl_for_backend_id(backend_id);
-
-        // Optional fields — defaults mirror `CtOriginChainArguments`
-        // (`default_no_step`, `default_no_frame`, `default_max_hops`).
-        // The backend treats negative step_id / frame_id as
-        // "use current".
-        let step_id = args
-            .and_then(|a| a.get("stepId"))
-            .and_then(Value::as_i64)
-            .unwrap_or(-1);
-        let frame_id = args
-            .and_then(|a| a.get("frameId"))
-            .and_then(Value::as_i64)
-            .unwrap_or(-1);
-        let max_hops = args
-            .and_then(|a| a.get("maxHops"))
-            .and_then(Value::as_u64)
-            .unwrap_or(16) as u32;
-        let lazy = args
-            .and_then(|a| a.get("lazy"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let continuation_token = args
-            .and_then(|a| a.get("continuationToken"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-
-        let dap_seq = match self.daemon_state.as_mut() {
-            Some(ds) => ds.py_bridge.next_seq(),
-            None => return Ok(()),
-        };
-
-        let mut origin_args = serde_json::json!({
-            "variableName": variable_name,
-            "variablePath": [],
-            "frameId": frame_id,
-            "stepId": step_id,
-            "threadId": 0,
-            "maxHops": max_hops,
-            "lazy": lazy,
-            "sessionId": "",
-            "classifySource": true,
-        });
-        if let Some(token) = continuation_token {
-            origin_args["continuationToken"] = serde_json::Value::String(token);
-        }
-
-        let dap_request = serde_json::json!({
-            "type": "request",
-            "command": "ct/originChain",
-            "seq": dap_seq,
-            "arguments": origin_args,
-        });
-
-        if let Err(e) = self.message(backend_id, dap_request).await {
-            self.send_py_command_error(
-                seq,
-                "ct/py-origin-chain",
-                &format!("failed to send command to backend: {e}"),
-            );
-            return Ok(());
-        }
-
-        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
-        if let Some(ds) = self.daemon_state.as_mut() {
-            ds.py_bridge.pending_requests.push(PendingPyRequest {
-                kind: PendingPyRequestKind::OriginChain,
-                client_id,
-                original_seq: seq,
-                backend_seq: dap_seq,
-                response_command: "ct/py-origin-chain".to_string(),
-                expression: variable_name,
-            });
-        }
-
-        Ok(())
-    }
-
-    /// Handles `ct/py-resolve-variable-step` requests (M8 helper tool).
-    ///
-    /// Sends a `ct/load-history` request to the backend, scoped to the
-    /// queried variable. The response formatter walks the returned
-    /// `updates` array in reverse order to find the most-recent
-    /// assignment hit and returns its `stepId` + `location` to the
-    /// client.
-    async fn handle_py_resolve_variable_step(
-        &mut self,
-        seq: i64,
-        args: Option<&Value>,
-    ) -> Result<(), Box<dyn Error>> {
-        let trace_path_str = match args
-            .and_then(|a| a.get("tracePath"))
-            .and_then(Value::as_str)
-        {
-            Some(p) => p.to_string(),
-            None => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-resolve-variable-step",
-                    "missing 'tracePath' in arguments",
-                );
-                return Ok(());
-            }
-        };
-        let variable_name = match args
-            .and_then(|a| a.get("variableName"))
-            .and_then(Value::as_str)
-        {
-            Some(s) if !s.is_empty() => s.to_string(),
-            _ => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-resolve-variable-step",
-                    "missing 'variableName' in arguments",
-                );
-                return Ok(());
-            }
-        };
-
-        let trace_path = PathBuf::from(&trace_path_str);
-
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
-            Some(id) => id,
-            None => {
-                self.send_py_command_error(
-                    seq,
-                    "ct/py-resolve-variable-step",
-                    &self.no_session_error_message(&trace_path_str),
-                );
-                return Ok(());
-            }
-        };
-
-        self.reset_ttl_for_backend_id(backend_id);
-
-        let frame_id = args
-            .and_then(|a| a.get("frameId"))
-            .and_then(Value::as_i64)
-            .unwrap_or(-1);
-
-        let dap_seq = match self.daemon_state.as_mut() {
-            Some(ds) => ds.py_bridge.next_seq(),
-            None => return Ok(()),
-        };
-
-        let dap_request = serde_json::json!({
-            "type": "request",
-            "command": "ct/load-history",
-            "seq": dap_seq,
-            "arguments": {
-                "expression": variable_name,
-                "frameId": frame_id,
-            },
-        });
-
-        if let Err(e) = self.message(backend_id, dap_request).await {
-            self.send_py_command_error(
-                seq,
-                "ct/py-resolve-variable-step",
-                &format!("failed to send command to backend: {e}"),
-            );
-            return Ok(());
-        }
-
-        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
-        if let Some(ds) = self.daemon_state.as_mut() {
-            ds.py_bridge.pending_requests.push(PendingPyRequest {
-                kind: PendingPyRequestKind::ResolveVariableStep,
-                client_id,
-                original_seq: seq,
-                backend_seq: dap_seq,
-                response_command: "ct/py-resolve-variable-step".to_string(),
-                expression: variable_name,
-            });
-        }
-
-        Ok(())
-    }
-
-    // -----------------------------------------------------------------------
     // ct/py-add-breakpoint, ct/py-remove-breakpoint,
     // ct/py-add-watchpoint, ct/py-remove-watchpoint handlers
     // -----------------------------------------------------------------------
@@ -4178,7 +3924,10 @@ impl BackendManager {
             }
         };
 
-        let source_path = match args.and_then(|a| a.get("path")).and_then(Value::as_str) {
+        let source_path = match args
+            .and_then(|a| a.get("path"))
+            .and_then(Value::as_str)
+        {
             Some(p) => p.to_string(),
             None => {
                 self.send_py_command_error(
@@ -4190,7 +3939,10 @@ impl BackendManager {
             }
         };
 
-        let line = match args.and_then(|a| a.get("line")).and_then(Value::as_i64) {
+        let line = match args
+            .and_then(|a| a.get("line"))
+            .and_then(Value::as_i64)
+        {
             Some(l) => l,
             None => {
                 self.send_py_command_error(
@@ -5438,6 +5190,478 @@ impl BackendManager {
     }
 
     // -----------------------------------------------------------------------
+    // ct/py-memory-diff handler (MW47 Phase 2 — MCR agentic interface)
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-memory-diff` (alias: `ct/mcrMemoryDiff`) requests.
+    ///
+    /// MW47 Phase 2.  MCR's MW47 Phase 1b producer emits
+    /// `evMemorySnapshot` events into per-thread rings whenever
+    /// `CT_MEMORY_SNAPSHOT_AT_EVENT=1` is set at recording time.  This
+    /// handler decodes those snapshots from the `.ct` trace file and
+    /// returns the page-by-page diff between two snapshot GEIDs, plus
+    /// the GEID of the earliest divergent snapshot in `(eventA, eventB]`
+    /// — the field a cascade-peeling agent binary-searches on to
+    /// localise the missing-capture surface.
+    ///
+    /// The decode itself is delegated to the `ct_memdiff_helper` binary
+    /// (built from `ct_replayer/src/ct_memdiff_helper.nim`) which is
+    /// spawned as a one-shot subprocess.  This keeps the
+    /// backend-manager free of any CTFS / per-thread-ring decoder
+    /// dependency.  The helper is NOT a user-facing `ct-mcr`
+    /// subcommand — see `feedback_codetracer_agentic_interface`.
+    ///
+    /// Helper-binary discovery: `CODETRACER_CT_MEMDIFF_HELPER` env var
+    /// (absolute path) takes precedence; otherwise we look for
+    /// `ct_memdiff_helper`/`ct_memdiff_helper.exe` next to the current
+    /// backend-manager executable, then fall back to `$PATH`.
+    ///
+    /// **Wire protocol**
+    ///
+    /// Request:
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-memory-diff",
+    ///   "seq": 7,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace.ct",
+    ///     "eventA": 42,
+    ///     "eventB": 4096,
+    ///     "maxDiffs": 16
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Response body:
+    /// ```json
+    /// {
+    ///   "eventA": 42, "eventB": 4096,
+    ///   "snapshotsInRange": 1024,
+    ///   "pagesCompared": 4711,
+    ///   "differingPages": 3, "truncated": false,
+    ///   "firstDivergenceEventGeid": 117,
+    ///   "diffs": [
+    ///     {"pageIndex": 12, "pageVa": "0x...", "regionBase": "0x...",
+    ///      "regionProtect": 4, "hashRecorded": "0x...", "hashReplayed": "0x..."}
+    ///   ]
+    /// }
+    /// ```
+    async fn handle_py_memory_diff(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        const COMMAND: &str = "ct/py-memory-diff";
+
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'tracePath' in arguments");
+                return Ok(());
+            }
+        };
+
+        let event_a = match args.and_then(|a| a.get("eventA")).and_then(Value::as_i64) {
+            Some(v) => v,
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'eventA' in arguments");
+                return Ok(());
+            }
+        };
+
+        let event_b = match args.and_then(|a| a.get("eventB")).and_then(Value::as_i64) {
+            Some(v) => v,
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'eventB' in arguments");
+                return Ok(());
+            }
+        };
+
+        let max_diffs = args
+            .and_then(|a| a.get("maxDiffs"))
+            .and_then(Value::as_i64)
+            .unwrap_or(16)
+            .max(1);
+
+        // Reset TTL for the session (if any) backing this trace; the
+        // memory-diff query doesn't actually drive the backend, but if
+        // a session is loaded we don't want it to expire mid-bisect.
+        let trace_path = PathBuf::from(&trace_path_str);
+        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+            self.reset_ttl_for_backend_id(backend_id);
+        }
+
+        // Resolve the helper binary path.
+        let helper = match Self::resolve_memdiff_helper() {
+            Some(p) => p,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    "ct_memdiff_helper not found (set CODETRACER_CT_MEMDIFF_HELPER or \
+                     ensure the binary is next to backend-manager or on PATH)",
+                );
+                return Ok(());
+            }
+        };
+
+        // Build the JSON request for the helper.
+        let helper_request = serde_json::json!({
+            "tracePath": trace_path_str,
+            "eventA": event_a,
+            "eventB": event_b,
+            "maxDiffs": max_diffs,
+        });
+        let helper_request_str = helper_request.to_string();
+
+        // Spawn the helper and collect stdout.  This is a fast,
+        // one-shot operation; we spawn synchronously via tokio's
+        // blocking subprocess primitive to avoid further wiring.
+        let client_id = self.lookup_client_for_seq(seq);
+        let send_response = move |daemon_send: Box<dyn FnOnce(Value) + Send>, resp: Value| {
+            daemon_send(resp);
+        };
+        // We need a closure to ship the response either through the
+        // daemon's client channel or the legacy manager sender.  Build
+        // both responses (success / failure) here and dispatch.
+        let stdout_bytes = match tokio::process::Command::new(&helper)
+            .arg("--stdin")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use tokio::io::AsyncWriteExt as _;
+                    if let Err(e) = stdin.write_all(helper_request_str.as_bytes()).await {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("failed writing helper stdin: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+                match child.wait_with_output().await {
+                    Ok(output) => output.stdout,
+                    Err(e) => {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("ct_memdiff_helper wait failed: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                );
+                return Ok(());
+            }
+        };
+
+        // The helper prints exactly one JSON object followed by a newline.
+        let stdout_str = String::from_utf8_lossy(&stdout_bytes);
+        let parsed: Value = match serde_json::from_str(stdout_str.trim()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!(
+                        "ct_memdiff_helper produced invalid JSON ({e}); raw output: {}",
+                        stdout_str.trim()
+                    ),
+                );
+                return Ok(());
+            }
+        };
+
+        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let response = if success {
+            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": true,
+                "command": COMMAND,
+                "body": body,
+            })
+        } else {
+            let msg = parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ct_memdiff_helper reported failure")
+                .to_string();
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": COMMAND,
+                "message": msg,
+            })
+        };
+
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
+        }
+        let _ = send_response;  // silence the unused-closure warning when refactored
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // ct/py-memory-diff-record-vs-replay handler (MW47 Phase 3)
+    // -----------------------------------------------------------------------
+
+    /// Handles `ct/py-memory-diff-record-vs-replay` (alias:
+    /// `ct/mcrMemoryDiffRecordVsReplay`).
+    ///
+    /// MW47 Phase 3.  Cross-trace diff between the recorded snapshot
+    /// at GEID N (gated by `CT_MEMORY_SNAPSHOT_AT_GEID=N` during
+    /// recording) and the replayer's standalone single-shot file
+    /// (gated by `CT_REPLAY_SNAPSHOT_AT_GEID=N` during the verify
+    /// replay).  The agent binary-searches over GEID N to localise
+    /// the first point at which replay diverges from record.
+    ///
+    /// **Wire protocol**
+    ///
+    /// Request:
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-memory-diff-record-vs-replay",
+    ///   "seq": 9,
+    ///   "arguments": {
+    ///     "recordTrace":    "/path/to/recorded.ct",
+    ///     "replaySnapshot": "/path/to/<trace>.replay-snapshot-geid-<N>.bin",
+    ///     "geid":           4096,
+    ///     "maxDiffs":       16
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Response body shape is identical to `ct/py-memory-diff` —
+    /// returns a `MemoryDiffResult` JSON with `differingPages`,
+    /// `firstDivergenceEventGeid`, and a `diffs` array.
+    async fn handle_py_memory_diff_record_vs_replay(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        const COMMAND: &str = "ct/py-memory-diff-record-vs-replay";
+
+        let record_trace = match args
+            .and_then(|a| a.get("recordTrace"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'recordTrace' in arguments");
+                return Ok(());
+            }
+        };
+
+        let replay_snapshot = match args
+            .and_then(|a| a.get("replaySnapshot"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'replaySnapshot' in arguments");
+                return Ok(());
+            }
+        };
+
+        let geid = match args.and_then(|a| a.get("geid")).and_then(Value::as_i64) {
+            Some(v) => v,
+            None => {
+                self.send_py_command_error(seq, COMMAND, "missing 'geid' in arguments");
+                return Ok(());
+            }
+        };
+
+        let max_diffs = args
+            .and_then(|a| a.get("maxDiffs"))
+            .and_then(Value::as_i64)
+            .unwrap_or(16)
+            .max(1);
+
+        // Refresh the session TTL if one is loaded for this trace —
+        // bisect agents call back-to-back and shouldn't lose state.
+        let trace_path = PathBuf::from(&record_trace);
+        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+            self.reset_ttl_for_backend_id(backend_id);
+        }
+
+        let helper = match Self::resolve_memdiff_helper() {
+            Some(p) => p,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    "ct_memdiff_helper not found (set CODETRACER_CT_MEMDIFF_HELPER or \
+                     ensure the binary is next to backend-manager or on PATH)",
+                );
+                return Ok(());
+            }
+        };
+
+        let helper_request = serde_json::json!({
+            "command": "record-vs-replay",
+            "recordTrace": record_trace,
+            "replaySnapshot": replay_snapshot,
+            "geid": geid,
+            "maxDiffs": max_diffs,
+        });
+        let helper_request_str = helper_request.to_string();
+
+        let client_id = self.lookup_client_for_seq(seq);
+        let stdout_bytes = match tokio::process::Command::new(&helper)
+            .arg("--stdin")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use tokio::io::AsyncWriteExt as _;
+                    if let Err(e) = stdin.write_all(helper_request_str.as_bytes()).await {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("failed writing helper stdin: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+                match child.wait_with_output().await {
+                    Ok(output) => output.stdout,
+                    Err(e) => {
+                        self.send_py_command_error(
+                            seq,
+                            COMMAND,
+                            &format!("ct_memdiff_helper wait failed: {e}"),
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                );
+                return Ok(());
+            }
+        };
+
+        let stdout_str = String::from_utf8_lossy(&stdout_bytes);
+        let parsed: Value = match serde_json::from_str(stdout_str.trim()) {
+            Ok(v) => v,
+            Err(e) => {
+                self.send_py_command_error(
+                    seq,
+                    COMMAND,
+                    &format!(
+                        "ct_memdiff_helper produced invalid JSON ({e}); raw output: {}",
+                        stdout_str.trim()
+                    ),
+                );
+                return Ok(());
+            }
+        };
+
+        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let response = if success {
+            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": true,
+                "command": COMMAND,
+                "body": body,
+            })
+        } else {
+            let msg = parsed
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ct_memdiff_helper reported failure")
+                .to_string();
+            json!({
+                "type": "response",
+                "request_seq": seq,
+                "success": false,
+                "command": COMMAND,
+                "message": msg,
+            })
+        };
+
+        if self.daemon_state.is_some() {
+            if let Some(cid) = client_id {
+                self.send_to_client(cid, response);
+            }
+        } else {
+            self.send_manager_message(response);
+        }
+        Ok(())
+    }
+
+    /// Resolves the path to the `ct_memdiff_helper` executable used by
+    /// `handle_py_memory_diff`.  Search order:
+    ///
+    /// 1. `CODETRACER_CT_MEMDIFF_HELPER` env var (absolute path).
+    /// 2. Same directory as the current executable.
+    /// 3. `$PATH` lookup.
+    ///
+    /// Returns `None` if no candidate exists / is executable.
+    fn resolve_memdiff_helper() -> Option<PathBuf> {
+        if let Ok(env_path) = std::env::var("CODETRACER_CT_MEMDIFF_HELPER") {
+            let candidate = PathBuf::from(env_path);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        let exe_name = if cfg!(windows) {
+            "ct_memdiff_helper.exe"
+        } else {
+            "ct_memdiff_helper"
+        };
+        if let Ok(self_exe) = std::env::current_exe()
+            && let Some(dir) = self_exe.parent()
+        {
+            let sibling = dir.join(exe_name);
+            if sibling.is_file() {
+                return Some(sibling);
+            }
+        }
+        // PATH lookup.
+        if let Ok(path_env) = std::env::var("PATH") {
+            for entry in std::env::split_paths(&path_env) {
+                let candidate = entry.join(exe_name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
+    }
+
+    // -----------------------------------------------------------------------
     // ct/open-trace, ct/trace-info, ct/close-trace handlers
     // -----------------------------------------------------------------------
 
@@ -5500,7 +5724,9 @@ impl BackendManager {
 
             // Clear accumulated breakpoint/watchpoint state from previous
             // script runs so the new script starts with a clean slate.
-            ds.py_bridge.breakpoint_state_mut(&trace_path).clear_all();
+            ds.py_bridge
+                .breakpoint_state_mut(&trace_path)
+                .clear_all();
 
             if let Some(info) = ds.session_manager.get_session(&trace_path) {
                 let backend_id = info.backend_id;
@@ -5612,13 +5838,14 @@ impl BackendManager {
             .unwrap_or_else(|_| "replay-server".to_string());
 
         // Build the arguments: the backend command + "dap-server" subcommand.
-        let backend_args_owned: Vec<String> =
-            if backend_cmd.contains("backend-manager") || backend_cmd.contains("session-manager") {
-                // For mock-dap-backend, the subcommand is `mock-dap-backend`.
-                vec!["mock-dap-backend".to_string()]
-            } else {
-                vec!["dap-server".to_string()]
-            };
+        let backend_args_owned: Vec<String> = if backend_cmd.contains("backend-manager")
+            || backend_cmd.contains("session-manager")
+        {
+            // For mock-dap-backend, the subcommand is `mock-dap-backend`.
+            vec!["mock-dap-backend".to_string()]
+        } else {
+            vec!["dap-server".to_string()]
+        };
         let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
 
         // Spawn the backend process (raw, without installing channels).
@@ -5708,10 +5935,7 @@ impl BackendManager {
                     });
 
                 if let Some(ref exe) = rr_support_cmd {
-                    info!(
-                        "RR trace detected, using ct-native-replay: {}",
-                        exe.display()
-                    );
+                    info!("RR trace detected, using ct-native-replay: {}", exe.display());
                     opts.ct_rr_worker_exe = rr_support_cmd;
                 } else {
                     warn!(
@@ -5832,6 +6056,12 @@ impl BackendManager {
             "body": {
                 "tracePath": trace_path_str,
                 "backendId": backend_id,
+                // M-REC-1 / Recording-Identifier-Migration §6.6: the canonical
+                // recording identifier (UUIDv7) is surfaced through the DAP
+                // open-trace response so frontends, sharing UIs and
+                // observability integrations all see the same id without
+                // needing to re-parse `meta.dat`.
+                "recordingId": metadata.recording_id,
                 "language": metadata.language,
                 "totalEvents": metadata.total_events,
                 "sourceFiles": metadata.source_files,

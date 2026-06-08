@@ -287,11 +287,97 @@ jobs:
   windows-rust-components:
     runs-on: windows-latest
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-trace-format-nim ref
+        id: resolve-trace-format-nim-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format-nim
+        # codetracer_trace_writer_nim's build.rs (in codetracer-trace-format)
+        # resolves the Nim FFI entry point from
+        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``.
+        # nim-reader is on by default in src/db-backend/Cargo.toml, so a
+        # plain ``cargo build`` triggers the build script -- it panics
+        # without the sibling.  trace-format-nim has no .gitmodules so
+        # submodules: "false" prevents clone-repo's unconditional sed.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-native-recorder ref
+        id: resolve-mcr-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder
+        # src/db-backend/build.rs canonicalizes
+        # ``../../../codetracer-native-recorder`` and links the Nim
+        # ct_emulator into replay-server.  ``cargo build`` panics
+        # with ``expected sibling codetracer-native-recorder``
+        # without this clone.  codetracer-native-recorder has no
+        # .gitmodules, so pass submodules: 'false' to avoid the
+        # clone-repo action's unconditional ``sed -i ... .gitmodules``
+        # step (which fails with ``can't read .gitmodules``).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -301,6 +387,55 @@ jobs:
       - name: Install capnproto
         shell: pwsh
         run: choco install capnproto -y
+
+      - name: Install Nim toolchain
+        # codetracer_trace_writer_nim's build.rs invokes ``nimble
+        # install --depsOnly`` to resolve the .nimble requires before
+        # compiling the FFI sources.  nim-reader is in the default
+        # feature set of replay-server, so plain ``cargo build`` pulls
+        # in the writer_nim crate and that build script must find
+        # ``nimble`` on PATH.
+        #
+        # ``choco install`` modifies the system PATH but the change is
+        # not reflected in subsequent step shells, so explicitly emit
+        # the Nim + nimble bin dirs into GITHUB_PATH so later steps
+        # (Build db-backend etc.) can find them.
+        shell: pwsh
+        run: |
+          choco install nim -y
+          # nim installs to C:\tools\Nim\nim-X.Y.Z\bin and nimble's
+          # pkg dir lives at $HOME\.nimble\bin.  Resolve the actual nim
+          # bin via a wildcard so this keeps working across version
+          # bumps in the chocolatey package.
+          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
+          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+
+      - name: Remove WSL bash stub from System32
+        # db-backend's build.rs runs ``Command::new("bash") ...
+        # build_native_api.sh`` on Windows.  Rust's
+        # ``Command::new`` uses ``CreateProcessW``, whose documented
+        # lookup order checks ``C:\Windows\System32`` BEFORE PATH.
+        # On windows-latest that directory contains a WSL launcher
+        # stub (``bash.exe``) which aborts with ``Windows Subsystem
+        # for Linux has no installed distributions``.  Even after
+        # prepending Git Bash to PATH the WSL stub still wins.
+        #
+        # We don't need WSL on this runner -- removing the stub
+        # lets CreateProcessW fall through to Git for Windows'
+        # ``bash.exe`` (added to PATH below), which is what the
+        # build.rs comment ("Ensure Git for Windows bash is on
+        # PATH") actually wants.
+        shell: pwsh
+        run: |
+          $wslStub = "$env:SystemRoot\System32\bash.exe"
+          if (Test-Path $wslStub) {
+            takeown /f $wslStub | Out-Null
+            icacls $wslStub /grant "Administrators:(F)" | Out-Null
+            Remove-Item -Force $wslStub
+          }
+          # Add Git Bash bin dir so ``bash`` resolves to Git for Windows.
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
@@ -312,12 +447,44 @@ jobs:
       - name: Build db-backend
         working-directory: src/db-backend
         shell: bash
+        # The emulator's ``syscall_replay.nim`` imports
+        # ``stew/endians2`` but ``ct_emulator.nimble`` doesn't list
+        # ``stew`` as a dep, so on a fresh Windows runner Nim cannot
+        # resolve the module.  The Nix derivation sets
+        # ``CT_EMULATOR_EXTRA_NIM_PATHS`` to inject codetracer's
+        # vendored ``libs/nim-stew``; mirror that here so
+        # build_native_api.sh's ``--path:`` flags pick it up.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: cargo build
 
       - name: Test db-backend
         working-directory: src/db-backend
         shell: bash
-        run: cargo test
+        # build_native_api.sh has already produced the C files in
+        # the Build step above; this env var only matters when
+        # regeneration is required, but we leave it set so a stale
+        # cache doesn't trigger a re-run that then fails for the
+        # same path-resolution reason.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+        # The *_flow_*  tests under tests/ are end-to-end integration
+        # tests that drive sibling-language recorders through the DAP
+        # wire protocol; they need both the recorder binaries AND a
+        # matching language runtime (elixir/erlang/ruby/etc.) on the
+        # runner image.  windows-latest has none of those installed --
+        # the Cross-Repo Integration Tests workflow exercises the same
+        # code paths on a Linux self-hosted runner with the recorders
+        # + runtimes available.  Mirror the skip pattern used by the
+        # db-backend Nix derivation in nix/packages/default.nix.
+        run: |
+          cargo test -- \
+            --skip ruby_flow_integration \
+            --skip bash_flow_integration \
+            --skip zsh_flow_integration \
+            --skip javascript_flow_integration \
+            --skip e2e_codetracer_elixir \
+            --skip e2e_codetracer_erlang
 
       - name: Build backend-manager
         working-directory: src/backend-manager
@@ -332,6 +499,11 @@ jobs:
       - name: Clippy db-backend
         working-directory: src/db-backend
         shell: bash
+        # Same rationale as Build db-backend above: keep the path
+        # variable set so any cached-state-invalidation triggers
+        # a regeneration with stew on the import path.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Clippy backend-manager
@@ -385,13 +557,62 @@ jobs:
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
       - name: Clone codetracer-native-recorder
+        # codetracer-native-recorder has no .gitmodules; pass
+        # submodules: 'false' so clone-repo's unconditional sed step
+        # doesn't fail with ``can't read .gitmodules``.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'true'
+          submodules: 'false'
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format sibling
+        # Required by src/db-backend/Cargo.toml's path deps; see
+        # windows-rust-components for the longer rationale.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-trace-format-nim ref
+        id: resolve-trace-format-nim-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # Required by codetracer_trace_writer_nim's build.rs; see
+        # windows-rust-components for the longer rationale.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
 
       - name: Bootstrap Windows dev environment
         shell: pwsh
@@ -442,6 +663,12 @@ jobs:
       - name: Build db-backend
         working-directory: src/db-backend
         shell: bash
+        # Same CT_EMULATOR_EXTRA_NIM_PATHS rationale as the
+        # windows-rust-components job above; without it
+        # build_native_api.sh fails on a fresh runner with
+        # ``cannot open file: stew/endians2``.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: cargo build --release
 
       - name: Build backend-manager
@@ -526,11 +753,99 @@ jobs:
   lint-rust:
     runs-on: [self-hosted, nixos]
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format sibling
+        # src/db-backend/Cargo.toml has path deps like
+        # ``../../../codetracer-trace-format/codetracer_ctfs``.  Without
+        # the sibling clone ``cargo clippy`` aborts during workspace
+        # resolution with ``failed to get codetracer_ctfs ... No such
+        # file or directory``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-trace-format-nim ref
+        id: resolve-trace-format-nim-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # codetracer_trace_writer_nim's build.rs (lives in
+        # codetracer-trace-format) reads the Nim FFI entry point at
+        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``.
+        # nim-reader is on by default in src/db-backend/Cargo.toml, so
+        # ``cargo build`` invokes that build script -- it panics
+        # without the sibling.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-native-recorder ref
+        id: resolve-mcr-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder sibling
+        # src/db-backend/build.rs canonicalizes
+        # ``../../../codetracer-native-recorder`` to locate Nim
+        # ct_emulator sources; without the clone, ``cargo clippy``
+        # panics with ``expected sibling codetracer-native-recorder``.
+        # codetracer-native-recorder has no .gitmodules, so pass
+        # submodules: 'false' to avoid clone-repo's unconditional sed.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -540,6 +855,34 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # src/db-backend/build.rs invokes ``direnv exec <recorder-root>
+        # bash ct_emulator/build_native_api.sh`` to materialise the
+        # generated C sources before the Rust build.  A fresh clone has
+        # its .envrc in the "blocked" state, so direnv refuses to run
+        # and the build script panics with ``build_native_api.sh exited
+        # with status exit status: 1``.  ``direnv allow`` is idempotent
+        # and only persists in the local direnv state dir on this
+        # self-hosted runner.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # build_native_api.sh runs ``nim c ... ct_emulator.nim``
+        # whose .nimble declares ``requires "results"``.  A fresh
+        # nim install has no global ``results`` package, so the
+        # script aborts with ``cannot open file: results``.  Run
+        # ``nimble install --depsOnly`` once in ct_emulator (inside
+        # the recorder's direnv env so nim/nimble resolve from the
+        # recorder's flake) -- idempotent, mirrors what
+        # codetracer_trace_writer_nim's build.rs does in the trace-
+        # format crate.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh"
 
@@ -667,11 +1010,24 @@ jobs:
       - lint-rust
 
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup isonim siblings
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -958,11 +1314,28 @@ jobs:
       - lint-rust
 
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup isonim siblings
+        # appimage-build runs nim *outside* the Nix sandbox via
+        # ``./ci/build/appimage.sh``; clone the isonim siblings next
+        # to the codetracer checkout so codetracer's ``nim.cfg``
+        # ``path:"../isonim/src"`` directives resolve.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1159,11 +1532,28 @@ jobs:
       - lint-nix
       - lint-rust
     steps:
+      - name: Generate CI token
+        if: matrix.platform == 'nixos'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
           token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup isonim siblings (nixos)
+        # ``just test`` -> ``test-nimsuggest`` needs the codetracer
+        # source to build, which pulls in ``../isonim/src`` siblings.
+        if: matrix.platform == 'nixos'
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       # --- NixOS setup ---
       - name: Install Nix
@@ -1239,11 +1629,40 @@ jobs:
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format into libs/
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/libs/codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
 
       # --- NixOS setup ---
       - name: Install Nix
@@ -1275,8 +1694,243 @@ jobs:
         if: matrix.platform == 'macos'
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup isonim siblings (macOS)
+        if: matrix.platform == 'macos'
+        # codetracer's nim.cfg ``--path:``s into ``../isonim/src`` and
+        # five other isonim sibling repos.  Without them the
+        # frontend build aborts with ``cannot open file:
+        # isonim/core/async_compat``.  Reuse the composite action
+        # the Linux jobs already use.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Stage codetracer-trace-format as a sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``src/db-backend/Cargo.toml`` has path deps like
+        # ``../../../codetracer-trace-format/codetracer_ctfs`` -- they
+        # resolve to ``$workspace/../codetracer-trace-format``.  The
+        # earlier ``Clone codetracer-trace-format into libs/`` step
+        # gives us only the in-repo copy used by the nix flake
+        # override.  Symlink it next to the checkout so cargo finds
+        # the path dependency at the expected location.
+        shell: bash
+        run: |
+          set -euo pipefail
+          ln -snf "${{ github.workspace }}/libs/codetracer-trace-format" \
+            "${{ github.workspace }}/../codetracer-trace-format"
+
+      - name: Resolve codetracer-trace-format-nim ref (macOS)
+        if: matrix.platform == 'macos'
+        id: resolve-trace-format-nim-ref-macos
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format-nim sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``codetracer_trace_writer_nim``'s ``build.rs`` (inside
+        # codetracer-trace-format) reads
+        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``
+        # at cargo build time.  Without this clone the macOS non-nix
+        # build aborts with ``Nim FFI entry point not found``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: ${{ steps.resolve-trace-format-nim-ref-macos.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-native-recorder ref (macOS)
+        if: matrix.platform == 'macos'
+        id: resolve-native-recorder-ref-macos
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``src/db-backend/build.rs`` canonicalises
+        # ``../../../codetracer-native-recorder`` (i.e. the workspace
+        # sibling) at compile time.  Without this clone cargo aborts
+        # with ``expected sibling codetracer-native-recorder repo``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-native-recorder-ref-macos.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-visual-replay ref (macOS)
+        if: matrix.platform == 'macos'
+        id: resolve-visual-replay-ref-macos
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-visual-replay ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-visual-replay sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``ct_cli`` (codetracer-native-recorder) pulls
+        # ``gfx_stream/ctfs_visual`` from codetracer-visual-replay/src
+        # at compile time; without this clone ``just build-ct-mcr``
+        # aborts with ``cannot open file: gfx_stream/ctfs_visual``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-visual-replay
+          ref: ${{ steps.resolve-visual-replay-ref-macos.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-visual-replay
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Resolve codetracer-native-backend ref (macOS)
+        if: matrix.platform == 'macos'
+        id: resolve-native-backend-ref-macos
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-backend ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-backend sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``just build-ct-mcr`` -> ``build-license-ffi`` cds into
+        # ``../codetracer-native-backend`` and runs ``cargo build``
+        # for ``libct_license_ffi``.  Without this clone the recipe
+        # aborts with ``could not find Cargo.toml`` at line 110 of
+        # the recorder's Justfile.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.resolve-native-backend-ref-macos.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix (macOS, for ct_cli build)
+        # See comment block below for why we don't use the shared
+        # ``setup-nix`` composite on macos-latest.
+        # The macOS Playwright suite includes visual-replay specs
+        # (``visual-replay-real-recording.spec.ts``,
+        # ``visual-recording-book-screenshots.spec.ts``) that
+        # ``requireExecutable(ct_cli)`` at module-load time.  Build
+        # ct_cli through the sibling's ``just`` target under
+        # ``direnv exec`` -- the pattern documented in
+        # metacraft-dev-guidelines/policies/ci-workflow-standards.md
+        # "Building artifacts from sibling repos".  That target's
+        # ``.envrc`` does ``use flake``, so we need a working Nix
+        # install on the runner first.
+        #
+        # We bypass the shared ``setup-nix`` composite because it
+        # pins ``cachix/install-nix-action@v27`` which on
+        # ``macos-latest`` (arm64) trips
+        # ``eDSRecordAlreadyExists`` while creating the
+        # ``_nixbld1`` build user -- the GitHub-hosted Apple Silicon
+        # image carries leftover Nix state from its base snapshot
+        # that the older installer can't recover from.
+        # DeterminateSystems/nix-installer-action is the
+        # recommended workaround on that runner image; cachix on
+        # nixos / darwin self-hosted runners stays on v27 because
+        # those don't trip the same state issue.
+        if: matrix.platform == 'macos'
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            access-tokens = github.com=${{ steps.app-token.outputs.token }}
+            substituters = https://cache.nixos.org ${{ vars.SUBSTITUTERS }}
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.TRUSTED_PUBLIC_KEYS }}
+
+      - name: Configure Cachix (macOS)
+        if: matrix.platform == 'macos'
+        # The DeterminateSystems installer doesn't auto-configure
+        # Cachix substituters/auth.  Without this, ``scripts/build-
+        # siblings.sh`` re-evaluates each sibling's flake from
+        # source which (a) prints ``HTTP error 401`` against
+        # metacraft-labs-codetracer.cachix.org and (b) makes the
+        # cold ct-mcr build ~45 min instead of ~10 min.
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+
+      - name: Build ct-mcr via codetracer-native-recorder nix develop (macOS)
+        if: matrix.platform == 'macos'
+        # The macOS Playwright suite needs ct_cli/ct_cli built from
+        # the codetracer-native-recorder sibling.  Use the recorder's
+        # own ``nix develop`` shell + its ``just build-ct-mcr`` target
+        # so the recipe is single-sourced in the sibling's Justfile
+        # (canonical pattern from
+        # metacraft-dev-guidelines/policies/ci-workflow-standards.md
+        # "Building artifacts from sibling repos").
+        #
+        # We bypass scripts/build-siblings.sh because that script
+        # assumes direnv-allow state and a parent codetracer dev shell
+        # that supplies nim/nimble.  On macos-latest none of those
+        # preconditions hold yet -- ``nix develop`` invokes the recorder's
+        # flake directly and supplies the same Nim/Rust/LLDB toolchain
+        # the recipe expects, without the direnv allow state plumbing.
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-native-recorder"
+          # Allow cargo to use git's credential helper so cloning the
+          # private ``lldb-sys.rs`` dependency picks up the App-token
+          # we set via ``GIT_CREDENTIALS`` below.
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
+          nix develop --no-write-lock-file --command just build-ct-mcr
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
+        # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
+        # at ``$ROOT_DIR/../codetracer-trace-format`` (the dev-machine
+        # workspace-sibling layout).  In CI we already clone it into
+        # ``libs/codetracer-trace-format``; point TRACE_FORMAT_DIR there
+        # instead of duplicating the clone.
+        #
+        # The codetracer_trace_writer_nim build.rs also defaults to
+        # running ``nimble install --depsOnly`` to pull stew + results;
+        # ``install_nim_osx.sh`` only bootstraps Nim itself (no nimble
+        # binary), so SKIP that step and provide the deps via
+        # CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS instead.  Same pair
+        # of stew paths the Nix derivation uses (``stew/`` first so
+        # ``import results`` resolves to stew's results.nim, then the
+        # parent so ``import stew/...`` also resolves).
+        # db-backend's build.rs wraps build_native_api.sh in
+        # ``direnv exec`` on POSIX so the recorder's Nim/Nimble env
+        # loads onto PATH.  macos-latest doesn't ship direnv and
+        # we already have nim on PATH from install_nim_osx.sh, so
+        # tell build.rs to skip the direnv wrapper.
+        env:
+          TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
         run: ./non-nix-build/build.sh
 
       - name: Clone python-recorder (macOS)
@@ -1307,11 +1961,40 @@ jobs:
     runs-on: [self-hosted, nixos]
     timeout-minutes: 120
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve codetracer-trace-format ref
+        id: resolve-trace-format-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format into libs/
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+          path: ${{ github.workspace }}/libs/codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -1371,6 +2054,11 @@ jobs:
 
       - name: Resolve codetracer-visual-replay ref
         id: visual-replay-ref
+        # The self-hosted ``nixos`` runner's bash-interactive shell
+        # starts with a minimal PATH that doesn't include ``awk`` /
+        # ``cut`` from coreutils, so the previous ``awk`` parse failed
+        # with ``awk: command not found`` (exit 127).  Use pure bash
+        # parameter expansion instead -- no external tools required.
         shell: bash
         run: |
           set -euo pipefail
@@ -1379,7 +2067,13 @@ jobs:
             echo "Missing $PINS" >&2
             exit 1
           fi
-          REF="$(awk '$1 == "codetracer-visual-replay" { print $2; exit }' "$PINS")"
+          REF=""
+          while IFS=$' \t' read -r name sha _rest; do
+            if [[ "$name" == "codetracer-visual-replay" ]]; then
+              REF="$sha"
+              break
+            fi
+          done < "$PINS"
           if [[ -z "$REF" ]]; then
             echo "Missing codetracer-visual-replay pin in $PINS" >&2
             exit 1
@@ -1396,6 +2090,8 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Restore codetracer-visual-replay sibling pins
+        # Same awk-not-on-PATH constraint as Resolve codetracer-visual-replay
+        # ref above; replace awk with a pure-bash ``while read`` loop.
         shell: bash
         env:
           TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
@@ -1407,19 +2103,38 @@ jobs:
             exit 1
           fi
 
+          # Collect pin names into a bash array so we can check
+          # ``required`` entries without shelling out to awk/grep.
+          declare -A PIN_NAMES
+          while IFS=$' \t' read -r name _sha _branch; do
+            [[ -z "$name" ]] && continue
+            PIN_NAMES["$name"]=1
+          done < "$PINS"
+
           for required in \
             codetracer-native-backend \
             codetracer-native-recorder \
             codetracer-native-test-programs \
             codetracer-visual-replay-fixtures; do
-            if ! awk -v repo="$required" '$1 == repo { found = 1 } END { exit found ? 0 : 1 }' "$PINS"; then
+            if [[ -z "${PIN_NAMES[$required]:-}" ]]; then
               echo "Missing required visual replay sibling pin: $required" >&2
               exit 1
             fi
           done
 
-          while IFS=' ' read -r name sha branch; do
+          while IFS=$' \t' read -r name sha branch; do
             [[ -z "$name" ]] && continue
+            # Skip ``codetracer`` itself — visual-replay's sibling-pins
+            # lists codetracer as a sibling because VR depends on it,
+            # but here we ARE codetracer, and ``<workspace>/../codetracer``
+            # resolves to the very workspace we're running in.  Cloning
+            # over it fails with ``could not create work tree dir ...:
+            # File exists`` after the ``rm -rf`` no-ops on a non-empty
+            # active directory.
+            if [[ "$name" == "codetracer" ]]; then
+              echo "Skipping self-pin: codetracer"
+              continue
+            fi
             dest="${{ github.workspace }}/../${name}"
             echo "Restoring ${name}@${sha}"
             rm -rf "$dest"
@@ -1442,6 +2157,35 @@ jobs:
         run: |
           nix develop .#devShells.x86_64-linux.default --command just test-visual-replay-gate
 
+      - name: Stage sibling artifacts into workspace
+        # actions/upload-artifact@v5 forbids paths containing ``..``
+        # and absolute paths outside the workspace, so the previous
+        # config aborted with ``Invalid pattern '../codetracer-visual-replay/...':
+        # Relative pathing '.' and '..' is not allowed``.  Copy any
+        # sibling and /tmp artifacts into a workspace staging dir so
+        # the upload step can reference them via workspace-relative
+        # globs.
+        if: failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          STAGE="visual-replay-regression-staging"
+          mkdir -p "${STAGE}/sibling/tests/output" \
+                   "${STAGE}/sibling/bench-results" \
+                   "${STAGE}/tmp"
+          if [ -d ../codetracer-visual-replay/tests/output ]; then
+            cp -a ../codetracer-visual-replay/tests/output/. \
+                  "${STAGE}/sibling/tests/output/" 2>/dev/null || true
+          fi
+          if [ -d ../codetracer-visual-replay/bench-results ]; then
+            cp -a ../codetracer-visual-replay/bench-results/. \
+                  "${STAGE}/sibling/bench-results/" 2>/dev/null || true
+          fi
+          shopt -s nullglob
+          for f in /tmp/*_diff.rgba /tmp/*_sw.rgba /tmp/*_hw.rgba; do
+            cp -a "$f" "${STAGE}/tmp/" 2>/dev/null || true
+          done
+
       - name: Upload visual replay artifacts
         if: failure()
         uses: actions/upload-artifact@v5
@@ -1453,11 +2197,7 @@ jobs:
             src/tests/gui/test-stats/
             storybook/storybook-static/
             storybook/dist/
-            ../codetracer-visual-replay/tests/output/
-            ../codetracer-visual-replay/bench-results/
-            /tmp/*_diff.rgba
-            /tmp/*_sw.rgba
-            /tmp/*_hw.rgba
+            visual-replay-regression-staging/
           retention-days: 14
           if-no-files-found: ignore
 

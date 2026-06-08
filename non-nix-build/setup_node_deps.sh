@@ -16,6 +16,19 @@ pushd "$ROOT_DIR"/node-packages
 echo y | npx yarn
 npx yarn add electron
 
+# yarn-plugin-nixify (loaded via .yarnrc.yml) suppresses
+# electron's postinstall so the binary download is brokered
+# through Nix.  On non-Nix runners (macOS-latest) that leaves
+# ``node_modules/electron/dist`` empty and the later
+# build_mac_app.sh ``cp ... Electron.app/Contents/Info.plist``
+# step aborts.  Run the postinstall script directly so the
+# prebuilt Electron app is materialised regardless of plugin
+# state.
+if [ -f "node_modules/electron/install.js" ]; then
+	echo "non-nix-build: forcing electron postinstall (install.js)"
+	(cd node_modules/electron && node install.js)
+fi
+
 pushd "$ROOT_DIR"
 node_modules/.bin/webpack
 

@@ -35,8 +35,22 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Fetch noir over git+https (cloning the repo) instead of GitHub's
+    # tarball API.  cache.metacraft-labs.com had a stale .narinfo for
+    # the GitHub-tarball form of metacraft-labs/noir@334c1ee9 with a
+    # different NAR hash than what the current upstream tarball
+    # actually produces; every job that re-evaluated the flake on a
+    # runner that hit that cached entry failed with
+    #
+    #   NAR hash mismatch in input 'github:metacraft-labs/noir/334c1ee9...':
+    #   expected 'sha256-gkp/0/sMp0...' but got 'sha256-sfBJqzD3...'.
+    #
+    # Switching the URL scheme bypasses the cached GitHub-tarball
+    # narinfo entirely; ``git+https`` content-addresses the repository
+    # snapshot from the actual ``git`` history rather than GitHub's
+    # archive endpoint.
     noir = {
-      url = "github:metacraft-labs/noir?ref=codetracer-temp";
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer-temp&rev=334c1ee9f7899e1275fbc7d7a8cffbb08bb1d3e2";
       inputs.nixpkgs.follows = "nixpkgs";
       flake = true;
     };
@@ -122,6 +136,22 @@
       flake = false;
     };
 
+    # Non-flake inputs: needed by ``src/db-backend/build.rs`` and
+    # ``codetracer_trace_writer_nim``'s build.rs to materialise
+    # generated C / Nim FFI sources before the Rust crate links.  The
+    # build script canonicalises ``../../../codetracer-native-recorder``
+    # and ``../codetracer-trace-format-nim`` -- inside the Nix sandbox
+    # we have to seed those paths from these flake inputs.  ``.envrc``
+    # overrides each with a local checkout when present.
+    codetracer-native-recorder = {
+      url = "github:metacraft-labs/codetracer-native-recorder/main";
+      flake = false;
+    };
+    codetracer-trace-format-nim = {
+      url = "github:metacraft-labs/codetracer-trace-format-nim/main";
+      flake = false;
+    };
+
     # Non-flake input: the metacraft-labs/langserver fork (a.k.a. nim-langserver),
     # branch `codetracer`.  Carries patches on top of upstream nim-lang/langserver
     # that the CodeTracer GUI depends on — currently `nim/traceExpandMacro`
@@ -133,6 +163,42 @@
     # to consume a local sibling checkout during development.
     nim-langserver = {
       url = "github:metacraft-labs/langserver?ref=codetracer";
+      flake = false;
+    };
+
+    # Non-flake inputs: the IsoNim view-layer used by the GUI, plus its
+    # support libraries.  ``nim.cfg`` carries
+    # ``path:"../isonim/src"`` / ``isonim-tui`` / ``isonim-gpui`` /
+    # ``nim-everywhere`` / ``nim-termctl`` / ``nim-pty`` so local dev
+    # shells pick up sibling checkouts; in CI / fresh ``nix build``
+    # invocations we need deterministic sources for these to resolve
+    # ``import isonim/web/web_renderer``, ``import nim_everywhere/platform``
+    # etc. when building ``ui.js`` and the other Nim derivations.
+    #
+    # ``.envrc`` can override each with
+    # ``--override-input isonim path:../isonim`` for local development.
+    isonim = {
+      url = "github:metacraft-labs/isonim/dev";
+      flake = false;
+    };
+    isonim-tui = {
+      url = "github:metacraft-labs/isonim-tui/dev";
+      flake = false;
+    };
+    isonim-gpui = {
+      url = "github:metacraft-labs/isonim-gpui/dev";
+      flake = false;
+    };
+    nim-everywhere = {
+      url = "github:metacraft-labs/nim-everywhere/dev";
+      flake = false;
+    };
+    nim-termctl = {
+      url = "github:metacraft-labs/nim-termctl/dev";
+      flake = false;
+    };
+    nim-pty = {
+      url = "github:metacraft-labs/nim-pty/dev";
       flake = false;
     };
 

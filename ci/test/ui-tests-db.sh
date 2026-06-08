@@ -15,23 +15,29 @@ PLATFORM="${CODETRACER_CI_PLATFORM:-nixos}"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 case "$PLATFORM" in
-  nixos)
-    export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/result/bin/ct}"
-    export CODETRACER_DB_TESTS_ONLY=1
-    exec nix develop .#devShells.x86_64-linux.default --command just test-gui
-    ;;
-  macos)
-    export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct}"
-    export CODETRACER_DB_TESTS_ONLY=1
-    # shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT
-    source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
-    cd "$REPO_ROOT/tsc-ui-tests"
-    npm install --no-audit --no-fund
-    npx playwright install
-    npx playwright test --workers=1
-    ;;
-  *)
-    echo "ERROR: unknown CODETRACER_CI_PLATFORM: $PLATFORM" >&2
-    exit 1
-    ;;
+nixos)
+	export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/result/bin/ct}"
+	export CODETRACER_DB_TESTS_ONLY=1
+	exec nix develop .#devShells.x86_64-linux.default --command just test-gui
+	;;
+macos)
+	export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct}"
+	export CODETRACER_DB_TESTS_ONLY=1
+	# shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT
+	source "$REPO_ROOT/scripts/detect-siblings.sh" "$REPO_ROOT"
+	# The Playwright test suite lives in ``src/tests/gui`` (it kept
+	# the historical ``tsc-ui-tests`` *package name* -- see
+	# ``package.json`` -- but the directory was moved into the
+	# source tree).  ``$REPO_ROOT/tsc-ui-tests`` no longer exists,
+	# so the previous ``cd`` aborted the macOS job before any
+	# tests ran.
+	cd "$REPO_ROOT/src/tests/gui"
+	npm install --no-audit --no-fund
+	npx playwright install
+	npx playwright test --workers=1
+	;;
+*)
+	echo "ERROR: unknown CODETRACER_CI_PLATFORM: $PLATFORM" >&2
+	exit 1
+	;;
 esac
