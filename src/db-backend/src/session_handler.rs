@@ -158,7 +158,7 @@ impl SessionHandler {
         }
         let mut traces: Vec<LoadedTrace> = Vec::with_capacity(handlers.len());
         let mut by_recording_id: HashMap<RecordingId, TraceSlot> = HashMap::new();
-        for (slot, (entry, handler)) in manifest.traces.iter().zip(handlers.into_iter()).enumerate() {
+        for (slot, (entry, handler)) in manifest.traces.iter().zip(handlers).enumerate() {
             // Slot fits in TraceSlot because of the MAX_TRACES check.
             let slot = slot as TraceSlot;
             by_recording_id.insert(entry.recording_id.clone(), slot);
