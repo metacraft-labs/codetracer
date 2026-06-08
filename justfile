@@ -1547,3 +1547,91 @@ developer-setup *flags:
 # The results will be placed in test-results/readme-animations-review/
 capture-readme-animations-review:
   bash scripts/docs/capture-readme-animations.sh
+
+# ─── cross-repo sibling builds ──────────────────────────────────────────────
+# Per metacraft-dev-guidelines/policies/cross-repo-builds.md: consumer
+# recipes invoke ensure-* prerequisites which build sibling artefacts on
+# demand via the sibling's own ``just`` target. Three-way fallback —
+# reprobuild → direnv → DIY — keeps Nix/Windows/cached environments on
+# the same code path. ``CT_<NAME>_SIBLING`` env vars are set by
+# codetracer/.envrc (Nix) or metacraft/env.ps1 (Windows DIY).
+
+# Build ct-mcr (= ct_cli.exe on Windows) from the sibling
+# codetracer-native-recorder checkout.
+ensure-ct-mcr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${CT_CODETRACER_NATIVE_RECORDER_SIBLING:-}" ]; then
+        echo "SKIP: codetracer-native-recorder sibling not detected (set CT_CODETRACER_NATIVE_RECORDER_SIBLING or check it out at \$METACRAFT_ROOT/codetracer-native-recorder)" >&2
+        exit 0
+    fi
+    sibling="$CT_CODETRACER_NATIVE_RECORDER_SIBLING"
+    if command -v repro >/dev/null 2>&1; then
+        repro build --cwd "$sibling" ct-mcr
+    elif [ "${OS:-}" = "Windows_NT" ]; then
+        # Windows DIY: no Nix dev shell, invoke the sibling's
+        # Windows-specific build target directly. env.ps1 has already
+        # populated nim + MSVC into the current shell, so the sibling's
+        # nimble/MSBuild calls can run in-place. Check this branch
+        # BEFORE direnv: direnv on Windows DIY would try to enter the
+        # sibling's Nix dev shell, which isn't viable.
+        cd "$sibling" && just build-ct-mcr-windows
+    elif command -v direnv >/dev/null 2>&1 && [ -f "$sibling/.envrc" ]; then
+        direnv allow "$sibling"
+        direnv exec "$sibling" just -f "$sibling/Justfile" build-ct-mcr
+    else
+        cd "$sibling" && just build-ct-mcr
+    fi
+
+# Build ct-native-replay from the sibling codetracer-native-backend
+# checkout. The sibling's Justfile uses ``build`` (cargo build) as its
+# canonical recipe and does not yet expose a dedicated
+# ``build-ct-native-replay`` target; the recipe below follows the
+# policy's three-way fallback shape so the wiring stays consistent and
+# will pick up a future ``build-ct-native-replay`` target without
+# consumer-side changes.
+ensure-ct-native-replay:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${CT_CODETRACER_NATIVE_BACKEND_SIBLING:-}" ]; then
+        echo "SKIP: codetracer-native-backend sibling not detected (set CT_CODETRACER_NATIVE_BACKEND_SIBLING or check it out at \$METACRAFT_ROOT/codetracer-native-backend)" >&2
+        exit 0
+    fi
+    sibling="$CT_CODETRACER_NATIVE_BACKEND_SIBLING"
+    # Helper to invoke the sibling's policy-canonical target when
+    # available and fall back to ``cargo build --bin ct-native-replay``
+    # otherwise. The sibling repo currently exposes ``just build``
+    # (cargo build) rather than a dedicated ``build-ct-native-replay``
+    # recipe; the fallback lets the consumer stay stable until that
+    # target lands.
+    _diy_build() {
+        cd "$sibling"
+        if just --list 2>/dev/null | grep -qE '^\s*build-ct-native-replay\b'; then
+            just build-ct-native-replay
+        else
+            cargo build --bin ct-native-replay
+        fi
+    }
+    if command -v repro >/dev/null 2>&1; then
+        repro build --cwd "$sibling" ct-native-replay
+    elif [ "${OS:-}" = "Windows_NT" ]; then
+        # Windows DIY: short-circuit before direnv (see ensure-ct-mcr
+        # for rationale). cargo must be on PATH (rustup-init or
+        # equivalent) for this branch to succeed; env.ps1 does NOT
+        # provision rust today. The recipe still wires correctly; a
+        # missing cargo surfaces a clear "command not found" rather
+        # than a silent skip.
+        _diy_build
+    elif command -v direnv >/dev/null 2>&1 && [ -f "$sibling/.envrc" ]; then
+        direnv allow "$sibling"
+        direnv exec "$sibling" just -f "$sibling/Justfile" build-ct-native-replay
+    else
+        _diy_build
+    fi
+
+# Run the DAP-flow integration tests (Ada / C++ / D / Fortran / Go /
+# Pascal) under ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``.
+# These tests SKIP when ct-mcr / ct-native-replay are not on PATH; the
+# ensure-* prerequisites build the sibling binaries first.
+test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
+    cd src/db-backend && cargo test --test '*_mcr_streaming_flow_test'
