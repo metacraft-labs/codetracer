@@ -373,7 +373,10 @@ impl FlowTestRunner {
     }
 
     /// Run to the configured breakpoint and verify locals via CodeTracer's DAP variables extension.
-    pub fn run_and_verify_dap_variables(&mut self, config: &FlowTestConfig) -> Result<(), BoxError> {
+    pub fn run_and_verify_dap_variables(
+        &mut self,
+        config: &FlowTestConfig,
+    ) -> Result<(), BoxError> {
         self.client
             .set_breakpoints(&config.source_file, &[config.breakpoint_line])?;
 
@@ -396,7 +399,9 @@ impl FlowTestRunner {
             };
             let value = local.get("value").cloned().unwrap_or(Value::Null);
             values.insert(name.to_string(), value.clone());
-            values.entry(normalize_dap_source_name(name)).or_insert(value);
+            values
+                .entry(normalize_dap_source_name(name))
+                .or_insert(value);
         }
 
         for expected in &config.expected_variables {
@@ -416,8 +421,8 @@ impl FlowTestRunner {
             let actual_int = FlowData::extract_int_value(actual)
                 .or_else(|| parse_dap_int(&actual.to_string()))
                 .ok_or_else(|| {
-                format!("DAP variable {name:?} value {actual:?} was not an integer")
-            })?;
+                    format!("DAP variable {name:?} value {actual:?} was not an integer")
+                })?;
             if actual_int != *expected {
                 return Err(format!(
                     "DAP variable {name:?} value mismatch: expected {expected}, got {actual_int} ({actual:?})"
