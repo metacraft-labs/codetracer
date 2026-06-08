@@ -1688,6 +1688,8 @@ jobs:
           submodules: 'false'
 
       - name: Install Nix (macOS, for ct_cli build)
+        # See comment block below for why we don't use the shared
+        # ``setup-nix`` composite on macos-latest.
         # The macOS Playwright suite includes visual-replay specs
         # (``visual-replay-real-recording.spec.ts``,
         # ``visual-recording-book-screenshots.spec.ts``) that
@@ -1717,6 +1719,20 @@ jobs:
             access-tokens = github.com=${{ steps.app-token.outputs.token }}
             substituters = https://cache.nixos.org ${{ vars.SUBSTITUTERS }}
             trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.TRUSTED_PUBLIC_KEYS }}
+
+      - name: Configure Cachix (macOS)
+        if: matrix.platform == 'macos'
+        # The DeterminateSystems installer doesn't auto-configure
+        # Cachix substituters/auth.  Without this, ``scripts/build-
+        # siblings.sh`` re-evaluates each sibling's flake from
+        # source which (a) prints ``HTTP error 401`` against
+        # metacraft-labs-codetracer.cachix.org and (b) makes the
+        # cold ct-mcr build ~45 min instead of ~10 min.
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
 
       - name: Build sibling artefacts via scripts/build-siblings.sh (macOS)
         if: matrix.platform == 'macos'
@@ -1754,7 +1770,13 @@ jobs:
           # bashInteractive: macOS-latest ships /bin/bash 3.2 which
           # doesn't support ``declare -A`` (associative arrays the
           # script uses).
-          nix shell nixpkgs#direnv nixpkgs#bashInteractive -c bash scripts/build-siblings.sh
+          # BUILD_SIBLINGS_VERBOSE=1 streams each sibling's build
+          # output to stderr instead of swallowing it into per-repo
+          # log files we'd have to upload as artefacts; on CI the
+          # extra noise is worth the immediate diagnosability.
+          BUILD_SIBLINGS_VERBOSE=1 \
+            nix shell nixpkgs#direnv nixpkgs#bashInteractive -c \
+              bash scripts/build-siblings.sh
 
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
