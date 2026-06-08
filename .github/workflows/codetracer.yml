@@ -1632,6 +1632,33 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
+      - name: Resolve codetracer-native-recorder ref (macOS)
+        if: matrix.platform == 'macos'
+        id: resolve-native-recorder-ref-macos
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-recorder sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``src/db-backend/build.rs`` canonicalises
+        # ``../../../codetracer-native-recorder`` (i.e. the workspace
+        # sibling) at compile time.  Without this clone cargo aborts
+        # with ``expected sibling codetracer-native-recorder repo``.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.resolve-native-recorder-ref-macos.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
         # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
