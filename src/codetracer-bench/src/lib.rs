@@ -89,7 +89,28 @@ impl Language {
         vec![Language::Python, Language::CPlusPlus]
     }
 
-    /// Full matrix: the 10 languages the wider fixture set spans.
+    /// Full matrix: the 8 languages with a working recorder binary
+    /// in the sibling ecosystem.
+    ///
+    /// Nim + Go fixtures live in `fixtures/omniscient-db-size/{nim,go}/`
+    /// for parity with the campaign spec's 10-language goal but are
+    /// excluded from `all()` because the recorder binaries the
+    /// fixtures' `regenerate.sh` scripts call (`codetracer-nim`,
+    /// `codetracer-go-recorder`) don't ship in the current
+    /// recorder ecosystem:
+    ///
+    ///   * `codetracer-nim` is a patched Nim compiler with
+    ///     `--sourcemap:on` (see
+    ///     `codetracer-specs/Nim-Compiler-Patches.md`); recording a
+    ///     Nim program needs a separate compile-then-record flow
+    ///     (compile with `nim --sourcemap:on`, record the binary
+    ///     with `ct-mcr`) the bench harness doesn't yet model.
+    ///   * `codetracer-go-recorder` has no sibling repo at all.
+    ///
+    /// Operators that want to extend the matrix can pass the
+    /// language explicitly via `--languages=nim,go` once the
+    /// integration story for those recorders ships; the FromStr
+    /// arm + fixtures are kept ready for that path.
     pub fn all() -> Vec<Language> {
         vec![
             Language::Python,
@@ -98,8 +119,6 @@ impl Language {
             Language::JavaScript,
             Language::C,
             Language::Rust,
-            Language::Nim,
-            Language::Go,
             Language::Cairo,
             Language::Solana,
         ]
@@ -170,16 +189,32 @@ impl LanguageProbe {
         // exports RUBY_RECORDER_ROOT. The binary check is the
         // load-bearing gate; the env var hint surfaces in the sentinel
         // when the binary is missing so the operator knows why.
+        // Additionally check that the Rust-backed native_tracer .so is
+        // built (the pure-Ruby fallback produces a legacy trace format
+        // the omniscient-prep step doesn't accept).
         if language == Language::Ruby {
             if which("codetracer-ruby-recorder").is_some() {
-                if which("ruby").is_some() {
-                    return Ok(());
+                if which("ruby").is_none() {
+                    return Err(
+                        "ruby not on PATH (run from `nix develop` shell so the ruby \
+                         toolchain is available)"
+                            .to_string(),
+                    );
                 }
-                return Err(
-                    "ruby not on PATH (run from `nix develop` shell so the ruby \
-                     toolchain is available)"
-                        .to_string(),
-                );
+                if let Some(root) = std::env::var_os("RUBY_RECORDER_ROOT") {
+                    let so = PathBuf::from(&root)
+                        .join("gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.so");
+                    if !so.is_file() {
+                        return Err(format!(
+                            "codetracer_ruby_recorder.so native extension not built at \
+                             {} (the pure-Ruby fallback ships a legacy trace format \
+                             omniscient-prep rejects; run `just build-extension` in \
+                             codetracer-ruby-recorder)",
+                            so.display()
+                        ));
+                    }
+                }
+                return Ok(());
             }
             let hint = match std::env::var_os("RUBY_RECORDER_ROOT") {
                 Some(p) => format!(
@@ -196,15 +231,33 @@ impl LanguageProbe {
         // JavaScript: sibling-detection prepends the node workspace's
         // `node_modules/.bin/` to PATH so the `codetracer-js-recorder`
         // shim resolves. Also need `node` on PATH for the JS recorder
-        // to execute.
+        // to execute, plus the Rust-backed napi addon (`.node` file).
         if language == Language::JavaScript {
-            if which("codetracer-js-recorder").is_some() {
-                if which("node").is_some() {
-                    return Ok(());
+            if let Some(shim) = which("codetracer-js-recorder") {
+                if which("node").is_none() {
+                    return Err(
+                        "node not on PATH (the JS recorder shells out to node; run from \
+                         `nix develop` shell)"
+                            .to_string(),
+                    );
+                }
+                // The shim lives under
+                // codetracer-js-recorder/packages/cli/.../bin/.
+                // The napi addon lives at
+                // codetracer-js-recorder/crates/recorder_native/index.node.
+                // Walk up from the shim path to find the workspace root.
+                let mut walk: Option<&Path> = Some(&shim);
+                while let Some(p) = walk {
+                    let candidate = p.join("crates").join("recorder_native").join("index.node");
+                    if candidate.is_file() {
+                        return Ok(());
+                    }
+                    walk = p.parent();
                 }
                 return Err(
-                    "node not on PATH (the JS recorder shells out to node; run from \
-                     `nix develop` shell)"
+                    "codetracer-js-recorder/crates/recorder_native/index.node not built \
+                     (run `just build-native` in codetracer-js-recorder; the JS recorder \
+                     needs the napi addon to instrument programs)"
                         .to_string(),
                 );
             }
@@ -212,6 +265,51 @@ impl LanguageProbe {
                 "codetracer-js-recorder not on PATH (run `npm install` in the sibling \
                  codetracer-js-recorder repo, then `nix develop` or `source \
                  scripts/detect-siblings.sh`)"
+                    .to_string(),
+            );
+        }
+        // Cairo: needs CAIRO_CORELIB_DIR set + the recorder binary on
+        // PATH. The corelib is the Cairo language's stdlib distributed
+        // separately from the recorder (operators clone the Cairo
+        // source repo and set CAIRO_CORELIB_DIR).
+        if language == Language::Cairo {
+            if which("codetracer-cairo-recorder").is_none() {
+                return Err("codetracer-cairo-recorder not on PATH (build via `cd \
+                     codetracer-cairo-recorder && nix develop --command cargo build \
+                     --release`)"
+                    .to_string());
+            }
+            let corelib = std::env::var_os("CAIRO_CORELIB_DIR")
+                .map(PathBuf::from)
+                .filter(|p| p.is_dir());
+            if corelib.is_none() {
+                return Err(
+                    "CAIRO_CORELIB_DIR not set or directory missing (the cairo recorder \
+                     compiles .cairo source via the Cairo Sierra/CASM pipeline which \
+                     requires the Cairo stdlib `corelib`; clone github.com/starkware-libs/cairo \
+                     and set CAIRO_CORELIB_DIR to its `corelib/src` directory)"
+                        .to_string(),
+                );
+            }
+            return Ok(());
+        }
+        // Solana: needs a compiled .so ELF (produced by `cargo-build-sbf`)
+        // as input, not a Rust source file. The bench fixture ships a
+        // `main.rs`, so the recorder cannot run against it directly.
+        // Surface a precise sentinel until the fixture is updated to
+        // ship a precompiled .so or the bench wires a cargo-build-sbf
+        // compile step.
+        if language == Language::Solana {
+            if which("codetracer-solana-recorder").is_none() {
+                return Err("codetracer-solana-recorder not on PATH (build via `cd \
+                     codetracer-solana-recorder && nix develop --command cargo build \
+                     --release`)"
+                    .to_string());
+            }
+            return Err(
+                "codetracer-solana-recorder consumes a compiled .so ELF (produced by \
+                 `cargo-build-sbf`), not a Rust source file; the bench fixture's main.rs \
+                 needs an SBF-targeted compile step that the harness doesn't yet model"
                     .to_string(),
             );
         }
@@ -719,10 +817,14 @@ impl FixtureRecorder {
         let recorder = std::env::var_os("CODETRACER_JS_RECORDER")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("codetracer-js-recorder"));
+        // codetracer-js-recorder requires the `record` subcommand and
+        // `-o` for the trace output dir; the program path is a
+        // positional argument (no `--` separator — the parser treats
+        // anything after `--` as a "file required" error).
         let output = Command::new(&recorder)
-            .arg("--out-dir")
+            .arg("record")
+            .arg("-o")
             .arg(trace_dir)
-            .arg("--")
             .arg(program_path)
             .output()
             .map_err(|e| {

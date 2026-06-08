@@ -107,8 +107,35 @@ _ct_detect_summary() {
 
 # --- codetracer-native-backend (formerly codetracer-rr-backend) ---
 # Prepends to PATH so `ct` finds ct-native-replay via the same PATH search as end users.
+#
+# The binary's build-time RPATH points at the production Nix derivation
+# output dir (`codetracer-native-recorder/outputs/out/lib`) which only
+# exists when the recorder ships through a `nix build`.  In a dev-shell
+# `cargo build`, that dir is empty and the dynamic loader can't find
+# liblldb / libstdc++, so `ct-native-replay --help` aborts with
+# `error while loading shared libraries`.  Patch the RPATH on first
+# detection so subsequent invocations through PATH (including from
+# language-recorder bench harnesses) work without LD_LIBRARY_PATH
+# wrangling.  Idempotent: skips when patchelf is missing or the binary
+# already points at a valid liblldb / libstdc++.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" ]; then
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug:$PATH"
+	if command -v patchelf >/dev/null 2>&1 && command -v ldd >/dev/null 2>&1; then
+		if ldd "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" 2>/dev/null | grep -qE "liblldb.*not found|libstdc\+\+.*not found"; then
+			_ct_lldb_dir=""
+			if command -v nix >/dev/null 2>&1; then
+				_ct_lldb_dir="$(nix build --no-link --print-out-paths nixpkgs#lldb 2>/dev/null)/lib"
+			fi
+			_ct_stdcpp_dir=""
+			if command -v g++ >/dev/null 2>&1; then
+				_ct_stdcpp_dir="$(g++ -print-file-name=libstdc++.so 2>/dev/null | xargs -r dirname || true)"
+			fi
+			if [ -n "$_ct_lldb_dir" ] && [ -d "$_ct_lldb_dir" ] && [ -n "$_ct_stdcpp_dir" ] && [ -d "$_ct_stdcpp_dir" ]; then
+				patchelf --set-rpath "$_ct_lldb_dir:$_ct_stdcpp_dir" "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" 2>/dev/null || true
+			fi
+			unset _ct_lldb_dir _ct_stdcpp_dir
+		fi
+	fi
 	_ct_detect_summary "codetracer-native-backend (ct-native-replay available)"
 elif [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug:$PATH"
