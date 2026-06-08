@@ -1750,8 +1750,11 @@ jobs:
           done
           # build-siblings.sh wants ``direnv`` on PATH but doesn't run
           # inside a Nix shell of its own, so route the invocation
-          # through ``nix shell`` to add direnv to PATH.
-          nix shell nixpkgs#direnv -c bash scripts/build-siblings.sh
+          # through ``nix shell`` to add direnv to PATH.  Also pull in
+          # bashInteractive: macOS-latest ships /bin/bash 3.2 which
+          # doesn't support ``declare -A`` (associative arrays the
+          # script uses).
+          nix shell nixpkgs#direnv nixpkgs#bashInteractive -c bash scripts/build-siblings.sh
 
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
