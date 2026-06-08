@@ -1906,6 +1906,20 @@ jobs:
           git config --global --add url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
           nix develop --no-write-lock-file --command just build-ct-mcr
 
+      - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
+        if: matrix.platform == 'macos'
+        # The Playwright suite's visual-replay specs
+        # ``requireExecutable(ct_gfx_player)`` at module-load time.
+        # ``codetracer-visual-replay``'s ``just build`` target wraps
+        # ``nimble build`` and emits ct_gfx_player + ct-native-replay
+        # at the repo root, which is where
+        # ``src/tests/gui/lib/real-visual-trace.ts`` expects them.
+        # Same direct ``nix develop --command`` pattern as ct-mcr.
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-visual-replay"
+          nix develop --no-write-lock-file --command just build
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
         # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
