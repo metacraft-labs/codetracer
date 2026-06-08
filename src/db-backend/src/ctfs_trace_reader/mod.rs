@@ -2154,10 +2154,22 @@ mod tests {
                         "{{\"benchmark\":\"new_format_startup\",\"startup_ms\":{}}}",
                         elapsed.as_millis()
                     );
+                    // Default dev-machine SLA is 200ms.  Shared CI runners
+                    // (especially GitHub-hosted windows-latest) are 2-3x
+                    // slower than a developer workstation, so let CI
+                    // override the threshold via env var instead of
+                    // flaking on the dev-machine value.  No env var ->
+                    // legacy 200ms enforcement is unchanged.
+                    let threshold_ms: u128 = std::env::var("CT_BENCH_STARTUP_MS_THRESHOLD")
+                        .ok()
+                        .and_then(|raw| raw.parse().ok())
+                        .filter(|&v: &u128| v > 0)
+                        .unwrap_or(200);
                     assert!(
-                        elapsed.as_millis() < 200,
-                        "new-format startup took too long: {}ms (threshold: 200ms)",
-                        elapsed.as_millis()
+                        elapsed.as_millis() < threshold_ms,
+                        "new-format startup took too long: {}ms (threshold: {}ms)",
+                        elapsed.as_millis(),
+                        threshold_ms
                     );
                 }
                 Err(e) => {

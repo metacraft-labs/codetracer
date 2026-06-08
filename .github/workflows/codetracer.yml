@@ -470,6 +470,13 @@ jobs:
         # same path-resolution reason.
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # ``ctfs_trace_reader::tests::bench_new_format_startup_time``
+          # asserts new-format trace startup is under 200ms.  That
+          # number is calibrated for a developer workstation; GitHub-
+          # hosted ``windows-latest`` is consistently 2-3x slower
+          # (we've observed 322ms cleanly).  Let CI assert against a
+          # roomier threshold without weakening the dev-machine SLA.
+          CT_BENCH_STARTUP_MS_THRESHOLD: "1000"
         # The *_flow_*  tests under tests/ are end-to-end integration
         # tests that drive sibling-language recorders through the DAP
         # wire protocol; they need both the recorder binaries AND a
