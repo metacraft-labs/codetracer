@@ -251,6 +251,14 @@ pub enum Language {
     Elixir,
     /// Erlang/BEAM: recorded by codetracer-beam-recorder
     Erlang,
+    /// D: native, built via `ldc2` by ct-native-replay, recorded by MCR.
+    D,
+    /// Fortran: native, built via `gfortran` by ct-native-replay, recorded by MCR.
+    Fortran,
+    /// Pascal: native, built via `fpc` by ct-native-replay, recorded by MCR.
+    Pascal,
+    /// Ada: native, built via `gnatmake` by ct-native-replay, recorded by MCR.
+    Ada,
 }
 
 impl Language {
@@ -284,6 +292,10 @@ impl Language {
             Language::Cadence => "cdc",
             Language::Elixir => "ex",
             Language::Erlang => "erl",
+            Language::D => "d",
+            Language::Fortran => "f90",
+            Language::Pascal => "pas",
+            Language::Ada => "adb",
         }
     }
 
