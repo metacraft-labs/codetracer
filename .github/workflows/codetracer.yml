@@ -1589,6 +1589,21 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      - name: Stage codetracer-trace-format as a sibling (macOS)
+        if: matrix.platform == 'macos'
+        # ``src/db-backend/Cargo.toml`` has path deps like
+        # ``../../../codetracer-trace-format/codetracer_ctfs`` -- they
+        # resolve to ``$workspace/../codetracer-trace-format``.  The
+        # earlier ``Clone codetracer-trace-format into libs/`` step
+        # gives us only the in-repo copy used by the nix flake
+        # override.  Symlink it next to the checkout so cargo finds
+        # the path dependency at the expected location.
+        shell: bash
+        run: |
+          set -euo pipefail
+          ln -snf "${{ github.workspace }}/libs/codetracer-trace-format" \
+            "${{ github.workspace }}/../codetracer-trace-format"
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
         # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
