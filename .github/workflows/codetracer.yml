@@ -1675,11 +1675,17 @@ jobs:
         # of stew paths the Nix derivation uses (``stew/`` first so
         # ``import results`` resolves to stew's results.nim, then the
         # parent so ``import stew/...`` also resolves).
+        # db-backend's build.rs wraps build_native_api.sh in
+        # ``direnv exec`` on POSIX so the recorder's Nim/Nimble env
+        # loads onto PATH.  macos-latest doesn't ship direnv and
+        # we already have nim on PATH from install_nim_osx.sh, so
+        # tell build.rs to skip the direnv wrapper.
         env:
           TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
         run: ./non-nix-build/build.sh
 
       - name: Clone python-recorder (macOS)
