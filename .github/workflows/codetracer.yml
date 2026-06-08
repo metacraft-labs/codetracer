@@ -1839,6 +1839,33 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
+      - name: Clone codetracer-snapshot-codecs sibling (macOS)
+        if: matrix.platform == 'macos'
+        # codetracer-visual-replay's config.nims threads
+        # ``--path:../codetracer-snapshot-codecs/src`` into the Nim
+        # compile.  The build aborts with ``cannot open file:
+        # snapshot_codecs`` without this checkout.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-snapshot-codecs
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-snapshot-codecs
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-image-diff sibling (macOS)
+        if: matrix.platform == 'macos'
+        # Companion sibling to codetracer-snapshot-codecs threaded via
+        # the same ``config.nims`` --path; without it ST-M3 test
+        # imports break the visual-replay build.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-image-diff
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-image-diff
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
       - name: Install Nix (macOS, for ct_cli build)
         # See comment block below for why we don't use the shared
         # ``setup-nix`` composite on macos-latest.
