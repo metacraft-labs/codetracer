@@ -1639,8 +1639,20 @@ jobs:
         # workspace-sibling layout).  In CI we already clone it into
         # ``libs/codetracer-trace-format``; point TRACE_FORMAT_DIR there
         # instead of duplicating the clone.
+        #
+        # The codetracer_trace_writer_nim build.rs also defaults to
+        # running ``nimble install --depsOnly`` to pull stew + results;
+        # ``install_nim_osx.sh`` only bootstraps Nim itself (no nimble
+        # binary), so SKIP that step and provide the deps via
+        # CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS instead.  Same pair
+        # of stew paths the Nix derivation uses (``stew/`` first so
+        # ``import results`` resolves to stew's results.nim, then the
+        # parent so ``import stew/...`` also resolves).
         env:
           TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: ./non-nix-build/build.sh
 
       - name: Clone python-recorder (macOS)
