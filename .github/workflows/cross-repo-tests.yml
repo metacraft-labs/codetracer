@@ -9,7 +9,7 @@ on:
       - 'scripts/run-cross-repo-tests.sh'
       - '.github/workflows/cross-repo-tests.yml'
   push:
-    branches: [main]
+    branches: [main, dev, stable]
     paths:
       - 'src/db-backend/**'
       - '.github/rr-backend-pin.txt'
