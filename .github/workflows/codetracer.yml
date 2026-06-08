@@ -1718,22 +1718,35 @@ jobs:
             substituters = https://cache.nixos.org ${{ vars.SUBSTITUTERS }}
             trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.TRUSTED_PUBLIC_KEYS }}
 
-      - name: Build ct-mcr in sibling clone (macOS)
+      - name: Build sibling artefacts via scripts/build-siblings.sh (macOS)
         if: matrix.platform == 'macos'
-        # Canonical sibling-build pattern: direnv allow + direnv exec
-        # + the sibling's own ``just`` target so the recorder's
-        # flake-pinned Nim/Rust/LLDB toolchain is what materialises
-        # the binary, not whatever the host runner happens to have
-        # on PATH.  ``just build-ct-mcr`` produces ct_cli/ct_cli plus
-        # the libct_interpose / libct_license_ffi sidecars; the
-        # Playwright tests' module-load ``requireExecutable`` will
-        # find it once this step lands.
+        # Use the shared ``scripts/build-siblings.sh`` -- the same
+        # recipe ``just test-gui`` runs on Linux as a prerequisite to
+        # the Playwright suite.  It walks every cloned sibling, runs
+        # the sibling's own ``just`` / cargo target under
+        # ``direnv exec <sibling>`` (canonical pattern documented in
+        # metacraft-dev-guidelines/policies/ci-workflow-standards.md
+        # "Building artifacts from sibling repos"), and skips any
+        # repo not checked out under $workspace/..  We pre-allow
+        # direnv on each cloned sibling because ``direnv exec`` on
+        # a fresh clone refuses until ``.envrc`` is whitelisted.
         run: |
           set -euo pipefail
-          RECORDER_DIR="${{ github.workspace }}/../codetracer-native-recorder"
-          nix run nixpkgs#direnv -- allow "$RECORDER_DIR"
-          nix run nixpkgs#direnv -- exec "$RECORDER_DIR" \
-            just -f "$RECORDER_DIR/Justfile" build-ct-mcr
+          WS="${{ github.workspace }}/.."
+          for sibling in \
+            codetracer-native-recorder \
+            codetracer-native-backend \
+            codetracer-trace-format \
+            codetracer-trace-format-nim
+          do
+            if [ -d "$WS/$sibling" ]; then
+              nix run nixpkgs#direnv -- allow "$WS/$sibling"
+            fi
+          done
+          # build-siblings.sh wants ``direnv`` on PATH but doesn't run
+          # inside a Nix shell of its own, so route the invocation
+          # through ``nix shell`` to add direnv to PATH.
+          nix shell nixpkgs#direnv -c bash scripts/build-siblings.sh
 
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
