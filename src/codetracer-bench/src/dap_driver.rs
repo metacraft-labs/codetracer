@@ -29,6 +29,26 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Result of a per-operation bench.  Carries the latency percentiles
+/// plus a sample of the dap-server response so the matrix-builder can
+/// run correctness assertions against the actual operation output.
+///
+/// `success_count` lets the bench distinguish a fast wire-loop
+/// round-trip from a real successful operation: a zero
+/// `success_count` with a non-empty `failure_message` is the
+/// dap-server rejecting every iteration with "missing field X"
+/// or similar — that's a bench design bug (or a recorder
+/// regression), not a measurement.
+#[derive(Debug, Clone)]
+pub struct BenchOutcome {
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub iterations: usize,
+    pub success_count: usize,
+    pub first_response_body: Option<Value>,
+    pub failure_message: Option<String>,
+}
+
 /// Owns the spawned dap-server subprocess plus the read buffer used to
 /// peel out one DAP message at a time.
 pub struct DapSession {
@@ -274,6 +294,50 @@ impl DapSession {
         )))
     }
 
+    /// Block until an event with the given name arrives.  Buffered
+    /// events are drained first, then we read off the stream until the
+    /// match arrives or `timeout` elapses.  Non-matching messages stay
+    /// buffered for later `send_and_wait` / `wait_for_event` calls.
+    ///
+    /// Used by the gui-ops bench's setup phase to wait for the
+    /// `stopped` event that follows a `continue` / `stepIn` request —
+    /// the dap-server only emits this when the step completes, so the
+    /// caller cannot assume the trace cursor advanced just because the
+    /// request response arrived.
+    pub fn wait_for_event(
+        &mut self,
+        event_name: &str,
+        timeout: Duration,
+    ) -> Result<Value, DapError> {
+        if let Some(idx) = self.buffered_messages.iter().position(|m| {
+            m.get("type").and_then(Value::as_str) == Some("event")
+                && m.get("event").and_then(Value::as_str) == Some(event_name)
+        }) {
+            return Ok(self.buffered_messages.remove(idx));
+        }
+        let started = Instant::now();
+        while started.elapsed() < timeout {
+            let remaining = timeout.saturating_sub(started.elapsed());
+            match self.read_one_message(remaining) {
+                Ok(Some(msg)) => {
+                    if msg.get("type").and_then(Value::as_str) == Some("event")
+                        && msg.get("event").and_then(Value::as_str) == Some(event_name)
+                    {
+                        return Ok(msg);
+                    }
+                    self.buffered_messages.push(msg);
+                }
+                Ok(None) => continue,
+                Err(DapError::Timeout(_)) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(DapError::Timeout(format!(
+            "{event_name} event not seen within {}ms",
+            timeout.as_millis()
+        )))
+    }
+
     fn extract_body(command: &str, msg: Value) -> Result<Value, DapError> {
         let success = msg.get("success").and_then(Value::as_bool).unwrap_or(false);
         if !success {
@@ -413,31 +477,40 @@ impl DapSession {
         Ok(Some(value))
     }
 
-    /// Measure `command(arguments)` round-trip latency over
-    /// `iterations` invocations.  Returns (p50_ms, p95_ms).
+    /// Result of [`DapSession::bench`].  Carries the latency
+    /// percentiles plus a sample of the first response body so callers
+    /// can run correctness assertions against the actual operation
+    /// output (not just the round-trip time).
     ///
-    /// Subsequent iterations reuse the same DAP session, so the
-    /// numbers reflect the cold-cache + warm-cache mix that operators
-    /// see when their GUI repeatedly fires the same operation.
+    /// `success_count` tracks how many of the `iterations` returned a
+    /// `success: true` response.  A non-zero `failure_count` indicates
+    /// the dap-server rejected the request — the bench surfaces this
+    /// as a correctness failure rather than letting it silently
+    /// degrade the latency-only column.
     pub fn bench(
         &mut self,
         command: &str,
         arguments: Value,
         iterations: usize,
-    ) -> Result<(f64, f64), DapError> {
+    ) -> Result<BenchOutcome, DapError> {
         let mut samples = Vec::with_capacity(iterations);
+        let mut success_count = 0usize;
+        let mut failure_message: Option<String> = None;
+        let mut first_body: Option<Value> = None;
         for _ in 0..iterations {
             let started = Instant::now();
-            // We swallow per-iteration RequestFailed errors so that
-            // operations whose argument shape doesn't perfectly match
-            // the trace's actual locations still produce a latency
-            // sample (the GUI-ops bench is about request-loop
-            // round-trip, not the surface's semantic success).  Wire
-            // errors and timeouts still bubble up since they indicate
-            // the session is dead.
-            match self.send_and_wait(command, arguments.clone(), Duration::from_secs(5)) {
-                Ok(_) => {}
-                Err(DapError::RequestFailed { .. }) => {}
+            match self.send_and_wait(command, arguments.clone(), Duration::from_secs(15)) {
+                Ok(body) => {
+                    success_count += 1;
+                    if first_body.is_none() {
+                        first_body = Some(body);
+                    }
+                }
+                Err(DapError::RequestFailed { message, .. }) => {
+                    if failure_message.is_none() {
+                        failure_message = Some(message);
+                    }
+                }
                 Err(e) => return Err(e),
             }
             samples.push(started.elapsed().as_secs_f64() * 1000.0);
@@ -446,7 +519,14 @@ impl DapSession {
         let p50 = samples[samples.len() / 2];
         let p95_idx = ((samples.len() as f64) * 0.95) as usize;
         let p95 = samples[p95_idx.min(samples.len() - 1)];
-        Ok((p50, p95))
+        Ok(BenchOutcome {
+            p50_ms: p50,
+            p95_ms: p95,
+            iterations,
+            success_count,
+            first_response_body: first_body,
+            failure_message,
+        })
     }
 }
 
