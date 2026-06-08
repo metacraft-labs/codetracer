@@ -1734,49 +1734,32 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           skipPush: true
 
-      - name: Build sibling artefacts via scripts/build-siblings.sh (macOS)
+      - name: Build ct-mcr via codetracer-native-recorder nix develop (macOS)
         if: matrix.platform == 'macos'
-        # Use the shared ``scripts/build-siblings.sh`` -- the same
-        # recipe ``just test-gui`` runs on Linux as a prerequisite to
-        # the Playwright suite.  It walks every cloned sibling, runs
-        # the sibling's own ``just`` / cargo target under
-        # ``direnv exec <sibling>`` (canonical pattern documented in
+        # The macOS Playwright suite needs ct_cli/ct_cli built from
+        # the codetracer-native-recorder sibling.  Use the recorder's
+        # own ``nix develop`` shell + its ``just build-ct-mcr`` target
+        # so the recipe is single-sourced in the sibling's Justfile
+        # (canonical pattern from
         # metacraft-dev-guidelines/policies/ci-workflow-standards.md
-        # "Building artifacts from sibling repos"), and skips any
-        # repo not checked out under $workspace/..  We pre-allow
-        # direnv on each cloned sibling because ``direnv exec`` on
-        # a fresh clone refuses until ``.envrc`` is whitelisted.
+        # "Building artifacts from sibling repos").
+        #
+        # We bypass scripts/build-siblings.sh because that script
+        # assumes direnv-allow state and a parent codetracer dev shell
+        # that supplies nim/nimble.  On macos-latest none of those
+        # preconditions hold yet -- ``nix develop`` invokes the recorder's
+        # flake directly and supplies the same Nim/Rust/LLDB toolchain
+        # the recipe expects, without the direnv allow state plumbing.
         run: |
           set -euo pipefail
-          WS="${{ github.workspace }}/.."
-          # ``direnv allow`` errors out when the target has no .envrc
-          # (codetracer-trace-format-nim ships nothing direnv-shaped on
-          # purpose -- ``build-siblings.sh`` invokes its build via
-          # whatever direnv shell inherits from the parent).  Skip any
-          # sibling that's not direnv-managed.
-          for sibling in \
-            codetracer-native-recorder \
-            codetracer-native-backend \
-            codetracer-trace-format \
-            codetracer-trace-format-nim
-          do
-            if [ -f "$WS/$sibling/.envrc" ]; then
-              nix run nixpkgs#direnv -- allow "$WS/$sibling"
-            fi
-          done
-          # build-siblings.sh wants ``direnv`` on PATH but doesn't run
-          # inside a Nix shell of its own, so route the invocation
-          # through ``nix shell`` to add direnv to PATH.  Also pull in
-          # bashInteractive: macOS-latest ships /bin/bash 3.2 which
-          # doesn't support ``declare -A`` (associative arrays the
-          # script uses).
-          # BUILD_SIBLINGS_VERBOSE=1 streams each sibling's build
-          # output to stderr instead of swallowing it into per-repo
-          # log files we'd have to upload as artefacts; on CI the
-          # extra noise is worth the immediate diagnosability.
-          BUILD_SIBLINGS_VERBOSE=1 \
-            nix shell nixpkgs#direnv nixpkgs#bashInteractive -c \
-              bash scripts/build-siblings.sh
+          cd "${{ github.workspace }}/../codetracer-native-recorder"
+          # Allow cargo to use git's credential helper so cloning the
+          # private ``lldb-sys.rs`` dependency picks up the App-token
+          # we set via ``GIT_CREDENTIALS`` below.
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
+          nix develop --no-write-lock-file --command just build-ct-mcr
 
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
