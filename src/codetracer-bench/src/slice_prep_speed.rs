@@ -148,7 +148,16 @@ pub fn run(
                     let per = &per_slice_durations;
                     s.spawn(move |_| {
                         let started = Instant::now();
-                        let _ = OmniscientPrep::run(dir, "on");
+                        // Walk the slice dir for the recorder-produced
+                        // .ct file (different recorders nest it at
+                        // different depths — see omniscient_db_size.rs
+                        // find_ct_container for the rationale).  Pass
+                        // the .ct's parent dir as the slice-folder arg
+                        // to omniscient-prep.
+                        let prep_target = crate::omniscient_db_size::find_ct_container(dir)
+                            .and_then(|p| p.parent().map(|x| x.to_path_buf()))
+                            .unwrap_or_else(|| dir.clone());
+                        let _ = OmniscientPrep::run(&prep_target, "on");
                         per.lock().expect("mutex").push(started.elapsed());
                     });
                 }

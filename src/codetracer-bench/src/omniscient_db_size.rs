@@ -270,7 +270,7 @@ pub fn measure_fixture(
 /// path keeps it shallow, the JavaScript recorder nests it under
 /// `trace-<idx>/`), so the bench discovers the canonical path rather
 /// than hard-coding the layout.
-fn find_ct_container(trace_dir: &Path) -> Option<PathBuf> {
+pub fn find_ct_container(trace_dir: &Path) -> Option<PathBuf> {
     for entry in walkdir::WalkDir::new(trace_dir) {
         let entry = entry.ok()?;
         if entry.file_type().is_file()
