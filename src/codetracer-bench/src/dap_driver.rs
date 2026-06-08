@@ -206,7 +206,11 @@ impl DapSession {
 
         let started = Instant::now();
         while started.elapsed() < timeout {
-            match self.read_one_message(timeout - started.elapsed()) {
+            // `timeout - started.elapsed()` overflows when the loop
+            // condition was barely true and another thread preempted
+            // before the subtraction — saturate at zero instead.
+            let remaining = timeout.saturating_sub(started.elapsed());
+            match self.read_one_message(remaining) {
                 Ok(Some(msg)) => {
                     if msg.get("type").and_then(Value::as_str) == Some("response")
                         && msg.get("request_seq").and_then(Value::as_i64) == Some(seq)
@@ -319,7 +323,7 @@ impl DapSession {
             // which case we want to skip the poll and consume them
             // immediately.
             if self.stdout.buffer().is_empty() {
-                let remaining = timeout - started.elapsed();
+                let remaining = timeout.saturating_sub(started.elapsed());
                 let slice = remaining.min(Duration::from_millis(200));
                 if !poll_readable(fd, slice) {
                     if let Ok(Some(_)) = self.child.try_wait() {

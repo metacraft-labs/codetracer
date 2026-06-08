@@ -485,20 +485,17 @@ impl DapMeasurementDriver {
         Ok(trace_dir)
     }
 
-    /// Find the recorded `.ct` file inside `trace_dir` and return its
-    /// file name.  The Python recorder writes `<script_name>.ct`; we
-    /// pick the first `.ct` we see.
+    /// Locate the recorded `.ct` file under `trace_dir` (recursively)
+    /// and return its path *relative to `trace_dir`*.  Different
+    /// recorders place the `.ct` at different depths: Python /
+    /// Ruby / MCR-recorded / Cairo / Solana write
+    /// `<trace_dir>/<name>.ct`; the JavaScript recorder writes
+    /// `<trace_dir>/trace-<idx>/main.ct`.  We walk the dir to keep
+    /// the harness recorder-layout-agnostic.
     fn find_trace_file(trace_dir: &Path) -> Option<String> {
-        let entries = std::fs::read_dir(trace_dir).ok()?;
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if let Some(s) = name.to_str()
-                && s.ends_with(".ct")
-            {
-                return Some(s.to_string());
-            }
-        }
-        None
+        let abs = crate::omniscient_db_size::find_ct_container(trace_dir)?;
+        let rel = abs.strip_prefix(trace_dir).ok()?;
+        rel.to_str().map(|s| s.to_string())
     }
 
     /// Map an [`Operation`] to its DAP command name + an arguments
