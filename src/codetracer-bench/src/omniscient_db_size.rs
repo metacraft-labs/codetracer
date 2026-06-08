@@ -186,14 +186,29 @@ pub fn measure_fixture(
     LanguageProbe::probe(fixture.language).map_err(RecorderError::Unavailable)?;
     let trace_dir = temp_root.join(format!("{}-{}", fixture.language.wire(), fixture.name));
     FixtureRecorder::record(fixture.language, &fixture.source_path, &trace_dir)?;
-    // Run the omniscient-prep subprocess against the trace folder.
-    // The campaign's P2.4 deliverable explicitly says "call into
-    // codetracer-ci's `ct trace omniscient-prep` subprocess directly
-    // — no actual cluster". The subprocess is currently the M31 stub
-    // which writes `meta_dat/origin-config.toml`; the on-disk sizes
-    // we measure are dominated by the trace itself plus whatever the
-    // stub emits, which is the shape the campaign asked for.
-    OmniscientPrep::run(&trace_dir, "on")?;
+    // Run the omniscient-prep subprocess against the .ct CTFS container
+    // the recorder wrote.  Different recorders place the .ct file at
+    // different depths under their --out-dir: the Python / C++ /
+    // C / Rust / Nim / Go (MCR) / Cairo recorders write
+    // `<out-dir>/<name>.ct`; the JavaScript recorder writes
+    // `<out-dir>/trace-<idx>/main.ct`; future recorders may use yet
+    // another layout.  We resolve the canonical .ct path by walking
+    // the trace_dir and passing the actual file to replay-server so
+    // every layout works under the same omniscient-prep invocation.
+    let ct_path = find_ct_container(&trace_dir).ok_or_else(|| {
+        RecorderError::SubprocessFailed {
+            binary: "FixtureRecorder".to_string(),
+            exit: None,
+            stderr: format!(
+                "recorder did not produce a *.ct CTFS container anywhere under {} \
+                 — check that the recorder's native binary path (not the legacy \
+                 trace_metadata.json sidecar fallback) is in use",
+                trace_dir.display()
+            ),
+        }
+    })?;
+    let slice_folder = ct_path.parent().unwrap_or(&trace_dir);
+    OmniscientPrep::run(slice_folder, "on")?;
 
     let trace_raw = dir_size_bytes(&trace_dir).map_err(|e| RecorderError::Io(e.to_string()))?;
     let omniscient_dir = trace_dir.join("meta_dat");
@@ -231,6 +246,24 @@ pub fn measure_fixture(
         origin_meta_raw_bytes: origin_meta_raw,
         origin_meta_compressed_bytes: origin_meta_compressed,
     })
+}
+
+/// Walk `trace_dir` (recursively) looking for the first `*.ct` CTFS
+/// container the recorder produced.  Recorders place the .ct file at
+/// different depths under their `--out-dir` (the Python / C++ / MCR
+/// path keeps it shallow, the JavaScript recorder nests it under
+/// `trace-<idx>/`), so the bench discovers the canonical path rather
+/// than hard-coding the layout.
+fn find_ct_container(trace_dir: &Path) -> Option<PathBuf> {
+    for entry in walkdir::WalkDir::new(trace_dir) {
+        let entry = entry.ok()?;
+        if entry.file_type().is_file()
+            && entry.path().extension().is_some_and(|ext| ext == "ct")
+        {
+            return Some(entry.path().to_path_buf());
+        }
+    }
+    None
 }
 
 fn file_subset_size(dir: &Path, names: &[&str]) -> Result<u64, RecorderError> {

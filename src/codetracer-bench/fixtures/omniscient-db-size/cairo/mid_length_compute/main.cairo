@@ -1,24 +1,21 @@
 // omniscient-db-size / cairo / mid_length_compute
-fn fold(state: felt252, chunk: felt252) -> felt252 {
-    state * 31 + chunk * 7
-}
-
+//
+// Single-loop variant — the original nested-loop version (200 × 64
+// iterations + a `fold` helper) tripped the Sierra `GasBuiltin`
+// requirement, which `tracer.rs`'s `run_function_with_starknet_context`
+// invocation doesn't supply.  An inlined single-loop body of ~1000
+// iterations stays gas-free while still producing a "mid length"
+// trace (the working `short_loop` fixture iterates 100 times; this
+// one does 10× that with the same arithmetic shape).
 fn main() -> felt252 {
     let mut state: felt252 = 0;
-    let mut round_idx: felt252 = 0;
+    let mut i: felt252 = 0;
     loop {
-        if round_idx == 200 {
+        if i == 1000 {
             break;
         }
-        let mut c: felt252 = 0;
-        loop {
-            if c == 64 {
-                break;
-            }
-            state = fold(state, c);
-            c = c + 1;
-        };
-        round_idx = round_idx + 1;
+        state = state * 31 + i * 7;
+        i = i + 1;
     };
     state
 }

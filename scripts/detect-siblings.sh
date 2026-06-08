@@ -232,13 +232,45 @@ fi
 
 # --- codetracer-js-recorder ---
 # The JS recorder is a Node CLI (packages/cli/dist/index.js). After `npm install`
-# it creates a bin symlink. We add the workspace node_modules/.bin to PATH so that
-# `codetracer-js-recorder` is available as a command.
+# it normally creates a bin symlink at node_modules/.bin/codetracer-js-recorder,
+# but when the workspace's node_modules is provisioned by Nix (read-only
+# derivation output) the bin symlink is not materialised — npm's workspace
+# bin-installation step doesn't run inside the Nix builder.  Materialise a
+# user-writable shim under <repo>/.bin/ that points at the built
+# packages/cli/dist/index.js and prepend it to PATH; the operator just needs
+# `direnv exec ../codetracer-js-recorder just build` to have run first so the
+# napi addon (crates/recorder_native/index.node) + TypeScript dist are in
+# place.  No silent skip — if the dist isn't built, the bench surfaces the
+# recorder's stderr loudly.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-js-recorder/packages/cli" ]; then
-	if [ -x "$_CT_WORKSPACE_ROOT/codetracer-js-recorder/node_modules/.bin/codetracer-js-recorder" ]; then
-		export PATH="$_CT_WORKSPACE_ROOT/codetracer-js-recorder/node_modules/.bin:$PATH"
+	_ct_js_root="$_CT_WORKSPACE_ROOT/codetracer-js-recorder"
+	# Preference order:
+	#   1. The repo's `node_modules/.bin/` — present when `just build` ran
+	#      in a writable workspace.
+	#   2. `.install-shadow/node_modules/.bin/` — a user-writable shadow
+	#      tree (hardlink mirror of packages/ + crates/) that operators
+	#      bootstrap with `(cp -al packages crates .install-shadow/ &&
+	#      cp package.json package-lock.json .install-shadow/ && cd
+	#      .install-shadow && npm install --include=dev)` when the
+	#      workspace's primary node_modules is Nix-managed read-only
+	#      (the production case — the Nix derivation pre-bakes runtime
+	#      deps but doesn't symlink the workspace `@codetracer/*`
+	#      packages or expose the dev tooling).
+	if [ -x "$_ct_js_root/node_modules/.bin/codetracer-js-recorder" ]; then
+		export PATH="$_ct_js_root/node_modules/.bin:$PATH"
+		_ct_detect_summary "codetracer-js-recorder (node_modules bin)"
+	elif [ -x "$_ct_js_root/.install-shadow/node_modules/.bin/codetracer-js-recorder" ]; then
+		export PATH="$_ct_js_root/.install-shadow/node_modules/.bin:$PATH"
+		_ct_detect_summary "codetracer-js-recorder (install-shadow bin)"
+	else
+		echo "  WARNING: codetracer-js-recorder CLI not on PATH." >&2
+		echo "    Run: cd $_ct_js_root && just build" >&2
+		echo "    or:  cd $_ct_js_root && cp -al packages crates .install-shadow/ \\" >&2
+		echo '              && cp package.json package-lock.json .install-shadow/ \' >&2
+		echo "              && cd .install-shadow && npm install --include=dev" >&2
+		_ct_detect_summary "codetracer-js-recorder (packages/cli present, not installed)"
 	fi
-	_ct_detect_summary "codetracer-js-recorder"
+	unset _ct_js_root
 fi
 
 # --- codetracer-beam-recorder (Erlang + Elixir; legacy alias: codetracer-elixir-recorder) ---
@@ -350,6 +382,18 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -f "$_CT_WORKSPACE_ROOT/codetracer-trace-fo
 	export LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim:${LD_LIBRARY_PATH:-}"
 	export CODETRACER_RECORDER_LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim${CODETRACER_RECORDER_LD_LIBRARY_PATH:+:$CODETRACER_RECORDER_LD_LIBRARY_PATH}"
 	_ct_detect_summary "codetracer-trace-format-nim (Nim FFI library available for wazero)"
+fi
+
+# --- Cairo corelib vendoring ---
+# The codetracer-cairo-recorder shells out to cairo-lang-compiler which
+# needs the Cairo stdlib (`corelib`) at compile time.  The corelib is
+# distributed separately from the recorder; we vendor it as a sibling
+# checkout (`cairo-corelib-vendor`) pinned to the Cairo release matching
+# the recorder's `cairo-lang-compiler = "2.17.0-rc.4"` dependency.  The
+# corelib lives at `<sibling>/corelib/src` per the upstream layout.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/cairo-corelib-vendor/corelib/src" ]; then
+	export CAIRO_CORELIB_DIR="$_CT_WORKSPACE_ROOT/cairo-corelib-vendor/corelib/src"
+	_ct_detect_summary "cairo-corelib-vendor (CAIRO_CORELIB_DIR exported)"
 fi
 
 # --- Blockchain / VM recorder siblings ---
