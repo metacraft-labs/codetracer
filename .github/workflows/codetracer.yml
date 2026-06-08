@@ -1659,6 +1659,43 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
+      - name: Install Nix (macOS, for ct_cli build)
+        # The macOS Playwright suite includes visual-replay specs
+        # (``visual-replay-real-recording.spec.ts``,
+        # ``visual-recording-book-screenshots.spec.ts``) that
+        # ``requireExecutable(ct_cli)`` at module-load time.  Build
+        # ct_cli through the sibling's ``just`` target under
+        # ``direnv exec`` -- the pattern documented in
+        # metacraft-dev-guidelines/policies/ci-workflow-standards.md
+        # "Building artifacts from sibling repos".  That target's
+        # ``.envrc`` does ``use flake``, so we need a working Nix
+        # install on the runner first.
+        if: matrix.platform == 'macos'
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Build ct-mcr in sibling clone (macOS)
+        if: matrix.platform == 'macos'
+        # Canonical sibling-build pattern: direnv allow + direnv exec
+        # + the sibling's own ``just`` target so the recorder's
+        # flake-pinned Nim/Rust/LLDB toolchain is what materialises
+        # the binary, not whatever the host runner happens to have
+        # on PATH.  ``just build-ct-mcr`` produces ct_cli/ct_cli plus
+        # the libct_interpose / libct_license_ffi sidecars; the
+        # Playwright tests' module-load ``requireExecutable`` will
+        # find it once this step lands.
+        run: |
+          set -euo pipefail
+          RECORDER_DIR="${{ github.workspace }}/../codetracer-native-recorder"
+          nix run nixpkgs#direnv -- allow "$RECORDER_DIR"
+          nix run nixpkgs#direnv -- exec "$RECORDER_DIR" \
+            just -f "$RECORDER_DIR/Justfile" build-ct-mcr
+
       - name: Build CodeTracer (non-nix)
         if: matrix.platform == 'macos'
         # ``build_trace_writer_ffi.sh`` looks for codetracer-trace-format
