@@ -20,6 +20,7 @@
 use crate::dap_driver::{DapError, DapSession};
 use crate::{
     BenchReport, BenchRow, FixtureRecorder, Language, LanguageProbe, RecorderError, ct_binary,
+    which,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -366,6 +367,22 @@ pub fn build_matrix<D: MeasurementDriver>(
                             pending_reason: None,
                         }),
                         Err(reason) => {
+                            // CT_BENCH_DEBUG_PENDING surfaces the per-cell
+                            // sentinel on stderr so operators can diagnose
+                            // why a cell PENDed without parsing the JSON
+                            // report (the report writer collapses every
+                            // pending reason into the bare "PENDING" string
+                            // for matrix-table cleanliness).
+                            if std::env::var_os("CT_BENCH_DEBUG_PENDING").is_some() {
+                                eprintln!(
+                                    "[ct-bench] PENDING {}-{}-{}/{} → {}",
+                                    backend.wire(),
+                                    platform.wire(),
+                                    language.wire(),
+                                    op.wire(),
+                                    reason
+                                );
+                            }
                             matrix.push(GuiOpCell::pending(backend, platform, language, op, reason))
                         }
                     }
@@ -581,17 +598,53 @@ impl MeasurementDriver for DapMeasurementDriver {
         language: Language,
         operation: Operation,
     ) -> Result<OperationStats, String> {
-        // The campaign's ceiling: only the Materialized backend has
-        // its DAP stdio entry point in the current dev shell.  RR /
-        // MCR rows surface as PENDING with precise sentinels until
-        // the codetracer-rr-backend + codetracer-native-recorder ship
-        // their own dap-stdio adapters into the dev shell.
-        if backend != Backend::Materialized {
-            return Err(format!(
-                "dap-driver pending: {} backend has no headless dap-stdio adapter in dev shell",
-                backend.wire(),
-            ));
-        }
+        // Backend → recording-path mapping:
+        //
+        // * Materialized — the Python-class trace shape (per-step
+        //   state materialised inline).  Recorded by the language's
+        //   own recorder shim (codetracer-python-recorder,
+        //   codetracer-ruby-recorder, codetracer-js-recorder,
+        //   codetracer-cairo-recorder, codetracer-solana-recorder).
+        //   The dap-server reads the CTFS event stream directly; no
+        //   replay-worker subprocess is needed.
+        //
+        // * McrNoOmniscient / McrOmniscient — recorded by `ct-mcr`.
+        //   The dap-server spawns `ct-native-replay` as the replay
+        //   worker via the `ctRRWorkerExe` launch arg (see
+        //   `codetracer/src/db-backend/src/dap.rs` LaunchRequestArguments
+        //   and the existing *_mcr_streaming_flow_test.rs harnesses).
+        //   The bench's FixtureRecorder routes C/C++/Rust/Nim/Go
+        //   through `ct-mcr record` already.
+        //
+        // * Rr — would record via the codetracer-rr-backend's
+        //   classic-rr launcher; PEND because the dev shell doesn't
+        //   ship a one-shot ct-rr recording entry point.
+        //
+        // * Ttd — Windows-only per the campaign's platform ceiling.
+        let ct_rr_worker_exe = match backend {
+            Backend::Materialized => None,
+            Backend::McrNoOmniscient | Backend::McrOmniscient => {
+                let worker = which("ct-native-replay").ok_or_else(|| {
+                    "ct-native-replay not on PATH (required as the MCR replay-worker \
+                     binary; run `direnv exec ../codetracer-native-backend cargo build` \
+                     in the sibling)"
+                        .to_string()
+                })?;
+                Some(worker)
+            }
+            Backend::Rr => {
+                return Err(
+                    "dap-driver pending: RR backend has no one-shot record entry point \
+                     in the dev shell (the codetracer-rr-backend ships ct-rr-support as \
+                     a replay-worker only; first-record uses the classic-rr CLI which is \
+                     not yet wired into the bench harness)"
+                        .to_string(),
+                );
+            }
+            Backend::Ttd => {
+                return Err("ttd backend is Windows-only per the campaign ceiling".to_string());
+            }
+        };
         // Narrow probes — the recorder + the dap-server binary must
         // both be reachable for the cell to be measurable.
         LanguageProbe::probe(language)?;
@@ -623,7 +676,12 @@ impl MeasurementDriver for DapMeasurementDriver {
             )
         })?;
 
-        let mut session = DapSession::launch(&dap_binary, &trace_dir, &trace_file)
+        let mut session = DapSession::launch(
+            &dap_binary,
+            &trace_dir,
+            &trace_file,
+            ct_rr_worker_exe.as_deref(),
+        )
             .map_err(|e: DapError| format!("dap session launch failed: {e}"))?;
         let (p50, p95) = session
             .bench(dap_command, dap_args, self.iterations)

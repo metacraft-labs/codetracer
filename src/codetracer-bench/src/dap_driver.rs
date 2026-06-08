@@ -86,19 +86,44 @@ impl DapSession {
     ///
     /// `dap_binary` is typically the path returned by
     /// [`crate::ct_binary`]; `trace_folder` is the directory the
-    /// Python recorder wrote into; `trace_file` is the relative path
-    /// of the `.ct` artefact inside the folder.
+    /// recorder wrote into; `trace_file` is the relative path of the
+    /// `.ct` artefact inside the folder.
+    ///
+    /// `ct_rr_worker_exe` is required for MCR / RR traces — the
+    /// dap-server uses this binary to spawn the replay worker that
+    /// owns the recorded program's memory state.  Pass `None` for
+    /// Materialized-class traces (Python / Ruby / JavaScript) where
+    /// the db-backend reads the CTFS event stream directly without
+    /// a separate replay-worker process.
     pub fn launch(
         dap_binary: &Path,
         trace_folder: &Path,
         trace_file: &str,
+        ct_rr_worker_exe: Option<&Path>,
     ) -> Result<Self, DapError> {
+        // Capture dap-server stderr so launch failures surface
+        // visibly instead of being swallowed silently — the replay
+        // worker spawn under MCR traces emits diagnostic lines that
+        // are the only signal when a stopped event doesn't arrive.
+        let stderr_target = if std::env::var_os("CT_BENCH_DEBUG_PENDING").is_some() {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
         let mut child = Command::new(dap_binary)
             .arg("dap-server")
             .arg("--stdio")
+            // CODETRACER_IN_UI_TEST=1 bypasses the free-tier daily
+            // replay-quota gate the replay-worker enforces.  Matches
+            // `ensure_replay_license_bypass()` in
+            // codetracer/src/db-backend/tests/test_harness/mod.rs —
+            // without it the worker exits with
+            // `daily_replay_limit_reached` after a handful of
+            // recordings and the dap-server never emits `stopped`.
+            .env("CODETRACER_IN_UI_TEST", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(stderr_target)
             .spawn()
             .map_err(|e| DapError::Spawn(e.to_string()))?;
         let stdin = child
@@ -135,10 +160,21 @@ impl DapSession {
         //    NOTE: the on-the-wire field is `trace_file` (snake_case)
         //    not `traceFile` — that's the codetracer convention.
         let trace_folder_str = trace_folder.to_string_lossy().to_string();
-        let launch_args = json!({
+        let mut launch_args = json!({
             "traceFolder": trace_folder_str,
             "trace_file": trace_file,
         });
+        // MCR / RR traces require `ctRRWorkerExe` so the dap-server
+        // can spawn the replay-worker subprocess that owns the
+        // recorded program's memory state.  This matches the
+        // LaunchRequestArguments contract in
+        // `codetracer/src/db-backend/src/dap.rs` (the
+        // `#[serde(rename = "ctRRWorkerExe")]` field) and the
+        // existing `*_mcr_streaming_flow_test.rs` harnesses under
+        // `codetracer/src/db-backend/tests/`.
+        if let Some(worker) = ct_rr_worker_exe {
+            launch_args["ctRRWorkerExe"] = json!(worker.to_string_lossy().to_string());
+        }
         session.send_and_wait("launch", launch_args, Duration::from_secs(10))?;
 
         // 3. configurationDone — server forwards the cached launch
@@ -148,8 +184,15 @@ impl DapSession {
 
         // 4. Wait for the `stopped` event before returning so callers
         //    have a stable frame to query.
+        //
+        // Timeout budget matches `*_mcr_streaming_flow_test.rs` in
+        // codetracer/src/db-backend/tests/ — 60s covers the
+        // `ct-native-replay` worker-spawn time for MCR traces (which
+        // is slower than the in-process Materialized path) plus the
+        // M-RLP layout-snapshot decode that runs on first stop.
+        let stopped_timeout = Duration::from_secs(60);
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(15) {
+        while started.elapsed() < stopped_timeout {
             match session.read_one_message(Duration::from_millis(500)) {
                 Ok(Some(msg)) => {
                     if msg.get("type").and_then(Value::as_str) == Some("event")
@@ -168,9 +211,10 @@ impl DapSession {
                 Err(e) => return Err(e),
             }
         }
-        Err(DapError::Timeout(
-            "stopped event not seen within 15s of configurationDone".to_string(),
-        ))
+        Err(DapError::Timeout(format!(
+            "stopped event not seen within {}s of configurationDone",
+            stopped_timeout.as_secs()
+        )))
     }
 
     /// Send a request and block until the response with the matching
