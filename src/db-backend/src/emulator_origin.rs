@@ -434,14 +434,9 @@ fn parse_watch_extent_hint(variable_name: &str) -> Option<WatchExtent> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard, Once};
+    use std::sync::{MutexGuard, Once};
 
     static NIM_MAIN: Once = Once::new();
-    /// Mirror of the `emulator_ffi::tests::FFI_LOCK` mutex — see that
-    /// module's commentary. The two mutexes serialise different things
-    /// (FFI calls vs. high-level driver), so each integration test
-    /// reaches for its own lock.
-    static FFI_LOCK: Mutex<()> = Mutex::new(());
 
     fn ensure_nim() {
         NIM_MAIN.call_once(|| unsafe {
@@ -449,10 +444,19 @@ mod tests {
         });
     }
 
-    /// Acquire the FFI mutex and reset the Nim-side state.
+    /// Acquire the FFI mutex and reset the Nim-side state.  We share
+    /// the same mutex used by `emulator_ffi::tests` because both test
+    /// modules drive the same `mcrUndoMap*` / `mcrLastMileReverseStep*`
+    /// Nim-global state.  Two independent mutexes used to live here;
+    /// on the 32-core self-hosted nixos CI runner the two test modules
+    /// raced and `max_hops_zero_is_clamped_to_one` would panic because
+    /// a parallel `emulator_ffi` test concurrently mutated the undo
+    /// log between our reset and our query.
     fn reset_nim_state() -> MutexGuard<'static, ()> {
         ensure_nim();
-        let guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let guard = crate::emulator_ffi::undo_map_ffi_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         unsafe {
             crate::emulator_ffi::mcrUndoMapReset();
             crate::emulator_ffi::mcrLastMileReverseStepReset(0, 0, 0);

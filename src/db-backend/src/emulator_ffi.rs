@@ -502,19 +502,30 @@ pub const MCR_DATA_WATCH_SLOTS_EXHAUSTED: c_int = -2;
 /// M22 — sentinel for invalid arguments (size out of `1..=8`).
 pub const MCR_DATA_WATCH_INVALID_ARG: c_int = -1;
 
+/// All `mcr*` FFI symbols read/write Nim-global module-local state
+/// (`gOriginUndoLog`, `gLastMileReverseStep*`, `gInitialized`, etc.).
+/// Cargo runs tests in parallel by default, and every test module that
+/// touches the FFI -- this module, `emulator_origin`, anything else
+/// added later -- must serialise through the **same** mutex.  A
+/// per-module mutex still leaves race windows between modules: locally
+/// (low core counts, single test binary executor) the race is rarely
+/// observed; on the self-hosted nixos CI runner with ~32 cores it
+/// reliably corrupts the undo-map state and panics
+/// `max_hops_zero_is_clamped_to_one`.  Exposing the mutex as a crate
+/// item under `#[cfg(test)]` lets every test module import the one
+/// canonical lock.
+#[cfg(test)]
+pub(crate) fn undo_map_ffi_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, Once};
+    use std::sync::Once;
 
     static NIM_MAIN: Once = Once::new();
-    /// All `mcr*` FFI symbols read/write Nim-global module-local state.
-    /// Cargo runs tests in parallel by default, so without a single
-    /// shared lock the M17 tests race on `gOriginUndoLog` and the
-    /// existing F5c-1 smoke would race on `gInitialized`. The mutex
-    /// is global to every test in this module so the FFI surface
-    /// stays serially exclusive.
-    pub(crate) static FFI_LOCK: Mutex<()> = Mutex::new(());
 
     fn init_nim_runtime() {
         // SAFETY: NimMain is idempotent at the C level but our Once guard
@@ -530,7 +541,7 @@ mod tests {
     #[test]
     fn ffi_round_trip_returns_zero_before_init() {
         init_nim_runtime();
-        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = super::undo_map_ffi_lock().lock().unwrap_or_else(|p| p.into_inner());
         // SAFETY: mcrInit and the getters are safe to call against the
         // freshly-initialised Nim runtime; mcrInit resets gInitialized=false
         // so every getter must return 0.
@@ -549,7 +560,7 @@ mod tests {
     #[test]
     fn m17_coverage_is_zero_on_empty_undo_log() {
         init_nim_runtime();
-        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = super::undo_map_ffi_lock().lock().unwrap_or_else(|p| p.into_inner());
         // SAFETY: reset is idempotent and the coverage query is
         // side-effect-free apart from reading the module-local state
         // the reset just cleared.
@@ -565,7 +576,7 @@ mod tests {
     #[test]
     fn m17_tier_one_round_trip_finds_synthetic_write() {
         init_nim_runtime();
-        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = super::undo_map_ffi_lock().lock().unwrap_or_else(|p| p.into_inner());
         // SAFETY: every entry point is guarded by the module-local
         // state machine; the reset/push/query order matches the
         // documented contract.
@@ -608,7 +619,7 @@ mod tests {
     #[test]
     fn m17_tier_two_reverse_step_reports_sentinels() {
         init_nim_runtime();
-        let _guard = FFI_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = super::undo_map_ffi_lock().lock().unwrap_or_else(|p| p.into_inner());
         // SAFETY: per the module contract `mcrLastMileReverseStepReset`
         // is the only legal way to (re-)seed the cursor; subsequent
         // step calls are scalar and side-effect-bounded to the
