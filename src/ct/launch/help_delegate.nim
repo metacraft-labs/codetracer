@@ -149,6 +149,19 @@ func augmentSelfCommand(cmd: var RuntimeCommand) =
   of "check-license":
     if cmd.description.len == 0:
       cmd.description = "Check the current license status"
+  # P7.1 user-facing wrappers around recorder-internal tools.
+  # The launcher's help screen needs human descriptions for these
+  # so they don't show up as bare command names in the desktop
+  # ``ct --help`` rendering.
+  of "trace":
+    if cmd.description.len == 0:
+      cmd.description = "Post-process a recorded trace (extract-gfx, export)"
+  of "gfx-replay":
+    if cmd.description.len == 0:
+      cmd.description = "Replay an extracted graphics stream"
+  of "doctor":
+    if cmd.description.len == 0:
+      cmd.description = "Check recorder readiness (per-language probes)"
   else:
     discard
 

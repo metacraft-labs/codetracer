@@ -85,6 +85,7 @@ proc runWithRestart(
                              withDiff="",
                              storeTraceFolderForPid = -1,
                              upload=false,
+                             useInterpose=false,
                              program=program,
                              args=recordArgs[1..^1])
     if not recordedTrace.isNil:

@@ -28,6 +28,19 @@ type
     status,     ## Print run status
     cancel      ## Cancel a run
 
+  TraceCommand* {.pure.} = enum
+    ## Subcommands for ``ct trace``.
+    ##
+    ## Centralizes trace post-processing operations under a single
+    ## verb. Each sub-subcommand forwards to the internal recorder
+    ## binary that actually implements it (today this is ``ct-mcr``
+    ## for MCR-format traces). Users should only ever invoke ``ct
+    ## trace ...``; the direct ``ct-mcr`` calls are an implementation
+    ## detail. See P7.1 of the Performance + E2E Coverage campaign.
+    noCommand,
+    `extract-gfx`, ## Extract a recorded graphics stream
+    `export`       ## Export a trace (e.g. ``--portable`` for upload-ready containers)
+
   StartupCommand* {.pure.} = enum
     noCommand,
     replay,
@@ -78,6 +91,14 @@ type
 
     `trace-metadata`, # TODO .hidden?
     start_backend,
+
+    # P7.1: user-facing wrappers around recorder-internal tools.
+    # The book sweep replaces direct ``ct-mcr`` / ``ct_gfx_player``
+    # invocations with ``ct``-level subcommands so the documentation
+    # only ever references the user-facing CLI. See P7.1 spec.
+    trace,         ## ct trace <sub> — graphics extraction / portable export
+    `gfx-replay`,  ## ct gfx-replay — forwards to ``ct_gfx_player``
+    doctor,        ## ct doctor [<lang>] — recorder readiness probe
 
     # M7 (CodeTracer Launcher campaign): help delegate subcommands.
     # These power the `help-delegate` protocol from the launcher
@@ -627,6 +648,20 @@ type
           "processing it"
       .}: bool
 
+      # P7.1: visual recording flag. When set, the recorder
+      # captures graphics API activity in addition to the native
+      # execution trace. Only supported by the MCR backend; the
+      # ``record`` dispatcher rejects this flag for non-MCR
+      # backends with a precise error message. The book references
+      # ``ct record --use-interpose`` so users never have to call
+      # ``ct-mcr record --use-interpose`` directly.
+      recordUseInterpose* {.
+        name: "use-interpose",
+        defaultValue: false,
+        desc: "Record graphics API calls for " &
+          "visual replay (MCR backend only)."
+      .}: bool
+
       recordProgram* {.
         argument
         desc: "Program to record"
@@ -1168,6 +1203,89 @@ type
       socketPath* {.
         name: "socket-path",
       .}: Option[string]
+
+    # P7.1 ``ct trace`` subcommand parent. Mirrors the ``ct ci``
+    # multi-level pattern so each post-processing operation gets
+    # its own help block and argument schema.
+    of StartupCommand.trace:
+      case traceCommand* {.
+        command,
+        defaultValue: TraceCommand.noCommand
+      .}: TraceCommand
+      of TraceCommand.noCommand:
+        discard
+      of TraceCommand.`extract-gfx`:
+        traceExtractGfxOutputDir* {.
+          name: "output-dir",
+          abbr: "o",
+          desc: "Directory to extract the " &
+            "graphics stream into. Required."
+        .}: string
+        traceExtractGfxPath* {.
+          argument,
+          desc: "Path to the .ct trace " &
+            "container to extract."
+        .}: string
+      of TraceCommand.`export`:
+        traceExportPortable* {.
+          name: "portable",
+          defaultValue: false,
+          desc: "Produce a portable export " &
+            "with embedded binaries and " &
+            "debug symbols."
+        .}: bool
+        traceExportOutput* {.
+          name: "output",
+          abbr: "o",
+          desc: "Output path for the exported " &
+            "trace (required)."
+        .}: string
+        traceExportPath* {.
+          argument,
+          desc: "Path to the source trace to " &
+            "export."
+        .}: string
+
+    # P7.1 ``ct gfx-replay`` forwards to ``ct_gfx_player``.  The
+    # binary is resolved via ``CODETRACER_CT_GFX_PLAYER_CMD`` and
+    # falls back to a sibling-of-ct lookup + PATH.
+    of `gfx-replay`:
+      gfxReplayGfxStream* {.
+        name: "gfx-stream",
+        desc: "Path to the extracted " &
+          "graphics-stream directory " &
+          "(required)."
+      .}: string
+      gfxReplayHttp* {.
+        name: "http",
+        defaultValue: false,
+        desc: "Start the player as an HTTP " &
+          "server (used by the GUI)."
+      .}: bool
+      gfxReplayPort* {.
+        name: "port",
+        desc: "Port for the HTTP player " &
+          "(only meaningful with --http)."
+      .}: Option[int]
+      gfxReplayBackend* {.
+        name: "backend",
+        defaultValue: "",
+        desc: "Rendering backend selector " &
+          "(e.g. 'software' or 'hardware')."
+      .}: string
+
+    # P7.1 ``ct doctor`` probes recorder readiness. When a
+    # language argument is supplied (``ct doctor python``) the
+    # probe is targeted; without an argument, every known
+    # recorder is probed.
+    of doctor:
+      doctorLanguage* {.
+        argument,
+        defaultValue: "",
+        desc: "Recorder to probe " &
+          "(python, ruby, javascript, ...). " &
+          "Omit to probe every known recorder."
+      .}: string
 
     # M7: Help delegate subcommands. The full machinery lives in
     # ``src/ct/launch/help_delegate.nim``; here we just declare the

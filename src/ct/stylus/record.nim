@@ -50,7 +50,8 @@ proc recordStylus*(hash: string): Trace {.raises: [IOError, ValueError, OSError,
 
   result = record("", ".", "", evmTrace, "", "", "",
                   withDiff="", storeTraceFolderForPid = -1,
-                  upload=false, program = wasm, args = @[])
+                  upload=false, useInterpose=false,
+                  program = wasm, args = @[])
   updateField(result.recordingId, "program", hash, false)
   result.program = hash
 

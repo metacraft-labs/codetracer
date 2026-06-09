@@ -277,6 +277,7 @@ proc record*(lang: string,
              withDiff: string,
              storeTraceFolderForPid: int,
              upload: bool,
+             useInterpose: bool,
              program: string,
              args: seq[string]): Trace =
   let detectedLang = detectLang(program, toLang(lang))
@@ -394,6 +395,14 @@ proc record*(lang: string,
     putEnv("CODETRACER_WRAPPER_PID", $getCurrentProcessId())
 
   if detectedLang.usesMaterializedTraces:
+    if useInterpose:
+      # The interpose recorder is graphics-API specific and lives in
+      # the MCR backend.  Materialized backends (e.g. Python's db
+      # backend) cannot honour --use-interpose, so fail fast rather
+      # than silently dropping the flag.
+      echo "error: --use-interpose is only supported for native MCR recordings; "
+      echo "  the detected language (" & $detectedLang & ") uses a materialized-trace backend."
+      quit(1)
     return recordInternal(
       dbBackendRecordExe,
       pargs.concat(@["--trace-kind", "db"]),
@@ -405,11 +414,20 @@ proc record*(lang: string,
     if ctConfig.rrBackend.enabled:
       let nativeBackend = nativeRecordingBackendForHost(recordBackend)
       let traceKind = nativeReplayTraceKindForBackend(nativeBackend)
+      if useInterpose and nativeBackend != "mcr":
+        echo "error: --use-interpose requires the MCR backend; current backend is '" & nativeBackend & "'."
+        echo "  Pass --backend=mcr explicitly or unset --use-interpose."
+        quit(1)
       var nativeArgs =
         pargs.concat(@["--trace-kind", traceKind,
                        "--rr-support-path", ctConfig.rrBackend.path])
       if nativeBackend == "mcr":
         nativeArgs = nativeArgs.concat(@["--backend", "mcr"])
+        if useInterpose:
+          # Forwarded as a trailing recorder-side flag; db-backend-record
+          # already passes unknown ``--`` args through to the native
+          # recorder when ``--backend=mcr`` is in effect.
+          nativeArgs.add("--use-interpose")
       return recordInternal(
         dbBackendRecordExe,
         nativeArgs,

@@ -6,11 +6,13 @@ import
   ../cli/[ logging, list, help, build, print_trace],
   ../online_sharing/[ upload, download, delete, remote,
                       activate_command, check_license_command, remote_config ],
-  ../trace/[ replay, record, run, metadata, host, import_command ],
+  ../trace/[ replay, record, run, metadata, host, import_command, trace_forward ],
   ../ci/[ ci_commands ],
   ../codetracerconf,
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
+  ../doctor,
+  ../gfx_replay,
   backends,
   electron,
   help_delegate,
@@ -366,6 +368,7 @@ proc runInitial*(conf: CodetracerConf) =
         conf.recordWithDiff,
         conf.recordStoreTraceFolderForPid,
         conf.recordUpload,
+        conf.recordUseInterpose,
         conf.recordProgram, conf.recordArgs)
     of StartupCommand.`record-test`:
       recordTest(
@@ -498,6 +501,34 @@ proc runInitial*(conf: CodetracerConf) =
         conf.traceMetadataTest)
     of StartupCommand.start_backend:
       startBackend(conf.backendKind, conf.isStdio, conf.socketPath)
+    of StartupCommand.trace:
+      # P7.1: ``ct trace`` is the user-facing parent for graphics
+      # stream extraction and portable export.  Each sub-subcommand
+      # forwards to ``ct-mcr``; see ``trace/trace_forward.nim``.
+      case conf.traceCommand
+      of TraceCommand.noCommand:
+        echo "ct trace: no subcommand specified. Try `ct trace extract-gfx --help` or `ct trace export --help`."
+        quit(1)
+      of TraceCommand.`extract-gfx`:
+        quit(traceExtractGfxCommand(
+          conf.traceExtractGfxPath,
+          conf.traceExtractGfxOutputDir))
+      of TraceCommand.`export`:
+        quit(traceExportCommand(
+          conf.traceExportPath,
+          conf.traceExportOutput,
+          conf.traceExportPortable))
+    of StartupCommand.`gfx-replay`:
+      # P7.1: user-facing wrapper around ``ct_gfx_player``.  All
+      # discovery + argument forwarding lives in ``gfx_replay.nim``.
+      quit(gfxReplayCommand(
+        conf.gfxReplayGfxStream,
+        conf.gfxReplayHttp,
+        conf.gfxReplayPort,
+        conf.gfxReplayBackend))
+    of StartupCommand.doctor:
+      # P7.1: recorder readiness probe.  See ``doctor.nim``.
+      quit(doctorCommand(conf.doctorLanguage))
     of StartupCommand.`ct-describe-commands`:
       # M7: emit the line-oriented description used by the launcher's
       # help-delegate algorithm. See spec §2.6.
