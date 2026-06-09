@@ -96,12 +96,19 @@ impl Language {
     /// belt-and-braces safety net rather than a routing decision).
     pub fn ct_record_lang(self) -> &'static str {
         match self {
+            // ct record's --lang dispatcher maps "python" → LangPythonDb
+            // (the materialized recorder) per codetracer/src/common/lang.nim.
             Language::Python => "python",
             // ct record's --lang token for C++ is "cpp" — the
             // language_detection table accepts "cpp"/"c++"/"c_plus_plus"
             // but the dispatcher canonicalises to "cpp".
             Language::CPlusPlus => "cpp",
-            Language::Ruby => "ruby",
+            // IMPORTANT: ct record's --lang "ruby" maps to LangRuby (the
+            // gdb/rr legacy variant) which is NOT a materialized-traces
+            // lang.  We need the materialized variant: pass "rb" so
+            // toLang() returns LangRubyDb (materialized via
+            // codetracer-ruby-recorder).  See common/lang.nim line 27.
+            Language::Ruby => "rb",
             Language::JavaScript => "javascript",
             Language::C => "c",
             Language::Rust => "rust",

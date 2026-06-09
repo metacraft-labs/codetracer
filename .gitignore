@@ -317,3 +317,9 @@ src/tests/gui/tests/**/*_vm_test
 
 # Old test directory (moved to src/tests/gui/)
 tsc-ui-tests/
+
+# P9.1 — ct record produces compiled binaries + build-source manifests
+# alongside source-only fixtures.  Source files (main.<ext>) are tracked,
+# build outputs are not.
+src/codetracer-bench/fixtures/gui-ops/*/main
+src/codetracer-bench/fixtures/gui-ops/*/main.ct-build-sources.json
