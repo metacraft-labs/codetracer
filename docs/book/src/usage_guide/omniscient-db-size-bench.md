@@ -6,8 +6,8 @@ on-disk artefact sizes for the omniscient-DB build flow.
 
 For each fixture program, the bench:
 
-1. Records the program via the per-language recorder (`codetracer-python-recorder`,
-   `ct-native-replay`, …).
+1. Records the program through `ct record` (which routes to the appropriate
+   per-language recorder backend internally).
 2. Invokes `ct trace omniscient-prep <slice-dir> --mode on` to materialise
    the omniscient artefacts under `meta_dat/`.
 3. Measures the on-disk artefact sizes via `std::fs::metadata`.

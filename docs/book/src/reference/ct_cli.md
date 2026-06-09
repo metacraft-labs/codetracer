@@ -77,7 +77,7 @@ ct record [options] <program> [-- <program-args>]
 | `-e, --export <ZIP>`          | Export trace as a zip archive                                |
 | `-c, --cleanup-output-folder` | Remove the output folder after export                        |
 | `--trace-kind <KIND>`         | Trace kind: `db` (default), `rr`, or `ttd`                   |
-| `--rr-support-path <PATH>`    | Path to `ct-rr-support` binary                               |
+| `--rr-support-path <PATH>`    | (internal) Override path for the RR-backend DAP binary       |
 | `--python-interpreter <PATH>` | Path to the Python interpreter to use                        |
 | `--pytest [ARGS]`             | Run pytest with the given arguments                          |
 | `--unittest [ARGS]`           | Run unittest with the given arguments                        |
@@ -99,7 +99,7 @@ ct record [options] <program> [-- <program-args>]
 
 > **Note:** Blockchain-specific languages (Circom, Cairo, Aiken, Cadence, Move, Sway, Miden, PolkaVM, Leo, Tolk) use their own recorder binaries. See the [Getting Started](../getting_started/overview.md) guides for each language.
 
-> **Note:** Visual recordings for native graphics programs are MCR `.ct` traces produced with `ct-mcr record --use-interpose`. CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See [Visual recordings](../usage_guide/visual_recordings.md).
+> **Note:** Visual recordings for native graphics programs are MCR `.ct` traces produced with `ct-mcr record --use-interpose` (migrating that workflow to a `ct` subcommand is tracked in [P7](https://github.com/metacraft-labs/codetracer-specs/blob/latest/Planned-Features/Performance-And-E2E-Coverage.milestones.org)). CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See [Visual recordings](../usage_guide/visual_recordings.md).
 
 ### ct replay
 

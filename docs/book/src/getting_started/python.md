@@ -2,7 +2,9 @@
 
 This guide explains how to install the Python recorder wheel, capture a trace with your own interpreter, and open the resulting recording in CodeTracer.
 
-### 1. Install `codetracer_python_recorder`
+### 1. Install the Python recorder package
+
+CodeTracer's Python support runs inside your Python interpreter — the `codetracer_python_recorder` package must be installed in the same environment whose code you intend to trace.  `ct record` discovers and invokes it automatically.
 
 1. Activate the environment that you normally use to run your Python code (virtualenv, `uv`, Conda, system Python, etc.). `ct record` always reuses whichever interpreter is active in your shell.
 2. Install (or upgrade) the recorder package:
@@ -17,9 +19,10 @@ This guide explains how to install the Python recorder wheel, capture a trace wi
    ```bash
    python -m codetracer_python_recorder --help
    ```
+   > A future `ct doctor python` subcommand will replace this manual probe; tracked in [P7](https://github.com/metacraft-labs/codetracer-specs/blob/latest/Planned-Features/Performance-And-E2E-Coverage.milestones.org).
 
 > [!CAUTION]
-> If `ct record` cannot import `codetracer_python_recorder`, recording will fail with a module import error. Install the package in the interpreter you intend to trace or point Codetracer at a specific interpreter via `CODETRACER_PYTHON_INTERPRETER=/path/to/python`.
+> If `ct record` cannot import the recorder package, recording will fail with a module import error. Install the package in the interpreter you intend to trace or point Codetracer at a specific interpreter via `CODETRACER_PYTHON_INTERPRETER=/path/to/python`.
 
 ### 2. Record a trace
 
@@ -56,4 +59,4 @@ You can explore the recording immediately in the UI or later on:
   ct run path/to/script.py [-- <script arguments>]
   ```
 
-All three commands reuse the recorded artefacts created by `codetracer_python_recorder`, so you see the exact execution captured during `ct record`.
+All three commands replay the same trace artefacts `ct record` produced.
