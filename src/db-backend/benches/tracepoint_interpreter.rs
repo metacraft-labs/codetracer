@@ -37,8 +37,8 @@ use db_backend::expr_loader::ExprLoader;
 use db_backend::lang::Lang;
 use db_backend::replay::ReplaySession;
 use db_backend::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
-    LoadHistoryArg, Location, ProgramEvent, VariableWithRecord,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
+    ProgramEvent, VariableWithRecord,
 };
 use db_backend::tracepoint_interpreter::TracepointInterpreter;
 use db_backend::value::ValueRecordWithType;
@@ -191,10 +191,7 @@ impl ReplaySession for SyntheticReplaySession {
     fn step(&mut self, _action: Action, _forward: bool) -> Result<bool, Box<dyn StdError>> {
         unimplemented!("synthetic session: interpreter never calls step")
     }
-    fn load_locals(
-        &mut self,
-        _arg: CtLoadLocalsArguments,
-    ) -> Result<Vec<VariableWithRecord>, Box<dyn StdError>> {
+    fn load_locals(&mut self, _arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn StdError>> {
         unimplemented!("synthetic session: interpreter never calls load_locals")
     }
     fn load_value(
@@ -329,9 +326,7 @@ fn drive_stream(compiled: &Compiled, session: &mut SyntheticReplaySession, strea
     for i in 0..stream_size {
         let tp_idx = i % TRACEPOINTS.len();
         let step = session.step_id;
-        let _ = compiled
-            .interpreter
-            .evaluate(tp_idx, step, session, Lang::Python);
+        let _ = compiled.interpreter.evaluate(tp_idx, step, session, Lang::Python);
         session.advance();
     }
 }

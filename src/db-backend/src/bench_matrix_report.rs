@@ -85,11 +85,7 @@ pub fn matrix_column_name() -> String {
 /// at higher absolute durations, but the format itself is still
 /// `p50=...ms p95=...ms`.
 pub fn render_cell(c: &CellResult) -> String {
-    format!(
-        "p50={:.3}ms p95={:.3}ms",
-        c.p50_us / 1000.0,
-        c.p95_us / 1000.0,
-    )
+    format!("p50={:.3}ms p95={:.3}ms", c.p50_us / 1000.0, c.p95_us / 1000.0,)
 }
 
 /// Row id for the given stream size. Format

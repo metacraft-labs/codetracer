@@ -89,8 +89,7 @@ fn p4_tracepoint_benchmark_emits_matrix_format() {
             p95_us: 2345.6,
         },
     ];
-    let dir = bench_matrix_report::emit(&results, env!("CARGO_MANIFEST_DIR"))
-        .expect("emit matrix report");
+    let dir = bench_matrix_report::emit(&results, env!("CARGO_MANIFEST_DIR")).expect("emit matrix report");
 
     // Strip the env var before any assertion can panic, so a failure
     // doesn't leak the override into subsequent tests.
@@ -115,14 +114,14 @@ fn p4_tracepoint_benchmark_emits_matrix_format() {
     let _blank = lines.next();
     let header = lines.next().expect("md header line");
     assert!(header.starts_with("| id | language |"), "md header wrong: {header}");
-    assert!(header.contains("criterion-"), "md header missing criterion column: {header}");
+    assert!(
+        header.contains("criterion-"),
+        "md header missing criterion column: {header}"
+    );
     let separator = lines.next().expect("md separator line");
     assert!(separator.starts_with("| --- |"), "md separator wrong: {separator}");
     let data_lines: Vec<&str> = lines.collect();
-    assert!(
-        !data_lines.is_empty(),
-        "md should contain at least one data row"
-    );
+    assert!(!data_lines.is_empty(), "md should contain at least one data row");
     let any_measured = data_lines
         .iter()
         .any(|l| l.contains("p50=") && l.contains("ms p95=") && l.contains("ms"));
@@ -159,8 +158,7 @@ fn p4_tracepoint_benchmark_emits_matrix_format() {
     // assertion fails — flagging that the bench needs to be updated
     // to match.
     let json_str = std::fs::read_to_string(dir.join("report.json")).expect("read json");
-    let report: BenchReport =
-        serde_json::from_str(&json_str).expect("json must match BenchReport shape");
+    let report: BenchReport = serde_json::from_str(&json_str).expect("json must match BenchReport shape");
     assert!(!report.bench_name.is_empty(), "bench_name must be non-empty");
     assert!(!report.columns.is_empty(), "columns must be non-empty");
     assert!(!report.rows.is_empty(), "rows must be non-empty");

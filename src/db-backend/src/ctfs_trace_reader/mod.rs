@@ -1718,7 +1718,7 @@ mod tests {
         for i in 0..step_count {
             events.push(TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(i % 10),
-                line: Line((i + 1) as i64)
+                line: Line((i + 1) as i64),
             }));
             events.push(TraceLowLevelEvent::Value(FullValueRecord {
                 variable_id: VariableId(0),
@@ -1986,7 +1986,7 @@ mod tests {
         for i in 0..200usize {
             events.push(TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),
-                line: Line((i + 1) as i64)
+                line: Line((i + 1) as i64),
             }));
             events.push(TraceLowLevelEvent::Value(FullValueRecord {
                 variable_id: VariableId(0),
