@@ -40,6 +40,27 @@ let
     export yarn_enable_nixify=false
   '';
 
+  # ``yarn nixify fetch`` only populates the cache for the *current*
+  # architecture (Yarn 4 defaults to ``supportedArchitectures: ["current"]``).
+  # Our ``yarn.lock`` pins platform-specific optional dependencies (esbuild,
+  # @parcel/watcher, ...) for every OS/CPU, so the resulting cache — and hence
+  # the fixed-output hash — differs per build platform. Select the hash for the
+  # host system; the Linux hash is what CI / the Cachix cache is built against.
+  #
+  # To add a new platform: build once, take the ``got:`` hash from the
+  # "hash mismatch" error, and add it below.
+  cacheOutputHashes = {
+    "x86_64-linux" = "sha512-2guUBYTPk7MUt9DfamxnVESTpzx06r7rPnl2GGenNdrXqw3wgIfMZ4dvGHubyj4Lj+m2XVtQNow9hRjUz0cCsg==";
+    "aarch64-darwin" = "sha512-mt7iF+4GNu9oGd42DeCMddB5bcemUYNdzj8g1gEKgzSIfGemBZxJCNC/u0k6kD1xwg7OfOwksHXWq88JBqA56A==";
+  };
+
+  cacheOutputHash =
+    cacheOutputHashes.${stdenv.hostPlatform.system} or (throw ''
+      No yarn-cache outputHash pinned for system '${stdenv.hostPlatform.system}'.
+      Add one to cacheOutputHashes in node-packages/yarn-project.nix: build once
+      and copy the 'got:' hash reported by the hash-mismatch error.
+    '');
+
   cacheDrv = stdenv.mkDerivation {
     name = "yarn-cache";
     buildInputs = [ yarn git cacert ];
@@ -52,7 +73,7 @@ let
       rm $out/.gitignore
     '';
     outputHashMode = "recursive";
-    outputHash = "sha512-2guUBYTPk7MUt9DfamxnVESTpzx06r7rPnl2GGenNdrXqw3wgIfMZ4dvGHubyj4Lj+m2XVtQNow9hRjUz0cCsg==";
+    outputHash = cacheOutputHash;
   };
 
   # Main project derivation.
