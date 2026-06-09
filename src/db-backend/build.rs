@@ -83,20 +83,13 @@ fn build_windows(emulator_dir: &Path) {
     // so editing the Nim source or build script forces a rebuild.
     let native_c_dir = emulator_dir.join("build").join("native_c_files");
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        emulator_dir.join("src/ct_emulator/emulator_wasm_api.nim").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        emulator_dir.join("build_native_api.sh").display()
-    );
+    track_nim_inputs(emulator_dir);
     println!("cargo:rerun-if-changed={}", native_c_dir.display());
 
-    // Windows: if Nim-generated C files are missing, invoke the recorder's
-    // build script. `regenerate_c` has a Windows branch that runs bash
-    // directly (no direnv).
-    if !native_c_dir.join("@memulator_wasm_api.nim.c").exists() {
+    // Windows: if Nim-generated C files are stale or missing, invoke the
+    // recorder's build script.  `regenerate_c` has a Windows branch that
+    // runs bash directly (no direnv).
+    if needs_regeneration(emulator_dir, &native_c_dir) {
         regenerate_c(emulator_dir, "build_native_api.sh", &native_c_dir);
     }
 
@@ -375,17 +368,10 @@ fn which_on_path(name: &str) -> Option<PathBuf> {
 fn build_native(emulator_dir: &Path, target_arch: &str) {
     let native_c_dir = emulator_dir.join("build").join("native_c_files");
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        emulator_dir.join("src/ct_emulator/emulator_wasm_api.nim").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        emulator_dir.join("build_native_api.sh").display()
-    );
+    track_nim_inputs(emulator_dir);
     println!("cargo:rerun-if-changed={}", native_c_dir.display());
 
-    if !native_c_dir.join("@memulator_wasm_api.nim.c").exists() {
+    if needs_regeneration(emulator_dir, &native_c_dir) {
         regenerate_c(emulator_dir, "build_native_api.sh", &native_c_dir);
     }
 
@@ -590,17 +576,14 @@ fn link_shared(objects: &[PathBuf], out_dir: &Path, target_arch: &str) -> PathBu
 fn build_wasm32(emulator_dir: &Path) {
     let wasm_c_dir = emulator_dir.join("build").join("wasm_c_files");
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        emulator_dir.join("src/ct_emulator/emulator_wasm_api.nim").display()
-    );
+    track_nim_inputs(emulator_dir);
     println!(
         "cargo:rerun-if-changed={}",
         emulator_dir.join("build_wasm_api.sh").display()
     );
     println!("cargo:rerun-if-changed={}", wasm_c_dir.display());
 
-    if !wasm_c_dir.join("@memulator_wasm_api.nim.c").exists() {
+    if needs_regeneration(emulator_dir, &wasm_c_dir) {
         regenerate_c(emulator_dir, "build_wasm_api.sh", &wasm_c_dir);
     }
 
@@ -701,7 +684,7 @@ fn build_wasm32(emulator_dir: &Path) {
 fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
     println!("cargo:rerun-if-env-changed=CODETRACER_DB_BACKEND_SKIP_DIRENV");
     eprintln!(
-        "db-backend build.rs: generated C missing at {}; invoking {}",
+        "db-backend build.rs: generated C stale or missing at {}; invoking {}",
         output_dir.display(),
         script_name,
     );
@@ -838,6 +821,59 @@ fn which_nim() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Source files that drive C-code regeneration.  Adding a new FFI shim
+/// (`*_ffi.nim`) means adding it here too so build.rs reruns and the
+/// staleness check below picks it up.
+///
+/// Self-hosted CI runners keep `target/release/build/` and
+/// `ct_emulator/build/native_c_files/` across runs, so a "regenerate if
+/// the cached C file is missing" check is not enough: the cached C from
+/// a previous (pre-M17/M18) build silently shadows fresh Nim source and
+/// `libmcr_emulator.so` ends up missing every `mcrUndoMap*` /
+/// `mcrLastMileReverseStep*` / `mcrDataWatch*` symbol the version
+/// script tries to export.  We list the Nim inputs explicitly here and
+/// regenerate when any is newer than the cached output.
+fn nim_input_files(emulator_dir: &Path) -> Vec<PathBuf> {
+    let src = emulator_dir.join("src/ct_emulator");
+    vec![
+        src.join("emulator_wasm_api.nim"),
+        src.join("origin_undo_ffi.nim"),
+        src.join("omniscient_db_ffi.nim"),
+        src.join("data_watch_ffi.nim"),
+    ]
+}
+
+fn track_nim_inputs(emulator_dir: &Path) {
+    for f in nim_input_files(emulator_dir) {
+        println!("cargo:rerun-if-changed={}", f.display());
+    }
+    println!(
+        "cargo:rerun-if-changed={}",
+        emulator_dir.join("build_native_api.sh").display()
+    );
+}
+
+/// Returns true iff the cached C is missing or older than any tracked
+/// Nim input.  Self-hosted CI runners keep build artefacts between
+/// runs; without an mtime check the build.rs happily reuses stale C
+/// from before the M17/M18 FFI shims existed and the resulting .so
+/// fails to export their symbols.
+fn needs_regeneration(emulator_dir: &Path, output_dir: &Path) -> bool {
+    let cached = output_dir.join("@memulator_wasm_api.nim.c");
+    let Ok(cached_meta) = std::fs::metadata(&cached) else {
+        return true;
+    };
+    let Ok(cached_mtime) = cached_meta.modified() else {
+        return true;
+    };
+    nim_input_files(emulator_dir).iter().any(|src| {
+        std::fs::metadata(src)
+            .and_then(|m| m.modified())
+            .map(|src_mtime| src_mtime > cached_mtime)
+            .unwrap_or(false)
+    })
 }
 
 fn read_nim_lib_path(c_dir: &Path) -> PathBuf {
