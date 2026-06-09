@@ -21,6 +21,7 @@ pub mod c_compat;
 #[cfg(feature = "browser-transport")]
 pub mod vfs;
 
+pub mod bench_matrix_report;
 pub mod calltrace;
 // M25 — Correlation markers (tracepoint-based; no protocol shims).
 // Spec: `codetracer-specs/GUI/Debugging-Features/Correlation-Markers.md`.

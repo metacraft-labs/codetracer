@@ -192,6 +192,21 @@ required-features = ["io-transport"]
 [dev-dependencies]
 ct-dap-client = { path = "../../libs/ct-dap-client" }
 tempfile = "3"
+# Performance + E2E Coverage campaign P4.6 / P9.2: the
+# tracepoint_interpreter Criterion bench at benches/tracepoint_interpreter.rs.
+# default-features = false drops criterion's `rayon` + `plotters`
+# HTML-report dependencies, which we don't need (the bench emits its
+# own CSV/JSON/Markdown matrix report through
+# `db_backend::bench_matrix_report`).
+criterion = { version = "0.5", default-features = false }
+
+# P4.6 / P9.2 — register the tracepoint_interpreter Criterion bench.
+# `harness = false` so Criterion's `criterion_main!` macro provides
+# its own main() instead of the default libtest harness (Criterion's
+# CLI flags + sampling loop are incompatible with the libtest one).
+[[bench]]
+name = "tracepoint_interpreter"
+harness = false
 
 [features]
 debugging = []
