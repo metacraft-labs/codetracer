@@ -415,6 +415,68 @@ pub fn ct_binary() -> Option<PathBuf> {
     None
 }
 
+/// Locate the user-facing `ct` CLI binary.  This is the front door for
+/// recording (`ct record`) and launching DAP backends (`ct start_backend
+/// <kind> --stdio`).  The bench prefers it over direct
+/// `replay-server`/`ct-mcr` invocations so the matrix exercises the same
+/// surface end users see.
+///
+/// Resolution order:
+///   1. `CT_CLI_BIN` env var (full override).
+///   2. `ct` on PATH.  We accept any binary named `ct` whose `--help`
+///      mentions `start_backend` — that filters out unrelated `ct`
+///      binaries the operator may have on PATH (e.g. `cargo-cinit ct`,
+///      C-Tools, etc.) without dragging in heavyweight probes.
+///   3. The known build path `src/build-debug/bin/ct` relative to
+///      `CODETRACER_REPO_ROOT_PATH`.
+pub fn ct_cli_binary() -> Option<PathBuf> {
+    if let Some(env) = std::env::var_os("CT_CLI_BIN") {
+        let p = PathBuf::from(env);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    if let Some(p) = which("ct")
+        && binary_supports_start_backend(&p)
+    {
+        return Some(p);
+    }
+
+    if let Some(root) = std::env::var_os("CODETRACER_REPO_ROOT_PATH") {
+        let candidate = PathBuf::from(root)
+            .join("src")
+            .join("build-debug")
+            .join("bin")
+            .join("ct");
+        if candidate.is_file() && binary_supports_start_backend(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+/// Quick probe that confirms a binary is the codetracer `ct` CLI by
+/// checking its top-level `--help` output mentions the `start_backend`
+/// subcommand.  Bounded to a short timeout so a hung binary on PATH
+/// can't stall the bench at startup.
+fn binary_supports_start_backend(path: &Path) -> bool {
+    use std::process::Command;
+    let output = Command::new(path)
+        .arg("--help")
+        .env("CODETRACER_IN_UI_TEST", "1")
+        .output();
+    match output {
+        Ok(o) => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            stdout.contains("start_backend") || stderr.contains("start_backend")
+        }
+        Err(_) => false,
+    }
+}
+
 /// Probe a candidate binary by spawning it with `trace omniscient-prep
 /// --help` and inspecting the exit status. Used by [`ct_binary`] to
 /// avoid surfacing the pre-M19 `replay-server` that doesn't carry the

@@ -20,7 +20,7 @@
 use crate::dap_driver::{DapError, DapSession};
 use crate::{
     BenchReport, BenchRow, FixtureRecorder, Language, LanguageProbe, RecorderError, ct_binary,
-    which,
+    ct_cli_binary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -729,26 +729,32 @@ impl DapMeasurementDriver {
                 "ct/originSummary",
                 json!({"tokens": ctx.summary_tokens.clone()}),
             )),
-            // ct/source-line-jump and ct/source-call-jump are
-            // fire-and-event-back ops — see dap_handler::source_line_jump
-            // which calls `complete_move` and emits a `stopped` event
-            // but does NOT send a DAP response (no `respond_dap` call).
-            // The bench's `send_and_wait` loop would block forever
-            // waiting for a response that never arrives, so these
-            // legitimately PEND here.  A future "event-driven" bench
-            // mode could measure them via the stopped-event timeline.
-            Operation::JumpToLine => None,
-            Operation::JumpToCall => None,
-            // Tracepoint expression evaluation has no stdio-DAP
-            // single-request entry point in this dap-server: the
-            // standard `evaluate` request is not dispatched (see
-            // dap_server.rs — only the `ct/*` family routes), and
-            // tracepoint expressions are scheduled through
-            // `ct/run-tracepoints` which is a stateful, multi-step
-            // setup that doesn't fit the single-request bench loop.
-            // P4.6 is the dedicated Criterion bench for the
-            // tracepoint-interpreter hot path; this cell legitimately
-            // pends.
+            // `ct/source-line-jump` and `ct/source-call-jump`: the
+            // handlers in db-backend's dap_handler.rs now end with
+            // `respond_dap(req, 0, sender)` so the request gets a
+            // proper response (the fix landed in this campaign — see
+            // commit "fix(dap): add missing respond_dap on
+            // source-line-jump / source-call-jump").
+            Operation::JumpToLine => Some((
+                "ct/source-line-jump",
+                json!({
+                    "path": ctx.source_path.clone(),
+                    "line": ctx.stop_line,
+                }),
+            )),
+            Operation::JumpToCall => Some((
+                "ct/source-call-jump",
+                json!({
+                    "path": ctx.source_path.clone(),
+                    "line": ctx.stop_line,
+                    "token": ctx.function_name.clone(),
+                }),
+            )),
+            // Tracepoint expression evaluation: the dap-server doesn't
+            // dispatch the standard DAP `evaluate` request; tracepoints
+            // live behind the stateful `ct/run-tracepoints` flow.  The
+            // dedicated tracepoint_interpreter Criterion bench (P4.6)
+            // measures the hot path directly.
             Operation::Tracepoint => None,
             // `stepBack` is the DAP-standard reverse-step request.
             // On Materialized backends the response carries the new
@@ -757,11 +763,9 @@ impl DapMeasurementDriver {
             // Tier-1 lookup).
             Operation::ReverseStep => Some(("stepBack", json!({"threadId": ctx.thread_id}))),
             // `setDataBreakpoints` is not dispatched by the
-            // dap-server (the standard DAP data-breakpoint surface
-            // isn't wired up — watchpoints in CodeTracer are
-            // expressed through the `ct/run-tracepoints` machinery
-            // instead).  Watchpoint latency would need a dedicated
-            // micro-bench like P4.6, not the DAP wire loop.
+            // dap-server; CodeTracer watchpoints route through
+            // `ct/run-tracepoints` instead.  PEND until that flow
+            // gets a single-call DAP entry.
             Operation::Watchpoint => None,
         }
     }
@@ -817,38 +821,34 @@ impl MeasurementDriver for DapMeasurementDriver {
         //   ship a one-shot ct-rr recording entry point.
         //
         // * Ttd — Windows-only per the campaign's platform ceiling.
-        let ct_rr_worker_exe = match backend {
-            Backend::Materialized => None,
-            Backend::McrNoOmniscient | Backend::McrOmniscient => {
-                let worker = which("ct-native-replay").ok_or_else(|| {
-                    "ct-native-replay not on PATH (required as the MCR replay-worker \
-                     binary; run `direnv exec ../codetracer-native-backend cargo build` \
-                     in the sibling)"
-                        .to_string()
-                })?;
-                Some(worker)
-            }
-            Backend::Rr => {
-                return Err(
-                    "dap-driver pending: RR backend has no one-shot record entry point \
-                     in the dev shell (the codetracer-rr-backend ships ct-rr-support as \
-                     a replay-worker only; first-record uses the classic-rr CLI which is \
-                     not yet wired into the bench harness)"
-                        .to_string(),
-                );
-            }
+        // Map backend → `ct start_backend` kind.  Materialized + both
+        // MCR variants share the `db` kind (the same replay-server
+        // dap binary, distinguished by trace contents + the
+        // replay-worker the dap-server discovers via PATH).  Rr uses
+        // its own ct-rr-support DAP binary, launched via `ct
+        // start_backend rr --stdio`.
+        let backend_kind = match backend {
+            Backend::Materialized | Backend::McrNoOmniscient | Backend::McrOmniscient => "db",
+            Backend::Rr => "rr",
             Backend::Ttd => {
                 return Err("ttd backend is Windows-only per the campaign ceiling".to_string());
             }
         };
-        // Narrow probes — the recorder + the dap-server binary must
-        // both be reachable for the cell to be measurable.
+        // Narrow probes — the recorder + the DAP host must both be
+        // reachable for the cell to be measurable.
         LanguageProbe::probe(language)?;
-        let dap_binary = ct_binary().ok_or_else(|| {
-            "replay-server binary with `trace omniscient-prep` not on PATH (CT_BIN unset, \
-             no fresh build at src/db-backend/target/debug/replay-server)"
-                .to_string()
-        })?;
+        // Prefer the user-facing `ct` CLI as the DAP host (it routes
+        // through `start_backend` to the right replay binary per kind).
+        // Fall back to the direct `replay-server`/`ct-rr-support`
+        // discovery so cells still measure when `ct` isn't built.
+        let dap_binary = ct_cli_binary()
+            .or_else(ct_binary)
+            .ok_or_else(|| {
+                "neither `ct` (preferred) nor `replay-server` is on PATH / discoverable; \
+                 run `just build-once` to produce src/build-debug/bin/ct or build the \
+                 db-backend at src/db-backend/target/debug/replay-server"
+                    .to_string()
+            })?;
         let program = self.fixture_program(language);
         if !program.exists() {
             return Err(format!("fixture program missing: {}", program.display()));
@@ -864,9 +864,9 @@ impl MeasurementDriver for DapMeasurementDriver {
 
         let mut session = DapSession::launch(
             &dap_binary,
+            backend_kind,
             &trace_dir,
             &trace_file,
-            ct_rr_worker_exe.as_deref(),
         )
             .map_err(|e: DapError| format!("dap session launch failed: {e}"))?;
 

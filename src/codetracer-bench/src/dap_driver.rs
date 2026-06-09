@@ -109,17 +109,23 @@ impl DapSession {
     /// recorder wrote into; `trace_file` is the relative path of the
     /// `.ct` artefact inside the folder.
     ///
-    /// `ct_rr_worker_exe` is required for MCR / RR traces — the
-    /// dap-server uses this binary to spawn the replay worker that
-    /// owns the recorded program's memory state.  Pass `None` for
-    /// Materialized-class traces (Python / Ruby / JavaScript) where
-    /// the db-backend reads the CTFS event stream directly without
-    /// a separate replay-worker process.
+    /// Launch a DAP session through the user-facing `ct start_backend`
+    /// CLI surface (preferred) or fall back to `replay-server
+    /// dap-server` / `ct-rr-support` directly.  `backend_kind` is the
+    /// argument `ct start_backend` accepts: `"db"` for materialized +
+    /// MCR-via-replay-worker traces; `"rr"` for RR traces.
+    ///
+    /// The replay-worker (`ct-native-replay` / `ct-rr-support`) is
+    /// resolved by the dap-server itself: it looks at the DAP launch
+    /// `ctRRWorkerExe` field, then `CODETRACER_*_EXE` environment
+    /// variables, then searches PATH.  The bench's
+    /// `detect-siblings.sh` exposes `ct-native-replay` on PATH, so no
+    /// per-cell `ctRRWorkerExe` plumbing is needed.
     pub fn launch(
         dap_binary: &Path,
+        backend_kind: &str,
         trace_folder: &Path,
         trace_file: &str,
-        ct_rr_worker_exe: Option<&Path>,
     ) -> Result<Self, DapError> {
         // Capture dap-server stderr so launch failures surface
         // visibly instead of being swallowed silently — the replay
@@ -130,9 +136,30 @@ impl DapSession {
         } else {
             Stdio::null()
         };
-        let mut child = Command::new(dap_binary)
-            .arg("dap-server")
-            .arg("--stdio")
+        // Pick the right argv shape based on the binary name.  The
+        // user-facing `ct` invokes `ct start_backend <kind> --stdio`;
+        // the `replay-server` direct path uses `dap-server --stdio`;
+        // `ct-rr-support` uses just `--stdio`.  We sniff the binary
+        // name rather than threading another flag through callers.
+        let exe_name = dap_binary
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let mut command = Command::new(dap_binary);
+        match exe_name {
+            "ct" => {
+                command.arg("start_backend").arg(backend_kind).arg("--stdio");
+            }
+            "replay-server" => {
+                command.arg("dap-server").arg("--stdio");
+            }
+            _ => {
+                // Fall back to single-arg `--stdio` (matches the
+                // `ct-rr-support` / older direct invocation).
+                command.arg("--stdio");
+            }
+        }
+        let mut child = command
             // CODETRACER_IN_UI_TEST=1 bypasses the free-tier daily
             // replay-quota gate the replay-worker enforces.  Matches
             // `ensure_replay_license_bypass()` in
@@ -180,21 +207,17 @@ impl DapSession {
         //    NOTE: the on-the-wire field is `trace_file` (snake_case)
         //    not `traceFile` — that's the codetracer convention.
         let trace_folder_str = trace_folder.to_string_lossy().to_string();
-        let mut launch_args = json!({
+        let launch_args = json!({
             "traceFolder": trace_folder_str,
             "trace_file": trace_file,
         });
-        // MCR / RR traces require `ctRRWorkerExe` so the dap-server
-        // can spawn the replay-worker subprocess that owns the
-        // recorded program's memory state.  This matches the
-        // LaunchRequestArguments contract in
-        // `codetracer/src/db-backend/src/dap.rs` (the
-        // `#[serde(rename = "ctRRWorkerExe")]` field) and the
-        // existing `*_mcr_streaming_flow_test.rs` harnesses under
-        // `codetracer/src/db-backend/tests/`.
-        if let Some(worker) = ct_rr_worker_exe {
-            launch_args["ctRRWorkerExe"] = json!(worker.to_string_lossy().to_string());
-        }
+        // The replay-worker binary (`ct-native-replay` for MCR,
+        // `ct-rr-support` for RR) is resolved by the dap-server's own
+        // 3-tier discovery: DAP launch `ctRRWorkerExe` arg → env vars
+        // (`CODETRACER_*_EXE`) → PATH search (see
+        // db-backend/src/dap_server.rs::resolve_recreator_exe).  The
+        // bench's `detect-siblings.sh` puts `ct-native-replay` on
+        // PATH so launch args don't need to carry it.
         session.send_and_wait("launch", launch_args, Duration::from_secs(10))?;
 
         // 3. configurationDone — server forwards the cached launch
