@@ -228,12 +228,21 @@ impl DapSession {
         // 4. Wait for the `stopped` event before returning so callers
         //    have a stable frame to query.
         //
-        // Timeout budget matches `*_mcr_streaming_flow_test.rs` in
-        // codetracer/src/db-backend/tests/ — 60s covers the
-        // `ct-native-replay` worker-spawn time for MCR traces (which
-        // is slower than the in-process Materialized path) plus the
-        // M-RLP layout-snapshot decode that runs on first stop.
-        let stopped_timeout = Duration::from_secs(60);
+        // MCR traces can be huge (a tiny C++ fixture produces a ~95 MB
+        // trace because the recorder captures every CPU instruction,
+        // memory write, and syscall).  `ct-native-replay`'s
+        // configurationDone bootstrap on such traces includes:
+        // (a) opening the .ct container, (b) decoding the
+        // M-RLP layout snapshot, (c) replaying to recording entry
+        // before emitting the first `stopped`.  60 s is enough for
+        // tiny streaming-flow fixtures but not for the 95 MB+ MCR
+        // recordings produced by `ct record --backend mcr` against
+        // the gui-ops fixtures.  Bump the budget to 5 minutes — the
+        // bench tolerates a slow bootstrap once per cell, the
+        // per-op latency measurements that follow are still
+        // wall-clock-accurate.  Materialized cells hit `stopped`
+        // immediately so the larger budget is harmless for them.
+        let stopped_timeout = Duration::from_secs(300);
         let started = Instant::now();
         while started.elapsed() < stopped_timeout {
             match session.read_one_message(Duration::from_millis(500)) {
