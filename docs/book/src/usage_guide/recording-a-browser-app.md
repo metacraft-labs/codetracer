@@ -15,9 +15,7 @@ This guide walks through three deployment shapes:
 3. **Webpack / esbuild / Rollup** — thin wrapper packages that share the
    same SWC instrumentation visitor.
 
-The wire format and policy are specified in
-[Value-Origin-Tracking.md §14.4](../../../../../codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md);
-this guide is the operational counterpart.
+This guide describes the operational workflow for browser-app recording.
 
 ## 1. Vite dev-server
 
@@ -123,8 +121,6 @@ ct.mark_correlation_recv(request_id, request_body, boundary="inbound")
 
 The send/recv pair joins at trace load time, and a `ct originChain`
 query on the response value traverses both recordings end-to-end.
-See [Correlation-Markers.md](../../../../../codetracer-specs/GUI/Debugging-Features/Correlation-Markers.md)
-for the full marker grammar.
 
 ## Troubleshooting
 

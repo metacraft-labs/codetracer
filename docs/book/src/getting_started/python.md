@@ -19,7 +19,6 @@ CodeTracer's Python support runs inside your Python interpreter — the `codetra
    ```bash
    python -m codetracer_python_recorder --help
    ```
-   > A future `ct doctor python` subcommand will replace this manual probe; tracked in [P7](https://github.com/metacraft-labs/codetracer-specs/blob/latest/Planned-Features/Performance-And-E2E-Coverage.milestones.org).
 
 > [!CAUTION]
 > If `ct record` cannot import the recorder package, recording will fail with a module import error. Install the package in the interpreter you intend to trace or point Codetracer at a specific interpreter via `CODETRACER_PYTHON_INTERPRETER=/path/to/python`.

@@ -17,10 +17,7 @@ origin tracking tells you "what computation produced this particular
 value?". The two compose well — pinning a historic value and then asking
 for its origin is one of the canonical workflows.
 
-The canonical specification with the full UI layout, wire protocol, and
-backend semantics is at
-[`codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`](https://github.com/metacraft-labs/codetracer-specs/blob/main/GUI/Debugging-Features/Value-Origin-Tracking.md).
-This chapter distills the user-facing surfaces.
+This chapter describes the user-facing surfaces of value-origin tracking.
 
 ## When to use it
 
@@ -116,11 +113,9 @@ sequences (useful for "why is iteration 17 different from iteration
 16?").
 
 > **Note:** The Origin Chain Side Panel screenshot for this section is
-> pending — the M5 Playwright capture suite runs end-to-end on
+> pending — the Playwright capture suite runs end-to-end on
 > recorder-equipped CI runners but SKIPs cleanly in dev shells without
-> the Python recorder installed. See the M5 verification entries in
-> [`Value-Origin-Tracking.milestones.org`](https://github.com/metacraft-labs/codetracer-specs/blob/main/Planned-Features/Value-Origin-Tracking.milestones.org)
-> for the capture status.
+> the Python recorder installed.
 
 ## In VS Code
 
@@ -309,9 +304,6 @@ pattern added at any level applies uniformly to every caller.
 
 ## See also
 
-- [`GUI/Debugging-Features/Value-Origin-Tracking.md`](https://github.com/metacraft-labs/codetracer-specs/blob/main/GUI/Debugging-Features/Value-Origin-Tracking.md)
-  — the canonical specification (UI layout §3.2, preferences §3.7,
-  classification rules §7, pattern schema §7.4).
 - [`ct` CLI reference](../reference/ct_cli.md#ct-trace-origin) — full
   flag table for `ct trace origin`.
 - [MCP tool reference](../reference/mcp-tools.md) — input/output

@@ -8,7 +8,6 @@ This feature is built on the MCR recorder and the visual replay player:
 1. `ct-mcr extract-gfx` extracts the graphics stream from the `.ct` container.
 1. `ct_gfx_player` replays the extracted graphics stream and exposes frame, draw-call, pixel-history, and shader-debug APIs to the GUI.
 
-> **Tracked.**  These commands invoke internal recorder binaries directly.  The user-facing `ct` launcher does not yet expose them; migrating the visual-recording workflow to `ct record --use-interpose` / `ct trace extract-gfx` / `ct gfx-replay` is tracked in [P7](https://github.com/metacraft-labs/codetracer-specs/blob/latest/Planned-Features/Performance-And-E2E-Coverage.milestones.org).  Until then, the `ct-mcr` / `ct_gfx_player` commands below are the supported workflow.
 
 When you open a compatible visual trace in CodeTracer, the GUI performs the extraction and player startup automatically. You usually only need to produce or open the `.ct` trace.
 

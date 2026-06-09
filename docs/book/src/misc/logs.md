@@ -106,8 +106,6 @@ When filing a bug report, include:
    ```bash
    ct-mcr export --portable -o trace-portable.ct /path/to/trace.ct
    ```
-   > Migrating this to a `ct trace export --portable` subcommand is tracked in
-   > [P7](https://github.com/metacraft-labs/codetracer-specs/blob/latest/Planned-Features/Performance-And-E2E-Coverage.milestones.org).
 
 ### Quick log bundle
 

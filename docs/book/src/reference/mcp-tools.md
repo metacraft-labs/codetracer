@@ -149,7 +149,6 @@ backend's error message.
 |                                            | `src/backend-manager/src/mcp_server.rs::handle_resolve_variable_step` |
 | Response formatters                        | `src/backend-manager/src/python_bridge.rs`                            |
 | Wire-shape definitions                     | `src/db-backend/src/task.rs` (Rust) / `python-api/codetracer/origin.py` (Python) |
-| Canonical wire spec                        | [`Value-Origin-Tracking.md` §4.1 / §5](https://github.com/metacraft-labs/codetracer-specs/blob/main/GUI/Debugging-Features/Value-Origin-Tracking.md) |
 
 For the user-facing walkthrough, see
 [Value Origin Tracking](../usage_guide/value-origin-tracking.md).
