@@ -63,6 +63,13 @@ fn require_gcc() -> Option<String> {
     }
 }
 
+// P7.4: This test bypasses `ct record` and drives `ct-native-replay
+// build`/`record` directly so it can probe the recorder's own CLI
+// contract — the "RR support not built" stderr sentinel, the per-
+// subcommand exit codes, and the API-surface side effects that the
+// `ct` wrapper would smooth over.  A slower user-facing variant that
+// drives the same fixture through `ct record --backend rr` is tracked
+// as the P7.4 slow-but-true-to-end-user smoke variant follow-up.
 #[test]
 fn test_origin_rr_smoke_gdb_apis_available() {
     // Step 1: confirm rr is on PATH (only required for the end-to-end

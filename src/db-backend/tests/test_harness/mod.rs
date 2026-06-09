@@ -355,6 +355,15 @@ impl TestRecording {
         // exit 3 with `daily_replay_limit_reached`.
         ensure_replay_license_bypass();
 
+        // P7.4: This harness deliberately bypasses `ct record` and drives
+        // `ct-native-replay build` + `ct-native-replay record` directly.
+        // Rationale: the db-backend flow tests need to assert against the
+        // raw recorder CLI contract (exit codes, stderr "not built" sentinel,
+        // mid-run process model) without the `ct` wrapper's progress/UI
+        // layer interleaving on stderr.  A slower user-facing variant that
+        // exercises the same paths through `ct record` is tracked as the
+        // P7.4 slow-but-true-to-end-user smoke variant follow-up.
+
         let temp_dir = std::env::temp_dir().join(format!(
             "flow_test_{}_{}_{}",
             language.extension(),
@@ -432,6 +441,14 @@ impl TestRecording {
         version_label: &str,
         ct_rr_support: &Path,
     ) -> Result<Self, String> {
+        // P7.4: bypasses `ct record --backend mcr`.  The MCR flow tests
+        // need to assert against `ct-native-replay`'s raw CLI surface
+        // (build/record subcommands, `--backend mcr` flag, exit-code
+        // sentinels) without `ct`'s progress reporting interleaving on
+        // stderr.  A slower user-facing variant that drives this through
+        // `ct record --backend mcr` is tracked as the P7.4 slow-but-true
+        // smoke variant follow-up.
+
         let temp_dir = std::env::temp_dir().join(format!(
             "mcr_flow_test_{}_{}_{}",
             language.extension(),

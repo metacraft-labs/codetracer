@@ -578,6 +578,15 @@ mod macos_arm64_gate {
         }
     }
 
+    // P7.4: this helper drives `ct-mcr debugserver` directly rather than
+    // going through `ct` because the HCR repro-build test needs to wire
+    // a custom socket / ready-file pair via env vars
+    // (`REPRO_HCR_AGENT_SOCKET`, `RB_HCR_FIXTURE_READY_FILE`) and capture
+    // raw stdout/stderr line-by-line for the live-debugserver assertion.
+    // Routing through `ct` would add a wrapper process that owns stdio
+    // and would not propagate the test-only env contract.  A slower
+    // user-facing variant is tracked as the P7.4 slow-but-true-to-end-
+    // user smoke variant follow-up.
     fn start_live_debugserver(
         ct_mcr: &Path,
         program: &Path,

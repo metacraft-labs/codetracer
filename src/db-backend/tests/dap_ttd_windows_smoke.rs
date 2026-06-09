@@ -346,6 +346,13 @@ fn is_access_denied_output(stderr: &str) -> bool {
         || lower.contains("access is denied")
 }
 
+// P7.4: bypasses `ct record --backend ttd` and drives `ct-native-replay
+// record` directly so the smoke can distinguish "TTD unavailable / access
+// denied" (legitimate skip) from real recorder regressions via
+// `is_access_denied_output` — the `ct` wrapper would re-classify those
+// stderr lines and break the skip contract.  A slower user-facing
+// variant that drives this through `ct record` is tracked as the P7.4
+// slow-but-true-to-end-user smoke variant follow-up.
 fn record_ttd_trace(ct_rr_support: &Path, exe: &Path, output_trace: &Path) -> Result<Option<PathBuf>, String> {
     let output = Command::new(ct_rr_support)
         .args([
