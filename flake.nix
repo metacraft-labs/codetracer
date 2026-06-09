@@ -149,7 +149,12 @@
     # we have to seed those paths from these flake inputs.  ``.envrc``
     # overrides each with a local checkout when present.
     codetracer-native-recorder = {
-      url = "github:metacraft-labs/codetracer-native-recorder/main";
+      # ``stable`` is the released branch under the new branching
+      # policy; ``main`` is being phased out and on this repo
+      # diverged from the integration line (its tip is missing the
+      # FFI files added in the M18 omniscient-DB work) which broke
+      # the db-backend link against libmcr_emulator.  Track stable.
+      url = "github:metacraft-labs/codetracer-native-recorder/stable";
       flake = false;
     };
     codetracer-trace-format-nim = {
