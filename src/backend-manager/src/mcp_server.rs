@@ -2870,8 +2870,9 @@ mod tests {
     fn test_handle_tools_list() {
         let resp = handle_tools_list(&json!(2));
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        // 4 trace tools + 2 observability-discovery tools.
-        assert_eq!(tools.len(), 6);
+        // 4 trace tools + 2 observability-discovery tools + 2 value-origin
+        // discovery handles (get_value_origin + resolve_variable_step).
+        assert_eq!(tools.len(), 8);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"exec_script"));
@@ -2880,6 +2881,8 @@ mod tests {
         assert!(names.contains(&"read_source_file"));
         assert!(names.contains(&"find_recordings_by_window"));
         assert!(names.contains(&"find_recording_by_id"));
+        assert!(names.contains(&"get_value_origin"));
+        assert!(names.contains(&"resolve_variable_step"));
 
         // Verify each tool has an inputSchema.
         for tool in tools {
