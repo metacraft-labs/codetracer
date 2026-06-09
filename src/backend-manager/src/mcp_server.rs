@@ -243,6 +243,70 @@ fn find_recording_by_id_tool() -> Value {
     })
 }
 
+/// Returns the JSON schema for the `get_value_origin` tool.
+///
+/// The MCP tool surface intentionally steers callers toward
+/// `exec_script` + `trace.value_origin(...)` for full programmatic
+/// access; this top-level tool is a discovery handle that points
+/// agents at the Python scripting workflow rather than duplicating
+/// it.  The description names both `exec_script` and `value_origin`
+/// so the test in `tests/mcp_origin_test.rs::test_mcp_get_value_origin
+/// _description_points_at_scripting` can verify the steering.
+fn get_value_origin_tool() -> Value {
+    json!({
+        "name": "get_value_origin",
+        "description": "Return the origin chain for a recorded value.  Prefer the scripting workflow: call `exec_script` with a Python script that invokes `trace.value_origin(path, line, variable)` to get programmatic access to the full chain (steps, scopes, source locations).  This top-level tool is a discovery handle; use `exec_script` + `trace.value_origin` for production queries.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "trace_path": {
+                    "type": "string",
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Source file path (within the trace) of the variable's defining line."
+                },
+                "line": {
+                    "type": "number",
+                    "description": "1-based line number where the variable is defined or last assigned."
+                },
+                "variable": {
+                    "type": "string",
+                    "description": "Variable name to trace the origin of."
+                }
+            },
+            "required": ["trace_path", "path", "line", "variable"]
+        }
+    })
+}
+
+/// Returns the JSON schema for the `resolve_variable_step` tool.
+///
+/// Companion to `get_value_origin`: this tool resolves a single
+/// variable name at the latest matching step rather than returning
+/// the full origin chain.
+fn resolve_variable_step_tool() -> Value {
+    json!({
+        "name": "resolve_variable_step",
+        "description": "Resolve a variable to its latest assigning step in the trace.  Returns the step location (path, line, function) and the value as observed at that step.  For the full origin chain, use `get_value_origin` or the `trace.value_origin` Python API via `exec_script`.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "trace_path": {
+                    "type": "string",
+                    "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL."
+                },
+                "variable": {
+                    "type": "string",
+                    "description": "Variable name to resolve to its latest assigning step."
+                }
+            },
+            "required": ["trace_path", "variable"]
+        }
+    })
+}
+
 /// Returns the JSON schema for the `read_source_file` tool.
 fn read_source_file_tool() -> Value {
     json!({
@@ -1036,6 +1100,8 @@ fn handle_tools_list(id: &Value) -> Value {
                 read_source_file_tool(),
                 find_recordings_by_window_tool(),
                 find_recording_by_id_tool(),
+                get_value_origin_tool(),
+                resolve_variable_step_tool(),
             ]
         }),
     )
