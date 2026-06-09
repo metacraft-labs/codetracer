@@ -104,7 +104,7 @@ When filing a bug report, include:
 4. **The trace file** (if possible) — smaller traces are better. You can
    export a portable trace with:
    ```bash
-   ct-mcr export --portable -o trace-portable.ct /path/to/trace.ct
+   ct trace export --portable -o trace-portable.ct /path/to/trace.ct
    ```
 
 ### Quick log bundle

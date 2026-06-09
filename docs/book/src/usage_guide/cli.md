@@ -11,7 +11,7 @@ Run `ct --help` to see the full list of supported subcommands, but the most comm
 `<application>` can be a source file or a project folder (depending on the language):
 
 1. `ct run <application>` - Creates a recording and load it in CodeTracer with a single command.
-1. `ct record <application>` - Creates a trace file that can be loaded later or shared. On Windows, recordings use TTD (the underlying `ct-rr-support record` invocation requires an elevated shell).
+1. `ct record <application>` - Creates a trace file that can be loaded later or shared. On Windows, `ct record` transparently routes through TTD; the underlying launcher requires an elevated shell.
 1. `ct replay` - Launches the CodeTracer GUI with a previously recorded trace file. Common usages are:
    - `ct replay` - Opens a simple console-based dialog to choose what recording you want to replay.
    - `ct replay <program-name>` - Opens the last trace of an application.
@@ -27,4 +27,4 @@ through the CodeTracer CLI with commands like `ct run` or `ct record`(or through
 Think of debugging your application with CodeTracer as recording a video and then replaying it in order to find
 the information you need. This is why we use commands like `record` and `replay`.
 
-For native graphics programs, visual recordings are produced by the MCR recorder and opened in the GUI as `.ct` files. See [Visual recordings](./visual_recordings.md) for the `ct-mcr record --use-interpose` workflow and the Frame Viewer, Pixel History, and Shader Debugger panels.
+For native graphics programs, visual recordings are produced by the MCR recorder and opened in the GUI as `.ct` files. See [Visual recordings](./visual_recordings.md) for the `ct record --use-interpose` workflow and the Frame Viewer, Pixel History, and Shader Debugger panels.

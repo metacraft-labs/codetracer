@@ -4,25 +4,25 @@ Visual recordings capture graphics API activity together with the native program
 
 This feature is built on the MCR recorder and the visual replay player:
 
-1. `ct-mcr record --use-interpose` records the program into a `.ct` container.
-1. `ct-mcr extract-gfx` extracts the graphics stream from the `.ct` container.
-1. `ct_gfx_player` replays the extracted graphics stream and exposes frame, draw-call, pixel-history, and shader-debug APIs to the GUI.
+1. `ct record --use-interpose` records the program into a `.ct` container.
+1. `ct trace extract-gfx` extracts the graphics stream from the `.ct` container.
+1. `ct gfx-replay` replays the extracted graphics stream and exposes frame, draw-call, pixel-history, and shader-debug APIs to the GUI.
 
 
 When you open a compatible visual trace in CodeTracer, the GUI performs the extraction and player startup automatically. You usually only need to produce or open the `.ct` trace.
 
 ## Recording a visual trace
 
-Use the MCR recorder with the interpose recording path:
+Use `ct record` with the interpose recording path. The `--use-interpose` flag routes through the MCR backend and captures graphics API calls:
 
 ```sh
-ct-mcr record --use-interpose -o /tmp/demo.ct -- /path/to/program --args
+ct record --use-interpose -o /tmp/demo.ct -- /path/to/program --args
 ```
 
 For OpenGL tests in headless or CI environments, software rendering can make the result more reproducible:
 
 ```sh
-LIBGL_ALWAYS_SOFTWARE=1 ct-mcr record --use-interpose -o /tmp/demo.ct -- /path/to/program
+LIBGL_ALWAYS_SOFTWARE=1 ct record --use-interpose -o /tmp/demo.ct -- /path/to/program
 ```
 
 The output is a CTFS `.ct` file. It contains the native execution trace and the captured graphics events needed for visual replay. Keep this file as the artifact to share, import, or open later.
@@ -37,7 +37,7 @@ ct host --trace-path=/tmp/demo.ct
 
 For normal replay workflows, use the same GUI entry points you use for other traces. CodeTracer detects compatible MCR `.ct` files and marks the session as visual replay capable.
 
-When the trace opens, CodeTracer extracts the graphics stream into a temporary directory and starts `ct_gfx_player --http`. The temporary extracted stream is an implementation detail; the `.ct` file remains the durable recording.
+When the trace opens, CodeTracer extracts the graphics stream into a temporary directory and starts `ct gfx-replay --http`. The temporary extracted stream is an implementation detail; the `.ct` file remains the durable recording.
 
 ## GUI panels
 
@@ -70,27 +70,27 @@ Click any screenshot to open the generated full-size image.
 The GUI normally manages this pipeline, but the lower-level commands are useful for diagnostics:
 
 ```sh
-ct-mcr extract-gfx -o /tmp/demo-gfx /tmp/demo.ct
-ct_gfx_player --gfx-stream /tmp/demo-gfx --http --port 9000
+ct trace extract-gfx -o /tmp/demo-gfx /tmp/demo.ct
+ct gfx-replay --gfx-stream /tmp/demo-gfx --http --port 9000
 ```
 
 For offscreen or CI runs, force the software backend:
 
 ```sh
-ct_gfx_player --backend software --gfx-stream /tmp/demo-gfx --http --port 9000
+ct gfx-replay --backend software --gfx-stream /tmp/demo-gfx --http --port 9000
 ```
 
 The HTTP player serves the same APIs used by the CodeTracer GUI, including frame loading, draw-call scrubbing, pixel history, and shader debugging.
 
 ## Development overrides
 
-Development builds can point CodeTracer at non-default binaries:
+Development builds can point CodeTracer at non-default underlying binaries. The user-facing `ct trace extract-gfx` and `ct gfx-replay` subcommands resolve these binaries internally; the variables below override that resolution.
 
 | Variable | Description |
 | -------- | ----------- |
-| `CODETRACER_CT_MCR_CMD` | Path to the `ct-mcr` or `ct_cli` binary used for `extract-gfx`. |
-| `CODETRACER_CT_GFX_PLAYER_CMD` | Path to the `ct_gfx_player` binary. |
-| `CODETRACER_CT_GFX_PLAYER_BACKEND` | Optional player backend override, for example `software`. |
+| `CODETRACER_CT_MCR_CMD` | Path to the internal MCR binary that `ct trace extract-gfx` invokes to read the graphics stream from a `.ct` container. |
+| `CODETRACER_CT_GFX_PLAYER_CMD` | Path to the internal player binary that `ct gfx-replay` launches. |
+| `CODETRACER_CT_GFX_PLAYER_BACKEND` | Optional player backend override (equivalent to passing `--backend` to `ct gfx-replay`), for example `software`. |
 
 These variables are mainly useful when working from sibling development repositories. Installed builds should find the bundled tools without extra configuration.
 

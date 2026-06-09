@@ -12,12 +12,15 @@ ct <command> [options] [<program>] [<args>]
 
 #### Recording and Replay
 
-| Command                      | Description                            |
-| ---------------------------- | -------------------------------------- |
-| `ct run <program> [args]`    | Record and immediately open in the GUI |
-| `ct record <program> [args]` | Record a trace to disk                 |
-| `ct replay`                  | Open a trace in the GUI                |
-| `ct import <trace-folder>`   | Import a trace from a folder           |
+| Command                                       | Description                                                          |
+| --------------------------------------------- | -------------------------------------------------------------------- |
+| `ct run <program> [args]`                     | Record and immediately open in the GUI                               |
+| `ct record <program> [args]`                  | Record a trace to disk                                               |
+| `ct replay`                                   | Open a trace in the GUI                                              |
+| `ct import <trace-folder>`                    | Import a trace from a folder                                         |
+| `ct trace extract-gfx -o <dir> <trace>`       | Extract the graphics stream from a `.ct` container                   |
+| `ct trace export --portable -o <out> <trace>` | Export a portable trace (embeds binaries and debug symbols)          |
+| `ct gfx-replay --gfx-stream <dir>`            | Replay an extracted graphics stream (used by the visual replay GUI)  |
 
 #### Stylus / EVM
 
@@ -43,13 +46,14 @@ ct <command> [options] [<program>] [<args>]
 
 #### Utility
 
-| Command      | Description                  |
-| ------------ | ---------------------------- |
-| `ct install` | Install the CLI tools        |
-| `ct version` | Print the CodeTracer version |
-| `ct help`    | Display help information     |
-| `ct list`    | List recorded traces         |
-| `ct console` | Open the interactive console |
+| Command               | Description                                                                       |
+| --------------------- | --------------------------------------------------------------------------------- |
+| `ct install`          | Install the CLI tools                                                             |
+| `ct version`          | Print the CodeTracer version                                                      |
+| `ct help`             | Display help information                                                          |
+| `ct list`             | List recorded traces                                                              |
+| `ct console`          | Open the interactive console                                                      |
+| `ct doctor <lang>`    | Probe recorder-readiness for a language (currently `python`; more languages soon) |
 
 #### Online Sharing
 
@@ -84,6 +88,7 @@ ct record [options] <program> [-- <program-args>]
 | `-t, --stylus-trace <PATH>`   | Path to a Stylus trace file                                  |
 | `-a, --address <ADDR>`        | Contract address (Stylus)                                    |
 | `--socket <PATH>`             | Unix socket path for event reporting                         |
+| `--use-interpose`             | Record graphics API calls for visual replay (MCR backend only) |
 
 **Language detection:** When `--lang` is not provided, `ct` detects the language from the file extension or project structure:
 
@@ -99,7 +104,7 @@ ct record [options] <program> [-- <program-args>]
 
 > **Note:** Blockchain-specific languages (Circom, Cairo, Aiken, Cadence, Move, Sway, Miden, PolkaVM, Leo, Tolk) use their own recorder binaries. See the [Getting Started](../getting_started/overview.md) guides for each language.
 
-> **Note:** Visual recordings for native graphics programs are MCR `.ct` traces produced with `ct-mcr record --use-interpose`. CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See [Visual recordings](../usage_guide/visual_recordings.md).
+> **Note:** Visual recordings for native graphics programs are MCR `.ct` traces produced with `ct record --use-interpose`. CodeTracer opens these traces in the GUI and starts the visual replay player automatically. See [Visual recordings](../usage_guide/visual_recordings.md).
 
 ### ct replay
 
@@ -180,6 +185,72 @@ reused.
 See [Value Origin Tracking](../usage_guide/value-origin-tracking.md) for
 the user-facing walkthrough.
 
+### ct trace extract-gfx
+
+Extracts the graphics stream from a `.ct` trace container into a directory the visual replay player can consume.
+
+```
+ct trace extract-gfx -o <output-dir> <trace>
+```
+
+**Options:**
+
+| Flag                       | Description                                                            |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `<trace>`                  | Path to the `.ct` trace container to extract (required positional).    |
+| `-o, --output-dir <DIR>`   | Directory to extract the graphics stream into. Required.               |
+
+See [Visual recordings](../usage_guide/visual_recordings.md) for the full workflow.
+
+### ct trace export
+
+Exports a recorded trace to a single file, optionally producing a portable bundle with embedded binaries and debug symbols.
+
+```
+ct trace export [--portable] -o <output> <trace>
+```
+
+**Options:**
+
+| Flag                  | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| `<trace>`             | Path to the source trace to export (required positional).          |
+| `--portable`          | Produce a portable export with embedded binaries and debug symbols.|
+| `-o, --output <PATH>` | Output path for the exported trace (required).                     |
+
+### ct gfx-replay
+
+Replays an extracted graphics stream. The CodeTracer GUI launches this automatically when opening a visual `.ct` trace; running it directly is useful for diagnostics.
+
+```
+ct gfx-replay --gfx-stream <dir> [--http --port <N>] [--backend <BACKEND>]
+```
+
+**Options:**
+
+| Flag                  | Description                                                                |
+| --------------------- | -------------------------------------------------------------------------- |
+| `--gfx-stream <DIR>`  | Path to the extracted graphics-stream directory (required).                |
+| `--http`              | Start the player as an HTTP server (used by the GUI).                      |
+| `--port <N>`          | Port for the HTTP player (only meaningful with `--http`).                  |
+| `--backend <BACKEND>` | Rendering backend selector — e.g. `software` or `hardware`.                |
+
+### ct doctor
+
+Probes recorder-readiness for a language: reports the interpreter or runtime that would be used and whether the matching recorder package is installed and importable.
+
+```
+ct doctor <language>
+```
+
+**Arguments:**
+
+| Argument     | Description                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------- |
+| `<language>` | Recorder to probe. Currently `python` is wired; more recorders will land in future releases. |
+
+Run this when `ct record` fails with a recorder import error to confirm which interpreter `ct` is targeting and whether the recorder package is present.
+
 ### ct trace exec
 
 Runs a Python replay-script against a recording. The script body is the
@@ -207,9 +278,9 @@ for the full surface.
 | `CODETRACER_RECORDING`          | Set to `1` during recording                                             |
 | `CODETRACER_CALLTRACE_MODE`     | Call trace mode: `FullRecord`, `RawRecordNoValues`, `NoInstrumentation` |
 | `CODETRACER_SHELL_ID`           | Shell session ID (for CodeTracer Shell)                                 |
-| `CODETRACER_CT_MCR_CMD`         | Override the MCR command used for visual replay graphics extraction      |
-| `CODETRACER_CT_GFX_PLAYER_CMD`  | Override the visual replay player binary                                |
-| `CODETRACER_CT_GFX_PLAYER_BACKEND` | Override the visual replay player backend, for example `software`     |
+| `CODETRACER_CT_MCR_CMD`         | Override the internal MCR binary that `ct trace extract-gfx` invokes     |
+| `CODETRACER_CT_GFX_PLAYER_CMD`  | Override the internal player binary that `ct gfx-replay` launches        |
+| `CODETRACER_CT_GFX_PLAYER_BACKEND` | Default backend for `ct gfx-replay` (equivalent to `--backend`), for example `software` |
 
 ### Output Format
 

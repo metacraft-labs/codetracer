@@ -14,11 +14,13 @@ CodeTracer's Python support runs inside your Python interpreter — the `codetra
    ```
 
    If you use a tool like `uv` or `pipx`, run the equivalent command inside that tool so the recorder ends up on the same `sys.path` as your application.
-3. Optional: confirm the module is reachable by asking the interpreter for help.
+3. Optional: confirm the recorder is ready by running CodeTracer's readiness probe.
 
    ```bash
-   python -m codetracer_python_recorder --help
+   ct doctor python
    ```
+
+   The probe reports the interpreter it would invoke and whether the recorder package is importable from it.
 
 > [!CAUTION]
 > If `ct record` cannot import the recorder package, recording will fail with a module import error. Install the package in the interpreter you intend to trace or point Codetracer at a specific interpreter via `CODETRACER_PYTHON_INTERPRETER=/path/to/python`.
