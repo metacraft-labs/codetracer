@@ -1616,6 +1616,76 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
+      # ── BEAM (Erlang / Elixir) recorder ──────────────────────────────
+      # ``src/db-backend/tests/erlang_flow_dap_test.rs`` and
+      # ``elixir_flow_dap_test.rs`` resolve the recorder binary via
+      # ``test_harness::find_beam_recorder()``: env var override →
+      # ``$PATH`` → sibling ``../codetracer-beam-recorder/target/{debug,
+      # release}/codetracer-beam-recorder``.  The tests ``assert!`` and
+      # panic when none of those hit, so they need the recorder repo
+      # cloned AND its binary compiled before ``./ci/test/non-gui.sh``
+      # runs.  Same sibling-pin pattern as codetracer-native-recorder
+      # (resolve-mcr-ref + clone-repo + nix-develop build).
+      - name: Resolve codetracer-beam-recorder ref
+        if: matrix.platform == 'nixos'
+        id: resolve-beam-ref
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-beam-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-beam-recorder (nixos)
+        if: matrix.platform == 'nixos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-beam-recorder
+          ref: ${{ steps.resolve-beam-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-beam-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Build codetracer-beam-recorder (nixos)
+        # The recorder's Justfile `build` target shells into the
+        # recorder's own ``nix develop`` shell when cargo isn't on
+        # PATH and runs ``cargo build --locked`` there.  We pre-build
+        # so ``find_beam_recorder()`` resolves the binary at
+        # ``../codetracer-beam-recorder/target/debug/codetracer-beam-recorder``
+        # without the test having to bootstrap nim/cargo itself.
+        if: matrix.platform == 'nixos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
+          nix develop --no-write-lock-file --command just build
+
+      - name: Clone codetracer-beam-recorder (macOS)
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-beam-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-beam-recorder
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Build codetracer-beam-recorder (macOS)
+        # macOS has cargo from ``Set up Rust toolchain (macOS)`` above,
+        # so the recorder's Justfile takes the native ``build-native``
+        # branch.  Elixir / rebar3 aren't required to *produce* the
+        # binary — only to run its full test matrix — so we just
+        # invoke ``cargo build --locked`` directly to keep the
+        # macOS prerequisites narrow.
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
+          cargo build --locked
+
       # Runs all Rust tests including flow integration tests for all languages.
       # WASM flow tests skip automatically if wazero or wasm32-wasip1 target
       # are not available. Stylus flow tests are #[ignore] and need a devnode.
