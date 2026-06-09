@@ -5,7 +5,7 @@ use codetracer_bench::gui_ops::{
     current_platform, every_unmeasured_cell_is_pending, pending_cell_count,
     tracepoint_benchmark_exists,
 };
-use codetracer_bench::{Language, LanguageProbe, ct_binary};
+use codetracer_bench::{Language, ct_binary, ct_cli_binary};
 use std::path::PathBuf;
 
 fn skip(reason: &str) {
@@ -54,16 +54,16 @@ fn count_cells(matrix: &GuiOpsMatrix, backend: Backend, language: Language) -> u
 
 #[test]
 fn python_materialized_linux_runs_9_operations() {
-    // Probe + decide if the row can be measured. The Python recorder
-    // gates the row's measurability per the M3 / M5 / M11 narrow SKIP
-    // discipline.
-    if let Err(s) = LanguageProbe::probe(Language::Python) {
-        skip(&format!(
-            "Python recorder unavailable — {s}; row stays pending in matrix"
-        ));
+    // Per-language toolchain probes moved into `ct record` itself
+    // (P9.1).  The test now only confirms the wiring binaries are
+    // present; whether the Python recorder actually loads is something
+    // `ct record` will surface as a row-level error during the live
+    // bench run.
+    if ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable; rows stay pending in matrix");
     }
     if ct_binary().is_none() {
-        skip("ct binary not on PATH; row stays pending in matrix");
+        skip("ct binary not on PATH; rows stay pending in matrix");
     }
     let driver = AlwaysPendingDriver;
     let matrix = build_matrix(
@@ -88,8 +88,8 @@ fn python_materialized_linux_runs_9_operations() {
 
 #[test]
 fn cpp_rr_linux_runs_11_operations() {
-    if let Err(s) = LanguageProbe::probe(Language::CPlusPlus) {
-        skip(&format!("C++ recorder unavailable — {s}"));
+    if ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable; rows stay pending");
     }
     let driver = AlwaysPendingDriver;
     let matrix = build_matrix(
@@ -105,8 +105,8 @@ fn cpp_rr_linux_runs_11_operations() {
 
 #[test]
 fn cpp_mcr_omniscient_linux_runs_11_operations() {
-    if let Err(s) = LanguageProbe::probe(Language::CPlusPlus) {
-        skip(&format!("C++ recorder unavailable — {s}"));
+    if ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable; rows stay pending");
     }
     let driver = AlwaysPendingDriver;
     let matrix = build_matrix(
@@ -122,8 +122,8 @@ fn cpp_mcr_omniscient_linux_runs_11_operations() {
 
 #[test]
 fn cpp_mcr_no_omniscient_linux_runs_11_operations() {
-    if let Err(s) = LanguageProbe::probe(Language::CPlusPlus) {
-        skip(&format!("C++ recorder unavailable — {s}"));
+    if ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable; rows stay pending");
     }
     let driver = AlwaysPendingDriver;
     let matrix = build_matrix(

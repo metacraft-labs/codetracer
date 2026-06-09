@@ -100,8 +100,18 @@ pub fn run(
         report: BenchReport::new("slice-prep-speed", report_columns()),
         ..Default::default()
     };
-    if let Err(sentinel) = crate::LanguageProbe::probe(language) {
-        outcome.skip_reason = Some(sentinel);
+    // Gate the bench on the two binaries it shells out to: the user-
+    // facing `ct` CLI (for `ct record`) and the db-backend
+    // `replay-server` (for `ct trace omniscient-prep`).  Missing
+    // either is a SKIP — the recording itself, language-toolchain
+    // probing, and recorder discovery all happen inside `ct record`,
+    // so we don't probe per-language here.
+    if crate::ct_cli_binary().is_none() {
+        outcome.skip_reason = Some(
+            "ct CLI not on PATH and not discoverable at src/build-debug/bin/ct \
+             — run `just build-once` first"
+                .to_string(),
+        );
         return outcome;
     }
     if crate::ct_binary().is_none() {

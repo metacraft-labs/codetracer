@@ -13,8 +13,7 @@
 //! `just bench-omniscient-db-size`.
 
 use crate::{
-    BenchReport, BenchRow, FixtureRecorder, Language, LanguageProbe, OmniscientPrep, RecorderError,
-    dir_size_bytes,
+    BenchReport, BenchRow, FixtureRecorder, Language, OmniscientPrep, RecorderError, dir_size_bytes,
 };
 use std::path::{Path, PathBuf};
 
@@ -199,8 +198,14 @@ pub fn measure_fixture(
     fixture: &OmniscientDbFixture,
     temp_root: &Path,
 ) -> Result<OmniscientDbMeasurement, RecorderError> {
-    LanguageProbe::probe(fixture.language).map_err(RecorderError::Unavailable)?;
     let trace_dir = temp_root.join(format!("{}-{}", fixture.language.wire(), fixture.name));
+    // Record through `ct record` — the single recording entry point.
+    // Per-language toolchain probing, recorder discovery, and (for
+    // native langs) compile-then-record orchestration all happen
+    // inside the `ct` CLI; the bench inherits the process environment
+    // so the sibling-detection env vars
+    // (CODETRACER_PYTHON_INTERPRETER, CODETRACER_CT_MCR_CMD, …) flow
+    // through.
     FixtureRecorder::record(fixture.language, &fixture.source_path, &trace_dir)?;
     // Run the omniscient-prep subprocess against the .ct CTFS container
     // the recorder wrote.  Different recorders place the .ct file at
@@ -212,13 +217,12 @@ pub fn measure_fixture(
     // the trace_dir and passing the actual file to replay-server so
     // every layout works under the same omniscient-prep invocation.
     let ct_path = find_ct_container(&trace_dir).ok_or_else(|| {
-        RecorderError::SubprocessFailed {
-            binary: "FixtureRecorder".to_string(),
-            exit: None,
-            stderr: format!(
-                "recorder did not produce a *.ct CTFS container anywhere under {} \
-                 — check that the recorder's native binary path (not the legacy \
-                 trace_metadata.json sidecar fallback) is in use",
+        RecorderError::RecordingFailed {
+            exit_code: None,
+            stderr_tail: format!(
+                "ct record exit 0 but no *.ct CTFS container found under {} \
+                 — recorder may have written to an unexpected location; \
+                 check the `recordingId:` marker in stdout for the trace id",
                 trace_dir.display()
             ),
         }
@@ -326,9 +330,11 @@ fn read_event_count(trace_dir: &Path) -> Option<u64> {
     None
 }
 
-/// Drive the bench across the selected language set. Each language
-/// that fails the [`LanguageProbe`] is recorded in
-/// [`BenchOutcome::skipped`] with a precise sentinel.
+/// Drive the bench across the selected language set.  Languages whose
+/// recorder is unreachable (`ct record` returns a
+/// [`RecorderError::Unavailable`] sentinel) are collected into
+/// [`BenchOutcome::skipped`] with the precise diagnostic `ct record`
+/// emitted so operators know which environment dependency to fix.
 pub fn run(fixtures_root: &Path, languages: &[Language], temp_root: &Path) -> BenchOutcome {
     let mut outcome = BenchOutcome {
         report: BenchReport::new("omniscient-db-size", report_columns()),
@@ -337,8 +343,20 @@ pub fn run(fixtures_root: &Path, languages: &[Language], temp_root: &Path) -> Be
     for language in languages {
         let language = *language;
         let fixtures = discover_fixtures(fixtures_root, language);
-        if let Err(sentinel) = LanguageProbe::probe(language) {
-            outcome.skipped.push((language, sentinel));
+        // No fixtures discovered means the matrix doesn't cover this
+        // language for the current campaign run — record an explicit
+        // SKIP so the per-language wire name is represented in the
+        // outcome (the `all_languages_flag_runs_full_matrix` test
+        // depends on this contract).
+        if fixtures.is_empty() {
+            outcome.skipped.push((
+                language,
+                format!(
+                    "no fixtures found under {}/omniscient-db-size/{}",
+                    fixtures_root.display(),
+                    language.wire(),
+                ),
+            ));
             continue;
         }
         for fixture in fixtures {

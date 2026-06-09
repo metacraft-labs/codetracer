@@ -19,8 +19,7 @@
 
 use crate::dap_driver::{DapError, DapSession};
 use crate::{
-    BenchReport, BenchRow, FixtureRecorder, Language, LanguageProbe, RecorderError, ct_binary,
-    ct_cli_binary,
+    BenchReport, BenchRow, FixtureRecorder, Language, RecorderError, ct_binary, ct_cli_binary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -69,6 +68,35 @@ impl Backend {
             Backend::McrNoOmniscient,
             Backend::Ttd,
         ]
+    }
+
+    /// Map the bench's [`Backend`] enum to the `--backend` argument
+    /// `ct record` expects.  Per `codetracer/src/ct/trace/record.nim`
+    /// `nativeRecordingBackendForHost`:
+    ///
+    /// * Linux defaults to `mcr`; `rr` is the only other accepted value.
+    /// * macOS always uses `mcr` (the recorder rejects `rr` / `ttd`).
+    /// * Windows accepts `mcr` and `ttd`.
+    ///
+    /// Materialized languages (Python / Ruby / JS / Cairo / Solana)
+    /// ignore `--backend` entirely — the recorder routes through the
+    /// language shim regardless.  Returning `Ok(None)` here lets the
+    /// caller omit the flag so `ct` picks the language's canonical
+    /// path.
+    ///
+    /// The `McrOmniscient` / `McrNoOmniscient` distinction is a
+    /// *replay-time* knob (omniscient-prep runs after recording); both
+    /// record through `--backend mcr`.
+    ///
+    /// Returns `Err(_)` for [`Backend::Ttd`] on non-Windows hosts —
+    /// the caller surfaces this as the Windows-only PENDING sentinel.
+    pub fn ct_record_backend_kind(self) -> Result<Option<&'static str>, &'static str> {
+        match self {
+            Backend::Materialized => Ok(None),
+            Backend::McrNoOmniscient | Backend::McrOmniscient => Ok(Some("mcr")),
+            Backend::Rr => Ok(Some("rr")),
+            Backend::Ttd => Err("ttd backend is Windows-only per the campaign ceiling"),
+        }
     }
 }
 
@@ -437,10 +465,18 @@ pub struct DapMeasurementDriver {
     /// (backend,language) tuple).  Optional — when `None` the driver
     /// records into a OS-default temp path.
     pub recording_root: Option<PathBuf>,
-    /// Cache of recorded trace folders keyed by language.  Each entry
-    /// is the absolute path to the directory containing the `.ct`
-    /// trace artifact.  Filled in on first measurement.
-    recorded_traces: RefCell<HashMap<Language, PathBuf>>,
+    /// Cache of recorded trace folders keyed by `(backend-kind,
+    /// language)`.  Each entry is the absolute path to the directory
+    /// containing the `.ct` trace artifact.  Filled in on first
+    /// measurement.
+    ///
+    /// Keyed by backend-kind (the `--backend` argument value, or empty
+    /// string for the default) rather than the bench's [`Backend`]
+    /// enum so the McrOmniscient and McrNoOmniscient variants share a
+    /// single recorded trace — both record through `--backend mcr` and
+    /// only differ at replay time (omniscient-prep is a post-recording
+    /// step the bench will exercise separately, not at record time).
+    recorded_traces: RefCell<HashMap<(String, Language), PathBuf>>,
 }
 
 impl DapMeasurementDriver {
@@ -466,9 +502,23 @@ impl DapMeasurementDriver {
     }
 
     /// Returns the directory containing the recorded `.ct` artifact
-    /// for `language`.  Records the fixture lazily on first call.
-    fn ensure_recording(&self, language: Language) -> Result<PathBuf, String> {
-        if let Some(cached) = self.recorded_traces.borrow().get(&language) {
+    /// for `(backend, language)`.  Records the fixture lazily on first
+    /// call via `ct record`.
+    ///
+    /// `backend_kind` is the value passed after `--backend`; `None`
+    /// means the bench lets `ct record` pick the language's default
+    /// path (the materialized recorder for VM languages; `mcr` on
+    /// Linux for native compiled languages).
+    fn ensure_recording(
+        &self,
+        backend_kind: Option<&str>,
+        language: Language,
+    ) -> Result<PathBuf, String> {
+        let cache_key = (
+            backend_kind.unwrap_or("").to_string(),
+            language,
+        );
+        if let Some(cached) = self.recorded_traces.borrow().get(&cache_key) {
             return Ok(cached.clone());
         }
         let program = self.fixture_program(language);
@@ -480,25 +530,39 @@ impl DapMeasurementDriver {
             None => std::env::temp_dir().join("ct-bench-gui-ops"),
         };
         std::fs::create_dir_all(&recording_root).map_err(|e| e.to_string())?;
-        let trace_dir = recording_root.join(language.wire());
+        // Subdirectory name encodes both the language and the
+        // backend-kind so separate (language, backend) tuples don't
+        // stomp on each other's traces under the shared recording_root.
+        let trace_dir = recording_root.join(format!(
+            "{}-{}",
+            language.wire(),
+            if cache_key.0.is_empty() {
+                "default"
+            } else {
+                cache_key.0.as_str()
+            }
+        ));
         // Clear any stale trace from a previous run so the recorder
         // can write into a clean directory.
         if trace_dir.exists() {
             let _ = std::fs::remove_dir_all(&trace_dir);
         }
         std::fs::create_dir_all(&trace_dir).map_err(|e| e.to_string())?;
-        FixtureRecorder::record(language, &program, &trace_dir).map_err(|e| match e {
-            RecorderError::Unavailable(s) => s,
-            RecorderError::Io(s) => format!("recorder io error: {s}"),
-            RecorderError::SubprocessFailed {
-                binary,
-                exit,
-                stderr,
-            } => format!("recorder {binary} failed (exit={exit:?}): {stderr}"),
-        })?;
+        FixtureRecorder::record_via_ct(language, backend_kind, &program, &trace_dir).map_err(
+            |e| match e {
+                RecorderError::Unavailable(s) => s,
+                RecorderError::Io(s) => format!("recorder io error: {s}"),
+                RecorderError::RecordingFailed {
+                    exit_code,
+                    stderr_tail,
+                } => format!(
+                    "ct record failed (exit={exit_code:?}):\n{stderr_tail}"
+                ),
+            },
+        )?;
         self.recorded_traces
             .borrow_mut()
-            .insert(language, trace_dir.clone());
+            .insert(cache_key, trace_dir.clone());
         Ok(trace_dir)
     }
 
@@ -801,32 +865,30 @@ impl MeasurementDriver for DapMeasurementDriver {
         // Backend → recording-path mapping:
         //
         // * Materialized — the Python-class trace shape (per-step
-        //   state materialised inline).  Recorded by the language's
-        //   own recorder shim (codetracer-python-recorder,
+        //   state materialised inline).  `ct record` routes through
+        //   the language's own recorder shim (codetracer-python-recorder,
         //   codetracer-ruby-recorder, codetracer-js-recorder,
         //   codetracer-cairo-recorder, codetracer-solana-recorder).
         //   The dap-server reads the CTFS event stream directly; no
         //   replay-worker subprocess is needed.
         //
-        // * McrNoOmniscient / McrOmniscient — recorded by `ct-mcr`.
-        //   The dap-server spawns `ct-native-replay` as the replay
-        //   worker via the `ctRRWorkerExe` launch arg (see
-        //   `codetracer/src/db-backend/src/dap.rs` LaunchRequestArguments
-        //   and the existing *_mcr_streaming_flow_test.rs harnesses).
-        //   The bench's FixtureRecorder routes C/C++/Rust/Nim/Go
-        //   through `ct-mcr record` already.
+        // * McrNoOmniscient / McrOmniscient — `ct record --backend mcr`
+        //   spawns `ct-mcr` against the compiled binary.  Both
+        //   variants share the same recording; the omniscient-prep
+        //   step happens at replay time (the dap-server discovers it
+        //   on PATH and invokes it on demand).
         //
-        // * Rr — would record via the codetracer-rr-backend's
-        //   classic-rr launcher; PEND because the dev shell doesn't
-        //   ship a one-shot ct-rr recording entry point.
+        // * Rr — `ct record --backend rr` on Linux spawns the
+        //   classic-rr recorder via codetracer-rr-backend.
         //
         // * Ttd — Windows-only per the campaign's platform ceiling.
-        // Map backend → `ct start_backend` kind.  Materialized + both
-        // MCR variants share the `db` kind (the same replay-server
-        // dap binary, distinguished by trace contents + the
-        // replay-worker the dap-server discovers via PATH).  Rr uses
-        // its own ct-rr-support DAP binary, launched via `ct
-        // start_backend rr --stdio`.
+        //
+        // Map backend → `ct start_backend` kind for the DAP side.
+        // Materialized + both MCR variants share the `db` kind (the
+        // same replay-server dap binary, distinguished by trace
+        // contents + the replay-worker the dap-server discovers via
+        // PATH).  Rr uses its own ct-rr-support DAP binary, launched
+        // via `ct start_backend rr --stdio`.
         let backend_kind = match backend {
             Backend::Materialized | Backend::McrNoOmniscient | Backend::McrOmniscient => "db",
             Backend::Rr => "rr",
@@ -834,9 +896,29 @@ impl MeasurementDriver for DapMeasurementDriver {
                 return Err("ttd backend is Windows-only per the campaign ceiling".to_string());
             }
         };
-        // Narrow probes — the recorder + the DAP host must both be
-        // reachable for the cell to be measurable.
-        LanguageProbe::probe(language)?;
+        // Map backend → `ct record --backend <kind>`.  Ttd is
+        // intercepted above with the Windows-only sentinel.
+        let record_backend_kind = backend.ct_record_backend_kind()
+            .map_err(|s| s.to_string())?;
+        // MCR over a materialized-trace language is a category error:
+        // Python / Ruby / JS / Cairo / Solana fixtures don't compile
+        // to a native binary, so there's nothing for MCR to attach
+        // to.  Emit the NotApplicable sentinel rather than letting
+        // `ct record` produce a confusing error mid-recording.  This
+        // mirrors the contract that the pre-P9.1 bench enforced
+        // implicitly via per-language recorder dispatch.
+        if matches!(
+            backend,
+            Backend::McrNoOmniscient | Backend::McrOmniscient | Backend::Rr
+        ) && language.uses_materialized_traces()
+        {
+            return Err(format!(
+                "not-applicable: {} traces are materialized by the language recorder; \
+                 the {} backend records native binaries only",
+                language.wire(),
+                backend.wire(),
+            ));
+        }
         // Prefer the user-facing `ct` CLI as the DAP host (it routes
         // through `start_backend` to the right replay binary per kind).
         // Fall back to the direct `replay-server`/`ct-rr-support`
@@ -854,7 +936,7 @@ impl MeasurementDriver for DapMeasurementDriver {
             return Err(format!("fixture program missing: {}", program.display()));
         }
 
-        let trace_dir = self.ensure_recording(language)?;
+        let trace_dir = self.ensure_recording(record_backend_kind, language)?;
         let trace_file = Self::find_trace_file(&trace_dir).ok_or_else(|| {
             format!(
                 "recorded trace folder {} contains no .ct artifact",

@@ -29,8 +29,10 @@ fn default_fixture_runs_5_slice_counts_x_4_concurrencies() {
         skip("fixture program missing — build cannot proceed");
         return;
     }
-    if let Err(s) = codetracer_bench::LanguageProbe::probe(language) {
-        skip(&format!("recorder unavailable — {s}"));
+    // Per-language recorder gating now lives inside `ct record`; the
+    // bench tests only verify the wiring through `ct` is reachable.
+    if codetracer_bench::ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable — needed for ct record");
         return;
     }
     if codetracer_bench::ct_binary().is_none() {

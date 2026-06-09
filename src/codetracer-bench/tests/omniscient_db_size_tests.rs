@@ -1,9 +1,17 @@
 //! P2 verification — 4 tests.
 //!
 //! Each test verifies the bench infrastructure, not the recorder's
-//! actual on-disk size output. The recorder is invoked when on PATH;
-//! otherwise the test SKIPs with a narrow sentinel per the M3
-//! SKIP-discipline review.
+//! actual on-disk size output.  When the dev shell lacks the `ct` CLI
+//! (which fronts `ct record`) or the db-backend `replay-server` (which
+//! provides `ct trace omniscient-prep`), the test SKIPs with a narrow
+//! sentinel per the M3 SKIP-discipline review.
+//!
+//! Post-P9.1: language-specific recorder probes are gone.  The bench
+//! routes every recording through `ct record`, which surfaces precise
+//! per-language errors itself; the test layer just confirms that the
+//! shared infrastructure (the CLI binaries) is reachable and lets
+//! `ct record` report any deeper environment failure as a row-level
+//! error.
 
 use codetracer_bench::{Language, omniscient_db_size};
 use std::path::PathBuf;
@@ -22,15 +30,12 @@ fn skip(reason: &str) {
 
 #[test]
 fn default_python_cpp_fixtures_run_to_completion() {
-    // Probe both recorders; SKIP narrowly when either is missing.
-    let python = codetracer_bench::LanguageProbe::probe(Language::Python);
-    let cpp = codetracer_bench::LanguageProbe::probe(Language::CPlusPlus);
-    if let Err(s) = &python {
-        skip(&format!("Python recorder unavailable — {s}"));
-        return;
-    }
-    if let Err(s) = &cpp {
-        skip(&format!("C++ recorder unavailable — {s}"));
+    // Gate on the two binaries the bench shells out to: `ct record`
+    // (the recording side) and `replay-server`-style `ct` (the
+    // omniscient-prep side).  Per-language toolchain probes live
+    // inside `ct record` now, not in the bench.
+    if codetracer_bench::ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable — needed for ct record");
         return;
     }
     if codetracer_bench::ct_binary().is_none() {
@@ -39,21 +44,32 @@ fn default_python_cpp_fixtures_run_to_completion() {
     }
     let temp = tempfile::tempdir().expect("tempdir");
     let outcome = omniscient_db_size::run(&fixtures_root(), &Language::default_set(), temp.path());
-    // Expect 6 rows (3 fixtures × 2 languages). Surface SKIP cleanly
-    // when fewer rows land — e.g. one fixture failed to record.
+    // The bench's contract here is wiring-correctness.  Each
+    // discovered fixture produces a row in `outcome.report` (whether
+    // the recording succeeded or the row carries an `error` column);
+    // languages without any discovered fixtures land in
+    // `outcome.skipped`.  With 3 fixtures per language × 2 languages
+    // = 6 fixtures the combined count should reach 6 — or, if a
+    // language's fixtures directory is missing entirely, the
+    // `skipped` bucket gains an entry per language.
+    let total_buckets = outcome.report.rows.len() + outcome.skipped.len();
     assert!(
-        outcome.report.rows.len() >= 6,
-        "expected >= 6 rows, got {}",
+        total_buckets >= 6,
+        "expected >= 6 entries across the default Python (3 fixtures) + C++ \
+         (3 fixtures) matrix — rows + skipped should cover every fixture; \
+         got {total_buckets}; rows = {:?}, skipped = {:?}",
         outcome.report.rows.len(),
+        outcome.skipped,
     );
 }
 
 #[test]
 fn wider_fixture_set_via_languages_flag() {
-    // Narrow to a single language. SKIPs per-language when missing.
+    // Narrow to a single language.  Same gating as above — `ct record`
+    // surfaces the per-language SKIP sentinel.
     let language = Language::Python;
-    if let Err(s) = codetracer_bench::LanguageProbe::probe(language) {
-        skip(&format!("Python recorder unavailable — {s}"));
+    if codetracer_bench::ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable");
         return;
     }
     if codetracer_bench::ct_binary().is_none() {
@@ -62,10 +78,14 @@ fn wider_fixture_set_via_languages_flag() {
     }
     let temp = tempfile::tempdir().expect("tempdir");
     let outcome = omniscient_db_size::run(&fixtures_root(), &[language], temp.path());
+    let total = outcome.report.rows.len() + outcome.skipped.len();
     assert!(
-        outcome.report.rows.len() >= 3,
-        "expected >= 3 Python rows, got {}",
+        total >= 3,
+        "expected >= 3 entries for the Python-only matrix (3 fixtures, each \
+         producing either a row or a skip); got {total}; rows = {:?}, \
+         skipped = {:?}",
         outcome.report.rows.len(),
+        outcome.skipped,
     );
 }
 
@@ -74,6 +94,10 @@ fn all_languages_flag_runs_full_matrix() {
     // The function itself runs the full matrix; per-language SKIPs
     // get collected in outcome.skipped without aborting the run.
     let temp = tempfile::tempdir().expect("tempdir");
+    if codetracer_bench::ct_cli_binary().is_none() {
+        skip("ct CLI not discoverable");
+        return;
+    }
     if codetracer_bench::ct_binary().is_none() {
         skip("ct binary not on PATH");
         return;
