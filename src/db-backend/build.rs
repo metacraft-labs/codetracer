@@ -689,6 +689,28 @@ fn regenerate_c(emulator_dir: &Path, script_name: &str, output_dir: &Path) {
         script_name,
     );
 
+    // Wipe the cache directory before invoking Nim.  Nim's nimcache
+    // does its own incremental-build hashing, but historically a stale
+    // cache from a prior FFI surface (pre-M17 / pre-M18 / pre-M22)
+    // has left orphan .c/.o files behind even when the current Nim
+    // source no longer imports those shims.  Worse: when the build
+    // graph EXPANDS (new FFI module added), the cached
+    // `@memulator_wasm_api.nim.c` from the old graph stays valid
+    // from Nim's perspective and the new FFI .c files are NOT
+    // produced — leaving `libmcr_emulator.so` short of every newly
+    // added `mcr*` export.  On self-hosted CI runners that keep
+    // `ct_emulator/build/native_c_files/` between runs, this
+    // surfaces as rust-lld undefined-symbol errors for the entire
+    // new FFI surface.  Always start from a clean slate when we
+    // detect staleness — Nim's recompile time is dominated by the
+    // host C compiler (cc::Build), not Nim itself, and the
+    // staleness gate above only fires when the source actually
+    // changed.
+    if output_dir.exists() {
+        let _ = std::fs::remove_dir_all(output_dir);
+    }
+    let _ = std::fs::create_dir_all(output_dir);
+
     let recorder_root = emulator_dir.parent().expect("emulator_dir has a parent").to_path_buf();
 
     // Windows: skip direnv (not available); call bash directly with
