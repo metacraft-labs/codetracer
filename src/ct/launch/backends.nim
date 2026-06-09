@@ -8,13 +8,17 @@ when not defined(windows):
 var coreProcessId* = -1
 
 proc startBackend*(backendKind: string, isStdio: bool = true, socketPath: Option[string]) =
-  let backendExe =
+  # `replay-server` requires a subcommand (`dap-server`) before any
+  # transport flag — `replay-server --stdio` errors with
+  # "unexpected argument '--stdio'".  The `rr` backend's binary
+  # (`ct-rr-support`) accepts `--stdio` directly with no subcommand.
+  let (backendExe, prelude) =
     if backendKind == "db":
-      dbBackendExe
+      (dbBackendExe, @["dap-server"])
     elif backendKind == "rr":
       let ctConfig = loadConfig(folder=getCurrentDir(), inTest=false)
       if ctConfig.rrBackend.enabled:
-        ctConfig.rrBackend.path
+        (ctConfig.rrBackend.path, @[])
       else:
         echo "ERROR: rr backend not enabled!"
         quit(1)
@@ -22,7 +26,7 @@ proc startBackend*(backendKind: string, isStdio: bool = true, socketPath: Option
       echo "ERROR: Backend kind not recognized, needs to be 'rr' or 'db'"
       quit(1)
 
-  let args =
+  let transport =
     if isStdio:
       @["--stdio"]
     elif socketPath.isSome:
@@ -30,6 +34,8 @@ proc startBackend*(backendKind: string, isStdio: bool = true, socketPath: Option
     else:
       echo "ERRROR: Needs to have either --stdio or a valid socket path"
       quit(1)
+
+  let args = prelude & transport
 
   let process = startProcess(
     backendExe,

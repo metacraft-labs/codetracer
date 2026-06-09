@@ -2407,7 +2407,7 @@ impl Handler {
 
     pub fn source_line_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         source_location: SourceLocation,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -2415,7 +2415,13 @@ impl Handler {
             if let Some(step_id) = self.get_closest_step_id(&source_location) {
                 self.replay.jump_to(step_id)?;
                 self.step_id = self.replay.current_step_id();
-                self.complete_move(false, sender)?;
+                self.complete_move(false, sender.clone())?;
+                // DAP requires a response for every request — the
+                // `complete_move` above only emits the `stopped` event.
+                // Without this respond_dap, headless DAP clients (the
+                // bench, IDE adapters speaking strict DAP) block
+                // indefinitely waiting for the response.
+                self.respond_dap(req, 0, sender)?;
                 Ok(())
             } else {
                 let err: String = format!("unknown location: {}", &source_location);
@@ -2451,7 +2457,8 @@ impl Handler {
             }
 
             self.step_id = self.replay.current_step_id();
-            self.complete_move(false, sender)?;
+            self.complete_move(false, sender.clone())?;
+            self.respond_dap(req, 0, sender)?;
             Ok(())
         }
     }
@@ -2509,7 +2516,7 @@ impl Handler {
 
     pub fn source_call_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         call_target: SourceCallJumpTarget,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -2525,6 +2532,9 @@ impl Handler {
             self.replay.jump_to(call_step_id)?;
             self.step_id = self.replay.current_step_id();
             self.complete_move(false, sender.clone())?;
+            // DAP requires a response for every request — see the
+            // matching note on `source_line_jump` above.
+            self.respond_dap(req, 0, sender)?;
             Ok(())
         } else {
             let err: String = format!("unknown call location: {}", &call_target);
