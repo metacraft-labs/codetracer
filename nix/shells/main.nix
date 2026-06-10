@@ -377,11 +377,30 @@ mkShell {
 
     export CODETRACER_PREFIX=$ROOT_PATH/src/build-debug
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
+
+    # `repro` compiles the project provider + interface extractor against
+    # REPROBUILD_SOURCE_ROOT. Point it at the SAME source the `repro` binary
+    # itself was built from (the flake input) — if these diverge, the
+    # freshly-compiled provider emits a build-target payload the older `repro`
+    # engine can't decode (`unsupported build target payload version`). The
+    # flake input already follows the local sibling via the `.envrc`
+    # `--override-input reprobuild path:../reprobuild`.
     export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
     export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
     export BLAKE3_PREFIX=${pkgs.libblake3}
     export RUNQUOTA_SRC=${inputs.runquota}
     export XXHASH_PREFIX=${pkgs.xxHash}
+
+    # repro's ASP solver (and the interface extractor repro compiles on the
+    # fly) dlopen()s libclingo by leaf name at runtime. On macOS that only
+    # resolves if clingo's lib dir is on the dyld search path, so put it there
+    # for any direct `repro build` in the shell. scripts/build-once.sh sets the
+    # same thing for its own invocation; this makes the bare CLI work too.
+    # Use the flake-pinned clingo so the ABI matches the one `repro` links.
+    ${pkgs.lib.optionalString stdenv.isDarwin ''
+      export DYLD_LIBRARY_PATH="${clingo}/lib''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+    ''}
+
     export PATH=$ROOT_PATH/src/build-debug/bin:$PATH
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
     export CODETRACER_DEV_TOOLS=0
