@@ -1698,21 +1698,42 @@ jobs:
         # -- pre-build it here so the Erlang / Elixir flow DAP tests
         # don't have to bootstrap the recorder themselves.
         #
-        # The recorder's ``just build`` target runs ``cargo build
-        # --locked``.  That fails here because the sibling
-        # codetracer-trace-format clone (we pinned codetracer to a
-        # newer trace-format than the BEAM recorder's Cargo.lock was
-        # generated against) doesn't match the lock.  Side-step the
-        # ``--locked`` flag by invoking ``cargo build`` directly --
-        # the lock regenerates against the actually-checked-out
-        # trace-format and the binary builds.  rebar3 compile (which
-        # ``build-native`` also does) is irrelevant for the DAP tests.
+        # Use codetracer's nix dev shell (not BEAM's own) because
+        # BEAM's flake only ships {cargo, elixir, erlang, rebar3,
+        # rustc} and the recorder transitively path-depends on
+        # ``codetracer-trace-format/codetracer_trace_writer_nim``,
+        # whose build.rs panics with "failed to run `nimble`" when
+        # nimble isn't on PATH.  Codetracer's shell ships the full
+        # nim/nimble toolchain.
+        #
+        # We skip ``--locked`` because the sibling
+        # codetracer-trace-format clone is pinned to a newer ref
+        # than the BEAM recorder's own Cargo.lock was generated
+        # against; ``cargo build`` (without --locked) regenerates
+        # the lock against the checked-out source.
+        #
+        # ``CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1`` is
+        # set because the trace-format-nim crate's build.rs runs
+        # ``nimble install --depsOnly`` by default, and the stew
+        # dependency isn't in the recorder's nimble metadata --
+        # codetracer's vendored ``libs/nim-stew`` is injected via
+        # ``CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS`` instead, same
+        # pattern as the macos test-non-gui branch above.  rebar3
+        # compile (which the recorder's ``build-native`` target
+        # also does) is irrelevant for the DAP tests.
         if: matrix.platform == 'nixos'
         shell: bash
+        env:
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
-          nix develop --no-write-lock-file --command cargo build
+          cd "${{ github.workspace }}"
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -euo pipefail
+            cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
+            cargo build
+          '
 
       - name: Clone codetracer-beam-recorder (macOS)
         if: matrix.platform == 'macos'
