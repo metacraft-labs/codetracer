@@ -1062,6 +1062,67 @@ type
     testsFailed*: int
     functionsTraced*: int
 
+  AgentServiceBackend* = enum
+    ## Backend used by a CodeTracer agentic session.  Kept independent from
+    ## nim-agents so the store remains a renderer-neutral data model.
+    asbAcp
+    asbHarbor
+
+  AgentServiceLifecycle* = enum
+    ## Normalized lifecycle shown by tabs, caption progress, and activity.
+    aslDisconnected
+    aslConnecting
+    aslRunning
+    aslCompleted
+    aslCancelled
+    aslError
+
+  AgentServiceEventKind* = enum
+    aseConnection
+    aseMessage
+    aseThought
+    asePlan
+    aseTool
+    aseFileEdit
+    aseDiff
+    aseWorkspace
+    aseProgress
+    aseCompleted
+    aseCancelled
+    aseError
+    aseStatus
+
+  AgentServiceEventEntry* = object
+    id*: string
+    kind*: AgentServiceEventKind
+    text*: string
+    status*: string
+    toolName*: string
+    filePath*: string
+    diff*: string
+    milestoneCompleted*: int
+    milestoneTotal*: int
+
+  AgentServiceSessionEntry* = object
+    ## One agentic-coding tab/session tracked by the shared ViewModel store.
+    tabId*: string
+    sessionId*: string
+    taskId*: string
+    backend*: AgentServiceBackend
+    lifecycle*: AgentServiceLifecycle
+    title*: string
+    prompt*: string
+    evidenceCommand*: string
+    workspacePath*: string
+    workingCopyMode*: string
+    milestonesCompleted*: int
+    milestonesTotal*: int
+    events*: seq[AgentServiceEventEntry]
+
+  AgentSessionsState* = object
+    activeTabId*: string
+    sessions*: seq[AgentServiceSessionEntry]
+
   DeepReviewPanelViewMode* = enum
     drpvmFullFiles
     drpvmUnified
@@ -1152,6 +1213,42 @@ proc `==`*(a, b: AgentWorkspaceSummary): bool {.noSideEffect.} =
     a.testsPassed == b.testsPassed and
     a.testsFailed == b.testsFailed and
     a.functionsTraced == b.functionsTraced
+
+proc `==`*(a, b: AgentServiceEventEntry): bool {.noSideEffect.} =
+  a.id == b.id and
+    a.kind == b.kind and
+    a.text == b.text and
+    a.status == b.status and
+    a.toolName == b.toolName and
+    a.filePath == b.filePath and
+    a.diff == b.diff and
+    a.milestoneCompleted == b.milestoneCompleted and
+    a.milestoneTotal == b.milestoneTotal
+
+proc `==`*(a, b: AgentServiceSessionEntry): bool {.noSideEffect.} =
+  if a.tabId != b.tabId: return false
+  if a.sessionId != b.sessionId: return false
+  if a.taskId != b.taskId: return false
+  if a.backend != b.backend: return false
+  if a.lifecycle != b.lifecycle: return false
+  if a.title != b.title: return false
+  if a.prompt != b.prompt: return false
+  if a.evidenceCommand != b.evidenceCommand: return false
+  if a.workspacePath != b.workspacePath: return false
+  if a.workingCopyMode != b.workingCopyMode: return false
+  if a.milestonesCompleted != b.milestonesCompleted: return false
+  if a.milestonesTotal != b.milestonesTotal: return false
+  if a.events.len != b.events.len: return false
+  for i in 0 ..< a.events.len:
+    if a.events[i] != b.events[i]: return false
+  true
+
+proc `==`*(a, b: AgentSessionsState): bool {.noSideEffect.} =
+  if a.activeTabId != b.activeTabId: return false
+  if a.sessions.len != b.sessions.len: return false
+  for i in 0 ..< a.sessions.len:
+    if a.sessions[i] != b.sessions[i]: return false
+  true
 
 proc `==`*(a, b: DeepReviewTraceContextEntry): bool {.noSideEffect.} =
   a.id == b.id and a.label == b.label

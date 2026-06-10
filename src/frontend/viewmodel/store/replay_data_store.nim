@@ -112,6 +112,7 @@ type
     debugger*: Signal[DebuggerState]
     currentGeid*: Signal[Option[uint64]]
     timeline*: Signal[TimelineState]
+    agentSessions*: Signal[AgentSessionsState]
     calltrace*: CalltraceStore
     locals*: LocalsStore
     backend*: BackendService
@@ -232,6 +233,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         maxRRTicks: 0'u64,
         currentRRTicks: 0'u64,
       )),
+      agentSessions: createSignal(AgentSessionsState()),
 
       # -- calltrace --
       calltrace: CalltraceStore(
