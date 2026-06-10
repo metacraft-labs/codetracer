@@ -1693,18 +1693,26 @@ jobs:
           submodules: 'false'
 
       - name: Build codetracer-beam-recorder (nixos)
-        # The recorder's Justfile `build` target shells into the
-        # recorder's own ``nix develop`` shell when cargo isn't on
-        # PATH and runs ``cargo build --locked`` there.  We pre-build
-        # so ``find_beam_recorder()`` resolves the binary at
+        # ``find_beam_recorder()`` resolves the binary at
         # ``../codetracer-beam-recorder/target/debug/codetracer-beam-recorder``
-        # without the test having to bootstrap nim/cargo itself.
+        # -- pre-build it here so the Erlang / Elixir flow DAP tests
+        # don't have to bootstrap the recorder themselves.
+        #
+        # The recorder's ``just build`` target runs ``cargo build
+        # --locked``.  That fails here because the sibling
+        # codetracer-trace-format clone (we pinned codetracer to a
+        # newer trace-format than the BEAM recorder's Cargo.lock was
+        # generated against) doesn't match the lock.  Side-step the
+        # ``--locked`` flag by invoking ``cargo build`` directly --
+        # the lock regenerates against the actually-checked-out
+        # trace-format and the binary builds.  rebar3 compile (which
+        # ``build-native`` also does) is irrelevant for the DAP tests.
         if: matrix.platform == 'nixos'
         shell: bash
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
-          nix develop --no-write-lock-file --command just build
+          nix develop --no-write-lock-file --command cargo build
 
       - name: Clone codetracer-beam-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -1716,18 +1724,19 @@ jobs:
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build codetracer-beam-recorder (macOS)
-        # macOS has cargo from ``Set up Rust toolchain (macOS)`` above,
-        # so the recorder's Justfile takes the native ``build-native``
-        # branch.  Elixir / rebar3 aren't required to *produce* the
-        # binary — only to run its full test matrix — so we just
-        # invoke ``cargo build --locked`` directly to keep the
-        # macOS prerequisites narrow.
+        # macOS has cargo from ``Set up Rust toolchain (macOS)`` above.
+        # Skip the recorder's ``just build-native`` (which uses
+        # ``--locked``) for the same reason as the nixos step above --
+        # the trace-format sibling is checked out at a newer ref than
+        # the recorder's Cargo.lock expects.  Elixir / rebar3 aren't
+        # required to *produce* the binary, only to run its full test
+        # matrix.
         if: matrix.platform == 'macos'
         shell: bash
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}/../codetracer-beam-recorder"
-          cargo build --locked
+          cargo build
 
       # Runs all Rust tests including flow integration tests for all languages.
       # WASM flow tests skip automatically if wazero or wasm32-wasip1 target
