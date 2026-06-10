@@ -10,6 +10,8 @@ import frameworks/nim_unittest
 import frameworks/python_pytest
 import frameworks/python_unittest
 import frameworks/rust_libtest
+import frameworks/ruby_minitest
+import frameworks/ruby_rspec
 
 proc newDefaultProviderRegistry*(): ProviderRegistry =
   ProviderRegistry(providers: @[
@@ -20,7 +22,9 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newJsJestM1Provider(),
     newJsVitestM1Provider(),
     newJsNodeTestM1Provider(),
-    newJsPlaywrightM1Provider()
+    newJsPlaywrightM1Provider(),
+    newRubyRspecM1Provider(),
+    newRubyMinitestM1Provider()
   ])
 
 proc errorResponse(message: string): DiscoverResponse =
