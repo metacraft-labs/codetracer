@@ -1,0 +1,3 @@
+name "ct_m11_d"
+description "CodeTracer M11 D unittest fixture"
+targetType "library"
