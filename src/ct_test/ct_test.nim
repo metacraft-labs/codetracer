@@ -3,6 +3,15 @@ import std/[json, os]
 import contracts
 import discovery
 import frameworks/nim_unittest
+import frameworks/python_pytest
+import frameworks/python_unittest
+
+proc newDefaultProviderRegistry*(): ProviderRegistry =
+  ProviderRegistry(providers: @[
+    newNimUnittestM1Provider(),
+    newPythonPytestM1Provider(),
+    newPythonUnittestM1Provider()
+  ])
 
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
@@ -38,6 +47,6 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry; cache: DiscoveryC
 
 when isMainModule:
   let
-    registry = newNimUnittestProviderRegistry()
+    registry = newDefaultProviderRegistry()
     cache = newDiscoveryCache()
   quit(runCtTest(commandLineParams(), registry, cache))
