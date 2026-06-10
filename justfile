@@ -1592,6 +1592,17 @@ test-vm-js:
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
 
+# Run the headless agentic CodeTracer matrix. This invokes Agent Harbor's
+# existing CodeTracer contract E2E tests for the real REST/scenario side, then
+# runs the CodeTracer service/ViewModel/DeepReview headless matrix.
+test-codetracer-agentic-headless-matrix:
+  bash scripts/test-codetracer-agentic-headless.sh matrix
+
+# Run the agentic headless matrix plus adjacent DAP, backend-manager,
+# ViewModel, and collaboration regression coverage.
+test-codetracer-agentic-regression-gate:
+  bash scripts/test-codetracer-agentic-headless.sh regression
+
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
 

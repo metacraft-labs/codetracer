@@ -137,7 +137,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("CalltraceVM", ["searchQuery", "rawIgnorePatterns"],
     vscSharedSessionViewState,
     "Calltrace filter/search settings are logical shared view state.")
-  entries.addEntry("CalltraceVM", "backendSearchResults", vscBackendAuthoritative,
+  entries.addEntry("CalltraceVM", "backendSearchResults",
+    vscBackendAuthoritative,
     "Search result payloads come from backend queries.")
   entries.addDerived("CalltraceVM",
     ["visibleLines", "hasMoreAbove", "hasMoreBelow", "highlightedMatches",
@@ -154,7 +155,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Selected variable path is shared session view state.",
     requiresStableId = true,
     stableIdNote = "String paths are not durable variable identities across backend snapshots.")
-  entries.addDerived("StateVM", ["currentVariables", "isLoading", "codeStateLine"])
+  entries.addDerived("StateVM", ["currentVariables", "isLoading",
+      "codeStateLine"])
 
   entries.addEntry("EventLogVM", "selectedRow", vscSharedSessionViewState,
     "Event-log selection is logical session state.",
@@ -164,7 +166,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["currentPage", "pageSize", "searchQuery", "sortColumn", "sortAscending"],
     vscSharedSessionViewState,
     "Event-log query/page/sort settings are logical shared view state.")
-  entries.addMany("EventLogVM", ["eventRows", "totalEventCount", "loadingState"],
+  entries.addMany("EventLogVM", ["eventRows", "totalEventCount",
+      "loadingState"],
     vscBackendAuthoritative,
     "Event-log rows/count/loading are backend query results.")
   entries.addDerived("EventLogVM", ["totalPages", "isLoading"])
@@ -349,7 +352,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     stableIdNote = "Current field is an index; needs stable request id.")
   entries.addDerived("RequestPanelVM", ["filteredRequests"])
 
-  entries.addMany("ReplVM", ["history", "replEnabled", "materialized", "langName"],
+  entries.addMany("ReplVM", ["history", "replEnabled", "materialized",
+      "langName"],
     vscBackendAuthoritative,
     "REPL history/status reflects backend/materialization capability and output.")
   entries.addDerived("ReplVM", ["displayMode"])
@@ -444,25 +448,42 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Workspace file selection uses an index and is local.",
     requiresStableId = true,
     stableIdNote = "Would need stable workspace file id if synchronized.")
-  entries.addEntry("AgentWorkspaceVM", "coverageOverlayEnabled", vscRendererLocal,
+  entries.addEntry("AgentWorkspaceVM", "coverageOverlayEnabled",
+    vscRendererLocal,
     "Coverage overlay toggle is local UI state.")
   entries.addDerived("AgentWorkspaceVM",
     ["fileCount", "hasWorkspace", "selectedFile", "selectedCoverageText"])
 
+  entries.addMany("AgenticSessionVM",
+    ["workspaceMode", "activeEditorPath", "activeEditorContent",
+     "userEditorSnapshot", "agentEditorSnapshot"],
+    vscRendererLocal,
+    "Agent workspace projection and editor snapshots are local UI coordination state.")
+  entries.addMany("AgenticSessionVM", ["activeTabId", "activeCaption"],
+    vscDerivedNonSignal,
+    "Memo/computed field; recomputed locally from agent session store state.")
+
   entries.addMany("FrameViewerVM",
     ["visualReplayAvailable", "playerUrl", "currentGeid", "currentFrame",
      "frameCount", "frameImageSrc", "frameWidth", "frameHeight", "loading",
-     "error", "drawCalls"],
+     "error", "drawCalls", "clearFrames", "medianFetchMs"],
     vscBackendAuthoritative,
     "Frame-viewer frame data is visual replay backend output.")
   entries.addEntry("FrameViewerVM", "selectedPixel", vscSharedSessionViewState,
     "Pixel selection can be shared once tied to a stable frame.",
     requiresStableId = true,
     stableIdNote = "Needs stable frame/geid plus pixel coordinate identity.")
-  entries.addEntry("FrameViewerVM", "selectedDrawCall", vscSharedSessionViewState,
+  entries.addEntry("FrameViewerVM", "selectedDrawCall",
+    vscSharedSessionViewState,
     "Draw-call selection can be shared once draw calls have stable ids.",
     requiresStableId = true,
     stableIdNote = "Current field is an index; needs stable draw-call id.")
+
+  entries.addMany("VideoPlayerVM",
+    ["playState", "direction", "rate", "pickerState", "magnifier",
+     "magnifierCenterColor", "bufferingDegraded"],
+    vscRendererLocal,
+    "Video playback controls, picker state, loupe sampling, and buffering hints are local visual-replay UI state.")
 
   entries.addEntry("PixelHistoryVM", "selectedPixel", vscSharedSessionViewState,
     "Pixel-history target can be shared once tied to stable frame identity.",
@@ -476,14 +497,16 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     requiresStableId = true,
     stableIdNote = "Current field is an index; needs stable pixel-history entry id.")
 
-  entries.addEntry("ShaderDebugVM", "selectedContext", vscSharedSessionViewState,
+  entries.addEntry("ShaderDebugVM", "selectedContext",
+    vscSharedSessionViewState,
     "Shader debug context selection is logical visual replay state.",
     requiresStableId = true,
     stableIdNote = "Needs stable draw/shader invocation identity.")
   entries.addMany("ShaderDebugVM", ["debugInfo", "loading", "error"],
     vscBackendAuthoritative,
     "Shader debug payload/status are backend output.")
-  entries.addEntry("ShaderDebugVM", "currentStepIndex", vscSharedSessionViewState,
+  entries.addEntry("ShaderDebugVM", "currentStepIndex",
+    vscSharedSessionViewState,
     "Shader step selection can be shared with stable step ids.",
     requiresStableId = true,
     stableIdNote = "Current field is an index; needs stable shader-step id.")
