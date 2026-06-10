@@ -2,6 +2,7 @@ import std/[json, os]
 
 import contracts
 import discovery
+import frameworks/nim_unittest
 
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
@@ -37,7 +38,6 @@ proc runCtTest*(args: seq[string]; registry: ProviderRegistry; cache: DiscoveryC
 
 when isMainModule:
   let
-    counters = newFakeProviderCounters()
-    registry = newFakeProviderRegistry(counters)
+    registry = newNimUnittestProviderRegistry()
     cache = newDiscoveryCache()
   quit(runCtTest(commandLineParams(), registry, cache))

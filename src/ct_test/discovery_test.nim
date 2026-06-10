@@ -161,10 +161,21 @@ suite "ct-test M1 discovery skeleton":
     let root = makeWorkspace("cli")
     defer: removeDir(root)
     let selected = fakeFile(root, "tests/cli.fake", markerLine = 2)
-    let binary = getTempDir() / ("ct-test-m1-cli-" & $getCurrentProcessId())
+    let
+      fakeMain = root / "fake_ct_test_main.nim"
+      binary = getTempDir() / ("ct-test-m1-cli-" & $getCurrentProcessId())
+    writeFixture(fakeMain, """
+import std/os
+
+import ct_test
+import discovery
+
+let counters = newFakeProviderCounters()
+quit(runCtTest(commandLineParams(), newFakeProviderRegistry(counters), newDiscoveryCache()))
+""")
     let compile = execCmdEx(
-      "nim c --hints:off --warnings:off --nimcache:/tmp/ct-nim-cache/ct-test-m1-cli -o:" &
-        quoteShell(binary) & " src/ct_test/ct_test.nim",
+      "nim c --hints:off --warnings:off --path:src/ct_test --nimcache:/tmp/ct-nim-cache/ct-test-m1-cli -o:" &
+        quoteShell(binary) & " " & quoteShell(fakeMain),
       options = {poUsePath},
       workingDir = getCurrentDir())
     check compile.exitCode == 0
