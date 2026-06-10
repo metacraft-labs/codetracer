@@ -1,0 +1,11 @@
+{
+  "name": "ct-test-jest-fixture",
+  "private": true,
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^30.0.0",
+    "ts-jest": "^29.0.0"
+  }
+}

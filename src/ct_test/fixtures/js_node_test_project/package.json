@@ -1,0 +1,8 @@
+{
+  "name": "ct-test-node-test-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

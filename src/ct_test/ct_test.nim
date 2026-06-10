@@ -2,6 +2,9 @@ import std/[json, os]
 
 import contracts
 import discovery
+import frameworks/js_jest
+import frameworks/js_node_test
+import frameworks/js_vitest
 import frameworks/nim_unittest
 import frameworks/python_pytest
 import frameworks/python_unittest
@@ -12,7 +15,10 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newNimUnittestM1Provider(),
     newPythonPytestM1Provider(),
     newPythonUnittestM1Provider(),
-    newRustLibtestM1Provider()
+    newRustLibtestM1Provider(),
+    newJsJestM1Provider(),
+    newJsVitestM1Provider(),
+    newJsNodeTestM1Provider()
   ])
 
 proc errorResponse(message: string): DiscoverResponse =
@@ -23,10 +29,13 @@ proc errorResponse(message: string): DiscoverResponse =
     catalogs: @[],
     diagnostics: @[diagnostic(dsError, message)])
 
-proc runCtTest*(args: seq[string]; registry: ProviderRegistry; cache: DiscoveryCache): int =
+proc runCtTest*(args: seq[string]; registry: ProviderRegistry;
+    cache: DiscoveryCache): int =
   var response: DiscoverResponse
   if args.len < 2 or args[0] != "test" or args[1] != "discover":
-    response = errorResponse("usage: ct-test test discover (--workspace <path> | --file <path>) --json")
+    response = errorResponse(
+      "usage: ct-test test discover " &
+      "(--workspace <path> | --file <path>) --json")
   else:
     let discoverArgs =
       if args.len > 2:
