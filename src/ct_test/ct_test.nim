@@ -2,6 +2,9 @@ import std/[json, os]
 
 import contracts
 import discovery
+import frameworks/cpp_catch2
+import frameworks/cpp_ctest
+import frameworks/cpp_gtest
 import frameworks/js_jest
 import frameworks/js_node_test
 import frameworks/js_playwright
@@ -19,6 +22,9 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newPythonPytestM1Provider(),
     newPythonUnittestM1Provider(),
     newRustLibtestM1Provider(),
+    newCppGTestM1Provider(),
+    newCppCatch2M1Provider(),
+    newCppCTestM1Provider(),
     newJsJestM1Provider(),
     newJsVitestM1Provider(),
     newJsNodeTestM1Provider(),
