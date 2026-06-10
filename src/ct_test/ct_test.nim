@@ -26,6 +26,7 @@ import frameworks/rust_libtest
 import frameworks/ruby_minitest
 import frameworks/ruby_rspec
 import frameworks/v_fallback
+import frameworks/smart_contract_harnesses
 
 proc newDefaultProviderRegistry*(): ProviderRegistry =
   ProviderRegistry(providers: @[
@@ -53,7 +54,7 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newLeanFallbackM1Provider(),
     newJuliaFallbackM1Provider(),
     newAssemblyFallbackM1Provider()
-  ])
+  ] & newSmartContractHarnessM13Providers())
 
 proc errorResponse(message: string): DiscoverResponse =
   DiscoverResponse(
