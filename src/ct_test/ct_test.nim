@@ -5,12 +5,14 @@ import discovery
 import frameworks/nim_unittest
 import frameworks/python_pytest
 import frameworks/python_unittest
+import frameworks/rust_libtest
 
 proc newDefaultProviderRegistry*(): ProviderRegistry =
   ProviderRegistry(providers: @[
     newNimUnittestM1Provider(),
     newPythonPytestM1Provider(),
-    newPythonUnittestM1Provider()
+    newPythonUnittestM1Provider(),
+    newRustLibtestM1Provider()
   ])
 
 proc errorResponse(message: string): DiscoverResponse =

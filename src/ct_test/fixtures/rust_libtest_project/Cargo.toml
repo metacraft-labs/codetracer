@@ -1,0 +1,16 @@
+[package]
+name = "ct-test-rust-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ct_test_rust_fixture"
+path = "src/lib.rs"
+
+[[test]]
+name = "integration_sample"
+path = "tests/integration_sample.rs"
+
+[dev-dependencies]
+async-std = { version = "1", features = ["attributes"] }
+tokio = { version = "1", features = ["macros", "rt"] }
