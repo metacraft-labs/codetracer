@@ -552,6 +552,10 @@ test-gui-visible *args: build-once build-siblings
 test-visual-replay-gate:
   bash ci/test/visual-replay-gate.sh
 
+# Run the M16 ct-test provider matrix and release-gate checks.
+test-m16-release-gate:
+  bash ci/test/m16-release-gate.sh
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!
