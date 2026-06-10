@@ -1,0 +1,28 @@
+[package]
+name = "sourcemap-translate"
+version = "0.1.0"
+edition = "2024"
+description = "Server-side Source Map V3 translation for the CodeTracer replay-server (Column-Aware-Tracing-And-Deminification §P3)."
+license = "MIT OR Apache-2.0"
+
+# The crate is the single source of truth for translating
+# recorded (file, line, column) coordinates that were observed against a
+# minified bundle back to the original source coordinates that produced
+# them.  The replay-server consumes this via a per-trace `SourcemapCache`
+# at trace-open time; the milestone spec lives in
+# `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org`
+# §P3.
+
+[dependencies]
+# `sourcemap` v9 is the de-facto pure-Rust Source Map V3 parser
+# (Sentry-maintained).  Used here for VLQ decoding + the logarithmic
+# `lookup_token` API.  We deliberately do NOT build our own
+# (generated_line, col) -> original HashMap because production
+# sourcemaps can be 10MB+ and the crate's index is already O(log n).
+sourcemap = "9"
+
+log = "0.4"
+
+[dev-dependencies]
+# Used by the `source_content` "sibling file on disk" fallback test.
+tempfile = "3"

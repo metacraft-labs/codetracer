@@ -147,6 +147,13 @@ tree-sitter-nim = { path = "../../libs/tree-sitter-nim/bindings/rust", optional 
 
 # the binding for our custom tracepoint tresitter grammar:
 tree-sitter-tracepoint = { path = "./tree-sitter-trace/", optional = true }
+
+# Source Map V3 translation library (Column-Aware-Tracing-And-Deminification §P3).
+# Self-contained sub-crate under `./sourcemap-translate/` — wraps the
+# `sourcemap` crate from crates.io with a 1-indexed surface and the
+# `discover_sourcemap_for` helper the trace-open hook uses to find
+# `<source>.map` siblings + parse `//# sourceMappingURL=...` comments.
+sourcemap-translate = { path = "./sourcemap-translate" }
 tree-sitter-go = { version = "0.25.0", optional = true }
 tree-sitter-javascript = { version = "0.25.0", optional = true }
 tree-sitter-bash = { version = "0.23.3", optional = true }

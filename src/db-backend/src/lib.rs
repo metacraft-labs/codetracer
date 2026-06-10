@@ -117,7 +117,14 @@ pub mod eager_origin_mode;
 pub mod origin_query;
 pub mod paths;
 pub mod program_search_tool;
+// Column-Aware-Tracing-And-Deminification §P3 — per-trace Source Map
+// V3 cache.  Owns the `SourcemapIndex` per recorded `PathId` and
+// translates step-time (file, line, column) coordinates back to the
+// original source.  Lives next to `macro_sourcemap` because both are
+// "per-trace position-translation indexes" that hang off the
+// `Handler` and are populated at trace-open time.
 pub mod query;
+pub mod sourcemap_cache;
 // M11 — RR-driver origin chain algorithm (spec §6.3).
 // Sits between `recreator_session::RecreatorReplaySession` (which owns
 // the worker transport) and `dap_handler::Handler::origin_chain` (which

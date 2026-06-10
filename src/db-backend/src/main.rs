@@ -95,10 +95,15 @@ mod eager_origin_mode;
 mod origin_query;
 mod paths;
 mod program_search_tool;
+// Column-Aware-Tracing-And-Deminification §P3 — per-trace Source Map
+// V3 cache. Mirrors the lib.rs declaration above; the bin needs its
+// own copy so `dap_handler` reaches for the cache via the
+// `crate::sourcemap_cache` path.
 mod query;
 mod recreator_origin;
 mod recreator_session;
 mod replay;
+mod sourcemap_cache;
 // M24 — Multi-trace session loading; mirror of the lib.rs declarations.
 // The bin needs its own copies because `dap_server` reaches for the
 // SessionHandler via the `crate::session_handler` path.

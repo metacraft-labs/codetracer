@@ -25,6 +25,7 @@ use crate::macro_sourcemap::{self, MacroSourceMapCollection, UpdateExpansionArgs
 use crate::program_search_tool::ProgramSearchTool;
 use crate::recreator_session::{RecreatorArgs, RecreatorReplaySession};
 use crate::replay::ReplaySession;
+use crate::sourcemap_cache::{SourcemapCache, TranslatedLocation, translation_enabled};
 use crate::trace_reader::TraceReader;
 // use crate::response::{};
 use crate::dap_types;
@@ -158,6 +159,27 @@ pub struct Handler {
     /// Macro sourcemaps loaded from the trace directory.
     /// Used for resolving macro expansion locations (ALT+E shortcut).
     pub macro_sourcemaps: MacroSourceMapCollection,
+
+    /// Per-trace Source Map V3 cache.
+    ///
+    /// Populated lazily at trace-open time by [`Handler::load_sourcemaps`]:
+    /// for every recorded source path that has either a sibling
+    /// `<path>.map` file or a `//# sourceMappingURL=` comment, the
+    /// parsed [`sourcemap_translate::SourcemapIndex`] is cached here
+    /// keyed by `PathId`. The DAP `stackTrace` handler consults this
+    /// cache to translate recorded minified `(file, line, column)`
+    /// coordinates back to the original source.
+    ///
+    /// Spec: `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org` §P3.
+    pub sourcemap_cache: SourcemapCache,
+
+    /// Optional cache directory the sourcemap translator writes
+    /// materialised inline `sourcesContent` to.  Populated by
+    /// [`Handler::load_sourcemaps`] with the trace directory path so
+    /// the original (unminified) source files land alongside the
+    /// trace data.  `None` when the trace was opened without a
+    /// filesystem path (e.g. WASM/VFS replay).
+    pub sourcemap_cache_dir: Option<std::path::PathBuf>,
 
     /// Per-session cache of computed `OriginSummary` values keyed by
     /// `(variable_id, step_id)` per spec §3.2.3 / M2 deliverable
@@ -397,6 +419,8 @@ impl Handler {
             cached_events: None,
             cached_terminal_events: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
+            sourcemap_cache: SourcemapCache::new(),
+            sourcemap_cache_dir: None,
             origin_summary_cache: HashMap::new(),
             origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
             materialized_origin_metadata_decoder: None,
@@ -3404,6 +3428,95 @@ impl Handler {
         }
     }
 
+    /// Discover and load Source Map V3 indexes for every recorded
+    /// source path that has one.  Populates [`Self::sourcemap_cache`].
+    ///
+    /// Should be called during trace setup, right after the reader's
+    /// path interning table is populated.  No-ops when the
+    /// `CT_SOURCEMAP_TRANSLATION` environment variable disables
+    /// translation (e.g. for bisection or to debug the minified
+    /// form directly).
+    ///
+    /// Spec: `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org` §P3.2.
+    pub fn load_sourcemaps(&mut self, trace_dir: &Path) {
+        if !translation_enabled() {
+            info!("sourcemap_cache: translation disabled via CT_SOURCEMAP_TRANSLATION");
+            return;
+        }
+        self.sourcemap_cache_dir = Some(trace_dir.to_path_buf());
+        let workdir = self.reader.workdir().to_path_buf();
+        // Snapshot the path entries up-front so we don't borrow
+        // `self.reader` while mutating `self.sourcemap_cache`.
+        let entries: Vec<(String, PathId)> = self
+            .reader
+            .path_entries_iter()
+            .map(|(p, id)| (p.to_string(), id))
+            .collect();
+        let mut loaded = 0usize;
+        for (recorded, path_id) in entries {
+            // The recorded path may be absolute (most CTFS traces are)
+            // or relative to the workdir (legacy traces).  We try the
+            // recorded form first, then join with workdir.
+            let recorded_path = std::path::Path::new(&recorded);
+            let probe = if recorded_path.is_absolute() {
+                recorded_path.to_path_buf()
+            } else {
+                workdir.join(recorded_path)
+            };
+            if !probe.is_file() {
+                continue;
+            }
+            let before = self.sourcemap_cache.len();
+            self.sourcemap_cache.try_load(path_id, &probe);
+            if self.sourcemap_cache.len() > before {
+                loaded += 1;
+            }
+        }
+        if loaded > 0 {
+            info!(
+                "sourcemap_cache: loaded {loaded} sourcemap(s) from trace at {}",
+                trace_dir.display()
+            );
+        }
+    }
+
+    /// Translate a recorded `(path_id, line, column)` triple through
+    /// the per-trace sourcemap cache.
+    ///
+    /// Returns `None` when:
+    /// * The translation cache is empty (no sourcemaps loaded).
+    /// * The path has no associated sourcemap.
+    /// * The segment is sparse (no original mapping).
+    ///
+    /// The DAP `stackTrace` handler uses this to surface original
+    /// source coordinates instead of minified ones.  When `None`
+    /// is returned the recorded coordinates flow through unchanged.
+    pub fn translate_via_sourcemap(&mut self, path_id: PathId, line: u32, column: u32) -> Option<TranslatedLocation> {
+        if self.sourcemap_cache.is_empty() {
+            return None;
+        }
+        let cache_dir = self.sourcemap_cache_dir.clone();
+        self.sourcemap_cache
+            .translate(path_id, line, column, cache_dir.as_deref())
+    }
+
+    /// Translate by absolute path string — fallback for code paths
+    /// that don't carry `PathId` through.  See
+    /// [`Self::translate_via_sourcemap`] for the contract.
+    pub fn translate_via_sourcemap_for_path(
+        &mut self,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> Option<TranslatedLocation> {
+        if self.sourcemap_cache.is_empty() {
+            return None;
+        }
+        let cache_dir = self.sourcemap_cache_dir.clone();
+        self.sourcemap_cache
+            .translate_for_path(path, line, column, cache_dir.as_deref())
+    }
+
     /// Handle the `ct/update-expansion` custom DAP request.
     ///
     /// When the user presses ALT+E on a macro call in the editor, the frontend
@@ -3624,12 +3737,19 @@ impl Handler {
         } else {
             call.location
         };
+        // P3 — Source Map V3 translation.  When the recorded path has
+        // a known sourcemap, translate `(line, column=1)` back to the
+        // original source so DAP consumers see the original file +
+        // coordinates instead of the minified bundle.  Falls through
+        // to the recorded path when no sourcemap is loaded or the
+        // segment is sparse.
+        let (frame_path, frame_line, frame_column) = self.apply_sourcemap_translation(&location.path, location.line, 1);
         dap_types::StackFrame {
             id: call_record.key.0,
             name: location.function_name,
             source: Some(dap_types::Source {
                 name: Some("".to_string()),
-                path: Some(location.path),
+                path: Some(frame_path),
                 source_reference: None,
                 adapter_data: None,
                 checksums: None,
@@ -3637,14 +3757,44 @@ impl Handler {
                 presentation_hint: None,
                 sources: None,
             }),
-            line: if location.line >= 0 { location.line } else { 0 },
-            column: 1,
+            line: if frame_line >= 0 { frame_line } else { 0 },
+            column: frame_column,
             end_line: None,
             end_column: None,
             instruction_pointer_reference: None,
             module_id: None,
             presentation_hint: None,
             can_restart: None,
+        }
+    }
+
+    /// Apply Source Map V3 translation to a recorded `(path, line, column)`.
+    ///
+    /// Returns the original-source coordinates when a sourcemap is
+    /// available; otherwise returns the inputs unchanged.  This is the
+    /// single point where DAP `stackTrace` responses pick up
+    /// translation — keeping all callers funnelled through here
+    /// guarantees the §P3 server-side single-source-of-truth contract.
+    fn apply_sourcemap_translation(
+        &mut self,
+        recorded_path: &str,
+        recorded_line: i64,
+        recorded_column: i64,
+    ) -> (String, i64, i64) {
+        if self.sourcemap_cache.is_empty() || recorded_line <= 0 {
+            return (recorded_path.to_string(), recorded_line, recorded_column);
+        }
+        // The path-based lookup is the natural fit here — by the time
+        // we reach DAP-frame synthesis the recorded path has already
+        // been joined with the workdir, and we don't carry the
+        // `PathId` through.  The `by_path` index inside the cache
+        // shares the same parsed sourcemap as the by-PathId entry, so
+        // this is a single HashMap lookup.
+        let line_u32 = recorded_line.max(0) as u32;
+        let col_u32 = recorded_column.max(1) as u32;
+        match self.translate_via_sourcemap_for_path(recorded_path, line_u32, col_u32) {
+            Some(t) => (t.path, t.line as i64, t.column as i64),
+            None => (recorded_path.to_string(), recorded_line, recorded_column),
         }
     }
     pub fn threads(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
@@ -3726,13 +3876,16 @@ impl Handler {
             if self.trace_kind == TraceKind::Recreator || self.trace_kind == TraceKind::Emulator {
                 // RR / Emulator traces need a stack frame derived from the current location so VS Code can show the locator arrow.
                 let current_location = self.replay.load_location(&mut self.expr_loader)?;
+                // P3 — translate current location through the sourcemap cache.
+                let (cur_path, cur_line, cur_col) =
+                    self.apply_sourcemap_translation(&current_location.path, current_location.line, 1);
                 let mut stack_frames: Vec<dap_types::StackFrame> = Vec::new();
                 stack_frames.push(dap_types::StackFrame {
                     id: 0,
                     name: current_location.function_name.clone(),
                     source: Some(dap_types::Source {
                         name: Some("".to_string()),
-                        path: Some(current_location.path.clone()),
+                        path: Some(cur_path.clone()),
                         source_reference: None,
                         adapter_data: None,
                         checksums: None,
@@ -3740,12 +3893,8 @@ impl Handler {
                         presentation_hint: None,
                         sources: None,
                     }),
-                    line: if current_location.line >= 0 {
-                        current_location.line
-                    } else {
-                        0
-                    },
-                    column: 1,
+                    line: if cur_line >= 0 { cur_line } else { 0 },
+                    column: cur_col,
                     end_line: None,
                     end_column: None,
                     instruction_pointer_reference: None,
@@ -3763,13 +3912,16 @@ impl Handler {
                     if location.path == current_location.path && location.line == current_location.line {
                         continue;
                     }
+                    // P3 — translate caller frame paths through sourcemap.
+                    let (frame_path, frame_line, frame_col) =
+                        self.apply_sourcemap_translation(&location.path, location.line, 1);
                     let next_id = stack_frames.len() as i64;
                     stack_frames.push(dap_types::StackFrame {
                         id: next_id,
                         name: location.function_name,
                         source: Some(dap_types::Source {
                             name: Some("".to_string()),
-                            path: Some(location.path),
+                            path: Some(frame_path),
                             source_reference: None,
                             adapter_data: None,
                             checksums: None,
@@ -3777,8 +3929,8 @@ impl Handler {
                             presentation_hint: None,
                             sources: None,
                         }),
-                        line: if location.line >= 0 { location.line } else { 0 },
-                        column: 1,
+                        line: if frame_line >= 0 { frame_line } else { 0 },
+                        column: frame_col,
                         end_line: None,
                         end_column: None,
                         instruction_pointer_reference: None,

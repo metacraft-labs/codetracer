@@ -387,6 +387,10 @@ fn setup(
                 handler.raw_diff_index = raw_diff_index;
                 // Load macro sourcemaps for Nim macro expansion support (S6).
                 handler.load_macro_sourcemaps(trace_folder);
+                // Load Source Map V3 indexes for every recorded source
+                // path that has one (P3 — Column-Aware-Tracing-And-
+                // Deminification milestone).
+                handler.load_sourcemaps(trace_folder);
                 if for_launch {
                     handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
                 }
@@ -464,6 +468,8 @@ fn setup(
         );
         handler.raw_diff_index = raw_diff_index;
         handler.load_macro_sourcemaps(trace_folder);
+        // P3 — load Source Map V3 indexes for every recorded source.
+        handler.load_sourcemaps(trace_folder);
         if for_launch {
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
         }
@@ -534,6 +540,8 @@ fn setup(
         );
         handler.raw_diff_index = raw_diff_index;
         handler.load_macro_sourcemaps(trace_folder);
+        // P3 — load Source Map V3 indexes for every recorded source.
+        handler.load_sourcemaps(trace_folder);
         if for_launch {
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
         }
@@ -562,6 +570,8 @@ fn setup(
         handler.raw_diff_index = raw_diff_index;
         // Load macro sourcemaps for Nim macro expansion support (S6).
         handler.load_macro_sourcemaps(trace_folder);
+        // P3 — load Source Map V3 indexes for every recorded source.
+        handler.load_sourcemaps(trace_folder);
         if for_launch {
             eprintln!("[db-backend setup] calling run_to_entry");
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
@@ -886,6 +896,8 @@ fn setup_live_program(
     info!("live ct_rr_args {:?}", ct_rr_args);
     let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
     handler.load_macro_sourcemaps(&live_recording_dir);
+    // P3 — load Source Map V3 indexes for every recorded source.
+    handler.load_sourcemaps(&live_recording_dir);
     if for_launch {
         handler.run_to_entry(dap::Request::default(), None, sender)?;
     }
