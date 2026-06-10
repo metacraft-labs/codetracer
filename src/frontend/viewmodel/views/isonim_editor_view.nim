@@ -26,7 +26,8 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
-import ../viewmodels/editor_vm
+import ../viewmodels/[editor_test_controls_vm, editor_vm]
+import ./isonim_editor_test_controls_view
 
 # ---------------------------------------------------------------------------
 # Class composition
@@ -66,7 +67,7 @@ template renderEditorContainerImpl(r, index, path,
                                     cursorKind, sourceGeneration,
                                     sourceDigest,
                                     isExpansion, expansionDepth,
-                                    hostId: untyped):
+                                    hostId, testControls: untyped):
                                     untyped =
   ui(r):
     tdiv(id = editorHostId(index, hostId),
@@ -76,7 +77,8 @@ template renderEditorContainerImpl(r, index, path,
          `data-source-generation` = $sourceGeneration,
          `data-source-digest` = sourceDigest,
          tabindex = "2"):
-      discard
+      if testControls.placement != etcpDisabled and testControls.controls.len > 0:
+        renderEditorTestControls(r, testControls)
 
 # ---------------------------------------------------------------------------
 # Renderer overloads
@@ -85,50 +87,63 @@ template renderEditorContainerImpl(r, index, path,
 proc renderEditorContainer*(r: MockRenderer; vm: EditorVM;
                             index: int; path: string;
                             isExpansion: bool; expansionDepth: int;
-                            hostId: string = ""): MockNode =
+                            hostId: string = "";
+                            testControls = EditorTestControlRenderPlan(
+                              placement: etcpDisabled)): MockNode =
   ## Mock-renderer overload — used by headless tests.
   renderEditorContainerImpl(r, index, path, vm.executionCursorKind.val,
                             vm.activeSourceGeneration.val,
                             vm.activeSourceDigest.val,
-                            isExpansion, expansionDepth, hostId)
+                            isExpansion, expansionDepth, hostId, testControls)
 
 proc renderEditorPanel*(r: MockRenderer; vm: EditorVM;
                         index: int; path: string;
                         isExpansion: bool; expansionDepth: int;
-                        hostId: string = ""): MockNode =
+                        hostId: string = "";
+                        testControls = EditorTestControlRenderPlan(
+                          placement: etcpDisabled)): MockNode =
   ## Public name retained for symmetry with the other panel views.
-  renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId)
+  renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId,
+                        testControls)
 
 when defined(js):
   proc renderEditorContainer*(r: WebRenderer; vm: EditorVM;
                               index: int; path: string;
                               isExpansion: bool;
                               expansionDepth: int;
-                              hostId: string = ""): isonim_dom.Element =
+                              hostId: string = "";
+                              testControls = EditorTestControlRenderPlan(
+                                placement: etcpDisabled)): isonim_dom.Element =
     renderEditorContainerImpl(r, index, path, vm.executionCursorKind.val,
                               vm.activeSourceGeneration.val,
                               vm.activeSourceDigest.val,
-                              isExpansion, expansionDepth, hostId)
+                              isExpansion, expansionDepth, hostId, testControls)
 
   proc renderEditorPanel*(r: WebRenderer; vm: EditorVM;
                           index: int; path: string;
                           isExpansion: bool;
                           expansionDepth: int;
-                          hostId: string = ""): isonim_dom.Element =
-    renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId)
+                          hostId: string = "";
+                          testControls = EditorTestControlRenderPlan(
+                            placement: etcpDisabled)): isonim_dom.Element =
+    renderEditorContainer(r, vm, index, path, isExpansion, expansionDepth, hostId,
+                          testControls)
 
   proc mountIsoNimEditor*(container: isonim_dom.Element;
                           vm: EditorVM;
                           index: int; path: string;
                           isExpansion: bool;
                           expansionDepth: int;
-                          hostId: string = ""): isonim_dom.Element =
+                          hostId: string = "";
+                          testControls = EditorTestControlRenderPlan(
+                            placement: etcpDisabled)): isonim_dom.Element =
     ## Mount the IsoNim editor container as a child of `container` and
     ## return the element so the caller can pass its selector to
     ## `createMonacoEditor`. Unlike the other panel mounts, this view
     ## returns the element reference because Monaco needs it for
     ## initialisation.
     let r = WebRenderer()
-    let panel = renderEditorPanel(r, vm, index, path, isExpansion, expansionDepth, hostId)
+    let panel = renderEditorPanel(r, vm, index, path, isExpansion, expansionDepth,
+                                  hostId, testControls)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
     panel
