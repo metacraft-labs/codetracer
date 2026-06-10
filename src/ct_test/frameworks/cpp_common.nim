@@ -2,6 +2,7 @@ import std/[algorithm, options, os, osproc, sequtils, strutils, tables, times]
 
 import ../contracts
 import ../discovery
+import native_m11_common as nativeM11
 
 type
   CppFrameworkKind* = enum
@@ -552,114 +553,26 @@ proc runNativeCommand*(providerId: string; kind: CppFrameworkKind;
         value: events)
 
 proc nativeRecorderPrefix*(): seq[string] =
-  let configured = getEnv("CODETRACER_CT_MCR_CMD", "")
-  if configured.len > 0:
-    return @[configured]
-  let onPath = findExe("ct-mcr")
-  if onPath.len > 0:
-    return @[onPath]
-  let sibling = getCurrentDir().parentDir / "codetracer-native-recorder" / "ct_cli"
-  for name in ["ct_cli-debug", "ct_cli"]:
-    let path = sibling / name
-    if fileExists(path):
-      return @[path]
-  @[]
-
-proc ctFilesUnder(root: string): seq[string] =
-  if not dirExists(root):
-    return @[]
-  for path in walkDirRec(root):
-    if fileExists(path) and splitFile(path).ext == ".ct":
-      result.add path
-  result.sort(system.cmp[string])
+  nativeM11.nativeRecorderPrefix()
 
 proc recordNativeCommand*(providerId: string; kind: CppFrameworkKind;
     scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
-  {.cast(gcsafe).}:
-    if scope.kind != tskSingle:
-      return ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsWarning,
-            providerId & " M10 recording supports single-test scopes only",
-            scope.file)],
-        value: @[])
-    let recorder = nativeRecorderPrefix()
-    if recorder.len == 0:
-      return ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "ct-mcr native recorder is required for C/C++ test recording. " &
-            "Set CODETRACER_CT_MCR_CMD or build codetracer-native-recorder/ct_cli/ct_cli",
-            scope.file)],
-        value: @[])
-    let testCommand = buildCppCommand(kind, scope.projectRoot, scope.file,
-        scope.selector, ccsSingle)
-    if testCommand.len == 0 or testCommand[0].startsWith("<"):
-      return ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "native test executable is required for recording but was not found under the project build directory",
-            scope.file)],
-        value: @[])
-    let
-      outputRoot = getTempDir() / ("ct-native-record-" & $getCurrentProcessId() &
-          "-" & $epochTime().int & "-" & $cpuTime())
-      tracePath = outputRoot / "single.ct"
-      args = recorder & @["record", "--use-interpose", "--output", tracePath, "--"] & testCommand
-      command = commandLine(args)
-      runId = providerId & ":record:" & scope.selector
-      testId = if scope.testId.len > 0: scope.testId else: scope.selector
-    createDir(outputRoot)
-    var events = @[
-      event(tekRecordStarted, providerId, runId, testId, message = command),
-      event(tekTestStarted, providerId, runId, testId, message = scope.selector)
-    ]
-    let result = execCmdEx(command, options = {poUsePath}, workingDir = scope.projectRoot)
-    if result.output.len > 0:
-      events.add event(tekOutput, providerId, runId, testId, output = result.output)
-    if result.exitCode != 0:
-      events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
-          "ct-mcr exited with " & $result.exitCode, result.output)
-      events.add event(tekRecordFinished, providerId, runId, testId, some(tsFailed),
-          "failed")
-      return ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "native recording failed with exit code " & $result.exitCode,
-            scope.file)],
-        value: events)
-    let traces =
-      if fileExists(tracePath): @[tracePath] else: ctFilesUnder(outputRoot)
-    if traces.len == 0 or getFileSize(traces[0]) <= 0:
-      events.add event(tekFailure, providerId, runId, testId, some(tsErrored),
-          "ct-mcr did not produce a non-empty .ct artifact", result.output)
-      events.add event(tekRecordFinished, providerId, runId, testId, some(tsErrored),
-          "errored")
-      return ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "native recording did not produce a non-empty .ct artifact",
-            scope.file)],
-        value: events)
-    var metadata = initTable[string, string]()
-    metadata["frameworkSelector"] = scope.selector
-    metadata["catalogTestId"] = testId
-    metadata["recordCommand"] = command
-    metadata["artifactSize"] = $getFileSize(traces[0])
-    let trace = TraceMetadata(
-      traceId: splitFile(traces[0]).name,
-      recordingId: splitFile(traces[0]).name,
-      path: parentDir(traces[0]),
-      backend: "native",
-      entryPoint: normalizedRelative(scope.projectRoot, scope.file),
-      metadata: metadata)
-    events.add TestEvent(schemaVersion: TestEventSchemaVersion,
-        kind: tekRecordingCreated, providerId: providerId, runId: runId,
-        testId: testId, status: none(TestResultStatus), message: "recorded",
-        output: "", durationMs: 0, trace: some(trace),
-        diagnostic: none(TestDiagnostic))
-    events.add event(tekTestFinished, providerId, runId, testId, some(tsPassed),
-        "passed")
-    events.add TestEvent(schemaVersion: TestEventSchemaVersion,
-        kind: tekRecordFinished, providerId: providerId, runId: runId,
-        testId: testId, status: some(tsPassed), message: "passed", output: "",
-        durationMs: 0, trace: some(trace), diagnostic: none(TestDiagnostic))
-    ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
+  if scope.kind != tskSingle:
+    return ProviderResult[seq[TestEvent]](
+      diagnostics: @[diagnostic(dsWarning,
+          providerId & " M10 recording supports single-test scopes only",
+          scope.file)],
+      value: @[])
+  let testCommand = buildCppCommand(kind, scope.projectRoot, scope.file,
+      scope.selector, ccsSingle)
+  if testCommand.len == 0 or testCommand[0].startsWith("<"):
+    return ProviderResult[seq[TestEvent]](
+      diagnostics: @[diagnostic(dsError,
+          "native test executable is required for recording but was not found under the project build directory",
+          scope.file)],
+      value: @[])
+  nativeM11.recordCommand(providerId, scope, testCommand, @[],
+      normalizedRelative(scope.projectRoot, scope.file))
 
 proc parseProviderEventLine*(providerId: string; raw: string): ProviderResult[TestEvent] =
   try:

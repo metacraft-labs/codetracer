@@ -40,6 +40,27 @@ proc eventsOfKind(events: seq[TestEvent]; kind: TestEventKind): seq[TestEvent] =
     if event.kind == kind:
       result.add event
 
+proc checkNonEmptyCtArtifact(events: seq[TestEvent]; label: string): string =
+  let created = events.eventsOfKind(tekRecordingCreated)
+  check created.len == 1
+  if created.len == 0 or created[0].trace.isNone:
+    return ""
+  let trace = created[0].trace.get
+  var candidates: seq[string] = @[]
+  if trace.recordingId.len > 0:
+    candidates.add trace.path / (trace.recordingId & ".ct")
+  if trace.traceId.len > 0 and trace.traceId != trace.recordingId:
+    candidates.add trace.path / (trace.traceId & ".ct")
+  for path in candidates:
+    if fileExists(path):
+      let size = getFileSize(path)
+      checkpoint(label & " .ct artifact: " & path & " (" & $size & " bytes)")
+      check size > 0
+      return path
+  checkpoint(label & " missing .ct artifact; candidates: " & $candidates)
+  check false
+  ""
+
 proc configureAndBuild(root: string): tuple[ok: bool; output: string] =
   createDir(buildDir(root))
   var cmakeArgs = "cmake -S . -B build"
@@ -263,6 +284,7 @@ Test project /tmp/build
       check recordResult.diagnostics.len == 0
       check recordResult.value.eventsOfKind(tekRecordingCreated).len == 1
       check recordResult.value.eventsOfKind(tekRecordFinished)[0].status.get == tsPassed
+      discard recordResult.value.checkNonEmptyCtArtifact("catch2 single-test")
       for event in recordResult.value:
         check event.validateEvent.valid
 
