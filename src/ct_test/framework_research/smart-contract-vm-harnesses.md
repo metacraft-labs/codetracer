@@ -1,5 +1,8 @@
 # M13 Smart-Contract and VM Recorder Harnesses
 
+<!-- cspell:words Aleo Blockfrost cardano Circom corelib miden MASM -->
+<!-- cspell:words masm polkavm solana starknet tolk uplc wasmi -->
+
 Scope: catalog integration for sibling recorder repositories present in the
 workspace. Recorder repos are treated as read-only inputs.
 
@@ -33,18 +36,22 @@ Common contract:
 | `smart-wasm`    | `codetracer-wasm-recorder`    | `examples`                                                        | `go test ./examples/...`                                                                | No CodeTracer recorder artifact contract found        | This sibling is a wazero checkout, not a `record --out-dir` CodeTracer recorder CLI. Discovery is informational.                                          |
 | `smart-wasmi`   | `codetracer-wasmi-recorder`   | `crates/*/tests`                                                  | `cargo test`                                                                            | No CodeTracer recorder artifact contract found        | This sibling is a wasmi runtime checkout, not a `record --out-dir` CodeTracer recorder CLI. Discovery is informational.                                   |
 
-Current local verification environment:
+Current local verification notes:
 
-- `nim`, `just`, and `cargo` are available; recorder builds were run through
-  `nix-shell -p cargo rustc nim nimble openssl pkg-config just`.
+- Recorder artifacts in a workspace should be checked with
+  `scripts/build-siblings.sh --check` and built with `just build-siblings`.
+  That script uses `direnv exec <repo>` so each sibling recorder uses its own
+  flake-pinned toolchain.
 - `codetracer-evm-recorder`, `codetracer-fuel-recorder`,
   `codetracer-polkavm-recorder`, and `codetracer-miden-recorder` build
-  successfully into sibling `target/debug` directories.
+  successfully into sibling `target/debug` directories in the previously
+  recorded local run.
 - Real recorder smokes produced non-empty CTFS bundles:
   `FlowTest.ct` from EVM when `solc` and `anvil` are provided by
   `nix-shell -p solc foundry`, `flow_test.ct` from Fuel bytecode,
   `flow_test.ct` from PolkaVM, and `masm_flow_test.ct` from Miden MASM.
 - Recorder providers whose binaries are not available in `PATH` or sibling
   `target/{debug,release}` directories report discovery-only capabilities and
-  emit diagnostics naming the missing binary and the matching
-  `CODETRACER_*_RECORDER_CMD` override.
+  emit diagnostics naming the missing binary, the matching
+  `CODETRACER_*_RECORDER_CMD` override, and the need to build the sibling
+  artifact when the source repo is present.

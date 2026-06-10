@@ -64,9 +64,12 @@ Editor recording depends on the same command-line setup as `ct test`:
 - Recorder binaries and language toolchains must be available on `PATH` or
   configured through the usual CodeTracer environment variables.
 - In this workspace, the Nix development shell and `.envrc` auto-detect common
-  sibling recorder repositories. For native Rust recording, ensure the native
-  recorder from `codetracer-native-recorder` is built. For Python, ensure the
-  Python recorder and the project test runner, such as `pytest`, are installed.
+  sibling recorder repositories. Run `scripts/build-siblings.sh --check` to see
+  which sibling artifacts are missing, and `just build-siblings` to build them
+  through each sibling repo's `direnv exec` environment. For native Rust
+  recording, ensure the native recorder from `codetracer-native-recorder` is
+  built. For Python, ensure the Python recorder and the project test runner,
+  such as `pytest`, are installed.
 
 ## Current Limitations
 
@@ -74,7 +77,8 @@ Editor recording depends on the same command-line setup as `ct test`:
 - Some frameworks support file-level recording but not reliable single-test
   recording; those providers should report a diagnostic instead of exposing an
   unavailable action.
-- Full Electron GUI coverage depends on the local GUI harness, display server,
-  built frontend, and recorder/toolchain binaries. The M15 headless acceptance
-  tests exercise the ViewModel and rendered control contract when the full GUI
-  harness is not available.
+- Full Electron GUI coverage should run through `just test-gui`, which builds
+  the frontend, builds sibling recorder artifacts, and starts Xvfb for
+  Playwright/Electron on Linux. The M15 headless acceptance tests exercise the
+  ViewModel and rendered control contract when the full GUI harness cannot be
+  run in the current environment.

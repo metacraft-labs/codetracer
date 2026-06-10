@@ -104,6 +104,20 @@ if [ -n "$NIMBLE_TOOLCHAIN_BIN" ] && [ "$NIMBLE_TOOLCHAIN_BIN" != "$NIM_TOOLCHAI
 fi
 export EXTRA_NIM_PATH
 
+# codetracer-trace-format-nim needs libzstd headers and library paths while
+# building its Nim FFI library. Resolve them from the codetracer dev shell,
+# which already pins zstd for the main workspace.
+ZSTD_CFLAGS="$(
+	direnv exec "$CT_ROOT" bash -c 'pkg-config --cflags libzstd 2>/dev/null || pkg-config --cflags zstd 2>/dev/null' 2>/dev/null
+)"
+ZSTD_LIBS="$(
+	direnv exec "$CT_ROOT" bash -c 'pkg-config --libs libzstd 2>/dev/null || pkg-config --libs zstd 2>/dev/null' 2>/dev/null
+)"
+if [ -z "$ZSTD_CFLAGS" ] || [ -z "$ZSTD_LIBS" ]; then
+	echo "build-siblings.sh: WARNING: could not resolve zstd from codetracer dev shell." >&2
+	echo "  codetracer-trace-format-nim may fail to compile zstd bindings." >&2
+fi
+
 # Per-repo results.
 declare -A RESULT_STATE  # repo -> PASS|SKIP|FAIL|MISSING
 declare -A RESULT_DETAIL # repo -> human-readable detail
@@ -133,12 +147,15 @@ should_skip() {
 #   $4 — optional logical key (defaults to $1).  Use this when a single repo
 #        produces multiple artifacts (e.g. flow recorder = Rust crate + Go
 #        helper) so each step gets its own result row.
+#   $5 — optional direnv repo (defaults to $1).  Use this when a sibling has no
+#        usable direnv shell but can be built from another pinned dev shell.
 # ---------------------------------------------------------------------------
 build_sibling() {
 	local repo="$1"
 	local artifact="$2"
 	local cmd="$3"
 	local key="${4:-$1}"
+	local env_repo="${5:-$repo}"
 
 	if should_skip "$key"; then return 0; fi
 
@@ -146,6 +163,13 @@ build_sibling() {
 	if [ ! -d "$repo_dir" ]; then
 		RESULT_STATE[$key]="MISSING"
 		RESULT_DETAIL[$key]="repo not checked out at $repo_dir"
+		return 0
+	fi
+
+	local env_dir="$WS_ROOT/$env_repo"
+	if [ ! -d "$env_dir" ]; then
+		RESULT_STATE[$key]="MISSING"
+		RESULT_DETAIL[$key]="direnv repo not checked out at $env_dir"
 		return 0
 	fi
 
@@ -176,9 +200,9 @@ build_sibling() {
 
 	local rc=0
 	if [ "${BUILD_SIBLINGS_VERBOSE:-0}" = "1" ]; then
-		(cd "$repo_dir" && direnv exec "$repo_dir" bash -c "$wrapped_cmd") || rc=$?
+		(cd "$repo_dir" && direnv exec "$env_dir" bash -c "$wrapped_cmd") || rc=$?
 	else
-		(cd "$repo_dir" && direnv exec "$repo_dir" bash -c "$wrapped_cmd") >"$log" 2>&1 || rc=$?
+		(cd "$repo_dir" && direnv exec "$env_dir" bash -c "$wrapped_cmd") >"$log" 2>&1 || rc=$?
 	fi
 
 	if [ "$rc" -ne 0 ]; then
@@ -197,6 +221,29 @@ build_sibling() {
 	RESULT_DETAIL[$key]="built $artifact"
 }
 
+ensure_submodules() {
+	local repo="$1"
+	shift
+
+	local repo_dir="$WS_ROOT/$repo"
+	if [ ! -d "$repo_dir" ]; then
+		return 0
+	fi
+
+	local needs_update=0
+	local path
+	for path in "$@"; do
+		if [ ! -e "$repo_dir/$path/.git" ]; then
+			needs_update=1
+		fi
+	done
+
+	if [ "$needs_update" -eq 1 ]; then
+		echo "[build-siblings] $repo: initializing git submodules: $*" >&2
+		git -C "$repo_dir" submodule update --init --recursive -- "$@"
+	fi
+}
+
 # ---------------------------------------------------------------------------
 # Build steps — one per sibling repo.  Order matters where there are deps:
 # trace-format / trace-format-nim provide FFI libs that wazero loads, so
@@ -210,16 +257,29 @@ build_sibling \
 	"cargo build --release"
 
 # Nim FFI shared lib (libcodetracer_trace_writer.so, used by wazero with CGO).
+trace_format_nim_cmd="nimble buildSharedLib"
+if [ -n "$ZSTD_CFLAGS" ] && [ -n "$ZSTD_LIBS" ]; then
+	trace_format_nim_cmd="export NIX_CFLAGS_COMPILE=\"\${NIX_CFLAGS_COMPILE:-} $ZSTD_CFLAGS\"; export NIX_LDFLAGS=\"\${NIX_LDFLAGS:-} $ZSTD_LIBS\"; nimble buildSharedLib"
+fi
 build_sibling \
 	codetracer-trace-format-nim \
 	libcodetracer_trace_writer.so \
-	"nimble buildSharedLib"
+	"$trace_format_nim_cmd"
 
-# Native backend (ct-native-replay).
+# Native backend (ct-native-replay). Its own direnv/flake can reject freshly
+# initialized submodules in repo-managed checkouts, so build it the same way
+# the local justfile does: borrow codetracer's dev shell and compile in-place.
+if ! should_skip codetracer-native-backend; then
+	ensure_submodules codetracer-native-backend libs/rr libs/delve
+fi
+# shellcheck disable=SC2016
+native_backend_cmd='if [ -z "${LLVM_CONFIG:-}" ]; then llvm_dev="$(nix build --no-link --print-out-paths nixpkgs#llvm.dev)"; export LLVM_CONFIG="$llvm_dev/bin/llvm-config"; fi; if [ -z "${LLDB_LIB_PATH:-}" ]; then lldb_out="$(nix build --no-link --print-out-paths nixpkgs#lldb)"; export LLDB_LIB_PATH="$lldb_out/lib"; fi; if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"; export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"; fi; export LIBRARY_PATH="$LLDB_LIB_PATH${LIBRARY_PATH:+:$LIBRARY_PATH}"; export LD_LIBRARY_PATH="$LLDB_LIB_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; cargo build --bin ct-native-replay'
 build_sibling \
 	codetracer-native-backend \
 	target/debug/ct-native-replay \
-	"cargo build"
+	"$native_backend_cmd" \
+	codetracer-native-backend \
+	codetracer
 
 # MCR / native recorder (ct_cli aka ct-mcr).
 build_sibling \
@@ -239,13 +299,17 @@ build_sibling \
 build_sibling \
 	codetracer-wasm-recorder \
 	wazero \
-	"just build"
+	"go build -o wazero ./cmd/wazero" \
+	codetracer-wasm-recorder \
+	codetracer
 
 # noir / nargo.
 build_sibling \
 	noir \
 	target/release/nargo \
-	"cargo build --release --bin nargo"
+	"cargo build --release --package nargo_cli --bin nargo" \
+	noir \
+	codetracer
 
 # Cadence Go helper used by the flow recorder.  Distinct logical key so its
 # result row doesn't collide with the codetracer-flow-recorder Rust crate

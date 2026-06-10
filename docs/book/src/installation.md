@@ -103,8 +103,8 @@ cargo test --release --bin db-backend # test most cases: non-ignored
 cargo test --release --bin db-backend -- --ignored # test the ignored cases: ignored by default as they're slower
 ```
 
-some initial simple end to end playwright tests:
+some initial simple end to end Playwright GUI tests:
 
 ```bash
-just test-e2e
-````
+just test-gui
+```

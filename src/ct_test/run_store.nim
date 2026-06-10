@@ -5,7 +5,10 @@
 ## editor can answer "last result" and "open last trace" after a fresh
 ## ViewModel/session without mixing results from different toolchains.
 
-import std/[json, options, os, strutils, tables, times]
+import std/[json, options, strutils, tables, times]
+
+when not defined(js):
+  import std/os
 
 import contracts
 
@@ -111,17 +114,24 @@ proc runRecordKey*(catalogItemId, environmentFingerprint: string): string =
   catalogItemId & "\n" & environmentFingerprint
 
 proc defaultRunStoreRoot*(): string =
-  getEnv("CODETRACER_TEST_RUN_STORE",
-    getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state") /
-      "codetracer" / "ct-test")
+  when defined(js):
+    ""
+  else:
+    getEnv("CODETRACER_TEST_RUN_STORE",
+      getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state") /
+        "codetracer" / "ct-test")
 
 proc defaultEnvironmentFingerprint*(workspaceRoot: string;
                                     provider: TestProviderInfo): string =
+  when defined(js):
+    let normalizedWorkspace = workspaceRoot
+  else:
+    let normalizedWorkspace = workspaceRoot.normalizedPath
   [
     "schema=v1",
     "os=" & hostOS,
     "cpu=" & hostCPU,
-    "workspace=" & workspaceRoot.normalizedPath,
+    "workspace=" & normalizedWorkspace,
     "provider=" & provider.id,
     "language=" & provider.language,
     "framework=" & provider.framework,
@@ -129,8 +139,9 @@ proc defaultEnvironmentFingerprint*(workspaceRoot: string;
   ].join(";")
 
 proc ensureStoreDirs(store: LocalRunStore) =
-  createDir(store.root)
-  createDir(store.root / "logs")
+  when not defined(js):
+    createDir(store.root)
+    createDir(store.root / "logs")
 
 proc toJson*(record: RunRecord): JsonNode =
   result = %*{
@@ -184,33 +195,40 @@ proc runRecordFromJson*(node: JsonNode): RunRecord =
     result.trace = some(traceMetadataFromJson(node["trace"]))
 
 proc save*(store: LocalRunStore) =
-  store.ensureStoreDirs()
-  var records = newJArray()
-  for _, record in store.records:
-    records.add record.toJson
-  writeFile(store.dbPath, $(%*{
-    "schemaVersion": RunStoreSchemaVersion,
-    "records": records
-  }))
+  when not defined(js):
+    store.ensureStoreDirs()
+    var records = newJArray()
+    for _, record in store.records:
+      records.add record.toJson
+    writeFile(store.dbPath, $(%*{
+      "schemaVersion": RunStoreSchemaVersion,
+      "records": records
+    }))
 
 proc load*(store: LocalRunStore) =
   store.records = initTable[string, RunRecord]()
-  if not fileExists(store.dbPath):
-    return
-  let node = parseJson(readFile(store.dbPath))
-  if node{"schemaVersion"}.getInt(0) != RunStoreSchemaVersion:
-    return
-  for item in node{"records"}.items:
-    let record = runRecordFromJson(item)
-    if record.catalogItemId.len > 0 and record.environmentFingerprint.len > 0:
-      store.records[runRecordKey(record.catalogItemId,
-        record.environmentFingerprint)] = record
+  when not defined(js):
+    if not fileExists(store.dbPath):
+      return
+    let node = parseJson(readFile(store.dbPath))
+    if node{"schemaVersion"}.getInt(0) != RunStoreSchemaVersion:
+      return
+    for item in node{"records"}.items:
+      let record = runRecordFromJson(item)
+      if record.catalogItemId.len > 0 and
+          record.environmentFingerprint.len > 0:
+        store.records[runRecordKey(record.catalogItemId,
+          record.environmentFingerprint)] = record
 
 proc openLocalRunStore*(root = defaultRunStoreRoot();
                         retentionDays = DefaultRetentionDays): LocalRunStore =
+  when defined(js):
+    let dbPath = ""
+  else:
+    let dbPath = root / "runs.json"
   result = LocalRunStore(
     root: root,
-    dbPath: root / "runs.json",
+    dbPath: dbPath,
     retentionDays: retentionDays,
     records: initTable[string, RunRecord]())
   result.ensureStoreDirs()
@@ -278,15 +296,16 @@ proc getLastTrace*(store: LocalRunStore; catalogItemId,
 proc recordOutput(store: LocalRunStore; record: var RunRecord; output: string) =
   if output.len == 0:
     return
-  store.ensureStoreDirs()
-  if record.outputLogPath.len == 0:
-    record.outputLogPath = store.root / "logs" /
-      (safeFileComponent(record.catalogItemId & "-" &
-        record.environmentFingerprint) & ".log")
-  writeFile(record.outputLogPath,
-    if fileExists(record.outputLogPath): readFile(record.outputLogPath) & output
-    else: output)
   record.outputTail = output
+  when not defined(js):
+    store.ensureStoreDirs()
+    if record.outputLogPath.len == 0:
+      record.outputLogPath = store.root / "logs" /
+        (safeFileComponent(record.catalogItemId & "-" &
+          record.environmentFingerprint) & ".log")
+    writeFile(record.outputLogPath,
+      if fileExists(record.outputLogPath): readFile(record.outputLogPath) & output
+      else: output)
 
 proc updateFromEvent*(store: LocalRunStore; event: TestEvent;
                       environmentFingerprint: string;
@@ -352,20 +371,21 @@ proc setPinned*(store: LocalRunStore; catalogItemId,
 
 proc removePath(path: string; report: var RunStoreCleanupReport;
     isRecording: bool) =
-  if path.len == 0 or not (fileExists(path) or dirExists(path)):
-    return
-  try:
-    if dirExists(path):
-      removeDir(path)
-    else:
-      removeFile(path)
-    if isRecording:
-      report.removedRecordingPaths.add path
-    else:
-      report.removedLogPaths.add path
-  except OSError as err:
-    report.diagnostics.add diagnostic(dsWarning,
-      "could not remove expired ct-test artifact " & path & ": " & err.msg)
+  when not defined(js):
+    if path.len == 0 or not (fileExists(path) or dirExists(path)):
+      return
+    try:
+      if dirExists(path):
+        removeDir(path)
+      else:
+        removeFile(path)
+      if isRecording:
+        report.removedRecordingPaths.add path
+      else:
+        report.removedLogPaths.add path
+    except OSError as err:
+      report.diagnostics.add diagnostic(dsWarning,
+        "could not remove expired ct-test artifact " & path & ": " & err.msg)
 
 proc cleanupExpired*(store: LocalRunStore; nowUnixValue = nowUnix()):
     RunStoreCleanupReport =
@@ -402,18 +422,22 @@ proc importCiArtifactEvents*(store: LocalRunStore; path,
     CiArtifactImportReport =
   ## Import newline-delimited ct-test TestEvent JSON artifacts. Broader CI
   ## formats should be normalized to this contract before import.
-  if not fileExists(path):
-    result.diagnostics.add diagnostic(dsError,
-      "ct-test CI artifact not found: " & path, path)
-    return
-  for line in readFile(path).splitLines:
-    let stripped = line.strip
-    if stripped.len == 0:
-      continue
-    try:
-      let event = eventFromJsonLine(stripped)
-      store.updateFromEvent(event, environmentFingerprint, timestamp)
-      inc result.importedEvents
-    except CatchableError as err:
-      result.diagnostics.add diagnostic(dsWarning,
-        "unsupported ct-test CI artifact line: " & err.msg, path)
+  when defined(js):
+    result.diagnostics.add diagnostic(dsWarning,
+      "ct-test CI artifact import is unavailable in the browser", path)
+  else:
+    if not fileExists(path):
+      result.diagnostics.add diagnostic(dsError,
+        "ct-test CI artifact not found: " & path, path)
+      return
+    for line in readFile(path).splitLines:
+      let stripped = line.strip
+      if stripped.len == 0:
+        continue
+      try:
+        let event = eventFromJsonLine(stripped)
+        store.updateFromEvent(event, environmentFingerprint, timestamp)
+        inc result.importedEvents
+      except CatchableError as err:
+        result.diagnostics.add diagnostic(dsWarning,
+          "unsupported ct-test CI artifact line: " & err.msg, path)
