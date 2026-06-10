@@ -449,17 +449,21 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
             scope.file)],
         value: events)
 
-proc rubyRecorderCommandPrefix(): seq[string] =
+proc rubyRecorderCommandPrefix*(): seq[string] =
   let configured = getEnv("CODETRACER_RUBY_RECORDER_PATH", "")
   if configured.len > 0:
     return @[configured]
+  let siblingRoots = [
+    getCurrentDir().parentDir,
+    currentSourcePath().parentDir.parentDir.parentDir.parentDir.parentDir]
+  for root in siblingRoots:
+    let siblingCli = root / "codetracer-ruby-recorder" / "gems" /
+        "codetracer-ruby-recorder" / "bin" / "codetracer-ruby-recorder"
+    if fileExists(siblingCli):
+      return @["ruby", siblingCli]
   let onPath = findExe("codetracer-ruby-recorder")
   if onPath.len > 0:
     return @[onPath]
-  let siblingCli = getCurrentDir().parentDir / "codetracer-ruby-recorder" /
-      "gems" / "codetracer-ruby-recorder" / "bin" / "codetracer-ruby-recorder"
-  if fileExists(siblingCli):
-    return @["ruby", siblingCli]
   @[]
 
 proc ctFilesUnder(root: string): seq[string] =
@@ -469,6 +473,42 @@ proc ctFilesUnder(root: string): seq[string] =
     if fileExists(path) and splitFile(path).ext == ".ct":
       result.add path
   result.sort(system.cmp[string])
+
+proc prependEnv(name, value: string): tuple[hadValue: bool; oldValue: string] =
+  result = (existsEnv(name), getEnv(name))
+  let current = getEnv(name, "")
+  if current.len > 0:
+    putEnv(name, value & PathSep & current)
+  else:
+    putEnv(name, value)
+
+proc restoreEnv(name: string; saved: tuple[hadValue: bool; oldValue: string]) =
+  if saved.hadValue:
+    putEnv(name, saved.oldValue)
+  else:
+    delEnv(name)
+
+proc rubyEnvOptionPrefix(option: string): tuple[hadValue: bool; oldValue: string] =
+  result = (existsEnv("RUBYOPT"), getEnv("RUBYOPT"))
+  let current = getEnv("RUBYOPT", "")
+  if current.len > 0:
+    putEnv("RUBYOPT", option & " " & current)
+  else:
+    putEnv("RUBYOPT", option)
+
+proc resolveRspecExecutable(projectRoot: string): ProviderResult[string] =
+  let probe = execCmdEx(
+    "ruby -rbundler/setup -e " &
+      quoteShell("print Gem.bin_path('rspec-core', 'rspec')"),
+    options = {poUsePath},
+    workingDir = projectRoot)
+  if probe.exitCode != 0:
+    return ProviderResult[string](
+      diagnostics: @[diagnostic(dsError,
+          "Ruby recording could not resolve the RSpec executable: " &
+          probe.output)],
+      value: "")
+  ProviderResult[string](diagnostics: @[], value: probe.output.strip)
 
 proc recordRubyUnsupported(message: string; scope: TestScope): ProviderResult[
     seq[TestEvent]] =
@@ -506,58 +546,68 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
       testId = if scope.testId.len > 0: scope.testId else: scope.selector
     createDir(outputRoot)
 
-    let runnerPath = outputRoot / "ct_ruby_test_runner.rb"
-    let runner =
+    let targetArgs =
       case kind
       of rfkRSpec:
-        "begin\n" &
-        "  require 'bundler/setup'\n" &
-        "rescue LoadError\n" &
-        "end\n" &
-        "ARGV.shift if ARGV[0] == '--'\n" &
-        "require 'rspec/core'\n" &
-        "exit RSpec::Core::Runner.run(ARGV)\n"
-      of rfkMinitest:
-        "begin\n" &
-        "  require 'bundler/setup'\n" &
-        "rescue LoadError\n" &
-        "end\n" &
-        "require 'minitest'\n" &
-        "Minitest.class_variable_set(:@@installed_at_exit, true)\n" &
-        "ARGV.shift if ARGV[0] == '--'\n" &
-        "file = ARGV.shift\n" &
-        "load File.expand_path(file, Dir.pwd)\n" &
-        "exit(Minitest.run(ARGV) ? 0 : 1)\n"
-    writeFile(runnerPath, runner)
-
-    let frameworkArgs =
-      case kind
-      of rfkRSpec:
-        @[scope.selector]
+        let rspecExecutable = resolveRspecExecutable(scope.projectRoot)
+        if rspecExecutable.diagnostics.len > 0:
+          return ProviderResult[seq[TestEvent]](
+            diagnostics: rspecExecutable.diagnostics,
+            value: @[])
+        @[rspecExecutable.value, scope.selector]
       of rfkMinitest:
         @[normalizedRelative(scope.projectRoot, scope.file), "--name",
           "/" & scope.selector & "$/"]
-    let args = recorderPrefix & @["--out-dir", outputRoot, runnerPath, "--"] &
-        frameworkArgs
+
+    let args = recorderPrefix & @["--out-dir", outputRoot] & targetArgs
     let command = commandLine(args)
     var events = @[
       event(tekRecordStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    let result = execCmdEx(command, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    var result = (output: "", exitCode: -1)
+    let
+      rubyOpt = if kind == rfkRSpec:
+          some(rubyEnvOptionPrefix("-rbundler/setup"))
+        else:
+          none(tuple[hadValue: bool; oldValue: string])
+      rubyLib = if kind == rfkMinitest:
+          some(prependEnv("RUBYLIB", "test"))
+        else:
+          none(tuple[hadValue: bool; oldValue: string])
+    try:
+      result = execCmdEx(command, options = {poUsePath},
+          workingDir = scope.projectRoot)
+    finally:
+      if rubyOpt.isSome:
+        restoreEnv("RUBYOPT", rubyOpt.get)
+      if rubyLib.isSome:
+        restoreEnv("RUBYLIB", rubyLib.get)
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
     if result.exitCode != 0:
+      let capturedOutput =
+        if result.output.len > 0:
+          result.output
+        else:
+          "<no stdout/stderr captured>"
+      let failureDetails =
+        "codetracer-ruby-recorder failure" &
+        "\nrecorderCommand: " & command &
+        "\ncwd: " & scope.projectRoot &
+        "\noutDir: " & outputRoot &
+        "\nexitStatus: " & $result.exitCode &
+        "\noutput:\n" & capturedOutput
       events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
           "codetracer-ruby-recorder exited with " & $result.exitCode,
-          result.output)
+          failureDetails)
       events.add event(tekRecordFinished, providerId, runId, testId, some(
           tsFailed), "failed")
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
-            "Ruby recording failed with exit code " & $result.exitCode,
+            "Ruby recording failed with exit code " & $result.exitCode &
+            ". " & failureDetails,
             scope.file)],
         value: events)
 

@@ -146,6 +146,30 @@ proc checkSuccessfulRecording(
   for event in result.value:
     check event.validateEvent.valid
 
+proc withEnvValue(name, value: string; body: proc()) =
+  let
+    hadValue = existsEnv(name)
+    oldValue = getEnv(name)
+  putEnv(name, value)
+  try:
+    body()
+  finally:
+    if hadValue:
+      putEnv(name, oldValue)
+    else:
+      delEnv(name)
+
+proc withoutEnvValue(name: string; body: proc()) =
+  let
+    hadValue = existsEnv(name)
+    oldValue = getEnv(name)
+  delEnv(name)
+  try:
+    body()
+  finally:
+    if hadValue:
+      putEnv(name, oldValue)
+
 suite "ct-test M9 Ruby RSpec and Minitest providers":
   test "RSpec detects project and discovers nested examples with source ranges":
     check hasRspecProject(rspecRoot())
@@ -277,6 +301,79 @@ suite "ct-test M9 Ruby RSpec and Minitest providers":
         MinitestAddsSelector, rcsSingle) == @[
           "bundle", "exec", "ruby", "-Itest", "test/calculator_test.rb",
           "--name", "/CalculatorTest#test_adds_numbers$/"]
+
+  test "recorder resolution prefers explicit path then workspace sibling":
+    let
+      siblingCli = getCurrentDir().parentDir / "codetracer-ruby-recorder" /
+        "gems" / "codetracer-ruby-recorder" / "bin" /
+        "codetracer-ruby-recorder"
+      fakeDir = getTempDir() / ("ct-ruby-fake-recorder-" &
+        $getCurrentProcessId())
+      fakeCli = fakeDir / "codetracer-ruby-recorder"
+      configuredCli = fakeDir / "configured-recorder"
+      oldPath = getEnv("PATH")
+    createDir(fakeDir)
+    writeFile(fakeCli, "#!/bin/sh\nexit 1\n")
+    writeFile(configuredCli, "#!/bin/sh\nexit 1\n")
+    setFilePermissions(fakeCli, {fpUserExec, fpUserRead, fpUserWrite})
+    setFilePermissions(configuredCli, {fpUserExec, fpUserRead, fpUserWrite})
+
+    withEnvValue("PATH", fakeDir & PathSep & oldPath):
+      withEnvValue("CODETRACER_RUBY_RECORDER_PATH", configuredCli):
+        check rubyRecorderCommandPrefix() == @[configuredCli]
+
+      withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
+        if fileExists(siblingCli):
+          check rubyRecorderCommandPrefix() == @["ruby", siblingCli]
+        else:
+          check rubyRecorderCommandPrefix() == @[fakeCli]
+
+    if fileExists(siblingCli):
+      let oldCwd = getCurrentDir()
+      setCurrentDir(getTempDir())
+      try:
+        withEnvValue("PATH", fakeDir):
+          withoutEnvValue("CODETRACER_RUBY_RECORDER_PATH"):
+            check rubyRecorderCommandPrefix() == @["ruby", siblingCli]
+      finally:
+        setCurrentDir(oldCwd)
+
+  test "recording failure diagnostics include command cwd out dir and no-output marker":
+    if findExe("ruby").len == 0:
+      checkpoint("Ruby is required for recording failure diagnostics coverage")
+    else:
+      let
+        fakeDir = getTempDir() / ("ct-ruby-silent-recorder-" &
+          $getCurrentProcessId())
+        recorder = fakeDir / "codetracer-ruby-recorder"
+      createDir(fakeDir)
+      writeFile(recorder, "#!/bin/sh\nexit 7\n")
+      setFilePermissions(recorder, {fpUserExec, fpUserRead, fpUserWrite})
+
+      let
+        catalog = minitestFileCatalog(minitestRoot(), minitestSample()).value
+        item = catalog.itemBySelector(MinitestAddsSelector)
+        provider = newRubyMinitestM1Provider()
+        scope = TestScope(
+          kind: tskSingle,
+          projectRoot: minitestRoot(),
+          file: minitestSample(),
+          testId: item.id,
+          selector: item.selector)
+
+      withEnvValue("CODETRACER_RUBY_RECORDER_PATH", recorder):
+        let result = provider.provider.record(scope)
+        check result.diagnostics.len == 1
+        check result.diagnostics[0].message.contains("recorderCommand: " &
+          quoteShell(recorder))
+        check result.diagnostics[0].message.contains("cwd: " & minitestRoot())
+        check result.diagnostics[0].message.contains("outDir: ")
+        check result.diagnostics[0].message.contains("exitStatus: 7")
+        check result.diagnostics[0].message.contains(
+          "<no stdout/stderr captured>")
+        check result.value.eventsOfKind(tekFailure).len == 1
+        check result.value.eventsOfKind(tekFailure)[0].output.contains(
+          "<no stdout/stderr captured>")
 
   test "Ruby result parsers map RSpec JSON and Minitest summary statuses":
     let rspecJson = %*{
