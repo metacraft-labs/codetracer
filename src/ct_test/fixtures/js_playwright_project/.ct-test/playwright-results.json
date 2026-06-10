@@ -1,0 +1,182 @@
+{
+  "config": {
+    "rootDir": "/workspace/src/ct_test/fixtures/js_playwright_project",
+    "workers": 1,
+    "projects": [{ "name": "chromium" }]
+  },
+  "suites": [
+    {
+      "title": "tests/home.spec.ts",
+      "file": "tests/home.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "renders greeting",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "expected",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "passed",
+                  "duration": 42,
+                  "stdout": [{ "text": "home rendered\n" }],
+                  "stderr": [],
+                  "retry": 0,
+                  "attachments": []
+                }
+              ]
+            }
+          ],
+          "id": "a1",
+          "file": "tests/home.spec.ts",
+          "line": 4,
+          "column": 8,
+          "titlePath": ["home page", "renders greeting"]
+        },
+        {
+          "title": "updates counter",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "expected",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "passed",
+                  "duration": 37,
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "attachments": []
+                }
+              ]
+            }
+          ],
+          "id": "a2",
+          "file": "tests/home.spec.ts",
+          "line": 9,
+          "column": 8,
+          "titlePath": ["home page", "updates counter"]
+        }
+      ]
+    },
+    {
+      "title": "tests/form.spec.ts",
+      "file": "tests/form.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "submits entered value",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "expected",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "passed",
+                  "duration": 51,
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "attachments": []
+                }
+              ]
+            }
+          ],
+          "id": "b1",
+          "file": "tests/form.spec.ts",
+          "line": 4,
+          "column": 8,
+          "titlePath": ["form flow", "submits entered value"]
+        },
+        {
+          "title": "fails on missing output",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "passed",
+              "status": "unexpected",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "failed",
+                  "duration": 88,
+                  "stdout": [],
+                  "stderr": [{ "text": "expected output to contain Grace\n" }],
+                  "retry": 0,
+                  "error": {
+                    "message": "Error: toHaveText(expected) failed"
+                  },
+                  "attachments": [
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "test-results/form-missing-output/trace.zip"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "id": "b2",
+          "file": "tests/form.spec.ts",
+          "line": 9,
+          "column": 8,
+          "titlePath": ["form flow", "fails on missing output"]
+        },
+        {
+          "title": "skips optional path",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "projectName": "chromium",
+              "expectedStatus": "skipped",
+              "status": "skipped",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "skipped",
+                  "duration": 0,
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "attachments": []
+                }
+              ]
+            }
+          ],
+          "id": "b3",
+          "file": "tests/form.spec.ts",
+          "line": 15,
+          "column": 8,
+          "titlePath": ["form flow", "skips optional path"]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "expected": 3,
+    "skipped": 1,
+    "unexpected": 1,
+    "flaky": 0,
+    "duration": 218
+  }
+}

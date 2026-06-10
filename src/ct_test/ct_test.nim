@@ -4,6 +4,7 @@ import contracts
 import discovery
 import frameworks/js_jest
 import frameworks/js_node_test
+import frameworks/js_playwright
 import frameworks/js_vitest
 import frameworks/nim_unittest
 import frameworks/python_pytest
@@ -18,7 +19,8 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newRustLibtestM1Provider(),
     newJsJestM1Provider(),
     newJsVitestM1Provider(),
-    newJsNodeTestM1Provider()
+    newJsNodeTestM1Provider(),
+    newJsPlaywrightM1Provider()
   ])
 
 proc errorResponse(message: string): DiscoverResponse =

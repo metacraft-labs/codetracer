@@ -1,0 +1,11 @@
+{
+  "name": "ct-test-playwright-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}
