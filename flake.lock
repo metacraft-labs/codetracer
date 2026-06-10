@@ -292,11 +292,11 @@
     "codetracer-trace-format_3": {
       "flake": false,
       "locked": {
-        "lastModified": 1781065806,
-        "narHash": "sha256-GQywO+wJGiH8ITpRSrYTgZjwWaHPSbrlmlZHCc7gJd0=",
+        "lastModified": 1781082992,
+        "narHash": "sha256-7o6+h5gm/sXtjUWmmcdNfLaKbmN6vvYP3Hxd0YezPjw=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format",
-        "rev": "ad8a12052b0eb9561ca0b726af3a273ffa0e61bb",
+        "rev": "37181591803ee2a111d3934c949a2d8fdb5d969a",
         "type": "github"
       },
       "original": {
