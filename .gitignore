@@ -12,6 +12,9 @@ nimcache/
 .venv/
 .python-recorder-venv/
 build-*/
+# Reprobuild recipe writes generated headers + object files to a top-level
+# build/ (build/generated/ct_config.h, build/c/*.o).
+/build/
 
 !build-python
 build-python/src/ct/bin

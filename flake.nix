@@ -125,6 +125,10 @@
       inputs.flake-parts.follows = "flake-parts";
       inputs.git-hooks.follows = "git-hooks-nix";
       inputs.runquota-src.follows = "runquota";
+      # reprobuild's repro package needs ct_interpose (from the
+      # native-recorder repo) to build; share CodeTracer's own
+      # native-recorder input so a local sibling checkout is reused.
+      inputs.codetracer-native-recorder.follows = "codetracer-native-recorder";
       flake = true;
     };
 

@@ -1,6 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Generate isonim's build/tailwind-styles.json before any frontend Nim
+# compile. ``src/frontend/ui_js.nim`` transitively imports
+# ``isonim/dsl/tailwind``, which ``staticRead``s that file at Nim compile
+# time — a missing file is an uncatchable compile error
+# (see isonim/src/isonim/dsl/tailwind.nim), so the ``frontend-ui-js``
+# build action fails without it. Regenerate it each run (cheap) from the
+# isonim sibling using its own ``build-tailwind`` recipe.
+isonim_root=""
+for candidate in ../isonim ../../isonim; do
+	if [ -f "$candidate/tools/tailwind-extract.mjs" ]; then
+		isonim_root="$(cd "$candidate" && pwd)"
+		break
+	fi
+done
+if [ -n "$isonim_root" ]; then
+	if command -v just >/dev/null 2>&1; then
+		(cd "$isonim_root" && just build-tailwind) || true
+	else
+		(cd "$isonim_root" &&
+			{ [ -d node_modules ] || yarn install --frozen-lockfile; } &&
+			node tools/tailwind-extract.mjs) || true
+	fi
+fi
+
 if [ "$(uname -s)" = "Darwin" ]; then
 	repro_bin="${REPROBUILD_BIN:-}"
 	reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
@@ -103,8 +127,18 @@ if [ "$(uname -s)" = "Darwin" ]; then
 	fi
 
 	if command -v nix >/dev/null 2>&1; then
+		# clingo is Reprobuild's ASP solver: repro_solver dlopen()s
+		# ``libclingo.dylib`` by leaf name at runtime (see
+		# ``libs/repro_solver/src/repro_solver/clingo_bindings.nim``), and
+		# that dlopen also happens inside the ``extract_runner`` helper that
+		# ``repro`` compiles and spawns to load the project interface. Neither
+		# ``repro`` nor that helper links clingo, so the shared library must be
+		# discoverable via ``DYLD_LIBRARY_PATH`` for both the parent and its
+		# children. Provision it alongside the other native libs below; clingo
+		# is a single-output derivation so it has no ``.out`` attribute.
 		native_lib_roots="$(nix build --no-link --print-out-paths \
 			nixpkgs#openssl.out nixpkgs#sqlite.out nixpkgs#pcre.out nixpkgs#libzip.out \
+			nixpkgs#clingo \
 			2>/dev/null || true)"
 		if [ -n "$native_lib_roots" ]; then
 			while IFS= read -r root; do
