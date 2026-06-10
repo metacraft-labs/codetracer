@@ -1092,6 +1092,14 @@ type
     aseError
     aseStatus
 
+  AgentServiceEvidenceState* = enum
+    asesNone
+    asesReady
+    asesNoRecording
+    asesFailedTests
+    asesMalformedMetadata
+    asesDiffTraceMismatch
+
   AgentServiceEventEntry* = object
     id*: string
     kind*: AgentServiceEventKind
@@ -1102,6 +1110,23 @@ type
     diff*: string
     milestoneCompleted*: int
     milestoneTotal*: int
+
+  AgentServiceEvidenceFileEntry* = object
+    path*: string
+    status*: string
+    linesAdded*: int
+    linesRemoved*: int
+    diff*: string
+
+  AgentServiceEvidenceEntry* = object
+    traceId*: string
+    tracePath*: string
+    testName*: string
+    testCommand*: string
+    workspacePath*: string
+    state*: AgentServiceEvidenceState
+    statusMessage*: string
+    files*: seq[AgentServiceEvidenceFileEntry]
 
   AgentServiceSessionEntry* = object
     ## One agentic-coding tab/session tracked by the shared ViewModel store.
@@ -1118,6 +1143,7 @@ type
     milestonesCompleted*: int
     milestonesTotal*: int
     events*: seq[AgentServiceEventEntry]
+    evidence*: AgentServiceEvidenceEntry
 
   AgentSessionsState* = object
     activeTabId*: string
@@ -1225,6 +1251,23 @@ proc `==`*(a, b: AgentServiceEventEntry): bool {.noSideEffect.} =
     a.milestoneCompleted == b.milestoneCompleted and
     a.milestoneTotal == b.milestoneTotal
 
+proc `==`*(a, b: AgentServiceEvidenceFileEntry): bool {.noSideEffect.} =
+  a.path == b.path and
+    a.status == b.status and
+    a.linesAdded == b.linesAdded and
+    a.linesRemoved == b.linesRemoved and
+    a.diff == b.diff
+
+proc `==`*(a, b: AgentServiceEvidenceEntry): bool {.noSideEffect.} =
+  a.traceId == b.traceId and
+    a.tracePath == b.tracePath and
+    a.testName == b.testName and
+    a.testCommand == b.testCommand and
+    a.workspacePath == b.workspacePath and
+    a.state == b.state and
+    a.statusMessage == b.statusMessage and
+    a.files == b.files
+
 proc `==`*(a, b: AgentServiceSessionEntry): bool {.noSideEffect.} =
   if a.tabId != b.tabId: return false
   if a.sessionId != b.sessionId: return false
@@ -1241,6 +1284,7 @@ proc `==`*(a, b: AgentServiceSessionEntry): bool {.noSideEffect.} =
   if a.events.len != b.events.len: return false
   for i in 0 ..< a.events.len:
     if a.events[i] != b.events[i]: return false
+  if a.evidence != b.evidence: return false
   true
 
 proc `==`*(a, b: AgentSessionsState): bool {.noSideEffect.} =

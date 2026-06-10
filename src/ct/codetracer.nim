@@ -1,7 +1,8 @@
 # Thank you, Lord and GOD Jesus!
 
 import
-  launch/[ launch, help_delegate ],
+  launch/[launch, help_delegate],
+  ../frontend/viewmodel/agent_evidence,
   cli/e2e_tests,
   codetracerconf, confutils,
   version
@@ -67,6 +68,11 @@ try:
     # raw argument list reaches the help-delegate intact.
     if args.len > 0:
       case args[0]
+      of "agent":
+        let dispatch = dispatchAgentEvidenceCli(args)
+        if dispatch.handled:
+          echo dispatch.output
+          quit(dispatch.exitCode)
       of "ct-complete":
         runCtComplete(args[1 .. ^1])
         quit(QuitSuccess)
@@ -80,8 +86,9 @@ try:
   # TODO: When confutils gets updated with nim 2 make sure to improve on the copyright banner, as newer versions
   # support having prefix and postfix banners. The banner here is only a prefix banner
   let conf = CodetracerConf.load(
-    version="CodeTracer version: " & version.CodeTracerVersionStr & (when defined(debug): "(debug)" else: ""),
-    copyrightBanner="CodeTracer - the user-friendly time-travelling debugger"
+    version = "CodeTracer version: " & version.CodeTracerVersionStr & (
+        when defined(debug): "(debug)" else: ""),
+    copyrightBanner = "CodeTracer - the user-friendly time-travelling debugger"
   )
   customValidateConfig(conf)
   runInitial(conf)

@@ -5,11 +5,12 @@
 ## previous ACP-only launch shape with one CodeTracer interface that can start
 ## either a direct ACP session or an Agent Harbor task.
 
-import std/[json, strutils]
+import std/[json, sequtils, strutils]
 
 import isonim/core/signals
 import nim_agents
 
+import agent_evidence
 import store/[replay_data_store, types]
 
 type
@@ -196,6 +197,49 @@ proc updateSession(service: CodeTracerAgentService; tabId: string;
   update(state.sessions[index])
   state.activeTabId = tabId
   service.store.agentSessions.val = state
+
+proc toStoreEvidenceState(status: AgentEvidenceStatus):
+    AgentServiceEvidenceState =
+  case status
+  of aesReady: asesReady
+  of aesNoRecording: asesNoRecording
+  of aesFailedTests: asesFailedTests
+  of aesMalformedMetadata: asesMalformedMetadata
+  of aesDiffTraceMismatch: asesDiffTraceMismatch
+
+proc toStoreEvidenceFile(file: AgentEvidenceFile):
+    AgentServiceEvidenceFileEntry =
+  AgentServiceEvidenceFileEntry(
+    path: file.path,
+    status: file.status,
+    linesAdded: file.linesAdded,
+    linesRemoved: file.linesRemoved,
+    diff: file.diff)
+
+proc registerAgentEvidence*(service: CodeTracerAgentService;
+    notification: AgentEvidenceNotification) =
+  let tabId =
+    if notification.tabId.len > 0: notification.tabId
+    else: notification.sessionId
+  service.updateSession(tabId) do (entry: var AgentServiceSessionEntry):
+    entry.evidence = AgentServiceEvidenceEntry(
+      traceId: notification.traceId,
+      tracePath: notification.tracePath,
+      testName: notification.testName,
+      testCommand: notification.testCommand,
+      workspacePath: notification.workspacePath,
+      state: notification.status.toStoreEvidenceState(),
+      statusMessage: notification.statusMessage,
+      files: notification.files.mapIt(it.toStoreEvidenceFile()))
+    entry.events.add AgentServiceEventEntry(
+      id: entry.tabId & ":evidence:" & $entry.events.len,
+      kind: if notification.status == aesReady: aseStatus else: aseError,
+      text:
+      if notification.status == aesReady:
+          "Recorded test evidence ready for DeepReview"
+        else:
+          "Recorded test evidence error: " & notification.status.statusString(),
+      status: notification.status.statusString())
 
 proc applyEvents*(service: CodeTracerAgentService; tabId: string;
     events: openArray[AgentEvent]) =
