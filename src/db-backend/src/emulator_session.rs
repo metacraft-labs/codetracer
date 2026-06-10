@@ -2022,7 +2022,7 @@ mod tests {
     /// program.
     #[test]
     fn new_session_initialises_nim_runtime_and_resets_state() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut session = EmulatorReplaySession::new();
 
         // SAFETY: After `new()` the Nim runtime is initialised and
@@ -2046,7 +2046,7 @@ mod tests {
     /// meta-derived source path and program name.
     #[test]
     fn new_from_ctfs_bytes_populates_meta() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes();
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
 
@@ -2067,7 +2067,7 @@ mod tests {
     /// emulator path.
     #[test]
     fn new_from_ctfs_bytes_rejects_non_mcr_traces() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: 0,
@@ -2101,7 +2101,7 @@ mod tests {
     /// mirrors what the F5 gateway-client checks via DAP `stackTrace`.
     #[test]
     fn load_callstack_returns_frame_with_non_empty_name() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -2132,7 +2132,7 @@ mod tests {
     /// path: `delete_breakpoint` with an unknown id must error.
     #[test]
     fn add_breakpoint_returns_enabled_record() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -2156,7 +2156,7 @@ mod tests {
     /// expression so the variables view renders something.
     #[test]
     fn load_locals_returns_register_variables() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -2180,7 +2180,7 @@ mod tests {
     /// and surface a typed error for unknown expressions.
     #[test]
     fn load_value_resolves_registers_and_errors_for_unknown() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -2208,7 +2208,7 @@ mod tests {
     /// consistent with the emulator-reported counter.
     #[test]
     fn step_does_not_error_without_a_loaded_program() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut session = EmulatorReplaySession::new();
         session.step(Action::Next, true).expect("step must succeed");
         // SAFETY: the FFI getter is total; it returns 0 before any
@@ -2224,7 +2224,7 @@ mod tests {
     /// pagination warm-up).
     #[test]
     fn empty_returns_for_stub_paths() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut session = EmulatorReplaySession::new();
         let events = session.load_events().expect("load_events must succeed");
         assert!(events.events.is_empty());
@@ -2313,7 +2313,7 @@ mod tests {
     /// `DwarfIndex` accessible via the session's `dwarf` field.
     #[test]
     fn new_from_ctfs_bytes_with_debug_populates_dwarf_index() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
         let session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).expect("CTFS load must succeed");
 
@@ -2342,7 +2342,7 @@ mod tests {
     /// to the M-DWARF-2 placeholder location behaviour silently.
     #[test]
     fn new_from_ctfs_bytes_with_bad_debug_falls_back() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let meta = MetaDat {
             version: META_DAT_VERSION,
             flags: FLAG_HAS_MCR_FIELDS,
@@ -2408,7 +2408,7 @@ mod tests {
     /// single test process.
     #[test]
     fn load_callstack_uses_dwarf_resolved_line() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -2711,7 +2711,7 @@ mod tests {
     /// rather than panic.
     #[test]
     fn install_memory_regions_parses_well_formed_tuples() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Reset the emulator before we install regions so this test's
         // diagnostics aren't polluted by leftover state from a sibling.
         // We also have to seed registers via `mcrSetRegisters` — the Nim
@@ -2756,7 +2756,7 @@ mod tests {
     /// before the corrupt tail count.
     #[test]
     fn install_memory_regions_tolerates_truncated_tail() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         ensure_nim_runtime();
         unsafe { emulator_ffi::mcrInit() };
 
@@ -2779,7 +2779,7 @@ mod tests {
     /// "recorder → CTFS → replay → DAP stackTrace" data path.
     #[test]
     fn new_from_ctfs_bytes_seeds_pc_and_resolves_via_dwarf() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let regs = InitialRegisters {
             rax: 0xdeadbeef,
             rbx: 0,
@@ -2843,7 +2843,7 @@ mod tests {
     /// the recorder didn't seed a PC).
     #[test]
     fn new_from_ctfs_bytes_without_cp0_falls_back() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_with_cp0(
             /* cp0_regs */ None,
             /* cp0_mem  */ &[],
@@ -2860,7 +2860,7 @@ mod tests {
     /// fallback should still produce a well-formed location.
     #[test]
     fn new_from_ctfs_bytes_with_corrupt_cp0_regs_falls_back() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // 16 bytes of garbage: outer header reads tid=0xDEADBEEF /
         // reg_data_len=0xCAFEBABE but the body is empty. decode must
         // return None and the constructor must still succeed.
@@ -2980,7 +2980,7 @@ mod tests {
     /// path = hello.c) — proving the rebase path works end-to-end.
     #[test]
     fn new_from_ctfs_bytes_with_cp0_maps_rebases_pc_to_dwarf_line() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let regs = InitialRegisters {
             rax: 0xdeadbeef,
             rbx: 0,
@@ -3052,7 +3052,7 @@ mod tests {
     /// behaviour for traces that don't need rebasing.
     #[test]
     fn new_from_ctfs_bytes_without_cp0_maps_leaves_rebase_none() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let regs = InitialRegisters {
             rax: 0,
             rbx: 0,
@@ -3090,7 +3090,7 @@ mod tests {
     /// logs, not test fixtures).
     #[test]
     fn new_from_ctfs_bytes_with_cp0_maps_missing_program_falls_back() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let regs = InitialRegisters {
             rax: 0,
             rbx: 0,
@@ -3133,7 +3133,7 @@ mod tests {
     /// PIE case where the first executable PT_LOAD has `p_vaddr == 0`.
     #[test]
     fn compute_pc_rebase_falls_back_to_mapping_start_without_elf() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let maps_blob = fake_cp0_maps_for_hello();
         let regs = InitialRegisters {
             rax: 0,
@@ -3181,7 +3181,7 @@ mod tests {
     /// the innermost one.
     #[test]
     fn load_callstack_returns_multiple_frames_via_cfi_walk() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Synthetic stack layout — matches the same `a/b/c` chain used
         // by the unit test in `stack_unwinder.rs`. The stack lives in
         // a single 4 KB page so cp0.mem only needs one region.
@@ -3387,7 +3387,7 @@ mod tests {
     /// error so the DAP client can show a useful diagnostic.
     #[test]
     fn step_reverse_returns_err() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut session = EmulatorReplaySession::new();
         for action in [Action::StepIn, Action::Next, Action::StepOut, Action::Continue] {
             let err = session
@@ -3406,7 +3406,7 @@ mod tests {
     /// `Continue` action's hot path.
     #[test]
     fn add_breakpoint_resolves_to_known_pcs() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -3447,7 +3447,7 @@ mod tests {
     /// loop allow itself to stop, and by then we are at line 30.
     #[test]
     fn step_over_advances_past_call_to_next_line() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -3481,7 +3481,7 @@ mod tests {
     /// layout).
     #[test]
     fn step_in_enters_callee() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -3534,7 +3534,7 @@ mod tests {
     /// the epilogue.
     #[test]
     fn step_out_returns_to_caller() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Pick a comfortable rbp/rsp in the middle of the stack page
         // so the red-zone locals fit below and the saved-rbp+ra pair
         // fits above.
@@ -3608,7 +3608,7 @@ mod tests {
     /// callee's body, the RET, and stop at line 30.
     #[test]
     fn continue_halts_at_breakpoint() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_CALL_ADD, STACK_INIT_RSP, STACK_INIT_RBP);
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -3648,7 +3648,7 @@ mod tests {
     /// safe.
     #[test]
     fn continue_with_no_breakpoints_reports_miss() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
@@ -3663,7 +3663,7 @@ mod tests {
     /// gateway-client can render.
     #[test]
     fn load_callstack_falls_back_to_single_frame_without_unwinder() {
-        let _guard = FFI_TEST_LOCK.lock().unwrap();
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bytes = synthetic_mcr_ctfs_bytes(); // no debug.dat, no cp0.regs
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
         assert!(session.stack_unwinder.is_none(), "no debug.dat -> no CFI unwinder",);
