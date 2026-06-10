@@ -893,7 +893,20 @@ jobs:
             direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
               bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh"
+      # The emulator's ``syscall_replay.nim`` imports ``stew/endians2``
+      # but ``ct_emulator.nimble`` doesn't list ``stew`` as a dep, so a
+      # fresh Nim build cannot resolve the module.  Codetracer ships its
+      # own pinned copy as a submodule under ``libs/nim-stew``; inject
+      # it via ``CT_EMULATOR_EXTRA_NIM_PATHS`` so build_native_api.sh's
+      # ``--path:`` flags pick it up.  Same env-var the windows-rust-
+      # components job (line 460) and the macOS db-backend test job
+      # (line 472) already use.  Required because build.rs's wipe-
+      # before-regen (commit 601cf357) means we no longer rely on a
+      # stale cached @memulator_wasm_api.nim.c surviving from prior runs.
+      - name: Run rust lints
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+        run: nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
 
   reprobuild-macos-smoke:
     runs-on: [self-hosted, darwin, nix-darwin, aarch64-darwin]
