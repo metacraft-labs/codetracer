@@ -1,5 +1,6 @@
 import std/[json, os, osproc, strutils, unittest]
 
+import ct_test
 import contracts
 import discovery
 import frameworks/nim_unittest
@@ -25,6 +26,10 @@ proc allMessages(response: DiscoverResponse): string =
   for catalog in response.catalogs:
     for diagnostic in catalog.diagnostics:
       result.add diagnostic.message & "\n"
+
+proc catalogProviderIds(response: DiscoverResponse): seq[string] =
+  for catalog in response.catalogs:
+    result.add catalog.provider.id
 
 suite "ct-test M2 Nim unittest provider":
   test "detects Nim unittest project and file":
@@ -90,7 +95,8 @@ suite "ct-test M2 Nim unittest provider":
 
   test "project discovery aggregates multiple Nim unittest files":
     let response = discover(
-      DiscoverRequest(scope: dskWorkspace, workspaceRoot: fixtureRoot(), jsonOutput: true),
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: fixtureRoot(),
+          jsonOutput: true),
       newNimUnittestProviderRegistry(),
       newDiscoveryCache())
 
@@ -98,15 +104,18 @@ suite "ct-test M2 Nim unittest provider":
     check response.catalogs.len == 1
     let catalog = response.catalogs[0]
     check catalog.provider.id == "nim-unittest"
-    check catalog.itemBySelector("math::adds numbers").file == "tests/test_sample.nim"
-    check catalog.itemBySelector("more::second file case").file == "tests/test_more.nim"
+    check catalog.itemBySelector("math::adds numbers").file ==
+      "tests/test_sample.nim"
+    check catalog.itemBySelector("more::second file case").file ==
+      "tests/test_more.nim"
     check catalog.items.len == 11
     check catalog.validateCatalog.valid
 
-  test "CLI JSON for real Nim fixture uses schema version and nim-unittest provider":
+  test "CLI JSON for real Nim fixture uses nim-unittest provider":
     let binary = getTempDir() / ("ct-test-m2-cli-" & $getCurrentProcessId())
     let compile = execCmdEx(
-      "nim c --hints:off --warnings:off --nimcache:/tmp/ct-nim-cache/ct-test-m2-cli -o:" &
+      "nim c --hints:off --warnings:off " &
+        "--nimcache:/tmp/ct-nim-cache/ct-test-m2-cli -o:" &
         quoteShell(binary) & " src/ct_test/ct_test.nim",
       options = {poUsePath},
       workingDir = getCurrentDir())
@@ -131,9 +140,12 @@ suite "ct-test M2 Nim unittest provider":
     check node["catalogs"][0]["schemaVersion"].getInt == 1
     check node["catalogs"][0]["provider"]["id"].getStr == "nim-unittest"
     check node["catalogs"][0]["items"].len == 9
-    check node["catalogs"][0]["items"][0]["file"].getStr == "tests/test_sample.nim"
+    check node["catalogs"][0]["items"][0]["file"].getStr ==
+      "tests/test_sample.nim"
+    check "m1-fake" notin output
+    check "m1-unsupported" notin output
 
-  test "reports explicit unsupported diagnostics for unittest2 and unittest_parallel":
+  test "reports unsupported diagnostics for unittest variants":
     let unittest2Catalog = nimUnittestFileCatalog(
       fixtureRoot(),
       fixtureRoot() / "tests/test_unittest2_detected.nim").value
@@ -152,16 +164,24 @@ suite "ct-test M2 Nim unittest provider":
     for diagnostic in parallelCatalog.diagnostics:
       messages.add diagnostic.message & "\n"
 
-    check messages.contains("unittest2 discovery is detected but not implemented in M2")
-    check messages.contains("unittest_parallel discovery is detected but not implemented in M2")
+    check messages.contains(
+      "unittest2 discovery is detected but not implemented in M2")
+    check messages.contains(
+      "unittest_parallel discovery is detected but not implemented in M2")
 
-  test "discover file through registry uses Nim provider and keeps fake provider out of default registry":
+  test "discover file through default registry uses Nim provider":
     let response = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: fixtureRoot(), file: sampleFile(), jsonOutput: true),
-      newNimUnittestProviderRegistry(),
+      DiscoverRequest(
+        scope: dskFile,
+        workspaceRoot: fixtureRoot(),
+        file: sampleFile(),
+        jsonOutput: true),
+      newDefaultProviderRegistry(),
       newDiscoveryCache())
 
     check discoverExitCode(response) == 0
     check response.catalogs.len == 1
     check response.catalogs[0].provider.id == "nim-unittest"
+    check response.catalogProviderIds == @["nim-unittest"]
     check not allMessages(response).contains("m1-fake")
+    check not allMessages(response).contains("m1-unsupported")

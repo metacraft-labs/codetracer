@@ -3,12 +3,12 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_editor_test_controls_m4.nim
 
-import std/[options, tables, unittest]
+import std/[options, os, tables, unittest]
 
 import isonim/testing/mock_dom
 import isonim/viewmodel
 
-import ../../../../ct_test/contracts
+import ../../../../ct_test/[contracts, run_store]
 import ../../backend/mock_backend
 import ../../store/replay_data_store
 import ../../viewmodels/[editor_test_controls_vm, editor_vm, test_explorer_vm]
@@ -87,8 +87,8 @@ proc trace(path: string): TraceMetadata =
     metadata: initTable[string, string]())
 
 proc event(kind: TestEventKind; testId: string;
-           traceValue = none(TraceMetadata);
-           status = none(TestResultStatus)): TestEvent =
+    traceValue = none(TraceMetadata);
+    status = none(TestResultStatus)): TestEvent =
   TestEvent(
     schemaVersion: TestEventSchemaVersion,
     kind: kind,
@@ -109,8 +109,26 @@ proc newVmWith(items: seq[TestItem]): TestExplorerViewModel =
     TraceOpenService(openProc: proc(request: TraceOpenRequest) = discard))
   result.ingestCatalog(catalog(items))
 
-proc collectByAttr(node: MockNode; attr, value: string; outNodes: var seq[MockNode]) =
-  if node.kind == mnkElement and node.attributes.getOrDefault(attr, "") == value:
+proc newVmWith(items: seq[TestItem]; store: LocalRunStore):
+    TestExplorerViewModel =
+  result = createTestExplorerViewModel(
+    Workspace,
+    CtTestService(sendProc: proc(command: CtTestCommand) = discard),
+    TraceOpenService(openProc: proc(request: TraceOpenRequest) = discard),
+    store)
+  result.ingestCatalog(catalog(items))
+
+proc tempRoot(name: string): string =
+  result = getTempDir() / ("codetracer-controls-m14-" & name & "-" &
+      $getCurrentProcessId())
+  if dirExists(result):
+    removeDir(result)
+  createDir(result)
+
+proc collectByAttr(node: MockNode; attr, value: string;
+    outNodes: var seq[MockNode]) =
+  if node.kind == mnkElement and
+      node.attributes.getOrDefault(attr, "") == value:
     outNodes.add node
   for child in node.children:
     collectByAttr(child, attr, value, outNodes)
@@ -163,7 +181,8 @@ suite "ct-test editor controls M4":
     check plan.controls.len == 1
     check plan.controls[0].gutterSlot == etgsSecondary
     check plan.controls[0].collisionMarkers == @[
-      elmBreakpoint, elmTracepoint, elmCurrentExecution, elmFolding, elmDiagnostic]
+      elmBreakpoint, elmTracepoint, elmCurrentExecution, elmFolding,
+      elmDiagnostic]
 
     let r = MockRenderer()
     let dom = r.renderEditorTestControls(plan)
@@ -233,7 +252,8 @@ suite "ct-test editor controls M4":
     let dom = r.renderEditorTestControls(plan)
     let run = firstByAttr(dom, "data-ct-test-action", "run")
     let record = firstByAttr(dom, "data-ct-test-action", "record")
-    let openLastTrace = firstByAttr(dom, "data-ct-test-action", "open-last-trace")
+    let openLastTrace = firstByAttr(
+      dom, "data-ct-test-action", "open-last-trace")
     let status = firstByAttr(dom, "data-ct-test-action", "status")
 
     check run.attr("data-ct-test-command") == "ct.test.run"
@@ -277,3 +297,28 @@ suite "ct-test editor controls M4":
 
     editor.dispose()
     store.dispose()
+
+  test "editor_control_last_result_and_last_trace_state_after_reload":
+    let root = tempRoot("reload")
+    let store = openLocalRunStore(root)
+    let alpha = item(FileA, "alpha", "tests/test_alpha.nim::alpha", 12)
+    let env = defaultEnvironmentFingerprint(Workspace, providerInfo())
+    discard store.upsertCatalogItem(alpha, env)
+    store.updateFromEvent(event(tekTestFinished, alpha.id,
+      traceValue = some(trace(root / "alpha.trace")),
+      status = some(tsPassed)), env)
+
+    let vm = newVmWith(@[alpha], openLocalRunStore(root))
+    let plan = vm.editorTestControlPlanForFile(
+      FileA,
+      EditorTestControlSettings(placement: etcpAboveLine))
+
+    let r = MockRenderer()
+    let dom = r.renderEditorTestControls(plan)
+    let openLastTrace = firstByAttr(
+      dom, "data-ct-test-action", "open-last-trace")
+    let status = firstByAttr(dom, "data-ct-test-action", "status")
+
+    check openLastTrace != nil
+    check openLastTrace.attr("data-ct-test-command") == "ct.test.openLastTrace"
+    check status.attr("data-ct-test-status") == "passed"

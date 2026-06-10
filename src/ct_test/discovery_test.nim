@@ -8,7 +8,8 @@ proc writeFixture(path, content: string) =
   writeFile(path, content)
 
 proc makeWorkspace(name: string): string =
-  let root = getTempDir() / ("ct-test-m1-" & name & "-" & $getCurrentProcessId())
+  let root = getTempDir() / (
+    "ct-test-m1-" & name & "-" & $getCurrentProcessId())
   if dirExists(root):
     removeDir(root)
   createDir(root)
@@ -37,6 +38,54 @@ proc messages(response: DiscoverResponse): string =
     for diagnostic in catalog.diagnostics:
       result.add diagnostic.message & "\n"
 
+proc testCapabilities(): TestCapabilities =
+  TestCapabilities(
+    canDiscoverProject: true,
+    canDiscoverFile: true,
+    canLocateTests: true,
+    canRunProject: false,
+    canRunFile: false,
+    canRunSingle: false,
+    canRecordProject: false,
+    canRecordFile: false,
+    canRecordSingle: false,
+    canCapturePerTestOutput: false,
+    canMapTraceEntryPoints: false,
+    emitsStructuredEvents: true)
+
+proc testProviderInfo(id: string): TestProviderInfo =
+  TestProviderInfo(
+    id: id,
+    language: "fake",
+    framework: "fixture",
+    displayName: id,
+    version: "m1",
+    capabilities: testCapabilities())
+
+proc emptyCatalog(info: TestProviderInfo): TestCatalog =
+  TestCatalog(
+    schemaVersion: TestCatalogSchemaVersion,
+    provider: info,
+    items: @[],
+    diagnostics: @[])
+
+proc emptyFileProviderRegistry(id: string; diagnostics: seq[
+    TestDiagnostic]): ProviderRegistry =
+  let info = testProviderInfo(id)
+  var provider = TestProvider(info: info)
+  provider.detect = proc(projectRoot: string): ProviderResult[bool] {.gcsafe.} =
+    ProviderResult[bool](diagnostics: @[], value: true)
+  provider.discoverFile = proc(projectRoot, file: string): ProviderResult[
+      TestCatalog] {.gcsafe.} =
+    ProviderResult[TestCatalog](
+      diagnostics: diagnostics,
+      value: emptyCatalog(info))
+  provider.discoverProject = proc(projectRoot: string): ProviderResult[
+      TestCatalog] {.gcsafe.} =
+    ProviderResult[TestCatalog](diagnostics: @[], value: emptyCatalog(info))
+  ProviderRegistry(providers: @[M1Provider(provider: provider,
+      relevantConfigFiles: @[])])
+
 suite "ct-test M1 discovery skeleton":
   test "discover --file returns one file catalog without full workspace scan":
     let root = makeWorkspace("file-only")
@@ -62,7 +111,8 @@ suite "ct-test M1 discovery skeleton":
     check response.catalogs[0].items[0].range.startLine == 3
     check counters.discoverProjectCalls == 0
     check counters.discoverFileCalls.len == 1
-    check counters.discoverFileCalls[normalizedPath(absolutePath(selected))] == 1
+    check counters.discoverFileCalls[
+      normalizedPath(absolutePath(selected))] == 1
 
   test "cache invalidates one changed source file/provider entry":
     let root = makeWorkspace("cache")
@@ -76,7 +126,8 @@ suite "ct-test M1 discovery skeleton":
 
     for file in [first, second, first, second]:
       let response = discover(
-        DiscoverRequest(scope: dskFile, workspaceRoot: root, file: file, jsonOutput: true),
+        DiscoverRequest(scope: dskFile, workspaceRoot: root, file: file,
+            jsonOutput: true),
         registry,
         cache)
       check discoverExitCode(response) == 0
@@ -88,11 +139,13 @@ suite "ct-test M1 discovery skeleton":
 
     writeFixture(first, "# CT_TEST_FAKE changed\nbody\n")
     let changed = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: first, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: first,
+          jsonOutput: true),
       registry,
       cache)
     let unchanged = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: second, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: second,
+          jsonOutput: true),
       registry,
       cache)
 
@@ -114,7 +167,8 @@ suite "ct-test M1 discovery skeleton":
 
     for file in [first, second, first, second]:
       let response = discover(
-        DiscoverRequest(scope: dskFile, workspaceRoot: root, file: file, jsonOutput: true),
+        DiscoverRequest(scope: dskFile, workspaceRoot: root, file: file,
+            jsonOutput: true),
         registry,
         cache)
       check discoverExitCode(response) == 0
@@ -126,11 +180,13 @@ suite "ct-test M1 discovery skeleton":
 
     writeFixture(root / "ct-test.fake", "enabled\nconfig changed\n")
     let firstAfterConfigChange = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: first, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: first,
+          jsonOutput: true),
       registry,
       cache)
     let secondAfterConfigChange = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: second, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: second,
+          jsonOutput: true),
       registry,
       cache)
 
@@ -140,13 +196,14 @@ suite "ct-test M1 discovery skeleton":
     check counters.discoverFileCalls[normalizedPath(absolutePath(second))] == 2
     check cache.stats.invalidations == 2
 
-  test "discover --workspace aggregates supported catalogs and unsupported diagnostics":
+  test "discover --workspace aggregates supported catalogs and diagnostics":
     let root = makeWorkspace("workspace")
     defer: removeDir(root)
     discard fakeFile(root, "tests/a.fake", markerLine = 1)
     discard fakeFile(root, "tests/b.fake", markerLine = 2)
     let response = discover(
-      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root, jsonOutput: true),
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root,
+          jsonOutput: true),
       m1Registry(newFakeProviderCounters()),
       newDiscoveryCache())
 
@@ -171,10 +228,14 @@ import ct_test
 import discovery
 
 let counters = newFakeProviderCounters()
-quit(runCtTest(commandLineParams(), newFakeProviderRegistry(counters), newDiscoveryCache()))
+quit(runCtTest(
+  commandLineParams(),
+  newFakeProviderRegistry(counters),
+  newDiscoveryCache()))
 """)
     let compile = execCmdEx(
-      "nim c --hints:off --warnings:off --path:src/ct_test --nimcache:/tmp/ct-nim-cache/ct-test-m1-cli -o:" &
+      "nim c --hints:off --warnings:off --path:src/ct_test " &
+        "--nimcache:/tmp/ct-nim-cache/ct-test-m1-cli -o:" &
         quoteShell(binary) & " " & quoteShell(fakeMain),
       options = {poUsePath},
       workingDir = getCurrentDir())
@@ -196,7 +257,8 @@ quit(runCtTest(commandLineParams(), newFakeProviderRegistry(counters), newDiscov
     check fileNode["schemaVersion"].getInt == 1
     check fileNode["workspaceRoot"].getStr == root
     check fileNode["catalogs"].len == 1
-    check fileNode["catalogs"][0]["schemaVersion"].getInt == TestCatalogSchemaVersion
+    check fileNode["catalogs"][0]["schemaVersion"].getInt ==
+      TestCatalogSchemaVersion
     check fileNode["catalogs"][0]["items"][0]["file"].getStr == "tests/cli.fake"
 
     let workspaceOutput = execProcess(
@@ -210,20 +272,64 @@ quit(runCtTest(commandLineParams(), newFakeProviderRegistry(counters), newDiscov
     check workspaceNode["catalogs"].len == 1
     check workspaceNode["catalogs"][0]["items"].len == 1
 
+  test "file discovery omits empty catalogs without diagnostics":
+    let root = makeWorkspace("empty-file")
+    defer: removeDir(root)
+    let selected = root / "tests/empty.fake"
+    writeFixture(selected, "no tests here\n")
+    let response = discover(
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: selected,
+          jsonOutput: true),
+      emptyFileProviderRegistry("empty-provider", @[]),
+      newDiscoveryCache())
+
+    check discoverExitCode(response) == 0
+    check response.catalogs.len == 0
+    check response.diagnostics.len == 0
+
+  test "file discovery keeps provider errors for empty catalogs and cache hits":
+    let root = makeWorkspace("empty-error")
+    defer: removeDir(root)
+    let selected = root / "tests/error.fake"
+    writeFixture(selected, "broken tests\n")
+    let cache = newDiscoveryCache()
+    let registry = emptyFileProviderRegistry("error-provider", @[
+      diagnostic(dsError, "provider parser failed", selected)])
+    let first = discover(
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: selected,
+          jsonOutput: true),
+      registry,
+      cache)
+    let second = discover(
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: selected,
+          jsonOutput: true),
+      registry,
+      cache)
+
+    check discoverExitCode(first) == 1
+    check discoverExitCode(second) == 1
+    check first.catalogs.len == 0
+    check second.catalogs.len == 0
+    check messages(first).contains("provider parser failed")
+    check messages(second).contains("provider parser failed")
+
   test "invalid workspace and file requests produce clear diagnostics":
     let root = makeWorkspace("invalid")
     defer: removeDir(root)
     let missingFile = root / "missing.fake"
     let fileResponse = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: missingFile, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: root, file: missingFile,
+          jsonOutput: true),
       m1Registry(newFakeProviderCounters()),
       newDiscoveryCache())
     let workspaceResponse = discover(
-      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root / "missing", jsonOutput: true),
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root / "missing",
+          jsonOutput: true),
       m1Registry(newFakeProviderCounters()),
       newDiscoveryCache())
     let noProviderResponse = discover(
-      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root, jsonOutput: true),
+      DiscoverRequest(scope: dskWorkspace, workspaceRoot: root,
+          jsonOutput: true),
       emptyProviderRegistry(),
       newDiscoveryCache())
 
