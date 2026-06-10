@@ -181,6 +181,17 @@ proc fixtureFiles*(spec: SmartHarnessSpec; projectRoot: string): seq[string] =
     let rb = rank(b, spec.preferredFixtureNames)
     if ra != rb: cmp(ra, rb) else: cmp(a, b))
 
+proc isFixtureFile(spec: SmartHarnessSpec; projectRoot,
+    filePath: string): bool =
+  let repo = spec.findRecorderRepo(projectRoot)
+  if repo.len == 0 or not fileExists(filePath) or
+      not spec.hasExtension(filePath) or spec.isIgnored(filePath):
+    return false
+  for fixtureRoot in spec.fixtureRoots:
+    if filePath.isWithinDir(repo / fixtureRoot):
+      return true
+  false
+
 proc harnessItem(spec: SmartHarnessSpec; projectRoot,
     filePath: string): TestItem =
   let
@@ -247,8 +258,7 @@ proc smartHarnessFileCatalog*(spec: SmartHarnessSpec; projectRoot,
   let info = providerInfo(spec, projectRoot)
   var catalog = TestCatalog(schemaVersion: TestCatalogSchemaVersion,
       provider: info, items: @[], diagnostics: @[])
-  if fileExists(filePath) and spec.hasExtension(filePath) and
-      not spec.isIgnored(filePath):
+  if spec.isFixtureFile(projectRoot, filePath):
     catalog.items.add harnessItem(spec, projectRoot, filePath)
   catalog.diagnostics = catalogDiagnostics(spec, projectRoot, filePath)
   ProviderResult[TestCatalog](diagnostics: @[], value: catalog)

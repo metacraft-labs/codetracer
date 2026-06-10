@@ -26,6 +26,22 @@ proc itemBySelector(catalog: TestCatalog; selector: string): TestItem =
 proc selectors(catalog: TestCatalog): seq[string] =
   catalog.items.mapIt(it.selector)
 
+proc catalogProviderIds(node: JsonNode): seq[string] =
+  for catalog in node["catalogs"].getElems:
+    result.add catalog["provider"]["id"].getStr
+
+proc jsonCatalogByProvider(node: JsonNode; providerId: string): JsonNode =
+  for catalog in node["catalogs"].getElems:
+    if catalog["provider"]["id"].getStr == providerId:
+      return catalog
+  raise newException(ValueError, "missing provider catalog: " & providerId)
+
+proc jsonItemByName(catalog: JsonNode; name: string): JsonNode =
+  for item in catalog["items"].getElems:
+    if item["name"].getStr == name:
+      return item
+  raise newException(ValueError, "missing JSON item: " & name)
+
 proc allMessages(response: DiscoverResponse): string =
   for diagnostic in response.diagnostics:
     result.add diagnostic.message & "\n"
@@ -36,8 +52,8 @@ proc allMessages(response: DiscoverResponse): string =
 proc compileCtTestBinary(name: string): string =
   let binary = getTempDir() / (name & "-" & $getCurrentProcessId())
   let compile = execCmdEx(
-    "nim c --hints:off --warnings:off --nimcache:/tmp/ct-nim-cache/" & name & " -o:" &
-      quoteShell(binary) & " src/ct_test/ct_test.nim",
+    "nim c --hints:off --warnings:off --nimcache:/tmp/ct-nim-cache/" &
+      name & " -o:" & quoteShell(binary) & " src/ct_test/ct_test.nim",
     options = {poUsePath},
     workingDir = getCurrentDir())
   if compile.exitCode != 0:
@@ -59,7 +75,7 @@ suite "ct-test M6 Rust libtest provider":
     check detected.value
     check detected.diagnostics.len == 0
 
-  test "discovers unit tests with libtest-like module selectors and source ranges":
+  test "discovers unit tests with module selectors and source ranges":
     let catalog = rustFileCatalog(rustRoot(), libFile()).value
     check catalog.provider.id == "rust-libtest"
     check catalog.provider.framework == "libtest/cargo-test"
@@ -101,7 +117,8 @@ suite "ct-test M6 Rust libtest provider":
 
   test "discovers file module tests with source path module prefixes":
     let catalog = rustFileCatalog(rustRoot(), nestedFile()).value
-    let item = catalog.itemBySelector("nested::nested_file_tests::nested_file_unit")
+    let item = catalog.itemBySelector(
+      "nested::nested_file_tests::nested_file_unit")
     check item.file == "src/nested.rs"
     check item.range.startLine == 3
     check item.range.endLine == 4
@@ -112,14 +129,18 @@ suite "ct-test M6 Rust libtest provider":
     let catalog = rustFileCatalog(rustRoot(), integrationFile()).value
     check catalog.itemBySelector("integration_smoke").range.startLine == 5
     check catalog.itemBySelector("failing_integration").range.startLine == 10
-    check catalog.itemBySelector("api::nested_integration").range.startLine == 16
+    check catalog.itemBySelector("api::nested_integration").
+      range.startLine == 16
     check "fake_without_attr" notin catalog.selectors.join("\n")
     check catalog.items.len == 3
     check catalog.validateCatalog.valid
 
   test "project discovery aggregates src and integration test files":
     let response = discover(
-      DiscoverRequest(scope: dskWorkspace, workspaceRoot: rustRoot(), jsonOutput: true),
+      DiscoverRequest(
+        scope: dskWorkspace,
+        workspaceRoot: rustRoot(),
+        jsonOutput: true),
       newRustLibtestProviderRegistry(),
       newDiscoveryCache())
 
@@ -128,8 +149,10 @@ suite "ct-test M6 Rust libtest provider":
     let catalog = response.catalogs[0]
     check catalog.provider.id == "rust-libtest"
     check catalog.itemBySelector("tests::unit_adds").file == "src/lib.rs"
-    check catalog.itemBySelector("nested::nested_file_tests::nested_file_unit").file == "src/nested.rs"
-    check catalog.itemBySelector("integration_smoke").file == "tests/integration_sample.rs"
+    check catalog.itemBySelector(
+      "nested::nested_file_tests::nested_file_unit").file == "src/nested.rs"
+    check catalog.itemBySelector("integration_smoke").file ==
+      "tests/integration_sample.rs"
     check catalog.items.len == 9
     check catalog.validateCatalog.valid
 
@@ -142,25 +165,37 @@ suite "ct-test M6 Rust libtest provider":
       workingDir = rustRoot())
     let node = parseJson(output)
     check node["schemaVersion"].getInt == 1
+    let providerIds = node.catalogProviderIds
+    check "smart-wasmi" notin providerIds
+    check providerIds.allIt(not it.contains("fake"))
     check node["catalogs"].len == 1
-    check node["catalogs"][0]["schemaVersion"].getInt == 1
-    check node["catalogs"][0]["provider"]["id"].getStr == "rust-libtest"
-    check node["catalogs"][0]["items"][0]["file"].getStr == "tests/integration_sample.rs"
+    let catalog = node.jsonCatalogByProvider("rust-libtest")
+    check catalog["schemaVersion"].getInt == 1
+    check catalog["provider"]["id"].getStr == "rust-libtest"
+    let item = catalog.jsonItemByName("integration_smoke")
+    check item["file"].getStr == "tests/integration_sample.rs"
+    check item["name"].getStr == "integration_smoke"
 
-  test "command construction is explicit and trace recording remains unsupported":
-    let unitSelector = rustFileCatalog(rustRoot(), libFile()).value.itemBySelector("tests::unit_adds").selector
-    let integrationSelector = rustFileCatalog(rustRoot(), integrationFile()).value.itemBySelector("api::nested_integration").selector
+  test "command construction is explicit and recording remains unsupported":
+    let unitSelector = rustFileCatalog(rustRoot(), libFile()).value.
+      itemBySelector("tests::unit_adds").selector
+    let integrationSelector = rustFileCatalog(rustRoot(), integrationFile()).
+      value.itemBySelector("api::nested_integration").selector
 
     check buildRustCommand(rustRoot(), libFile(), unitSelector, rcsProject) ==
       @["cargo", "test"]
     check buildRustCommand(rustRoot(), libFile(), unitSelector, rcsFile) ==
       @["cargo", "test", "--lib"]
     check buildRustCommand(rustRoot(), libFile(), unitSelector, rcsSingle) ==
-      @["cargo", "test", "--lib", "--", "tests::unit_adds", "--exact", "--include-ignored"]
-    check buildRustCommand(rustRoot(), integrationFile(), integrationSelector, rcsFile) ==
+      @["cargo", "test", "--lib", "--", "tests::unit_adds", "--exact",
+        "--include-ignored"]
+    check buildRustCommand(rustRoot(), integrationFile(), integrationSelector,
+        rcsFile) ==
       @["cargo", "test", "--test", "integration_sample"]
-    check buildRustCommand(rustRoot(), integrationFile(), integrationSelector, rcsSingle) ==
-      @["cargo", "test", "--test", "integration_sample", "--", "api::nested_integration", "--exact", "--include-ignored"]
+    check buildRustCommand(rustRoot(), integrationFile(), integrationSelector,
+        rcsSingle) ==
+      @["cargo", "test", "--test", "integration_sample", "--",
+        "api::nested_integration", "--exact", "--include-ignored"]
 
     let provider = newRustLibtestM1Provider()
     let recordResult = provider.provider.record(TestScope(
@@ -180,18 +215,20 @@ suite "ct-test M6 Rust libtest provider":
     check runResult.value.len == 0
     check runResult.diagnostics[0].message.contains("event parsing")
 
-  test "default registry leaves Nim and Python providers intact for their fixtures":
+  test "default registry leaves Nim and Python providers intact":
     let nimRoot = getCurrentDir() / "src/ct_test/fixtures/nim_unittest_project"
     let nimFile = nimRoot / "tests/test_sample.nim"
     let pyRoot = getCurrentDir() / "src/ct_test/fixtures/python_pytest_project"
     let pyFile = pyRoot / "tests/test_sample.py"
 
     let nimResponse = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: nimRoot, file: nimFile, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: nimRoot, file: nimFile,
+        jsonOutput: true),
       newDefaultProviderRegistry(),
       newDiscoveryCache())
     let pyResponse = discover(
-      DiscoverRequest(scope: dskFile, workspaceRoot: pyRoot, file: pyFile, jsonOutput: true),
+      DiscoverRequest(scope: dskFile, workspaceRoot: pyRoot, file: pyFile,
+        jsonOutput: true),
       newDefaultProviderRegistry(),
       newDiscoveryCache())
 

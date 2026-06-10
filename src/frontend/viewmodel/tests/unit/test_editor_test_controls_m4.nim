@@ -3,7 +3,7 @@
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_editor_test_controls_m4.nim
 
-import std/[options, os, tables, unittest]
+import std/[options, os, strutils, tables, unittest]
 
 import isonim/testing/mock_dom
 import isonim/viewmodel
@@ -145,6 +145,16 @@ proc attr(node: MockNode; name: string): string =
 
 suite "ct-test editor controls M4":
 
+  test "m15_default_placement_is_gutter":
+    let alpha = item(FileA, "alpha", "tests/test_alpha.nim::alpha", 12)
+    let vm = newVmWith(@[alpha])
+    let plan = vm.editorTestControlPlanForFile(FileA)
+
+    check DefaultEditorTestControlSettings.placement == etcpGutter
+    check plan.placement == etcpGutter
+    check plan.controls.len == 1
+    check plan.controls[0].surface == etcsGutter
+
   test "controls_render_for_file_with_known_test_actions_on_expected_lines":
     let alpha = item(FileA, "alpha", "tests/test_alpha.nim::alpha", 12)
     let beta = item(FileA, "beta", "tests/test_alpha.nim::beta", 24)
@@ -265,6 +275,35 @@ suite "ct-test editor controls M4":
     check record.attr("aria-label") == "Record test " & alpha.id
     check openLastTrace.attr("aria-label") == "Open last test trace " & alpha.id
     check status.attr("aria-label") == "Test status passed for " & alpha.id
+
+  test "m15_keyboard_and_accessibility_metadata_for_all_control_surfaces":
+    let alpha = item(FileA, "alpha", "tests/test_alpha.nim::alpha", 12)
+    let vm = newVmWith(@[alpha])
+    vm.handleEvent(event(tekTestFinished, alpha.id,
+      traceValue = some(trace("/repo/.codetracer/alpha.trace")),
+      status = some(tsPassed)))
+    let plan = vm.editorTestControlPlanForFile(
+      FileA,
+      EditorTestControlSettings(placement: etcpBoth))
+
+    let r = MockRenderer()
+    let dom = r.renderEditorTestControls(plan)
+    for surface in ["gutter", "above-line"]:
+      let surfaceControls = nodesByAttr(dom, "data-ct-test-surface", surface)
+      check surfaceControls.len == 1
+      for action in ["run", "record", "open-last-trace", "status"]:
+        let node = firstByAttr(surfaceControls[0], "data-ct-test-action",
+          action)
+        check node != nil
+        check node.attr("aria-label").len > 0
+        check node.attr("title") == node.attr("aria-label")
+        check node.attr("data-ct-test-command").startsWith("ct.test.")
+      check firstByAttr(surfaceControls[0], "data-ct-test-action", "run").
+        attr("data-ct-test-enabled") == "true"
+      check firstByAttr(surfaceControls[0], "data-ct-test-action", "record").
+        attr("data-ct-test-enabled") == "true"
+      check firstByAttr(surfaceControls[0], "data-ct-test-action", "status").
+        attr("data-ct-test-enabled") == "false"
 
   test "editor_container_default_and_disabled_plans_render_no_test_controls":
     let mock = newMockBackendService(autoRespond = true)

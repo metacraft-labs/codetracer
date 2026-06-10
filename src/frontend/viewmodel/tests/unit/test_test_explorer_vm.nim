@@ -77,12 +77,17 @@ proc capabilities(): TestCapabilities =
     canMapTraceEntryPoints: true,
     emitsStructuredEvents: true)
 
-proc providerInfo(version = "m3-fixture"): TestProviderInfo =
+proc providerInfo(
+    version = "m3-fixture";
+    id = ProviderId;
+    language = "nim";
+    framework = "std/unittest";
+    displayName = "Nim unittest"): TestProviderInfo =
   TestProviderInfo(
-    id: ProviderId,
-    language: "nim",
-    framework: "std/unittest",
-    displayName: "Nim unittest",
+    id: id,
+    language: language,
+    framework: framework,
+    displayName: displayName,
     version: version,
     capabilities: capabilities())
 
@@ -93,12 +98,16 @@ proc sourceRange(line: int): SourceRange =
     endLine: line,
     endColumn: 24)
 
-proc item(file, name, selector: string; line: int): TestItem =
+proc itemWithProvider(
+    provider: TestProviderInfo;
+    file, name, selector: string;
+    line: int): TestItem =
   TestItem(
-    id: makeTestItemId(ProviderId, "nim", "std/unittest", file, selector),
-    providerId: ProviderId,
-    language: "nim",
-    framework: "std/unittest",
+    id: makeTestItemId(provider.id, provider.language, provider.framework,
+      file, selector),
+    providerId: provider.id,
+    language: provider.language,
+    framework: provider.framework,
     name: name,
     kind: tikCase,
     file: file,
@@ -113,12 +122,19 @@ proc item(file, name, selector: string; line: int): TestItem =
     stale: false,
     staleReason: "")
 
-proc catalog(items: seq[TestItem]): TestCatalog =
+proc item(file, name, selector: string; line: int): TestItem =
+  itemWithProvider(providerInfo(), file, name, selector, line)
+
+proc catalogWithProvider(items: seq[TestItem];
+    provider: TestProviderInfo): TestCatalog =
   TestCatalog(
     schemaVersion: TestCatalogSchemaVersion,
-    provider: providerInfo(),
+    provider: provider,
     items: items,
     diagnostics: @[])
+
+proc catalog(items: seq[TestItem]): TestCatalog =
+  catalogWithProvider(items, providerInfo())
 
 proc trace(path: string): TraceMetadata =
   TraceMetadata(
@@ -149,6 +165,19 @@ proc event(kind: TestEventKind; testId: string;
     durationMs: durationMs,
     trace: traceValue,
     diagnostic: diagnostic)
+
+proc eventForProvider(kind: TestEventKind; provider: TestProviderInfo;
+    testId: string;
+    runId = "run-1";
+    status = none(TestResultStatus);
+    message = "";
+    output = "";
+    durationMs = 0;
+    traceValue = none(TraceMetadata);
+    diagnostic = none(TestDiagnostic)): TestEvent =
+  result = event(kind, testId, runId, status, message, output, durationMs,
+    traceValue, diagnostic)
+  result.providerId = provider.id
 
 suite "ct-test TestExplorerViewModel M3":
 
@@ -399,3 +428,143 @@ suite "ct-test TestExplorerViewModel M14":
     check vm.runStates[staleAlpha.id].status == tesPassed
     check vm.runStates[staleAlpha.id].trace.get.path == root / "stale-trace"
     check vm.editorActionsForFile(FileA).len == 0
+
+suite "ct-test TestExplorerViewModel M15 acceptance":
+
+  test "gui_run_and_record_nim_python_rust":
+    let (vm, ctMock, traceMock) = newVm()
+    let nimProvider = providerInfo(
+      id = "nim-unittest",
+      language = "nim",
+      framework = "std/unittest",
+      displayName = "Nim unittest")
+    let pythonProvider = providerInfo(
+      id = "python-pytest",
+      language = "python",
+      framework = "pytest",
+      displayName = "pytest")
+    let rustProvider = providerInfo(
+      id = "rust-libtest",
+      language = "rust",
+      framework = "libtest",
+      displayName = "Rust libtest")
+    let cases = @[
+      (provider: nimProvider,
+        item: itemWithProvider(nimProvider, "tests/test_alpha.nim", "alpha",
+          "tests/test_alpha.nim::alpha", 10),
+        tracePath: "/repo/.codetracer/m15-nim.trace"),
+      (provider: pythonProvider,
+        item: itemWithProvider(pythonProvider, "tests/test_alpha.py", "alpha",
+          "tests/test_alpha.py::test_alpha", 11),
+        tracePath: "/repo/.codetracer/m15-python.trace"),
+      (provider: rustProvider,
+        item: itemWithProvider(rustProvider, "tests/alpha.rs", "alpha",
+          "alpha::tests::alpha", 12),
+        tracePath: "/repo/.codetracer/m15-rust.trace")]
+
+    for entry in cases:
+      vm.ingestCatalog(catalogWithProvider(@[entry.item], entry.provider))
+
+    for entry in cases:
+      vm.runTest(entry.item.id)
+      vm.handleEvent(eventForProvider(tekRunStarted, entry.provider,
+        entry.item.id, runId = "run-" & entry.provider.language))
+      vm.handleEvent(eventForProvider(tekOutput, entry.provider,
+        entry.item.id,
+        runId = "run-" & entry.provider.language,
+        output = entry.provider.language & " stdout"))
+      vm.handleEvent(eventForProvider(tekRunFinished, entry.provider,
+        entry.item.id,
+        runId = "run-" & entry.provider.language,
+        status = some(tsPassed),
+        durationMs = 17))
+
+      vm.recordTest(entry.item.id, topCurrentTab)
+      vm.handleEvent(eventForProvider(tekRecordStarted, entry.provider,
+        entry.item.id,
+        runId = "record-" & entry.provider.language),
+        topCurrentTab)
+      vm.handleEvent(eventForProvider(tekRecordingCreated, entry.provider,
+        entry.item.id,
+        runId = "record-" & entry.provider.language,
+        traceValue = some(trace(entry.tracePath))),
+        topCurrentTab)
+      vm.handleEvent(eventForProvider(tekRecordFinished, entry.provider,
+        entry.item.id,
+        runId = "record-" & entry.provider.language,
+        status = some(tsPassed),
+        durationMs = 23,
+        traceValue = some(trace(entry.tracePath))),
+        topCurrentTab)
+
+    check ctMock.commands.len == 6
+    check ctMock.commands[0].argv[0 .. 3] == @[
+      "ct", "test", "run", "--selector"]
+    check ctMock.commands[1].argv[^1] == "--open-policy=current-tab"
+    check ctMock.commands[3].argv[^1] == "--open-policy=current-tab"
+    check ctMock.commands[5].argv[^1] == "--open-policy=current-tab"
+
+    check traceMock.opened.len == 3
+    for i, entry in cases:
+      check traceMock.opened[i].testId == entry.item.id
+      check traceMock.opened[i].tracePath == entry.tracePath
+      check traceMock.opened[i].policy == topCurrentTab
+      check vm.runStates[entry.item.id].status == tesPassed
+      check vm.runStates[entry.item.id].output ==
+        entry.provider.language & " stdout"
+      check vm.runStates[entry.item.id].trace.get.path == entry.tracePath
+
+  test "gui_open_trace_current_and_new_tab":
+    let (vm, _, traceMock) = newVm()
+    let alpha = item(FileA, "alpha", "tests/test_alpha.nim::alpha", 10)
+    vm.ingestCatalog(catalog(@[alpha]))
+
+    vm.handleEvent(event(tekRecordStarted, alpha.id, runId = "record-current"),
+      topCurrentTab)
+    vm.handleEvent(event(tekRecordingCreated, alpha.id,
+      runId = "record-current",
+      traceValue = some(trace("/repo/.codetracer/current.trace"))),
+      topNewTab)
+    vm.handleEvent(event(tekRecordStarted, alpha.id, runId = "record-new"),
+      topNewTab)
+    vm.handleEvent(event(tekRecordingCreated, alpha.id,
+      runId = "record-new",
+      traceValue = some(trace("/repo/.codetracer/new.trace"))),
+      topCurrentTab)
+
+    check traceMock.opened.len == 2
+    check traceMock.opened[0].tracePath == "/repo/.codetracer/current.trace"
+    check traceMock.opened[0].testId == alpha.id
+    check traceMock.opened[0].policy == topCurrentTab
+    check traceMock.opened[1].tracePath == "/repo/.codetracer/new.trace"
+    check traceMock.opened[1].testId == alpha.id
+    check traceMock.opened[1].policy == topNewTab
+
+  test "gui_output_and_failure_diagnostics_do_not_open_trace":
+    let (vm, _, traceMock) = newVm()
+    let alpha = item(FileA, "alpha", "tests/test_alpha.nim::alpha", 10)
+    vm.ingestCatalog(catalog(@[alpha]))
+    let diagnostic = TestDiagnostic(
+      severity: dsError,
+      message: "toolchain missing: pytest",
+      file: FileA,
+      range: some(sourceRange(10)))
+
+    vm.handleEvent(event(tekRunStarted, alpha.id, runId = "run-alpha"))
+    vm.handleEvent(event(tekOutput, alpha.id,
+      runId = "run-alpha",
+      output = "collecting tests"))
+    vm.handleEvent(event(tekOutput, alpha.id,
+      runId = "run-alpha",
+      output = "pytest not found"))
+    vm.handleEvent(event(tekFailure, alpha.id,
+      runId = "run-alpha",
+      diagnostic = some(diagnostic)))
+
+    check traceMock.opened.len == 0
+    check vm.runStates[alpha.id].status == tesFailed
+    check vm.runStates[alpha.id].output == "collecting tests\npytest not found"
+    check vm.runStates[alpha.id].diagnostics.len == 1
+    check vm.runStates[alpha.id].diagnostics[0].message ==
+      "toolchain missing: pytest"
+    check vm.runStates[alpha.id].trace.isNone
