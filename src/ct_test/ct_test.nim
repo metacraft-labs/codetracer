@@ -2,22 +2,30 @@ import std/[json, os]
 
 import contracts
 import discovery
+import frameworks/ada_fallback
+import frameworks/assembly_fallback
 import frameworks/crystal_spec
 import frameworks/cpp_catch2
 import frameworks/cpp_ctest
 import frameworks/cpp_gtest
 import frameworks/d_unittest
+import frameworks/fortran_fallback
 import frameworks/go_test
 import frameworks/js_jest
 import frameworks/js_node_test
 import frameworks/js_playwright
 import frameworks/js_vitest
+import frameworks/julia_fallback
+import frameworks/lean_fallback
 import frameworks/nim_unittest
+import frameworks/odin_fallback
+import frameworks/pascal_fallback
 import frameworks/python_pytest
 import frameworks/python_unittest
 import frameworks/rust_libtest
 import frameworks/ruby_minitest
 import frameworks/ruby_rspec
+import frameworks/v_fallback
 
 proc newDefaultProviderRegistry*(): ProviderRegistry =
   ProviderRegistry(providers: @[
@@ -36,7 +44,15 @@ proc newDefaultProviderRegistry*(): ProviderRegistry =
     newJsNodeTestM1Provider(),
     newJsPlaywrightM1Provider(),
     newRubyRspecM1Provider(),
-    newRubyMinitestM1Provider()
+    newRubyMinitestM1Provider(),
+    newPascalFallbackM1Provider(),
+    newFortranFallbackM1Provider(),
+    newAdaFallbackM1Provider(),
+    newOdinFallbackM1Provider(),
+    newVFallbackM1Provider(),
+    newLeanFallbackM1Provider(),
+    newJuliaFallbackM1Provider(),
+    newAssemblyFallbackM1Provider()
   ])
 
 proc errorResponse(message: string): DiscoverResponse =
