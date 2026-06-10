@@ -1652,6 +1652,36 @@ jobs:
           fi
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
+      # The BEAM recorder has Cargo path-deps on
+      # ``../codetracer-trace-format/codetracer_ctfs`` (its trace shim
+      # reuses the shared CTFS writer).  test-non-gui doesn't otherwise
+      # need codetracer-trace-format as a sibling, but the recorder
+      # build does -- clone it here so ``just build`` resolves the
+      # ``codetracer_ctfs`` crate.  Same sibling-pin pattern as
+      # lint-rust / windows-rust-components.
+      - name: Resolve codetracer-trace-format ref (for beam)
+        if: matrix.platform == 'nixos'
+        id: resolve-trace-format-ref-beam
+        shell: bash
+        run: |
+          PINS=".github/sibling-pins"
+          REF="main"
+          if [ -f "${PINS}" ]; then
+            PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+            [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-trace-format (for beam, nixos)
+        if: matrix.platform == 'nixos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-trace-format
+          ref: ${{ steps.resolve-trace-format-ref-beam.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer-trace-format
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
       - name: Clone codetracer-beam-recorder (nixos)
         if: matrix.platform == 'nixos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@main
