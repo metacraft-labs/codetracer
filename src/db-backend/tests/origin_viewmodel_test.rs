@@ -120,6 +120,7 @@ fn build_trace(recipe: Recipe<'_>) -> (Db, TempDir) {
             step_id,
             path_id: PathId(1),
             line: TraceLine(*line_1based),
+            column: None,
             call_key: call_for_step[step_idx],
             global_call_key: call_for_step[step_idx],
         };

@@ -3794,11 +3794,17 @@ impl Handler {
         //   how to do it efficiently is a non-trivial question: maybe by iterating through previous steps,
         //   or a new kind of index?
         let call = self.reader.to_call(call_record, &mut self.expr_loader);
-        let current_call_key = self
+        let current_step = self
             .reader
             .step(self.step_id)
-            .expect("produce_stack_frame: invalid step_id")
-            .call_key;
+            .expect("produce_stack_frame: invalid step_id");
+        let current_call_key = current_step.call_key;
+        // P6.3 — pull the column from the DbStep so the source-map
+        // translation can use it.  Falls back to column=1 when the
+        // trace was not recorded with column-aware mode (or the
+        // canonical reader has not yet exposed the column through the
+        // FFI — see P6.4).
+        let recorded_column = current_step.column.map(|c| c.0).unwrap_or(1);
         let location = if call_record.key == current_call_key {
             self.reader
                 .load_location(self.step_id, call_record.key, &mut self.expr_loader)
@@ -3806,12 +3812,13 @@ impl Handler {
             call.location
         };
         // P3 — Source Map V3 translation.  When the recorded path has
-        // a known sourcemap, translate `(line, column=1)` back to the
+        // a known sourcemap, translate `(line, column)` back to the
         // original source so DAP consumers see the original file +
         // coordinates instead of the minified bundle.  Falls through
         // to the recorded path when no sourcemap is loaded or the
         // segment is sparse.
-        let (frame_path, frame_line, frame_column) = self.apply_sourcemap_translation(&location.path, location.line, 1);
+        let (frame_path, frame_line, frame_column) =
+            self.apply_sourcemap_translation(&location.path, location.line, recorded_column);
         dap_types::StackFrame {
             id: call_record.key.0,
             name: location.function_name,

@@ -357,6 +357,12 @@ impl CTFSTraceReader {
                         step_id,
                         path_id,
                         line: Line(line),
+                        // BEAM sidecar `runtime_session.jsonl` records
+                        // only `(file, line)` per step — see
+                        // codetracer-beam-recorder.  Column data is
+                        // not part of the sidecar contract, so we
+                        // surface `None` here.
+                        column: None,
                         call_key,
                         global_call_key: call_key,
                     };
@@ -781,6 +787,13 @@ impl CTFSTraceReader {
                     step_id,
                     path_id,
                     line,
+                    // The bulk `ct_reader_step_locations` FFI returns
+                    // only `(path_id, line)` today (see
+                    // codetracer-trace-format-nim).  Until P6.4
+                    // widens that surface to expose the column-aware
+                    // step encoding, we populate `None` here so the
+                    // DAP layer falls back to column=1.
+                    column: None,
                     call_key,
                     global_call_key,
                 };

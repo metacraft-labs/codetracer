@@ -28,13 +28,15 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 use codetracer_trace_types::{
-    CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent, TypeKind, TypeRecord,
-    TypeSpecificInfo,
+    CallKey, CallRecord, FunctionId, FunctionRecord, Line, PathId, StepId, StepRecord, TraceLowLevelEvent, TypeId,
+    TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord,
 };
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::dap::{DapMessage, ProtocolMessage, Request, Response};
 use db_backend::dap_handler::Handler;
 use db_backend::dap_types::{StackTraceArguments, StackTraceResponseBody};
+use db_backend::db::{Db, DbCall, DbStep, EndOfProgram};
+use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::recreator_session::RecreatorArgs;
 use db_backend::sourcemap_cache::translation_enabled;
 use db_backend::task::TraceKind;
@@ -269,4 +271,180 @@ fn p3_dap_source_returns_unminified_content() {
     // not the bogus string we used here.  This call should return
     // None and not crash.
     assert!(translated.is_none());
+}
+
+/// Build a minimal in-memory `Db` whose single `DbStep` lands at
+/// `(file=lodash.min.js, line=1, column=column_1based)`.
+///
+/// The legacy `runtime_tracing` event stream this fixture mirrors has
+/// no column field on `StepRecord`, and the canonical CTFS reader's
+/// bulk `step_locations` FFI currently surfaces only `(path_id, line)`
+/// — so neither production loader can produce a column-bearing step
+/// today.  We therefore reach in via `InMemoryTraceReader`, which
+/// accepts a `Db` constructed cell-by-cell.  This is the documented
+/// escape hatch (see `origin_dap_test.rs`'s top-of-file comment).
+///
+/// Returns `(reader, fixture_dir, recorded_min_path)` shaped exactly
+/// like [`build_trace_into_fixture`] so the test setup matches the
+/// existing P3 acceptance test.
+fn build_trace_with_column(column_1based: i64) -> (Arc<dyn TraceReader>, PathBuf, String) {
+    use std::collections::HashMap;
+
+    let dir = fixture_dir();
+    let min_path = dir.join("lodash.min.js");
+    assert!(min_path.is_file(), "fixture lodash.min.js missing");
+    let recorded = min_path.display().to_string();
+
+    let mut db = Db::new(&dir);
+    // PathId(0) is reserved as a sentinel by Db::new (matches the
+    // canonical reader's convention).  PathId(1) holds the absolute
+    // recorded path.
+    db.paths.push(String::new());
+    db.paths.push(recorded.clone());
+    db.path_map.insert(recorded.clone(), PathId(1));
+
+    db.types.push(TypeRecord {
+        kind: TypeKind::Int,
+        lang_type: "int".to_string(),
+        specific_info: TypeSpecificInfo::None,
+    });
+
+    db.functions.push(FunctionRecord {
+        path_id: PathId(1),
+        line: Line(1),
+        name: "<top-level>".to_string(),
+    });
+
+    // Single call that the lone step belongs to.  Without a valid
+    // call_key the calltrace's load_callstack assert would fail
+    // because steps must reference a real call.
+    let call_key = CallKey(0);
+    db.calls.push(DbCall {
+        key: call_key,
+        function_id: FunctionId(0),
+        args: Vec::new(),
+        return_value: ValueRecord::None { type_id: TypeId(0) },
+        step_id: StepId(0),
+        depth: 0,
+        parent_key: CallKey(-1),
+        children_keys: Vec::new(),
+    });
+
+    // The DbStep under test: line 1, column from the parameter.
+    let step_id = StepId(0);
+    let step = DbStep {
+        step_id,
+        path_id: PathId(1),
+        line: Line(1),
+        // P6.3 — column is now plumbed through `DbStep`; this is the
+        // value the source-map translation should consume.
+        column: Some(Line(column_1based)),
+        call_key,
+        global_call_key: call_key,
+    };
+    db.steps.push(step);
+    db.variables.push(Vec::new());
+    db.instructions.push(Vec::new());
+    db.compound.push(HashMap::new());
+    db.cells.push(HashMap::new());
+    db.variable_cells.push(HashMap::new());
+
+    // step_map indexed by PathId then line.  Two entries (PathId(0)
+    // sentinel + PathId(1)) mirror the production loader's invariant
+    // that step_map.len() >= path_count.
+    db.step_map.push(HashMap::new());
+    let mut path1_map: HashMap<usize, Vec<DbStep>> = HashMap::new();
+    path1_map.insert(1, vec![step]);
+    db.step_map.push(path1_map);
+
+    db.end_of_program = EndOfProgram::Normal;
+
+    let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db));
+    (reader, dir, recorded)
+}
+
+/// Issue the stackTrace request our other acceptance tests use, drain
+/// the response, and return the body.
+fn invoke_stack_trace(handler: &mut Handler) -> StackTraceResponseBody {
+    let (tx, rx) = mpsc::channel::<DapMessage>();
+    let request = Request {
+        base: ProtocolMessage {
+            seq: 1,
+            type_: "request".to_string(),
+        },
+        command: "stackTrace".to_string(),
+        arguments: serde_json::json!({"threadId": 1}),
+    };
+    let args = StackTraceArguments {
+        thread_id: 1,
+        start_frame: None,
+        levels: None,
+        format: None,
+    };
+    handler.stack_trace(request, args, tx).expect("stack_trace responds");
+    let msg = drain_response(&rx);
+    decode_stack_trace_body(&msg)
+}
+
+#[test]
+fn p6_3_translated_column_flows_through_to_stack_frame() {
+    // §P6.3 acceptance — when a column-aware trace records a step at
+    // column N on a minified source, the DAP `StackFrame` returned by
+    // `stackTrace` must reflect the **translated** column from the
+    // sourcemap (not the recorded one, and definitely not the
+    // hard-coded `column=1` fallback that pre-P6.3 sites used).
+    //
+    // The hand-crafted lodash sourcemap maps generated `(line=1,
+    // col=29)` to original `(line=5, col=1)` — the start of
+    // `function double(value)`.  See the segment table in
+    // `tests/fixtures/sourcemap/lodash.min.js.map`:
+    //
+    //   AAAAA            -> gen col 0  → orig (line 1, col 1)  "add"
+    //   4BAIAC           -> gen col 28 → orig (line 5, col 1)  "double"
+    //   0BAIAC           -> gen col 56 → orig (line 9, col 1)  "sum"
+    //   aACAC            -> gen col 69 → orig (line 10, col 1) "doubled"
+    //
+    // So a recorded column of 29 (1-indexed) should produce a frame
+    // line of 5 and column of 1.
+    if !translation_enabled() {
+        eprintln!("CT_SOURCEMAP_TRANSLATION is off; skipping P6.3 column-flow assertion.");
+        return;
+    }
+
+    const RECORDED_COLUMN: i64 = 29;
+    const EXPECTED_TRANSLATED_LINE: i64 = 5;
+    const EXPECTED_TRANSLATED_COLUMN: i64 = 1;
+
+    let (reader, fixture, _recorded_min_path) = build_trace_with_column(RECORDED_COLUMN);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    handler.load_sourcemaps(&fixture);
+    assert!(
+        !handler.sourcemap_cache.is_empty(),
+        "expected sourcemap to be discovered for lodash.min.js"
+    );
+
+    let body = invoke_stack_trace(&mut handler);
+    assert!(!body.stack_frames.is_empty(), "stackTrace returned at least one frame");
+
+    let frame = &body.stack_frames[0];
+    let source = frame.source.as_ref().expect("frame has a source");
+    let path = source.path.as_ref().expect("source has a path");
+    assert!(
+        path.ends_with("lodash.js") && !path.ends_with("lodash.min.js"),
+        "frame source should be the original lodash.js, got: {path}"
+    );
+
+    // Strict — the recorded column flowed all the way through the
+    // sourcemap and the translated column reached the DAP frame.
+    // Before P6.3 the call site hard-coded `column=1`, which would
+    // make this assertion pass at line=1, col=1 (i.e. `add`), not
+    // line=5, col=1 (`double`).
+    assert_eq!(
+        frame.line, EXPECTED_TRANSLATED_LINE,
+        "P6.3: translated frame line should reflect the column-driven segment lookup"
+    );
+    assert_eq!(
+        frame.column, EXPECTED_TRANSLATED_COLUMN,
+        "P6.3: translated frame column should reflect the column-driven segment lookup"
+    );
 }

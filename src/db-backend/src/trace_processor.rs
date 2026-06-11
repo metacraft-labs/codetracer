@@ -88,6 +88,14 @@ impl<'a> TraceProcessor<'a> {
                     step_id: StepId(self.db.steps.len() as i64),
                     path_id: step_record.path_id,
                     line: step_record.line,
+                    // The legacy `runtime_tracing` materialised event
+                    // stream that this processor consumes has no
+                    // column field on `StepRecord`.  Surface `None`
+                    // so the DAP layer's source-map translation falls
+                    // back to column=1.  Column data must arrive via
+                    // the canonical CTFS reader once P6.4 wires it
+                    // through the Nim FFI step accessor.
+                    column: None,
                     call_key: self.current_call_key,
                     global_call_key: self.last_started_call_key,
                 };

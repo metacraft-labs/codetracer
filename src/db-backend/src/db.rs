@@ -866,6 +866,15 @@ pub struct DbStep {
     pub step_id: StepId,
     pub path_id: PathId,
     pub line: Line,
+    // 1-indexed column at which the step landed in the source.  `None`
+    // for traces recorded without column-aware mode (the legacy
+    // `runtime_tracing` materialised layout has no column metadata, and
+    // the Nim bulk reader currently surfaces only `(path_id, line)` —
+    // see codetracer-trace-format-spec/trace-events.md §"Compact Step
+    // Encoding").  Wired through P6.3 so the DAP layer's source-map
+    // translation can consume real column data once P6.4 surfaces it
+    // through the canonical reader.
+    pub column: Option<Line>,
     // the call key of the current frame call
     pub call_key: CallKey,
     // the call key of the last started call in the program
@@ -1165,6 +1174,7 @@ impl MaterializedReplaySession {
             step_id: StepId(0),
             path_id: PathId(0),
             line: Line(0),
+            column: None,
             call_key: CallKey(0),
             global_call_key: CallKey(0),
         };

@@ -183,6 +183,7 @@ fn build_trace(recipe: Recipe<'_>) -> (Db, TempDir) {
             step_id,
             path_id: PathId(1),
             line: TraceLine(*line_1based),
+            column: None,
             call_key: call_for_step[step_idx],
             global_call_key: call_for_step[step_idx],
         };
@@ -508,6 +509,7 @@ fn test_origin_chain_continuation_token_source_digest_mismatch() {
             step_id: StepId(step_idx),
             path_id: PathId(1),
             line: TraceLine(step_idx + 1),
+            column: None,
             call_key: CallKey(0),
             global_call_key: CallKey(0),
         };
