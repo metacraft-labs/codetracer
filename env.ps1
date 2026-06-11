@@ -818,6 +818,7 @@ $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 . "$windowsDir/ensure-zstd.ps1"
 . "$windowsDir/ensure-zlib.ps1"
 . "$windowsDir/ensure-llvm.ps1"
+. "$windowsDir/ensure-clingo.ps1"
 
 $preferGitBash = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_PREFER_GIT_BASH" -Default $true
 $gitBashBinDir = ""
@@ -876,6 +877,11 @@ if ($doSync) {
   # Ensure-Zlib must run after Ensure-Gcc (depends on mingw32-make + gcc).
   if (Test-BootstrapStepEnabled "ZLIB") { Ensure-Zlib -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "LLVM") { Ensure-Llvm -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  # Clingo is the ASP solver `repro` and its child `extract_runner.exe`
+  # dlopen at runtime via `clingo.dll`. It has no other build-system
+  # dependency; install it whenever the user does not opt out via
+  # WINDOWS_DIY_SKIP_CLINGO=1.
+  if (Test-BootstrapStepEnabled "CLINGO") { Ensure-Clingo -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 2: Rust (no deps on other managed tools)
   if (Test-BootstrapStepEnabled "RUST") { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
@@ -1075,6 +1081,13 @@ $llvmTarget = ConvertTo-LlvmFileArch -Arch $arch
 $llvmDir = Join-Path $installRoot ("llvm\" + $toolchain["LLVM_VERSION"] + "\LLVM-" + $toolchain["LLVM_VERSION"] + "-" + $llvmTarget)
 $llvmBinDir = Join-Path $llvmDir "bin"
 
+# Clingo install layout produced by ensure-clingo.ps1:
+#   $installRoot/clingo/<version>/bin/clingo.dll
+# `repro` and `extract_runner.exe` dlopen `clingo.dll` by leaf name; putting
+# the bin dir on PATH is what lets the Win32 loader resolve it.
+$clingoDir = Join-Path $installRoot ("clingo\" + $toolchain["CLINGO_VERSION"])
+$clingoBinDir = Join-Path $clingoDir "bin"
+
 Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
 Ensure-NodeModulesJunction -RepoRoot $repoRoot
 Ensure-GoldenLayoutAsset -RepoRoot $repoRoot
@@ -1146,6 +1159,7 @@ function Resolve-ClExePath {
 [Environment]::SetEnvironmentVariable("FPC_DIR", $fpcDir, "Process")
 [Environment]::SetEnvironmentVariable("ZSTD_DIR", $zstdDir, "Process")
 [Environment]::SetEnvironmentVariable("ZLIB_DIR", $zlibDir, "Process")
+[Environment]::SetEnvironmentVariable("CLINGO_DIR", $clingoDir, "Process")
 # Prepend the zlib lib dir to LIBRARY_PATH so the MinGW gcc linker finds
 # `libz.a` when codetracer's Nim build emits `-lz` via Tuprules.tup. PATH gets
 # the same dir below (mirrors how ZSTD_DIR is consumed downstream) for any
@@ -1290,7 +1304,8 @@ Prepend-PathEntries -Entries @(
   $vlangBinDir,
   $fpcBinDir,
   $llvmBinDir,
-  $zlibLibDir
+  $zlibLibDir,
+  $clingoBinDir
 )
 
 $ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" -Default $true
@@ -1363,6 +1378,7 @@ Write-Host "GO_DIR=$goDir"
 Write-Host "GOROOT=$env:GOROOT"
 Write-Host "ZSTD_DIR=$zstdDir"
 Write-Host "ZLIB_DIR=$zlibDir"
+Write-Host "CLINGO_DIR=$clingoDir"
 Write-Host "LLVM_DIR=$llvmDir"
 Write-Host "WINDOWS_DIY_SHIMS_DIR=$shimsDir"
 Write-Host "CODETRACER_REPO_ROOT_PATH=$env:CODETRACER_REPO_ROOT_PATH"
