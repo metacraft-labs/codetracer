@@ -317,9 +317,9 @@ impl SourcemapCache {
         // First, hit the cache.  Avoid double-format on repeat lookups
         // for both positive and negative outcomes.
         if let Some(entry) = self.autoformat_by_path.get(recorded_path) {
-            return entry.as_ref().and_then(|lookup| {
-                project_through_autoformat(lookup, line, column)
-            });
+            return entry
+                .as_ref()
+                .and_then(|lookup| project_through_autoformat(lookup, line, column));
         }
 
         // Not cached — attempt the lazy build.
@@ -368,9 +368,7 @@ impl SourcemapCache {
 
         let threshold = autoformat::minified_threshold();
         if !autoformat::looks_minified(&content, threshold) {
-            debug!(
-                "autoformat: source does not look minified (avg line < {threshold} chars): {recorded_path}"
-            );
+            debug!("autoformat: source does not look minified (avg line < {threshold} chars): {recorded_path}");
             return None;
         }
 
@@ -542,9 +540,7 @@ impl SourcemapCache {
             if let Some(renamed) = list.lookup(file, scope_hint, minified_name) {
                 return Some(renamed.to_string());
             }
-            let basename = std::path::Path::new(file)
-                .file_name()
-                .and_then(|s| s.to_str());
+            let basename = std::path::Path::new(file).file_name().and_then(|s| s.to_str());
             if let Some(bn) = basename
                 && bn != file
                 && let Some(renamed) = list.lookup(bn, scope_hint, minified_name)
@@ -728,11 +724,7 @@ fn materialise_original(
 ///
 /// Falls back to `None` when the line wasn't anchored — the caller
 /// then surfaces the recorded coordinates unchanged.
-fn project_through_autoformat(
-    lookup: &Arc<AutoFormatLookup>,
-    line: u32,
-    column: u32,
-) -> Option<TranslatedLocation> {
+fn project_through_autoformat(lookup: &Arc<AutoFormatLookup>, line: u32, column: u32) -> Option<TranslatedLocation> {
     let (fmt_line, fmt_col) = lookup.position_map.project(line, column)?;
     Some(TranslatedLocation {
         path: lookup.formatted_path.clone(),
@@ -775,9 +767,7 @@ fn materialise_autoformat(cache_dir: &Path, recorded_path: &str, formatted_conte
         Ok(existing) => existing != formatted_content,
         Err(_) => true,
     };
-    if needs_write
-        && let Err(e) = std::fs::write(&out_path, formatted_content.as_bytes())
-    {
+    if needs_write && let Err(e) = std::fs::write(&out_path, formatted_content.as_bytes()) {
         warn!(
             "autoformat: failed to materialise formatted source to {}: {e}",
             out_path.display()
@@ -933,10 +923,7 @@ mod tests {
         .unwrap();
         cache.set_rename_list(Some(list));
         assert!(cache.has_rename_list());
-        assert_eq!(
-            cache.resolve_name("lodash.min.js", None, "e").as_deref(),
-            Some("array")
-        );
+        assert_eq!(cache.resolve_name("lodash.min.js", None, "e").as_deref(), Some("array"));
     }
 
     #[test]
@@ -1012,10 +999,7 @@ mod tests {
         cache.try_load(PathId(7), &src);
         // No user rename list installed — sourcemap's names[] confirms
         // `alpha` is a known binding and echoes it back.
-        assert_eq!(
-            cache.resolve_name("min.js", None, "alpha").as_deref(),
-            Some("alpha")
-        );
+        assert_eq!(cache.resolve_name("min.js", None, "alpha").as_deref(), Some("alpha"));
         // Unknown binding name returns None so the caller can surface
         // the recorded name unchanged.
         assert!(cache.resolve_name("min.js", None, "totally_unknown").is_none());

@@ -236,8 +236,7 @@ fn replay_server_loads_srcviews_from_trace() {
     let ct_path = write_srcviews_container(&trace_dir, std::slice::from_ref(&view));
     assert!(ct_path.is_file());
 
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
 
     // First load_sourcemaps (P3) — no sibling map, so this is a no-op
     // for the cache; we still call it because the production
@@ -320,8 +319,7 @@ fn replay_server_prefers_srcviews_over_sibling_map() {
     };
     write_srcviews_container(&trace_dir, std::slice::from_ref(&view));
 
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
 
     // Production order: sibling first, srcviews after.  The latter
     // MUST overwrite.
@@ -379,8 +377,7 @@ fn replay_server_legacy_trace_no_srcviews() {
     let ct_path = trace_dir.join("trace.ct");
     write_minimal_ctfs(&ct_path, &[("steps.dat", b"x")]).expect("dummy CTFS without srcviews");
 
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
 
     handler.load_sourcemaps(&trace_dir);
     // Calling load_source_views on a no-srcviews container must be a

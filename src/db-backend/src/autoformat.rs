@@ -247,7 +247,8 @@ fn first_anchor_token(line: &str) -> Option<String> {
 fn is_common_keyword(s: &str) -> bool {
     matches!(
         s,
-        "var" | "let"
+        "var"
+            | "let"
             | "const"
             | "function"
             | "return"
@@ -639,7 +640,14 @@ mod tests {
         // Hand-crafted before/after; the formatter inserts line breaks
         // around statements so each function lands on its own line.
         let original = "function alpha(){return 1;}function beta(){return 2;}\n";
-        let formatted = concat!("function alpha() {\n", "  return 1;\n", "}\n", "function beta() {\n", "  return 2;\n", "}\n");
+        let formatted = concat!(
+            "function alpha() {\n",
+            "  return 1;\n",
+            "}\n",
+            "function beta() {\n",
+            "  return 2;\n",
+            "}\n"
+        );
         let map = PositionMap::from_diff(original, formatted);
         // Original line 1 contains "alpha" (first anchor) which lands
         // on formatted line 1.
@@ -694,10 +702,7 @@ mod tests {
                 );
                 // The position map should at minimum anchor `add` from
                 // the original onto a non-empty formatted line range.
-                assert!(
-                    !r.position_map.is_empty(),
-                    "expected at least one position map entry"
-                );
+                assert!(!r.position_map.is_empty(), "expected at least one position map entry");
                 let projected = r.position_map.project(1, 1).expect("line 1 projects");
                 // Formatter output's `function add(` starts on a real
                 // line — line 1 (or 2 if prettier emits a leading blank).

@@ -28,8 +28,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Global lock serializing the tests that mutate `CT_AUTOFORMAT`.
 /// `std::env::set_var` is process-global, and `cargo test` runs the
@@ -275,10 +275,7 @@ fn p4_dap_source_returns_formatted_javascript() {
         source_path.contains("sourcemap-translate"),
         "expected autoformat sidecar under sourcemap-translate/, got: {source_path}"
     );
-    let basename = formatted_pathbuf
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let basename = formatted_pathbuf.file_name().and_then(|n| n.to_str()).unwrap_or("");
     assert!(
         basename.starts_with("autoformat_"),
         "sidecar basename should start with 'autoformat_', got: {basename}"

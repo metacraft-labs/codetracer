@@ -3635,11 +3635,8 @@ impl Handler {
             //
             // Both keys share one `Arc<SourcemapIndex>`, so they stay
             // consistent if we ever extend the cache.
-            self.sourcemap_cache.install_index(
-                PathId(sv.path_id as usize),
-                recorded_path,
-                idx,
-            );
+            self.sourcemap_cache
+                .install_index(PathId(sv.path_id as usize), recorded_path, idx);
 
             info!(
                 "srcviews: installed view {} → {} (path_id {})",
@@ -3802,11 +3799,7 @@ impl Handler {
             None => mapping_catalog::catalog_path_from_env(),
         };
         let workdir = self.reader.workdir().to_path_buf();
-        let entries: Vec<String> = self
-            .reader
-            .path_entries_iter()
-            .map(|(p, _id)| p.to_string())
-            .collect();
+        let entries: Vec<String> = self.reader.path_entries_iter().map(|(p, _id)| p.to_string()).collect();
         for recorded in entries {
             let recorded_path = std::path::Path::new(&recorded);
             let probe = if recorded_path.is_absolute() {
@@ -3819,7 +3812,9 @@ impl Handler {
             }
             let outcome = scan_single_path(&probe, &catalog_path);
             match outcome {
-                AutoloadOutcome::Applied { list, library, version, .. } => {
+                AutoloadOutcome::Applied {
+                    list, library, version, ..
+                } => {
                     info!(
                         "catalog_autoload: installing {library}@{version} ({} entries) in-memory",
                         list.len()
@@ -3836,15 +3831,17 @@ impl Handler {
                 AutoloadOutcome::MatchLogged { .. } => {
                     // Already logged by the scanner; nothing else to do.
                 }
-                AutoloadOutcome::ShaMismatch { recorded_sha, indexed_sha, toml_path } => {
+                AutoloadOutcome::ShaMismatch {
+                    recorded_sha,
+                    indexed_sha,
+                    toml_path,
+                } => {
                     warn!(
                         "catalog_autoload: sha mismatch (recorded {recorded_sha}, indexed {indexed_sha}) for {} — refusing to apply",
                         toml_path.display()
                     );
                 }
-                AutoloadOutcome::NoMatch
-                | AutoloadOutcome::SourceUnreadable
-                | AutoloadOutcome::CatalogUnavailable => {}
+                AutoloadOutcome::NoMatch | AutoloadOutcome::SourceUnreadable | AutoloadOutcome::CatalogUnavailable => {}
             }
         }
     }
@@ -4491,15 +4488,15 @@ impl Handler {
         // entries on miss internally.
         if let Some((fn_scope, block_scope)) = scope_hint {
             if let Some(fn_s) = &fn_scope
-                && let Some(renamed) = self
-                    .sourcemap_cache
-                    .resolve_name_at_position(file, line, col, Some(fn_s), recorded_name)
+                && let Some(renamed) =
+                    self.sourcemap_cache
+                        .resolve_name_at_position(file, line, col, Some(fn_s), recorded_name)
             {
                 return (renamed, original);
             }
-            if let Some(renamed) = self
-                .sourcemap_cache
-                .resolve_name_at_position(file, line, col, Some(&block_scope), recorded_name)
+            if let Some(renamed) =
+                self.sourcemap_cache
+                    .resolve_name_at_position(file, line, col, Some(&block_scope), recorded_name)
             {
                 return (renamed, original);
             }
@@ -4540,8 +4537,7 @@ impl Handler {
                     let ct_val = to_ct_value(&l.value);
                     // §P5/P6.4 — user rename list + per-position
                     // sourcemap segment lookup at render time.
-                    let (display, _original) =
-                        self.resolve_variable_name_at(&l.expression, &file, line, col);
+                    let (display, _original) = self.resolve_variable_name_at(&l.expression, &file, line, col);
                     dap::new_dap_variable(&display, &ct_val.text_repr(), 0)
                 })
                 .collect();
@@ -4569,8 +4565,7 @@ impl Handler {
                     .to_string();
                 // §P5/P6.4 — user rename list + per-position sourcemap
                 // segment lookup at render time.
-                let (display, _original) =
-                    self.resolve_variable_name_at(&recorded_name, &file, line, col);
+                let (display, _original) = self.resolve_variable_name_at(&recorded_name, &file, line, col);
                 Variable {
                     expression: display,
                     value: self.reader.to_ct_value(&v.value),
@@ -4735,10 +4730,7 @@ fn find_ct_container(trace_dir: &Path) -> Option<std::path::PathBuf> {
 fn materialise_source_view(trace_dir: &Path, view_name: &str, content: &[u8], sourcemap_v3: &[u8]) -> Option<String> {
     let cache_root = trace_dir.join("sourcemap-translate");
     if let Err(e) = std::fs::create_dir_all(&cache_root) {
-        warn!(
-            "srcviews: failed to create cache dir {}: {e}",
-            cache_root.display()
-        );
+        warn!("srcviews: failed to create cache dir {}: {e}", cache_root.display());
         return None;
     }
 
@@ -4749,10 +4741,7 @@ fn materialise_source_view(trace_dir: &Path, view_name: &str, content: &[u8], so
     let map_path = cache_root.join(format!("{}.map", safe));
 
     if let Err(e) = std::fs::write(&content_path, content) {
-        warn!(
-            "srcviews: failed to write content to {}: {e}",
-            content_path.display()
-        );
+        warn!("srcviews: failed to write content to {}: {e}", content_path.display());
         return None;
     }
     if !sourcemap_v3.is_empty()
@@ -4762,10 +4751,7 @@ fn materialise_source_view(trace_dir: &Path, view_name: &str, content: &[u8], so
         // do not fail the whole materialisation if only the map write
         // fails (the in-memory `SourcemapIndex` already holds the
         // parsed map).
-        warn!(
-            "srcviews: failed to write map to {}: {e}",
-            map_path.display()
-        );
+        warn!("srcviews: failed to write map to {}: {e}", map_path.display());
     }
     Some(content_path.display().to_string())
 }

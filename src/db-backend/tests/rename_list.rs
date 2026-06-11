@@ -165,10 +165,7 @@ fn p5_rename_list_toml_parses_cleanly() {
     let chunk = Scope::Function("chunk".to_string());
     assert_eq!(list.lookup("lodash.min.js", Some(&chunk), "t"), Some("result"));
     let block = Scope::Block(1);
-    assert_eq!(
-        list.lookup("lodash.min.js", Some(&block), "f"),
-        Some("iteration_index")
-    );
+    assert_eq!(list.lookup("lodash.min.js", Some(&block), "f"), Some("iteration_index"));
 }
 
 #[test]
@@ -260,8 +257,7 @@ fn p5_rename_list_composes_with_sourcemap_names() {
     // poison is safe.
     let _guard = env_mutex().lock().unwrap_or_else(|p| p.into_inner());
     let (reader, fixture) = build_trace_into_fixture();
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&fixture);
     let _renames = RenamesGuard::new(
         &fixture,
@@ -313,8 +309,7 @@ fn p5_rename_list_kill_switch_disables_loader() {
     assert!(!rename_list_enabled(), "sanity: kill switch parsed");
 
     let (reader, fixture) = build_trace_into_fixture();
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&fixture);
     let _renames = RenamesGuard::new(
         &fixture,
@@ -361,8 +356,7 @@ fn p5_explicit_path_overrides_sibling_lookup() {
     // poison is safe.
     let _guard = env_mutex().lock().unwrap_or_else(|p| p.into_inner());
     let (reader, fixture) = build_trace_into_fixture();
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&fixture);
 
     // Put a sibling renames.toml that says e -> sibling_array.

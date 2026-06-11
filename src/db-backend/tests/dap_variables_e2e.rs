@@ -128,10 +128,7 @@ impl Drop for RenamesGuard {
 /// Returns `(reader, fixture_dir, recorded_min_path)` so callers can
 /// also assert filesystem invariants on the fixture (matches the shape
 /// of `sourcemap_lodash.rs::build_trace_into_fixture`).
-fn build_trace_with_variable(
-    column_1based: i64,
-    recorded_name: &str,
-) -> (Arc<dyn TraceReader>, PathBuf, String) {
+fn build_trace_with_variable(column_1based: i64, recorded_name: &str) -> (Arc<dyn TraceReader>, PathBuf, String) {
     let dir = fixture_dir();
     let min_path = dir.join("lodash.min.js");
     assert!(
@@ -358,10 +355,7 @@ fn dap_variables_no_translation_shows_recorded_name() {
         handler.sourcemap_cache.is_empty(),
         "no sourcemap loaded — cache MUST be empty"
     );
-    assert!(
-        !handler.sourcemap_cache.has_rename_list(),
-        "no rename list installed"
-    );
+    assert!(!handler.sourcemap_cache.has_rename_list(), "no rename list installed");
 
     let body = invoke_variables(&mut handler);
     assert_eq!(body.variables.len(), 1);

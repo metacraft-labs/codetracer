@@ -142,11 +142,7 @@ pub enum RenameListError {
     /// Two `[[rename]]` entries share the same `(file, scope, from)`
     /// triple — ambiguous, so we surface the conflict rather than
     /// silently picking one.
-    DuplicateEntry {
-        file: String,
-        scope: String,
-        from: String,
-    },
+    DuplicateEntry { file: String, scope: String, from: String },
     /// A `[[rename]]` entry is missing a required field
     /// (`file`, `from`, or `to`).
     MissingField(&'static str),
@@ -157,10 +153,9 @@ impl fmt::Display for RenameListError {
         match self {
             RenameListError::Io(e) => write!(f, "I/O error reading rename list: {e}"),
             RenameListError::ParseToml(e) => write!(f, "failed to parse rename list TOML: {e}"),
-            RenameListError::DuplicateEntry { file, scope, from } => write!(
-                f,
-                "duplicate [[rename]] entry: file={file}, scope={scope}, from={from}"
-            ),
+            RenameListError::DuplicateEntry { file, scope, from } => {
+                write!(f, "duplicate [[rename]] entry: file={file}, scope={scope}, from={from}")
+            }
             RenameListError::MissingField(field) => write!(f, "[[rename]] entry missing required field: {field}"),
         }
     }
@@ -302,9 +297,7 @@ impl RenameList {
             // rename.  When the recognised fields can't be filled the
             // MissingField check above takes over.
             for (k, _) in entry.extras.iter() {
-                warn!(
-                    "rename_list: ignoring unknown key \"{k}\" in [[rename]] entry (file={file}, from={from})"
-                );
+                warn!("rename_list: ignoring unknown key \"{k}\" in [[rename]] entry (file={file}, from={from})");
             }
 
             let canonical_scope = scope.to_canonical_string();
@@ -370,10 +363,7 @@ impl RenameList {
     pub fn try_load_sibling(recording_dir: &Path) -> Result<Option<Self>, RenameListError> {
         let path = recording_dir.join("renames.toml");
         if !path.is_file() {
-            debug!(
-                "rename_list: no sibling renames.toml at {} — skipping",
-                path.display()
-            );
+            debug!("rename_list: no sibling renames.toml at {} — skipping", path.display());
             return Ok(None);
         }
         Self::load(&path).map(Some)
@@ -521,10 +511,7 @@ mod tests {
         let list = RenameList::parse_toml(raw).unwrap();
         // Function-scoped hit wins.
         let fn_scope = Scope::Function("chunk".to_string());
-        assert_eq!(
-            list.lookup("lodash.min.js", Some(&fn_scope), "t"),
-            Some("chunk_result")
-        );
+        assert_eq!(list.lookup("lodash.min.js", Some(&fn_scope), "t"), Some("chunk_result"));
         // Different function falls back to the global entry.
         let other_scope = Scope::Function("other".to_string());
         assert_eq!(

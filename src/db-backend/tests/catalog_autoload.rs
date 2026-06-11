@@ -31,9 +31,7 @@ use codetracer_trace_types::{
     CallRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent, TypeKind, TypeRecord,
     TypeSpecificInfo,
 };
-use db_backend::catalog_autoload::{
-    AutoloadOutcome, autoload_enabled, install_to_recording_dir, scan_single_path,
-};
+use db_backend::catalog_autoload::{AutoloadOutcome, autoload_enabled, install_to_recording_dir, scan_single_path};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::dap_handler::Handler;
 use db_backend::recreator_session::RecreatorArgs;
@@ -61,8 +59,7 @@ fn set_env(key: &str, val: Option<&str>) {
 /// Hand-crafted one-liner bundle — same shape as the §P3 lodash
 /// fixture's minified source, but treated as the "tinylib" library so
 /// it doesn't clash with the lodash fixture's renames.
-const TINYLIB_MIN_BODY: &str =
-    "function a(b,c){return b+c;}function d(e){return e*2;}var f=a(1,2);var g=d(f);\n";
+const TINYLIB_MIN_BODY: &str = "function a(b,c){return b+c;}function d(e){return e*2;}var f=a(1,2);var g=d(f);\n";
 
 /// Build a tinylib catalog directory + the matching minified bundle.
 ///
@@ -138,8 +135,7 @@ fn build_trace_for_bundle(bundle_path: &Path) -> Arc<dyn TraceReader> {
             line: Line(1),
         }),
     ];
-    let reader =
-        CTFSTraceReader::from_events(events, bundle_path.parent().unwrap()).expect("from_events");
+    let reader = CTFSTraceReader::from_events(events, bundle_path.parent().unwrap()).expect("from_events");
     Arc::new(reader)
 }
 
@@ -155,16 +151,10 @@ fn catalog_autoload_off_default() {
     set_env("CT_CATALOG_AUTOLOAD_DISABLED", None);
     assert!(!autoload_enabled());
 
-    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) =
-        build_tinylib_fixture();
+    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) = build_tinylib_fixture();
     let reader = build_trace_for_bundle(&bundle_path);
 
-    let mut handler = Handler::construct_with_reader(
-        TraceKind::Materialized,
-        RecreatorArgs::default(),
-        reader,
-        false,
-    );
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&trace_dir);
     handler.load_catalog_autoload(&trace_dir, Some(&cat_root));
 
@@ -195,16 +185,10 @@ fn catalog_autoload_on_applies_matching_entry() {
     set_env("CT_CATALOG_AUTOLOAD_DISABLED", None);
     assert!(autoload_enabled());
 
-    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) =
-        build_tinylib_fixture();
+    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) = build_tinylib_fixture();
     let reader = build_trace_for_bundle(&bundle_path);
 
-    let mut handler = Handler::construct_with_reader(
-        TraceKind::Materialized,
-        RecreatorArgs::default(),
-        reader,
-        false,
-    );
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&trace_dir);
     handler.load_catalog_autoload(&trace_dir, Some(&cat_root));
 
@@ -214,16 +198,13 @@ fn catalog_autoload_on_applies_matching_entry() {
         "with CT_CATALOG_AUTOLOAD=1, the catalog match MUST install a rename list"
     );
     // STRICT: the installed list MUST contain the cataloged renames.
-    let resolved =
-        handler.sourcemap_cache.resolve_name("tinylib.min.js", None, "a");
+    let resolved = handler.sourcemap_cache.resolve_name("tinylib.min.js", None, "a");
     assert_eq!(
         resolved.as_deref(),
         Some("add"),
         "the cataloged `a -> add` rename MUST be applied"
     );
-    let resolved = handler
-        .sourcemap_cache
-        .resolve_name("tinylib.min.js", None, "d");
+    let resolved = handler.sourcemap_cache.resolve_name("tinylib.min.js", None, "d");
     assert_eq!(
         resolved.as_deref(),
         Some("double"),
@@ -249,29 +230,19 @@ fn catalog_sha_mismatch_refuses_to_apply() {
     set_env("CT_CATALOG_AUTOLOAD_DISABLED", None);
 
     // Build the fixture correctly first ...
-    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) =
-        build_tinylib_fixture();
+    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) = build_tinylib_fixture();
 
     // ... then mutate the catalog's index.toml so the sha256 entry
     // doesn't match what the recording will actually contain.  We
     // overwrite the bundle file with new content so the recorded sha
     // diverges from the index.
-    std::fs::write(
-        &bundle_path,
-        "function alpha(){return 'utterly different bundle';}\n",
-    )
-    .unwrap();
+    std::fs::write(&bundle_path, "function alpha(){return 'utterly different bundle';}\n").unwrap();
     let actual_sha = compute_file_sha256(&bundle_path).unwrap();
     assert_eq!(actual_sha.len(), 64, "sanity: actual sha is a real hex string");
 
     let reader = build_trace_for_bundle(&bundle_path);
 
-    let mut handler = Handler::construct_with_reader(
-        TraceKind::Materialized,
-        RecreatorArgs::default(),
-        reader,
-        false,
-    );
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&trace_dir);
     handler.load_catalog_autoload(&trace_dir, Some(&cat_root));
 
@@ -297,8 +268,7 @@ fn scan_single_path_surfaces_outcomes_for_library_consumers() {
     set_env("CT_CATALOG_AUTOLOAD", None);
     set_env("CT_CATALOG_AUTOLOAD_DISABLED", None);
 
-    let (_cat_guard, cat_root, _trace_guard, _trace_dir, bundle_path) =
-        build_tinylib_fixture();
+    let (_cat_guard, cat_root, _trace_guard, _trace_dir, bundle_path) = build_tinylib_fixture();
     let outcome = scan_single_path(&bundle_path, &cat_root);
     assert!(matches!(outcome, AutoloadOutcome::MatchLogged { .. }));
 
@@ -312,8 +282,7 @@ fn scan_single_path_surfaces_outcomes_for_library_consumers() {
 #[test]
 fn install_to_recording_dir_round_trip() {
     let _g = env_lock().lock().unwrap_or_else(|p| p.into_inner());
-    let (_cat_guard, cat_root, _trace_guard, trace_dir, _bundle_path) =
-        build_tinylib_fixture();
+    let (_cat_guard, cat_root, _trace_guard, trace_dir, _bundle_path) = build_tinylib_fixture();
     let catalog = Catalog::load(&cat_root).unwrap();
     let entry = catalog.entries().first().unwrap().clone();
     let dst = install_to_recording_dir(&cat_root, &entry, &trace_dir).expect("install");
@@ -332,8 +301,7 @@ fn handler_skips_catalog_when_sibling_renames_exists() {
     set_env("CT_CATALOG_AUTOLOAD", Some("1"));
     set_env("CT_CATALOG_AUTOLOAD_DISABLED", None);
 
-    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) =
-        build_tinylib_fixture();
+    let (_cat_guard, cat_root, _trace_guard, trace_dir, bundle_path) = build_tinylib_fixture();
     // Drop a sibling renames.toml that maps `a` to a DIFFERENT name
     // than the catalog does.  The sibling MUST win.
     std::fs::write(
@@ -348,12 +316,7 @@ fn handler_skips_catalog_when_sibling_renames_exists() {
     .unwrap();
 
     let reader = build_trace_for_bundle(&bundle_path);
-    let mut handler = Handler::construct_with_reader(
-        TraceKind::Materialized,
-        RecreatorArgs::default(),
-        reader,
-        false,
-    );
+    let mut handler = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
     handler.load_sourcemaps(&trace_dir);
     handler.load_rename_list(&trace_dir, None);
     handler.load_catalog_autoload(&trace_dir, Some(&cat_root));

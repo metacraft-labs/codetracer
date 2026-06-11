@@ -178,8 +178,5 @@ fn per_position_with_no_name_index_returns_none() {
     // overall result is `None`.
     let (cache, path_str, _dir) = cache_with_map(NO_NAME_INDEX_MAP);
     let result = cache.resolve_name_at_position(&path_str, 1, 10, None, "a");
-    assert!(
-        result.is_none(),
-        "segment without name_index + empty names[] → None"
-    );
+    assert!(result.is_none(), "segment without name_index + empty names[] → None");
 }

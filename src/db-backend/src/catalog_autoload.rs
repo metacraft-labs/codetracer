@@ -51,15 +51,28 @@ pub enum AutoloadOutcome {
     NoMatch,
     /// SHA matched a catalog entry but the env opt-in is off.  The
     /// scanner logged the friendly hint; the recording is unchanged.
-    MatchLogged { library: String, version: String, sha256: String },
+    MatchLogged {
+        library: String,
+        version: String,
+        sha256: String,
+    },
     /// SHA matched a catalog entry AND the env opt-in is on.  The
     /// scanner applied the cataloged rename TOML in-memory (via the
     /// returned [`RenameList`]).  Caller composes / installs it.
-    Applied { library: String, version: String, sha256: String, list: RenameList },
+    Applied {
+        library: String,
+        version: String,
+        sha256: String,
+        list: RenameList,
+    },
     /// Candidate match was found but the SHA in `index.toml` doesn't
     /// match the actual content of the entry's TOML file (catalog
     /// corruption).  Refused even with the env opt-in.
-    ShaMismatch { recorded_sha: String, indexed_sha: String, toml_path: PathBuf },
+    ShaMismatch {
+        recorded_sha: String,
+        indexed_sha: String,
+        toml_path: PathBuf,
+    },
     /// Source file couldn't be read (permissions, missing, ...).
     /// Logged at debug — the path may be a synthetic/virtual source.
     SourceUnreadable,
@@ -74,8 +87,7 @@ pub enum AutoloadOutcome {
 pub fn autoload_enabled() -> bool {
     matches!(
         std::env::var("CT_CATALOG_AUTOLOAD").ok().as_deref(),
-        Some("1") | Some("on") | Some("true") | Some("yes")
-            | Some("ON") | Some("TRUE") | Some("YES")
+        Some("1") | Some("on") | Some("true") | Some("yes") | Some("ON") | Some("TRUE") | Some("YES")
     )
 }
 
@@ -107,10 +119,7 @@ pub fn autoload_disabled() -> bool {
 /// * Installs the returned `RenameList` on `Applied`.
 /// * Logs a warning on `ShaMismatch`.
 /// * Falls through silently on `NoMatch` / `SourceUnreadable`.
-pub fn scan_single_path(
-    recorded_path: &Path,
-    catalog_path: &Path,
-) -> AutoloadOutcome {
+pub fn scan_single_path(recorded_path: &Path, catalog_path: &Path) -> AutoloadOutcome {
     // Skip the scan when the kill switch is set.  Returning `NoMatch`
     // keeps the caller's code path uniform regardless of why we
     // didn't find anything.
@@ -133,10 +142,7 @@ pub fn scan_single_path(
     let recorded_sha = match compute_file_sha256(recorded_path) {
         Ok(s) => s,
         Err(e) => {
-            debug!(
-                "catalog_autoload: failed to hash {}: {e}",
-                recorded_path.display()
-            );
+            debug!("catalog_autoload: failed to hash {}: {e}", recorded_path.display());
             return AutoloadOutcome::SourceUnreadable;
         }
     };
@@ -179,8 +185,7 @@ pub fn scan_single_path(
     if entry.sha256.trim().len() != 64 || !is_hex(&entry.sha256) {
         warn!(
             "catalog_autoload: cataloged sha256 for {}@{} is not a 64-char hex string — refusing to apply",
-            entry.library,
-            entry.version
+            entry.library, entry.version
         );
         return AutoloadOutcome::ShaMismatch {
             recorded_sha,
@@ -239,10 +244,7 @@ pub fn scan_single_path(
 /// the result is the outcome for input path `i`.
 ///
 /// `catalog_path` defaults to [`catalog_path_from_env`] when `None`.
-pub fn scan_catalog_for_matches(
-    recorded_paths: &[&Path],
-    catalog_path: Option<&Path>,
-) -> Vec<AutoloadOutcome> {
+pub fn scan_catalog_for_matches(recorded_paths: &[&Path], catalog_path: Option<&Path>) -> Vec<AutoloadOutcome> {
     if autoload_disabled() {
         debug!("catalog_autoload: scan suppressed by CT_CATALOG_AUTOLOAD_DISABLED");
         return vec![AutoloadOutcome::NoMatch; recorded_paths.len()];
@@ -279,11 +281,7 @@ pub fn scan_catalog_for_matches(
 
 /// Internal helper used by [`scan_catalog_for_matches`] — same
 /// logic as [`scan_single_path`] but reuses a pre-parsed Catalog.
-fn scan_one_against_catalog(
-    recorded_path: &Path,
-    catalog: &Catalog,
-    enabled: bool,
-) -> AutoloadOutcome {
+fn scan_one_against_catalog(recorded_path: &Path, catalog: &Catalog, enabled: bool) -> AutoloadOutcome {
     if !recorded_path.is_file() {
         return AutoloadOutcome::SourceUnreadable;
     }
@@ -323,12 +321,7 @@ fn scan_one_against_catalog(
 
 /// Apply a matched catalog entry by loading its rename TOML.  Shared
 /// between the single-path and batch-scan code paths.
-fn apply_match(
-    entry: &CatalogEntry,
-    catalog: &Catalog,
-    recorded_path: &Path,
-    recorded_sha: String,
-) -> AutoloadOutcome {
+fn apply_match(entry: &CatalogEntry, catalog: &Catalog, recorded_path: &Path, recorded_sha: String) -> AutoloadOutcome {
     let toml_path = catalog.entry_toml_path(entry);
     match RenameList::load(&toml_path) {
         Ok(list) => {
@@ -627,10 +620,7 @@ mod tests {
         let other = scratch.path().join("other.js");
         fs::write(&other, "totally different content").unwrap();
 
-        let outcomes = scan_catalog_for_matches(
-            &[matching.as_path(), other.as_path()],
-            Some(&root),
-        );
+        let outcomes = scan_catalog_for_matches(&[matching.as_path(), other.as_path()], Some(&root));
         assert_eq!(outcomes.len(), 2);
         assert!(matches!(outcomes[0], AutoloadOutcome::MatchLogged { .. }));
         assert!(matches!(outcomes[1], AutoloadOutcome::NoMatch));
