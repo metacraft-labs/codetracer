@@ -137,6 +137,13 @@ pub mod autoformat;
 // sourcemap `names[]` data at value-stream render time.  Self-contained
 // module so the parser stays independently testable.
 pub mod rename_list;
+// Column-Aware-Tracing-And-Deminification §P8 — opt-in catalog
+// autoload.  Scans recorded sources at trace-open time, computes
+// SHA-256, looks up matches in the curated `codetracer-mapping-catalog`,
+// and (when `CT_CATALOG_AUTOLOAD=1`) installs the cataloged rename
+// TOML.  Self-contained module so the scanner stays independently
+// testable from the rest of the trace-open path.
+pub mod catalog_autoload;
 // M11 — RR-driver origin chain algorithm (spec §6.3).
 // Sits between `recreator_session::RecreatorReplaySession` (which owns
 // the worker transport) and `dap_handler::Handler::origin_chain` (which

@@ -114,6 +114,11 @@ mod autoformat;
 // copy because `sourcemap_cache` reaches for the module via the
 // `crate::rename_list` path.
 mod rename_list;
+// Column-Aware-Tracing-And-Deminification §P8 — opt-in catalog
+// autoload.  Mirrors the lib.rs declaration; the bin needs its own
+// copy because `dap_handler::Handler::load_catalog_autoload` reaches
+// for the module via the `crate::catalog_autoload` path.
+mod catalog_autoload;
 // M24 — Multi-trace session loading; mirror of the lib.rs declarations.
 // The bin needs its own copies because `dap_server` reaches for the
 // SessionHandler via the `crate::session_handler` path.

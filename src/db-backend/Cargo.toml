@@ -165,6 +165,12 @@ tree-sitter-tracepoint = { path = "./tree-sitter-trace/", optional = true }
 # pre-record formatting) and P7 (`codetracer-mapping-tools/`) can
 # consume it without duplicating the implementation.
 sourcemap-translate = { path = "../../../codetracer-trace-format/sourcemap-translate" }
+
+# Column-Aware-Tracing-And-Deminification §P8 — shared catalog crate
+# under `codetracer-trace-format/mapping-catalog/`.  Pulled in by the
+# trace-open autoload hook (`catalog_autoload.rs`) so the replay-server
+# and `ct-mapping-tools` agree on catalog layout + lookup semantics.
+mapping-catalog = { path = "../../../codetracer-trace-format/mapping-catalog" }
 tree-sitter-go = { version = "0.25.0", optional = true }
 tree-sitter-javascript = { version = "0.25.0", optional = true }
 tree-sitter-bash = { version = "0.23.3", optional = true }

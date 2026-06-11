@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -3582,6 +3582,100 @@ impl Handler {
                     .unwrap_or("<unspecified>")
             );
             self.sourcemap_cache.set_rename_list(Some(list));
+        }
+    }
+
+    /// §P8 — scan recorded sources for catalog matches and (optionally)
+    /// auto-apply them.
+    ///
+    /// Behaviour:
+    ///
+    /// 1. Snapshot every recorded absolute path (the recordings' path
+    ///    interning table, filtered to files that exist on disk).
+    /// 2. Skip any path that already has a sibling `renames.toml` —
+    ///    the user's explicit rename list always wins over the catalog.
+    /// 3. For each remaining path, call [`crate::catalog_autoload::scan_single_path`]
+    ///    against the catalog directory resolved via
+    ///    [`mapping_catalog::catalog_path_from_env`] (or the
+    ///    `explicit_catalog_path` argument when supplied).
+    /// 4. On `Applied`, merge the cataloged rename list into the
+    ///    in-memory `SourcemapCache`.  We do NOT write to disk by
+    ///    default — opt-in apply is in-memory only so the recording
+    ///    isn't mutated under the user.
+    /// 5. On `MatchLogged`, do nothing further — the autoload module
+    ///    already logged the friendly hint.
+    ///
+    /// The kill switches mirror the rest of the §P3-§P8 trace-open
+    /// hooks: `CT_CATALOG_AUTOLOAD_DISABLED=1` skips the scan
+    /// entirely; `CT_CATALOG_AUTOLOAD=1` enables auto-apply.
+    ///
+    /// Spec: `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org` §P8.3.
+    pub fn load_catalog_autoload(&mut self, trace_dir: &Path, explicit_catalog_path: Option<&Path>) {
+        use crate::catalog_autoload::{AutoloadOutcome, autoload_disabled, scan_single_path};
+
+        if autoload_disabled() {
+            info!("catalog_autoload: skipped via CT_CATALOG_AUTOLOAD_DISABLED");
+            return;
+        }
+        // If the trace already has a sibling renames.toml, the user's
+        // explicit list wins — don't even consult the catalog.
+        let sibling = trace_dir.join("renames.toml");
+        if sibling.is_file() {
+            debug!(
+                "catalog_autoload: sibling renames.toml present at {} — skipping catalog scan",
+                sibling.display()
+            );
+            return;
+        }
+        let catalog_path = match explicit_catalog_path {
+            Some(p) => p.to_path_buf(),
+            None => mapping_catalog::catalog_path_from_env(),
+        };
+        let workdir = self.reader.workdir().to_path_buf();
+        let entries: Vec<String> = self
+            .reader
+            .path_entries_iter()
+            .map(|(p, _id)| p.to_string())
+            .collect();
+        for recorded in entries {
+            let recorded_path = std::path::Path::new(&recorded);
+            let probe = if recorded_path.is_absolute() {
+                recorded_path.to_path_buf()
+            } else {
+                workdir.join(recorded_path)
+            };
+            if !probe.is_file() {
+                continue;
+            }
+            let outcome = scan_single_path(&probe, &catalog_path);
+            match outcome {
+                AutoloadOutcome::Applied { list, library, version, .. } => {
+                    info!(
+                        "catalog_autoload: installing {library}@{version} ({} entries) in-memory",
+                        list.len()
+                    );
+                    // Compose: the in-memory rename list wins over any
+                    // future sibling-loaded list because this method
+                    // is called AFTER `load_rename_list`.  The
+                    // composition rule from the §P5 spec ("explicit
+                    // user list wins") still holds: when the user
+                    // ships a sibling renames.toml, we exit early
+                    // above before installing the catalog list.
+                    self.sourcemap_cache.set_rename_list(Some(list));
+                }
+                AutoloadOutcome::MatchLogged { .. } => {
+                    // Already logged by the scanner; nothing else to do.
+                }
+                AutoloadOutcome::ShaMismatch { recorded_sha, indexed_sha, toml_path } => {
+                    warn!(
+                        "catalog_autoload: sha mismatch (recorded {recorded_sha}, indexed {indexed_sha}) for {} — refusing to apply",
+                        toml_path.display()
+                    );
+                }
+                AutoloadOutcome::NoMatch
+                | AutoloadOutcome::SourceUnreadable
+                | AutoloadOutcome::CatalogUnavailable => {}
+            }
         }
     }
 
