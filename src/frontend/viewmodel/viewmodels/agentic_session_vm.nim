@@ -408,9 +408,12 @@ proc handleAgentEvidenceRpcPayload*(vm: AgenticSessionVM; payload: string):
     evidenceNotificationFromJson(parseJson(payload)))
 
 proc handleAgentEvidenceRpcFile*(vm: AgenticSessionVM; path: string): bool =
-  if path.len == 0 or not fileExists(path):
-    return false
-  vm.handleAgentEvidenceRpcPayload(readFile(path))
+  when defined(js):
+    false
+  else:
+    if path.len == 0 or not fileExists(path):
+      return false
+    vm.handleAgentEvidenceRpcPayload(readFile(path))
 
 proc createAgenticSessionVM*(store: ReplayDataStore;
     service: CodeTracerAgentService; editor: EditorVM;

@@ -101,14 +101,17 @@ proc harborTransport(fixture: HarborFixture): HttpTransport =
           {"type": "tool_use", "tool_name": "bash",
            "tool_execution_id": "tool-1", "status": "started",
            "message": "run tests", "timestamp": 2},
+          {"type": "diff", "file_path": "src/app.nim",
+           "lines_added": 2, "lines_removed": 1,
+           "diff": "agent harbor content", "timestamp": 3},
           {"type": "milestone_progress", "completed": 2, "total": 3,
-           "message": "M4 progress", "timestamp": 3},
+           "message": "M4 progress", "timestamp": 4},
           {"type": "status", "status": fixture.terminalStatus,
-           "message": "terminal state", "timestamp": 4}
+           "message": "terminal state", "timestamp": 5}
         ],
         "has_more": false,
         "oldest_timestamp": 1,
-        "total_count": 4
+        "total_count": 5
       }))
     if req.httpMethod == hmGet and
         req.url.contains("/api/v1/sessions/session-harbor-m4/events"):

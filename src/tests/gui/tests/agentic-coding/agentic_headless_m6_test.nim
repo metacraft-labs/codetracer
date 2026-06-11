@@ -75,6 +75,31 @@ proc harborTransport(fixture: HarborScenarioFixture): HttpTransport =
         }
       }))
     if req.httpMethod == hmGet and req.url.contains(
+        "/api/v1/sessions/session-codetracer-m6/events/history"):
+      return HttpResponse(status: 200, body: $(%*{
+        "events": [
+          {"type": "workspace", "status": "ready",
+           "mountPath": fixture.worktree, "workingCopyMode": "git_worktree",
+           "timestamp": 1},
+          {"type": "plan", "entries": ["edit", "test", "ct evidence"],
+           "timestamp": 2},
+          {"type": "tool_use", "tool_name": "bash",
+           "tool_execution_id": "tool-tests", "status": "started",
+           "message": "nim test && ct agent evidence", "timestamp": 3},
+          {"type": "diff", "file_path": "src/feature.nim",
+           "lines_added": 1, "lines_removed": 1,
+           "diff": "@@ -1 +1 @@\n-proc answer(): int = 1\n+proc answer(): int = 42\n",
+           "timestamp": 4},
+          {"type": "milestone_progress", "completed": 1, "total": 1,
+           "message": "M6 complete", "timestamp": 5},
+          {"type": "status", "status": "completed",
+           "message": "scenario complete", "timestamp": 6}
+        ],
+        "has_more": false,
+        "oldest_timestamp": 1,
+        "total_count": 6
+      }))
+    if req.httpMethod == hmGet and req.url.contains(
         "/api/v1/sessions/session-codetracer-m6/events"):
       return HttpResponse(status: 200, body:
         "event: message\n" &
@@ -235,8 +260,9 @@ suite "CodeTracer agentic M6 headless integration gate":
       check f.harbor.requests.anyIt(it.httpMethod == hmPost and
         it.url.endsWith("/api/v1/tasks"))
       let taskBody = parseJson(f.harbor.requests[0].body)
-      check taskBody["workspace"]["workingCopyMode"].getStr() == "git_worktree"
-      check ($taskBody["prompt"]).contains(
+      check taskBody["workspace_path"].getStr() == f.worktree
+      check taskBody["working_copy_mode"].getStr() == "git_worktree"
+      check taskBody["prompt"].getStr().contains(
         "ct agent evidence --session agent:harbor:m6")
       check ($taskBody["agents"][0]["acpStdioLaunchCommand"]).contains(
         "codetracer_contract_worktree_file_edges.yaml")

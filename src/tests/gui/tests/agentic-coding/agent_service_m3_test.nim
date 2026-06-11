@@ -183,9 +183,10 @@ suite "CodeTracer agent service M3":
         launchConfig(ctabHarbor, "prompt-key"))
 
       let body = capture.requestBody("/api/v1/tasks")
-      let outgoingPrompt = $body["prompt"]
+      let outgoingPrompt = body["prompt"].getStr()
       let session = store.agentSessions.val.sessions[0]
-      check body["workspace"]["workingCopyMode"].getStr() == "git_worktree"
+      check body["workspace_path"].getStr() == "/repo"
+      check body["working_copy_mode"].getStr() == "git_worktree"
       check session.evidenceCommand ==
         "ct agent evidence --session agent:harbor:prompt-key"
       check outgoingPrompt.contains(session.evidenceCommand)

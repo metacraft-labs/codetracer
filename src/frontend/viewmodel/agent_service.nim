@@ -150,6 +150,23 @@ proc lifecycleFromEvent(event: AgentEvent;
     if current in {aslCompleted, aslCancelled, aslError}: current
     else: aslRunning
 
+proc normalizeWorkingCopyMode(value: string): string =
+  case value
+  of "git": "git_worktree"
+  else: value
+
+proc lifecycleFromHarborStatus(status: string;
+    current: AgentServiceLifecycle): AgentServiceLifecycle =
+  case status
+  of "completed": aslCompleted
+  of "cancelled": aslCancelled
+  of "failed", "error": aslError
+  of "":
+    current
+  else:
+    if current in {aslCompleted, aslCancelled, aslError}: current
+    else: aslRunning
+
 proc eventText(event: AgentEvent): string =
   if event.text.len > 0:
     return event.text
@@ -237,9 +254,33 @@ proc registerAgentEvidence*(service: CodeTracerAgentService;
       text:
       if notification.status == aesReady:
           "Recorded test evidence ready for DeepReview"
-        else:
+      else:
           "Recorded test evidence error: " & notification.status.statusString(),
       status: notification.status.statusString())
+
+proc refreshHarborSessionInfo*(service: CodeTracerAgentService; tabId: string;
+    session: AgentSession; sourceWorkspace = "") =
+  if service.client.backend != abkHarbor or session.id.len == 0:
+    return
+  try:
+    let info = service.client.sessionInfo(session)
+    service.updateSession(tabId) do (entry: var AgentServiceSessionEntry):
+      if info.workspacePath.len > 0 and info.workspacePath != sourceWorkspace:
+        entry.workspacePath = info.workspacePath
+      if info.workingCopyMode.len > 0:
+        entry.workingCopyMode = info.workingCopyMode.normalizeWorkingCopyMode()
+      entry.lifecycle = info.status.lifecycleFromHarborStatus(entry.lifecycle)
+  except CatchableError:
+    discard
+
+proc markSessionCancelled*(service: CodeTracerAgentService; tabId: string) =
+  service.updateSession(tabId) do (entry: var AgentServiceSessionEntry):
+    entry.lifecycle = aslCancelled
+    entry.events.add AgentServiceEventEntry(
+      id: entry.tabId & ":cancelled:" & $entry.events.len,
+      kind: aseCancelled,
+      text: "Agent Harbor task cancelled",
+      status: "cancelled")
 
 proc applyEvents*(service: CodeTracerAgentService; tabId: string;
     events: openArray[AgentEvent]) =
@@ -250,7 +291,7 @@ proc applyEvents*(service: CodeTracerAgentService; tabId: string;
       if event.workspacePath.len > 0:
         entry.workspacePath = event.workspacePath
       if event.workingCopyMode.len > 0:
-        entry.workingCopyMode = event.workingCopyMode
+        entry.workingCopyMode = event.workingCopyMode.normalizeWorkingCopyMode()
       if event.milestoneTotal > 0:
         entry.milestonesCompleted = event.milestoneCompleted
         entry.milestonesTotal = event.milestoneTotal
@@ -306,9 +347,17 @@ proc startAgentSession*(service: CodeTracerAgentService;
     title: config.defaultTitle(),
     prompt: prompt.promptText(),
     evidenceCommand: evidenceCommandForTab(tabId),
+    milestonesCompleted: 0,
+    milestonesTotal: 1,
     workingCopyMode:
     if config.backend == ctabHarbor: $wiGitWorktree
       else: $wiNone)
+  service.updateSession(tabId) do (entry: var AgentServiceSessionEntry):
+    entry.events.add AgentServiceEventEntry(
+      id: tabId & ":evidence-command",
+      kind: aseStatus,
+      text: "Evidence command: " & evidenceCommandForTab(tabId),
+      status: "queued")
 
   let mode = buildStartMode(config, prompt)
   let started = service.client.startSession(mode)
@@ -318,13 +367,15 @@ proc startAgentSession*(service: CodeTracerAgentService;
     entry.sessionId = started.id
     entry.taskId = started.taskId
     entry.lifecycle = aslRunning
+  if config.backend == ctabHarbor:
+    service.refreshHarborSessionInfo(tabId, started, config.cwd)
 
   case config.backend
   of ctabAcp:
     let turn = service.client.sendPrompt(started, prompt)
     service.applyEvents(tabId, acpUpdatesToAgentEvents(started.id, turn.updates))
   of ctabHarbor:
-    service.applyEvents(tabId, service.client.readAgentEvents(started))
+    service.applyEvents(tabId, service.client.eventHistory(started, limit = 50))
 
 proc startFromCommandPalette*(service: CodeTracerAgentService;
     promptText: string; cwd: string; backend: CodeTracerAgentBackend;
@@ -348,7 +399,8 @@ proc reconnectHarborSession*(service: CodeTracerAgentService; tabId, sessionId,
       id: sessionId,
       taskId: taskId,
       backend: abkHarbor))
-    workspacePath = info.workspacePath
+    if info.workspacePath != cwd:
+      workspacePath = info.workspacePath
     status = info.status
   except CatchableError:
     discard
@@ -358,13 +410,7 @@ proc reconnectHarborSession*(service: CodeTracerAgentService; tabId, sessionId,
     sessionId: sessionId,
     taskId: taskId,
     backend: asbHarbor,
-    lifecycle:
-    case status
-    of "completed": aslCompleted
-    of "cancelled": aslCancelled
-    of "failed", "error": aslError
-    of "": aslConnecting
-    else: aslRunning,
+    lifecycle: status.lifecycleFromHarborStatus(aslConnecting),
     title: "Agent task",
     workspacePath: workspacePath,
     workingCopyMode: $wiGitWorktree)

@@ -20,8 +20,42 @@ NIM_COMMON_FLAGS=\
 --hint[XCannotRaiseY]:off\
 --warning[CaseTransition]:off
 
+ROOT = $(TUP_CWD)/../../
+
+NIM_REPO_PATH_FLAGS=\
+--path:$(ROOT)/libs/NimYAML\
+--path:$(ROOT)/libs/asynctools\
+--path:$(ROOT)/libs/nim\
+--path:$(ROOT)/libs/nim-chronicles\
+--path:$(ROOT)/libs/nim-faststreams\
+--path:$(ROOT)/libs/nim-json-serialization\
+--path:$(ROOT)/libs/nim-serialization\
+--path:$(ROOT)/libs/nim-prompt\
+--path:$(ROOT)/libs/nim-stew\
+--path:$(ROOT)/libs/nim-unicodedb/src\
+--path:$(ROOT)/libs/poly\
+--path:$(ROOT)/libs/quicktest\
+--path:$(ROOT)/libs/chronos\
+--path:$(ROOT)/libs/parsetoml/src\
+--path:$(ROOT)/libs/nim-result\
+--path:$(ROOT)/libs/nim-confutils\
+--path:$(ROOT)/libs/nimcrypto\
+--path:$(ROOT)/libs/zip\
+--path:$(ROOT)/libs/jsony/src\
+--path:$(ROOT)/libs/nim-uuid4/src\
+--path:$(ROOT)/../isonim/src\
+--path:$(ROOT)/../isonim-tui/src\
+--path:$(ROOT)/../isonim-gpui/src\
+--path:$(ROOT)/../nim-termctl/src\
+--path:$(ROOT)/../nim-pty/src\
+--path:$(ROOT)/../nim-everywhere/src\
+--path:$(ROOT)/../nim-acp/src\
+--path:$(ROOT)/../nim-agent-harbor/src\
+--path:$(ROOT)/../nim-agents/src
+
 NIM_DEBUG_FLAGS=\
 $(NIM_COMMON_FLAGS)\
+$(NIM_REPO_PATH_FLAGS)\
 -d:debug\
 --debugInfo\
 --lineDir:on\
@@ -30,6 +64,7 @@ $(NIM_COMMON_FLAGS)\
 
 NIM_RELEASE_FLAGS=\
 $(NIM_COMMON_FLAGS)\
+$(NIM_REPO_PATH_FLAGS)\
 -d:release\
 --boundChecks:on
 
@@ -39,7 +74,6 @@ NIM_DANGER_FLAGS=\
 --stacktrace:off\
 --linetrace:off
 
-ROOT = $(TUP_CWD)/../../
 NIM_BIN = nim
 
 # Windows port: `libs/zip/zip/libzip.nim` compiles `libzip_all.c` directly on

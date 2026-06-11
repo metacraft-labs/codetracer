@@ -193,6 +193,7 @@ type
     aTraceStaticBlockAtCursor, # Trace `static:` block at the editor cursor
     aCollabInvite,            # Create/copy/revoke a collaboration invite URL
     aTimeline,                # Open the Timeline panel
+    aStartAgenticWorktreeSession, # Start a worktree-isolated agentic session
     # Visual Replay / Video Player keyboard shortcuts — M4.  Routed through the
     # standard ClientAction mechanism but scoped to the Video Player component
     # (handlers query a focus marker before delegating to VideoPlayerVM).  See

@@ -8,9 +8,10 @@ import
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
-      pixel_history, shader_debug, video_player],
+      pixel_history, shader_debug, video_player, agentic_session_launcher],
   lib/[ jslib, logging ],
   types, lang, utils, renderer, config, dap, edit_mode,
+  ui/agentic_worktree_test_hooks,
   viewmodel/store/replay_data_store,
   viewmodel/viewmodels/video_player_vm,
   ../common/ct_logging,
@@ -693,6 +694,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Terminal Output", aTerminal
           element "Scratchpad", aScratchpad
           element "Agent Activity", aAgentActivity
+          element "Start Agent Worktree Session", aStartAgenticWorktreeSession
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -1620,6 +1622,9 @@ when not defined(ctInExtension):
         agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
       initPanelVM("initDeepReviewVMWithStore"):
         deepreview.initDeepReviewVMWithStore(activeSessionVM.store)
+      initPanelVM("installAgenticWorktreeTestHooks"):
+        agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
+          activeSessionVM.store)
 
       # -----------------------------------------------------------------
       # Direct viewsApi subscriptions: bypass the component mediator
@@ -2422,6 +2427,11 @@ proc onNoTrace(
   data.createUIComponents()
   data.refreshCommandPaletteMenuIndex()
   data.refreshCommandPaletteFileIndex()
+
+  when not defined(ctInExtension):
+    if not middlewareConfigured:
+      configureMiddleware()
+      middlewareConfigured = true
 
   # Check if coming from welcome screen (where layout was already initialized)
   let wasFromWelcomeScreen = not data.ui.layout.isNil
@@ -3692,6 +3702,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
       cstring(cgpDriver.presetName),
       cstring(cgpHost.presetName)]),
   proc(actionData: JsObject) = data.openLayoutTab(Content.Timeline), # aTimeline
+  proc(actionData: JsObject) = # aStartAgenticWorktreeSession
+    agentic_session_launcher.startAgenticWorktreeSessionFromCommandPalette(),
   # --- M4 Visual Replay / Video Player handlers ----------------------------
   # Each handler delegates to ``dispatchVideoPlayerAction`` on the live
   # VideoPlayerVM instance.  Focus scoping is enforced *by the Mousetrap

@@ -1603,6 +1603,10 @@ test-codetracer-agentic-headless-matrix:
 test-codetracer-agentic-regression-gate:
   bash scripts/test-codetracer-agentic-headless.sh regression
 
+# Run the focused GUI E2E tests for the worktree-isolated agentic workflow.
+test-e2e-agentic-worktree:
+  bash scripts/test-agentic-worktree-gui.sh
+
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
 
