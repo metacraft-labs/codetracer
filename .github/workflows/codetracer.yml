@@ -277,7 +277,7 @@ jobs:
       - name: Run origin-DAP per-PR subset (python + rust)
         shell: bash
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CT_TEST_LANGS: python,rust
         run: just test-origin-dap
 
@@ -342,7 +342,7 @@ jobs:
       - name: Run origin-DAP full matrix (all languages)
         shell: bash
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CT_TEST_LANGS: all
         run: just test-origin-dap
 
@@ -531,7 +531,7 @@ jobs:
         # vendored ``libs/nim-stew``; mirror that here so
         # build_native_api.sh's ``--path:`` flags pick it up.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: cargo build
 
       - name: Test db-backend
@@ -543,7 +543,7 @@ jobs:
         # cache doesn't trigger a re-run that then fails for the
         # same path-resolution reason.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           # ``ctfs_trace_reader::tests::bench_new_format_startup_time``
           # asserts new-format trace startup is under 200ms.  That
           # number is calibrated for a developer workstation; GitHub-
@@ -586,7 +586,7 @@ jobs:
         # variable set so any cached-state-invalidation triggers
         # a regeneration with stew on the import path.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Clippy backend-manager
@@ -751,7 +751,7 @@ jobs:
         # build_native_api.sh fails on a fresh runner with
         # ``cannot open file: stew/endians2``.
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: cargo build --release
 
       - name: Build backend-manager
@@ -979,7 +979,7 @@ jobs:
       # stale cached @memulator_wasm_api.nim.c surviving from prior runs.
       - name: Run rust lints
         env:
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: nix develop .#devShells.x86_64-linux.default -c ./ci/lint/rust.sh
 
   reprobuild-macos-smoke:
@@ -1043,6 +1043,8 @@ jobs:
 
       - name: Run origin-DAP per-PR subset (python + rust)
         env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CT_TEST_LANGS: python,rust
         run: nix develop . --command just test-origin-dap
 
@@ -1082,6 +1084,8 @@ jobs:
 
       - name: Run origin-DAP full matrix (all languages)
         env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CT_TEST_LANGS: all
         run: nix develop . --command just test-origin-dap
 
@@ -2220,7 +2224,7 @@ jobs:
         # tell build.rs to skip the direnv wrapper.
         env:
           TRACE_FORMAT_DIR: ${{ github.workspace }}/libs/codetracer-trace-format
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
