@@ -129,6 +129,14 @@ object = { version = "0.39", default-features = false, features = [
 
 ntest = "0.9.3"
 
+# Column-Aware-Tracing-And-Deminification §P5 — user-provided variable
+# rename list lives in `<recording-dir>/renames.toml`.  The crate is
+# already in the transitive dependency graph (origin-classifier pulls
+# it in), but we declare it as a direct dependency so the §P5 module
+# stays self-contained and the dependency stays visible in the audit
+# trail.
+toml = "0.8"
+
 # tree-sitter dependencies — only needed for syntax highlighting / source
 # analysis.  Gated behind the `syntax-highlight` feature so that WASM builds
 # (which cannot compile the C grammars) can omit them.

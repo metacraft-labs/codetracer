@@ -118,6 +118,7 @@ fn _test_backend_dap_server_socket() {
         session_id: None,
         recreator_exe: None,
         restore_location: None,
+        rename_list: None,
     };
 
     let launch = client.launch(launch_args).expect("failed to build launch request");

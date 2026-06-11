@@ -785,8 +785,14 @@ impl Handler {
             } else {
                 None
             };
+            // §P5 — apply the user rename list at render time so the
+            // UI sees the user-facing binding name.  Origin summaries
+            // continue to look up by the recorded (minified) name —
+            // origin tracking is keyed on the recorded variable id,
+            // not the rendered name.
+            let (display, _original) = self.resolve_variable_name(&l.expression);
             locals.push(Variable {
-                expression: l.expression.clone(),
+                expression: display,
                 value: to_ct_value(&l.value),
                 address: l.address,
                 origin_summary,
@@ -3517,6 +3523,68 @@ impl Handler {
             .translate_for_path(path, line, column, cache_dir.as_deref())
     }
 
+    /// §P5 — discover + install a user-provided variable rename list.
+    ///
+    /// Resolution order:
+    ///
+    /// 1. When `explicit_path` is `Some(_)` the loader uses it
+    ///    verbatim — this is the path the CLI `--rename-list <p>` flag
+    ///    or the DAP `launch.renameList` field carries.
+    /// 2. Otherwise the loader probes `<trace_dir>/renames.toml`.
+    /// 3. When neither is found, the cache is left without a rename
+    ///    list and [`crate::sourcemap_cache::SourcemapCache::resolve_name`]
+    ///    falls back to the §P3 sourcemap-names data alone.
+    ///
+    /// The kill switch `CT_RENAME_LIST={0,off,false,no}` short-circuits
+    /// the loader before any filesystem probe — useful when the user
+    /// wants to debug the minified binding names directly.
+    ///
+    /// Errors are logged at `warn!` and the cache stays empty;
+    /// failure to load is never fatal.
+    ///
+    /// Spec: `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org` §P5.1 / §P5.4.
+    pub fn load_rename_list(&mut self, trace_dir: &Path, explicit_path: Option<&Path>) {
+        if !crate::rename_list::rename_list_enabled() {
+            info!("rename_list: disabled via CT_RENAME_LIST");
+            return;
+        }
+        let load_result = match explicit_path {
+            Some(p) => {
+                info!("rename_list: loading explicit path {}", p.display());
+                match crate::rename_list::RenameList::load(p) {
+                    Ok(list) => Some(list),
+                    Err(e) => {
+                        warn!(
+                            "rename_list: failed to load explicit rename list at {}: {e}",
+                            p.display()
+                        );
+                        None
+                    }
+                }
+            }
+            None => match crate::rename_list::RenameList::try_load_sibling(trace_dir) {
+                Ok(opt) => opt,
+                Err(e) => {
+                    warn!(
+                        "rename_list: failed to load sibling renames.toml in {}: {e}",
+                        trace_dir.display()
+                    );
+                    None
+                }
+            },
+        };
+        if let Some(list) = load_result {
+            info!(
+                "rename_list: installed {} entries (meta version = {})",
+                list.len(),
+                list.meta()
+                    .and_then(|m| m.version.as_deref())
+                    .unwrap_or("<unspecified>")
+            );
+            self.sourcemap_cache.set_rename_list(Some(list));
+        }
+    }
+
     /// Handle the `ct/update-expansion` custom DAP request.
     ///
     /// When the user presses ALT+E on a macro call in the editor, the frontend
@@ -4055,6 +4123,68 @@ impl Handler {
         dap::new_dap_variable(&ct_variable.expression, &dap_value_text, 0)
     }
 
+    /// §P5 — apply the user-provided rename list to a recorded binding
+    /// name.  Returns `(display_name, original_name)` where:
+    ///
+    /// * `display_name` is the name the UI should show — the renamed
+    ///   form when the resolver produced one, the recorded name
+    ///   otherwise.
+    /// * `original_name` is the recorded minified name, surfaced so the
+    ///   UI can render `array (a)` if the user wants to see both.
+    ///
+    /// `step_id` provides the position context the resolver uses to
+    /// derive a `(file, scope_hint)` pair.  The lookup is best-effort:
+    /// when the step has no associated path / call, the resolver only
+    /// inspects the global-scope user list and the sourcemap names.
+    pub(crate) fn resolve_variable_name(&self, recorded_name: &str) -> (String, String) {
+        let original = recorded_name.to_string();
+        // Cheap fast-paths: if neither a rename list nor a sourcemap
+        // is loaded the resolver always returns `None`, so we avoid
+        // the (file, scope) computation entirely.
+        if !self.sourcemap_cache.has_rename_list() && self.sourcemap_cache.is_empty() {
+            return (original.clone(), original);
+        }
+        let step_id = self.step_id;
+        let file = self
+            .reader
+            .step(step_id)
+            .and_then(|s| self.reader.path(s.path_id).map(|p| p.to_string()))
+            .unwrap_or_default();
+        // Compute the scope hint: prefer function scope (from the
+        // surrounding call's function name) and fall back to a block
+        // scope keyed by the step's line.
+        let scope_hint = self.reader.step(step_id).map(|s| {
+            let block = crate::rename_list::Scope::Block(s.line.0 as u32);
+            let call_key = self.reader.call_key_for_step(step_id);
+            let fn_scope = call_key
+                .and_then(|k| self.reader.call(k))
+                .and_then(|call| self.reader.function(call.function_id))
+                .map(|func| crate::rename_list::Scope::Function(func.name.clone()));
+            (fn_scope, block)
+        });
+
+        // Try the narrower scope (function) first, then the broader
+        // (block).  `resolve_name` falls back to the global entries on
+        // miss internally.
+        if let Some((fn_scope, block_scope)) = scope_hint {
+            if let Some(fn_s) = &fn_scope
+                && let Some(renamed) = self.sourcemap_cache.resolve_name(&file, Some(fn_s), recorded_name)
+            {
+                return (renamed, original);
+            }
+            if let Some(renamed) = self
+                .sourcemap_cache
+                .resolve_name(&file, Some(&block_scope), recorded_name)
+            {
+                return (renamed, original);
+            }
+        }
+        if let Some(renamed) = self.sourcemap_cache.resolve_name(&file, None, recorded_name) {
+            return (renamed, original);
+        }
+        (original.clone(), original)
+    }
+
     pub fn variables(
         &mut self,
         request: dap::Request,
@@ -4077,7 +4207,9 @@ impl Handler {
                 .iter()
                 .map(|l| {
                     let ct_val = to_ct_value(&l.value);
-                    dap::new_dap_variable(&l.expression, &ct_val.text_repr(), 0)
+                    // §P5 — apply the user rename list at render time.
+                    let (display, _original) = self.resolve_variable_name(&l.expression);
+                    dap::new_dap_variable(&display, &ct_val.text_repr(), 0)
                 })
                 .collect();
             self.respond_dap(
@@ -4093,15 +4225,20 @@ impl Handler {
         let vars_slice = self.reader.variables_at(self.step_id).unwrap_or(&empty_vars);
         let full_value_locals: Vec<Variable> = vars_slice
             .iter()
-            .map(|v| Variable {
-                expression: self
+            .map(|v| {
+                let recorded_name = self
                     .reader
                     .variable_name(v.variable_id)
                     .unwrap_or("<unknown>")
-                    .to_string(),
-                value: self.reader.to_ct_value(&v.value),
-                address: NO_ADDRESS,
-                origin_summary: None,
+                    .to_string();
+                // §P5 — apply the user rename list at render time.
+                let (display, _original) = self.resolve_variable_name(&recorded_name);
+                Variable {
+                    expression: display,
+                    value: self.reader.to_ct_value(&v.value),
+                    address: NO_ADDRESS,
+                    origin_summary: None,
+                }
             })
             .collect();
 

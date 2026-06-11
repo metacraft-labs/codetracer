@@ -26,7 +26,7 @@ pub struct Request {
 
 // using this custom definition, not autogenerating one, because we have custom fields for
 // ct launch request (and to handle manually the rename = "__restart" case)
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchRequestArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +63,14 @@ pub struct LaunchRequestArguments {
     pub typ: Option<String>,
     #[serde(rename = "__sessionId", skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Column-Aware-Tracing-And-Deminification §P5.4 — explicit path to
+    /// a user-provided rename list (TOML).  When `Some(_)` the loader
+    /// uses this path instead of the default sibling lookup
+    /// (`<recording-dir>/renames.toml`).  When `None` the trace-open
+    /// hook tries the sibling location.  See
+    /// [`crate::rename_list::RenameList`].
+    #[serde(rename = "renameList", skip_serializing_if = "Option::is_none")]
+    pub rename_list: Option<PathBuf>,
 }
 
 // TODO: for now easier to initialize those, but when we start processing client capabilities or in

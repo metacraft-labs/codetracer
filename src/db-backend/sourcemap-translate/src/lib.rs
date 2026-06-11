@@ -283,6 +283,32 @@ impl SourcemapIndex {
             .position(|s| s == source)
             .map(|i| i as u32)
     }
+
+    /// `true` when `name` is present in the sourcemap's `names[]` array.
+    ///
+    /// Source Map V3 `names[]` is the dedup table the per-segment
+    /// `name_index` references; entries are the **original** identifier
+    /// names from the un-minified source.  The §P5 rename resolver uses
+    /// this as a coarse-grained sanity check: when the user asks
+    /// "does the sourcemap recognise binding name X?" we answer by
+    /// checking whether X appears anywhere in `names[]`.
+    ///
+    /// This is intentionally NOT a per-position lookup — that path is
+    /// covered by [`SourcemapIndex::translate`] returning
+    /// `OriginalPos::name`.  The boolean form is what the rename
+    /// resolver wants when composing with the user list: if the
+    /// sourcemap already names this binding (by either side of the
+    /// rename), the recorded coordinate is "blessed" and the resolver
+    /// can echo it back as the renamed name.
+    pub fn has_name(&self, name: &str) -> bool {
+        let count = self.inner.get_name_count();
+        for i in 0..count {
+            if self.inner.get_name(i) == Some(name) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// Discover a sourcemap for a given source file by following the

@@ -131,6 +131,12 @@ pub mod sourcemap_cache;
 // `sourcemap_cache` integration calls into it lazily on
 // per-path translation requests when no sourcemap is loaded.
 pub mod autoformat;
+// Column-Aware-Tracing-And-Deminification §P5 — user-provided variable
+// rename list.  Loaded at trace open from `<recording-dir>/renames.toml`
+// (or via `--rename-list <path>` on the CLI) and composed with the §P3
+// sourcemap `names[]` data at value-stream render time.  Self-contained
+// module so the parser stays independently testable.
+pub mod rename_list;
 // M11 — RR-driver origin chain algorithm (spec §6.3).
 // Sits between `recreator_session::RecreatorReplaySession` (which owns
 // the worker transport) and `dap_handler::Handler::origin_chain` (which

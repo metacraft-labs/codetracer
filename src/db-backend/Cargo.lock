@@ -1571,6 +1571,7 @@ dependencies = [
  "shellexpand",
  "sourcemap-translate",
  "tempfile",
+ "toml",
  "tree-sitter",
  "tree-sitter-aiken",
  "tree-sitter-bash",

@@ -46,6 +46,7 @@ use sourcemap_translate::{OriginalPos, SourcemapIndex, discover_sourcemap_for};
 use codetracer_trace_types::PathId;
 
 use crate::autoformat::{self, AutoFormatError};
+use crate::rename_list::{RenameList, Scope};
 
 /// One translated location returned by [`SourcemapCache::translate`].
 ///
@@ -106,6 +107,16 @@ pub struct SourcemapCache {
     ///   subprocess on every hot-loop translation call for the same
     ///   pass-through path.
     autoformat_by_path: HashMap<String, Option<Arc<AutoFormatLookup>>>,
+    /// §P5 — user-provided variable rename list.  Loaded once at
+    /// trace open from `<recording-dir>/renames.toml` (or from a CLI-
+    /// supplied path) and consulted by [`SourcemapCache::resolve_name`]
+    /// when the value-stream renderer wants the user-facing name for a
+    /// recorded binding.  `None` when no rename list was supplied (or
+    /// `CT_RENAME_LIST=0` disabled the feature).
+    ///
+    /// `Arc` so we can hand a cheap snapshot to consumers without
+    /// re-cloning the parsed entries on every value-render call.
+    rename_list: Option<Arc<RenameList>>,
 }
 
 /// One auto-formatted path's projected source + materialised file path.
@@ -386,6 +397,94 @@ impl SourcemapCache {
             let idx: &SourcemapIndex = idx.as_ref();
             if let Some(content) = idx.source_content(original_source) {
                 return Some(content.to_string());
+            }
+        }
+        None
+    }
+
+    /// §P5 — install a user-provided rename list.
+    ///
+    /// Replaces any existing rename list.  Pass `None` to clear.
+    /// Called once at trace-open time after [`SourcemapCache::try_load`]
+    /// has finished — see
+    /// [`crate::dap_handler::Handler::load_rename_list`].
+    pub fn set_rename_list(&mut self, list: Option<RenameList>) {
+        self.rename_list = list.map(Arc::new);
+    }
+
+    /// `true` when a non-empty rename list is installed.
+    pub fn has_rename_list(&self) -> bool {
+        match &self.rename_list {
+            Some(l) => !l.is_empty(),
+            None => false,
+        }
+    }
+
+    /// Read-only access to the installed rename list — useful for
+    /// tests and diagnostics surfacing the parsed entries without
+    /// going through the resolver.
+    pub fn rename_list(&self) -> Option<&RenameList> {
+        self.rename_list.as_deref()
+    }
+
+    /// §P5 — resolve a recorded binding's user-facing name.
+    ///
+    /// Composition rules (spec §P5):
+    ///
+    /// 1. **User rename list** wins on conflict — explicit > inferred.
+    /// 2. **Sourcemap V3 `names[]`** confirms otherwise un-renamed
+    ///    bindings: when the sourcemap's name table contains
+    ///    `minified_name`, the resolver echoes it back, signalling
+    ///    that the recorded name is already a known original name
+    ///    (i.e. the bundle preserved it).
+    /// 3. Returns `None` for unknown bindings — callers surface the
+    ///    recorded name unchanged in that case.
+    ///
+    /// ## File-key matching
+    ///
+    /// The recorded path string is often an absolute path
+    /// (e.g. `/home/me/proj/lodash.min.js`) while the user-facing
+    /// rename list keys off the bundle name as the user wrote it
+    /// (e.g. `lodash.min.js`).  The resolver tries the recorded path
+    /// verbatim first, then the file's basename — that way both
+    /// `file = "/abs/path/lodash.min.js"` and `file = "lodash.min.js"`
+    /// in the TOML resolve cleanly without forcing every author to
+    /// pin an absolute path.
+    ///
+    /// `file` is the recorded path string (absolute or relative);
+    /// `scope_hint` narrows the lookup to a function or block scope
+    /// when available; `minified_name` is the recorded binding name.
+    pub fn resolve_name(&self, file: &str, scope_hint: Option<&Scope>, minified_name: &str) -> Option<String> {
+        // Step 1 — user list (explicit wins).
+        if let Some(list) = &self.rename_list {
+            // Try the recorded path verbatim, then the basename as a
+            // fallback.  We deliberately do not normalise both sides
+            // (e.g. canonicalising the recorded path) — the TOML
+            // author's choice is what determines the key.
+            if let Some(renamed) = list.lookup(file, scope_hint, minified_name) {
+                return Some(renamed.to_string());
+            }
+            let basename = std::path::Path::new(file)
+                .file_name()
+                .and_then(|s| s.to_str());
+            if let Some(bn) = basename
+                && bn != file
+                && let Some(renamed) = list.lookup(bn, scope_hint, minified_name)
+            {
+                return Some(renamed.to_string());
+            }
+        }
+        // Step 2 — sourcemap V3 `names[]` confirmation.  We check
+        // every loaded sourcemap because the recorded path string may
+        // not match a `by_path` key exactly (e.g. the renderer keyed
+        // off the *original* source path while the sourcemap was
+        // indexed under the minified one).  Pull from `by_path_id`
+        // for canonical iteration order.
+        let _ = file; // file already consulted above for the user list
+        for idx in self.by_path_id.values() {
+            let idx: &SourcemapIndex = idx.as_ref();
+            if idx.has_name(minified_name) {
+                return Some(minified_name.to_string());
             }
         }
         None
@@ -703,6 +802,114 @@ mod tests {
     fn sanitize_for_cache_handles_relative_paths() {
         let p = sanitize_for_cache("../node_modules/lodash/lodash.js");
         assert_eq!(p, PathBuf::from("node_modules_lodash_lodash.js"));
+    }
+
+    #[test]
+    fn resolve_name_returns_user_list_first() {
+        let mut cache = SourcemapCache::new();
+        let list = RenameList::parse_toml(
+            r#"
+                [[rename]]
+                file = "lodash.min.js"
+                from = "e"
+                to = "array"
+            "#,
+        )
+        .unwrap();
+        cache.set_rename_list(Some(list));
+        assert!(cache.has_rename_list());
+        assert_eq!(
+            cache.resolve_name("lodash.min.js", None, "e").as_deref(),
+            Some("array")
+        );
+    }
+
+    #[test]
+    fn resolve_name_function_scope_overrides_global() {
+        let mut cache = SourcemapCache::new();
+        let list = RenameList::parse_toml(
+            r#"
+                [[rename]]
+                file = "lodash.min.js"
+                scope = "global"
+                from = "t"
+                to = "global_result"
+
+                [[rename]]
+                file = "lodash.min.js"
+                scope = "function:chunk"
+                from = "t"
+                to = "chunk_result"
+            "#,
+        )
+        .unwrap();
+        cache.set_rename_list(Some(list));
+        let chunk = Scope::Function("chunk".to_string());
+        assert_eq!(
+            cache.resolve_name("lodash.min.js", Some(&chunk), "t").as_deref(),
+            Some("chunk_result")
+        );
+        // No matching function hint → falls back to global.
+        let other = Scope::Function("other".to_string());
+        assert_eq!(
+            cache.resolve_name("lodash.min.js", Some(&other), "t").as_deref(),
+            Some("global_result")
+        );
+    }
+
+    #[test]
+    fn resolve_name_user_list_wins_over_sourcemap_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("min.js");
+        let map = dir.path().join("min.js.map");
+        fs::write(&src, b"console.log('min');\n").unwrap();
+        fs::write(&map, TINY_MAP).unwrap();
+        let mut cache = SourcemapCache::new();
+        cache.try_load(PathId(7), &src);
+        // Sourcemap has `alpha` in its names[] — resolve_name would
+        // echo it back via the sourcemap branch.  Install a user
+        // override that maps `alpha -> user_alpha` and assert the user
+        // list wins.
+        let list = RenameList::parse_toml(
+            r#"
+                [[rename]]
+                file = "min.js"
+                from = "alpha"
+                to = "user_alpha"
+            "#,
+        )
+        .unwrap();
+        cache.set_rename_list(Some(list));
+        assert_eq!(
+            cache.resolve_name("min.js", None, "alpha").as_deref(),
+            Some("user_alpha")
+        );
+    }
+
+    #[test]
+    fn resolve_name_falls_back_to_sourcemap_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("min.js");
+        let map = dir.path().join("min.js.map");
+        fs::write(&src, b"console.log('min');\n").unwrap();
+        fs::write(&map, TINY_MAP).unwrap();
+        let mut cache = SourcemapCache::new();
+        cache.try_load(PathId(7), &src);
+        // No user rename list installed — sourcemap's names[] confirms
+        // `alpha` is a known binding and echoes it back.
+        assert_eq!(
+            cache.resolve_name("min.js", None, "alpha").as_deref(),
+            Some("alpha")
+        );
+        // Unknown binding name returns None so the caller can surface
+        // the recorded name unchanged.
+        assert!(cache.resolve_name("min.js", None, "totally_unknown").is_none());
+    }
+
+    #[test]
+    fn resolve_name_returns_none_without_any_data() {
+        let cache = SourcemapCache::new();
+        assert!(cache.resolve_name("any.js", None, "a").is_none());
     }
 
     #[test]

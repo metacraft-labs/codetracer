@@ -179,11 +179,27 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 
 #[cfg(feature = "io-transport")]
 pub fn run_stdio() -> Result<(), Box<dyn Error>> {
-    run_with_endpoint(DapEndpoint::Stdio)
+    run_stdio_with_options(None)
+}
+
+/// §P5.4 — same as [`run_stdio`] but accepts a CLI-supplied default
+/// rename list path.  When provided, the path applies to every trace
+/// the server opens unless overridden by a per-launch
+/// `LaunchRequestArguments.renameList`.
+#[cfg(feature = "io-transport")]
+pub fn run_stdio_with_options(cli_default_rename_list: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+    run_with_endpoint_options(DapEndpoint::Stdio, cli_default_rename_list)
 }
 
 #[cfg(feature = "io-transport")]
 pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
+    run_with_options(socket_path, None)
+}
+
+/// §P5.4 — same as [`run`] but accepts a CLI-supplied default rename
+/// list path.  See [`run_stdio_with_options`] for the contract.
+#[cfg(feature = "io-transport")]
+pub fn run_with_options(socket_path: &Path, cli_default_rename_list: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
     #[cfg(windows)]
     {
         // On Windows, the backend-manager passes a TCP address like
@@ -191,14 +207,20 @@ pub fn run(socket_path: &Path) -> Result<(), Box<dyn Error>> {
         // if the path contains a colon followed by digits (host:port format).
         let path_str = socket_path.to_string_lossy();
         if looks_like_tcp_address(&path_str) {
-            run_with_endpoint(DapEndpoint::TcpSocket(path_str.into_owned()))
+            run_with_endpoint_options(DapEndpoint::TcpSocket(path_str.into_owned()), cli_default_rename_list)
         } else {
-            run_with_endpoint(DapEndpoint::WindowsNamedPipe(path_str.into_owned()))
+            run_with_endpoint_options(
+                DapEndpoint::WindowsNamedPipe(path_str.into_owned()),
+                cli_default_rename_list,
+            )
         }
     }
 
     #[cfg(not(windows))]
-    run_with_endpoint(DapEndpoint::UnixSocket(socket_path.to_path_buf()))
+    run_with_endpoint_options(
+        DapEndpoint::UnixSocket(socket_path.to_path_buf()),
+        cli_default_rename_list,
+    )
 }
 
 /// Returns true if the string looks like a TCP address (e.g. "127.0.0.1:12345").
@@ -215,13 +237,23 @@ fn looks_like_tcp_address(s: &str) -> bool {
 
 #[cfg(feature = "io-transport")]
 pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
+    run_with_endpoint_options(endpoint, None)
+}
+
+/// §P5.4 — endpoint-level entry point with the CLI-supplied default
+/// rename list path.  See [`run_stdio_with_options`] for the contract.
+#[cfg(feature = "io-transport")]
+pub fn run_with_endpoint_options(
+    endpoint: DapEndpoint,
+    cli_default_rename_list: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
     use std::io::BufReader;
 
     match endpoint {
         DapEndpoint::Stdio => {
             let stdin = std::io::stdin();
             let stdout = std::io::stdout();
-            run_with_stream(BufReader::new(stdin), stdout)
+            run_with_stream_options(BufReader::new(stdin), stdout, cli_default_rename_list)
         }
         DapEndpoint::UnixSocket(socket_path) => {
             #[cfg(unix)]
@@ -230,7 +262,7 @@ pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
                 let writer = stream.try_clone()?;
                 info!("stream ok out of thread");
                 let reader = BufReader::new(stream);
-                run_with_stream(reader, writer)
+                run_with_stream_options(reader, writer, cli_default_rename_list)
             }
             #[cfg(not(unix))]
             {
@@ -249,7 +281,7 @@ pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
                     format!("connected to named pipe '{pipe_path}', but failed to clone stream handle: {e}")
                 })?;
                 let reader = BufReader::new(stream);
-                run_with_stream(reader, writer)
+                run_with_stream_options(reader, writer, cli_default_rename_list)
             }
 
             #[cfg(not(windows))]
@@ -265,7 +297,7 @@ pub fn run_with_endpoint(endpoint: DapEndpoint) -> Result<(), Box<dyn Error>> {
                 .try_clone()
                 .map_err(|e| format!("connected to TCP {addr}, but failed to clone stream: {e}"))?;
             let reader = BufReader::new(stream);
-            run_with_stream(reader, writer)
+            run_with_stream_options(reader, writer, cli_default_rename_list)
         }
     }
 }
@@ -306,6 +338,21 @@ where
     R: std::io::BufRead + Send + 'static,
     W: std::io::Write + Send + 'static,
 {
+    run_with_stream_options(reader, writer, None)
+}
+
+/// §P5.4 — same as [`run_with_stream`] but accepts a CLI-supplied
+/// default rename list path.
+#[cfg(feature = "io-transport")]
+pub fn run_with_stream_options<R, W>(
+    reader: R,
+    writer: W,
+    cli_default_rename_list: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>>
+where
+    R: std::io::BufRead + Send + 'static,
+    W: std::io::Write + Send + 'static,
+{
     let (receiving_sender, receiving_receiver) = mpsc::channel();
     let builder = thread::Builder::new().name("receiving".to_string());
     let receiving_thread = builder.spawn(move || -> Result<(), String> {
@@ -330,7 +377,7 @@ where
         Ok(())
     })?;
 
-    handle_client(receiving_receiver, &receiving_thread, writer)
+    handle_client(receiving_receiver, &receiving_thread, writer, cli_default_rename_list)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -343,6 +390,7 @@ fn setup(
     sender: Sender<DapMessage>,
     for_launch: bool,
     thread_name: &str,
+    rename_list_path: Option<&Path>,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
     let trace_path = trace_folder.join(trace_file);
@@ -391,6 +439,8 @@ fn setup(
                 // path that has one (P3 — Column-Aware-Tracing-And-
                 // Deminification milestone).
                 handler.load_sourcemaps(trace_folder);
+                // §P5 — user-provided variable rename list.
+                handler.load_rename_list(trace_folder, rename_list_path);
                 if for_launch {
                     handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
                 }
@@ -470,6 +520,8 @@ fn setup(
         handler.load_macro_sourcemaps(trace_folder);
         // P3 — load Source Map V3 indexes for every recorded source.
         handler.load_sourcemaps(trace_folder);
+        // §P5 — user-provided variable rename list.
+        handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
         }
@@ -542,6 +594,8 @@ fn setup(
         handler.load_macro_sourcemaps(trace_folder);
         // P3 — load Source Map V3 indexes for every recorded source.
         handler.load_sourcemaps(trace_folder);
+        // §P5 — user-provided variable rename list.
+        handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
         }
@@ -572,6 +626,8 @@ fn setup(
         handler.load_macro_sourcemaps(trace_folder);
         // P3 — load Source Map V3 indexes for every recorded source.
         handler.load_sourcemaps(trace_folder);
+        // §P5 — user-provided variable rename list.
+        handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
             eprintln!("[db-backend setup] calling run_to_entry");
             handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
@@ -632,6 +688,7 @@ fn setup_session(
     sender: Sender<DapMessage>,
     for_launch: bool,
     thread_name: &str,
+    rename_list_path: Option<&Path>,
 ) -> Result<SessionHandler, Box<dyn Error>> {
     info!("setup_session: loading manifest from {}", manifest_path.display());
     let manifest = SessionManifest::load(manifest_path)
@@ -665,6 +722,7 @@ fn setup_session(
             sender.clone(),
             trace_for_launch,
             &per_trace_thread_name,
+            rename_list_path,
         )
         .map_err(|e| -> Box<dyn Error> {
             format!(
@@ -872,6 +930,7 @@ fn setup_live_program(
     sender: Sender<DapMessage>,
     for_launch: bool,
     thread_name: &str,
+    rename_list_path: Option<&Path>,
 ) -> Result<Handler, Box<dyn Error>> {
     let live_recording_dir = live_setup
         .live_recording_dir
@@ -898,6 +957,8 @@ fn setup_live_program(
     handler.load_macro_sourcemaps(&live_recording_dir);
     // P3 — load Source Map V3 indexes for every recorded source.
     handler.load_sourcemaps(&live_recording_dir);
+    // §P5 — user-provided variable rename list.
+    handler.load_rename_list(&live_recording_dir, rename_list_path);
     if for_launch {
         handler.run_to_entry(dap::Request::default(), None, sender)?;
     }
@@ -1497,6 +1558,17 @@ pub struct Ctx {
     pub launch_trace_folder: PathBuf,
     pub launch_trace_file: PathBuf,
     pub launch_raw_diff_index: Option<String>,
+    /// Column-Aware-Tracing-And-Deminification §P5.4 — explicit path to
+    /// a user-provided rename list (TOML).  When `Some(_)` the trace-
+    /// open hook uses this path; when `None` it falls back to the
+    /// CLI default (`cli_default_rename_list`) or the sibling lookup
+    /// `<recording-dir>/renames.toml`.
+    pub launch_rename_list: Option<PathBuf>,
+    /// CLI-supplied default rename list path
+    /// (`replay-server dap-server --rename-list <p>`).  Applies to
+    /// every trace the server opens unless overridden by a per-launch
+    /// `LaunchRequestArguments.renameList`.
+    pub cli_default_rename_list: Option<PathBuf>,
     pub launch_program: Option<PathBuf>,
     pub launch_program_args: Vec<String>,
     pub launch_cwd: Option<PathBuf>,
@@ -1522,6 +1594,8 @@ impl Default for Ctx {
             launch_trace_folder: PathBuf::from(""),
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
+            launch_rename_list: None,
+            cli_default_rename_list: None,
             launch_program: None,
             launch_program_args: Vec::new(),
             launch_cwd: None,
@@ -1639,6 +1713,9 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 //info!("stored launch trace folder: {0:?}", ctx.launch_trace_folder)
 
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
+                // §P5.4: per-launch arg wins; fall back to CLI default
+                // when the DAP `launch.renameList` field is unset.
+                ctx.launch_rename_list = args.rename_list.clone().or_else(|| ctx.cli_default_rename_list.clone());
 
                 // Only resolve the replay-worker executable for non-DB traces.
                 // DB-based traces (JavaScript, Python, Ruby, etc.) never use
@@ -1673,6 +1750,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.launch_trace_folder = PathBuf::new();
                 ctx.launch_trace_file = PathBuf::new();
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
+                ctx.launch_rename_list = args.rename_list.clone().or_else(|| ctx.cli_default_rename_list.clone());
                 ctx.recreator_exe = resolve_recreator_exe(args.recreator_exe);
                 ctx.restore_location = args.restore_location.clone();
 
@@ -1953,6 +2031,7 @@ fn task_thread(
                 sender.clone(),
                 for_launch,
                 name,
+                ctx_with_cached_launch.launch_rename_list.as_deref(),
             )
             .map_err(|e| {
                 error!("launch error (session): {e:?}");
@@ -1971,6 +2050,7 @@ fn task_thread(
                     sender.clone(),
                     for_launch,
                     name,
+                    ctx_with_cached_launch.launch_rename_list.as_deref(),
                 )
             } else {
                 setup(
@@ -1982,6 +2062,7 @@ fn task_thread(
                     sender.clone(),
                     for_launch,
                     name,
+                    ctx_with_cached_launch.launch_rename_list.as_deref(),
                 )
             }
             .map_err(|e| {
@@ -2093,6 +2174,11 @@ fn task_thread(
                 } else if let Some(manifest_path) = session_manifest_path {
                     // M24 session.toml launch
                     let for_launch = run_to_entry;
+                    // §P5.4 — per-launch arg wins; CLI default fills in.
+                    let effective_rename_list = args
+                        .rename_list
+                        .clone()
+                        .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
                     session = setup_session(
                         &manifest_path,
                         launch_raw_diff_index.clone(),
@@ -2101,6 +2187,7 @@ fn task_thread(
                         sender.clone(),
                         for_launch,
                         name,
+                        effective_rename_list.as_deref(),
                     )
                     .map_err(|e| {
                         error!("session launch error: {e:?}");
@@ -2111,6 +2198,11 @@ fn task_thread(
                     loaded_raw_diff_index = launch_raw_diff_index;
                 } else {
                     let for_launch = run_to_entry;
+                    // §P5.4 — per-launch arg wins; CLI default fills in.
+                    let effective_rename_list = args
+                        .rename_list
+                        .clone()
+                        .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
                     let handler = setup(
                         &launch_trace_folder,
                         &launch_trace_file,
@@ -2120,6 +2212,7 @@ fn task_thread(
                         sender.clone(),
                         for_launch,
                         name,
+                        effective_rename_list.as_deref(),
                     )
                     .map_err(|e| {
                         error!("launch error: {e:?}");
@@ -2137,6 +2230,11 @@ fn task_thread(
             {
                 let for_launch = run_to_entry;
                 let recreator_exe = resolve_recreator_exe(args.recreator_exe.clone());
+                // §P5.4 — per-launch arg wins; CLI default fills in.
+                let effective_rename_list = args
+                    .rename_list
+                    .clone()
+                    .or_else(|| ctx_with_cached_launch.cli_default_rename_list.clone());
                 let handler = setup_live_program(
                     LiveProgramSetup {
                         program: PathBuf::from(program),
@@ -2148,6 +2246,7 @@ fn task_thread(
                     sender.clone(),
                     for_launch,
                     name,
+                    effective_rename_list.as_deref(),
                 )
                 .map_err(|e| {
                     error!("live launch error: {e:?}");
@@ -2204,13 +2303,17 @@ fn handle_client<W>(
     receiver: Receiver<DapMessage>,
     _receiving_thread: &thread::JoinHandle<Result<(), String>>,
     writer: W,
+    cli_default_rename_list: Option<PathBuf>,
 ) -> Result<(), Box<dyn Error>>
 where
     W: std::io::Write + Send + 'static,
 {
     use log::error;
 
-    let mut ctx = Ctx::default();
+    let mut ctx = Ctx {
+        cli_default_rename_list,
+        ..Ctx::default()
+    };
 
     // TODO: start stable/other threads here
 

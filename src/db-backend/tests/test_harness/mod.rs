@@ -643,6 +643,7 @@ impl DapTestClient {
             session_id: None,
             recreator_exe: Some(ct_rr_support.to_path_buf()),
             restore_location: None,
+            rename_list: None,
         };
         let launch = self
             .client
@@ -880,6 +881,7 @@ impl DapStdioTestClient {
             session_id: None,
             recreator_exe: Some(ct_rr_support.to_path_buf()),
             restore_location: None,
+            rename_list: None,
         };
         let launch = self
             .client
@@ -929,6 +931,7 @@ impl DapStdioTestClient {
             session_id: None,
             recreator_exe: None,
             restore_location: None,
+            rename_list: None,
         };
         let launch = self
             .client

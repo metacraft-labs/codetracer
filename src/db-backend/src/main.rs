@@ -109,6 +109,11 @@ mod sourcemap_cache;
 // the sourcemap_cache integration reaches for the module via
 // `crate::autoformat`.
 mod autoformat;
+// Column-Aware-Tracing-And-Deminification §P5 — user-provided variable
+// rename list.  Mirrors the lib.rs declaration; the bin needs its own
+// copy because `sourcemap_cache` reaches for the module via the
+// `crate::rename_list` path.
+mod rename_list;
 // M24 — Multi-trace session loading; mirror of the lib.rs declarations.
 // The bin needs its own copies because `dap_server` reaches for the
 // SessionHandler via the `crate::session_handler` path.
@@ -145,6 +150,14 @@ enum Commands {
         /// Use stdio transport for DAP communication instead of a Unix socket.
         #[arg(long)]
         stdio: bool,
+        /// Column-Aware-Tracing-And-Deminification §P5.4 — path to a
+        /// user-provided variable rename list (TOML).  When set,
+        /// overrides the default `<recording-dir>/renames.toml` sibling
+        /// lookup for every trace this server serves.  Per-launch
+        /// `LaunchRequestArguments.renameList` still takes precedence
+        /// when supplied.
+        #[arg(long = "rename-list")]
+        rename_list: Option<std::path::PathBuf>,
     },
     IndexDiff {
         structured_diff_path: std::path::PathBuf,
@@ -368,10 +381,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     match cli.cmd {
-        Commands::DapServer { socket_path, stdio } => {
+        Commands::DapServer {
+            socket_path,
+            stdio,
+            rename_list,
+        } => {
             if stdio {
                 // thread::spawn(move || {
-                let res = db_backend::dap_server::run_stdio();
+                let res = db_backend::dap_server::run_stdio_with_options(rename_list);
                 if let Err(e) = res {
                     error!("dap server run error: {e:?}");
                 }
@@ -384,7 +401,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     db_backend::dap_server::socket_path_for(pid)
                 };
                 // thread::spawn(move || {
-                let res = db_backend::dap_server::run(&socket_path);
+                let res = db_backend::dap_server::run_with_options(&socket_path, rename_list);
                 if let Err(e) = res {
                     error!("dap server run error: {e:?}");
                 }
