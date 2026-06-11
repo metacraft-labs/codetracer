@@ -268,6 +268,13 @@ jobs:
           }
           Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
 
+      - name: Generate tree-sitter-nim parser
+        shell: pwsh
+        run: |
+          npm install -g tree-sitter-cli
+          cd libs/tree-sitter-nim
+          tree-sitter generate
+
       - name: Install just
         shell: pwsh
         run: |
@@ -332,6 +339,13 @@ jobs:
             Remove-Item -Force $wslStub
           }
           Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+
+      - name: Generate tree-sitter-nim parser
+        shell: pwsh
+        run: |
+          npm install -g tree-sitter-cli
+          cd libs/tree-sitter-nim
+          tree-sitter generate
 
       - name: Install just
         shell: pwsh
