@@ -245,6 +245,29 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install capnproto
+        shell: pwsh
+        run: choco install capnproto -y
+
+      - name: Install Nim toolchain
+        shell: pwsh
+        run: |
+          choco install nim -y
+          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
+          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+
+      - name: Prefer Git Bash over WSL bash stub
+        shell: pwsh
+        run: |
+          $wslStub = "$env:SystemRoot\System32\bash.exe"
+          if (Test-Path $wslStub) {
+            takeown /f $wslStub | Out-Null
+            icacls $wslStub /grant "Administrators:(F)" | Out-Null
+            Remove-Item -Force $wslStub
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+
       - name: Install just
         shell: pwsh
         run: |
@@ -254,6 +277,7 @@ jobs:
       - name: Run origin-DAP per-PR subset (python + rust)
         shell: bash
         env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CT_TEST_LANGS: python,rust
         run: just test-origin-dap
 
@@ -286,6 +310,29 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install capnproto
+        shell: pwsh
+        run: choco install capnproto -y
+
+      - name: Install Nim toolchain
+        shell: pwsh
+        run: |
+          choco install nim -y
+          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
+          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+
+      - name: Prefer Git Bash over WSL bash stub
+        shell: pwsh
+        run: |
+          $wslStub = "$env:SystemRoot\System32\bash.exe"
+          if (Test-Path $wslStub) {
+            takeown /f $wslStub | Out-Null
+            icacls $wslStub /grant "Administrators:(F)" | Out-Null
+            Remove-Item -Force $wslStub
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+
       - name: Install just
         shell: pwsh
         run: |
@@ -295,6 +342,7 @@ jobs:
       - name: Run origin-DAP full matrix (all languages)
         shell: bash
         env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
           CT_TEST_LANGS: all
         run: just test-origin-dap
 
