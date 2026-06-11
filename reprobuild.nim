@@ -1035,6 +1035,83 @@ package codeTracer:
           afterValue = @[macosApp])
         target("dmg", macosDmg)
 
+      when defined(windows):
+        # Windows app staging — assembles the prebuilt CodeTracer tree
+        # the NSIS installer bundles. The shape mirrors `macos-app`:
+        # binaries land at `bin/`, the frontend bundle + Electron
+        # runtime + node_modules live alongside, and the launcher
+        # `ct.bat` is a thin wrapper that exports CODETRACER_PREFIX +
+        # extends PATH before invoking the real `ct.exe`. The
+        # installer's `File /r` then mirrors the staged tree under
+        # `$PROGRAMFILES64\CodeTracer` so end-user paths match the
+        # build-debug layout exactly.
+        let windowsApp = ctShell(
+          "windows-app",
+          "set -eu\n" &
+          "APP_ROOT=non-nix-build/CodeTracer-win\n" &
+          "rm -rf \"$APP_ROOT\"\n" &
+          "mkdir -p \"$APP_ROOT/bin\" \"$APP_ROOT/src\"\n" &
+          "cp -a " & buildDebugPath(".") & "/. \"$APP_ROOT\"/\n" &
+          "cp src/helpers.js \"$APP_ROOT/src/helpers.js\"\n" &
+          "cp src/helpers.js \"$APP_ROOT/helpers.js\"\n" &
+          "if [ -d node_modules ]; then cp -a node_modules \"$APP_ROOT/node_modules\"; fi\n" &
+          "cp resources/CodeTracer.ico \"$APP_ROOT/CodeTracer.ico\"\n" &
+          "if [ -e \"$APP_ROOT/bin/ct.exe\" ]; then\n" &
+          "  mv \"$APP_ROOT/bin/ct.exe\" \"$APP_ROOT/bin/ct_unwrapped.exe\"\n" &
+          "  cat >\"$APP_ROOT/bin/ct.bat\" <<'EOF'\n" &
+          "@echo off\n" &
+          "setlocal\n" &
+          "set \"HERE=%~dp0..\"\n" &
+          "set \"CODETRACER_PREFIX=%HERE%\"\n" &
+          "set \"PATH=%HERE%\\bin;%PATH%\"\n" &
+          "\"%HERE%\\bin\\ct_unwrapped.exe\" %*\n" &
+          "EOF\n" &
+          "fi",
+          extraInputsValue = @[
+            "resources/CodeTracer.ico",
+            "src/ct/version.nim",
+            "src/helpers.js",
+            "node_modules"
+          ],
+          extraOutputsValue = @["non-nix-build/CodeTracer-win"],
+          afterValue = codetracerActions & frontendActions & styleActions)
+        target("windows-app", windowsApp)
+
+        # NSIS installer — compiles `resources/CodeTracer.nsi` against
+        # the staged tree and emits `non-nix-build/CodeTracer-Setup.exe`.
+        # The version string is reassembled from `src/ct/version.nim`
+        # so the installer's Add/Remove Programs entry tracks the
+        # codetracer release. `makensis` must be on PATH; install via
+        # `scoop install extras/nsis` or set the recipe's `uses:`
+        # clause to provision it through reprobuild once an `nsis`
+        # stdlib package lands.
+        let windowsInstaller = ctShell(
+          "windows-installer",
+          "set -eu\n" &
+          "YEAR=$(sed -n 's/.*CodeTracerYear\\* = //p' src/ct/version.nim | head -n1)\n" &
+          "MONTH=$(printf '%02d' \"$(sed -n 's/.*CodeTracerMonth\\* = //p' src/ct/version.nim | head -n1)\")\n" &
+          "BUILD=$(sed -n 's/.*CodeTracerBuild\\* = //p' src/ct/version.nim | head -n1)\n" &
+          "VERSION=\"$YEAR.$MONTH.$BUILD\"\n" &
+          "REPO_ROOT=$(pwd)\n" &
+          "STAGING_DIR=\"$REPO_ROOT/non-nix-build/CodeTracer-win\"\n" &
+          "OUT_FILE=\"$REPO_ROOT/non-nix-build/CodeTracer-Setup.exe\"\n" &
+          "rm -f \"$OUT_FILE\"\n" &
+          "makensis -NOCD " &
+            "-DAPP_VERSION=\"$VERSION\" " &
+            "-DSTAGING_DIR=\"$STAGING_DIR\" " &
+            "-DOUT_FILE=\"$OUT_FILE\" " &
+            "resources/CodeTracer.nsi",
+          extraInputsValue = @[
+            "non-nix-build/CodeTracer-win",
+            "resources/CodeTracer.nsi",
+            "resources/CodeTracer.ico",
+            "LICENSE",
+            "src/ct/version.nim"
+          ],
+          extraOutputsValue = @["non-nix-build/CodeTracer-Setup.exe"],
+          afterValue = @[windowsApp])
+        target("windows-installer", windowsInstaller)
+
     let cSudokuObjectTup = gcc(
       source = "test-programs/c_sudoku_solver/main.c",
       output = "build/c/main.tup.o",
