@@ -29,6 +29,24 @@
   !define OUT_FILE "..\non-nix-build\CodeTracer-Setup.exe"
 !endif
 
+; ICON_PATH defaults to the in-repo `resources/` copy. With ``-NOCD``
+; the working dir is the codetracer repo root, so the relative path
+; from there is ``resources/CodeTracer.ico``. Without ``-NOCD`` the
+; working dir is ``resources/`` and the bare filename works; both
+; cases are covered by the conditional default below.
+!ifndef ICON_PATH
+  !define ICON_PATH "resources\CodeTracer.ico"
+!endif
+
+; LICENSE_PATH same story — the MUI license page reads the file at
+; compile time, so the path resolves against the makensis cwd, not
+; the .nsi's location. The recipe-driven path passes the repo-root-
+; absolute path; the standalone smoke path defaults to the
+; repository's top-level LICENSE.
+!ifndef LICENSE_PATH
+  !define LICENSE_PATH "LICENSE"
+!endif
+
 !define APP_NAME            "CodeTracer"
 !define APP_PUBLISHER       "Metacraft Labs"
 !define APP_URL             "https://codetracer.com"
@@ -61,12 +79,12 @@ VIAddVersionKey FileVersion     "${APP_VERSION}"
 VIAddVersionKey ProductVersion  "${APP_VERSION}"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON   "CodeTracer.ico"
-!define MUI_UNICON "CodeTracer.ico"
+!define MUI_ICON   "${ICON_PATH}"
+!define MUI_UNICON "${ICON_PATH}"
 
 ; Pages: welcome → license → install dir → install → finish
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "..\LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${LICENSE_PATH}"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"

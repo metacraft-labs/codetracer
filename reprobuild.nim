@@ -1108,6 +1108,8 @@ package codeTracer:
             "-DAPP_VERSION=\"$VERSION\" " &
             "-DSTAGING_DIR=\"$STAGING_DIR\" " &
             "-DOUT_FILE=\"$OUT_FILE\" " &
+            "-DICON_PATH=\"$REPO_ROOT/resources/CodeTracer.ico\" " &
+            "-DLICENSE_PATH=\"$REPO_ROOT/LICENSE\" " &
             "resources/CodeTracer.nsi",
           extraInputsValue = @[
             "non-nix-build/CodeTracer-win",
