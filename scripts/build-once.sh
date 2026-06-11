@@ -25,7 +25,19 @@ if [ -n "$isonim_root" ]; then
 	fi
 fi
 
-if [ "$(uname -s)" = "Darwin" ]; then
+# Reprobuild branch: macOS (Darwin) uses Nix tool provisioning; Windows
+# (MINGW* / MSYS* via Git Bash) uses PATH provisioning since the codetracer
+# DIY toolchain bootstrap (`. env.ps1`) has already populated PATH with
+# every tool the codetracer `uses:` clause references on its Windows
+# branch. On both, the codetracer recipe lives in `reprobuild.nim` and is
+# built end-to-end via the local `repro` binary.
+case "$(uname -s)" in
+	Darwin) ct_reprobuild_host="darwin" ;;
+	MINGW*|MSYS*|CYGWIN*) ct_reprobuild_host="windows" ;;
+	*) ct_reprobuild_host="" ;;
+esac
+
+if [ -n "$ct_reprobuild_host" ]; then
 	repro_bin="${REPROBUILD_BIN:-}"
 	reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
 
@@ -47,13 +59,20 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		repro_bin="$(command -v repro || true)"
 	fi
 
-	if [ -z "$repro_bin" ] && [ -n "$reprobuild_root" ] &&
-		[ -x "$reprobuild_root/build/bin/repro" ]; then
-		repro_bin="$reprobuild_root/build/bin/repro"
+	# On Windows, `repro` ships as `repro.exe`; the `repro` (no extension)
+	# alias may not exist depending on how the sibling reprobuild was
+	# built. Probe both filenames under the sibling's `build/bin/`.
+	if [ -z "$repro_bin" ] && [ -n "$reprobuild_root" ]; then
+		for cand in "$reprobuild_root/build/bin/repro.exe" "$reprobuild_root/build/bin/repro"; do
+			if [ -x "$cand" ]; then
+				repro_bin="$cand"
+				break
+			fi
+		done
 	fi
 
 	if [ -z "$repro_bin" ]; then
-		echo "Error: repro is required for macOS builds." >&2
+		echo "Error: repro is required for codetracer reprobuild builds on $ct_reprobuild_host." >&2
 		echo "Set REPROBUILD_BIN or CODETRACER_REPROBUILD_REPO_PATH, or put repro on PATH." >&2
 		exit 127
 	fi
@@ -67,7 +86,15 @@ if [ "$(uname -s)" = "Darwin" ]; then
 	if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
 		runquotad_bin="${RUNQUOTAD_BIN:-}"
 		if [ -z "$runquotad_bin" ]; then
-			for candidate in ../runquota/build/bin/runquotad ../../runquota/build/bin/runquotad; do
+			# Windows ships `runquotad.exe`; macOS / Linux ship a bare
+			# `runquotad`. Search both filenames.
+			runquotad_candidates=(
+				"../runquota/build/bin/runquotad.exe"
+				"../../runquota/build/bin/runquotad.exe"
+				"../runquota/build/bin/runquotad"
+				"../../runquota/build/bin/runquotad"
+			)
+			for candidate in "${runquotad_candidates[@]}"; do
 				if [ -x "$candidate" ]; then
 					runquotad_bin="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
 					break
@@ -112,21 +139,28 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		fi
 	fi
 
-	if [ -z "${SDKROOT:-}" ]; then
+	# macOS-only: pick up the system SDK path so cargo's cc-rs and the
+	# Nim compiler can resolve `<sys/...>` includes when invoked outside
+	# the `nix develop` shell.
+	if [ "$ct_reprobuild_host" = "darwin" ] && [ -z "${SDKROOT:-}" ]; then
 		sdkroot="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
 		if [ -n "$sdkroot" ]; then
 			export SDKROOT="$sdkroot"
 		fi
 	fi
 
-	if [ ! -e node_modules ] && command -v nix >/dev/null 2>&1; then
+	# macOS / Linux Nix path: realize node_modules via the flake when the
+	# tree hasn't run `yarn install` yet. Windows installs node_modules via
+	# env.ps1's `Ensure-NodeTooling`, so this fallback is a no-op there.
+	if [ "$ct_reprobuild_host" = "darwin" ] && [ ! -e node_modules ] &&
+		command -v nix >/dev/null 2>&1; then
 		node_modules_drv="$(nix build --no-link --print-out-paths .#node-modules-derivation 2>/dev/null || true)"
 		if [ -n "$node_modules_drv" ] && [ -d "$node_modules_drv/bin/node_modules" ]; then
 			ln -s "$node_modules_drv/bin/node_modules" node_modules
 		fi
 	fi
 
-	if command -v nix >/dev/null 2>&1; then
+	if [ "$ct_reprobuild_host" = "darwin" ] && command -v nix >/dev/null 2>&1; then
 		# clingo is Reprobuild's ASP solver: repro_solver dlopen()s
 		# ``libclingo.dylib`` by leaf name at runtime (see
 		# ``libs/repro_solver/src/repro_solver/clingo_bindings.nim``), and
@@ -136,6 +170,10 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		# discoverable via ``DYLD_LIBRARY_PATH`` for both the parent and its
 		# children. Provision it alongside the other native libs below; clingo
 		# is a single-output derivation so it has no ``.out`` attribute.
+		#
+		# Windows provisions clingo.dll via `non-nix-build/windows/
+		# ensure-clingo.ps1` (downloads the conda-forge bundle), and env.ps1
+		# puts its bin dir on PATH so the Win32 loader resolves it.
 		native_lib_roots="$(nix build --no-link --print-out-paths \
 			nixpkgs#openssl.out nixpkgs#sqlite.out nixpkgs#pcre.out nixpkgs#libzip.out \
 			nixpkgs#clingo \
@@ -153,12 +191,30 @@ if [ "$(uname -s)" = "Darwin" ]; then
 		fi
 	fi
 
+	# Default tool-provisioning differs by host: macOS uses Nix
+	# (cakNix adapter pulls every `uses:` entry from /nix/store);
+	# Windows uses Scoop — the reprobuild stdlib package files at
+	# libs/repro_dsl_stdlib/packages/<tool>.nim carry per-tool
+	# `scoopApp(bucket = "main", app = "...", preferredVersion =
+	# ">=...")` entries that drive a real `scoop install bucket/app`
+	# for every uses: selector that isn't already on disk.
+	case "$ct_reprobuild_host" in
+		darwin) ct_tool_provisioning_default="nix" ;;
+		windows) ct_tool_provisioning_default="scoop" ;;
+		*) ct_tool_provisioning_default="nix" ;;
+	esac
+
 	"$repro_bin" build "${CODETRACER_REPROBUILD_TARGET:-.}" \
-		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-nix}" \
+		--tool-provisioning="${CODETRACER_REPROBUILD_TOOL_PROVISIONING:-$ct_tool_provisioning_default}" \
 		--progress="${CODETRACER_REPROBUILD_PROGRESS:-bar-line}" \
 		--diagnostics="${CODETRACER_REPROBUILD_DIAGNOSTICS:-.repro/build/reprobuild/build-diagnostics.log}" \
 		--log="${CODETRACER_REPROBUILD_LOG:-quiet}"
-	scripts/post-build-setcap.sh src/build-debug/bin/ct
+	# post-build-setcap.sh is Linux-only (BPF capabilities via setcap);
+	# on macOS the script no-ops, on Windows there's no Linux setcap
+	# concept so skip it entirely.
+	if [ "$ct_reprobuild_host" = "darwin" ]; then
+		scripts/post-build-setcap.sh src/build-debug/bin/ct
+	fi
 	exit 0
 fi
 
