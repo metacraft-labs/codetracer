@@ -439,6 +439,12 @@ fn setup(
                 // path that has one (P3 — Column-Aware-Tracing-And-
                 // Deminification milestone).
                 handler.load_sourcemaps(trace_folder);
+                // §P6.2 — recorder-baked alternate source views
+                // (`srcviews.dat`).  Runs AFTER `load_sourcemaps` so
+                // any srcviews record overwrites the sibling-map
+                // entry for the same path (the recorder explicitly
+                // baked this view).
+                handler.load_source_views(trace_folder);
                 // §P5 — user-provided variable rename list.
                 handler.load_rename_list(trace_folder, rename_list_path);
                 if for_launch {

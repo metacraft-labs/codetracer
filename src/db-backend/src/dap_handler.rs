@@ -3494,6 +3494,168 @@ impl Handler {
         }
     }
 
+    /// §P6.2 — discover and load `srcviews.dat` records from the CTFS
+    /// container in `trace_dir` and feed them into the sourcemap cache.
+    ///
+    /// `srcviews.dat` ships recorder-baked formatted views of minified
+    /// sources (the alternate-views extension of the CTFS spec); the
+    /// recorder pre-formatted the content and baked a Source Map V3
+    /// alongside it so the replay-server never has to fork a
+    /// `prettier` / `black` subprocess at trace-open time.
+    ///
+    /// ## Precedence
+    ///
+    /// This loader runs AFTER [`Self::load_sourcemaps`] so a srcviews
+    /// record OVERWRITES any sibling `<path>.map` previously discovered
+    /// for the same recorded path.  The recorder explicitly baked this
+    /// view, so its intent supersedes the heuristic sibling-map lookup
+    /// (per the spec's "prefer the alternate view for UI display" rule).
+    ///
+    /// ## Materialisation
+    ///
+    /// For each parsed view the loader writes:
+    ///
+    /// * `<trace_dir>/sourcemap-translate/<sanitised view_name>` — the
+    ///   formatted content, so the UI's filesystem-based source reader
+    ///   picks it up.
+    /// * `<trace_dir>/sourcemap-translate/<sanitised view_name>.map` —
+    ///   the V3 JSON, mirrored for diagnosability (the cache holds the
+    ///   parsed `SourcemapIndex` directly so the file is purely for
+    ///   the developer's benefit).
+    ///
+    /// Failures are logged at `warn!` and the cache is left unchanged
+    /// — same best-effort contract as the P3 loader.
+    pub fn load_source_views(&mut self, trace_dir: &Path) {
+        if !translation_enabled() {
+            // The same kill switch covers both the §P3 sibling-map path
+            // and this §P6.2 srcviews path: the user asked to debug the
+            // minified form directly.
+            return;
+        }
+        // Discover the .ct container.  The caller hands us the trace
+        // directory; the dispatcher's CTFS open path tries the dir
+        // itself + `<dir>/trace.ct` as candidates, so we mirror those
+        // probes here.
+        let ct_path = find_ct_container(trace_dir);
+        let Some(ct_path) = ct_path else {
+            debug!(
+                "srcviews: no .ct container found under {} — skipping",
+                trace_dir.display()
+            );
+            return;
+        };
+
+        let views = match crate::source_views::SourceViews::load(&ct_path) {
+            Ok(v) => v,
+            Err(crate::source_views::SourceViewsError::Absent) => {
+                // Pre-extension trace — legacy, expected, silent.
+                debug!("srcviews: extension absent in {}", ct_path.display());
+                return;
+            }
+            Err(e) => {
+                warn!("srcviews: failed to load from {}: {e}", ct_path.display());
+                return;
+            }
+        };
+        if views.is_empty() {
+            return;
+        }
+
+        // Make sure cache_dir is set so materialisation has a place to
+        // write — `load_sourcemaps` would normally have done this but
+        // we may be called even on traces with no sibling-map paths.
+        if self.sourcemap_cache_dir.is_none() {
+            self.sourcemap_cache_dir = Some(trace_dir.to_path_buf());
+        }
+
+        // Snapshot the recorded path strings keyed by PathId.  We need
+        // to map srcviews' `path_id: u64` back to the canonical
+        // (path_string, PathId) pair the cache indexes off.
+        let path_strings: HashMap<u64, String> = self
+            .reader
+            .path_entries_iter()
+            .map(|(p, id)| (id.0 as u64, p.to_string()))
+            .collect();
+
+        let mut installed = 0usize;
+        for sv in views.entries() {
+            let Some(recorded_path) = path_strings.get(&sv.path_id) else {
+                warn!(
+                    "srcviews: record references unknown path_id {} (view_name={:?})",
+                    sv.path_id, sv.view_name
+                );
+                continue;
+            };
+            // Parse the Source Map V3 bytes through the existing
+            // production wrapper so the cache-side code path is
+            // identical to the §P3 sibling-map case.
+            //
+            // The "sourcemap_dir" we hand to `from_slice` is the trace
+            // directory — it's only consulted by
+            // `SourcemapIndex::resolve_source_path` to anchor relative
+            // `sources[i]` entries.  For srcviews the `sources[0]`
+            // entry refers conceptually to the ORIGINAL recorded
+            // source; we leave it at the trace dir so the resolver
+            // returns a sensible-looking path even when the original
+            // file isn't physically on disk.
+            let idx = match sourcemap_translate::SourcemapIndex::from_slice(&sv.sourcemap_v3, trace_dir) {
+                Ok(i) => i,
+                Err(e) => {
+                    warn!(
+                        "srcviews: failed to parse map for path_id {} ({}): {e}",
+                        sv.path_id, sv.view_name
+                    );
+                    continue;
+                }
+            };
+
+            // Materialise the formatted content + map JSON under the
+            // trace's cache directory.  These on-disk sidecars let the
+            // UI's filesystem-based source reader pick up the formatted
+            // view through the path the translated `StackFrame`
+            // surfaces.
+            let view_path = match materialise_source_view(trace_dir, &sv.view_name, &sv.content, &sv.sourcemap_v3) {
+                Some(p) => p,
+                None => {
+                    // Materialisation failures are logged inside the
+                    // helper; we still install the in-memory index so
+                    // the cache can serve the translated coordinates
+                    // even without a sidecar to point the UI at.
+                    sv.view_name.clone()
+                }
+            };
+
+            // Insert under BOTH the recorded minified path AND the
+            // newly-materialised formatted-view path so callers can
+            // resolve from either side:
+            //  * `recorded_path` keys the by_path index that the §P3
+            //    `apply_sourcemap_translation` consults.
+            //  * `view_path` keys the cache for ad-hoc DAP `source`
+            //    handlers that arrive holding the formatted file path.
+            //
+            // Both keys share one `Arc<SourcemapIndex>`, so they stay
+            // consistent if we ever extend the cache.
+            self.sourcemap_cache.install_index(
+                PathId(sv.path_id as usize),
+                recorded_path,
+                idx,
+            );
+
+            info!(
+                "srcviews: installed view {} → {} (path_id {})",
+                sv.view_name, view_path, sv.path_id
+            );
+            installed += 1;
+        }
+
+        if installed > 0 {
+            info!(
+                "srcviews: loaded {installed} alternate source view(s) from {}",
+                ct_path.display()
+            );
+        }
+    }
+
     /// Translate a recorded `(path_id, line, column)` triple through
     /// the per-trace sourcemap cache.
     ///
@@ -4516,6 +4678,120 @@ pub(crate) fn placeholder_unknown_summary() -> task::OriginSummary {
         confidence: 0.0,
         is_placeholder: true,
         placeholder_token: None,
+    }
+}
+
+/// Locate the `.ct` CTFS container under `trace_dir`.
+///
+/// `trace_dir` is whatever the dispatcher passed to
+/// [`Handler::load_sourcemaps`] / [`Handler::load_source_views`].
+/// It can be either:
+///
+/// * The trace directory itself (the dispatcher hands the parent
+///   folder) — we probe `<dir>/trace.ct`, then the first `*.ct` we
+///   find in the directory.
+/// * A `.ct` file directly (the ct-dap-client test harness passes the
+///   file path as the trace folder).
+///
+/// Returns `None` when nothing matching the CTFS magic is found; the
+/// caller treats that as "no srcviews, fall through".
+fn find_ct_container(trace_dir: &Path) -> Option<std::path::PathBuf> {
+    // Direct `.ct` file → use as-is.
+    if trace_dir.is_file() {
+        return Some(trace_dir.to_path_buf());
+    }
+    if !trace_dir.is_dir() {
+        return None;
+    }
+    let canonical = trace_dir.join("trace.ct");
+    if canonical.is_file() {
+        return Some(canonical);
+    }
+    // Fallback: first `*.ct` in the directory.  Several recorders use
+    // the recording id or a free-form name; we accept any single `.ct`
+    // file so this helper degrades gracefully across recorders.
+    let read_dir = std::fs::read_dir(trace_dir).ok()?;
+    for entry in read_dir.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) == Some("ct") && p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// §P6.2 — materialise a srcviews record onto disk.
+///
+/// Writes both the formatted content and its V3 sourcemap under
+/// `<trace_dir>/sourcemap-translate/`:
+///
+/// * `<sanitised view_name>` — the formatted source bytes;
+/// * `<sanitised view_name>.map` — the V3 JSON.
+///
+/// Returns the absolute path of the formatted-content sidecar on
+/// success, or `None` if any write step failed (the helper logs the
+/// failure and the caller falls back to surfacing `view_name` verbatim
+/// in the cache entry).
+fn materialise_source_view(trace_dir: &Path, view_name: &str, content: &[u8], sourcemap_v3: &[u8]) -> Option<String> {
+    let cache_root = trace_dir.join("sourcemap-translate");
+    if let Err(e) = std::fs::create_dir_all(&cache_root) {
+        warn!(
+            "srcviews: failed to create cache dir {}: {e}",
+            cache_root.display()
+        );
+        return None;
+    }
+
+    // Flatten any path-traversal segments in view_name (the recorder
+    // may have included `.fmt.<ext>` or even a `./` prefix).
+    let safe = sanitize_view_name(view_name);
+    let content_path = cache_root.join(&safe);
+    let map_path = cache_root.join(format!("{}.map", safe));
+
+    if let Err(e) = std::fs::write(&content_path, content) {
+        warn!(
+            "srcviews: failed to write content to {}: {e}",
+            content_path.display()
+        );
+        return None;
+    }
+    if !sourcemap_v3.is_empty()
+        && let Err(e) = std::fs::write(&map_path, sourcemap_v3)
+    {
+        // Map sidecar is a nice-to-have for diagnosability — log but
+        // do not fail the whole materialisation if only the map write
+        // fails (the in-memory `SourcemapIndex` already holds the
+        // parsed map).
+        warn!(
+            "srcviews: failed to write map to {}: {e}",
+            map_path.display()
+        );
+    }
+    Some(content_path.display().to_string())
+}
+
+/// Strip path-traversal segments from a srcviews `view_name`.
+///
+/// Keeps printable basename characters intact (so legibility is
+/// preserved for the typical `<original>.fmt.<ext>` case) while
+/// replacing path separators and control characters.
+fn sanitize_view_name(name: &str) -> String {
+    let trimmed = std::path::Path::new(name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name);
+    let cleaned: String = trimmed
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' => '_',
+            c if c.is_ascii_control() => '_',
+            c => c,
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "source".to_string()
+    } else {
+        cleaned
     }
 }
 

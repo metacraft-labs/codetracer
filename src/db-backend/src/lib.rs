@@ -125,6 +125,12 @@ pub mod program_search_tool;
 // `Handler` and are populated at trace-open time.
 pub mod query;
 pub mod sourcemap_cache;
+// Column-Aware-Tracing-And-Deminification §P6.2 — reader for the
+// CTFS `srcviews.dat` / `srcviews.off` extension that carries
+// recorder-baked formatted views of minified sources.  Sits next to
+// `sourcemap_cache` because `Handler::load_source_views` feeds parsed
+// records straight into that cache.
+pub mod source_views;
 // Column-Aware-Tracing-And-Deminification §P4 — auto-format fallback
 // for minified sources that ship without a sourcemap.  Self-contained
 // module that wraps `prettier` / `black` as subprocesses; the

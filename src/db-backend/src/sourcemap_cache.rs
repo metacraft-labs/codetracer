@@ -217,6 +217,29 @@ impl SourcemapCache {
         }
     }
 
+    /// §P6.2 — install an externally-built [`SourcemapIndex`] under the
+    /// given `(PathId, absolute_path)` key.
+    ///
+    /// Used by the `srcviews.dat` loader to plug a recorder-baked
+    /// alternate view's Source Map V3 into the existing translation
+    /// pipeline.  The cache stores the index under both keys (sharing
+    /// one `Arc`) so the hot `translate_for_path` / `translate` lookups
+    /// hit identical data regardless of whether the caller has the
+    /// `PathId` or the path string on hand.
+    ///
+    /// Calls REPLACE any existing entry under the same keys — `srcviews`
+    /// records are explicitly recorder-baked and the spec says they
+    /// take precedence over any sibling `<path>.map` discovered by the
+    /// §P3 loader.  The dispatcher therefore calls
+    /// [`Handler::load_source_views`](crate::dap_handler::Handler::load_source_views)
+    /// AFTER [`Handler::load_sourcemaps`](crate::dap_handler::Handler::load_sourcemaps)
+    /// so the srcviews entries overwrite the sibling-map ones.
+    pub fn install_index(&mut self, path_id: PathId, absolute_path: &str, idx: SourcemapIndex) {
+        let shared = Arc::new(idx);
+        self.by_path_id.insert(path_id, Arc::clone(&shared));
+        self.by_path.insert(absolute_path.to_string(), shared);
+    }
+
     /// Translate a recorded generated position by `PathId`.
     ///
     /// Returns `None` when the path has no associated sourcemap, the
