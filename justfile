@@ -1330,6 +1330,23 @@ test-leo-flow:
   cd src/db-backend && cargo nextest run --no-capture --run-ignored all leo_flow_dap
   echo "Leo flow test passed!"
 
+# Reproduces the WDIO leo-deep ``can search the calltrace for compute``
+# failure (``DAP request timeout``) against a locally-recorded leo
+# trace.  Mirrors the WDIO sequence (set breakpoint -> continue ->
+# load flow -> search calltrace).
+#
+# Set CODETRACER_LEO_RECORDER_PATH to override the binary path.
+test-leo-search-calltrace:
+  #!/usr/bin/env bash
+  set -e
+  echo "Running Leo searchCalltrace integration test..."
+  LEO_RECORDER="${CODETRACER_LEO_RECORDER_PATH:-../codetracer-leo-recorder/target/debug/codetracer-leo-recorder}"
+  if [ -f "$LEO_RECORDER" ]; then
+    export CODETRACER_LEO_RECORDER_PATH="$(realpath "$LEO_RECORDER")"
+  fi
+  cd src/db-backend && cargo nextest run --no-capture --run-ignored all leo_search_calltrace
+  echo "Leo searchCalltrace test passed!"
+
 # Tolk/TON flow/omniscience integration test (DB-based, no rr required)
 # Prerequisites: codetracer-ton-recorder binary
 # Set CODETRACER_TON_RECORDER_PATH to override the binary path.
