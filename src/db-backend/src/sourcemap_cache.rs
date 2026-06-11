@@ -454,7 +454,62 @@ impl SourcemapCache {
     /// `file` is the recorded path string (absolute or relative);
     /// `scope_hint` narrows the lookup to a function or block scope
     /// when available; `minified_name` is the recorded binding name.
+    ///
+    /// Back-compat wrapper for callers that don't yet carry a
+    /// `(line, col)` pair from the surrounding step.  Internally this
+    /// delegates to [`SourcemapCache::resolve_name_at_position`] with
+    /// the **sentinel position `(0, 0)`**, which tells the per-position
+    /// branch to short-circuit — preserving the P5 contract where the
+    /// resolver only consults the user list + `names[]` membership.
+    ///
+    /// New code that has access to the step's `(line, col)` should
+    /// prefer [`SourcemapCache::resolve_name_at_position`] directly so
+    /// the per-segment `name_index` branch can recover original
+    /// identifier names from the sourcemap.
     pub fn resolve_name(&self, file: &str, scope_hint: Option<&Scope>, minified_name: &str) -> Option<String> {
+        // Sentinel `(0, 0)` — position lookup is suppressed.  See
+        // `resolve_name_at_position` for the gating logic.
+        self.resolve_name_at_position(file, 0, 0, scope_hint, minified_name)
+    }
+
+    /// §P6.4 — position-aware resolver.
+    ///
+    /// Composition rules:
+    ///
+    /// 1. **User rename list** (scope-aware) — explicit > inferred.
+    /// 2. **Per-position sourcemap segment lookup** — when a sourcemap
+    ///    is loaded for `file`, ask [`SourcemapIndex::translate`] for
+    ///    the segment covering `(line, col)`.  When the segment carries
+    ///    a `name_index`, the sourcemap crate returns the resolved
+    ///    original-side name as [`OriginalPos::name`]; we surface it
+    ///    directly.  This is what recovers `userId` from a minified
+    ///    `a` *at the position where it appears in the bundle*.
+    /// 3. **Sourcemap V3 `names[]` membership fallback** — when the
+    ///    per-position lookup didn't yield a name (sparse segment, or
+    ///    the segment has no `name_index`), preserve the P5 behaviour:
+    ///    iterate every loaded sourcemap's `names[]` and, if any
+    ///    contains `minified_name`, echo it back as a "blessed" name.
+    /// 4. `None` — caller surfaces the recorded name unchanged.
+    ///
+    /// ## Position sentinel
+    ///
+    /// `(line=0, col=0)` is a **sentinel** that suppresses the
+    /// per-position branch entirely — the resolver behaves exactly
+    /// like the P5 wrapper.  This is what
+    /// [`SourcemapCache::resolve_name`] uses internally and what
+    /// callers without real position info should pass.
+    ///
+    /// Otherwise `(line, col)` are 1-indexed and refer to the
+    /// **generated** / minified-bundle coordinates from the
+    /// surrounding step.
+    pub fn resolve_name_at_position(
+        &self,
+        file: &str,
+        line: u32,
+        col: u32,
+        scope_hint: Option<&Scope>,
+        minified_name: &str,
+    ) -> Option<String> {
         // Step 1 — user list (explicit wins).
         if let Some(list) = &self.rename_list {
             // Try the recorded path verbatim, then the basename as a
@@ -474,13 +529,50 @@ impl SourcemapCache {
                 return Some(renamed.to_string());
             }
         }
-        // Step 2 — sourcemap V3 `names[]` confirmation.  We check
-        // every loaded sourcemap because the recorded path string may
-        // not match a `by_path` key exactly (e.g. the renderer keyed
-        // off the *original* source path while the sourcemap was
-        // indexed under the minified one).  Pull from `by_path_id`
-        // for canonical iteration order.
-        let _ = file; // file already consulted above for the user list
+
+        // Step 2 — per-position sourcemap segment lookup.
+        //
+        // Gated on `(line, col) != (0, 0)` — the back-compat
+        // [`SourcemapCache::resolve_name`] wrapper passes the `(0, 0)`
+        // sentinel to suppress this branch, preserving the P5
+        // contract.  When the caller supplies real position info we
+        // ask the sourcemap for the original-side name attached to
+        // the segment covering that position.
+        //
+        // File-key matching mirrors the way `try_load` indexes the
+        // cache — `by_path` is keyed off the recorded absolute path
+        // string the trace observed.  We try the path verbatim first;
+        // if that doesn't hit, we fall back to scanning every loaded
+        // sourcemap.  The scan handles the case where the renderer
+        // keyed off a slightly different path representation (e.g.
+        // canonicalised vs. recorded).
+        if line != 0 && col != 0 {
+            if let Some(idx) = self.by_path.get(file) {
+                let idx: &SourcemapIndex = idx.as_ref();
+                if let Some(pos) = idx.translate(line, col)
+                    && let Some(name) = pos.name
+                {
+                    return Some(name);
+                }
+            } else {
+                for idx in self.by_path.values() {
+                    let idx: &SourcemapIndex = idx.as_ref();
+                    if let Some(pos) = idx.translate(line, col)
+                        && let Some(name) = pos.name
+                    {
+                        return Some(name);
+                    }
+                }
+            }
+        }
+
+        // Step 3 — sourcemap V3 `names[]` membership confirmation
+        // fallback (P5 behaviour).  When the per-position branch
+        // didn't recover a name (sentinel suppressed, sparse segment,
+        // or a segment without a `name_index`), fall back to the
+        // coarse-grained membership test: if `minified_name` appears
+        // anywhere in any loaded sourcemap's `names[]`, echo it back
+        // as a "blessed" name.
         for idx in self.by_path_id.values() {
             let idx: &SourcemapIndex = idx.as_ref();
             if idx.has_name(minified_name) {

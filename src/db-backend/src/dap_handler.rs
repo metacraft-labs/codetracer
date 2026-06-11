@@ -778,6 +778,13 @@ impl Handler {
         // origin summaries on the materialized backend. The cache
         // inside `build_origin_summary_for_local` keeps repeated
         // `ct/load-locals` requests on the same step ~O(1).
+        //
+        // §P6.4 — derive the surrounding step's `(file, line, col)`
+        // once and reuse it for every variable on the frame.  Doing
+        // it per-call would re-resolve the path/line/column inside
+        // `resolve_variable_name`'s wrapper, which is wasted work
+        // when every local on the frame shares the same position.
+        let (file, line, col) = self.current_step_location();
         let mut locals: Vec<Variable> = Vec::with_capacity(locals_with_records.len());
         for l in locals_with_records.iter() {
             let origin_summary = if self.trace_kind == TraceKind::Materialized {
@@ -785,12 +792,13 @@ impl Handler {
             } else {
                 None
             };
-            // §P5 — apply the user rename list at render time so the
-            // UI sees the user-facing binding name.  Origin summaries
-            // continue to look up by the recorded (minified) name —
-            // origin tracking is keyed on the recorded variable id,
-            // not the rendered name.
-            let (display, _original) = self.resolve_variable_name(&l.expression);
+            // §P5/P6.4 — apply the user rename list + per-position
+            // sourcemap segment lookup at render time so the UI sees
+            // the user-facing binding name.  Origin summaries continue
+            // to look up by the recorded (minified) name — origin
+            // tracking is keyed on the recorded variable id, not the
+            // rendered name.
+            let (display, _original) = self.resolve_variable_name_at(&l.expression, &file, line, col);
             locals.push(Variable {
                 expression: display,
                 value: to_ct_value(&l.value),
@@ -4237,23 +4245,75 @@ impl Handler {
     /// derive a `(file, scope_hint)` pair.  The lookup is best-effort:
     /// when the step has no associated path / call, the resolver only
     /// inspects the global-scope user list and the sourcemap names.
+    ///
+    /// Back-compat wrapper — derives `(file, line, col)` from the
+    /// current `step_id` and delegates to
+    /// [`Handler::resolve_variable_name_at`].  Existing callers that
+    /// don't have an external `(file, line, col)` triple keep working.
     pub(crate) fn resolve_variable_name(&self, recorded_name: &str) -> (String, String) {
+        // Cheap fast-paths: if neither a rename list nor a sourcemap
+        // is loaded the resolver always returns `None`, so we avoid
+        // the (file, line, col) computation entirely.
+        if !self.sourcemap_cache.has_rename_list() && self.sourcemap_cache.is_empty() {
+            let original = recorded_name.to_string();
+            return (original.clone(), original);
+        }
+        let (file, line, col) = self.current_step_location();
+        self.resolve_variable_name_at(recorded_name, &file, line, col)
+    }
+
+    /// §P6.4 — derive `(file, line, col)` from the current `step_id`.
+    ///
+    /// Returns sensible defaults when the step has no recorded
+    /// location: empty `file`, `line = 1`, `col = 1` — these keep the
+    /// per-position resolver in P5-compatible "no segment lookup
+    /// possible" mode without crashing.  Column defaults to `1` when
+    /// the recorder ran without column-aware tracing.
+    pub(crate) fn current_step_location(&self) -> (String, u32, u32) {
+        self.reader
+            .step(self.step_id)
+            .map(|s| {
+                let file = self.reader.path(s.path_id).map(|p| p.to_string()).unwrap_or_default();
+                let line = s.line.0 as u32;
+                let col = s.column.map(|c| c.0 as u32).unwrap_or(1);
+                (file, line, col)
+            })
+            .unwrap_or_else(|| (String::new(), 1, 1))
+    }
+
+    /// §P6.4 — position-aware variant of
+    /// [`Handler::resolve_variable_name`].
+    ///
+    /// Same precedence rules as the back-compat wrapper, but the
+    /// `(file, line, col)` triple is supplied by the caller — typically
+    /// derived from the surrounding step's recorded location.  The
+    /// position flows into [`SourcemapCache::resolve_name_at_position`]
+    /// so the per-segment `name_index` branch can recover the original
+    /// identifier name from the sourcemap.
+    ///
+    /// `file` is the recorded path string; `(line, col)` are 1-indexed
+    /// generated coordinates.  Passing `file = ""`, `line = 1`,
+    /// `col = 1` keeps the resolver in P5-compatible mode (the
+    /// per-position lookup degenerates to a "first segment on the
+    /// first line" probe, which matches the back-compat contract).
+    pub(crate) fn resolve_variable_name_at(
+        &self,
+        recorded_name: &str,
+        file: &str,
+        line: u32,
+        col: u32,
+    ) -> (String, String) {
         let original = recorded_name.to_string();
         // Cheap fast-paths: if neither a rename list nor a sourcemap
         // is loaded the resolver always returns `None`, so we avoid
-        // the (file, scope) computation entirely.
+        // the scope-hint computation entirely.
         if !self.sourcemap_cache.has_rename_list() && self.sourcemap_cache.is_empty() {
             return (original.clone(), original);
         }
-        let step_id = self.step_id;
-        let file = self
-            .reader
-            .step(step_id)
-            .and_then(|s| self.reader.path(s.path_id).map(|p| p.to_string()))
-            .unwrap_or_default();
         // Compute the scope hint: prefer function scope (from the
         // surrounding call's function name) and fall back to a block
         // scope keyed by the step's line.
+        let step_id = self.step_id;
         let scope_hint = self.reader.step(step_id).map(|s| {
             let block = crate::rename_list::Scope::Block(s.line.0 as u32);
             let call_key = self.reader.call_key_for_step(step_id);
@@ -4265,22 +4325,27 @@ impl Handler {
         });
 
         // Try the narrower scope (function) first, then the broader
-        // (block).  `resolve_name` falls back to the global entries on
-        // miss internally.
+        // (block).  `resolve_name_at_position` falls back to the global
+        // entries on miss internally.
         if let Some((fn_scope, block_scope)) = scope_hint {
             if let Some(fn_s) = &fn_scope
-                && let Some(renamed) = self.sourcemap_cache.resolve_name(&file, Some(fn_s), recorded_name)
+                && let Some(renamed) = self
+                    .sourcemap_cache
+                    .resolve_name_at_position(file, line, col, Some(fn_s), recorded_name)
             {
                 return (renamed, original);
             }
             if let Some(renamed) = self
                 .sourcemap_cache
-                .resolve_name(&file, Some(&block_scope), recorded_name)
+                .resolve_name_at_position(file, line, col, Some(&block_scope), recorded_name)
             {
                 return (renamed, original);
             }
         }
-        if let Some(renamed) = self.sourcemap_cache.resolve_name(&file, None, recorded_name) {
+        if let Some(renamed) = self
+            .sourcemap_cache
+            .resolve_name_at_position(file, line, col, None, recorded_name)
+        {
             return (renamed, original);
         }
         (original.clone(), original)
@@ -4304,12 +4369,17 @@ impl Handler {
             // it here because the emulator surfaces a single flat scope
             // per frame.
             let locals_with_records = self.replay.load_locals(task::CtLoadLocalsArguments::default())?;
+            // §P6.4 — surrounding step position threaded into the
+            // per-position resolver, computed once per frame.
+            let (file, line, col) = self.current_step_location();
             let dap_variables: Vec<dap_types::Variable> = locals_with_records
                 .iter()
                 .map(|l| {
                     let ct_val = to_ct_value(&l.value);
-                    // §P5 — apply the user rename list at render time.
-                    let (display, _original) = self.resolve_variable_name(&l.expression);
+                    // §P5/P6.4 — user rename list + per-position
+                    // sourcemap segment lookup at render time.
+                    let (display, _original) =
+                        self.resolve_variable_name_at(&l.expression, &file, line, col);
                     dap::new_dap_variable(&display, &ct_val.text_repr(), 0)
                 })
                 .collect();
@@ -4324,6 +4394,9 @@ impl Handler {
         }
         let empty_vars: Vec<FullValueRecord> = vec![];
         let vars_slice = self.reader.variables_at(self.step_id).unwrap_or(&empty_vars);
+        // §P6.4 — surrounding step position threaded into the
+        // per-position resolver, computed once per frame.
+        let (file, line, col) = self.current_step_location();
         let full_value_locals: Vec<Variable> = vars_slice
             .iter()
             .map(|v| {
@@ -4332,8 +4405,10 @@ impl Handler {
                     .variable_name(v.variable_id)
                     .unwrap_or("<unknown>")
                     .to_string();
-                // §P5 — apply the user rename list at render time.
-                let (display, _original) = self.resolve_variable_name(&recorded_name);
+                // §P5/P6.4 — user rename list + per-position sourcemap
+                // segment lookup at render time.
+                let (display, _original) =
+                    self.resolve_variable_name_at(&recorded_name, &file, line, col);
                 Variable {
                     expression: display,
                     value: self.reader.to_ct_value(&v.value),
