@@ -1,0 +1,71 @@
+name: Setup db-backend siblings
+description: Clone sibling repositories required by src/db-backend path dependencies.
+inputs:
+  gh-token:
+    description: GitHub token with access to sibling repositories.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Resolve codetracer-trace-format ref
+      id: resolve-trace-format-ref
+      shell: bash
+      run: |
+        PINS=".github/sibling-pins"
+        REF="main"
+        if [ -f "${PINS}" ]; then
+          PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
+          [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+        fi
+        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+    - name: Clone codetracer-trace-format sibling
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/codetracer-trace-format
+        ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
+        path: ${{ github.workspace }}/../codetracer-trace-format
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Resolve codetracer-trace-format-nim ref
+      id: resolve-trace-format-nim-ref
+      shell: bash
+      run: |
+        PINS=".github/sibling-pins"
+        REF="main"
+        if [ -f "${PINS}" ]; then
+          PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
+          [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+        fi
+        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+    - name: Clone codetracer-trace-format-nim sibling
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/codetracer-trace-format-nim
+        ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
+        path: ${{ github.workspace }}/../codetracer-trace-format-nim
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Resolve codetracer-native-recorder ref
+      id: resolve-native-recorder-ref
+      shell: bash
+      run: |
+        PINS=".github/sibling-pins"
+        REF="main"
+        if [ -f "${PINS}" ]; then
+          PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
+          [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
+        fi
+        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+    - name: Clone codetracer-native-recorder sibling
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/codetracer-native-recorder
+        ref: ${{ steps.resolve-native-recorder-ref.outputs.ref }}
+        path: ${{ github.workspace }}/../codetracer-native-recorder
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'

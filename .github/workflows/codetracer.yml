@@ -223,11 +223,24 @@ jobs:
     runs-on: windows-latest
     name: origin-DAP (per-PR subset, Windows)
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -251,11 +264,24 @@ jobs:
     runs-on: windows-latest
     name: origin-DAP (nightly full matrix, Windows)
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -939,11 +965,24 @@ jobs:
   origin-dap-macos:
     runs-on: [self-hosted, darwin, nix-darwin, aarch64-darwin]
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -965,11 +1004,24 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, darwin, nix-darwin, aarch64-darwin]
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
