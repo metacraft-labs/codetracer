@@ -115,9 +115,21 @@ When the UI requests the name for a recorded binding, the resolver consults thre
 |---------------------------|---------|--------------------------------------------------------------------------------------------------|
 | `CT_RENAME_LIST`          | on      | Disables the rename-list loader entirely — even an explicit `--rename-list` path is ignored.     |
 | `CT_SOURCEMAP_TRANSLATION`| on      | Disables [§P3](#sourcemap-translation-pipeline) sourcemap translation (separate kill switch).    |
-| `CT_AUTOFORMAT`           | on      | Disables the [§P4](#sourcemap-translation-pipeline) auto-format fallback for sourcemap-less minified sources. |
+| `CT_AUTOFORMAT`           | on      | Disables the [§P4](#sourcemap-translation-pipeline) auto-format fallback for sourcemap-less minified sources, **and** the [§P6.2](#sourcemap-translation-pipeline) recorder-side pre-format hook. |
+| `CT_AUTOFORMAT_THRESHOLD` | 500     | Override the average-line-length heuristic used by both the recorder pre-format and the replay-server fallback to decide whether a source looks minified.  Integer ≥ 1. |
 
-The three kill switches are independent.  Turning off `CT_RENAME_LIST` does not affect sourcemap translation or auto-format.
+The four kill switches are independent.  Turning off `CT_RENAME_LIST` does not affect sourcemap translation or auto-format.
+
+## Auto-format pipeline (where formatting happens)
+
+There are **two** places minified-source formatting can run, depending on which recorder produced the trace:
+
+* **Recorder-side (P6.2, recommended).**  Recorders from version 0.2.0 onward (e.g. `codetracer-js-recorder`) detect minified sources at record start, shell out to `prettier` (JavaScript) / `black` (Python) once, and bake the formatted view + a Source Map V3 sourcemap (formatted → original) into the trace under `<trace>/files/<file>.fmt.js{,.map}`.  The replay-server's existing [§P3](#sourcemap-translation-pipeline) sourcemap path discovers the `.map` sibling and translates positions with no replay-time subprocess.
+* **Replay-server-side (P4, fallback).**  For traces produced by older recorders, the replay-server lazily formats minified sources at trace open, caching the result under the trace's cache directory.  The behaviour is identical from the UI's perspective; the only difference is *when* the formatter runs (record time vs. view time) and how it's cached.
+
+The same `CT_AUTOFORMAT` env var disables both — useful when you want to inspect the raw minified source.  Disabling autoformat on a trace that already carries a `.fmt.js` sibling is a no-op (the formatted view is already on disk; the env var only gates the lookup pipeline).
+
+The JS recorder exposes a CLI flag `--no-autoformat` that disables the recorder-side hook for a single invocation, falling back to the P4 lazy path at view time.
 
 ## Caveats
 
@@ -132,4 +144,4 @@ The three kill switches are independent.  Turning off `CT_RENAME_LIST` does not 
 * [Value-Origin Tracking](./value-origin-tracking.md) — the parallel pipeline that recovers value provenance independently of binding names.
 
 <a id="sourcemap-translation-pipeline"></a>
-*§P3 (sourcemap translation), §P4 (auto-format fallback), and §P5 (this document) are the three milestones of the **Column-Aware Tracing & Source Deminification** campaign; the milestones spec lives at `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org`.*
+*§P3 (sourcemap translation), §P4 (replay-side auto-format fallback), §P5 (this document), and §P6.2 (recorder-side auto-format hook) are milestones of the **Column-Aware Tracing & Source Deminification** campaign; the milestones spec lives at `codetracer-specs/Planned-Features/Column-Aware-Tracing-And-Deminification.milestones.org`.*
