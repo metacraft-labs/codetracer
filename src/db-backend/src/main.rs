@@ -104,6 +104,11 @@ mod recreator_origin;
 mod recreator_session;
 mod replay;
 mod sourcemap_cache;
+// Column-Aware-Tracing-And-Deminification §P4 — auto-format fallback.
+// Mirrors the lib.rs declaration; the bin needs its own copy because
+// the sourcemap_cache integration reaches for the module via
+// `crate::autoformat`.
+mod autoformat;
 // M24 — Multi-trace session loading; mirror of the lib.rs declarations.
 // The bin needs its own copies because `dap_server` reaches for the
 // SessionHandler via the `crate::session_handler` path.

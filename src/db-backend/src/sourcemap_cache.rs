@@ -45,6 +45,8 @@ use sourcemap_translate::{OriginalPos, SourcemapIndex, discover_sourcemap_for};
 
 use codetracer_trace_types::PathId;
 
+use crate::autoformat::{self, AutoFormatError};
+
 /// One translated location returned by [`SourcemapCache::translate`].
 ///
 /// All coordinates are 1-indexed and ready to flow into DAP responses.
@@ -91,6 +93,39 @@ pub struct SourcemapCache {
     /// the lazy writer from clobbering user-edited files between
     /// queries within the same session.
     materialised: HashMap<String, ()>,
+    /// §P4 — per-path auto-format cache.  Keyed by the recorded
+    /// absolute path string.  Each entry is either:
+    ///
+    /// * `Some(Arc<AutoFormatLookup>)` — auto-format succeeded; the
+    ///   formatted content has been materialised to disk under
+    ///   `cache_dir/sourcemap-translate/autoformat_<sanitised>` and the
+    ///   position map is ready to project recorded coordinates.
+    /// * `None` — auto-format was attempted and **failed** (no tool,
+    ///   not minified, unknown extension, subprocess error).  Keeping
+    ///   the negative entry around prevents us from re-running the
+    ///   subprocess on every hot-loop translation call for the same
+    ///   pass-through path.
+    autoformat_by_path: HashMap<String, Option<Arc<AutoFormatLookup>>>,
+}
+
+/// One auto-formatted path's projected source + materialised file path.
+///
+/// Built once per recorded minified path the first time
+/// [`SourcemapCache::translate_via_autoformat`] is asked about it;
+/// cached for the rest of the session so the formatter subprocess
+/// runs at most once per source.
+#[derive(Debug)]
+pub struct AutoFormatLookup {
+    /// Absolute path to the materialised formatted-source sidecar on
+    /// disk — what the UI's filesystem reader picks up.  When the
+    /// cache was built without a `cache_dir` (e.g. test fixtures
+    /// without a trace dir) this falls back to the original recorded
+    /// path so the caller can still surface the projected
+    /// `(line, column)` pair.
+    pub formatted_path: String,
+    /// Synthetic line-only position map.  Built by
+    /// [`autoformat::PositionMap::from_diff`].
+    pub position_map: autoformat::PositionMap,
 }
 
 /// `true` when the `CT_SOURCEMAP_TRANSLATION` env var requests the
@@ -204,6 +239,138 @@ impl SourcemapCache {
     ) -> Option<TranslatedLocation> {
         let idx = self.by_path.get(path)?;
         translate_with_index(idx, line, column, cache_dir, &mut self.materialised)
+    }
+
+    /// §P4 — lazy auto-format fallback for a recorded path.
+    ///
+    /// Called by [`crate::dap_handler::Handler::apply_sourcemap_translation`]
+    /// when the sourcemap path returned nothing (the recorded source
+    /// has no sibling `.map` and no `//# sourceMappingURL=`).
+    ///
+    /// Behaviour:
+    ///
+    /// * **First call for a path**: read the file, run the
+    ///   minified-heuristic, and — if it qualifies — invoke
+    ///   [`autoformat::autoformat`].  Cache the result (positive *or*
+    ///   negative) under the absolute path string.  Materialise the
+    ///   formatted content as a sidecar under
+    ///   `cache_dir/sourcemap-translate/autoformat_<sanitised-name>`.
+    ///
+    /// * **Subsequent calls**: serve from the in-memory cache.  The
+    ///   formatter subprocess never runs twice for the same path
+    ///   within a session.
+    ///
+    /// Returns `None` when the path:
+    /// * Doesn't exist on disk.
+    /// * Doesn't look minified.
+    /// * The formatter isn't installed / failed / timed out.
+    /// * The position map projection didn't anchor the recorded line.
+    ///
+    /// In every `None` case the caller falls through to the recorded
+    /// `(path, line, column)` — auto-format is best-effort and never
+    /// destructive.
+    pub fn translate_via_autoformat(
+        &mut self,
+        recorded_path: &str,
+        line: u32,
+        column: u32,
+        cache_dir: Option<&Path>,
+    ) -> Option<TranslatedLocation> {
+        if !autoformat::autoformat_enabled() {
+            return None;
+        }
+
+        // First, hit the cache.  Avoid double-format on repeat lookups
+        // for both positive and negative outcomes.
+        if let Some(entry) = self.autoformat_by_path.get(recorded_path) {
+            return entry.as_ref().and_then(|lookup| {
+                project_through_autoformat(lookup, line, column)
+            });
+        }
+
+        // Not cached — attempt the lazy build.
+        let result = self.build_autoformat_entry(recorded_path, cache_dir);
+        // Cache the outcome (positive or negative).
+        self.autoformat_by_path
+            .insert(recorded_path.to_string(), result.clone());
+        result.and_then(|lookup| project_through_autoformat(&lookup, line, column))
+    }
+
+    /// Look up an existing auto-format entry without triggering a new
+    /// subprocess.  Used by callers that want the formatted-source
+    /// path (e.g. DAP `source` content delivery) without rerunning
+    /// the heuristic.
+    pub fn autoformat_lookup(&self, recorded_path: &str) -> Option<Arc<AutoFormatLookup>> {
+        self.autoformat_by_path.get(recorded_path).and_then(|e| e.clone())
+    }
+
+    /// Reset just the auto-format cache.  Exposed so tests can switch
+    /// `CT_AUTOFORMAT` between calls without stale negative entries
+    /// suppressing the new behaviour.
+    pub fn reset_autoformat_cache(&mut self) {
+        self.autoformat_by_path.clear();
+    }
+
+    /// Lazy builder shared by [`Self::translate_via_autoformat`].
+    /// Returns `Some(lookup)` on a usable auto-format, `None` for the
+    /// negative cache.
+    fn build_autoformat_entry(
+        &mut self,
+        recorded_path: &str,
+        cache_dir: Option<&Path>,
+    ) -> Option<Arc<AutoFormatLookup>> {
+        let path = Path::new(recorded_path);
+        if !path.is_file() {
+            debug!("autoformat: recorded path is not a file on disk: {recorded_path}");
+            return None;
+        }
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                debug!("autoformat: failed to read {recorded_path}: {e}");
+                return None;
+            }
+        };
+
+        let threshold = autoformat::minified_threshold();
+        if !autoformat::looks_minified(&content, threshold) {
+            debug!(
+                "autoformat: source does not look minified (avg line < {threshold} chars): {recorded_path}"
+            );
+            return None;
+        }
+
+        let formatted = match autoformat::autoformat(path, &content) {
+            Ok(r) => r,
+            Err(AutoFormatError::NoTool) => {
+                info!("autoformat: no formatter on PATH; skipping {recorded_path}");
+                return None;
+            }
+            Err(AutoFormatError::Timeout) => {
+                warn!("autoformat: formatter timed out on {recorded_path}");
+                return None;
+            }
+            Err(e) => {
+                warn!("autoformat: failed for {recorded_path}: {e}");
+                return None;
+            }
+        };
+
+        // Materialise the formatted content under the trace's cache
+        // directory if one was configured — gives the UI a real file
+        // path to read.  Without a cache_dir we still build the
+        // position map and surface the projected `(line, col)`, but
+        // the path the caller sees is the recorded one.
+        let formatted_path = match cache_dir {
+            Some(dir) => materialise_autoformat(dir, recorded_path, &formatted.formatted_content)
+                .unwrap_or_else(|| recorded_path.to_string()),
+            None => recorded_path.to_string(),
+        };
+
+        Some(Arc::new(AutoFormatLookup {
+            formatted_path,
+            position_map: formatted.position_map,
+        }))
     }
 
     /// Return the inline `sourcesContent[i]` for an original source
@@ -339,6 +506,71 @@ fn materialise_original(
             None
         }
     }
+}
+
+/// §P4 — project a recorded `(line, column)` through the cached
+/// auto-format lookup, returning a [`TranslatedLocation`] pointing at
+/// the materialised formatted-source sidecar.
+///
+/// Falls back to `None` when the line wasn't anchored — the caller
+/// then surfaces the recorded coordinates unchanged.
+fn project_through_autoformat(
+    lookup: &Arc<AutoFormatLookup>,
+    line: u32,
+    column: u32,
+) -> Option<TranslatedLocation> {
+    let (fmt_line, fmt_col) = lookup.position_map.project(line, column)?;
+    Some(TranslatedLocation {
+        path: lookup.formatted_path.clone(),
+        line: fmt_line,
+        column: fmt_col,
+        // Auto-format preserves bindings (it only reflows whitespace);
+        // there are no original `names[]` to attribute here.
+        name: None,
+    })
+}
+
+/// §P4 — write the formatter's output to
+/// `<cache_dir>/sourcemap-translate/autoformat_<sanitised-name>`.
+///
+/// Idempotent: returns the path if the file already exists with the
+/// same content; rewrites on content mismatch so re-running with a
+/// newer formatter version is reflected in the on-disk view.
+///
+/// The `autoformat_` prefix on the basename distinguishes these
+/// sidecars from the P3 materialised inline-sourcesContent files
+/// (which use no prefix) so the two paths can coexist in the same
+/// cache directory without colliding.
+fn materialise_autoformat(cache_dir: &Path, recorded_path: &str, formatted_content: &str) -> Option<String> {
+    let cache_root = cache_dir.join("sourcemap-translate");
+    if std::fs::create_dir_all(&cache_root).is_err() {
+        return None;
+    }
+    // Reuse the sourcemap-cache sanitiser to stay consistent across
+    // both materialisation paths.
+    let basename = sanitize_for_cache(recorded_path);
+    let mut prefixed = std::ffi::OsString::from("autoformat_");
+    prefixed.push(basename.as_os_str());
+    let out_path = cache_root.join(prefixed);
+
+    // Rewrite when the on-disk content drifts — handles the case where
+    // a follow-up session formats the same source with a newer tool
+    // version.  We deliberately don't skip-on-exists because the spec
+    // promises the user sees the *current* formatted view.
+    let needs_write = match std::fs::read_to_string(&out_path) {
+        Ok(existing) => existing != formatted_content,
+        Err(_) => true,
+    };
+    if needs_write
+        && let Err(e) = std::fs::write(&out_path, formatted_content.as_bytes())
+    {
+        warn!(
+            "autoformat: failed to materialise formatted source to {}: {e}",
+            out_path.display()
+        );
+        return None;
+    }
+    Some(out_path.display().to_string())
 }
 
 /// Convert a sourcemap logical source name (e.g. `webpack:///./src/foo.ts`,

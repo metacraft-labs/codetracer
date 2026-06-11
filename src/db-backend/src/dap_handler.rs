@@ -3771,31 +3771,46 @@ impl Handler {
     /// Apply Source Map V3 translation to a recorded `(path, line, column)`.
     ///
     /// Returns the original-source coordinates when a sourcemap is
-    /// available; otherwise returns the inputs unchanged.  This is the
-    /// single point where DAP `stackTrace` responses pick up
-    /// translation — keeping all callers funnelled through here
-    /// guarantees the §P3 server-side single-source-of-truth contract.
+    /// available; otherwise — when the source looks minified —
+    /// falls back to the §P4 auto-format path.  When neither route
+    /// fires, returns the inputs unchanged.  This is the single point
+    /// where DAP `stackTrace` responses pick up translation — keeping
+    /// all callers funnelled through here guarantees the §P3
+    /// server-side single-source-of-truth contract.
     fn apply_sourcemap_translation(
         &mut self,
         recorded_path: &str,
         recorded_line: i64,
         recorded_column: i64,
     ) -> (String, i64, i64) {
-        if self.sourcemap_cache.is_empty() || recorded_line <= 0 {
+        if recorded_line <= 0 {
             return (recorded_path.to_string(), recorded_line, recorded_column);
         }
-        // The path-based lookup is the natural fit here — by the time
-        // we reach DAP-frame synthesis the recorded path has already
-        // been joined with the workdir, and we don't carry the
-        // `PathId` through.  The `by_path` index inside the cache
-        // shares the same parsed sourcemap as the by-PathId entry, so
-        // this is a single HashMap lookup.
         let line_u32 = recorded_line.max(0) as u32;
         let col_u32 = recorded_column.max(1) as u32;
-        match self.translate_via_sourcemap_for_path(recorded_path, line_u32, col_u32) {
-            Some(t) => (t.path, t.line as i64, t.column as i64),
-            None => (recorded_path.to_string(), recorded_line, recorded_column),
+
+        // P3 — try the sourcemap path first.  When a sibling `.map` or
+        // `//# sourceMappingURL=` is loaded the by_path index serves the
+        // translation in O(log n) per segment.
+        if !self.sourcemap_cache.is_empty()
+            && let Some(t) = self.translate_via_sourcemap_for_path(recorded_path, line_u32, col_u32)
+        {
+            return (t.path, t.line as i64, t.column as i64);
         }
+
+        // P4 — sourcemap-less fallback.  Lazily auto-format the source
+        // on its first translation request and project the recorded
+        // position through the synthetic line-only map.  Disabled
+        // entirely when `CT_AUTOFORMAT={0,off,false,no}`.
+        let cache_dir = self.sourcemap_cache_dir.clone();
+        if let Some(t) =
+            self.sourcemap_cache
+                .translate_via_autoformat(recorded_path, line_u32, col_u32, cache_dir.as_deref())
+        {
+            return (t.path, t.line as i64, t.column as i64);
+        }
+
+        (recorded_path.to_string(), recorded_line, recorded_column)
     }
     pub fn threads(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         // For multi-process recordings (fork / exec), enumerate the recorded

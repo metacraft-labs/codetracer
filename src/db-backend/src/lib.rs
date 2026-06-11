@@ -125,6 +125,12 @@ pub mod program_search_tool;
 // `Handler` and are populated at trace-open time.
 pub mod query;
 pub mod sourcemap_cache;
+// Column-Aware-Tracing-And-Deminification §P4 — auto-format fallback
+// for minified sources that ship without a sourcemap.  Self-contained
+// module that wraps `prettier` / `black` as subprocesses; the
+// `sourcemap_cache` integration calls into it lazily on
+// per-path translation requests when no sourcemap is loaded.
+pub mod autoformat;
 // M11 — RR-driver origin chain algorithm (spec §6.3).
 // Sits between `recreator_session::RecreatorReplaySession` (which owns
 // the worker transport) and `dap_handler::Handler::origin_chain` (which
