@@ -382,7 +382,32 @@ pub trait TraceReader: std::fmt::Debug + Send {
     #[allow(clippy::expect_used)]
     fn load_location(&self, step_id: StepId, call_key_arg: CallKey, expr_loader: &mut ExprLoader) -> Location {
         let step_id_int = step_id.0;
-        let step_record = self.step(step_id).expect("load_location: invalid step_id");
+        let Some(step_record) = self.step(step_id) else {
+            // Some recorders (notably the EVM recorder against
+            // multi-function contracts like FlowTest.sol) emit Call
+            // records whose ``step_id`` points outside the steps table
+            // -- the source-map walk attributes the call to a step
+            // index that the step stream never produces.  Older
+            // versions of this helper would ``.expect("load_location:
+            // invalid step_id")`` and panic in the stable worker
+            // thread, which left every ``ct/load-calltrace-section``
+            // request hanging until the WDIO client timed out
+            // ("``DAP request timeout``").  Surface a sentinel
+            // location instead so the calltrace-section response can
+            // still be assembled -- the GUI shows ``<unknown>`` in
+            // that row, which is strictly more useful than the
+            // request never completing.
+            warn!(
+                "load_location: step_id {step_id_int} out of range (step_count={}) -- \
+                 returning sentinel Location to keep the DAP response stream alive",
+                self.step_count(),
+            );
+            return Location {
+                rr_ticks: RRTicks(step_id_int),
+                key: format!("{}", call_key_arg.0),
+                ..Location::default()
+            };
+        };
         let path = format!(
             "{}",
             self.workdir()
