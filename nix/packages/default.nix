@@ -42,6 +42,9 @@
         cp -a ${inputs.nim-everywhere} "$ISONIM_STAGE/nim-everywhere"
         cp -a ${inputs.nim-termctl} "$ISONIM_STAGE/nim-termctl"
         cp -a ${inputs.nim-pty} "$ISONIM_STAGE/nim-pty"
+        cp -a ${inputs.nim-acp} "$ISONIM_STAGE/nim-acp"
+        cp -a ${inputs.nim-agent-harbor} "$ISONIM_STAGE/nim-agent-harbor"
+        cp -a ${inputs.nim-agents} "$ISONIM_STAGE/nim-agents"
         chmod -R u+w "$ISONIM_STAGE"
         mkdir -p "$ISONIM_STAGE/isonim/build"
         [ -f "$ISONIM_STAGE/isonim/build/tailwind-styles.json" ] || \
@@ -266,6 +269,9 @@
               --path:"$ISONIM_STAGE/nim-everywhere/src" \
               --path:"$ISONIM_STAGE/nim-termctl/src" \
               --path:"$ISONIM_STAGE/nim-pty/src" \
+              --path:"$ISONIM_STAGE/nim-acp/src" \
+              --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
+              --path:"$ISONIM_STAGE/nim-agents/src" \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
@@ -277,6 +283,9 @@
               --path:"$ISONIM_STAGE/nim-everywhere/src" \
               --path:"$ISONIM_STAGE/nim-termctl/src" \
               --path:"$ISONIM_STAGE/nim-pty/src" \
+              --path:"$ISONIM_STAGE/nim-acp/src" \
+              --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
+              --path:"$ISONIM_STAGE/nim-agents/src" \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
           '';
@@ -310,6 +319,9 @@
                 --path:"$ISONIM_STAGE/nim-everywhere/src" \
                 --path:"$ISONIM_STAGE/nim-termctl/src" \
                 --path:"$ISONIM_STAGE/nim-pty/src" \
+                --path:"$ISONIM_STAGE/nim-acp/src" \
+                --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
+                --path:"$ISONIM_STAGE/nim-agents/src" \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
                 --out:./subwindow.js js src/frontend/subwindow.nim
@@ -347,6 +359,9 @@
               --path:"$ISONIM_STAGE/nim-everywhere/src" \
               --path:"$ISONIM_STAGE/nim-termctl/src" \
               --path:"$ISONIM_STAGE/nim-pty/src" \
+              --path:"$ISONIM_STAGE/nim-acp/src" \
+              --path:"$ISONIM_STAGE/nim-agent-harbor/src" \
+              --path:"$ISONIM_STAGE/nim-agents/src" \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
               --out:./ui.js js src/frontend/ui_js.nim

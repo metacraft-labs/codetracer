@@ -215,6 +215,18 @@
       url = "github:metacraft-labs/nim-pty/dev";
       flake = false;
     };
+    nim-acp = {
+      url = "github:metacraft-labs/nim-acp/dev";
+      flake = false;
+    };
+    nim-agent-harbor = {
+      url = "github:metacraft-labs/nim-agent-harbor/dev";
+      flake = false;
+    };
+    nim-agents = {
+      url = "github:metacraft-labs/nim-agents/dev";
+      flake = false;
+    };
 
     # Pre-commit hooks
     git-hooks-nix.url = "github:cachix/git-hooks.nix";

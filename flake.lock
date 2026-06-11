@@ -1474,6 +1474,57 @@
         "type": "github"
       }
     },
+    "nim-acp": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1777906308,
+        "narHash": "sha256-vjIFn84HCNj6HEHE+sabS9vYBI3YZ2lXLIwGpjvogNI=",
+        "owner": "metacraft-labs",
+        "repo": "nim-acp",
+        "rev": "92993d80a8782d8d5bc6da8bf415914eb6f56c39",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-acp",
+        "type": "github"
+      }
+    },
+    "nim-agent-harbor": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1781149637,
+        "narHash": "sha256-vRED36di6fDQjs2+0s3QzLuNZxbn+xUNMIs/9DwP6ro=",
+        "owner": "metacraft-labs",
+        "repo": "nim-agent-harbor",
+        "rev": "d5bbc474e50d34f62f1c2f0825c40836a8d01e3c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-agent-harbor",
+        "type": "github"
+      }
+    },
+    "nim-agents": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1781149653,
+        "narHash": "sha256-2FSmdN9ln2UWQskvjMAge6z1m7NMJzBTqmFEZo5cflk=",
+        "owner": "metacraft-labs",
+        "repo": "nim-agents",
+        "rev": "5ec079652b29bc0c4e7f29c77c0de23648bc5f20",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "ref": "dev",
+        "repo": "nim-agents",
+        "type": "github"
+      }
+    },
     "nim-everywhere": {
       "flake": false,
       "locked": {
@@ -2630,6 +2681,9 @@
         "isonim": "isonim",
         "isonim-gpui": "isonim-gpui",
         "isonim-tui": "isonim-tui",
+        "nim-acp": "nim-acp",
+        "nim-agent-harbor": "nim-agent-harbor",
+        "nim-agents": "nim-agents",
         "nim-everywhere": "nim-everywhere",
         "nim-langserver": "nim-langserver",
         "nim-pty": "nim-pty",
