@@ -480,12 +480,11 @@ mod tests {
         let target = scratch.path().join("tinylib.min.js");
         fs::write(&target, body).unwrap();
         let out = scan_single_path(&target, &root);
-        match out {
-            AutoloadOutcome::MatchLogged { library, version, .. } => {
-                assert_eq!(library, "tinylib");
-                assert_eq!(version, "1.0.0");
-            }
-            other => panic!("expected MatchLogged, got {other:?}"),
+        if let AutoloadOutcome::MatchLogged { library, version, .. } = out {
+            assert_eq!(library, "tinylib");
+            assert_eq!(version, "1.0.0");
+        } else {
+            assert!(matches!(out, AutoloadOutcome::MatchLogged { .. }));
         }
     }
 
@@ -501,13 +500,12 @@ mod tests {
         let target = scratch.path().join("tinylib.min.js");
         fs::write(&target, body).unwrap();
         let out = scan_single_path(&target, &root);
-        match out {
-            AutoloadOutcome::Applied { library, list, .. } => {
-                assert_eq!(library, "tinylib");
-                assert_eq!(list.len(), 1);
-                assert_eq!(list.lookup("tinylib.min.js", None, "a"), Some("add"));
-            }
-            other => panic!("expected Applied, got {other:?}"),
+        if let AutoloadOutcome::Applied { library, list, .. } = out {
+            assert_eq!(library, "tinylib");
+            assert_eq!(list.len(), 1);
+            assert_eq!(list.lookup("tinylib.min.js", None, "a"), Some("add"));
+        } else {
+            assert!(matches!(out, AutoloadOutcome::Applied { .. }));
         }
         set_env("CT_CATALOG_AUTOLOAD", orig.as_deref());
     }

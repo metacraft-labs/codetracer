@@ -572,13 +572,12 @@ mod tests {
             to = "alpha_again"
         "#;
         let err = RenameList::parse_toml(raw).expect_err("duplicate must error");
-        match err {
-            RenameListError::DuplicateEntry { file, scope, from } => {
-                assert_eq!(file, "x.js");
-                assert_eq!(scope, "global");
-                assert_eq!(from, "a");
-            }
-            other => panic!("expected DuplicateEntry, got {other:?}"),
+        if let RenameListError::DuplicateEntry { file, scope, from } = err {
+            assert_eq!(file, "x.js");
+            assert_eq!(scope, "global");
+            assert_eq!(from, "a");
+        } else {
+            assert!(matches!(err, RenameListError::DuplicateEntry { .. }));
         }
     }
 
@@ -591,9 +590,10 @@ mod tests {
             from = "a"
         "#;
         let err = RenameList::parse_toml(raw_no_to).expect_err("missing field");
-        match err {
-            RenameListError::MissingField(name) => assert_eq!(name, "to"),
-            other => panic!("expected MissingField, got {other:?}"),
+        if let RenameListError::MissingField(name) = err {
+            assert_eq!(name, "to");
+        } else {
+            assert!(matches!(err, RenameListError::MissingField(_)));
         }
 
         // Missing `file`.
