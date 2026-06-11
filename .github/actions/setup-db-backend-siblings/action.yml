@@ -11,7 +11,7 @@ runs:
       id: resolve-trace-format-ref
       shell: bash
       run: |
-        PINS=".github/sibling-pins"
+        PINS="${GITHUB_WORKSPACE}/.github/sibling-pins"
         REF="main"
         if [ -f "${PINS}" ]; then
           PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
@@ -32,7 +32,7 @@ runs:
       id: resolve-trace-format-nim-ref
       shell: bash
       run: |
-        PINS=".github/sibling-pins"
+        PINS="${GITHUB_WORKSPACE}/.github/sibling-pins"
         REF="main"
         if [ -f "${PINS}" ]; then
           PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
@@ -53,7 +53,7 @@ runs:
       id: resolve-native-recorder-ref
       shell: bash
       run: |
-        PINS=".github/sibling-pins"
+        PINS="${GITHUB_WORKSPACE}/.github/sibling-pins"
         REF="main"
         if [ -f "${PINS}" ]; then
           PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
@@ -69,3 +69,10 @@ runs:
         path: ${{ github.workspace }}/../codetracer-native-recorder
         gh-token: ${{ inputs.gh-token }}
         submodules: 'false'
+
+    - name: Allow codetracer-native-recorder direnv
+      shell: bash
+      run: |
+        if command -v direnv >/dev/null 2>&1; then
+          direnv allow "${GITHUB_WORKSPACE}/../codetracer-native-recorder"
+        fi

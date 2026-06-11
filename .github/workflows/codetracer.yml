@@ -979,11 +979,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Setup db-backend siblings
-        uses: ./.github/actions/setup-db-backend-siblings
-        with:
-          gh-token: ${{ steps.app-token.outputs.token }}
-
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
@@ -992,6 +987,11 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Run origin-DAP per-PR subset (python + rust)
         env:
@@ -1018,11 +1018,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Setup db-backend siblings
-        uses: ./.github/actions/setup-db-backend-siblings
-        with:
-          gh-token: ${{ steps.app-token.outputs.token }}
-
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
@@ -1031,6 +1026,11 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Run origin-DAP full matrix (all languages)
         env:
