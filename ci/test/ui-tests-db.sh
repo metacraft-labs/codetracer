@@ -18,7 +18,7 @@ case "$PLATFORM" in
 nixos)
 	export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/result/bin/ct}"
 	export CODETRACER_DB_TESTS_ONLY=1
-	exec nix develop .#devShells.x86_64-linux.default --command just test-gui
+	exec nix develop .#devShells.x86_64-linux.default --command just test-gui-prebuilt
 	;;
 macos)
 	export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/non-nix-build/CodeTracer.app/Contents/MacOS/bin/ct}"

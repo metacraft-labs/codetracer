@@ -492,17 +492,8 @@ test:
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
   fi
 
-# Run all GUI tests headlessly (TypeScript Playwright e2e suite).
-# On Linux, uses a virtual display (Xvfb) — same as CI.
-# On Windows, no virtual display is needed; Electron runs natively.
-# For visible windows on your desktop, use `just test-gui-visible` instead.
-#
-# `build-once` runs as a prereq so the rebuilt frontend + replay-server are
-# fresh before tests launch — without this, db-backend / Nim frontend / Tup
-# changes that haven't been compiled silently produce stale-binary test
-# failures (see task #317 + the May 19→20 staleness incident that produced
-# the "ct-mcr binary not found" Cluster B failure).
-test-gui *args: build-once build-siblings
+# Run all GUI tests headlessly against an already-built CodeTracer binary.
+test-gui-prebuilt *args:
   #!/usr/bin/env bash
   set -e
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
@@ -527,6 +518,19 @@ test-gui *args: build-once build-siblings
       just test-e2e {{args}}
       ;;
   esac
+
+# Run all GUI tests headlessly (TypeScript Playwright e2e suite).
+# On Linux, uses a virtual display (Xvfb) — same as CI.
+# On Windows, no virtual display is needed; Electron runs natively.
+# For visible windows on your desktop, use `just test-gui-visible` instead.
+#
+# `build-once` runs as a prereq so the rebuilt frontend + replay-server are
+# fresh before tests launch — without this, db-backend / Nim frontend / Tup
+# changes that haven't been compiled silently produce stale-binary test
+# failures (see task #317 + the May 19→20 staleness incident that produced
+# the "ct-mcr binary not found" Cluster B failure).
+test-gui *args: build-once build-siblings
+  just test-gui-prebuilt {{args}}
 
 # Run GUI tests with windows visible on the current desktop session.
 # On Linux, requires a running display server ($DISPLAY must be set).
