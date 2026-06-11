@@ -33,6 +33,7 @@ type
     branch*: string
     commit*: string
     executionHostId*: string
+    workingCopyMode*: string
     labels*: JsonNode
     sessionKey*: string
 
@@ -94,11 +95,45 @@ proc ensureSessionKey(service: CodeTracerAgentService;
     inc service.nextSessionOrdinal
     "session-" & $service.nextSessionOrdinal
 
+proc normalizeWorkingCopyMode(value: string; provider = ""): string =
+  let providerKey = provider.strip().toLowerAscii().replace("-", "_")
+  let valueKey = value.strip().toLowerAscii().replace("-", "_")
+  if providerKey == "agentfs" and valueKey in ["", "overlay", "cow_overlay",
+      "agentfs"]:
+    return "agentfs"
+  case valueKey
+  of "git", "worktree", "git_worktree": "git_worktree"
+  of "agentfs": "agentfs"
+  of "overlay", "cow_overlay": "cow_overlay"
+  of "copy", "file_copy": "copy"
+  of "inplace", "in_place": "in_place"
+  of "none", "": value
+  else: value
+
+proc providerFromRaw(raw: JsonNode): string =
+  if raw.isNil or raw.kind != JObject:
+    return ""
+  raw{"provider"}.getStr(raw{"workspace"}{"provider"}.getStr(""))
+
+proc effectiveWorkingCopyMode(config: CodeTracerAgentLaunchConfig): string =
+  if config.workingCopyMode.len > 0:
+    config.workingCopyMode.normalizeWorkingCopyMode()
+  elif config.backend == ctabHarbor:
+    $wiGitWorktree
+  else:
+    $wiNone
+
 proc buildLaunchPrompt*(config: CodeTracerAgentLaunchConfig;
     tabId: string): seq[ContentBlock] =
   let workspaceConstraint =
     if config.backend == ctabHarbor:
-      "Work only inside the Agent Harbor git worktree workspace for this task."
+      case config.effectiveWorkingCopyMode()
+      of "git_worktree":
+        "Work only inside the Agent Harbor git worktree workspace for this task."
+      of "agentfs", "cow_overlay":
+        "Work only inside the Agent Harbor snapshot-backed workspace for this task."
+      else:
+        "Work only inside the Agent Harbor isolated workspace for this task."
     else:
       "Work only inside the CodeTracer session workspace for this task."
   taskPrompt(
@@ -149,11 +184,6 @@ proc lifecycleFromEvent(event: AgentEvent;
   else:
     if current in {aslCompleted, aslCancelled, aslError}: current
     else: aslRunning
-
-proc normalizeWorkingCopyMode(value: string): string =
-  case value
-  of "git": "git_worktree"
-  else: value
 
 proc lifecycleFromHarborStatus(status: string;
     current: AgentServiceLifecycle): AgentServiceLifecycle =
@@ -268,7 +298,8 @@ proc refreshHarborSessionInfo*(service: CodeTracerAgentService; tabId: string;
       if info.workspacePath.len > 0 and info.workspacePath != sourceWorkspace:
         entry.workspacePath = info.workspacePath
       if info.workingCopyMode.len > 0:
-        entry.workingCopyMode = info.workingCopyMode.normalizeWorkingCopyMode()
+        entry.workingCopyMode = info.workingCopyMode.normalizeWorkingCopyMode(
+          info.raw.providerFromRaw())
       entry.lifecycle = info.status.lifecycleFromHarborStatus(entry.lifecycle)
   except CatchableError:
     discard
@@ -291,7 +322,8 @@ proc applyEvents*(service: CodeTracerAgentService; tabId: string;
       if event.workspacePath.len > 0:
         entry.workspacePath = event.workspacePath
       if event.workingCopyMode.len > 0:
-        entry.workingCopyMode = event.workingCopyMode.normalizeWorkingCopyMode()
+        entry.workingCopyMode = event.workingCopyMode.normalizeWorkingCopyMode(
+          event.raw.providerFromRaw())
       if event.milestoneTotal > 0:
         entry.milestonesCompleted = event.milestoneCompleted
         entry.milestonesTotal = event.milestoneTotal
@@ -315,15 +347,18 @@ proc buildStartMode(config: CodeTracerAgentLaunchConfig;
       acpAgent: acpConfig,
       labels: labels)
   of ctabHarbor:
+    let workingCopyMode = config.effectiveWorkingCopyMode()
     AgentStartMode(
-      workspace: gitWorktreeWorkspace(
-        config.cwd,
-        tenantId = config.tenantId,
-        projectId = config.projectId,
-        repoUrl = config.repoUrl,
-        branch = config.branch,
-        commit = config.commit,
-        executionHostId = config.executionHostId),
+      workspace: AgentWorkspaceContext(
+        tenantId: config.tenantId,
+        projectId: config.projectId,
+        cwd: config.cwd,
+        repoMode: if config.repoUrl.len > 0: "git" else: "none",
+        repoUrl: config.repoUrl,
+        branch: config.branch,
+        commit: config.commit,
+        executionHostId: config.executionHostId,
+        workingCopyMode: workingCopyMode),
       prompt: prompt,
       acpAgent: acpConfig,
       labels: labels)
@@ -349,9 +384,7 @@ proc startAgentSession*(service: CodeTracerAgentService;
     evidenceCommand: evidenceCommandForTab(tabId),
     milestonesCompleted: 0,
     milestonesTotal: 1,
-    workingCopyMode:
-    if config.backend == ctabHarbor: $wiGitWorktree
-      else: $wiNone)
+    workingCopyMode: config.effectiveWorkingCopyMode())
   service.updateSession(tabId) do (entry: var AgentServiceSessionEntry):
     entry.events.add AgentServiceEventEntry(
       id: tabId & ":evidence-command",
@@ -394,6 +427,7 @@ proc reconnectHarborSession*(service: CodeTracerAgentService; tabId, sessionId,
 
   var workspacePath = ""
   var status = ""
+  var workingCopyMode = $wiGitWorktree
   try:
     let info = service.client.sessionInfo(AgentSession(
       id: sessionId,
@@ -402,6 +436,9 @@ proc reconnectHarborSession*(service: CodeTracerAgentService; tabId, sessionId,
     if info.workspacePath != cwd:
       workspacePath = info.workspacePath
     status = info.status
+    if info.workingCopyMode.len > 0:
+      workingCopyMode = info.workingCopyMode.normalizeWorkingCopyMode(
+        info.raw.providerFromRaw())
   except CatchableError:
     discard
 
@@ -413,7 +450,7 @@ proc reconnectHarborSession*(service: CodeTracerAgentService; tabId, sessionId,
     lifecycle: status.lifecycleFromHarborStatus(aslConnecting),
     title: "Agent task",
     workspacePath: workspacePath,
-    workingCopyMode: $wiGitWorktree)
+    workingCopyMode: workingCopyMode)
 
   let session = AgentSession(id: sessionId, taskId: taskId, backend: abkHarbor)
   try:

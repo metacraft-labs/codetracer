@@ -65,6 +65,7 @@ run_headless_matrix() {
 	run_nim "src/tests/gui/tests/agentic-coding/agentic_vm_m4_test.nim"
 	run_nim "src/tests/gui/tests/agentic-coding/agentic_deepreview_m5_test.nim"
 	run_nim "src/tests/gui/tests/agentic-coding/agentic_headless_m6_test.nim"
+	run_nim "src/tests/gui/tests/agentic-coding/agentic_provider_mode_m8_test.nim"
 	echo "logs: $log_root"
 }
 

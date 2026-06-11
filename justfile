@@ -1607,6 +1607,16 @@ test-codetracer-agentic-regression-gate:
 test-e2e-agentic-worktree:
   bash scripts/test-agentic-worktree-gui.sh
 
+# Optional AgentFS/snapshot-daemon agentic E2E contract. This target does not
+# start privileged daemons; without explicit CODETRACER_AGENTFS_E2E=1 and an
+# already-running AgentFS/Agent Harbor setup, the Playwright test records a
+# precise runtime skip.
+test-e2e-agentic-agentfs-optional:
+  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
+    npm install --no-audit --no-fund && \
+    npx playwright test --workers=1 \
+      tests/agentic-coding/agentic-agentfs-optional.spec.ts
+
 developer-setup *flags:
   bash scripts/developer-setup.sh {{flags}}
 
