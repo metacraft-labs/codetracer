@@ -1810,6 +1810,27 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
+      - name: Allow direnv in cloned codetracer-beam-recorder
+        # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
+        # invoke ``elixirc`` / ``erlc`` through
+        # ``test_harness::run_in_recorder_shell``, which routes
+        # tooling through ``direnv exec <beam-recorder-root> bash -lc``
+        # so the BEAM recorder's own dev shell (declaring elixir +
+        # erlang + rebar3 in flake.nix) is what supplies the
+        # compilers.  ``should_use_recorder_direnv`` first probes
+        # ``direnv exec <repo> true`` -- on a fresh clone that probe
+        # fails because the cloned ``.envrc`` is in the "blocked"
+        # state, so the helper silently falls back to the bare
+        # codetracer-shell PATH (which has no elixirc) and the test
+        # panics with ``failed to run elixirc in recorder dev shell:
+        # No such file or directory (os error 2)``.  Allow the .envrc
+        # before the test runs -- same idempotent pattern as the
+        # codetracer-native-recorder direnv-allow step above.
+        if: matrix.platform == 'nixos'
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-beam-recorder"
+
       - name: Build codetracer-beam-recorder (nixos)
         # ``find_beam_recorder()`` resolves the binary at
         # ``../codetracer-beam-recorder/target/debug/codetracer-beam-recorder``
