@@ -1,8 +1,9 @@
 name: Setup isonim siblings
 description: |
   Clones the IsoNim sibling repos (isonim, isonim-tui, isonim-gpui,
-  nim-everywhere, nim-termctl, nim-pty) next to the codetracer
-  checkout so the dev-shell Nim builds can resolve
+  nim-everywhere, nim-termctl, nim-pty, nim-acp, nim-agent-harbor,
+  nim-agents) next to the codetracer checkout so the dev-shell Nim
+  builds can resolve
 
     --path:"../isonim/src"          (et al.)
 
@@ -76,6 +77,33 @@ runs:
         repo: metacraft-labs/nim-pty
         ref: dev
         path: ${{ github.workspace }}/../nim-pty
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone nim-acp
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/nim-acp
+        ref: dev
+        path: ${{ github.workspace }}/../nim-acp
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone nim-agent-harbor
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/nim-agent-harbor
+        ref: dev
+        path: ${{ github.workspace }}/../nim-agent-harbor
+        gh-token: ${{ inputs.gh-token }}
+        submodules: 'false'
+
+    - name: Clone nim-agents
+      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+      with:
+        repo: metacraft-labs/nim-agents
+        ref: dev
+        path: ${{ github.workspace }}/../nim-agents
         gh-token: ${{ inputs.gh-token }}
         submodules: 'false'
 
