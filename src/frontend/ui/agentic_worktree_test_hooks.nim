@@ -10,9 +10,7 @@ import ui_imports
 import ../viewmodel/store/replay_data_store
 import agentic_session_launcher
 
-var
-  installed = false
-  sharedStore: ReplayDataStore
+var sharedStore: ReplayDataStore
 
 when defined(js):
   proc runExternalAction(command, inputRaw: cstring): cstring {.importjs: """
@@ -85,12 +83,12 @@ when defined(js):
 
 proc installAgenticWorktreeTestHooks*(store: ReplayDataStore) =
   when defined(js):
-    if installed or not data.startOptions.inTest:
+    if not data.startOptions.inTest:
       return
     sharedStore = store
-    discard installAgenticSessionLauncher(sharedStore, runExternalActionAdapter)
+    if currentAgenticSessionLauncher.isNil:
+      discard installAgenticSessionLauncher(sharedStore, runExternalActionAdapter)
     installJsHook(dispatchProductLauncher)
-    installed = true
 
 proc agenticWorktreeLauncherState*(): JsonNode =
   if currentAgenticSessionLauncher.isNil:

@@ -52,10 +52,10 @@ run_agent_harbor_contracts() {
 	fi
 	run_cmd "agent-harbor-codetracer-m0-e2e" \
 		bash -lc \
-		"cd '$ah_root' && ./scripts/nix-env.sh -c \"scripts/run-test-suite.sh cargo nextest run -p acp-client-runs-scenario --profile single --test codetracer_contract_m0 -E 'test(e2e_codetracer_contract_worktree_changed_files_diff_and_ct_command)'\""
+		"cd '$ah_root' && ./scripts/nix-env.sh -c 'cargo build -p mock-agent && export PATH=\"\$PWD/target/debug:\$PATH\" && scripts/run-test-suite.sh cargo nextest run -p acp-client-runs-scenario --profile single --test codetracer_contract_m0 -E \"test(e2e_codetracer_contract_worktree_changed_files_diff_and_ct_command)\"'"
 	run_cmd "agent-harbor-codetracer-m1-e2e" \
 		bash -lc \
-		"cd '$ah_root' && ./scripts/nix-env.sh -c \"scripts/run-test-suite.sh cargo nextest run -p acp-client-runs-scenario --profile single --test codetracer_contract_m0 -E 'test(e2e_codetracer_contract_worktree_file_edges_reconnect_and_client_methods)'\""
+		"cd '$ah_root' && ./scripts/nix-env.sh -c 'cargo build -p mock-agent && export PATH=\"\$PWD/target/debug:\$PATH\" && scripts/run-test-suite.sh cargo nextest run -p acp-client-runs-scenario --profile single --test codetracer_contract_m0 -E \"test(e2e_codetracer_contract_worktree_file_edges_reconnect_and_client_methods)\"'"
 }
 
 run_headless_matrix() {
