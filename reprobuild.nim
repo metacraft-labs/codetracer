@@ -316,6 +316,14 @@ package codeTracer:
     "stylus >=0"
     "wasm-opt >=0"
 
+    # Windows-only build tools. ``nsis`` (the Nullsoft Scriptable
+    # Install System compiler) is what the ``windows-installer``
+    # build action invokes to produce ``CodeTracer-Setup.exe``.
+    # Linux + macOS use the existing ``appimage-scripts/`` and
+    # ``macos-dmg`` paths instead.
+    when defined(windows):
+      "nsis >=3"
+
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
       "cachix >=0"
@@ -1081,10 +1089,10 @@ package codeTracer:
         # the staged tree and emits `non-nix-build/CodeTracer-Setup.exe`.
         # The version string is reassembled from `src/ct/version.nim`
         # so the installer's Add/Remove Programs entry tracks the
-        # codetracer release. `makensis` must be on PATH; install via
-        # `scoop install extras/nsis` or set the recipe's `uses:`
-        # clause to provision it through reprobuild once an `nsis`
-        # stdlib package lands.
+        # codetracer release. ``makensis`` is provisioned through the
+        # ``nsis`` package declared in this recipe's Windows ``uses:``
+        # clause above, so the action shells out to the resolved
+        # binary on PATH (no out-of-band ``scoop install`` step).
         let windowsInstaller = ctShell(
           "windows-installer",
           "set -eu\n" &
