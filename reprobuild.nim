@@ -271,57 +271,87 @@ proc nativeLibraryPathEnvName(): string =
     "LD_LIBRARY_PATH"
 
 package codeTracer:
+  # macOS / Linux: the Nix dev shell provisions every tool listed in
+  # ``uses:`` below into ``/nix/store`` and the engine picks them up via the
+  # cakNix adapter. Windows has no Nix; the codetracer DIY toolchain
+  # bootstrap (``non-nix-build/windows/`` driven by ``env.ps1``) populates
+  # PATH with the same set, and ``scripts/build-once.sh`` switches the
+  # invocation to ``--tool-provisioning=path`` on that branch. We can't
+  # express ``when defined(windows): defaultToolProvisioning "path"`` here
+  # because the package DSL macro does not recognize ``when`` at the
+  # package-body root (see reprobuild ``libs/repro_project_dsl/src/
+  # repro_project_dsl/macros_a.nim``'s ``parsePackageDef``: it only
+  # dispatches on ``calleeName``, treating any nnkWhenStmt as an
+  # unrecognized identifier and emitting it back verbatim).
   defaultToolProvisioning "nix"
 
   uses:
-    "bash >=5"
-    "cachix >=0"
+    # Cross-platform build tools. Each one has matching provisioning
+    # entries in the reprobuild stdlib's package definitions at
+    # libs/repro_dsl_stdlib/packages/<tool>.nim:
+    #   * ``nixPackage`` for cakNix on Linux / macOS, and
+    #   * ``scoopApp`` for cakScoop on Windows (and non-Nix Linux).
+    # A Windows operator can therefore run ``repro build .
+    # --tool-provisioning=scoop`` and the engine drives a real
+    # ``scoop install bucket/app@<version>`` for every tool that doesn't
+    # already satisfy the constraint locally. ``capnp`` is on
+    # ScoopInstaller/Main as the upstream `capnp` package (added below
+    # in libs/repro_dsl_stdlib/packages/capnp.nim).
+    "bash >=4"
     "capnp >=0"
     "cargo >=1"
-    "cargo-nextest >=0"
-    "clang >=1"
-    "ctags >=0"
-    "create-dmg >=1"
-    "curl >=0"
-    "electron >=0"
     "emcc >=0"
-    "flake8 >=0"
+    "gcc >=1"
+    "git >=2"
+    "just >=1"
+    "mdbook >=0"
     "nim >=1.6 <3.0"
     "nimble >=0"
     "node >=20"
     "npx >=0"
-    "gcc >=1"
-    "gh >=0"
-    "git >=2"
-    "just >=1"
-    "llvm-config >=0"
-    "mdbook >=0"
-    "nix >=2"
-    "openssl >=0"
-    "pcre-config >=0"
-    "pkg-config >=0"
-    "playwright >=0"
     "python3 >=3"
-    "rg >=0"
-    "ruby >=0"
-    "rust-analyzer >=0"
     "rustc >=1"
-    "rustfmt >=1"
     "rustup >=1"
     "sh >=1"
-    "shellcheck >=0"
-    "sqlite3 >=0"
     "stylus >=0"
-    "tmux >=0"
-    "tree-sitter >=0"
-    "vim >=0"
     "wasm-opt >=0"
-    "wasm-pack >=0"
-    "webpack-cli >=0"
-    "wget >=0"
-    "yarn >=1"
-    "zstd >=0"
-    when not defined(macosx):
+
+    # POSIX-only / Nix-only tools — guarded off the Windows branch.
+    when not defined(windows):
+      "cachix >=0"
+      "cargo-nextest >=0"
+      "clang >=1"
+      "ctags >=0"
+      "create-dmg >=1"
+      "curl >=0"
+      "electron >=0"
+      "flake8 >=0"
+      "gh >=0"
+      "llvm-config >=0"
+      "nix >=2"
+      "openssl >=0"
+      "pcre-config >=0"
+      "pkg-config >=0"
+      "playwright >=0"
+      "rg >=0"
+      "ruby >=0"
+      "rust-analyzer >=0"
+      "rustfmt >=1"
+      "shellcheck >=0"
+      "sqlite3 >=0"
+      "tmux >=0"
+      "tree-sitter >=0"
+      "vim >=0"
+      "wasm-pack >=0"
+      "webpack-cli >=0"
+      "wget >=0"
+      "yarn >=1"
+      "zstd >=0"
+    # Tup is the legacy build driver on Linux. macOS now uses reprobuild
+    # exclusively, and the Windows build (reprobuild via env.ps1) has no
+    # Tup story (the env.ps1 Ensure-Tup is preserved for the old non-
+    # reprobuild fallback only).
+    when not defined(macosx) and not defined(windows):
       "tup >=0"
     when defined(linux):
       "bpftrace >=0"
