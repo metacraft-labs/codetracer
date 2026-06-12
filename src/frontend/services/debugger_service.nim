@@ -167,6 +167,44 @@ proc step*(
   else:
     self.stableBuffer.add((action, reverse))
 
+proc stepOverStatement*(self: DebuggerService) =
+  ## M2 — Column-Aware Replay Navigation §M2: step forward by one
+  ## /statement/ rather than by one source line.  Sends a DAP ``next``
+  ## request to the replay-server with ``granularity: "statement"`` on
+  ## the wire — the replay-server's ``next_dap`` handler dispatches
+  ## to the column-aware [`run_step_over_statement`] runner when the
+  ## granularity field is present, and falls back to legacy
+  ## line-granularity stepping otherwise.
+  ##
+  ## Unlike [`DebuggerService.step`] (which is the entry point for the
+  ## F10 button + Mousetrap keybind path and routes through
+  ## ``CODETRACER::step`` for IPC compatibility with the legacy CT
+  ## protocol), this proc speaks DAP directly — the granularity field
+  ## is a vanilla DAP extension and does not need a custom CT
+  ## protocol bridge.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M2 for the DAP wire contract.
+  if self.stableBusy:
+    return
+  self.stableBusy = true
+  inc self.operationCount
+  self.lastDirection = DebForward
+  self.lastAction = cstring"next"
+  # The DAP arguments carry the standard `threadId` (we currently use
+  # the single-thread sentinel `1`) plus the M2 extension field
+  # `granularity = "statement"` that activates the column-aware
+  # runner on the replay-server.  `DapStepArguments` does not surface
+  # the granularity slot on its Nim type — we ship a raw `js{}` literal
+  # to avoid widening every step request site with an unused field.
+  let args = js{
+    threadId: 1,
+    granularity: cstring"statement",
+  }
+  self.data.dapApi.sendCtRequest(DapNext, args)
+  self.data.redraw()
+
+
 proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount: int, iteration: int, rrTicks: int = -1, reverse: bool = false) =
   # (line, rr ticks) => all steps that correspond to those rr ticks and line
   # if two steps same lines rr ticks it means jump without changing rr ticks..
