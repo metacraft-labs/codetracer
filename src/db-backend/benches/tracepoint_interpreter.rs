@@ -232,7 +232,12 @@ impl ReplaySession for SyntheticReplaySession {
     ) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn StdError>> {
         unimplemented!("synthetic session: interpreter never calls load_history")
     }
-    fn add_breakpoint(&mut self, _path: &str, _line: i64) -> Result<Breakpoint, Box<dyn StdError>> {
+    fn add_breakpoint(
+        &mut self,
+        _path: &str,
+        _line: i64,
+        _column: Option<i64>,
+    ) -> Result<Breakpoint, Box<dyn StdError>> {
         unimplemented!("synthetic session: interpreter never calls add_breakpoint")
     }
     fn delete_breakpoint(&mut self, _breakpoint: &Breakpoint) -> Result<bool, Box<dyn StdError>> {

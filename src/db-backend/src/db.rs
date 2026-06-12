@@ -925,13 +925,24 @@ pub struct MaterializedReplaySession {
     local_types: Vec<TypeRecord>,
     pub step_id: StepId,
     pub call_key: CallKey,
-    pub breakpoint_list: Vec<HashMap<usize, Breakpoint>>,
+    /// Per-path table of registered breakpoints keyed by
+    /// `(line, column)`.
+    ///
+    /// `column = None` is the legacy line-only slot — it matches every
+    /// `DbStep` on that line regardless of recorded column.
+    /// `column = Some(c)` is the M1 column-aware slot — it only matches
+    /// `DbStep`s whose recorded `column` equals `c`.
+    ///
+    /// The two coexist on the same line (one map slot per coordinate),
+    /// so a Continue MUST consult both: any of the keyed entries that
+    /// would match the current step on this line counts as a hit.
+    pub breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>>,
     breakpoint_next_id: usize,
 }
 
 impl MaterializedReplaySession {
     pub fn new(reader: Arc<dyn TraceReader>) -> MaterializedReplaySession {
-        let mut breakpoint_list: Vec<HashMap<usize, Breakpoint>> = Default::default();
+        let mut breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>> = Default::default();
         breakpoint_list.resize_with(reader.path_count(), HashMap::new);
         MaterializedReplaySession {
             reader,
@@ -1276,11 +1287,7 @@ impl MaterializedReplaySession {
         };
         for step in steps {
             if !self.breakpoint_list.is_empty() {
-                if let Some(enabled) = self.breakpoint_list[step.path_id.0]
-                    .get(&step.line.into())
-                    .map(|bp| bp.enabled)
-                    && enabled
-                {
+                if self.step_matches_any_breakpoint(&step) {
                     self.step_id_jump(step.step_id);
                     // true: has hit a breakpoint
                     return Ok(true);
@@ -1309,6 +1316,46 @@ impl MaterializedReplaySession {
         }
         // false: hasn't hit a breakpoint
         Ok(false)
+    }
+
+    /// Return `true` when the given `step` matches an enabled breakpoint
+    /// for its path.  M1 column-aware semantics:
+    ///
+    ///   * a `(line, None)` entry — the legacy line-only slot — matches
+    ///     any step on that line, regardless of recorded column.
+    ///   * a `(line, Some(c))` entry — the column-aware slot — matches
+    ///     only steps whose recorded `column == Some(c)`.  Steps with no
+    ///     recorded column never match a column-aware breakpoint, even
+    ///     when the line agrees — without that data we cannot prove the
+    ///     match.
+    ///
+    /// Both slots coexist independently on the same line; a step
+    /// satisfying either kind is a hit.
+    fn step_matches_any_breakpoint(&self, step: &DbStep) -> bool {
+        let path_idx = step.path_id.0;
+        if path_idx >= self.breakpoint_list.len() {
+            return false;
+        }
+        let line_key = step.line.0 as usize;
+        let table = &self.breakpoint_list[path_idx];
+
+        // Legacy line-only slot: stop on every step at this line.
+        if let Some(bp) = table.get(&(line_key, None))
+            && bp.enabled
+        {
+            return true;
+        }
+
+        // Column-aware slot: only fire when the step's recorded column
+        // is `Some(c)` and equals the breakpoint's column.
+        if let Some(step_col) = step.column
+            && let Some(bp) = table.get(&(line_key, Some(step_col.0)))
+            && bp.enabled
+        {
+            return true;
+        }
+
+        false
     }
 
     /// Resolves a source path to its `PathId` in the trace database.
@@ -1667,7 +1714,7 @@ impl ReplaySession for MaterializedReplaySession {
         Ok(())
     }
 
-    fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
+    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(path)
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", path).into());
@@ -1676,20 +1723,27 @@ impl ReplaySession for MaterializedReplaySession {
         let breakpoint = Breakpoint {
             enabled: true,
             id: self.breakpoint_next_id as i64,
+            column,
         };
         self.breakpoint_next_id += 1;
-        inner_map.insert(line as usize, breakpoint.clone());
+        // Keyed by `(line, column)` per M1: the same line can carry
+        // multiple column-anchored breakpoints (one per statement on a
+        // multi-statement minified line) without overwriting each
+        // other, AND a column-less legacy breakpoint coexists with
+        // column-aware siblings on the same line (it lives under the
+        // `(line, None)` slot).
+        inner_map.insert((line as usize, column), breakpoint.clone());
         Ok(breakpoint)
     }
 
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
         for path_breakpoints in self.breakpoint_list.iter_mut() {
-            if let Some(line) = path_breakpoints
+            if let Some(key) = path_breakpoints
                 .iter()
                 .find(|(_, stored)| stored.id == breakpoint.id)
-                .map(|(line, _)| *line)
+                .map(|(key, _)| *key)
             {
-                path_breakpoints.remove(&line);
+                path_breakpoints.remove(&key);
                 return Ok(true);
             }
         }

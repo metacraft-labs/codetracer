@@ -71,6 +71,14 @@ type
 
   UIBreakpoint* = object
     line*: int
+    ## M1 — Column-Aware Replay Navigation: 1-indexed column when the
+    ## breakpoint is anchored at a specific column on the line; ``0``
+    ## preserves the legacy line-only semantics.  Multiple
+    ## column-aware breakpoints can coexist on the same line (the
+    ## breakpoint registry on the replay-server keys ``(path, line,
+    ## column)``); the GUI exposes them through the same gutter
+    ## marker for now.
+    column*: int
     path*: cstring
     fun*: cstring
     level*: int

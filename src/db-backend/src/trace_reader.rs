@@ -451,6 +451,13 @@ pub trait TraceReader: std::fmt::Debug + Send {
             &global_call_key_text,
             callstack_depth,
         );
+        // M1 — surface the recorded column on the DAP wire when the
+        // trace carries it (Python + JavaScript column-aware recorders).
+        // `Location::new` initializes `column = None` for the legacy
+        // line-only path; we overwrite here so the `ct/complete-move`
+        // event and the breakpoint stop-check downstream both see the
+        // recorded column.
+        location.column = step_record.column.map(|c| c.0);
         if function_name != "<top-level>" {
             let raw_path = self.path(step_record.path_id).unwrap_or("");
             let use_trace_function_boundaries = |location: &mut Location| {
