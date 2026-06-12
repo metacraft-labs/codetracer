@@ -205,6 +205,50 @@ proc stepOverStatement*(self: DebuggerService) =
   self.data.redraw()
 
 
+proc setActiveSourceView*(self: DebuggerService, viewPath: cstring) =
+  ## M3 — Column-Aware Replay Navigation §M3.  Activate the formatted
+  ## srcview at ``viewPath`` so subsequent step-overs advance one
+  ## /formatted/ line (or statement) per press rather than one
+  ## minified line.  Pass an empty string / ``nil`` to clear the active
+  ## view and return the runner to legacy minified-coordinate
+  ## behaviour.
+  ##
+  ## The replay-server's ``ct/set-active-source-view`` handler stores
+  ## the path on the per-trace ``Handler`` instance; subsequent ``next``
+  ## requests consult it to decide whether to invoke the formatted-view
+  ## runner or the legacy line-granularity runner.
+  let args = if viewPath.isNil or viewPath.len == 0:
+    js{ viewPath: nil }
+  else:
+    js{ viewPath: viewPath }
+  self.data.dapApi.sendCtRequest(CtSetActiveSourceView, args)
+
+proc installSourceViewForTest*(self: DebuggerService;
+                               recordedPath, formattedViewPath,
+                               sourcemapV3Json: cstring) =
+  ## M3 — test-only debug surface: inject a synthetic Source Map V3
+  ## record into the replay-server's sourcemap cache.
+  ##
+  ## Production code path: the recorder writes a ``srcviews.dat``
+  ## record that the replay-server discovers at trace-open time via
+  ## ``load_source_views``.  This procedure exposes the install hook
+  ## directly so headless ViewModel and GUI Playwright tests can
+  ## exercise the formatted-view runner without depending on the JS
+  ## recorder's autoformat step (which requires ``prettier`` on PATH
+  ## and would tie the M3 contract to an external toolchain).
+  ##
+  ## The injected index is stored under the same in-memory
+  ## ``sourcemap_cache`` slot the production ``load_source_views``
+  ## path writes to, so both paths exercise the same downstream
+  ## runner code.
+  let args = js{
+    recordedPath: recordedPath,
+    formattedViewPath: formattedViewPath,
+    sourcemapV3Json: sourcemapV3Json,
+  }
+  self.data.dapApi.sendCtRequest(CtInstallSourceView, args)
+
+
 proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount: int, iteration: int, rrTicks: int = -1, reverse: bool = false) =
   # (line, rr ticks) => all steps that correspond to those rr ticks and line
   # if two steps same lines rr ticks it means jump without changing rr ticks..

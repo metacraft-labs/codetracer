@@ -242,6 +242,51 @@ proc stepOverStatement*(s: HeadlessDebugSession) =
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
 
+proc setActiveSourceView*(s: HeadlessDebugSession; viewPath: string) =
+  ## M3 — Column-Aware Replay Navigation §M3: activate the formatted
+  ## srcview at ``viewPath``.  When non-empty, subsequent ``stepForward``
+  ## / ``stepOverStatement`` calls advance one /formatted/ line (or
+  ## statement) per invocation rather than one minified line — the
+  ## replay-server's ``next_dap`` runner consults the active view's
+  ## sourcemap to project each candidate step.
+  ##
+  ## Pass an empty string to clear the active view and return the
+  ## runner to legacy minified-coordinate behaviour.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M3 for the DAP wire contract.
+  let args = if viewPath.len == 0:
+    %*{ "viewPath": newJNull() }
+  else:
+    %*{ "viewPath": viewPath }
+  let resp = s.backend.sendDapRequest("ct/set-active-source-view", args)
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(IOError,
+      "ct/set-active-source-view failed: " & $resp)
+
+proc installSourceViewForTest*(s: HeadlessDebugSession;
+                               recordedPath, formattedViewPath,
+                               sourcemapV3Json: string) =
+  ## M3 — test-only debug request: install a synthetic Source Map V3
+  ## record under ``recordedPath`` so the formatted-view runner has a
+  ## real projection to consult.
+  ##
+  ## Production code path: the recorder writes a srcviews.dat record
+  ## that the replay-server discovers at trace-open time via
+  ## ``load_source_views``.  The test path uses this hook to inject the
+  ## same parsed SourcemapIndex into the cache at runtime — bypassing
+  ## the recorder's autoformat step (which requires ``prettier`` on
+  ## PATH and would tie the M3 contract to an external toolchain).
+  let args = %*{
+    "recordedPath": recordedPath,
+    "formattedViewPath": formattedViewPath,
+    "sourcemapV3Json": sourcemapV3Json,
+  }
+  let resp = s.backend.sendDapRequest("ct/install-source-view", args)
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(IOError,
+      "ct/install-source-view failed: " & $resp)
+
 proc stepBackward*(s: HeadlessDebugSession) =
   ## Step backward one source line.
   var dbg = s.session.store.debugger.val

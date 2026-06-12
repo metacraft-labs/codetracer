@@ -94,6 +94,13 @@ type
     CtOriginChainResponse,
     CtOriginSummary,
     CtOriginSummaryResponse,
+    # Column-Aware Replay Navigation (M3) — frontend-initiated requests
+    # that toggle the formatted-view step-over runner.  See
+    # codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3.
+    CtSetActiveSourceView,
+    CtSetActiveSourceViewResponse,
+    CtInstallSourceView,
+    CtInstallSourceViewResponse,
 
 when defined(js):
   import std / jsffi
