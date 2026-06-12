@@ -221,6 +221,27 @@ proc stepForward*(s: HeadlessDebugSession) =
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
 
+proc stepOverStatement*(s: HeadlessDebugSession) =
+  ## M2 — Column-Aware Replay Navigation §M2: step forward by one
+  ## /statement/ rather than by one source line.  Sends the DAP
+  ## ``next`` request with ``granularity = "statement"`` on the wire
+  ## so the replay-server dispatches to the column-aware runner.
+  ##
+  ## Back-compat: ``stepForward`` (above) keeps sending ``next``
+  ## without ``granularity`` and therefore continues to behave as
+  ## line-granularity step-over.  Tests that need to verify the
+  ## legacy path stays intact use ``stepForward``; tests that need
+  ## the new behaviour use ``stepOverStatement``.
+  var dbg = s.session.store.debugger.val
+  dbg.status = dsStepping
+  s.session.store.debugger.val = dbg
+
+  discard s.backend.sendDapRequest(
+    "next",
+    %*{"threadId": 1, "granularity": "statement"})
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
+
 proc stepBackward*(s: HeadlessDebugSession) =
   ## Step backward one source line.
   var dbg = s.session.store.debugger.val

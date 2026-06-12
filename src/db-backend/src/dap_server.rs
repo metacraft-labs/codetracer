@@ -1534,6 +1534,23 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             handler.update_expansion(req.clone(), req.load_args::<UpdateExpansionArgs>()?, sender.clone())?
         }
         _ => {
+            // M2 — `next` carries an optional `granularity` field that
+            // the legacy `dap_command_to_step_action` dispatch dropped
+            // on the floor (the comment `for now ignoring arguments`
+            // refers exactly to this).  We MUST read it here so the
+            // statement-granularity runner gets activated when the
+            // client opts in; line/instruction/None all keep routing
+            // through the legacy `Action::Next` path for back-compat.
+            //
+            // Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+            if req.command == "next" {
+                let granularity = req
+                    .load_args::<dap_types::NextArguments>()
+                    .ok()
+                    .and_then(|args| args.granularity);
+                handler.next_dap(req, granularity, sender.clone())?;
+                return Ok(());
+            }
             match dap_command_to_step_action(&req.command) {
                 Ok((action, is_reverse)) => {
                     // for now ignoring arguments: they contain threadId, but

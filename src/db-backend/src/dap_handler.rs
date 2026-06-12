@@ -1169,6 +1169,87 @@ impl Handler {
         Ok(())
     }
 
+    /// M2 — statement-granularity step-over.
+    ///
+    /// Dispatches to [`ReplaySession::step_over_statement`] (default
+    /// impl falls back to `Action::Next`; the materialised session
+    /// overrides with the column-aware runner).
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    pub fn next_statement(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
+        self.replay.step_over_statement(forward)?;
+        self.step_id = self.replay.current_step_id();
+        Ok(())
+    }
+
+    /// M2 — DAP `next` request entry point.
+    ///
+    /// Reads the DAP `granularity` field (previously dropped on the
+    /// floor) and dispatches:
+    ///
+    ///   * `Some("statement")` → [`Handler::next_statement`] —
+    ///     advance one /statement/ at a time using `DbStep.column`.
+    ///   * `Some("line")` / `Some("instruction")` / `None` →
+    ///     [`Handler::next`] — the existing line-granularity runner.
+    ///     Per the M2 contract any non-`statement` value (including
+    ///     unrecognised future values) maps to legacy line-granularity
+    ///     so an over-eager DAP client never breaks back-compat.
+    ///
+    /// `granularity` is consumed lowercase per DAP spec §SteppingGranularity
+    /// (`"statement" | "line" | "instruction"`).  Case-insensitive
+    /// matching protects against future client variations without
+    /// pinning a strict-mode rejection.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    pub fn next_dap(
+        &mut self,
+        request: dap::Request,
+        granularity: Option<String>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let original_step_id = self.step_id;
+        let use_statement = matches!(
+            granularity.as_deref(),
+            Some(g) if g.eq_ignore_ascii_case("statement")
+        );
+        if use_statement {
+            self.next_statement(true)?;
+        } else {
+            self.next(true)?;
+        }
+        self.skip_internal_jit_registration_stops()?;
+        // Surface the post-step location (mirrors `step()`'s
+        // `complete_move(false, ...)` call so DAP clients receive the
+        // ct/complete-move event the GUI listens on).  We pass
+        // `complete = true` semantics: every DAP `next` ends with a
+        // settled debugger position the frontend can read.
+        self.complete_move(false, sender.clone())?;
+
+        if self.trace_kind == TraceKind::Materialized {
+            if original_step_id == self.step_id {
+                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                    sender.clone(),
+                )?;
+            } else if self.step_id == StepId(0) {
+                self.send_notification(
+                    NotificationKind::Info,
+                    "Beginning of record reached",
+                    false,
+                    sender.clone(),
+                )?;
+            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
+            }
+        }
+
+        self.respond_dap(request, 0, sender)?;
+        Ok(())
+    }
+
     pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         self.replay.step(Action::StepOut, forward)?;
         self.step_id = self.replay.current_step_id();
