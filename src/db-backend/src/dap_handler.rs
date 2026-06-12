@@ -128,7 +128,15 @@ pub struct Handler {
     pub resulting_dap_messages: Vec<DapMessage>,
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
-    pub breakpoints: HashMap<(String, i64), Vec<Breakpoint>>,
+    /// Per-source breakpoint registry keyed by `(path, line, column)`.
+    ///
+    /// M1 extends the legacy `(path, line)` key with an optional
+    /// column so multiple statements that share a line (the headline
+    /// minified-JS case) can each carry their own breakpoint.  A
+    /// `column = None` entry preserves the legacy line-only behaviour
+    /// — DAP clients that omit `column` continue to stop at the start
+    /// of the line.
+    pub breakpoints: HashMap<(String, i64, Option<i64>), Vec<Breakpoint>>,
 
     pub trace_kind: TraceKind,
     pub replay: Box<dyn ReplaySession>,
@@ -2473,9 +2481,11 @@ impl Handler {
             //  if this fails, we stop and don't do the run to entry(the error returns because of `?`):
             //    i think it can't really return an error in our current impl though
             self.replay.disable_breakpoints()?;
-            let b = self
-                .replay
-                .add_breakpoint(&source_location.path, source_location.line as i64)?;
+            let b = self.replay.add_breakpoint(
+                &source_location.path,
+                source_location.line as i64,
+                source_location.column,
+            )?;
 
             let mut move_error = false;
             if let Err(e) = self.source_line_jump_moves_for_rr(&source_location) {
@@ -2545,6 +2555,7 @@ impl Handler {
         if let Some(step_id) = self.get_closest_step_id(&SourceLocation {
             line: line.into(),
             path: self.reader.path(path_id).unwrap_or("").to_string(),
+            column: None,
         }) {
             return Some(step_id);
         }
@@ -2561,6 +2572,7 @@ impl Handler {
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
             path: call_target.path.clone(),
+            column: None,
         }) {
             self.replay.jump_to(line_step_id)?;
             self.step_id = self.replay.current_step_id();
@@ -2596,13 +2608,26 @@ impl Handler {
         let mut results = Vec::new();
         if let Some(path) = args.source.path.clone() {
             self.clear_breakpoints_for_source(&path)?;
-            let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
-                bps.into_iter().map(|b| b.line).collect()
+            // M1: keep the `(line, column)` pair from the DAP request so
+            // the breakpoint can be registered at the column the client
+            // asked for.  The legacy `args.lines` fallback (used by very
+            // old DAP clients that don't carry the structured
+            // `breakpoints` array) is column-less by construction.
+            // M1: normalise `column == Some(0)` to `None`.  The DAP
+            // spec doesn't permit column 0 (columns are 1-indexed),
+            // but the Nim frontend's strict ``DapSourceBreakpoint``
+            // ref-object can't elide the key — it ships
+            // ``"column": 0`` to mean "no column" for legacy
+            // line-only breakpoints.  Treating 0 as None preserves
+            // back-compat without forcing every existing UI surface
+            // to switch to an Option-shaped field.
+            let line_specs: Vec<(i64, Option<i64>)> = if let Some(bps) = args.breakpoints {
+                bps.into_iter().map(|b| (b.line, b.column.filter(|c| *c > 0))).collect()
             } else {
-                args.lines.unwrap_or_default()
+                args.lines.unwrap_or_default().into_iter().map(|l| (l, None)).collect()
             };
 
-            for line in lines {
+            for (line, column) in line_specs {
                 let source = Some(dap_types::Source {
                     name: args.source.name.clone(),
                     path: Some(path.clone()),
@@ -2616,6 +2641,7 @@ impl Handler {
                 match self.add_breakpoint(SourceLocation {
                     path: path.clone(),
                     line: line as usize,
+                    column,
                 }) {
                     Ok(breakpoint) => {
                         results.push(dap_types::Breakpoint {
@@ -2624,7 +2650,12 @@ impl Handler {
                             message: None,
                             source,
                             line: Some(line),
-                            column: None,
+                            // M1: surface the bound column on the
+                            // response (the legacy implementation
+                            // returned `None` unconditionally).  DAP
+                            // clients consume this to anchor their
+                            // gutter marker at the right column.
+                            column: breakpoint.column,
                             end_line: None,
                             end_column: None,
                             instruction_reference: None,
@@ -2633,7 +2664,10 @@ impl Handler {
                         });
                     }
                     Err(e) => {
-                        let message = format!("failed to set breakpoint at {path}:{line}: {e}");
+                        let message = format!(
+                            "failed to set breakpoint at {path}:{line}{}: {e}",
+                            column.map(|c| format!(":{c}")).unwrap_or_default()
+                        );
                         warn!("{message}");
                         results.push(dap_types::Breakpoint {
                             id: None,
@@ -2641,7 +2675,7 @@ impl Handler {
                             message: Some(message),
                             source,
                             line: Some(line),
-                            column: None,
+                            column,
                             end_line: None,
                             end_column: None,
                             instruction_reference: None,
@@ -2683,15 +2717,19 @@ impl Handler {
     }
 
     pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<Breakpoint, Box<dyn Error>> {
-        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
-        let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
+        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64, loc.column)?;
+        let entry = self
+            .breakpoints
+            .entry((loc.path.clone(), loc.line as i64, loc.column))
+            .or_default();
         entry.push(breakpoint.clone());
         Ok(breakpoint)
     }
 
     pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        if self.breakpoints.contains_key(&(loc.path.clone(), loc.line as i64)) {
-            for breakpoint in &self.breakpoints[&(loc.path.clone(), loc.line as i64)] {
+        let key = (loc.path.clone(), loc.line as i64, loc.column);
+        if self.breakpoints.contains_key(&key) {
+            for breakpoint in &self.breakpoints[&key] {
                 self.replay.delete_breakpoint(breakpoint)?;
             }
         }
@@ -2702,7 +2740,7 @@ impl Handler {
         let keys = self
             .breakpoints
             .keys()
-            .filter(|(path, _line)| path == source_path)
+            .filter(|(path, _line, _column)| path == source_path)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -2730,7 +2768,9 @@ impl Handler {
         }
         if let Some(first_step) = self.reader.step(StepId(0)) {
             let path = self.reader.path(first_step.path_id).unwrap_or("").to_string();
-            self.breakpoints.entry((path, first_step.line.0)).or_default();
+            // M1: the sentinel cache entry mirrors the legacy line-only
+            // slot — column `None` matches every step on the line.
+            self.breakpoints.entry((path, first_step.line.0, None)).or_default();
         }
     }
 
@@ -2784,15 +2824,19 @@ impl Handler {
         self.event_db.reset_tracepoint_data(&tracepoint_id_list); // for now no smart cache non-changed optimizations(?)
 
         let original_step_id = self.replay.current_step_id();
-        let mut disabled_breakpoints: Vec<((String, i64), usize)> = vec![];
+        // M1 — the breakpoint registry key is `(path, line, column)`.
+        // We hoist that triple into a local alias so clippy stops
+        // flagging the `Vec<(.., usize)>` as "very complex type".
+        type BreakpointKey = (String, i64, Option<i64>);
+        let mut disabled_breakpoints: Vec<(BreakpointKey, usize)> = vec![];
 
         {
             let replay = &mut self.replay;
-            for ((path, line), breakpoints) in self.breakpoints.iter_mut() {
+            for ((path, line, column), breakpoints) in self.breakpoints.iter_mut() {
                 for (index, breakpoint) in breakpoints.iter_mut().enumerate() {
                     if breakpoint.enabled {
                         let toggled = replay.toggle_breakpoint(breakpoint)?;
-                        disabled_breakpoints.push(((path.clone(), *line), index));
+                        disabled_breakpoints.push(((path.clone(), *line, *column), index));
                         *breakpoint = toggled;
                     }
                 }
@@ -2816,7 +2860,7 @@ impl Handler {
                         if !tracepoint_indices.iter().any(|idx| registered[*idx]) {
                             continue;
                         }
-                        match self.replay.add_breakpoint(path, line as i64) {
+                        match self.replay.add_breakpoint(path, line as i64, None) {
                             Ok(breakpoint) => tracepoint_breakpoints.push(breakpoint),
                             Err(error) => {
                                 warn!("tracepoint breakpoint error: {error:?}");
@@ -3207,7 +3251,7 @@ impl Handler {
             self.complete_move(false, sender)?;
         } else {
             self.replay.disable_breakpoints()?;
-            let bp = self.replay.add_breakpoint(&arg.path, arg.first_loop_line + 1)?;
+            let bp = self.replay.add_breakpoint(&arg.path, arg.first_loop_line + 1, None)?;
             let location = self.replay.load_location(&mut self.expr_loader)?;
             if location.line < arg.first_loop_line {
                 self.replay.step(Action::Continue, true)?;
@@ -4957,6 +5001,7 @@ mod tests {
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
             line: 3,
+            column: None,
         };
         handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
@@ -4965,6 +5010,7 @@ mod tests {
             SourceLocation {
                 path: path.to_string(),
                 line: 2,
+                column: None,
             },
             sender.clone(),
         )?;

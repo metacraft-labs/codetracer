@@ -197,6 +197,10 @@ func hasBreakpoint*(self: DebuggerService, path: cstring, line: int): bool =
 const NO_B_COLUMN = 0
 
 proc dapSetBreakpoints*(self: DebuggerService) =
+  ## M1 — when a registered breakpoint carries a non-zero column the
+  ## DAP request surfaces it; legacy breakpoints (``column == 0``)
+  ## fall back to the original line-only payload so older replay
+  ## servers (and the existing CI smoke fixtures) keep working.
   for path, breakpointList in self.breakpointTable:
     var args = DapSetBreakpointsArguments(
       source: DapSource(
@@ -210,7 +214,7 @@ proc dapSetBreakpoints*(self: DebuggerService) =
         args.breakpoints.add(
           DapSourceBreakpoint(
             line: line,
-            column: NO_B_COLUMN
+            column: b.column
           )
         )
         args.lines.add(line)
@@ -223,7 +227,12 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
   if not self.hasBreakpoint(path, line):
     if not self.breakpointTable.hasKey(path):
       self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
-    self.breakpointTable[path][line] = UIBreakpoint(line: line, path: path, level: if not c: 0 else: 1, enabled: true)
+    self.breakpointTable[path][line] = UIBreakpoint(
+      line: line,
+      column: NO_B_COLUMN,
+      path: path,
+      level: if not c: 0 else: 1,
+      enabled: true)
     data.pointList.breakpoints.add(self.breakpointTable[path][line])
 
     # if not c:
@@ -233,6 +242,32 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
     #     self.internalAddBreakpointC(path, line)
 
     # TODO self.data.services.editor.open[self.data.services.editor.active].viewLine = line
+  self.dapSetBreakpoints()
+  self.data.redraw()
+
+
+proc addColumnBreakpoint*(self: DebuggerService, path: cstring, line: int, column: int) =
+  ## M1 — Column-Aware Replay Navigation: register a breakpoint
+  ## anchored at ``(path, line, column)``.  Stored in the same
+  ## ``breakpointTable[path][line]`` slot as a line-only breakpoint
+  ## (one column-anchored breakpoint per line in the UI for now);
+  ## the recorded column is round-tripped through DAP so the
+  ## replay-server matches the exact recorded ``DbStep.column`` at
+  ## continue-time.
+  ##
+  ## Used by tests (and a future GUI affordance) to set
+  ## column-precision breakpoints; the existing
+  ## ``addBreakpoint``/``toggleBreakpoint`` path remains line-only
+  ## so the gutter-click default behaviour is unchanged.
+  if not self.breakpointTable.hasKey(path):
+    self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
+  self.breakpointTable[path][line] = UIBreakpoint(
+    line: line,
+    column: column,
+    path: path,
+    level: 0,
+    enabled: true)
+  data.pointList.breakpoints.add(self.breakpointTable[path][line])
   self.dapSetBreakpoints()
   self.data.redraw()
 

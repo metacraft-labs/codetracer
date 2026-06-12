@@ -306,6 +306,29 @@ proc getCurrentLine*(s: HeadlessDebugSession): int =
   ## Get the current source line number from the debugger state.
   s.session.store.debugger.val.location.line
 
+proc getCurrentColumn*(s: HeadlessDebugSession): Option[int] =
+  ## M1 — return the 1-indexed column the current step landed on, as
+  ## reported by the backend's most recent ``ct/complete-move`` event.
+  ##
+  ## The DAP-reported column is `Option<i64>` on the wire: ``None`` for
+  ## legacy line-only recordings, ``Some(c)`` for column-aware traces
+  ## (Python + JavaScript recorders).  We surface the same shape so
+  ## tests can distinguish "the trace has no column data" from "the
+  ## column is at position 0/1/..".  The store currently keeps only
+  ## the line; the column is read straight off the cached complete-move
+  ## event to avoid widening every downstream consumer mid-migration.
+  if s.lastCompleteMoveEvent.isNil:
+    return none(int)
+  let body = s.lastCompleteMoveEvent.getOrDefault("body")
+  if body.isNil:
+    return none(int)
+  if not body.hasKey("location"):
+    return none(int)
+  let loc = body["location"]
+  if not loc.hasKey("column") or loc["column"].kind == JNull:
+    return none(int)
+  some(loc["column"].getInt(0))
+
 proc getCurrentRRTicks*(s: HeadlessDebugSession): uint64 =
   ## Get the current rrTicks position from the debugger state.
   s.session.store.debugger.val.rrTicks
@@ -569,24 +592,53 @@ proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
 # Breakpoints
 # ---------------------------------------------------------------------------
 
-proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int) =
+proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int;
+                    column: int = 0) =
   ## Send a ``setBreakpoints`` DAP request for a single breakpoint at the
   ## given file and line.  The standard DAP ``setBreakpoints`` command
   ## replaces all breakpoints for the specified source, so calling this
   ## multiple times for the same file will overwrite previous breakpoints
   ## in that file.
+  ##
+  ## M1 — Column-Aware Replay Navigation: when ``column`` is non-zero the
+  ## breakpoint is anchored at ``(line, column)`` and the next ``continue``
+  ## stops only at recorded steps whose ``(line, column)`` match exactly.
+  ## When ``column`` is ``0`` (the default) the legacy line-only semantics
+  ## apply: the next ``continue`` stops at the first recorded step on
+  ## ``line``, regardless of column.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M1 for the DAP wire contract.
+  var bp = %*{"line": line}
+  if column > 0:
+    bp["column"] = %column
   let args = %*{
     "source": {
       "path": file,
     },
-    "breakpoints": [
-      {"line": line},
-    ],
+    "breakpoints": [bp],
   }
   let resp = s.backend.sendDapRequest("setBreakpoints", args)
   if not resp.getOrDefault("success").getBool(false):
     raise newException(IOError,
       "setBreakpoints failed: " & $resp)
+
+proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
+                                 file: string; line: int;
+                                 column: int = 0): JsonNode =
+  ## Send a ``setBreakpoints`` request and return the raw DAP response
+  ## body.  Mirrors ``setBreakpoint`` but exposes the response so tests
+  ## can assert on the bound ``column`` the backend echoes back.
+  var bp = %*{"line": line}
+  if column > 0:
+    bp["column"] = %column
+  let args = %*{
+    "source": {
+      "path": file,
+    },
+    "breakpoints": [bp],
+  }
+  result = s.backend.sendDapRequest("setBreakpoints", args)
 
 # ---------------------------------------------------------------------------
 # Event log

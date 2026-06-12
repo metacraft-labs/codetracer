@@ -380,6 +380,13 @@ pub struct Location {
     #[serde(deserialize_with = "deserialize_null_default")]
     pub path: String,
     pub line: i64,
+    /// M1 — 1-indexed column the step landed on, or `None` for
+    /// recordings that don't carry column data (legacy line-only
+    /// traces).  Surfaced through the DAP `ct/complete-move` event so
+    /// the GUI's cursor / breakpoint marker can anchor at the right
+    /// column on traces that recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
     #[serde(deserialize_with = "deserialize_null_default")]
     pub function_name: String,
     #[serde(deserialize_with = "deserialize_null_default")]
@@ -461,6 +468,13 @@ impl Location {
         Location {
             path: path.to_string(),
             line,
+            // M1 — `Location::new` callers (the trace-reader path) do
+            // not have a column at this layer.  The `load_location`
+            // shim in `trace_reader.rs` overwrites `column` with the
+            // step's recorded column right after this constructor
+            // returns, so column-aware traces still surface the column
+            // on the wire.
+            column: None,
             high_level_path: path.to_string(),
             high_level_line: line,
             high_level_function_name: function_name.to_string(),
@@ -926,11 +940,18 @@ pub struct FunctionLocation {
 pub struct SourceLocation {
     pub path: String,
     pub line: usize,
+    /// Optional 1-indexed column for column-aware breakpoints (M1).
+    /// `None` preserves the legacy line-only semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
 }
 
 impl fmt::Display for SourceLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.path, self.line)
+        match self.column {
+            Some(col) => write!(f, "{}:{}:{}", self.path, self.line, col),
+            None => write!(f, "{}:{}", self.path, self.line),
+        }
     }
 }
 
@@ -2390,6 +2411,16 @@ pub struct TracepointResultsAggregate {
 pub struct Breakpoint {
     pub id: i64,
     pub enabled: bool,
+    /// 1-indexed column the breakpoint is anchored at, or `None` for
+    /// the legacy line-only behaviour.  Wired through M1 of the
+    /// Column-Aware Replay Navigation campaign — see
+    /// `codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org`
+    /// §M1.  The Continue stop check compares this column against
+    /// `DbStep.column` when present and falls back to line-only
+    /// matching when `None`, preserving back-compat for legacy DAP
+    /// clients that send only `{line: N}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

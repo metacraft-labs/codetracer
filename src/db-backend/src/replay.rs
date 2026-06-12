@@ -49,7 +49,15 @@ pub trait ReplaySession: std::fmt::Debug {
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
     fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>>;
 
-    fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>>;
+    /// Register a breakpoint at `(path, line[, column])`.
+    ///
+    /// `column` is `Some(c)` for the M1 column-aware path (matches a
+    /// recorded `DbStep` whose `(line, column)` equals the breakpoint
+    /// coordinates) and `None` for the legacy line-only path (matches
+    /// any step on the line, regardless of column).  Implementations
+    /// MUST keep the legacy line-only behaviour intact when `column`
+    /// is `None`.
+    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>>;
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>>;
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>>;
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>>;
