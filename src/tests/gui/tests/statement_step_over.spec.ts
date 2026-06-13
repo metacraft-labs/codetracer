@@ -43,7 +43,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 
-import { test, expect } from "../lib/fixtures";
+import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures";
 import { LayoutPage } from "../page-objects/layout-page";
 import { EditorPane } from "../page-objects/panes/editor/editor-pane";
 
@@ -196,7 +196,10 @@ async function getCurrentLine(editor: EditorPane): Promise<number | null> {
 
 test.describe("M2 — Statement-granularity step-over", () => {
   test("statement_step_over_advances_one_statement_per_press", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
+    await layout.runToEntryButton().click();
+    await expect(ctPage.locator(".location-path")).not.toHaveText(":0#0", { timeout: 30_000 });
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.fileName === "program.js");
     expect(editor, "program.js editor tab should be open").toBeDefined();
@@ -232,6 +235,7 @@ test.describe("M2 — Statement-granularity step-over", () => {
     // control distinct from the legacy F10 next button.  We pin the
     // service surface itself here — without it the keybind / button
     // wiring on the GUI side is dormant.
+    await readyOnEntry(ctPage);
     const exposed = await ctPage.evaluate(() => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       return typeof w?.data?.services?.debugger?.stepOverStatement === "function";

@@ -40,7 +40,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 
-import { test, expect } from "../lib/fixtures";
+import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures";
 import { LayoutPage } from "../page-objects/layout-page";
 import { EditorPane } from "../page-objects/panes/editor/editor-pane";
 
@@ -278,7 +278,10 @@ async function getCurrentLine(editor: EditorPane): Promise<number | null> {
 
 test.describe("M3 — Formatted-view step-over", () => {
   test("formatted_view_step_over_advances_one_formatted_line", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
+    await layout.runToEntryButton().click();
+    await expect(ctPage.locator(".location-path")).not.toHaveText(":0#0", { timeout: 30_000 });
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.fileName === "program.js");
     expect(editor, "program.js editor tab should be open").toBeDefined();
@@ -307,7 +310,10 @@ test.describe("M3 — Formatted-view step-over", () => {
   });
 
   test("minified_view_step_over_preserves_legacy_line_granularity", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
+    await layout.runToEntryButton().click();
+    await expect(ctPage.locator(".location-path")).not.toHaveText(":0#0", { timeout: 30_000 });
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.fileName === "program.js");
     expect(editor, "program.js editor tab should be open").toBeDefined();
@@ -321,7 +327,10 @@ test.describe("M3 — Formatted-view step-over", () => {
   });
 
   test("formatted_view_step_over_statement_composes_with_m2", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
+    await layout.runToEntryButton().click();
+    await expect(ctPage.locator(".location-path")).not.toHaveText(":0#0", { timeout: 30_000 });
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.fileName === "program.js");
     expect(editor, "program.js editor tab should be open").toBeDefined();
@@ -352,6 +361,7 @@ test.describe("M3 — Formatted-view step-over", () => {
     // the F10 / Shift+F10 wiring in the editor pane has no way to
     // toggle the formatted view, and the runner falls back to
     // minified coordinates unconditionally.
+    await readyOnEntry(ctPage);
     const surfaces = await ctPage.evaluate(() => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       return {
