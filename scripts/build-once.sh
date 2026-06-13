@@ -16,12 +16,18 @@ for candidate in ../isonim ../../isonim; do
 	fi
 done
 if [ -n "$isonim_root" ]; then
+	# Failures here must propagate: ui_js.nim's compile-time staticRead
+	# of build/tailwind-styles.json is uncatchable, so silently swallowing
+	# a tailwind-extract failure here only resurfaces as an opaque Nim
+	# compile error several minutes later. The isonim Justfile's
+	# ``build-tailwind`` recipe handles ``yarn install`` provisioning, so
+	# the recipe path is the preferred one when ``just`` is available.
 	if command -v just >/dev/null 2>&1; then
-		(cd "$isonim_root" && just build-tailwind) || true
+		(cd "$isonim_root" && just build-tailwind)
 	else
 		(cd "$isonim_root" &&
 			{ [ -d node_modules ] || yarn install --frozen-lockfile; } &&
-			node tools/tailwind-extract.mjs) || true
+			node tools/tailwind-extract.mjs)
 	fi
 fi
 
@@ -32,9 +38,9 @@ fi
 # branch. On both, the codetracer recipe lives in `reprobuild.nim` and is
 # built end-to-end via the local `repro` binary.
 case "$(uname -s)" in
-	Darwin) ct_reprobuild_host="darwin" ;;
-	MINGW*|MSYS*|CYGWIN*) ct_reprobuild_host="windows" ;;
-	*) ct_reprobuild_host="" ;;
+Darwin) ct_reprobuild_host="darwin" ;;
+MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
+*) ct_reprobuild_host="" ;;
 esac
 
 if [ -n "$ct_reprobuild_host" ]; then
@@ -199,9 +205,9 @@ if [ -n "$ct_reprobuild_host" ]; then
 	# ">=...")` entries that drive a real `scoop install bucket/app`
 	# for every uses: selector that isn't already on disk.
 	case "$ct_reprobuild_host" in
-		darwin) ct_tool_provisioning_default="nix" ;;
-		windows) ct_tool_provisioning_default="scoop" ;;
-		*) ct_tool_provisioning_default="nix" ;;
+	darwin) ct_tool_provisioning_default="nix" ;;
+	windows) ct_tool_provisioning_default="scoop" ;;
+	*) ct_tool_provisioning_default="nix" ;;
 	esac
 
 	"$repro_bin" build "${CODETRACER_REPROBUILD_TARGET:-.}" \

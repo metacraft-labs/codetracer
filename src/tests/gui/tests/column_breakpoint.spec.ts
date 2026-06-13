@@ -34,7 +34,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as childProcess from "node:child_process";
 
-import { test, expect } from "../lib/fixtures";
+import { test, expect, readyOnEntryTest as readyOnEntry } from "../lib/fixtures";
 import { LayoutPage } from "../page-objects/layout-page";
 import { EditorPane } from "../page-objects/panes/editor/editor-pane";
 
@@ -248,7 +248,10 @@ async function getCurrentLine(editor: EditorPane): Promise<number | null> {
 
 test.describe("M1 — Column-aware breakpoint", () => {
   test("column_breakpoint_stops_at_recorded_column", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
+    await layout.runToEntryButton().click();
+    await expect(ctPage.locator(".location-path")).not.toHaveText(":0#0", { timeout: 30_000 });
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.fileName === "program.js");
     expect(editor, "program.js editor tab should be open").toBeDefined();
@@ -274,7 +277,10 @@ test.describe("M1 — Column-aware breakpoint", () => {
   });
 
   test("legacy_line_only_breakpoint_still_stops_at_line", async ({ ctPage }) => {
+    await readyOnEntry(ctPage);
     const layout = new LayoutPage(ctPage);
+    await layout.runToEntryButton().click();
+    await expect(ctPage.locator(".location-path")).not.toHaveText(":0#0", { timeout: 30_000 });
     const editors = await layout.editorTabs(true);
     const editor = editors.find((e) => e.fileName === "program.js");
     expect(editor, "program.js editor tab should be open").toBeDefined();
