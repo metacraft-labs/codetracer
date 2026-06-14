@@ -755,19 +755,44 @@ impl CTFSTraceReader {
         // before / after benchmark numbers.
         const BULK_STEP_LOCATIONS_CHUNK: u64 = 1024;
 
+        // M1 — call the column-aware bulk FFI when the trace declared
+        // `has_column_aware_steps` so DbStep.column carries the real
+        // recorded column.  Legacy line-only traces stay on the
+        // cheaper line-only path; their column slot would be 0 on the
+        // column-aware FFI anyway (the spec keeps columns 1-indexed),
+        // and skipping the column buffer avoids an extra allocation
+        // per chunk.
+        let column_aware = reader.has_column_aware_steps();
         let mut path_id_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut line_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
+        let mut column_buf: Vec<u64> = if column_aware {
+            vec![0; BULK_STEP_LOCATIONS_CHUNK as usize]
+        } else {
+            Vec::new()
+        };
         let mut step_idx: u64 = 0;
         while step_idx < step_count {
             let want = std::cmp::min(BULK_STEP_LOCATIONS_CHUNK, step_count - step_idx);
-            let written = reader
-                .step_locations(
-                    step_idx,
-                    want,
-                    &mut path_id_buf[..want as usize],
-                    &mut line_buf[..want as usize],
-                )
-                .map_err(|e| format!("step_locations(start={step_idx}, count={want}): {e}"))?;
+            let written = if column_aware {
+                reader
+                    .step_locations_with_columns(
+                        step_idx,
+                        want,
+                        &mut path_id_buf[..want as usize],
+                        &mut line_buf[..want as usize],
+                        &mut column_buf[..want as usize],
+                    )
+                    .map_err(|e| format!("step_locations_with_columns(start={step_idx}, count={want}): {e}"))?
+            } else {
+                reader
+                    .step_locations(
+                        step_idx,
+                        want,
+                        &mut path_id_buf[..want as usize],
+                        &mut line_buf[..want as usize],
+                    )
+                    .map_err(|e| format!("step_locations(start={step_idx}, count={want}): {e}"))?
+            };
             if written == 0 {
                 // Defensive: should never happen since `want > 0` and
                 // the bulk FFI guarantees min(count, remaining) on
@@ -783,17 +808,23 @@ impl CTFSTraceReader {
                 let call_key = step_to_call_key[i as usize];
                 let global_call_key = step_to_global_call_key[i as usize];
 
+                // M1 — populate `DbStep.column` when the trace is
+                // column-aware.  The column-aware FFI returns
+                // 1-indexed columns; a 0 sentinel (which the FFI
+                // emits on per-line-table absent fallback) maps to
+                // `None` so the stop check defaults to line-only
+                // matching.  Legacy traces stay on `None`.
+                let column = if column_aware {
+                    let raw = column_buf[offset as usize];
+                    if raw == 0 { None } else { Some(Line(raw as i64)) }
+                } else {
+                    None
+                };
                 let db_step = DbStep {
                     step_id,
                     path_id,
                     line,
-                    // The bulk `ct_reader_step_locations` FFI returns
-                    // only `(path_id, line)` today (see
-                    // codetracer-trace-format-nim).  Until P6.4
-                    // widens that surface to expose the column-aware
-                    // step encoding, we populate `None` here so the
-                    // DAP layer falls back to column=1.
-                    column: None,
+                    column,
                     call_key,
                     global_call_key,
                 };

@@ -221,6 +221,72 @@ proc stepForward*(s: HeadlessDebugSession) =
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
 
+proc stepOverStatement*(s: HeadlessDebugSession) =
+  ## M2 — Column-Aware Replay Navigation §M2: step forward by one
+  ## /statement/ rather than by one source line.  Sends the DAP
+  ## ``next`` request with ``granularity = "statement"`` on the wire
+  ## so the replay-server dispatches to the column-aware runner.
+  ##
+  ## Back-compat: ``stepForward`` (above) keeps sending ``next``
+  ## without ``granularity`` and therefore continues to behave as
+  ## line-granularity step-over.  Tests that need to verify the
+  ## legacy path stays intact use ``stepForward``; tests that need
+  ## the new behaviour use ``stepOverStatement``.
+  var dbg = s.session.store.debugger.val
+  dbg.status = dsStepping
+  s.session.store.debugger.val = dbg
+
+  discard s.backend.sendDapRequest(
+    "next",
+    %*{"threadId": 1, "granularity": "statement"})
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
+
+proc setActiveSourceView*(s: HeadlessDebugSession; viewPath: string) =
+  ## M3 — Column-Aware Replay Navigation §M3: activate the formatted
+  ## srcview at ``viewPath``.  When non-empty, subsequent ``stepForward``
+  ## / ``stepOverStatement`` calls advance one /formatted/ line (or
+  ## statement) per invocation rather than one minified line — the
+  ## replay-server's ``next_dap`` runner consults the active view's
+  ## sourcemap to project each candidate step.
+  ##
+  ## Pass an empty string to clear the active view and return the
+  ## runner to legacy minified-coordinate behaviour.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M3 for the DAP wire contract.
+  let args = if viewPath.len == 0:
+    %*{ "viewPath": newJNull() }
+  else:
+    %*{ "viewPath": viewPath }
+  let resp = s.backend.sendDapRequest("ct/set-active-source-view", args)
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(IOError,
+      "ct/set-active-source-view failed: " & $resp)
+
+proc installSourceViewForTest*(s: HeadlessDebugSession;
+                               recordedPath, formattedViewPath,
+                               sourcemapV3Json: string) =
+  ## M3 — test-only debug request: install a synthetic Source Map V3
+  ## record under ``recordedPath`` so the formatted-view runner has a
+  ## real projection to consult.
+  ##
+  ## Production code path: the recorder writes a srcviews.dat record
+  ## that the replay-server discovers at trace-open time via
+  ## ``load_source_views``.  The test path uses this hook to inject the
+  ## same parsed SourcemapIndex into the cache at runtime — bypassing
+  ## the recorder's autoformat step (which requires ``prettier`` on
+  ## PATH and would tie the M3 contract to an external toolchain).
+  let args = %*{
+    "recordedPath": recordedPath,
+    "formattedViewPath": formattedViewPath,
+    "sourcemapV3Json": sourcemapV3Json,
+  }
+  let resp = s.backend.sendDapRequest("ct/install-source-view", args)
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(IOError,
+      "ct/install-source-view failed: " & $resp)
+
 proc stepBackward*(s: HeadlessDebugSession) =
   ## Step backward one source line.
   var dbg = s.session.store.debugger.val
@@ -305,6 +371,29 @@ proc getCurrentFile*(s: HeadlessDebugSession): string =
 proc getCurrentLine*(s: HeadlessDebugSession): int =
   ## Get the current source line number from the debugger state.
   s.session.store.debugger.val.location.line
+
+proc getCurrentColumn*(s: HeadlessDebugSession): Option[int] =
+  ## M1 — return the 1-indexed column the current step landed on, as
+  ## reported by the backend's most recent ``ct/complete-move`` event.
+  ##
+  ## The DAP-reported column is `Option<i64>` on the wire: ``None`` for
+  ## legacy line-only recordings, ``Some(c)`` for column-aware traces
+  ## (Python + JavaScript recorders).  We surface the same shape so
+  ## tests can distinguish "the trace has no column data" from "the
+  ## column is at position 0/1/..".  The store currently keeps only
+  ## the line; the column is read straight off the cached complete-move
+  ## event to avoid widening every downstream consumer mid-migration.
+  if s.lastCompleteMoveEvent.isNil:
+    return none(int)
+  let body = s.lastCompleteMoveEvent.getOrDefault("body")
+  if body.isNil:
+    return none(int)
+  if not body.hasKey("location"):
+    return none(int)
+  let loc = body["location"]
+  if not loc.hasKey("column") or loc["column"].kind == JNull:
+    return none(int)
+  some(loc["column"].getInt(0))
 
 proc getCurrentRRTicks*(s: HeadlessDebugSession): uint64 =
   ## Get the current rrTicks position from the debugger state.
@@ -569,24 +658,53 @@ proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
 # Breakpoints
 # ---------------------------------------------------------------------------
 
-proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int) =
+proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int;
+                    column: int = 0) =
   ## Send a ``setBreakpoints`` DAP request for a single breakpoint at the
   ## given file and line.  The standard DAP ``setBreakpoints`` command
   ## replaces all breakpoints for the specified source, so calling this
   ## multiple times for the same file will overwrite previous breakpoints
   ## in that file.
+  ##
+  ## M1 — Column-Aware Replay Navigation: when ``column`` is non-zero the
+  ## breakpoint is anchored at ``(line, column)`` and the next ``continue``
+  ## stops only at recorded steps whose ``(line, column)`` match exactly.
+  ## When ``column`` is ``0`` (the default) the legacy line-only semantics
+  ## apply: the next ``continue`` stops at the first recorded step on
+  ## ``line``, regardless of column.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M1 for the DAP wire contract.
+  var bp = %*{"line": line}
+  if column > 0:
+    bp["column"] = %column
   let args = %*{
     "source": {
       "path": file,
     },
-    "breakpoints": [
-      {"line": line},
-    ],
+    "breakpoints": [bp],
   }
   let resp = s.backend.sendDapRequest("setBreakpoints", args)
   if not resp.getOrDefault("success").getBool(false):
     raise newException(IOError,
       "setBreakpoints failed: " & $resp)
+
+proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
+                                 file: string; line: int;
+                                 column: int = 0): JsonNode =
+  ## Send a ``setBreakpoints`` request and return the raw DAP response
+  ## body.  Mirrors ``setBreakpoint`` but exposes the response so tests
+  ## can assert on the bound ``column`` the backend echoes back.
+  var bp = %*{"line": line}
+  if column > 0:
+    bp["column"] = %column
+  let args = %*{
+    "source": {
+      "path": file,
+    },
+    "breakpoints": [bp],
+  }
+  result = s.backend.sendDapRequest("setBreakpoints", args)
 
 # ---------------------------------------------------------------------------
 # Event log

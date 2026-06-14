@@ -128,7 +128,15 @@ pub struct Handler {
     pub resulting_dap_messages: Vec<DapMessage>,
     pub raw_diff_index: Option<String>,
     pub previous_step_id: StepId,
-    pub breakpoints: HashMap<(String, i64), Vec<Breakpoint>>,
+    /// Per-source breakpoint registry keyed by `(path, line, column)`.
+    ///
+    /// M1 extends the legacy `(path, line)` key with an optional
+    /// column so multiple statements that share a line (the headline
+    /// minified-JS case) can each carry their own breakpoint.  A
+    /// `column = None` entry preserves the legacy line-only behaviour
+    /// — DAP clients that omit `column` continue to stop at the start
+    /// of the line.
+    pub breakpoints: HashMap<(String, i64, Option<i64>), Vec<Breakpoint>>,
 
     pub trace_kind: TraceKind,
     pub replay: Box<dyn ReplaySession>,
@@ -239,6 +247,29 @@ pub struct Handler {
     /// this slice verbatim, satisfying the §3.2.1 one-time-evaluation
     /// contract at the DAP layer.
     pub(crate) cached_marker_rows: Option<Vec<MarkerEventRow>>,
+
+    /// M3 — Column-Aware-Replay-Navigation §M3.  Absolute path of the
+    /// recorder-baked formatted ``srcview`` the user is currently
+    /// looking at, or ``None`` when the GUI is showing the recorded
+    /// minified coordinates directly.
+    ///
+    /// When ``Some(path)`` the [`Handler::next_dap`] runner reroutes
+    /// step-over: instead of advancing one recorded /minified/ line
+    /// per press (which for a 100KB one-liner bundle means "step
+    /// through the entire program"), it advances until the next
+    /// recorded step's projection through the sourcemap_cache lands
+    /// at a different /formatted/ ``(line, column)`` tuple — i.e.
+    /// one formatted line (or, under ``granularity:"statement"``,
+    /// one formatted statement) per press.  This is the whole point
+    /// of M3: users debugging a minified bundle in formatted view get
+    /// a step granularity that matches what they see on screen.
+    ///
+    /// Toggling between minified and formatted view is GUI state, so
+    /// the field is updated via the
+    /// ``ct/set-active-source-view`` DAP request rather than baked into
+    /// every individual step request — the runner consults
+    /// the active path at dispatch time.
+    pub active_source_view_path: Option<String>,
 }
 
 /// M25b — Event-Log marker row returned by `ct/event-load`. The
@@ -427,6 +458,7 @@ impl Handler {
             cached_patterns_fingerprint: None,
             marker_decode_calls: std::sync::atomic::AtomicUsize::new(0),
             cached_marker_rows: None,
+            active_source_view_path: None,
         };
         handler.initialize_breakpoint_cache();
         handler
@@ -511,7 +543,7 @@ impl Handler {
     //     Ok(())
     // }
 
-    fn respond_dap<T: Serialize>(
+    pub fn respond_dap<T: Serialize>(
         &mut self,
         request: dap::Request,
         value: T,
@@ -620,6 +652,33 @@ impl Handler {
         // self.db.load_location(self.step_id, call_key, &mut self.expr_loader),
         let mut location = self.replay.load_location(&mut self.expr_loader)?;
         self.step_id = self.replay.current_step_id();
+        // M3 — when the user has toggled into a formatted srcview, the
+        // GUI cursor must follow the formatted coordinates the runner
+        // is stepping through.  Project the recorded
+        // ``(path, line, column)`` through the active view's sourcemap
+        // BEFORE the find_function_location pass and downstream flow
+        // wiring see it — otherwise the UI cursor would track the
+        // minified position while the runner advanced by formatted line.
+        //
+        // Without an active source view the location flows through
+        // unchanged so legacy minified-mode behaviour is preserved
+        // (the existing per-stackTrace `apply_sourcemap_translation`
+        // path keeps the stack frame view consistent for that mode).
+        //
+        // Spec:
+        //   codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3.
+        if self.active_source_view_path.is_some() {
+            let recorded_column = location.column.unwrap_or(1);
+            let (translated_path, translated_line, translated_col) =
+                self.apply_sourcemap_translation(&location.path, location.line, recorded_column);
+            location.path = translated_path;
+            location.line = translated_line;
+            // Surface the translated column on the existing slot so the
+            // ViewModel's ``getCurrentColumn`` accessor (M1) sees the
+            // formatted column.  ``apply_sourcemap_translation`` always
+            // returns a positive column on a successful projection.
+            location.column = Some(translated_col);
+        }
         // Preserve the Db-derived function boundaries before find_function_location
         // potentially overwrites them with (0,0) when tree-sitter can't parse the file.
         let db_function_first = location.function_first;
@@ -1159,6 +1218,318 @@ impl Handler {
         self.replay.step(Action::Next, forward)?;
         self.step_id = self.replay.current_step_id();
         Ok(())
+    }
+
+    /// M2 — statement-granularity step-over.
+    ///
+    /// Dispatches to [`ReplaySession::step_over_statement`] (default
+    /// impl falls back to `Action::Next`; the materialised session
+    /// overrides with the column-aware runner).
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    pub fn next_statement(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
+        self.replay.step_over_statement(forward)?;
+        self.step_id = self.replay.current_step_id();
+        Ok(())
+    }
+
+    /// M2 — DAP `next` request entry point.
+    ///
+    /// Reads the DAP `granularity` field (previously dropped on the
+    /// floor) and dispatches:
+    ///
+    ///   * `Some("statement")` → [`Handler::next_statement`] —
+    ///     advance one /statement/ at a time using `DbStep.column`.
+    ///   * `Some("line")` / `Some("instruction")` / `None` →
+    ///     [`Handler::next`] — the existing line-granularity runner.
+    ///     Per the M2 contract any non-`statement` value (including
+    ///     unrecognised future values) maps to legacy line-granularity
+    ///     so an over-eager DAP client never breaks back-compat.
+    ///
+    /// `granularity` is consumed lowercase per DAP spec §SteppingGranularity
+    /// (`"statement" | "line" | "instruction"`).  Case-insensitive
+    /// matching protects against future client variations without
+    /// pinning a strict-mode rejection.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    pub fn next_dap(
+        &mut self,
+        request: dap::Request,
+        granularity: Option<String>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let original_step_id = self.step_id;
+        let use_statement = matches!(
+            granularity.as_deref(),
+            Some(g) if g.eq_ignore_ascii_case("statement")
+        );
+        // M3 — Formatted-view step-over.  When the user activated a
+        // recorder-baked srcview via ``ct/set-active-source-view``, we
+        // step until the next recorded step's PROJECTION through the
+        // sourcemap_cache lands at a different formatted
+        // ``(line[, column])`` tuple — i.e. one formatted line (or
+        // formatted statement, under ``granularity:"statement"``) per
+        // press.  Without an active source view we fall through to the
+        // legacy minified-coordinate runner so back-compat is bit-for-
+        // bit identical for clients that haven't opted in.
+        //
+        // The formatted-view path is only valid for the materialised
+        // DB-backed session — the recreator / emulator sessions have
+        // no per-step column data the runner could project.  For those
+        // we silently fall through to the legacy path; the M3 contract
+        // is scoped to materialised JS / Python recordings.
+        let advanced_via_formatted_view =
+            if self.active_source_view_path.is_some() && self.trace_kind == TraceKind::Materialized {
+                self.next_dap_formatted_view(use_statement)?
+            } else {
+                false
+            };
+        if !advanced_via_formatted_view {
+            if use_statement {
+                self.next_statement(true)?;
+            } else {
+                self.next(true)?;
+            }
+        }
+        self.skip_internal_jit_registration_stops()?;
+        // Surface the post-step location (mirrors `step()`'s
+        // `complete_move(false, ...)` call so DAP clients receive the
+        // ct/complete-move event the GUI listens on).  We pass
+        // `complete = true` semantics: every DAP `next` ends with a
+        // settled debugger position the frontend can read.
+        self.complete_move(false, sender.clone())?;
+
+        if self.trace_kind == TraceKind::Materialized {
+            if original_step_id == self.step_id {
+                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                    sender.clone(),
+                )?;
+            } else if self.step_id == StepId(0) {
+                self.send_notification(
+                    NotificationKind::Info,
+                    "Beginning of record reached",
+                    false,
+                    sender.clone(),
+                )?;
+            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
+            }
+        }
+
+        self.respond_dap(request, 0, sender)?;
+        Ok(())
+    }
+
+    /// M3 — set / clear the active formatted source view.
+    ///
+    /// When ``Some(path)`` subsequent DAP ``next`` requests run through
+    /// the formatted-view runner (see [`Handler::next_dap_formatted_view`]).
+    /// When ``None`` the runner falls back to the legacy minified-
+    /// coordinate path.
+    ///
+    /// The path is the absolute on-disk path of the materialised
+    /// formatted-view sidecar (typically
+    /// ``<trace_dir>/sourcemap-translate/<view_name>``).  It is the
+    /// caller's responsibility to ensure a corresponding entry exists
+    /// in [`Self::sourcemap_cache`] — either via [`Self::load_source_views`]
+    /// (production recorder-baked srcviews) or via
+    /// [`Self::install_source_view_for_test`] (test injection).
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3.
+    pub fn set_active_source_view(&mut self, view_path: Option<String>) {
+        self.active_source_view_path = view_path;
+    }
+
+    /// M3 — test-only: install a synthetic ``SourcemapIndex`` under a
+    /// recorded path so the formatted-view runner has a real
+    /// projection to consult.
+    ///
+    /// Production code path: [`Handler::load_source_views`] reads
+    /// ``srcviews.dat`` from the CTFS container and installs entries
+    /// via this same code path.  This method exposes the install hook
+    /// directly so headless ViewModel and GUI Playwright tests can
+    /// drive the formatted-view runner without needing the JS
+    /// recorder's autoformat step (which requires ``prettier`` on PATH
+    /// — a brittle test dependency).
+    ///
+    /// Arguments:
+    ///   * ``recorded_path`` — the absolute path of the recorded
+    ///     minified source the synthetic view applies to.  Looked up
+    ///     in the reader's `path_map` to get the `PathId`.
+    ///   * ``formatted_view_path`` — the absolute path the view will
+    ///     be surfaced under (used as the active-view key by
+    ///     [`Self::set_active_source_view`]).  Does not need to exist
+    ///     on disk for the runner contract; tests typically use a
+    ///     synthetic ``/tmp/...fmt.js`` string.
+    ///   * ``sourcemap_v3_json`` — the JSON bytes of the V3 sourcemap
+    ///     projecting recorded minified ``(line, column)`` →
+    ///     formatted ``(line, column)``.
+    ///
+    /// On unknown ``recorded_path`` returns an error so the caller can
+    /// surface a clear diagnostic; on V3 parse failure ditto.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3.
+    pub fn install_source_view_for_test(
+        &mut self,
+        recorded_path: &str,
+        _formatted_view_path: &str,
+        sourcemap_v3_json: &[u8],
+    ) -> Result<(), Box<dyn Error>> {
+        let path_id = self.reader.fuzzy_path_id_for(recorded_path).ok_or_else(|| {
+            format!(
+                "install_source_view_for_test: recorded_path {recorded_path} not registered in the trace's path table"
+            )
+        })?;
+        let dir = self
+            .sourcemap_cache_dir
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let idx = sourcemap_translate::SourcemapIndex::from_slice(sourcemap_v3_json, &dir)
+            .map_err(|e| format!("install_source_view_for_test: failed to parse V3 JSON: {e}"))?;
+        self.sourcemap_cache.install_index(path_id, recorded_path, idx);
+        Ok(())
+    }
+
+    /// M3 — formatted-view step-over runner.
+    ///
+    /// Strategy: option (b) from the M3 plan — step normally through
+    /// the recorded stream, but project each candidate step's location
+    /// through the forward sourcemap and stop at the first projection
+    /// that differs from the entry projection.  This sidesteps the
+    /// edge case where a single formatted line maps back to multiple
+    /// disjoint minified ranges (prettier sometimes wraps a single
+    /// minified expression across lines and back), because the
+    /// projection-based stop predicate naturally handles it: any step
+    /// whose forward projection lands inside the entry's formatted
+    /// line gets skipped, regardless of how the underlying minified
+    /// ranges look.
+    ///
+    /// Granularity contract:
+    ///   * ``use_statement == false`` → stop at the first candidate
+    ///     whose projected formatted /line/ differs from the entry's
+    ///     projected line.  Column changes within the same formatted
+    ///     line are NOT a boundary (one F10 = one formatted line).
+    ///   * ``use_statement == true`` → stop at the first candidate
+    ///     whose projected formatted ``(line, column)`` tuple differs
+    ///     from the entry's projection.  Column changes within the
+    ///     same formatted line ARE a boundary (one Shift-F10 = one
+    ///     formatted statement).
+    ///
+    /// Returns:
+    ///   * ``Ok(true)`` when the cursor advanced via the formatted-view
+    ///     path.  The caller MUST NOT then run the legacy runner.
+    ///   * ``Ok(false)`` when the formatted-view path was not
+    ///     applicable (no projection for the entry step) and the
+    ///     caller should fall through to the legacy runner.  This is
+    ///     the defensive fallback so a stale active-view path can't
+    ///     break navigation.
+    ///   * ``Err(_)`` on a real error condition (replay step failure).
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3.
+    fn next_dap_formatted_view(&mut self, use_statement: bool) -> Result<bool, Box<dyn Error>> {
+        // Snapshot the entry's projected formatted location.  If the
+        // recorded coordinates do not project (e.g. the active view's
+        // map has no segment covering them), bail out and let the
+        // legacy runner take over — we cannot decide what "next
+        // formatted line" means without a baseline projection.
+        let Some(entry_projection) = self.project_active_view_for_current_step() else {
+            return Ok(false);
+        };
+
+        let start_step_id = self.step_id;
+        let mut last_step_id = start_step_id;
+        let mut count: usize = 0;
+        loop {
+            let candidate = self
+                .reader
+                .next_step_id_relative_to_with_granularity(
+                    last_step_id,
+                    /* forward = */ true,
+                    /* step_to_different_line = */ false,
+                    /* step_to_different_column = */ false,
+                )
+                .0;
+            if candidate == last_step_id {
+                // No more steps — we've reached the trace boundary.
+                // Mirror the legacy clamp-in-place behaviour so the
+                // limit-reached notification fires downstream.
+                break;
+            }
+            last_step_id = candidate;
+            count += 1;
+            if count >= crate::db::NEXT_INTERNAL_STEP_OVERS_LIMIT {
+                break;
+            }
+
+            // Project the candidate's recorded coordinates through the
+            // active view's map.  When the candidate has no projection
+            // (sparse segment) we treat that as "no formatted-side
+            // change" and keep stepping — the user expects intra-
+            // formatted-line bookkeeping steps to be skipped.
+            let Some(candidate_projection) = self.project_active_view_for_step(candidate) else {
+                continue;
+            };
+
+            let line_changed = candidate_projection.path != entry_projection.path
+                || candidate_projection.line != entry_projection.line;
+            let column_changed = candidate_projection.column != entry_projection.column;
+            let boundary = if use_statement {
+                line_changed || column_changed
+            } else {
+                line_changed
+            };
+            if boundary {
+                break;
+            }
+        }
+        // Drive the replay session to the resolved step id so all the
+        // downstream session state (last_location, call_key, etc.)
+        // stays consistent with the materialised path.  This mirrors
+        // the legacy ``next`` runner which goes through
+        // ``MaterializedReplaySession::next``.
+        if last_step_id != start_step_id {
+            let moved = self.replay.jump_to(last_step_id)?;
+            // ``jump_to`` returns the new step id via
+            // ``current_step_id``; mirror it onto the handler's cursor.
+            let _ = moved;
+            self.step_id = self.replay.current_step_id();
+        }
+        Ok(true)
+    }
+
+    /// Helper — project the recorded coordinates of ``self.step_id``
+    /// through [`Self::sourcemap_cache`].  Returns ``None`` when no
+    /// projection exists (the cache has no entry for the recorded
+    /// path, or the segment is sparse).
+    fn project_active_view_for_current_step(&mut self) -> Option<crate::sourcemap_cache::TranslatedLocation> {
+        let step_id = self.step_id;
+        self.project_active_view_for_step(step_id)
+    }
+
+    /// Helper — project the recorded coordinates of ``step_id`` through
+    /// [`Self::sourcemap_cache`].  See
+    /// [`Self::project_active_view_for_current_step`].
+    fn project_active_view_for_step(&mut self, step_id: StepId) -> Option<crate::sourcemap_cache::TranslatedLocation> {
+        let step = self.reader.step(step_id)?;
+        let path = self.reader.path(step.path_id)?.to_string();
+        let workdir = self.reader.workdir().to_path_buf();
+        let abs_path = if std::path::Path::new(&path).is_absolute() {
+            path
+        } else {
+            workdir.join(&path).display().to_string()
+        };
+        let line = step.line.0.max(0) as u32;
+        let col = step.column.map(|c| c.0.max(1) as u32).unwrap_or(1);
+        if self.sourcemap_cache.is_empty() {
+            return None;
+        }
+        let cache_dir = self.sourcemap_cache_dir.clone();
+        self.sourcemap_cache
+            .translate_for_path(&abs_path, line, col, cache_dir.as_deref())
     }
 
     pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
@@ -2473,9 +2844,11 @@ impl Handler {
             //  if this fails, we stop and don't do the run to entry(the error returns because of `?`):
             //    i think it can't really return an error in our current impl though
             self.replay.disable_breakpoints()?;
-            let b = self
-                .replay
-                .add_breakpoint(&source_location.path, source_location.line as i64)?;
+            let b = self.replay.add_breakpoint(
+                &source_location.path,
+                source_location.line as i64,
+                source_location.column,
+            )?;
 
             let mut move_error = false;
             if let Err(e) = self.source_line_jump_moves_for_rr(&source_location) {
@@ -2545,6 +2918,7 @@ impl Handler {
         if let Some(step_id) = self.get_closest_step_id(&SourceLocation {
             line: line.into(),
             path: self.reader.path(path_id).unwrap_or("").to_string(),
+            column: None,
         }) {
             return Some(step_id);
         }
@@ -2561,6 +2935,7 @@ impl Handler {
         if let Some(line_step_id) = self.get_closest_step_id(&SourceLocation {
             line: call_target.line,
             path: call_target.path.clone(),
+            column: None,
         }) {
             self.replay.jump_to(line_step_id)?;
             self.step_id = self.replay.current_step_id();
@@ -2596,13 +2971,26 @@ impl Handler {
         let mut results = Vec::new();
         if let Some(path) = args.source.path.clone() {
             self.clear_breakpoints_for_source(&path)?;
-            let lines: Vec<i64> = if let Some(bps) = args.breakpoints {
-                bps.into_iter().map(|b| b.line).collect()
+            // M1: keep the `(line, column)` pair from the DAP request so
+            // the breakpoint can be registered at the column the client
+            // asked for.  The legacy `args.lines` fallback (used by very
+            // old DAP clients that don't carry the structured
+            // `breakpoints` array) is column-less by construction.
+            // M1: normalise `column == Some(0)` to `None`.  The DAP
+            // spec doesn't permit column 0 (columns are 1-indexed),
+            // but the Nim frontend's strict ``DapSourceBreakpoint``
+            // ref-object can't elide the key — it ships
+            // ``"column": 0`` to mean "no column" for legacy
+            // line-only breakpoints.  Treating 0 as None preserves
+            // back-compat without forcing every existing UI surface
+            // to switch to an Option-shaped field.
+            let line_specs: Vec<(i64, Option<i64>)> = if let Some(bps) = args.breakpoints {
+                bps.into_iter().map(|b| (b.line, b.column.filter(|c| *c > 0))).collect()
             } else {
-                args.lines.unwrap_or_default()
+                args.lines.unwrap_or_default().into_iter().map(|l| (l, None)).collect()
             };
 
-            for line in lines {
+            for (line, column) in line_specs {
                 let source = Some(dap_types::Source {
                     name: args.source.name.clone(),
                     path: Some(path.clone()),
@@ -2616,6 +3004,7 @@ impl Handler {
                 match self.add_breakpoint(SourceLocation {
                     path: path.clone(),
                     line: line as usize,
+                    column,
                 }) {
                     Ok(breakpoint) => {
                         results.push(dap_types::Breakpoint {
@@ -2624,7 +3013,12 @@ impl Handler {
                             message: None,
                             source,
                             line: Some(line),
-                            column: None,
+                            // M1: surface the bound column on the
+                            // response (the legacy implementation
+                            // returned `None` unconditionally).  DAP
+                            // clients consume this to anchor their
+                            // gutter marker at the right column.
+                            column: breakpoint.column,
                             end_line: None,
                             end_column: None,
                             instruction_reference: None,
@@ -2633,7 +3027,10 @@ impl Handler {
                         });
                     }
                     Err(e) => {
-                        let message = format!("failed to set breakpoint at {path}:{line}: {e}");
+                        let message = format!(
+                            "failed to set breakpoint at {path}:{line}{}: {e}",
+                            column.map(|c| format!(":{c}")).unwrap_or_default()
+                        );
                         warn!("{message}");
                         results.push(dap_types::Breakpoint {
                             id: None,
@@ -2641,7 +3038,7 @@ impl Handler {
                             message: Some(message),
                             source,
                             line: Some(line),
-                            column: None,
+                            column,
                             end_line: None,
                             end_column: None,
                             instruction_reference: None,
@@ -2683,15 +3080,19 @@ impl Handler {
     }
 
     pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<Breakpoint, Box<dyn Error>> {
-        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64)?;
-        let entry = self.breakpoints.entry((loc.path.clone(), loc.line as i64)).or_default();
+        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64, loc.column)?;
+        let entry = self
+            .breakpoints
+            .entry((loc.path.clone(), loc.line as i64, loc.column))
+            .or_default();
         entry.push(breakpoint.clone());
         Ok(breakpoint)
     }
 
     pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
-        if self.breakpoints.contains_key(&(loc.path.clone(), loc.line as i64)) {
-            for breakpoint in &self.breakpoints[&(loc.path.clone(), loc.line as i64)] {
+        let key = (loc.path.clone(), loc.line as i64, loc.column);
+        if self.breakpoints.contains_key(&key) {
+            for breakpoint in &self.breakpoints[&key] {
                 self.replay.delete_breakpoint(breakpoint)?;
             }
         }
@@ -2702,7 +3103,7 @@ impl Handler {
         let keys = self
             .breakpoints
             .keys()
-            .filter(|(path, _line)| path == source_path)
+            .filter(|(path, _line, _column)| path == source_path)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -2730,7 +3131,9 @@ impl Handler {
         }
         if let Some(first_step) = self.reader.step(StepId(0)) {
             let path = self.reader.path(first_step.path_id).unwrap_or("").to_string();
-            self.breakpoints.entry((path, first_step.line.0)).or_default();
+            // M1: the sentinel cache entry mirrors the legacy line-only
+            // slot — column `None` matches every step on the line.
+            self.breakpoints.entry((path, first_step.line.0, None)).or_default();
         }
     }
 
@@ -2784,15 +3187,19 @@ impl Handler {
         self.event_db.reset_tracepoint_data(&tracepoint_id_list); // for now no smart cache non-changed optimizations(?)
 
         let original_step_id = self.replay.current_step_id();
-        let mut disabled_breakpoints: Vec<((String, i64), usize)> = vec![];
+        // M1 — the breakpoint registry key is `(path, line, column)`.
+        // We hoist that triple into a local alias so clippy stops
+        // flagging the `Vec<(.., usize)>` as "very complex type".
+        type BreakpointKey = (String, i64, Option<i64>);
+        let mut disabled_breakpoints: Vec<(BreakpointKey, usize)> = vec![];
 
         {
             let replay = &mut self.replay;
-            for ((path, line), breakpoints) in self.breakpoints.iter_mut() {
+            for ((path, line, column), breakpoints) in self.breakpoints.iter_mut() {
                 for (index, breakpoint) in breakpoints.iter_mut().enumerate() {
                     if breakpoint.enabled {
                         let toggled = replay.toggle_breakpoint(breakpoint)?;
-                        disabled_breakpoints.push(((path.clone(), *line), index));
+                        disabled_breakpoints.push(((path.clone(), *line, *column), index));
                         *breakpoint = toggled;
                     }
                 }
@@ -2816,7 +3223,7 @@ impl Handler {
                         if !tracepoint_indices.iter().any(|idx| registered[*idx]) {
                             continue;
                         }
-                        match self.replay.add_breakpoint(path, line as i64) {
+                        match self.replay.add_breakpoint(path, line as i64, None) {
                             Ok(breakpoint) => tracepoint_breakpoints.push(breakpoint),
                             Err(error) => {
                                 warn!("tracepoint breakpoint error: {error:?}");
@@ -3207,7 +3614,7 @@ impl Handler {
             self.complete_move(false, sender)?;
         } else {
             self.replay.disable_breakpoints()?;
-            let bp = self.replay.add_breakpoint(&arg.path, arg.first_loop_line + 1)?;
+            let bp = self.replay.add_breakpoint(&arg.path, arg.first_loop_line + 1, None)?;
             let location = self.replay.load_location(&mut self.expr_loader)?;
             if location.line < arg.first_loop_line {
                 self.replay.step(Action::Continue, true)?;
@@ -4957,6 +5364,7 @@ mod tests {
         let source_location: SourceLocation = SourceLocation {
             path: path.to_string(),
             line: 3,
+            column: None,
         };
         handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
@@ -4965,6 +5373,7 @@ mod tests {
             SourceLocation {
                 path: path.to_string(),
                 line: 2,
+                column: None,
             },
             sender.clone(),
         )?;

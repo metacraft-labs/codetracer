@@ -139,6 +139,11 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   CtOriginChainResponse: "",
   CtOriginSummary: "ct/originSummary",
   CtOriginSummaryResponse: "",
+  # Column-Aware Replay Navigation (M3) — frontend-initiated requests.
+  CtSetActiveSourceView: "ct/set-active-source-view",
+  CtSetActiveSourceViewResponse: "",
+  CtInstallSourceView: "ct/install-source-view",
+  CtInstallSourceViewResponse: "",
 ]
 
 var DAP_TO_EVENT_KIND_MAPPING = JsAssoc[cstring, CtEventKind]{}
@@ -182,6 +187,9 @@ func toCtDapResponseEventKind*(kind: CtEventKind): CtEventKind =
   # Value Origin Tracking (M4)
   of CtOriginChain: CtOriginChainResponse
   of CtOriginSummary: CtOriginSummaryResponse
+  # Column-Aware Replay Navigation (M3)
+  of CtSetActiveSourceView: CtSetActiveSourceViewResponse
+  of CtInstallSourceView: CtInstallSourceViewResponse
   else: raise newException(ValueError, fmt"no response ct event kind for {kind} defined")
 
 
@@ -218,6 +226,9 @@ func commandToCtResponseEventKind(command: cstring): CtEventKind =
   # Value Origin Tracking (M4)
   of "ct/originChain": CtOriginChainResponse
   of "ct/originSummary": CtOriginSummaryResponse
+  # Column-Aware Replay Navigation (M3)
+  of "ct/set-active-source-view": CtSetActiveSourceViewResponse
+  of "ct/install-source-view": CtInstallSourceViewResponse
   else: raise newException(
     ValueError,
     "no ct event kind response for command: \"" & $command & "\" defined")

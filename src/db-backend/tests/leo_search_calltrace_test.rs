@@ -44,13 +44,103 @@ fn leo_search_calltrace_returns_compute_call() {
     let mut runner =
         FlowTestRunner::new_db_trace(&db_backend, &recording.trace_dir).expect("DAP init failed for Leo trace");
 
-    // Mirror the WDIO leo-deep ordering: set a breakpoint at line 5,
-    // continue to it, load flow, *then* search the calltrace.  The
-    // session state matters because each preceding ``ct/load-flow``
-    // or breakpoint-stop event leaves the server in a different
-    // worker state, and the WDIO failure only surfaces after those
-    // preceding requests.
+    // Mirror the WDIO leo-deep ordering exhaustively: prior to the
+    // ``ct/search-calltrace`` request the test does
+    //   load-calltrace-section → event-load → load-locals →
+    //   4×stepOver → stepIn → stepOut →
+    //   removeAllBreakpoints → addBreakpoint(5) →
+    //   continue → load-flow → search.
+    // Each of these requests mutates the db-backend's session state
+    // (current step_id, breakpoint list, expr_loader caches,
+    // tracepoint workers) -- the WDIO failure only surfaces in this
+    // settled-after-many-commands state, so reproduce the full
+    // ordering rather than the minimal init+search the previous
+    // version of this test had.
     let client = runner.client();
+
+    let calltrace_seq = client
+        .send_request(
+            "ct/load-calltrace-section",
+            json!({
+                "location": {
+                    "path": "", "line": 0, "functionName": "",
+                    "highLevelPath": "", "highLevelLine": 0,
+                    "highLevelFunctionName": "",
+                    "lowLevelPath": "", "lowLevelLine": 0,
+                    "rrTicks": 0, "functionFirst": 0,
+                    "functionLast": 0, "event": 0, "expression": "",
+                    "offset": 0, "error": false,
+                    "callstackDepth": 0,
+                    "originatingInstructionAddress": 0,
+                    "key": "", "globalCallKey": "",
+                },
+                "startCallLineIndex": 0,
+                "depth": 50, "height": 200,
+                "rawIgnorePatterns": "",
+                "autoCollapsing": false,
+                "optimizeCollapse": false,
+                "renderCallLineIndex": 0,
+            }),
+        )
+        .expect("send load-calltrace-section");
+    let _ = client
+        .recv_response(Duration::from_secs(10))
+        .expect("load-calltrace-section response timed out");
+    eprintln!("load-calltrace-section seq={calltrace_seq} responded");
+
+    let event_load_seq = client
+        .send_request("ct/event-load", json!({}))
+        .expect("send event-load");
+    let _ = client
+        .recv_response(Duration::from_secs(15))
+        .expect("event-load response timed out");
+    eprintln!("event-load seq={event_load_seq} responded");
+
+    let load_locals_seq = client
+        .send_request(
+            "ct/load-locals",
+            json!({
+                "rrTicks": 0, "countBudget": 100, "minCountLimit": 10,
+                "lang": 33, "watchExpressions": [], "depthLimit": 3,
+            }),
+        )
+        .expect("send load-locals");
+    let _ = client
+        .recv_response(Duration::from_secs(10))
+        .expect("load-locals response timed out");
+    eprintln!("load-locals seq={load_locals_seq} responded");
+
+    // WDIO uses DAP standard ``next``/``stepIn``/``stepOut`` requests
+    // (not the ct/step custom protocol), so mirror that exactly --
+    // they take a different code path inside the db-backend and the
+    // step_id state transitions differ subtly.
+    for i in 0..4 {
+        let next_seq = client.send_request("next", json!({"threadId": 1})).expect("send next");
+        let _ = client
+            .recv_response(Duration::from_secs(10))
+            .unwrap_or_else(|e| panic!("next #{i} response timed out: {e}"));
+        eprintln!("DAP next #{i} seq={next_seq} responded");
+    }
+    let step_in_seq = client
+        .send_request("stepIn", json!({"threadId": 1}))
+        .expect("send stepIn");
+    let _ = client
+        .recv_response(Duration::from_secs(10))
+        .expect("DAP stepIn response timed out");
+    eprintln!("DAP stepIn seq={step_in_seq} responded");
+    let step_out_seq = client
+        .send_request("stepOut", json!({"threadId": 1}))
+        .expect("send stepOut");
+    let _ = client
+        .recv_response(Duration::from_secs(10))
+        .expect("DAP stepOut response timed out");
+    eprintln!("DAP stepOut seq={step_out_seq} responded");
+
+    // removeAllBreakpoints + addBreakpoint(5) + continue: mirror
+    // WDIO's breakpoint exercise.
+    client
+        .set_breakpoints(source_path.to_str().unwrap(), &[])
+        .expect("clear breakpoints failed");
     client
         .set_breakpoints(source_path.to_str().unwrap(), &[5])
         .expect("set_breakpoints failed");

@@ -376,6 +376,23 @@ proc configureShortcuts* =
     cdebug "shortcuts: Cmd+Shift+O — Show Value Origin"
     dispatchShowValueOrigin()
 
+  # Column-Aware Replay Navigation (M2) — `Step Over Statement`
+  # keybinding (Alt+F10) layered on top of the existing F10 line-
+  # granularity step-over.  The legacy F10 / `next` action stays
+  # bit-for-bit identical (spec §M2: legacy DAP `next` MUST keep its
+  # line-granularity behaviour); Alt+F10 invokes the column-aware
+  # `stepOverStatement` surface on the debugger service, which sends
+  # a DAP `next` with `granularity: "statement"` so the replay-server
+  # dispatches to the column-aware runner.  Reusing the existing
+  # debug-controls component instead of introducing a new toolbar
+  # button keeps the M2 surface compact.
+  #
+  # Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+  Mousetrap.`bind`("alt+f10") do ():
+    cdebug "shortcuts: Alt+F10 — Step Over Statement"
+    if not data.isNil and not data.services.debugger.isNil:
+      data.services.debugger.stepOverStatement()
+
   ## Visual Replay / Video Player keyboard overlay must register LAST so its
   ## wrappers shadow any prior bindings on shared keys (Esc, Home, End, arrow
   ## keys).  Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md

@@ -225,6 +225,44 @@ impl Db {
         forward: bool,
         step_to_different_line: bool,
     ) -> (StepId, bool) {
+        self.next_step_id_relative_to_with_granularity(step_id, forward, step_to_different_line, false)
+    }
+
+    /// Generalised next-step driver shared by the line-granularity
+    /// (`next_step_id_relative_to`) and statement-granularity (M2)
+    /// runners.  Both forms spin the same `step_over_depths_step_id`
+    /// loop and apply the same bounds / step-cap guards; they differ
+    /// only in the loop-termination predicate:
+    ///
+    /// * `step_to_different_line = false`, `step_to_different_column = false`
+    ///   → single hop at same-or-shallower depth (raw next-statement
+    ///   primitive used internally by `step_over_depths_step_id`
+    ///   callers that want exactly one hop).
+    ///
+    /// * `step_to_different_line = true`, `step_to_different_column = false`
+    ///   → line-granularity `next` — keep hopping while the step
+    ///   stays on the same `(path_id, line, call_key)`.  The legacy
+    ///   F10 behaviour.
+    ///
+    /// * `step_to_different_column = true` → statement-granularity
+    ///   `next` (M2) — keep hopping while the step stays on the same
+    ///   `(path_id, line, column, call_key)`.  This drops out as soon
+    ///   as EITHER line changes OR column changes, which under the
+    ///   column-aware recorder contract corresponds to a statement
+    ///   boundary.  When the column field is `None` (legacy
+    ///   line-only trace), the column equality reduces to the
+    ///   line-only check — statement granularity quietly degrades to
+    ///   line granularity, which is the correct fallback for traces
+    ///   without column data.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    pub fn next_step_id_relative_to_with_granularity(
+        &self,
+        step_id: StepId,
+        forward: bool,
+        step_to_different_line: bool,
+        step_to_different_column: bool,
+    ) -> (StepId, bool) {
         let mut last_step_id = step_id;
         // Bounds-check: if step_id is invalid return it unchanged (no move happened).
         let Some(original_step) = self.steps.get(step_id) else {
@@ -236,8 +274,12 @@ impl Db {
             return (step_id, false);
         };
         let original_step = *original_step;
-        let (original_path_id, original_line, original_call_key) =
-            (original_step.path_id, original_step.line, original_step.call_key);
+        let (original_path_id, original_line, original_column, original_call_key) = (
+            original_step.path_id,
+            original_step.line,
+            original_step.column,
+            original_step.call_key,
+        );
         let mut count = 0;
         loop {
             // delta = 0 => we target same or upper level
@@ -250,16 +292,38 @@ impl Db {
             if count >= NEXT_INTERNAL_STEP_OVERS_LIMIT {
                 break;
             }
-            if !step_to_different_line {
+            if !step_to_different_line && !step_to_different_column {
                 break;
             } else if let Some(current_step) = self.steps.get(current_step_id) {
-                if original_path_id != current_step.path_id
+                let path_or_line_changed = original_path_id != current_step.path_id
                     || original_line != current_step.line
-                    || original_call_key != current_step.call_key
-                {
-                    // this is a different line: or even if the same line, it's in a different call!
+                    || original_call_key != current_step.call_key;
+                if path_or_line_changed {
+                    // a different line/path/frame — both granularities stop here.
                     break;
                 }
+                if step_to_different_column {
+                    // M2 — statement-boundary detection.  Stop when the
+                    // column STRICTLY advances past the entry column —
+                    // that marks the start of the next statement under
+                    // the recorder's left-to-right code-emit model.
+                    // Bookkeeping / assignment hooks anchored at or
+                    // before the entry column are skipped so the
+                    // runner advances to the real next-statement
+                    // boundary.  See
+                    // `crate::trace_reader::TraceReader::next_step_id_relative_to_with_granularity`
+                    // for the rationale and the
+                    // legacy-line-only-degrade contract.
+                    let strictly_advanced = match (original_column, current_step.column) {
+                        (Some(prev), Some(cur)) => cur.0 > prev.0,
+                        _ => false,
+                    };
+                    if strictly_advanced {
+                        break;
+                    }
+                }
+                // Same line + (for statement) column ≤ entry → still inside
+                // the current statement; keep stepping.
             } else {
                 // current_step_id is out of bounds - stop iterating.
                 warn!(
@@ -925,13 +989,24 @@ pub struct MaterializedReplaySession {
     local_types: Vec<TypeRecord>,
     pub step_id: StepId,
     pub call_key: CallKey,
-    pub breakpoint_list: Vec<HashMap<usize, Breakpoint>>,
+    /// Per-path table of registered breakpoints keyed by
+    /// `(line, column)`.
+    ///
+    /// `column = None` is the legacy line-only slot — it matches every
+    /// `DbStep` on that line regardless of recorded column.
+    /// `column = Some(c)` is the M1 column-aware slot — it only matches
+    /// `DbStep`s whose recorded `column` equals `c`.
+    ///
+    /// The two coexist on the same line (one map slot per coordinate),
+    /// so a Continue MUST consult both: any of the keyed entries that
+    /// would match the current step on this line counts as a hit.
+    pub breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>>,
     breakpoint_next_id: usize,
 }
 
 impl MaterializedReplaySession {
     pub fn new(reader: Arc<dyn TraceReader>) -> MaterializedReplaySession {
-        let mut breakpoint_list: Vec<HashMap<usize, Breakpoint>> = Default::default();
+        let mut breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>> = Default::default();
         breakpoint_list.resize_with(reader.path_count(), HashMap::new);
         MaterializedReplaySession {
             reader,
@@ -1255,6 +1330,42 @@ impl MaterializedReplaySession {
         Ok(moved)
     }
 
+    /// M2 — statement-granularity step-over.
+    ///
+    /// Advance until either (a) the recorded `(path_id, line,
+    /// call_key)` differs from the entry step — the same boundary
+    /// the legacy [`MaterializedReplaySession::next`] uses — OR (b)
+    /// a same-line step whose `column` is STRICTLY GREATER than the
+    /// entry column is observed, which marks the start of the next
+    /// statement under the column-aware recorder contract.
+    ///
+    /// Why strict-greater rather than any-change: the JS / Python
+    /// recorders may emit multiple steps per statement (the
+    /// user-facing `__ct.step(siteId)` injection point plus
+    /// assignment-write / bookkeeping hooks that anchor at-or-before
+    /// the statement's start column).  An "any-column-change"
+    /// predicate would stop on those bookkeeping anchors and the
+    /// cursor would oscillate intra-statement; the strict-greater
+    /// rule advances past them to the unambiguous user-visible next
+    /// statement, matching the M2 spec's statement-range semantic.
+    ///
+    /// Steps with `column = None` (legacy line-only traces) treat the
+    /// column predicate as never firing — statement granularity
+    /// degrades to line granularity, the documented fallback for
+    /// pre-column-aware recordings.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    fn next_statement(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        let moved;
+        (self.step_id, moved) = self.reader.next_step_id_relative_to_with_granularity(
+            self.step_id,
+            forward,
+            /* step_to_different_line = */ true,
+            /* step_to_different_column = */ true,
+        );
+        Ok(moved)
+    }
+
     // returns if it has hit any breakpoints
     #[allow(clippy::expect_used)] // Trace must have at least one step
     fn step_continue(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
@@ -1276,11 +1387,7 @@ impl MaterializedReplaySession {
         };
         for step in steps {
             if !self.breakpoint_list.is_empty() {
-                if let Some(enabled) = self.breakpoint_list[step.path_id.0]
-                    .get(&step.line.into())
-                    .map(|bp| bp.enabled)
-                    && enabled
-                {
+                if self.step_matches_any_breakpoint(&step) {
                     self.step_id_jump(step.step_id);
                     // true: has hit a breakpoint
                     return Ok(true);
@@ -1309,6 +1416,46 @@ impl MaterializedReplaySession {
         }
         // false: hasn't hit a breakpoint
         Ok(false)
+    }
+
+    /// Return `true` when the given `step` matches an enabled breakpoint
+    /// for its path.  M1 column-aware semantics:
+    ///
+    ///   * a `(line, None)` entry — the legacy line-only slot — matches
+    ///     any step on that line, regardless of recorded column.
+    ///   * a `(line, Some(c))` entry — the column-aware slot — matches
+    ///     only steps whose recorded `column == Some(c)`.  Steps with no
+    ///     recorded column never match a column-aware breakpoint, even
+    ///     when the line agrees — without that data we cannot prove the
+    ///     match.
+    ///
+    /// Both slots coexist independently on the same line; a step
+    /// satisfying either kind is a hit.
+    fn step_matches_any_breakpoint(&self, step: &DbStep) -> bool {
+        let path_idx = step.path_id.0;
+        if path_idx >= self.breakpoint_list.len() {
+            return false;
+        }
+        let line_key = step.line.0 as usize;
+        let table = &self.breakpoint_list[path_idx];
+
+        // Legacy line-only slot: stop on every step at this line.
+        if let Some(bp) = table.get(&(line_key, None))
+            && bp.enabled
+        {
+            return true;
+        }
+
+        // Column-aware slot: only fire when the step's recorded column
+        // is `Some(c)` and equals the breakpoint's column.
+        if let Some(step_col) = step.column
+            && let Some(bp) = table.get(&(line_key, Some(step_col.0)))
+            && bp.enabled
+        {
+            return true;
+        }
+
+        false
     }
 
     /// Resolves a source path to its `PathId` in the trace database.
@@ -1452,6 +1599,14 @@ impl ReplaySession for MaterializedReplaySession {
             Action::Continue => self.step_continue(forward),
             _ => todo!(),
         }
+    }
+
+    /// M2 — Column-Aware Replay Navigation §M2.
+    /// Override the default trait body to dispatch to the
+    /// column-aware [`next_statement`] runner instead of the legacy
+    /// line-granularity `next`.
+    fn step_over_statement(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        self.next_statement(forward)
     }
 
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
@@ -1667,7 +1822,7 @@ impl ReplaySession for MaterializedReplaySession {
         Ok(())
     }
 
-    fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>> {
+    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(path)
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", path).into());
@@ -1676,20 +1831,27 @@ impl ReplaySession for MaterializedReplaySession {
         let breakpoint = Breakpoint {
             enabled: true,
             id: self.breakpoint_next_id as i64,
+            column,
         };
         self.breakpoint_next_id += 1;
-        inner_map.insert(line as usize, breakpoint.clone());
+        // Keyed by `(line, column)` per M1: the same line can carry
+        // multiple column-anchored breakpoints (one per statement on a
+        // multi-statement minified line) without overwriting each
+        // other, AND a column-less legacy breakpoint coexists with
+        // column-aware siblings on the same line (it lives under the
+        // `(line, None)` slot).
+        inner_map.insert((line as usize, column), breakpoint.clone());
         Ok(breakpoint)
     }
 
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>> {
         for path_breakpoints in self.breakpoint_list.iter_mut() {
-            if let Some(line) = path_breakpoints
+            if let Some(key) = path_breakpoints
                 .iter()
                 .find(|(_, stored)| stored.id == breakpoint.id)
-                .map(|(line, _)| *line)
+                .map(|(key, _)| *key)
             {
-                path_breakpoints.remove(&line);
+                path_breakpoints.remove(&key);
                 return Ok(true);
             }
         }

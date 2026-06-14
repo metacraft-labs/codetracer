@@ -18,6 +18,27 @@ type
     ctabAcp
     ctabHarbor
 
+  ## Working-copy mode for an agent session's workspace. Mirrors the
+  ## string set accepted by ``normalizeWorkingCopyMode`` below and the
+  ## ``working_copy_mode`` field used over the wire by Agent Harbor.
+  ##
+  ## Nim's string-valued enum syntax means ``$wiNone == "none"``,
+  ## ``$wiGitWorktree == "git_worktree"``, etc., so call sites can keep
+  ## using ``$mode`` to obtain the canonical string form while gaining
+  ## compile-time exhaustiveness checking for the mode set.
+  ##
+  ## The nim-agents and nim-agent-harbor siblings use plain strings for
+  ## the same field; this enum is CodeTracer-local on purpose so the
+  ## frontend can be type-safe without forcing the shared libraries to
+  ## adopt the same shape.
+  WorkingCopyMode* = enum
+    wiNone = "none"
+    wiGitWorktree = "git_worktree"
+    wiAgentfs = "agentfs"
+    wiCowOverlay = "cow_overlay"
+    wiCopy = "copy"
+    wiInPlace = "in_place"
+
   CodeTracerAgentLaunchConfig* = object
     backend*: CodeTracerAgentBackend
     cwd*: string
@@ -75,6 +96,32 @@ proc promptText*(blocks: openArray[ContentBlock]): string =
       if result.len > 0:
         result.add "\n\n"
       result.add item.text
+
+proc taskPrompt*(instructions: string;
+    context: openArray[string] = @[];
+    evidenceCommand = "";
+    evidenceRequirement = ""): seq[ContentBlock] =
+  ## Assemble an agent task prompt as a list of text content blocks.
+  ## The blocks are joined with ``\n\n`` separators by ``promptText`` —
+  ## consumers that need the structured form should walk the seq, those
+  ## that just want the flattened text (e.g. Agent Harbor's `prompt`
+  ## field) can call ``promptText`` over the returned seq.
+  ##
+  ## Order: task instructions → each context line (e.g. workspace
+  ## constraints) → evidence-command hint → evidence requirement.  The
+  ## acceptance tests at
+  ## ``src/tests/gui/tests/agentic-coding/agent_service_m3_test.nim``
+  ## assert that the flattened text contains every non-empty input
+  ## segment, so empty inputs are skipped to keep the prompt tight.
+  if instructions.len > 0:
+    result.add textBlock(instructions)
+  for item in context:
+    if item.len > 0:
+      result.add textBlock(item)
+  if evidenceCommand.len > 0:
+    result.add textBlock("Evidence command: " & evidenceCommand)
+  if evidenceRequirement.len > 0:
+    result.add textBlock(evidenceRequirement)
 
 proc evidenceCommandForTab*(tabId: string): string =
   "ct agent evidence --session " & tabId

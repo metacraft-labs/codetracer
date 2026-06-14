@@ -167,6 +167,88 @@ proc step*(
   else:
     self.stableBuffer.add((action, reverse))
 
+proc stepOverStatement*(self: DebuggerService) =
+  ## M2 — Column-Aware Replay Navigation §M2: step forward by one
+  ## /statement/ rather than by one source line.  Sends a DAP ``next``
+  ## request to the replay-server with ``granularity: "statement"`` on
+  ## the wire — the replay-server's ``next_dap`` handler dispatches
+  ## to the column-aware [`run_step_over_statement`] runner when the
+  ## granularity field is present, and falls back to legacy
+  ## line-granularity stepping otherwise.
+  ##
+  ## Unlike [`DebuggerService.step`] (which is the entry point for the
+  ## F10 button + Mousetrap keybind path and routes through
+  ## ``CODETRACER::step`` for IPC compatibility with the legacy CT
+  ## protocol), this proc speaks DAP directly — the granularity field
+  ## is a vanilla DAP extension and does not need a custom CT
+  ## protocol bridge.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M2 for the DAP wire contract.
+  if self.stableBusy:
+    return
+  self.stableBusy = true
+  inc self.operationCount
+  self.lastDirection = DebForward
+  self.lastAction = cstring"next"
+  # The DAP arguments carry the standard `threadId` (we currently use
+  # the single-thread sentinel `1`) plus the M2 extension field
+  # `granularity = "statement"` that activates the column-aware
+  # runner on the replay-server.  `DapStepArguments` does not surface
+  # the granularity slot on its Nim type — we ship a raw `js{}` literal
+  # to avoid widening every step request site with an unused field.
+  let args = js{
+    threadId: 1,
+    granularity: cstring"statement",
+  }
+  self.data.dapApi.sendCtRequest(DapNext, args)
+  self.data.redraw()
+
+
+proc setActiveSourceView*(self: DebuggerService, viewPath: cstring) =
+  ## M3 — Column-Aware Replay Navigation §M3.  Activate the formatted
+  ## srcview at ``viewPath`` so subsequent step-overs advance one
+  ## /formatted/ line (or statement) per press rather than one
+  ## minified line.  Pass an empty string / ``nil`` to clear the active
+  ## view and return the runner to legacy minified-coordinate
+  ## behaviour.
+  ##
+  ## The replay-server's ``ct/set-active-source-view`` handler stores
+  ## the path on the per-trace ``Handler`` instance; subsequent ``next``
+  ## requests consult it to decide whether to invoke the formatted-view
+  ## runner or the legacy line-granularity runner.
+  let args = if viewPath.isNil or viewPath.len == 0:
+    js{ viewPath: nil }
+  else:
+    js{ viewPath: viewPath }
+  self.data.dapApi.sendCtRequest(CtSetActiveSourceView, args)
+
+proc installSourceViewForTest*(self: DebuggerService;
+                               recordedPath, formattedViewPath,
+                               sourcemapV3Json: cstring) =
+  ## M3 — test-only debug surface: inject a synthetic Source Map V3
+  ## record into the replay-server's sourcemap cache.
+  ##
+  ## Production code path: the recorder writes a ``srcviews.dat``
+  ## record that the replay-server discovers at trace-open time via
+  ## ``load_source_views``.  This procedure exposes the install hook
+  ## directly so headless ViewModel and GUI Playwright tests can
+  ## exercise the formatted-view runner without depending on the JS
+  ## recorder's autoformat step (which requires ``prettier`` on PATH
+  ## and would tie the M3 contract to an external toolchain).
+  ##
+  ## The injected index is stored under the same in-memory
+  ## ``sourcemap_cache`` slot the production ``load_source_views``
+  ## path writes to, so both paths exercise the same downstream
+  ## runner code.
+  let args = js{
+    recordedPath: recordedPath,
+    formattedViewPath: formattedViewPath,
+    sourcemapV3Json: sourcemapV3Json,
+  }
+  self.data.dapApi.sendCtRequest(CtInstallSourceView, args)
+
+
 proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount: int, iteration: int, rrTicks: int = -1, reverse: bool = false) =
   # (line, rr ticks) => all steps that correspond to those rr ticks and line
   # if two steps same lines rr ticks it means jump without changing rr ticks..
@@ -197,6 +279,10 @@ func hasBreakpoint*(self: DebuggerService, path: cstring, line: int): bool =
 const NO_B_COLUMN = 0
 
 proc dapSetBreakpoints*(self: DebuggerService) =
+  ## M1 — when a registered breakpoint carries a non-zero column the
+  ## DAP request surfaces it; legacy breakpoints (``column == 0``)
+  ## fall back to the original line-only payload so older replay
+  ## servers (and the existing CI smoke fixtures) keep working.
   for path, breakpointList in self.breakpointTable:
     var args = DapSetBreakpointsArguments(
       source: DapSource(
@@ -210,7 +296,7 @@ proc dapSetBreakpoints*(self: DebuggerService) =
         args.breakpoints.add(
           DapSourceBreakpoint(
             line: line,
-            column: NO_B_COLUMN
+            column: b.column
           )
         )
         args.lines.add(line)
@@ -223,7 +309,12 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
   if not self.hasBreakpoint(path, line):
     if not self.breakpointTable.hasKey(path):
       self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
-    self.breakpointTable[path][line] = UIBreakpoint(line: line, path: path, level: if not c: 0 else: 1, enabled: true)
+    self.breakpointTable[path][line] = UIBreakpoint(
+      line: line,
+      column: NO_B_COLUMN,
+      path: path,
+      level: if not c: 0 else: 1,
+      enabled: true)
     data.pointList.breakpoints.add(self.breakpointTable[path][line])
 
     # if not c:
@@ -233,6 +324,32 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
     #     self.internalAddBreakpointC(path, line)
 
     # TODO self.data.services.editor.open[self.data.services.editor.active].viewLine = line
+  self.dapSetBreakpoints()
+  self.data.redraw()
+
+
+proc addColumnBreakpoint*(self: DebuggerService, path: cstring, line: int, column: int) =
+  ## M1 — Column-Aware Replay Navigation: register a breakpoint
+  ## anchored at ``(path, line, column)``.  Stored in the same
+  ## ``breakpointTable[path][line]`` slot as a line-only breakpoint
+  ## (one column-anchored breakpoint per line in the UI for now);
+  ## the recorded column is round-tripped through DAP so the
+  ## replay-server matches the exact recorded ``DbStep.column`` at
+  ## continue-time.
+  ##
+  ## Used by tests (and a future GUI affordance) to set
+  ## column-precision breakpoints; the existing
+  ## ``addBreakpoint``/``toggleBreakpoint`` path remains line-only
+  ## so the gutter-click default behaviour is unchanged.
+  if not self.breakpointTable.hasKey(path):
+    self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
+  self.breakpointTable[path][line] = UIBreakpoint(
+    line: line,
+    column: column,
+    path: path,
+    level: 0,
+    enabled: true)
+  data.pointList.breakpoints.add(self.breakpointTable[path][line])
   self.dapSetBreakpoints()
   self.data.redraw()
 

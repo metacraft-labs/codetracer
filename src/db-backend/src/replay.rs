@@ -24,6 +24,29 @@ pub trait ReplaySession: std::fmt::Debug {
     fn run_to_entry(&mut self) -> Result<(), Box<dyn Error>>;
     fn load_events(&mut self) -> Result<Events, Box<dyn Error>>;
     fn step(&mut self, action: Action, forward: bool) -> Result<bool, Box<dyn Error>>;
+
+    /// M2 — statement-granularity step-over.
+    ///
+    /// Advance by exactly one /statement/ rather than by one source
+    /// /line/.  The default implementation falls back to the legacy
+    /// line-granularity step (`step(Action::Next, forward)`) so that
+    /// sessions without column data — emulator-backed MCR, recreator,
+    /// etc. — see no behaviour change.  The materialised replay
+    /// session overrides this to consult the recorded `DbStep.column`
+    /// data and advance to the next recorded step at same-or-shallower
+    /// call depth (each recorded step is its own statement under the
+    /// column-aware recorder contract).
+    ///
+    /// Returns `true` when execution advanced, `false` when the cursor
+    /// is already at the trace boundary and there is nothing to step
+    /// to.  Mirrors the `step()` return shape so the DAP handler's
+    /// limit-of-record notification works uniformly across granularities.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    fn step_over_statement(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
+        self.step(Action::Next, forward)
+    }
+
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>>;
 
     // currently depth_limit, lang only used for rr!
@@ -49,7 +72,15 @@ pub trait ReplaySession: std::fmt::Debug {
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
     fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>>;
 
-    fn add_breakpoint(&mut self, path: &str, line: i64) -> Result<Breakpoint, Box<dyn Error>>;
+    /// Register a breakpoint at `(path, line[, column])`.
+    ///
+    /// `column` is `Some(c)` for the M1 column-aware path (matches a
+    /// recorded `DbStep` whose `(line, column)` equals the breakpoint
+    /// coordinates) and `None` for the legacy line-only path (matches
+    /// any step on the line, regardless of column).  Implementations
+    /// MUST keep the legacy line-only behaviour intact when `column`
+    /// is `None`.
+    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>>;
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>>;
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>>;
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>>;

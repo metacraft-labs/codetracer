@@ -1533,7 +1533,70 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/update-expansion" => {
             handler.update_expansion(req.clone(), req.load_args::<UpdateExpansionArgs>()?, sender.clone())?
         }
+        "ct/set-active-source-view" => {
+            // M3 — Column-Aware-Replay-Navigation §M3.  Toggle the
+            // formatted-view step-over runner: when ``viewPath`` is a
+            // non-empty string the handler treats subsequent DAP
+            // ``next`` requests as formatted-view step-overs (advance
+            // one formatted line/statement per press); when ``null``
+            // or omitted the runner falls back to the legacy minified-
+            // coordinate behaviour.
+            let args = req.load_args::<Value>()?;
+            let view_path = args
+                .get("viewPath")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            handler.set_active_source_view(view_path);
+            handler.respond_dap(req, 0, sender.clone())?;
+        }
+        "ct/install-source-view" => {
+            // M3 — test-only entry point that injects a synthetic
+            // SourceView under a recorded path.  Used by the headless
+            // ViewModel and GUI Playwright tests so the formatted-view
+            // runner can be exercised without depending on the JS
+            // recorder's autoformat step (which would tie the M3
+            // contract to ``prettier`` availability at test time).
+            //
+            // Production code uses [`Handler::load_source_views`] which
+            // reads ``srcviews.dat`` from the CTFS container — the
+            // installed indexes flow through the exact same
+            // ``sourcemap_cache`` slot the test hook writes to, so
+            // both paths exercise the same downstream runner code.
+            let args = req.load_args::<Value>()?;
+            let recorded_path = args
+                .get("recordedPath")
+                .and_then(|v| v.as_str())
+                .ok_or("ct/install-source-view requires recordedPath")?;
+            let formatted_view_path = args
+                .get("formattedViewPath")
+                .and_then(|v| v.as_str())
+                .ok_or("ct/install-source-view requires formattedViewPath")?;
+            let sourcemap_v3_json = args
+                .get("sourcemapV3Json")
+                .and_then(|v| v.as_str())
+                .ok_or("ct/install-source-view requires sourcemapV3Json")?;
+            handler.install_source_view_for_test(recorded_path, formatted_view_path, sourcemap_v3_json.as_bytes())?;
+            handler.respond_dap(req, 0, sender.clone())?;
+        }
         _ => {
+            // M2 — `next` carries an optional `granularity` field that
+            // the legacy `dap_command_to_step_action` dispatch dropped
+            // on the floor (the comment `for now ignoring arguments`
+            // refers exactly to this).  We MUST read it here so the
+            // statement-granularity runner gets activated when the
+            // client opts in; line/instruction/None all keep routing
+            // through the legacy `Action::Next` path for back-compat.
+            //
+            // Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+            if req.command == "next" {
+                let granularity = req
+                    .load_args::<dap_types::NextArguments>()
+                    .ok()
+                    .and_then(|args| args.granularity);
+                handler.next_dap(req, granularity, sender.clone())?;
+                return Ok(());
+            }
             match dap_command_to_step_action(&req.command) {
                 Ok((action, is_reverse)) => {
                     // for now ignoring arguments: they contain threadId, but

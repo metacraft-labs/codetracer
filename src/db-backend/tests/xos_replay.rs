@@ -122,7 +122,7 @@ fn xos_fixture_drives_emulator_replay_session() {
     // `enabled: true` flag is what the DAP shim translates into
     // `verified: true` in the `setBreakpoints` response.
     let bp = session
-        .add_breakpoint(&dwarf_path, dwarf_line)
+        .add_breakpoint(&dwarf_path, dwarf_line, None)
         .expect("add_breakpoint must succeed for a DWARF-known (path, line)");
     assert!(
         bp.enabled,

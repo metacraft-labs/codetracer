@@ -451,6 +451,13 @@ pub trait TraceReader: std::fmt::Debug + Send {
             &global_call_key_text,
             callstack_depth,
         );
+        // M1 — surface the recorded column on the DAP wire when the
+        // trace carries it (Python + JavaScript column-aware recorders).
+        // `Location::new` initializes `column = None` for the legacy
+        // line-only path; we overwrite here so the `ct/complete-move`
+        // event and the breakpoint stop-check downstream both see the
+        // recorded column.
+        location.column = step_record.column.map(|c| c.0);
         if function_name != "<top-level>" {
             let raw_path = self.path(step_record.path_id).unwrap_or("");
             let use_trace_function_boundaries = |location: &mut Location| {
@@ -589,6 +596,38 @@ pub trait TraceReader: std::fmt::Debug + Send {
     ///
     /// Returns `(new_step_id, moved)`.
     fn next_step_id_relative_to(&self, step_id: StepId, forward: bool, step_to_different_line: bool) -> (StepId, bool) {
+        // M2 — delegate to the granularity-aware driver with the
+        // column-check disabled.  The line-only path stays
+        // bit-for-bit identical to the pre-M2 implementation; the
+        // statement-granularity path goes through
+        // `next_step_id_relative_to_with_granularity` directly.
+        self.next_step_id_relative_to_with_granularity(step_id, forward, step_to_different_line, false)
+    }
+
+    /// M2 — granularity-aware next-step driver.  Same depth-handling
+    /// shape as [`next_step_id_relative_to`] but with a column-aware
+    /// loop-termination predicate so the statement-granularity runner
+    /// can stop at a column change within the same line.
+    ///
+    /// * `step_to_different_line = false`, `step_to_different_column = false`
+    ///   → single hop at same-or-shallower depth.
+    /// * `step_to_different_line = true`, `step_to_different_column = false`
+    ///   → legacy line-granularity (`Action::Next`).
+    /// * `step_to_different_column = true` → statement-granularity (M2).
+    ///   Steps with `column = None` collapse — the column check
+    ///   reduces to equality of `None`s and never breaks the loop —
+    ///   so legacy line-only traces degrade gracefully to
+    ///   line-granularity behaviour without the caller needing a
+    ///   capability check.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+    fn next_step_id_relative_to_with_granularity(
+        &self,
+        step_id: StepId,
+        forward: bool,
+        step_to_different_line: bool,
+        step_to_different_column: bool,
+    ) -> (StepId, bool) {
         let mut last_step_id = step_id;
         let Some(original_step) = self.step(step_id) else {
             warn!(
@@ -599,8 +638,12 @@ pub trait TraceReader: std::fmt::Debug + Send {
             return (step_id, false);
         };
         let original_step = *original_step;
-        let (original_path_id, original_line, original_call_key) =
-            (original_step.path_id, original_step.line, original_step.call_key);
+        let (original_path_id, original_line, original_column, original_call_key) = (
+            original_step.path_id,
+            original_step.line,
+            original_step.column,
+            original_step.call_key,
+        );
         let mut count = 0;
         loop {
             let current_step_id = self.step_over_depths_step_id(last_step_id, forward, 0);
@@ -612,14 +655,54 @@ pub trait TraceReader: std::fmt::Debug + Send {
             if count >= NEXT_INTERNAL_STEP_OVERS_LIMIT {
                 break;
             }
-            if !step_to_different_line {
+            if !step_to_different_line && !step_to_different_column {
                 break;
             } else if let Some(current_step) = self.step(current_step_id) {
-                if original_path_id != current_step.path_id
+                let path_or_line_changed = original_path_id != current_step.path_id
                     || original_line != current_step.line
-                    || original_call_key != current_step.call_key
-                {
+                    || original_call_key != current_step.call_key;
+                if path_or_line_changed {
+                    // line / path / call frame changed — both
+                    // granularities stop here.
                     break;
+                }
+                if step_to_different_column {
+                    // M2 — statement-boundary detection.  Under the
+                    // column-aware recorder contract the recorder may
+                    // emit multiple steps per statement on the same
+                    // source line: the user-facing `__ct.step(siteId)`
+                    // injection point plus assignment-write /
+                    // bookkeeping hooks anchored at-or-before the
+                    // statement's start column.  We define the
+                    // unambiguous user-visible "next statement" as the
+                    // next step on the same line whose column is
+                    // STRICTLY GREATER than the entry column — that is,
+                    // the start of the NEXT statement under the
+                    // recorder's left-to-right code-emit model.
+                    //
+                    // Same-line steps with column ≤ entry are either
+                    // intra-statement bookkeeping or repeated landings
+                    // at the entry's own column (e.g. assignment
+                    // hooks emitted as a separate step); both are
+                    // skipped so the runner advances PAST them to the
+                    // real next-statement boundary.
+                    //
+                    // `column = None` (legacy line-only traces) maps
+                    // every comparison to "not strictly greater", so
+                    // the boundary never fires and statement
+                    // granularity degrades to line granularity — the
+                    // documented fallback for traces without column
+                    // data.
+                    //
+                    // Spec:
+                    //   codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+                    let strictly_advanced = match (original_column, current_step.column) {
+                        (Some(prev), Some(cur)) => cur.0 > prev.0,
+                        _ => false,
+                    };
+                    if strictly_advanced {
+                        break;
+                    }
                 }
             } else {
                 warn!(
