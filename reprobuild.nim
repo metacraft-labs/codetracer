@@ -262,7 +262,12 @@ proc metacraftScriptsPath(projectRoot, workspaceRoot: string): string =
       return scripts
 
 proc buildDebugPath(path: string): string =
-  BuildDebugRoot / path
+  # Force forward slashes — the result is interpolated into POSIX-style
+  # shell commands (bash via the reprobuild ``shell`` action) where
+  # backslashes are escape characters. On Windows, Nim's ``/`` operator
+  # yields ``src\build-debug\foo`` which bash sees as ``srcbuild-debugfoo``
+  # after escape processing, breaking ``cp`` and friends.
+  (BuildDebugRoot / path).replace('\\', '/')
 
 proc nativeLibraryPathEnvName(): string =
   when defined(macosx):
@@ -618,9 +623,29 @@ package codeTracer:
           source = sourcePath)
 
     template ctStylus(name: string): BuildActionDef =
-      stylus(
-        source = "src/frontend/styles/" & name & ".styl",
-        output = buildDebugPath("frontend/styles/" & name & ".css"))
+      when defined(windows):
+        # Windows: the reprobuild ``stylus`` typed-tool placeholder
+        # provisions Node.js (there is no native scoop bucket for the
+        # stylus npm package; see ``libs/repro_dsl_stdlib/.../stylus.nim``).
+        # ``node -o <out> <src>`` therefore fails with ``bad option: -o``.
+        # Project-local ``yarn install`` already drops
+        # ``node_modules/.bin/stylus.cmd`` next to the recipe, so invoke
+        # that directly via ``shell()`` until the DSL grows an ``npm:``
+        # provisioning shape that surfaces the npm-installed binary.
+        let inputStyl = "src/frontend/styles/" & name & ".styl"
+        let outputCss = buildDebugPath("frontend/styles/" & name & ".css")
+        shell(
+          actionId = "stylus-" & name,
+          command = "set -eu\n" &
+            "mkdir -p \"$(dirname \"" & outputCss & "\")\"\n" &
+            "./node_modules/.bin/stylus -o \"" & outputCss &
+              "\" \"" & inputStyl & "\"\n",
+          extraInputs = @[inputStyl],
+          extraOutputs = @[outputCss])
+      else:
+        stylus(
+          source = "src/frontend/styles/" & name & ".styl",
+          output = buildDebugPath("frontend/styles/" & name & ".css"))
 
     template ctShell(actionIdValue, commandValue: string;
                      extraInputsValue: openArray[string] = [];
@@ -887,9 +912,18 @@ package codeTracer:
       target("replay-server", replayServer)
       codetracerActions.add(replayServer)
 
+    # Nim cache dirs. ``/tmp`` is POSIX-only; on Windows we resolve to
+    # ``%TEMP%/ct-nim-cache`` via getEnv. The nimcache path is consumed
+    # raw by nim.exe (not via bash), so backslash mixing is OK.
+    let ctNimCacheRoot =
+      when defined(windows):
+        (getEnv("TEMP") / "ct-nim-cache").replace('\\', '/')
+      else:
+        "/tmp/ct-nim-cache"
+
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(
-        nimcachePath = "/tmp/ct-nim-cache/db_backend_record_codetracer_binary",
+        nimcachePath = ctNimCacheRoot & "/db_backend_record_codetracer_binary",
         outputPath = buildDebugPath("bin/db-backend-record"),
         sourcePath = "src/ct/db_backend_record.nim")
       target("db-backend-record", dbBackendRecord)
@@ -897,7 +931,7 @@ package codeTracer:
 
     if fileExists("src/ct/codetracer.nim"):
       let ct = ctNative(
-        nimcachePath = "/tmp/ct-nim-cache/codetracer_codetracer_binary",
+        nimcachePath = ctNimCacheRoot & "/codetracer_codetracer_binary",
         outputPath = buildDebugPath("bin/ct"),
         sourcePath = "src/ct/codetracer.nim")
       target("ct", ct)
