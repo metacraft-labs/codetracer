@@ -786,7 +786,16 @@ package codeTracer:
         "mkdir -p src/public/dist\n" &
         "WEBPACK_BIN=node_modules/.bin/webpack\n" &
         "if [ ! -x \"$WEBPACK_BIN\" ]; then WEBPACK_BIN=webpack; fi\n" &
-        "\"$WEBPACK_BIN\" --progress\n" &
+        # ``--progress`` floods stdout with ~thousands of small lines as
+        # webpack streams every module's build state. On Windows the
+        # reprobuild engine captures the action's stdout via a fixed-size
+        # named pipe (DefaultPipeBufferSize ≈ 64KB) and drains it via
+        # pollCompletion; the drain can fall behind the webpack write
+        # rate, the pipe fills, webpack blocks on write, and the build
+        # wedges. Drop --progress on Windows; POSIX is happy with
+        # poParentStreams.
+        (when defined(windows): "\"$WEBPACK_BIN\"\n"
+         else:                  "\"$WEBPACK_BIN\" --progress\n") &
         "touch " & buildDebugPath(".webpack-dist-built.stamp"),
         extraInputsValue = @[
           "webpack.config.js",
