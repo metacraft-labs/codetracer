@@ -804,19 +804,26 @@ package codeTracer:
       target("frontend-webpack-dist", webpackDist)
       frontendExtraActions.add(webpackDist)
 
-      let publicDist = ctShell(
-        "frontend-public-dist",
-        "set -eu\n" &
-        "rm -rf " & buildDebugPath("public/dist") & "\n" &
-        "mkdir -p " & buildDebugPath("public/dist") & "\n" &
-        "cp -a src/public/dist/. " & buildDebugPath("public/dist") & "/\n" &
-        "touch " & buildDebugPath(".public-dist.stamp"),
-        extraInputsValue = @["src/public/dist"],
-        extraOutputsValue = @[
-          buildDebugPath("public/dist"),
-          buildDebugPath(".public-dist.stamp")
-        ],
-        afterValue = @[webpackDist])
+      # Mirror src/public/dist into build-debug/public/dist via a one-
+      # shot ``node -e`` script. The previous shell formulation used
+      # ``sh -c "rm -rf … mkdir -p … cp -a … touch …"`` which spawned
+      # rm/mkdir/cp/touch as ~4 grandchildren and hit the same Git-Bash
+      # fork-emulation wedge as webpack. ``node -e`` does the entire
+      # copy in-process: one CreateProcessW, no shell, no wedge.
+      let publicDistTarget = buildDebugPath("public/dist")
+      let publicDistStamp = buildDebugPath(".public-dist.stamp")
+      let publicDistScript =
+        "const fs=require('node:fs'),path=require('node:path');" &
+        "const src='src/public/dist',dst=" & escape(publicDistTarget) & ";" &
+        "fs.rmSync(dst,{recursive:true,force:true});" &
+        "fs.cpSync(src,dst,{recursive:true,dereference:false});" &
+        "fs.closeSync(fs.openSync(" & escape(publicDistStamp) & ",'w'));"
+      let publicDist = node(
+        args = @["-e", publicDistScript],
+        actionId = "frontend-public-dist",
+        extraInputs = @["src/public/dist"],
+        extraOutputs = @[publicDistTarget, publicDistStamp],
+        after = @[webpackDist])
       target("frontend-public-dist", publicDist)
       frontendExtraActions.add(publicDist)
 
