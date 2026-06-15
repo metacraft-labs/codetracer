@@ -1098,36 +1098,50 @@ package codeTracer:
         # installer's `File /r` then mirrors the staged tree under
         # `$PROGRAMFILES64\CodeTracer` so end-user paths match the
         # build-debug layout exactly.
-        let windowsApp = ctShell(
-          "windows-app",
-          "set -eu\n" &
-          "APP_ROOT=non-nix-build/CodeTracer-win\n" &
-          "rm -rf \"$APP_ROOT\"\n" &
-          "mkdir -p \"$APP_ROOT/bin\" \"$APP_ROOT/src\"\n" &
-          "cp -a " & buildDebugPath(".") & "/. \"$APP_ROOT\"/\n" &
-          "cp src/helpers.js \"$APP_ROOT/src/helpers.js\"\n" &
-          "cp src/helpers.js \"$APP_ROOT/helpers.js\"\n" &
-          "if [ -d node_modules ]; then cp -a node_modules \"$APP_ROOT/node_modules\"; fi\n" &
-          "cp resources/CodeTracer.ico \"$APP_ROOT/CodeTracer.ico\"\n" &
-          "if [ -e \"$APP_ROOT/bin/ct.exe\" ]; then\n" &
-          "  mv \"$APP_ROOT/bin/ct.exe\" \"$APP_ROOT/bin/ct_unwrapped.exe\"\n" &
-          "  cat >\"$APP_ROOT/bin/ct.bat\" <<'EOF'\n" &
-          "@echo off\n" &
-          "setlocal\n" &
-          "set \"HERE=%~dp0..\"\n" &
-          "set \"CODETRACER_PREFIX=%HERE%\"\n" &
-          "set \"PATH=%HERE%\\bin;%PATH%\"\n" &
-          "\"%HERE%\\bin\\ct_unwrapped.exe\" %*\n" &
-          "EOF\n" &
-          "fi",
-          extraInputsValue = @[
+        # windows-app staging — one ``node -e`` script in lieu of the
+        # earlier ``ctShell("sh -c '...rm...mkdir...cp...mv...cat...'")``
+        # to avoid the Git-Bash fork-emulation wedge. Each file op
+        # runs in-process inside a single node.exe (one CreateProcessW
+        # the shim handles cleanly; no bash sub-fork).
+        let appRoot = "non-nix-build/CodeTracer-win"
+        let buildDebugRootPath = BuildDebugRoot   # forward slashes
+        let ctBatContents =
+          "@echo off\r\n" &
+          "setlocal\r\n" &
+          "set \"HERE=%~dp0..\"\r\n" &
+          "set \"CODETRACER_PREFIX=%HERE%\"\r\n" &
+          "set \"PATH=%HERE%\\bin;%PATH%\"\r\n" &
+          "\"%HERE%\\bin\\ct_unwrapped.exe\" %*\r\n"
+        let windowsAppScript =
+          "const fs=require('node:fs'),path=require('node:path');" &
+          "const APP_ROOT=" & escape(appRoot) & ";" &
+          "fs.rmSync(APP_ROOT,{recursive:true,force:true});" &
+          "fs.mkdirSync(path.join(APP_ROOT,'bin'),{recursive:true});" &
+          "fs.mkdirSync(path.join(APP_ROOT,'src'),{recursive:true});" &
+          "fs.cpSync(" & escape(buildDebugRootPath) & ",APP_ROOT,{recursive:true});" &
+          "fs.copyFileSync('src/helpers.js',path.join(APP_ROOT,'src/helpers.js'));" &
+          "fs.copyFileSync('src/helpers.js',path.join(APP_ROOT,'helpers.js'));" &
+          "if(fs.existsSync('node_modules'))" &
+            "fs.cpSync('node_modules',path.join(APP_ROOT,'node_modules')," &
+              "{recursive:true,dereference:false});" &
+          "fs.copyFileSync('resources/CodeTracer.ico',path.join(APP_ROOT,'CodeTracer.ico'));" &
+          "const ctExe=path.join(APP_ROOT,'bin','ct.exe');" &
+          "if(fs.existsSync(ctExe)){" &
+            "fs.renameSync(ctExe,path.join(APP_ROOT,'bin','ct_unwrapped.exe'));" &
+            "fs.writeFileSync(path.join(APP_ROOT,'bin','ct.bat')," &
+              escape(ctBatContents) & ");" &
+          "}"
+        let windowsApp = node(
+          args = @["-e", windowsAppScript],
+          actionId = "windows-app",
+          extraInputs = @[
             "resources/CodeTracer.ico",
             "src/ct/version.nim",
             "src/helpers.js",
             "node_modules"
           ],
-          extraOutputsValue = @["non-nix-build/CodeTracer-win"],
-          afterValue = codetracerActions & frontendActions & styleActions)
+          extraOutputs = @[appRoot],
+          after = codetracerActions & frontendActions & styleActions)
         target("windows-app", windowsApp)
 
         # NSIS installer — compiles `resources/CodeTracer.nsi` against
@@ -1138,33 +1152,47 @@ package codeTracer:
         # ``nsis`` package declared in this recipe's Windows ``uses:``
         # clause above, so the action shells out to the resolved
         # binary on PATH (no out-of-band ``scoop install`` step).
-        let windowsInstaller = ctShell(
-          "windows-installer",
-          "set -eu\n" &
-          "YEAR=$(sed -n 's/.*CodeTracerYear\\* = //p' src/ct/version.nim | head -n1)\n" &
-          "MONTH=$(printf '%02d' \"$(sed -n 's/.*CodeTracerMonth\\* = //p' src/ct/version.nim | head -n1)\")\n" &
-          "BUILD=$(sed -n 's/.*CodeTracerBuild\\* = //p' src/ct/version.nim | head -n1)\n" &
-          "VERSION=\"$YEAR.$MONTH.$BUILD\"\n" &
-          "REPO_ROOT=$(pwd)\n" &
-          "STAGING_DIR=\"$REPO_ROOT/non-nix-build/CodeTracer-win\"\n" &
-          "OUT_FILE=\"$REPO_ROOT/non-nix-build/CodeTracer-Setup.exe\"\n" &
-          "rm -f \"$OUT_FILE\"\n" &
-          "makensis -NOCD " &
-            "-DAPP_VERSION=\"$VERSION\" " &
-            "-DSTAGING_DIR=\"$STAGING_DIR\" " &
-            "-DOUT_FILE=\"$OUT_FILE\" " &
-            "-DICON_PATH=\"$REPO_ROOT/resources/CodeTracer.ico\" " &
-            "-DLICENSE_PATH=\"$REPO_ROOT/LICENSE\" " &
-            "resources/CodeTracer.nsi",
-          extraInputsValue = @[
+        # windows-installer — parse version.nim and spawn makensis in
+        # one ``node -e`` step. spawnSync(makensis) goes through a
+        # single CreateProcessW that the shim handles fine (makensis
+        # is a native binary with no fork emulation, unlike Git Bash).
+        let installerScript =
+          "const fs=require('node:fs');" &
+          "const cp=require('node:child_process');" &
+          "const path=require('node:path');" &
+          "const ver=fs.readFileSync('src/ct/version.nim','utf8');" &
+          "const match=(r)=>{const m=ver.match(r);if(!m)" &
+            "throw new Error('version field missing: '+r);return m[1].trim();};" &
+          "const Y=match(/CodeTracerYear\\*\\s*=\\s*(\\d+)/);" &
+          "const M=String(parseInt(match(/CodeTracerMonth\\*\\s*=\\s*(\\d+)/),10))" &
+            ".padStart(2,'0');" &
+          "const B=match(/CodeTracerBuild\\*\\s*=\\s*(\\d+)/);" &
+          "const VERSION=Y+'.'+M+'.'+B;" &
+          "const REPO_ROOT=process.cwd();" &
+          "const STAGING=path.join(REPO_ROOT,'non-nix-build','CodeTracer-win');" &
+          "const OUT=path.join(REPO_ROOT,'non-nix-build','CodeTracer-Setup.exe');" &
+          "try{fs.unlinkSync(OUT);}catch(e){if(e.code!=='ENOENT')throw e;}" &
+          "const r=cp.spawnSync('makensis',['-NOCD'," &
+            "'-DAPP_VERSION='+VERSION," &
+            "'-DSTAGING_DIR='+STAGING," &
+            "'-DOUT_FILE='+OUT," &
+            "'-DICON_PATH='+path.join(REPO_ROOT,'resources','CodeTracer.ico')," &
+            "'-DLICENSE_PATH='+path.join(REPO_ROOT,'LICENSE')," &
+            "'resources/CodeTracer.nsi'" &
+          "],{stdio:'inherit',shell:false});" &
+          "process.exit(r.status||0);"
+        let windowsInstaller = node(
+          args = @["-e", installerScript],
+          actionId = "windows-installer",
+          extraInputs = @[
             "non-nix-build/CodeTracer-win",
             "resources/CodeTracer.nsi",
             "resources/CodeTracer.ico",
             "LICENSE",
             "src/ct/version.nim"
           ],
-          extraOutputsValue = @["non-nix-build/CodeTracer-Setup.exe"],
-          afterValue = @[windowsApp])
+          extraOutputs = @["non-nix-build/CodeTracer-Setup.exe"],
+          after = @[windowsApp])
         target("windows-installer", windowsInstaller)
 
     let cSudokuObjectTup = gcc(
