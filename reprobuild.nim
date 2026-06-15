@@ -624,22 +624,20 @@ package codeTracer:
 
     template ctStylus(name: string): BuildActionDef =
       when defined(windows):
-        # Windows: the reprobuild ``stylus`` typed-tool placeholder
-        # provisions Node.js (there is no native scoop bucket for the
-        # stylus npm package; see ``libs/repro_dsl_stdlib/.../stylus.nim``).
-        # ``node -o <out> <src>`` therefore fails with ``bad option: -o``.
-        # Project-local ``yarn install`` already drops
-        # ``node_modules/.bin/stylus.cmd`` next to the recipe, so invoke
-        # that directly via ``shell()`` until the DSL grows an ``npm:``
-        # provisioning shape that surfaces the npm-installed binary.
+        # Windows: project-local ``yarn install`` drops
+        # ``node_modules/stylus/bin/stylus`` (a node script). Invoke
+        # ``node`` on it DIRECTLY via the typed-tool DSL — one
+        # CreateProcessW, no sh-wrapper, no Git-Bash fork-emulation
+        # collision with the fs-snoop shim's CREATE_SUSPENDED+inject
+        # pattern (the wedge that gave us the codetracer-webpack-wedge
+        # memo).
         let inputStyl = "src/frontend/styles/" & name & ".styl"
         let outputCss = buildDebugPath("frontend/styles/" & name & ".css")
-        shell(
+        node(
+          args = @["node_modules/stylus/bin/stylus",
+                   "-o", outputCss,
+                   inputStyl],
           actionId = "stylus-" & name,
-          command = "set -eu\n" &
-            "mkdir -p \"$(dirname \"" & outputCss & "\")\"\n" &
-            "./node_modules/.bin/stylus -o \"" & outputCss &
-              "\" \"" & inputStyl & "\"\n",
           extraInputs = @[inputStyl],
           extraOutputs = @[outputCss])
       else:
@@ -780,29 +778,26 @@ package codeTracer:
     var frontendExtraActions: seq[BuildActionDef] = @[]
     if fileExists("webpack.config.js") and
         fileExists("src/frontend/frontend_imports.js"):
-      let webpackDist = ctShell(
-        "frontend-webpack-dist",
-        "set -eu\n" &
-        "mkdir -p src/public/dist\n" &
-        "WEBPACK_BIN=node_modules/.bin/webpack\n" &
-        "if [ ! -x \"$WEBPACK_BIN\" ]; then WEBPACK_BIN=webpack; fi\n" &
-        # ``--progress`` floods stdout with ~thousands of small lines as
-        # webpack streams every module's build state. On Windows the
-        # reprobuild engine captures the action's stdout via a fixed-size
-        # named pipe (DefaultPipeBufferSize ≈ 64KB) and drains it via
-        # pollCompletion; the drain can fall behind the webpack write
-        # rate, the pipe fills, webpack blocks on write, and the build
-        # wedges. Drop --progress on Windows; POSIX is happy with
-        # poParentStreams.
-        (when defined(windows): "\"$WEBPACK_BIN\"\n"
-         else:                  "\"$WEBPACK_BIN\" --progress\n") &
-        "touch " & buildDebugPath(".webpack-dist-built.stamp"),
-        extraInputsValue = @[
+      # Invoke ``node`` DIRECTLY on webpack's CLI entry point. The
+      # previous ``ctShell`` formulation went through ``sh -c "...
+      # node_modules/.bin/webpack ..."`` which wraps in Git Bash's
+      # MSYS2/Cygwin fork-emulation layer; the shim's CREATE_SUSPENDED
+      # + LoadLibraryW + Resume injection collides with that fork
+      # emulation and the bash sub-process never spawns its child node.
+      # Reprobuild's design is to invoke target binaries directly via
+      # CreateProcessW, so the ``node`` typed-tool call achieves that
+      # — one CreateProcessW, no shell wrapper, no fork emulation.
+      # ``mkdir -p src/public/dist`` is handled via the ``ensureDir``
+      # builtin instead of an inline shell line.
+      let webpackDist = node(
+        args = @["node_modules/webpack/bin/webpack.js"],
+        actionId = "frontend-webpack-dist",
+        extraInputs = @[
           "webpack.config.js",
           "package.json",
           "src/frontend/frontend_imports.js"
         ],
-        extraOutputsValue = @[
+        extraOutputs = @[
           "src/public/dist",
           buildDebugPath(".webpack-dist-built.stamp")
         ])
