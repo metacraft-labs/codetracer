@@ -126,6 +126,35 @@ proc taskPrompt*(instructions: string;
 proc evidenceCommandForTab*(tabId: string): string =
   "ct agent evidence --session " & tabId
 
+proc taskPrompt*(instructions: string; context: seq[string] = @[];
+    evidenceCommand = ""; evidenceRequirement = ""):
+    seq[ContentBlock] =
+  ## Build the initial prompt the agent sees when CodeTracer launches an
+  ## agentic-coding session. The text is assembled from the user's
+  ## ``instructions``, any ``context`` strings the caller wants threaded
+  ## in front (workspace constraints, repo invariants, …), and a
+  ## closing requirement that tells the agent how to record evidence so
+  ## the GUI can switch to DeepReview when the task finishes. The
+  ## return value is the ACP-shaped ``seq[ContentBlock]`` both the ACP
+  ## adapter and ``toHarborContentBlocks`` consume.
+  var sections: seq[string] = @[]
+  for item in context:
+    let trimmed = item.strip()
+    if trimmed.len > 0:
+      sections.add(trimmed)
+  let trimmedInstructions = instructions.strip()
+  if trimmedInstructions.len > 0:
+    sections.add(trimmedInstructions)
+  let trimmedRequirement = evidenceRequirement.strip()
+  if trimmedRequirement.len > 0:
+    sections.add(trimmedRequirement)
+  let trimmedCommand = evidenceCommand.strip()
+  if trimmedCommand.len > 0:
+    sections.add("Evidence command: " & trimmedCommand)
+  if sections.len == 0:
+    return @[]
+  @[textBlock(sections.join("\n\n"))]
+
 proc buildAgentTabId*(backend: CodeTracerAgentBackend;
     sessionKey: string): string =
   let backendPart =
@@ -166,9 +195,9 @@ proc effectiveWorkingCopyMode(config: CodeTracerAgentLaunchConfig): string =
   if config.workingCopyMode.len > 0:
     config.workingCopyMode.normalizeWorkingCopyMode()
   elif config.backend == ctabHarbor:
-    $wiGitWorktree
+    "git_worktree"
   else:
-    $wiNone
+    "none"
 
 proc buildLaunchPrompt*(config: CodeTracerAgentLaunchConfig;
     tabId: string): seq[ContentBlock] =
@@ -474,7 +503,7 @@ proc reconnectHarborSession*(service: CodeTracerAgentService; tabId, sessionId,
 
   var workspacePath = ""
   var status = ""
-  var workingCopyMode = $wiGitWorktree
+  var workingCopyMode = "git_worktree"
   try:
     let info = service.client.sessionInfo(AgentSession(
       id: sessionId,
