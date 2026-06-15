@@ -149,6 +149,26 @@ fn build_windows(emulator_dir: &Path) {
     if deps_dir.exists() {
         let _ = std::fs::copy(&dll_path, deps_dir.join("mcr_emulator.dll"));
     }
+    // Windows: drop mcr_emulator.lib (the MSVC import lib) next to the
+    // DLL too, so cargo's standard link-search paths (profile dir +
+    // profile/deps) resolve `-l mcr_emulator` even when the
+    // ``cargo:rustc-link-search`` emit for our OUT_DIR doesn't propagate
+    // to the final link command (observed with custom --target-dir
+    // values under ``rust-lld``: replay-server's own OUT_DIR is missing
+    // from the linker's /LIBPATH list, causing
+    // ``could not open 'mcr_emulator.lib': no such file or directory``).
+    let implib_msvc_src = out_dir.join("mcr_emulator.lib");
+    if cfg!(target_env = "msvc") && implib_msvc_src.exists() {
+        let _ = std::fs::copy(&implib_msvc_src, profile_dir.join("mcr_emulator.lib"));
+        if deps_dir.exists() {
+            let _ = std::fs::copy(&implib_msvc_src, deps_dir.join("mcr_emulator.lib"));
+        }
+        // Surface the profile + deps directories as link-search paths
+        // so the rustc-driven linker invocation has a stable LIBPATH
+        // entry regardless of which build.rs hash cargo settled on.
+        println!("cargo:rustc-link-search=native={}", profile_dir.display());
+        println!("cargo:rustc-link-search=native={}", deps_dir.display());
+    }
 
     println!(
         "cargo:warning=db-backend: linked Nim MCR emulator ({} TUs) into mcr_emulator.dll \
