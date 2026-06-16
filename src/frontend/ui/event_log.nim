@@ -18,6 +18,10 @@ from isonim/core/signals import val
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_view import
   mountIsoNimEventLog, mountIsoNimEventLogWithDataTables
+from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
+  FilterTabRecord, FilterTagRow, FilterKindRecord, FilterDropdownCallbacks,
+  FilterDropdownContainerId, FilterDropdownListId,
+  mountFilterDropdownInto
 
 # Module-level EventLogVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
@@ -346,6 +350,65 @@ var arg: js
 
 const
   CLICK_DELAY_TIMER = 5
+  EVENT_LOG_TAG_NAMES: array[EventTag, string] = [
+    "std streams:",
+    "read events:",
+    "write events:",
+    "network:",
+    "trace:",
+    "file:",
+    "errors:",
+    "evm events:"
+  ]
+
+  EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
+    "write",
+    "write file",
+    "write(other)",
+    "read",
+    "read file",
+    "read(other)",
+    "read dir",
+    "open dir",
+    "close dir",
+    "socket",
+    "open",
+    "error",
+
+    "trace log event",
+    "messages",
+  ]
+
+  EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
+    "Filter",
+    "Trace events",
+    "Recorded events",
+    "_"
+  ]
+
+let kindTags: array[EventLogKind, seq[EventTag]] = [
+  @[EventWrites, EventStd],   #Write
+  @[EventWrites, EventFiles], #WriteFile
+  @[EventWrites],             #WriteOther
+  @[EventReads, EventStd],    #Read
+  @[EventReads, EventFiles],  #ReadFile
+  @[EventReads],              #ReadOther
+  @[],                        #ReadDir
+  @[],                        #OpenDir
+  @[],                        #CloseDir
+  @[EventNetwork],            #Socket
+  @[EventFiles],              #Open
+  @[EventErrorEvents],        #Error
+
+  @[EventTrace],              #TraceLogEvent
+  @[EventEvm]
+]
+
+var tagKinds: array[EventTag, seq[EventLogKind]]
+
+for kind, tags in kindTags:
+  for tag in tags:
+    tagKinds[tag].add(kind)
 
 when defined(ctInExtension):
   var eventLogComponentForExtension* {.exportc.}: EventLogComponent = makeEventLogComponent(data, 0, inExtension = true)
@@ -398,6 +461,226 @@ proc filterEvents(self: EventLogComponent): seq[ProgramEvent] =
       events.add(event)
 
   return events
+
+# ---------------------------------------------------------------------------
+# Filter dropdown — event-kind / event-tag filter panel
+# ---------------------------------------------------------------------------
+
+proc switchEventKindSelection(self: EventLogComponent, kind: EventLogKind) =
+  self.selectedKinds[kind] = not self.selectedKinds[kind]
+
+proc changeAllEventKinds(self: EventLogComponent, value: bool) =
+  for tag, _ in self.tags:
+    for kind in tagKinds[tag]:
+      self.selectedKinds[kind] = value
+
+proc isTagSelected(self: EventLogComponent, tag: EventTag): bool =
+  var isChecked = true
+
+  for kind in tagKinds[tag]:
+    isChecked = self.selectedKinds[kind]
+    if self.selectedKinds[kind]:
+      break
+
+  return isChecked
+
+proc switchEventTagSelection(self: EventLogComponent, tag: EventTag, value: bool = false) =
+  let isChecked = if not value: not self.isTagSelected(tag) else: true
+
+  for kind in tagKinds[tag]:
+    self.selectedKinds[kind] = isChecked
+
+proc checkIndeterminateCheckbox(self: EventLogComponent, tag: EventTag): (bool, string) =
+  var count = 0
+
+  for kind in tagKinds[tag]:
+    if self.selectedKinds[kind]:
+      count += 1
+
+  if count > 0 and count == tagKinds[tag].len:
+    return (true, "checkmark")
+  elif count != 0:
+    return (true, "indeterminate-checkmark")
+  else:
+    return (false, "checkmark")
+
+proc enableOrDisable(self: EventLogComponent): bool =
+  var b: bool
+
+  for tag, _ in self.tags:
+    for kind in tagKinds[tag]:
+      b = not self.selectedKinds[kind]
+      if b:
+        return b
+
+  return b
+
+proc isOnlyTraceSelected(self: EventLogComponent): bool =
+  for tag, _ in self.tags:
+    for kind in tagKinds[tag]:
+      if self.selectedKinds[kind] and tag != EventTrace:
+        return false
+      elif not self.selectedKinds[kind] and tag == EventTrace:
+        return false
+
+  return true
+
+proc isOnlyRecordedEventSelected(self: EventLogComponent): bool =
+  ## True when the current selection matches the "recorded events only" preset:
+  ## EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents are
+  ## fully selected; EventTrace and EventEvm are fully deselected.
+  ## This mirrors the exact tags that onlyRecordedEvent() sets so that the
+  ## "Recorded events" tab correctly shows as active after clicking it.
+  const selectedTags  = [EventReads, EventFiles, EventNetwork,
+                          EventWrites, EventErrorEvents]
+  const deselectedTags = [EventTrace, EventEvm]
+
+  for tag in selectedTags:
+    for kind in tagKinds[tag]:
+      if not self.selectedKinds[kind]:
+        return false
+
+  for tag in deselectedTags:
+    for kind in tagKinds[tag]:
+      if self.selectedKinds[kind]:
+        return false
+
+  return true
+
+proc onlyTrace(self: EventLogComponent) =
+  self.changeAllEventKinds(false)
+  self.switchEventTagSelection(EventTrace, true)
+
+proc onlyRecordedEvent(self: EventLogComponent) =
+  let eventTags = [EventReads, EventFiles, EventNetwork, EventWrites, EventErrorEvents]
+
+  self.changeAllEventKinds(false)
+
+  for tag in eventTags:
+    self.switchEventTagSelection(tag, true)
+
+proc setupFilterDropdown(self: EventLogComponent) =
+  ## Wire up the #category-image filter button to show/hide the event-kind
+  ## filter dropdown.  Called once from eventLogAfterRedraws after the IsoNim
+  ## shell has been mounted and DataTables has been initialised.
+  ##
+  ## The dropdown container is appended once to document.body (hidden) and
+  ## repositioned on each show.  Content is refreshed via IsoNim DSL on every
+  ## state change (mountFilterDropdownInto clears and remounts).
+  let dropDownId = cstring"category-image"
+  let containerId = cstring FilterDropdownContainerId
+
+  proc showDropdown()  # forward decl
+
+  proc reloadDenseTableAndRefresh() =
+    if not self.denseTable.isNil and not self.denseTable.context.isNil:
+      self.denseTable.context.ajax.reload(nil, false)
+      self.autoScrollUpdate = true
+    showDropdown()
+
+  proc buildFilterTabs(): seq[FilterTabRecord] =
+    @[
+      FilterTabRecord(
+        label: EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyTrace],
+        isSelected: self.isOnlyTraceSelected()),
+      FilterTabRecord(
+        label: EVENT_LOG_BUTTON_NAMES[EventDropDownBox.OnlyRecordedEvent],
+        isSelected: self.isOnlyRecordedEventSelected()),
+    ]
+
+  proc buildFilterRows(): seq[FilterTagRow] =
+    for tag, _ in self.tags:
+      let (isChecked, stateStr) = self.checkIndeterminateCheckbox(tag)
+      let checkState =
+        if stateStr == "indeterminate-checkmark": "indeterminate"
+        elif isChecked: "checked"
+        else: "unchecked"
+      var kinds: seq[FilterKindRecord]
+      for kind in tagKinds[tag]:
+        kinds.add(FilterKindRecord(
+          label: EVENT_LOG_KIND_NAMES[kind],
+          checkState: if self.selectedKinds[kind]: "checked" else: "unchecked"))
+      result.add(FilterTagRow(
+        label: EVENT_LOG_TAG_NAMES[tag],
+        checkState: checkState,
+        kinds: kinds))
+
+  proc buildFilterCallbacks(): FilterDropdownCallbacks =
+    FilterDropdownCallbacks(
+      onTabClick: proc(tabIndex: int) =
+        case tabIndex
+        of 0: self.onlyTrace()
+        of 1: self.onlyRecordedEvent()
+        else: discard
+        reloadDenseTableAndRefresh(),
+      onTagToggle: proc(tagIndex: int) =
+        self.switchEventTagSelection(EventTag(tagIndex))
+        reloadDenseTableAndRefresh(),
+      onKindToggle: proc(tagIndex, kindIndex: int) =
+        let kind = tagKinds[EventTag(tagIndex)][kindIndex]
+        self.switchEventKindSelection(kind)
+        reloadDenseTableAndRefresh())
+
+  proc showDropdown() =
+    var containerKdom = document.getElementById(containerId)
+
+    if containerKdom.isNil:
+      # Create the container once and attach the mousedown preventDefault
+      # listener so clicks inside the dropdown do not blur the filter button.
+      containerKdom = document.createElement(cstring"div")
+      containerKdom.setAttribute(cstring"id", containerId)
+      containerKdom.setAttribute(cstring"class", cstring"dropdown-container")
+      containerKdom.addEventListener(cstring"mousedown", proc(e: Event) =
+        e.preventDefault())
+      document.body.appendChild(containerKdom)
+
+    # Refresh content using IsoNim DSL — clears old children, remounts.
+    mountFilterDropdownInto(
+      cast[dom_api.Element](containerKdom),
+      buildFilterTabs(),
+      buildFilterRows(),
+      buildFilterCallbacks())
+
+    let filterButton = document.getElementById(dropDownId)
+    let rect = filterButton.getBoundingClientRect()
+    containerKdom.style.position = "absolute"
+    containerKdom.style.top = &"{rect.bottom}px"
+    containerKdom.style.left = &"{rect.left}px"
+    containerKdom.style.zIndex = "1000".cstring
+    containerKdom.style.display = "block"
+    filterButton.classList.add(cstring"open")
+    filterButton.focus()
+
+  proc hideDropdown() =
+    let containerKdom = document.getElementById(containerId)
+    if not containerKdom.isNil:
+      containerKdom.style.display = "none"
+    let filterButton = document.getElementById(dropDownId)
+    if not filterButton.isNil:
+      filterButton.classList.remove(cstring"open")
+
+  # Attach handlers to the already-mounted #category-image button.
+  let filterBtn = document.getElementById(dropDownId)
+  if filterBtn.isNil:
+    cwarn "setupFilterDropdown: #category-image not found in DOM"
+    return
+
+  filterBtn.addEventListener(cstring"focus", proc(e: Event) =
+    self.focusedDropDowns[Filter] = true
+    showDropdown())
+
+  filterBtn.addEventListener(cstring"blur", proc(e: Event) =
+    if self.dropDowns[Filter] or self.focusedDropDowns[Filter]:
+      self.focusedDropDowns[Filter] = false
+      self.dropDowns[Filter] = false
+      hideDropdown())
+
+  filterBtn.addEventListener(cstring"click", proc(e: Event) =
+    for categoryType, value in self.dropDowns:
+      if categoryType == Filter:
+        self.dropDowns[categoryType] = not self.dropDowns[Filter]
+    if not self.dropDowns[Filter] and self.focusedDropDowns[Filter]:
+      cast[Element](e.target).blur())
 
 proc findElement(self: EventLogComponent): Element =
   var denseTable = self.denseTable
@@ -1092,8 +1375,44 @@ method restart*(self: EventLogComponent) =
   self.redrawColumns = true
   self.redraw()
 
+proc eventLogSearchValue(self: EventLogComponent): cstring =
+  let searchInput = jqFind("#eventLog-" & $self.id & "-search")
+  if searchInput.isNil or searchInput.toJs.length.to(int) == 0:
+    return cstring""
+
+  let inputNode = searchInput[0]
+  if inputNode.toJs == jsUndefined:
+    return cstring""
+
+  result = inputNode.value.to(cstring)
+
+proc setupSearchInput(self: EventLogComponent) =
+  ## Wire the oninput handler on the event log search field.  The IsoNim shell
+  ## renders the input without handlers; we attach them here after mount.
+  let searchId = cstring("eventLog-" & $self.id & "-search")
+  let searchInput = document.getElementById(searchId)
+  if searchInput.isNil:
+    return
+
+  let search = proc(e: Event) =
+    if not self.isDetailed:
+      if self.denseTable.isNil or self.denseTable.context.isNil:
+        return
+      let value = self.eventLogSearchValue()
+      self.denseTable.context.search(value).draw()
+    else:
+      if self.detailedTable.isNil or self.detailedTable.context.isNil:
+        return
+      let value = self.eventLogSearchValue()
+      self.detailedTable.context.search(value).draw()
+
+  searchInput.addEventListener(cstring"input", search)
+  searchInput.addEventListener(cstring"change", search)
+
 proc eventLogAfterRedraws(self: EventLogComponent) =
   self.events()
+  self.setupFilterDropdown()
+  self.setupSearchInput()
   let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
   let detailedWrapper = cstring"#" & self.detailedId & cstring"_wrapper"
   let componentTab = cast[Node](jq(&"#eventLogComponent-{self.id}"))
