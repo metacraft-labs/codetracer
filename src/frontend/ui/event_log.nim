@@ -21,7 +21,7 @@ from ../viewmodel/views/isonim_event_log_view import
 from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
   FilterTabRecord, FilterTagRow, FilterKindRecord, FilterDropdownCallbacks,
   FilterDropdownContainerId, FilterDropdownListId,
-  mountFilterDropdownInto
+  mountFilterDropdownInto  # filtersEnabled param added
 
 # Module-level EventLogVM instance. Created once and fed data whenever
 # the legacy event-bus handlers fire. Rendering still reads from legacy
@@ -619,6 +619,12 @@ proc setupFilterDropdown(self: EventLogComponent) =
       onKindToggle: proc(tagIndex, kindIndex: int) =
         let kind = tagKinds[EventTag(tagIndex)][kindIndex]
         self.switchEventKindSelection(kind)
+        reloadDenseTableAndRefresh(),
+      onToggleEnabled: proc() =
+        ## Toggle all kinds on or off.  enableOrDisable() returns true when at
+        ## least one kind is currently deselected — clicking should enable all.
+        ## When all are already selected it returns false — clicking disables all.
+        self.changeAllEventKinds(self.enableOrDisable())
         reloadDenseTableAndRefresh())
 
   proc showDropdown() =
@@ -635,10 +641,12 @@ proc setupFilterDropdown(self: EventLogComponent) =
       document.body.appendChild(containerKdom)
 
     # Refresh content using IsoNim DSL — clears old children, remounts.
+    # filtersEnabled = not enableOrDisable(): toggle is ON when all kinds selected.
     mountFilterDropdownInto(
       cast[dom_api.Element](containerKdom),
       buildFilterTabs(),
       buildFilterRows(),
+      not self.enableOrDisable(),
       buildFilterCallbacks())
 
     let filterButton = document.getElementById(dropDownId)

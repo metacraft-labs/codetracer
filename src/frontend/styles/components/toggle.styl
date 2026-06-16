@@ -1,0 +1,139 @@
+/* toggle.styl
+ *
+ * Design-system toggle / switch component.
+ *
+ * Recommended markup:
+ *
+ * <label class="ct-toggle-field">
+ *   <span class="ct-toggle-label">LABEL</span>
+ *   <span class="ct-toggle" data-checked="true|false" data-size="md|sm"
+ *         aria-hidden="true">
+ *     <input class="ct-toggle-input" type="checkbox" role="switch" />
+ *     <span class="ct-toggle-thumb"></span>
+ *   </span>
+ * </label>
+ *
+ * States via data attributes:
+ *   data-checked="true|false"   on/off position of the thumb
+ *   data-size="md|sm"           size variant (default: md)
+ *   data-disabled="true"        on .ct-toggle-field — mutes the whole component
+ */
+
+@import "../generated/index"
+
+// ---------------------------------------------------------------------------
+// Track — the pill-shaped background
+// ---------------------------------------------------------------------------
+
+.ct-toggle
+  // --- size tokens (md default) ---
+  --ct-toggle-width: 2.5em
+  --ct-toggle-height: 1.375em
+  --ct-toggle-thumb-size: 1.125em
+  --ct-toggle-thumb-gap: 0.125em
+
+  // --- color tokens ---
+  --ct-toggle-track: rgba(255, 255, 255, 0.12)
+  --ct-toggle-track-hover: rgba(255, 255, 255, 0.2)
+  --ct-toggle-track-on: colors-ui-surface-action-primary
+  --ct-toggle-track-on-hover: colors-ui-surface-action-primary-hover
+  --ct-toggle-thumb-color: #ffffff
+
+  position: relative
+  display: inline-flex
+  align-items: center
+  flex-shrink: 0
+  width: var(--ct-toggle-width)
+  height: var(--ct-toggle-height)
+  border-radius: 999em
+  background: var(--ct-toggle-track)
+  cursor: pointer
+  user-select: none
+  box-sizing: border-box
+  vertical-align: middle
+  transition: background 150ms ease, box-shadow 150ms ease
+
+  // sm variant
+  &[data-size="sm"]
+    --ct-toggle-width: 2em
+    --ct-toggle-height: 1.125em
+    --ct-toggle-thumb-size: 0.875em
+
+  // On state — blue/indigo track
+  &[data-checked="true"]
+    background: var(--ct-toggle-track-on)
+
+    .ct-toggle-thumb
+      transform: translateX(
+        calc(var(--ct-toggle-width) - var(--ct-toggle-thumb-size) - calc(var(--ct-toggle-thumb-gap) * 2))
+      )
+
+  // Hover
+  &:hover
+    background: var(--ct-toggle-track-hover)
+
+  &[data-checked="true"]:hover
+    background: var(--ct-toggle-track-on-hover)
+
+  // Focus ring — uses :focus-within so keyboard tab reaches the hidden input
+  &:focus-within
+    box-shadow: 0 0 0 0.125em colors-ui-border-focus
+
+// ---------------------------------------------------------------------------
+// Thumb — the circular indicator
+// ---------------------------------------------------------------------------
+
+.ct-toggle-thumb
+  position: absolute
+  left: var(--ct-toggle-thumb-gap)
+  width: var(--ct-toggle-thumb-size)
+  height: var(--ct-toggle-thumb-size)
+  border-radius: 50%
+  background: var(--ct-toggle-thumb-color)
+  box-shadow: 0 0.0625em 0.25em rgba(0, 0, 0, 0.3)
+  transition: transform 150ms ease
+  pointer-events: none
+
+// ---------------------------------------------------------------------------
+// Hidden checkbox — accessible input behind the visual track
+// ---------------------------------------------------------------------------
+
+.ct-toggle-input
+  position: absolute
+  opacity: 0
+  inline-size: 0.0625em
+  block-size: 0.0625em
+  margin: 0
+  padding: 0
+  overflow: hidden
+  clip: rect(0 0 0 0)
+  white-space: nowrap
+  pointer-events: none
+
+// ---------------------------------------------------------------------------
+// Field wrapper — positions label and switch side by side
+// ---------------------------------------------------------------------------
+
+.ct-toggle-field
+  display: inline-flex
+  align-items: center
+  gap: 0.5em
+  cursor: pointer
+  user-select: none
+
+  &[data-disabled="true"]
+    opacity: 0.45
+    pointer-events: none
+    cursor: not-allowed
+
+// ---------------------------------------------------------------------------
+// Label text
+// ---------------------------------------------------------------------------
+
+.ct-toggle-label
+  font-family: "SpaceGrotesk"
+  font-size: 0.75em
+  text-transform: uppercase
+  color: colors-ui-text-primary-body-subtle
+  user-select: none
+  white-space: nowrap

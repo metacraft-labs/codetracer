@@ -48,6 +48,9 @@ type
     onTagToggle*: proc(tagIndex: int)
     ## onKindToggle receives the row index and the kind index within that row.
     onKindToggle*: proc(tagIndex: int; kindIndex: int)
+    ## onToggleEnabled is called when the user clicks the enable/disable toggle.
+    ## The caller is responsible for flipping the state and calling mount again.
+    onToggleEnabled*: proc()
 
 const
   FilterDropdownContainerId* = "dropdown-container-id"
@@ -65,6 +68,9 @@ proc invokeTagToggle(cb: FilterDropdownCallbacks; idx: int) =
 
 proc invokeKindToggle(cb: FilterDropdownCallbacks; ti, ki: int) =
   if not cb.onKindToggle.isNil: cb.onKindToggle(ti, ki)
+
+proc invokeToggleEnabled(cb: FilterDropdownCallbacks) =
+  if not cb.onToggleEnabled.isNil: cb.onToggleEnabled()
 
 # ---------------------------------------------------------------------------
 # Sub-element renderers — MockRenderer
@@ -119,16 +125,30 @@ proc renderTagRow(r: MockRenderer; row: FilterTagRow; tagIndex: int;
 proc renderFilterDropdownPanel*(r: MockRenderer;
                                 tabs: seq[FilterTabRecord];
                                 rows: seq[FilterTagRow];
+                                filtersEnabled: bool = true;
                                 cb: FilterDropdownCallbacks =
                                   FilterDropdownCallbacks()): MockNode =
   ## Render the full dropdown DOM tree (tab row + tag/kind grid).
   ## Returns the outer .dropdown-container element; children can be moved
   ## into a stable host via mountFilterDropdownInto.
+  let checkedAttr = if filtersEnabled: "true" else: "false"
+  let toggleLabel = if filtersEnabled: "ENABLED" else: "DISABLED"
   ui(r):
     tdiv(class = "dropdown-container"):
       tdiv(class = "toggle-buttons"):
         for i, tab in tabs:
           renderTab(r, tab, i, cb)
+        tdiv(class = "toggle-enabled-wrapper"):
+          span(class = "ct-toggle-label"):
+            text toggleLabel
+          span(class = "ct-toggle",
+               `data-checked` = checkedAttr,
+               `data-size`    = "sm",
+               `aria-hidden`  = "true",
+               onclick        = proc() = cb.invokeToggleEnabled()):
+            input(class = "ct-toggle-input", `type` = "checkbox", role = "switch")
+            span(class = "ct-toggle-thumb"):
+              discard
       ul(class = "dropdown-list", id = FilterDropdownListId):
         for i, row in rows:
           renderTagRow(r, row, i, cb)
@@ -187,16 +207,30 @@ when defined(js):
   proc renderFilterDropdownPanel*(r: WebRenderer;
                                   tabs: seq[FilterTabRecord];
                                   rows: seq[FilterTagRow];
+                                  filtersEnabled: bool = true;
                                   cb: FilterDropdownCallbacks =
                                     FilterDropdownCallbacks()): isonim_dom.Element =
     ## Render the full dropdown DOM tree (tab row + tag/kind grid).
     ## Returns the outer .dropdown-container element; children are moved
     ## into the stable host container by mountFilterDropdownInto.
+    let checkedAttr = if filtersEnabled: "true" else: "false"
+    let toggleLabel = if filtersEnabled: "ENABLED" else: "DISABLED"
     ui(r):
       tdiv(class = "dropdown-container"):
         tdiv(class = "toggle-buttons"):
           for i, tab in tabs:
             renderTab(r, tab, i, cb)
+          tdiv(class = "toggle-enabled-wrapper"):
+            span(class = "ct-toggle-label"):
+              text toggleLabel
+            span(class = "ct-toggle",
+                 `data-checked` = checkedAttr,
+                 `data-size`    = "sm",
+                 `aria-hidden`  = "true",
+                 onclick        = proc() = cb.invokeToggleEnabled()):
+              input(class = "ct-toggle-input", `type` = "checkbox", role = "switch")
+              span(class = "ct-toggle-thumb"):
+                discard
         ul(class = "dropdown-list", id = FilterDropdownListId):
           for i, row in rows:
             renderTagRow(r, row, i, cb)
@@ -204,6 +238,7 @@ when defined(js):
   proc mountFilterDropdownInto*(container: isonim_dom.Element;
                                 tabs: seq[FilterTabRecord];
                                 rows: seq[FilterTagRow];
+                                filtersEnabled: bool = true;
                                 cb: FilterDropdownCallbacks =
                                   FilterDropdownCallbacks()) =
     ## Clear `container` and remount a fresh dropdown panel inside it.
@@ -219,7 +254,7 @@ when defined(js):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
     let r = WebRenderer()
-    let panel = renderFilterDropdownPanel(r, tabs, rows, cb)
+    let panel = renderFilterDropdownPanel(r, tabs, rows, filtersEnabled, cb)
     let panelNode = isonim_dom.Node(panel)
     # Move the rendered children (toggle-buttons div, dropdown-list ul)
     # into the stable container so the container's id and event listeners
