@@ -3283,11 +3283,13 @@ proc disableAllTracepoints*(data: Data) =
 # ---------------------------------------------------------------------------
 # M5 — Column-Aware Replay Navigation: Nim-JS service-method exposure.
 #
-# The M1/M2/M3 milestones introduced four procs on ``DebuggerService``
-# in ``src/frontend/services/debugger_service.nim``:
+# The M1/M2/M3/M7 milestones introduced five procs on
+# ``DebuggerService`` in
+# ``src/frontend/services/debugger_service.nim``:
 #
 #   * ``addColumnBreakpoint``         (M1)
 #   * ``stepOverStatement``           (M2)
+#   * ``stepBackStatement``           (M7, reverse-direction mirror of M2)
 #   * ``setActiveSourceView``         (M3)
 #   * ``installSourceViewForTest``    (M3, test-only debug surface)
 #
@@ -3335,6 +3337,17 @@ proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int) =
 proc thunkM5StepOverStatement() =
   data.services.debugger.stepOverStatement()
 
+proc thunkM5StepBackStatement() =
+  ## M7 — time-travel symmetric counterpart of
+  ## [`thunkM5StepOverStatement`].  Exposes
+  ## ``data.services.debugger.stepBackStatement()`` to the JS layer so
+  ## the GUI Playwright spec and any external test harness can drive
+  ## the column-aware backward statement step via the same
+  ## ``page.evaluate`` pattern the M2 forward affordance uses.  See
+  ## the comment block above the M5 thunks for the dead-code-
+  ## elimination + method-style dispatch rationale.
+  data.services.debugger.stepBackStatement()
+
 proc thunkM5SetActiveSourceView(viewPath: cstring) =
   data.services.debugger.setActiveSourceView(viewPath)
 
@@ -3362,6 +3375,7 @@ proc installM5ColumnAwareServiceMethods() =
   if not svc.isNil:
     svc["addColumnBreakpoint"] = cast[JsObject](thunkM5AddColumnBreakpoint)
     svc["stepOverStatement"] = cast[JsObject](thunkM5StepOverStatement)
+    svc["stepBackStatement"] = cast[JsObject](thunkM5StepBackStatement)
     svc["setActiveSourceView"] = cast[JsObject](thunkM5SetActiveSourceView)
     svc["installSourceViewForTest"] =
       cast[JsObject](thunkM5InstallSourceViewForTest)

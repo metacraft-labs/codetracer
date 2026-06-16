@@ -47,6 +47,35 @@ pub trait ReplaySession: std::fmt::Debug {
         self.step(Action::Next, forward)
     }
 
+    /// M7 — statement-granularity step BACK.
+    ///
+    /// Reverse-direction counterpart to [`step_over_statement`].  The
+    /// runner walks the recorded step stream backwards from the entry
+    /// cursor until it lands on the prior statement boundary — defined
+    /// symmetrically to the forward case (the start of the prior
+    /// statement is the prior recorded step on the same line whose
+    /// column is STRICTLY LESS than the entry column, or the first
+    /// recorded step on a different line).
+    ///
+    /// The default implementation simply delegates to
+    /// [`step_over_statement`] with `forward = false` — the
+    /// materialised replay session's override of
+    /// `step_over_statement` already handles both directions via the
+    /// `forward` flag plumbed through
+    /// `next_step_id_relative_to_with_granularity`.  This thin
+    /// inverse-named entry point keeps the trait surface symmetric
+    /// with the forward navigation API at no behaviour cost.
+    ///
+    /// Returns `true` when execution moved, `false` at the trace
+    /// boundary.  Mirrors the `step()` return shape so the DAP
+    /// handler's limit-of-record notification works uniformly across
+    /// directions.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M7.
+    fn step_back_statement(&mut self) -> Result<bool, Box<dyn Error>> {
+        self.step_over_statement(false)
+    }
+
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>>;
 
     // currently depth_limit, lang only used for rr!
