@@ -667,37 +667,56 @@ pub trait TraceReader: std::fmt::Debug + Send {
                     break;
                 }
                 if step_to_different_column {
-                    // M2 — statement-boundary detection.  Under the
-                    // column-aware recorder contract the recorder may
-                    // emit multiple steps per statement on the same
-                    // source line: the user-facing `__ct.step(siteId)`
-                    // injection point plus assignment-write /
-                    // bookkeeping hooks anchored at-or-before the
-                    // statement's start column.  We define the
-                    // unambiguous user-visible "next statement" as the
-                    // next step on the same line whose column is
-                    // STRICTLY GREATER than the entry column — that is,
-                    // the start of the NEXT statement under the
-                    // recorder's left-to-right code-emit model.
+                    // M2 / M7 — statement-boundary detection.  Under
+                    // the column-aware recorder contract the recorder
+                    // may emit multiple steps per statement on the
+                    // same source line: the user-facing
+                    // `__ct.step(siteId)` injection point plus
+                    // assignment-write / bookkeeping hooks anchored
+                    // at-or-before the statement's start column.
                     //
-                    // Same-line steps with column ≤ entry are either
-                    // intra-statement bookkeeping or repeated landings
-                    // at the entry's own column (e.g. assignment
-                    // hooks emitted as a separate step); both are
-                    // skipped so the runner advances PAST them to the
-                    // real next-statement boundary.
+                    // Forward direction (M2 — `next`/F10-style):
+                    // we define the unambiguous user-visible "next
+                    // statement" as the next step on the same line
+                    // whose column is STRICTLY GREATER than the entry
+                    // column — that is, the start of the NEXT
+                    // statement under the recorder's left-to-right
+                    // code-emit model.  Same-line steps with column ≤
+                    // entry are either intra-statement bookkeeping or
+                    // repeated landings at the entry's own column;
+                    // both are skipped.
+                    //
+                    // Backward direction (M7 — `stepBack`-style): we
+                    // mirror the predicate.  The "previous statement"
+                    // is the previous step on the same line whose
+                    // column is STRICTLY LESS than the entry column —
+                    // the start of the PRIOR statement under the
+                    // recorder's left-to-right code-emit model.
+                    // Same-line steps with column ≥ entry are
+                    // intra-statement bookkeeping the runner skips
+                    // past to reach the real prior-statement boundary.
+                    // This is the exact mirror of the forward
+                    // predicate; the JS recorder's same-line
+                    // bookkeeping-anchor behaviour applies
+                    // symmetrically in the reverse direction.
                     //
                     // `column = None` (legacy line-only traces) maps
-                    // every comparison to "not strictly greater", so
-                    // the boundary never fires and statement
-                    // granularity degrades to line granularity — the
-                    // documented fallback for traces without column
-                    // data.
+                    // every comparison to "not strictly past", so the
+                    // boundary never fires and statement granularity
+                    // degrades to line granularity — the documented
+                    // fallback for traces without column data, in
+                    // both directions.
                     //
                     // Spec:
-                    //   codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2.
+                    //   codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M2 (forward) and §M7 (backward).
                     let strictly_advanced = match (original_column, current_step.column) {
-                        (Some(prev), Some(cur)) => cur.0 > prev.0,
+                        (Some(prev), Some(cur)) => {
+                            if forward {
+                                cur.0 > prev.0
+                            } else {
+                                cur.0 < prev.0
+                            }
+                        }
                         _ => false,
                     };
                     if strictly_advanced {

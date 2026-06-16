@@ -393,6 +393,23 @@ proc configureShortcuts* =
     if not data.isNil and not data.services.debugger.isNil:
       data.services.debugger.stepOverStatement()
 
+  # Column-Aware Replay Navigation (M7) — `Step Back Statement`
+  # keybinding (Alt+Shift+F10): time-travel symmetric counterpart of
+  # M2's Alt+F10.  The mapping mirrors the existing reverse-debug
+  # convention where the forward action is `KEY` and the reverse is
+  # `Shift+KEY` (see `default_config.yaml`: F10/Shift+F10 for the
+  # legacy line-granularity next/reverse-next pair).  Alt+F10 is the
+  # forward column-aware step-over (M2); Alt+Shift+F10 layers the
+  # `Shift` reverse-modifier on top to get the backward column-aware
+  # step.  Falls through cleanly to the legacy F10 / Shift+F10
+  # bindings — neither legacy keybind is touched.
+  #
+  # Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M7.
+  Mousetrap.`bind`("alt+shift+f10") do ():
+    cdebug "shortcuts: Alt+Shift+F10 — Step Back Statement"
+    if not data.isNil and not data.services.debugger.isNil:
+      data.services.debugger.stepBackStatement()
+
   ## Visual Replay / Video Player keyboard overlay must register LAST so its
   ## wrappers shadow any prior bindings on shared keys (Esc, Home, End, arrow
   ## keys).  Spec: codetracer-specs/GUI/Debugging-Features/Visual-Replay.md

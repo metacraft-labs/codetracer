@@ -205,6 +205,43 @@ proc stepOverStatement*(self: DebuggerService) =
   self.data.redraw()
 
 
+proc stepBackStatement*(self: DebuggerService) =
+  ## M7 — Column-Aware Replay Navigation §M7: time-travel symmetric
+  ## counterpart of [`stepOverStatement`].  Step BACKWARD by one
+  ## /statement/ rather than by one source line.  Sends a DAP
+  ## ``stepBack`` request to the replay-server with
+  ## ``granularity: "statement"`` on the wire — the replay-server's
+  ## ``step_back_dap`` handler dispatches to the column-aware reverse
+  ## runner when the granularity field is present, and falls back to
+  ## the legacy reverse-line-granularity runner otherwise.
+  ##
+  ## Like [`stepOverStatement`], this proc speaks DAP directly because
+  ## the granularity field is a vanilla DAP extension on
+  ## ``StepBackArguments`` (DAP spec §StepBackArguments) and does not
+  ## need a custom CT protocol bridge.  The legacy reverse-step UX
+  ## (the F9 / reverse-debug-controls button surface that ships
+  ## ``CODETRACER::step({reverse:true})``) keeps its current behaviour
+  ## untouched — M7 is purely additive.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M7 for the DAP wire contract.
+  if self.stableBusy:
+    return
+  self.stableBusy = true
+  inc self.operationCount
+  self.lastDirection = DebReverse
+  self.lastAction = cstring"reverse-next"
+  # DAP arguments mirror the forward `stepOverStatement` payload but
+  # ship through the `stepBack` command.  Same single-thread sentinel
+  # (`threadId: 1`) and same `granularity: "statement"` opt-in field.
+  let args = js{
+    threadId: 1,
+    granularity: cstring"statement",
+  }
+  self.data.dapApi.sendCtRequest(DapStepBack, args)
+  self.data.redraw()
+
+
 proc setActiveSourceView*(self: DebuggerService, viewPath: cstring) =
   ## M3 — Column-Aware Replay Navigation §M3.  Activate the formatted
   ## srcview at ``viewPath`` so subsequent step-overs advance one

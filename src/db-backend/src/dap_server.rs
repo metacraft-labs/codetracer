@@ -1597,6 +1597,24 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
                 handler.next_dap(req, granularity, sender.clone())?;
                 return Ok(());
             }
+            // M7 — `stepBack` carries the same optional `granularity`
+            // field (DAP §StepBackArguments).  Symmetric to the M2
+            // forward dispatch: we MUST read it here so the
+            // column-aware backward statement runner gets activated
+            // when the client opts in; line / instruction / None all
+            // keep routing through the legacy reverse-`next` path so
+            // existing reverse-step UX (F9 / Ctrl+Shift+F10 / etc.)
+            // remains bit-for-bit identical.
+            //
+            // Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M7.
+            if req.command == "stepBack" {
+                let granularity = req
+                    .load_args::<dap_types::StepBackArguments>()
+                    .ok()
+                    .and_then(|args| args.granularity);
+                handler.step_back_dap(req, granularity, sender.clone())?;
+                return Ok(());
+            }
             match dap_command_to_step_action(&req.command) {
                 Ok((action, is_reverse)) => {
                     // for now ignoring arguments: they contain threadId, but

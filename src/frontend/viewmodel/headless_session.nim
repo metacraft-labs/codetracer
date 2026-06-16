@@ -297,6 +297,29 @@ proc stepBackward*(s: HeadlessDebugSession) =
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
 
+proc stepBackStatement*(s: HeadlessDebugSession) =
+  ## M7 — Column-Aware Replay Navigation §M7: time-travel symmetric
+  ## counterpart of ``stepOverStatement``.  Step BACKWARD by one
+  ## /statement/ rather than by one source line.  Sends the DAP
+  ## ``stepBack`` request with ``granularity = "statement"`` on the
+  ## wire so the replay-server dispatches to the column-aware reverse
+  ## runner.
+  ##
+  ## Back-compat: ``stepBackward`` (above) keeps sending ``stepBack``
+  ## without ``granularity`` and therefore continues to behave as
+  ## reverse-line-granularity step-back.  Tests that need to verify
+  ## the legacy path stays intact use ``stepBackward``; tests that
+  ## need the new behaviour use ``stepBackStatement``.
+  var dbg = s.session.store.debugger.val
+  dbg.status = dsStepping
+  s.session.store.debugger.val = dbg
+
+  discard s.backend.sendDapRequest(
+    "stepBack",
+    %*{"threadId": 1, "granularity": "statement"})
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
+
 proc stepIn*(s: HeadlessDebugSession) =
   ## Step into a function call.
   var dbg = s.session.store.debugger.val

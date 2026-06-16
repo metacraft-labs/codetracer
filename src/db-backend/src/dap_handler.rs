@@ -1258,45 +1258,91 @@ impl Handler {
         granularity: Option<String>,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        self.next_or_step_back_dap(request, granularity, /* forward = */ true, sender)
+    }
+
+    /// M7 — DAP `stepBack` request entry point.
+    ///
+    /// Reverse-direction counterpart of [`Handler::next_dap`].  Reads
+    /// the DAP `granularity` field on the `stepBack` request (the DAP
+    /// `StepBackArguments.granularity` slot) and dispatches:
+    ///
+    ///   * `Some("statement")` → column-aware statement-granularity
+    ///     reverse runner — advance one /statement/ at a time
+    ///     /backwards/ using `DbStep.column`.  Symmetric mirror of the
+    ///     M2 forward path; the underlying runner
+    ///     ([`MaterializedReplaySession::next_statement`] with
+    ///     `forward = false`) uses the same `next_step_id_relative_to_with_granularity`
+    ///     helper but flips the stop predicate to STRICTLY-LESS
+    ///     column on the same line.
+    ///   * `Some("line")` / `Some("instruction")` / `None` → legacy
+    ///     line-granularity reverse runner ([`Handler::next`] with
+    ///     `forward = false`).  Mirrors the M2 forward back-compat
+    ///     contract: any non-`statement` value (including unrecognised
+    ///     future values) keeps the legacy behaviour intact, so an
+    ///     over-eager client never breaks back-compat.
+    ///
+    /// The M3 formatted-view runner is deliberately not consulted for
+    /// the backward direction at M7 — the active-source-view path
+    /// projects through the FORWARD sourcemap and would need a
+    /// dedicated reverse-projection runner to be correct in reverse.
+    /// M8 is scoped to add formatted-view stepIn / stepOut; reverse-
+    /// direction formatted projection is parked for a later milestone
+    /// alongside the rest of the reverse formatted UX.  Until then a
+    /// `stepBack` under an active source view falls through to the
+    /// minified-coordinate runner — the same behaviour the legacy
+    /// reverse-next has always had, so this is not a regression.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M7.
+    pub fn step_back_dap(
+        &mut self,
+        request: dap::Request,
+        granularity: Option<String>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.next_or_step_back_dap(request, granularity, /* forward = */ false, sender)
+    }
+
+    /// Shared `next` / `stepBack` runner (M2 + M7).
+    ///
+    /// Direction is parametrised by `forward`.  For `forward = true`
+    /// this is the M2 path; for `forward = false` it is the M7
+    /// reverse-direction mirror.  The M3 formatted-view runner is
+    /// only consulted in the forward direction — see [`step_back_dap`]
+    /// for the rationale.
+    fn next_or_step_back_dap(
+        &mut self,
+        request: dap::Request,
+        granularity: Option<String>,
+        forward: bool,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
         let original_step_id = self.step_id;
         let use_statement = matches!(
             granularity.as_deref(),
             Some(g) if g.eq_ignore_ascii_case("statement")
         );
-        // M3 — Formatted-view step-over.  When the user activated a
-        // recorder-baked srcview via ``ct/set-active-source-view``, we
-        // step until the next recorded step's PROJECTION through the
-        // sourcemap_cache lands at a different formatted
-        // ``(line[, column])`` tuple — i.e. one formatted line (or
-        // formatted statement, under ``granularity:"statement"``) per
-        // press.  Without an active source view we fall through to the
-        // legacy minified-coordinate runner so back-compat is bit-for-
-        // bit identical for clients that haven't opted in.
-        //
-        // The formatted-view path is only valid for the materialised
-        // DB-backed session — the recreator / emulator sessions have
-        // no per-step column data the runner could project.  For those
-        // we silently fall through to the legacy path; the M3 contract
-        // is scoped to materialised JS / Python recordings.
+        // M3 — Formatted-view step-over.  Only fires in the forward
+        // direction (M7 leaves reverse formatted-view projection for a
+        // later milestone; falling through to the minified runner in
+        // reverse preserves the legacy reverse-step behaviour).
         let advanced_via_formatted_view =
-            if self.active_source_view_path.is_some() && self.trace_kind == TraceKind::Materialized {
+            if forward && self.active_source_view_path.is_some() && self.trace_kind == TraceKind::Materialized {
                 self.next_dap_formatted_view(use_statement)?
             } else {
                 false
             };
         if !advanced_via_formatted_view {
             if use_statement {
-                self.next_statement(true)?;
+                self.next_statement(forward)?;
             } else {
-                self.next(true)?;
+                self.next(forward)?;
             }
         }
         self.skip_internal_jit_registration_stops()?;
         // Surface the post-step location (mirrors `step()`'s
         // `complete_move(false, ...)` call so DAP clients receive the
-        // ct/complete-move event the GUI listens on).  We pass
-        // `complete = true` semantics: every DAP `next` ends with a
-        // settled debugger position the frontend can read.
+        // ct/complete-move event the GUI listens on).
         self.complete_move(false, sender.clone())?;
 
         if self.trace_kind == TraceKind::Materialized {

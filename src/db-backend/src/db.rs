@@ -303,19 +303,33 @@ impl Db {
                     break;
                 }
                 if step_to_different_column {
-                    // M2 — statement-boundary detection.  Stop when the
-                    // column STRICTLY advances past the entry column —
-                    // that marks the start of the next statement under
-                    // the recorder's left-to-right code-emit model.
-                    // Bookkeeping / assignment hooks anchored at or
-                    // before the entry column are skipped so the
-                    // runner advances to the real next-statement
-                    // boundary.  See
+                    // M2 / M7 — statement-boundary detection.  Stop
+                    // when the column STRICTLY moves past the entry
+                    // column in the direction of travel.
+                    //
+                    // Forward (M2): `cur.0 > prev.0` — the start of
+                    // the next statement under the recorder's
+                    // left-to-right code-emit model.
+                    //
+                    // Backward (M7): `cur.0 < prev.0` — the start of
+                    // the prior statement.  Symmetric mirror of the
+                    // forward predicate.
+                    //
+                    // Bookkeeping / assignment hooks anchored at, or
+                    // on the "wrong" side of, the entry column are
+                    // skipped in both directions so the runner
+                    // advances to the real statement boundary.  See
                     // `crate::trace_reader::TraceReader::next_step_id_relative_to_with_granularity`
-                    // for the rationale and the
-                    // legacy-line-only-degrade contract.
+                    // for the full rationale and the legacy-line-only-
+                    // degrade contract.
                     let strictly_advanced = match (original_column, current_step.column) {
-                        (Some(prev), Some(cur)) => cur.0 > prev.0,
+                        (Some(prev), Some(cur)) => {
+                            if forward {
+                                cur.0 > prev.0
+                            } else {
+                                cur.0 < prev.0
+                            }
+                        }
                         _ => false,
                     };
                     if strictly_advanced {
