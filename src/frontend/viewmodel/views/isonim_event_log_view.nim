@@ -332,7 +332,7 @@ when defined(js):
            tabindex = "2"):
         tdiv(class = "ct-flex"):
           button(id = "category-image",
-                 class = "ct-button-image-md-secondary ct-mr-2 ct-button-no-border",
+                 class = "ct-button-image-md-secondary ct-button-no-border",
                  tabindex = "0"):
             discard
           input(class = "ct-input-panel ct-input-search-image",
