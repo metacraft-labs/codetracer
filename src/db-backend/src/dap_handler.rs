@@ -33,13 +33,13 @@ use crate::dap_types;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAndValueTuple, TraceKind};
 use crate::task::{
-    Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CalltraceLoadArgs,
-    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind, FlowMode, FlowUpdate,
-    FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions, LoadHistoryArg,
-    LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, NO_ADDRESS, NO_INDEX, NO_PATH,
-    NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks, RegisterEventsArg,
-    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task, TraceUpdate, TracepointId,
-    TracepointResults, TracepointResultsAggregate, UpdateTableArgs, Variable,
+    Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CallSearchResponseBody,
+    CalltraceLoadArgs, CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind,
+    FlowMode, FlowUpdate, FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions,
+    LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, NO_ADDRESS, NO_INDEX,
+    NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks,
+    RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task,
+    TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate, UpdateTableArgs, Variable,
 };
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{Type, Value, to_ct_value};
@@ -2007,7 +2007,19 @@ impl Handler {
         let raw_event = self.dap_client.calltrace_search_event(calls.clone())?;
         sender.send(raw_event)?;
         // Include search results in the response body for customRequest().
-        self.respond_dap(req, &calls, sender)?;
+        //
+        // Wrap the calls in ``CallSearchResponseBody { calls }`` instead
+        // of sending the bare ``Vec<Call>``.  VS Code's
+        // ``vscode.debug.activeDebugSession.customRequest`` rejects the
+        // pending promise when the DAP response ``body`` is a top-level
+        // JSON array (it expects an object); the WDIO leo + solana deep
+        // suites' ``can search the calltrace for <fn>`` tests see
+        // ``{ok: false}`` for this reason even though the in-process
+        // reproducer (``leo_search_calltrace_returns_compute_call``)
+        // confirms the handler returns ``success=true`` with the
+        // correct calls.  Wrapping in an object brings this response
+        // into the same shape every other ``ct/*`` custom command uses.
+        self.respond_dap(req, CallSearchResponseBody { calls }, sender)?;
         Ok(())
     }
 

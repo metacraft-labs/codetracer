@@ -967,6 +967,29 @@ pub struct CallSearchArg {
     pub value: String,
 }
 
+/// Response body for `ct/search-calltrace`.
+///
+/// The previous shape was a bare `Vec<Call>` written straight into the
+/// DAP response `body` field.  VS Code's `Debug Adapter Protocol`
+/// client (used by `vscode.debug.activeDebugSession.customRequest`)
+/// expects custom request response bodies to be JSON *objects* --
+/// returning a top-level array makes `customRequest()` reject the
+/// pending promise with a generic error and the WDIO test sees
+/// `{ok: false}` (cross-repo run 27626199922: leo + solana deep
+/// suites both fail `can search the calltrace for <fn>` with the
+/// db-backend in-process reproducer test
+/// `leo_search_calltrace_returns_compute_call` confirming the
+/// handler itself returns success).  Wrapping the calls in an
+/// object brings the response shape in line with every other
+/// `ct/*` custom command (`CtLoadLocalsResponseBody`,
+/// `CalltraceUpdate`, etc.) and the customRequest promise resolves
+/// cleanly.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallSearchResponseBody {
+    pub calls: Vec<Call>,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct LoadHistoryArg {
