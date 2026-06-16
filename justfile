@@ -93,6 +93,9 @@ test-hmr-fixture: build-hmr-fixture
 test-reprobuild-macos-smoke:
   ./ci/reprobuild/macos-smoke.sh
 
+test-reprobuild-linux-smoke:
+  ./ci/reprobuild/linux-smoke.sh
+
 # Drives the vm-harness Hyper-V backend through a fresh
 # install -> verify -> uninstall cycle against the produced
 # CodeTracer-Setup.exe. Requires a Windows host with Hyper-V enabled

@@ -1016,6 +1016,26 @@ jobs:
       - name: Run Reprobuild macOS smoke
         run: nix develop . --command just test-reprobuild-macos-smoke
 
+  reprobuild-linux-smoke:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Run Reprobuild Linux smoke
+        run: nix develop . --command just test-reprobuild-linux-smoke
+
   # M12: macOS verification pass for Value Origin Tracking.
   # Per-PR subset: Python materialized + Rust RR + MCP/CLI smoke. The full
   # per-language matrix (Ruby, JS, C, C++, Nim, Go, smart-contract languages)

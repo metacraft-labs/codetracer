@@ -392,13 +392,18 @@ mkShell {
     export XXHASH_PREFIX=${pkgs.xxHash}
 
     # repro's ASP solver (and the interface extractor repro compiles on the
-    # fly) dlopen()s libclingo by leaf name at runtime. On macOS that only
-    # resolves if clingo's lib dir is on the dyld search path, so put it there
-    # for any direct `repro build` in the shell. scripts/build-once.sh sets the
-    # same thing for its own invocation; this makes the bare CLI work too.
-    # Use the flake-pinned clingo so the ABI matches the one `repro` links.
+    # fly) dlopen()s libclingo by leaf name at runtime. That only resolves if
+    # clingo's lib dir is on the platform run-time loader search path
+    # (DYLD_LIBRARY_PATH on macOS, LD_LIBRARY_PATH on Linux), so put it there
+    # for any direct `repro build` in the shell — including the reprobuild
+    # smoke tests (ci/reprobuild/{linux,macos}-smoke.sh). scripts/build-once.sh
+    # sets the same thing for its own invocation; this makes the bare CLI work
+    # too. Use the flake-pinned clingo so the ABI matches the one `repro` links.
     ${pkgs.lib.optionalString stdenv.isDarwin ''
       export DYLD_LIBRARY_PATH="${clingo}/lib''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+    ''}
+    ${pkgs.lib.optionalString stdenv.isLinux ''
+      export LD_LIBRARY_PATH="${clingo}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     ''}
 
     export PATH=$ROOT_PATH/src/build-debug/bin:$PATH

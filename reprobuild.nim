@@ -329,13 +329,22 @@ package codeTracer:
     when defined(windows):
       "nsis >=3"
 
+    # macOS-only build tools. ``create-dmg`` produces the .dmg in the
+    # ``dmg`` target; it is a Darwin-only nixpkgs package (its
+    # ``meta.platforms`` is the two darwin systems), so declaring it in the
+    # shared ``not defined(windows)`` block below makes tool resolution fail
+    # on Linux (``create-dmg ... is not available on the requested
+    # hostPlatform x86_64-linux``). Linux packages instead via
+    # ``appimage-scripts/`` / ``nix bundle`` (see ``build-app-image``).
+    when defined(macosx):
+      "create-dmg >=1"
+
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
       "cachix >=0"
       "cargo-nextest >=0"
       "clang >=1"
       "ctags >=0"
-      "create-dmg >=1"
       "curl >=0"
       "electron >=0"
       "flake8 >=0"
@@ -789,6 +798,16 @@ package codeTracer:
       # — one CreateProcessW, no shell wrapper, no fork emulation.
       # ``mkdir -p src/public/dist`` is handled via the ``ensureDir``
       # builtin instead of an inline shell line.
+      # webpack's only emitted artifact is the ``src/public/dist`` tree
+      # (see ``webpack.config.js``'s ``output.path``); it does not write a
+      # marker file. Declaring a ``.webpack-dist-built.stamp`` output here
+      # therefore made the action fail post-run output validation on Linux
+      # ("No such file or directory: .../.webpack-dist-built.stamp") because
+      # nothing ever creates that stamp. Track the directory tree itself as
+      # the output — repro snapshots directory outputs (the Windows
+      # ``windows-app`` target relies on the same) and the downstream
+      # ``frontend-public-dist`` action already consumes ``src/public/dist``
+      # directly, so the stamp was redundant as well as absent.
       let webpackDist = node(
         args = @["node_modules/webpack/bin/webpack.js"],
         actionId = "frontend-webpack-dist",
@@ -798,8 +817,7 @@ package codeTracer:
           "src/frontend/frontend_imports.js"
         ],
         extraOutputs = @[
-          "src/public/dist",
-          buildDebugPath(".webpack-dist-built.stamp")
+          "src/public/dist"
         ])
       target("frontend-webpack-dist", webpackDist)
       frontendExtraActions.add(webpackDist)
