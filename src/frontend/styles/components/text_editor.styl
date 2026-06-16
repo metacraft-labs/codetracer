@@ -902,6 +902,18 @@
   margin-left: 40%
   cursor: pointer
 
+// M6 — Column-Aware Replay Navigation: column-anchored breakpoint
+// marker emitted by ``EditorViewComponent.applyColumnBreakpointDecorations``
+// in ``ui/editor.nim``.  The Monaco inline decoration spans the
+// single character at ``(line, column)`` so the red underline /
+// dot anchors visually to the bound column and tracks editor
+// scroll / resize automatically.
+.ct-column-breakpoint-marker
+  border-bottom: 0.125em solid BREAKPOINT_COLOR
+  background-color: rgba(255, 0, 0, 0.18)
+  border-radius: 0.1em
+  cursor: pointer
+
 .breakpoint-program-select
   width: 2em
   background-color: BREAKPOINT_MENU_0

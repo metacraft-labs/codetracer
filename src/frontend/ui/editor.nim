@@ -1,7 +1,8 @@
 import
-  std/[ cstrutils, jsre ],
+  std/[ cstrutils, jsre, options ],
   ui_imports, trace, debug, menu, flow, value, no_source, shortcuts, kdom,
   trace_macro, trace_static,
+  column_click_resolver,
   ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/ct_event
 
@@ -392,6 +393,117 @@ proc styleLines(self: EditorViewComponent, editor: MonacoEditor, lines: seq[Mona
 
   if not self.data.ui.welcomeScreen.isNil:
     self.data.ui.welcomeScreen.resetView()
+
+proc applyColumnBreakpointDecorations*(self: EditorViewComponent) =
+  ## M6 — Column-Aware Replay Navigation: render column-anchored
+  ## breakpoint markers as Monaco inline decorations.
+  ##
+  ## For each registered breakpoint with ``column > 0`` (i.e. a
+  ## breakpoint placed via ``DebuggerService.addColumnBreakpoint`` or
+  ## the M6 Alt+click affordance below) we emit a Monaco decoration
+  ## spanning ``(line, column..column+1)`` with the
+  ## ``ct-column-breakpoint-marker`` inline class and a hover tooltip
+  ## naming the bound column.  This satisfies two M6 deliverables:
+  ##
+  ##   * "Marker visibly anchors to the column, not the line start —
+  ##      column position survives editor scroll / resize."  Monaco
+  ##      anchors decorations to text positions, so they track scroll
+  ##      / resize automatically.
+  ##   * "Hovering an existing column breakpoint shows the bound
+  ##      column in a tooltip" via the decoration's ``hoverMessage``.
+  ##
+  ## The decoration IDs are stored on ``self.columnBreakpointDecorations``
+  ## so the next call diffs against them via ``deltaDecorations``,
+  ## the standard Monaco update pattern.  Breakpoints without a
+  ## bound column (legacy line-only) contribute no decoration —
+  ## their visual representation remains the gutter dot rendered by
+  ## ``editorLineNumber`` in ``ui/trace.nim``.
+  if self.monacoEditor.isNil:
+    return
+  let debuggerService = self.data.services.debugger
+  if debuggerService.isNil:
+    self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
+      self.columnBreakpointDecorations, @[])
+    return
+  let path = self.path
+  var newDecorations: seq[DeltaDecoration] = @[]
+  if debuggerService.breakpointTable.hasKey(path):
+    let textModel = self.monacoEditor.getModel()
+    for line, b in debuggerService.breakpointTable[path]:
+      if b.column <= 0 or not b.enabled:
+        continue
+      var column = b.column
+      var endColumn = column + 1
+      # Clamp to the actual line length so the marker never extends
+      # past the line's terminator — Monaco rejects out-of-range
+      # decoration ranges silently and we'd lose the marker.
+      if not textModel.isNil:
+        let maxColumn = textModel.getLineMaxColumn(line)
+        if maxColumn >= 1:
+          if column > maxColumn:
+            column = maxColumn
+          if endColumn > maxColumn:
+            endColumn = maxColumn
+          if endColumn <= column:
+            endColumn = column + 1
+      let hoverText = cstring("Column breakpoint at line " & $line &
+                              ", column " & $b.column)
+      newDecorations.add(DeltaDecoration(
+        `range`: newMonacoRange(line, column, line, endColumn),
+        options: js{
+          inlineClassName: cstring"ct-column-breakpoint-marker",
+          stickiness: 1,
+          hoverMessage: js{value: hoverText}}))
+  self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
+    self.columnBreakpointDecorations, newDecorations)
+
+
+proc setColumnBreakpoint*(
+    self: EditorViewComponent;
+    tabInfo: TabInfo;
+    line: int;
+    column: int) =
+  ## M6 — invoke the column-aware breakpoint path on the underlying
+  ## ``DebuggerService`` and refresh the editor row so the gutter dot
+  ## and the new column-anchored decoration both render.
+  self.data.services.debugger.addColumnBreakpoint(tabInfo.name, line, column)
+  self.applyColumnBreakpointDecorations()
+  self.refreshEditorLine(line)
+
+
+proc lineActionClickAt*(
+    self: EditorViewComponent;
+    tabInfo: TabInfo;
+    line: int;
+    monacoColumn: Option[int];
+    onGutterElement: bool;
+    lineMaxColumn: Option[int] = none(int)) =
+  ## M6 — dispatch a gutter / editor click to either the legacy
+  ## line-only ``toggleBreakpoint`` or the column-aware
+  ## ``addColumnBreakpoint`` path, based on the resolver in
+  ## ``column_click_resolver``.
+  ##
+  ## The pixel→column mapping is provided by Monaco
+  ## (``e.target.position.column``) when available; this proc just
+  ## consumes the resolver's verdict.  Pulling the dispatch out of
+  ## the raw DOM event handler keeps the legacy
+  ## ``lineActionClick(element)`` path untouched for the
+  ## ``gutter-line`` / ``gutter-breakpoint`` HTML elements that the
+  ## CodeTracer custom gutter emits.
+  if line <= 0:
+    return
+  let resolution = resolveColumnClick(
+    line = line,
+    monacoColumn = monacoColumn,
+    onGutterElement = onGutterElement,
+    lineMaxColumn = lineMaxColumn)
+  case resolution.kind
+  of ColumnAwareClick:
+    self.setColumnBreakpoint(tabInfo, resolution.line, resolution.column)
+  of GutterClick:
+    self.data.services.debugger.toggleBreakpoint(tabInfo.name, resolution.line)
+    self.refreshEditorLine(resolution.line)
+
 
 proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
   var element = line
@@ -2195,6 +2307,9 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   )
 
   tabInfo.monacoEditor.onMouseDown(proc(e: js) =
+    cdebug "M6 onMouseDown fired ctrl=" & $cast[bool](e.event.ctrlKey) &
+      " alt=" & $cast[bool](e.event.altKey) &
+      " shift=" & $cast[bool](e.event.shiftKey)
     if cast[bool](e.event.ctrlKey) and cast[bool](e.event.altKey):
       try:
         let targetToken = self.getTokenFromPosition(e.target.position)
@@ -2206,6 +2321,49 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
             SmartJump)
       except AmbiguousFunctionCallException:
         self.api.errorMessage getCurrentExceptionMsg()
+    elif cast[bool](e.event.altKey) and
+        not cast[bool](e.event.ctrlKey) and
+        not cast[bool](e.event.shiftKey) and
+        not cast[bool](e.event.middleButton):
+      # M6 — Column-Aware Replay Navigation: Alt+click on the line
+      # text places a column-anchored breakpoint at the exact column
+      # Monaco resolves under the click.  The gutter HTML click
+      # handler below still drives the legacy line-only path so
+      # M1's back-compat invariant holds — Alt+click is opt-in.
+      cdebug "M6 alt+click fired"
+      let position = e.target.position
+      if not position.isNil:
+        let lineNumber = cast[int](position.lineNumber)
+        let column = cast[int](e.target.toJs.position.column)
+        cdebug "M6 alt+click line=" & $lineNumber & " column=" & $column
+        var maxColumn = none(int)
+        let textModel = self.monacoEditor.getModel()
+        if not textModel.isNil:
+          let lm = textModel.getLineMaxColumn(lineNumber)
+          if lm >= 1:
+            maxColumn = some(lm)
+        # The target element class tells us whether Monaco hit the
+        # gutter region (margin / overlay / decorations) — those
+        # should fall through to the legacy line-only path even
+        # under Alt+click.
+        var onGutter = false
+        let targetClass =
+          cast[cstring](e.target.element.classList.value)
+        cdebug "M6 alt+click targetClass=" & $targetClass
+        if ($targetClass).contains("margin") or
+           ($targetClass).contains("glyph") or
+           ($targetClass).contains("line-numbers"):
+          onGutter = true
+        self.lineActionClickAt(
+          tabInfo,
+          lineNumber,
+          monacoColumn = some(column),
+          onGutterElement = onGutter,
+          lineMaxColumn = maxColumn)
+        e.event.preventDefault()
+        e.event.stopPropagation()
+      else:
+        cdebug "M6 alt+click position nil"
     elif cast[bool](e.event.ctrlKey) or cast[bool](e.event.middleButton):
       self.lastMouseClickLine = self.lastMouseMoveLine
       self.lastMouseClickCol = cast[int](e.target.toJs.position.column)
@@ -2311,6 +2469,10 @@ proc editorAfterRedraw(self: EditorViewComponent) =
 
     self.addTestActions()
     self.applyEventualStylesLines()
+    # M6 — refresh column-anchored breakpoint markers so they survive
+    # editor scroll / resize and reflect any column breakpoints
+    # registered via Alt+click or the M1 `addColumnBreakpoint` API.
+    self.applyColumnBreakpointDecorations()
 
   except Exception as e:
     cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
