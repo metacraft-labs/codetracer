@@ -3280,6 +3280,97 @@ proc disableAllTracepoints*(data: Data) =
     if not trace.isDisabled:
       trace.toggleTraceState()
 
+# ---------------------------------------------------------------------------
+# M5 — Column-Aware Replay Navigation: Nim-JS service-method exposure.
+#
+# The M1/M2/M3 milestones introduced four procs on ``DebuggerService``
+# in ``src/frontend/services/debugger_service.nim``:
+#
+#   * ``addColumnBreakpoint``         (M1)
+#   * ``stepOverStatement``           (M2)
+#   * ``setActiveSourceView``         (M3)
+#   * ``installSourceViewForTest``    (M3, test-only debug surface)
+#
+# The GUI Playwright specs call them as JS methods via
+# ``window.data.services.debugger.<method>(...)``.  Two distinct
+# obstacles previously made this fail:
+#
+# (1) Dead-code elimination.  Nim's JS backend emits a proc only when
+#     some reachable Nim caller references it.  None of the four procs
+#     had a Nim caller (their consumers are JS-side tests), so they
+#     were stripped from the generated ``ui.js`` and the Playwright
+#     specs failed with ``... is not a function``.  ``thunkM5...``
+#     procs below resolve this — each one references the underlying
+#     service proc, and the thunks themselves are kept reachable via
+#     the call to ``installM5ColumnAwareServiceMethods()`` at module
+#     init.
+#
+# (2) Method-style dispatch.  ``DebuggerService`` is a Nim ``ref
+#     object``.  Nim's JS backend emits procs that take ``self`` as a
+#     first parameter — they are NOT attached as methods on the JS
+#     prototype, and ``data.services.debugger.addColumnBreakpoint`` is
+#     ``undefined`` even when the proc is reachable.  We bridge this
+#     with a JS thunk: ``installM5ColumnAwareServiceMethods`` attaches
+#     each thunk as a property on the live ``data.services.debugger``
+#     instance.  When the spec calls
+#     ``svc.addColumnBreakpoint.call(svc, p, l, c)`` the thunk re-routes
+#     the arguments through the Nim proc.
+#
+# The thunks deliberately reach for ``data.services.debugger`` at call
+# time rather than capturing the instance, so multi-replay session
+# switching (the ``activeSessionIndex`` forwarder in ``types.nim``
+# §multi-session) keeps working — the thunk always targets the active
+# session's ``DebuggerService``.
+#
+# Avoiding closures here is also a JS-codegen workaround: Nim's JS
+# backend trips an ``env.kind == nkSym`` assertion when emitting
+# ``proc()`` closures that capture module-scope globals.  Using
+# top-level ``proc`` thunks with no captures sidesteps that bug.
+#
+# See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+# §M5 for the contract.
+proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int) =
+  data.services.debugger.addColumnBreakpoint(path, line, column)
+
+proc thunkM5StepOverStatement() =
+  data.services.debugger.stepOverStatement()
+
+proc thunkM5SetActiveSourceView(viewPath: cstring) =
+  data.services.debugger.setActiveSourceView(viewPath)
+
+proc thunkM5InstallSourceViewForTest(
+    recordedPath, formattedViewPath, sourcemapV3Json: cstring) =
+  data.services.debugger.installSourceViewForTest(
+    recordedPath, formattedViewPath, sourcemapV3Json)
+
+proc thunkM5DapSendCtRequest(kindOrdinal: int, rawValue: JsObject) =
+  ## The M3 GUI spec drives a plain DAP ``next`` via
+  ## ``data.dapApi.sendCtRequest(DapNext, {threadId: 1})`` — the same
+  ## pipeline ``DebuggerService.step`` uses for the F10 keybind path.
+  ## Without an exposed method dispatch the spec fails with
+  ## "Neither dapApi.sendCtRequest nor services.debugger.stepForward
+  ## is reachable".  We re-route through the underlying Nim proc with
+  ## the ordinal coerced back to ``CtEventKind`` (the wire enum is a
+  ## plain ordinal in JS).
+  data.dapApi.sendCtRequest(cast[CtEventKind](kindOrdinal), rawValue)
+
+proc installM5ColumnAwareServiceMethods() =
+  ## Attach the M1/M2/M3 service procs and the M3 DAP-pipeline
+  ## entry-point as JS methods on the live ``DebuggerService`` and
+  ## ``DapApi`` instances.  Idempotent.
+  let svc = cast[JsObject](data.services.debugger)
+  if not svc.isNil:
+    svc["addColumnBreakpoint"] = cast[JsObject](thunkM5AddColumnBreakpoint)
+    svc["stepOverStatement"] = cast[JsObject](thunkM5StepOverStatement)
+    svc["setActiveSourceView"] = cast[JsObject](thunkM5SetActiveSourceView)
+    svc["installSourceViewForTest"] =
+      cast[JsObject](thunkM5InstallSourceViewForTest)
+  let dap = cast[JsObject](data.dapApi)
+  if not dap.isNil:
+    dap["sendCtRequest"] = cast[JsObject](thunkM5DapSendCtRequest)
+
+installM5ColumnAwareServiceMethods()
+
 const ClientActionCount = ClientAction.high.int - ClientAction.low.int + 1
 
 # static:
