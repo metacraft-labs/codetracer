@@ -1096,6 +1096,14 @@ type
     lang*:           Lang
     tokens*:         JsAssoc[int, JsAssoc[cstring, int]]
     decorations*:    seq[(DeltaDecoration, bool)]
+    ## M6 — Column-aware breakpoint markers tracked separately from
+    ## the per-line `decorations` array so the column-anchored
+    ## inline decorations (anchored at `(line, column..column+1)`)
+    ## can be refreshed independently of the line-wide styling
+    ## emitted by ``styleLines``.  The IDs are the values returned by
+    ## ``MonacoEditor.deltaDecorations``; passing them back lets
+    ## Monaco diff the column-marker layer cleanly on each refresh.
+    columnBreakpointDecorations*: seq[cstring]
     whitespace*:     Whitespace
     encoding*:       cstring
     # monacoJsonSchemes*: JsAssoc[cstring, js]
