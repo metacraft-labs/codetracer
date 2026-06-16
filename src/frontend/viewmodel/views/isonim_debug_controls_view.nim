@@ -281,7 +281,6 @@ when defined(js):
                id = "jump-to-live-debug",
                class = "ct-button-image-md-secondary ct-button-no-border jump-to-live-debug",
                onclick = proc() = vm.jumpToLive()):
-          text "Live"
           tdiv(class = "custom-tooltip"):
             text "Jump to live"
         tdiv(class = "separate-bar"):
@@ -296,8 +295,8 @@ when defined(js):
     reactiveDisabled(r, revContBtn,    proc(): bool = not vm.canReverseContinue.val)
     reactiveDisabled(r, contBtn,       proc(): bool = not vm.canContinue.val)
     reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.canJumpToLive.val)
+    reactiveDisabled(r, jumpLiveBtn,     proc(): bool = not vm.showJumpToLive.val)
     reactiveHidden(r, headIndicator,   proc(): bool = not vm.showRecordingHead.val)
-    reactiveHidden(r, jumpLiveBtn,     proc(): bool = not vm.showJumpToLive.val)
 
     panel
 
