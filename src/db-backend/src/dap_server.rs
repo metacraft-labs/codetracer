@@ -1951,8 +1951,43 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
             ctx.should_terminate = true;
         }
         DapMessage::Request(req) => {
-            if let Some(to_stable_sender) = ctx.to_stable_sender.clone() {
-                to_stable_sender.send(req.clone())?;
+            if let Some(to_stable_sender) = ctx.to_stable_sender.clone()
+                && let Err(send_err) = to_stable_sender.send(req.clone())
+            {
+                // The stable task-thread's ``from_stable_receiver``
+                // has been dropped — almost always because the
+                // thread panicked.  Surface an error DAP response
+                // to the client so its ``customRequest`` promise
+                // resolves immediately instead of waiting the full
+                // 30 s for nothing (see the Leo deep-test
+                // ``can search the calltrace`` failure pattern:
+                // the assertion in ``calltrace::load_callstack``
+                // panicked on a step with ``call_key == NO_KEY``,
+                // the stable thread died silently, and subsequent
+                // requests timed out).
+                error!(
+                    "to_stable_sender.send({}) failed -- stable task-thread is gone ({send_err:?}); \
+                     replying success=false so the DAP client doesn't hang",
+                    req.command,
+                );
+                let error_response = DapMessage::Response(dap::Response {
+                    base: dap::ProtocolMessage {
+                        seq: ctx.seq,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: false,
+                    command: req.command.clone(),
+                    message: Some(format!(
+                        "stable task-thread has exited (likely panicked); cannot service {}",
+                        req.command,
+                    )),
+                    body: json!({}),
+                });
+                ctx.seq += 1;
+                if let Err(reply_err) = sender.send(error_response) {
+                    error!("could not send error response for {}: {reply_err:?}", req.command);
+                }
             }
         }
         _ => {}
