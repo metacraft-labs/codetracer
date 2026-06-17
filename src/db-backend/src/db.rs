@@ -990,6 +990,22 @@ pub enum EndOfProgram {
 
 // type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 
+/// Comparison operators supported by the M9 breakpoint condition
+/// evaluator.  The set is deliberately minimal — the spec calls out
+/// `i > 100` as the canonical use case; everything else is a natural
+/// extension (`>=`, `<=`, `==`, `!=`, `<`) and stays well within
+/// "no new expression evaluator".  Implemented inline in
+/// `evaluate_breakpoint_condition`.
+#[derive(Debug, Clone, Copy)]
+enum BreakpointConditionOp {
+    Gt,
+    Lt,
+    Ge,
+    Le,
+    Eq,
+    Ne,
+}
+
 #[derive(Debug)]
 pub struct MaterializedReplaySession {
     /// Shared, read-only access to trace data via the [`TraceReader`]
@@ -1445,6 +1461,16 @@ impl MaterializedReplaySession {
     ///
     /// Both slots coexist independently on the same line; a step
     /// satisfying either kind is a hit.
+    ///
+    /// M9 conditional layer — when the matched `Breakpoint` carries a
+    /// `condition: Some(expr)`, the step is treated as a hit ONLY when
+    /// `expr` evaluates to a truthy value against the locals recorded
+    /// at the candidate step.  Composes orthogonally with the column
+    /// match above: a column-aware breakpoint with a condition first
+    /// checks the column, then the condition.  A condition-bearing
+    /// breakpoint whose condition fails to evaluate (parse error,
+    /// unknown variable) is treated as a non-hit — the engine MUST
+    /// NOT spuriously stop on a malformed condition.
     fn step_matches_any_breakpoint(&self, step: &DbStep) -> bool {
         let path_idx = step.path_id.0;
         if path_idx >= self.breakpoint_list.len() {
@@ -1453,23 +1479,135 @@ impl MaterializedReplaySession {
         let line_key = step.line.0 as usize;
         let table = &self.breakpoint_list[path_idx];
 
-        // Legacy line-only slot: stop on every step at this line.
+        // Legacy line-only slot: stop on every step at this line, but
+        // honour the M9 condition layer when present.
         if let Some(bp) = table.get(&(line_key, None))
             && bp.enabled
+            && self.condition_satisfied_at(bp, step.step_id)
         {
             return true;
         }
 
         // Column-aware slot: only fire when the step's recorded column
-        // is `Some(c)` and equals the breakpoint's column.
+        // is `Some(c)` and equals the breakpoint's column.  The
+        // condition layer applies after the column filter so users
+        // can write "stop at column 14 only when i > 100".
         if let Some(step_col) = step.column
             && let Some(bp) = table.get(&(line_key, Some(step_col.0)))
             && bp.enabled
+            && self.condition_satisfied_at(bp, step.step_id)
         {
             return true;
         }
 
         false
+    }
+
+    /// Evaluate the breakpoint's optional condition expression against
+    /// the locals recorded at `step_id`.  Returns `true` when:
+    ///
+    ///   * the breakpoint has no condition (M1 unconditional path), OR
+    ///   * the condition parses, all referenced variables resolve at
+    ///     the step, and the expression yields a truthy value.
+    ///
+    /// Returns `false` for any parse error, unresolved variable, or
+    /// false expression result — a malformed condition MUST NOT
+    /// trigger spurious stops.  See M9 of
+    /// `codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org`.
+    fn condition_satisfied_at(&self, bp: &Breakpoint, step_id: StepId) -> bool {
+        let Some(expr) = bp.condition.as_deref() else {
+            return true;
+        };
+        // A malformed condition or unresolved variable counts as a
+        // non-hit — surfaced via `unwrap_or_default()` (default `bool`
+        // is `false`).
+        self.evaluate_breakpoint_condition(expr, step_id).unwrap_or_default()
+    }
+
+    /// Evaluate a breakpoint condition expression at `step_id`.
+    ///
+    /// Supports a minimal but practical surface:
+    ///   * `<name> <op> <int-literal>` — where `<op>` is one of
+    ///     `>`, `<`, `>=`, `<=`, `==`, `!=`.
+    ///   * `<name>` alone — truthy iff the variable resolves to a
+    ///     non-zero integer or boolean `true` (lets users write
+    ///     `enabled` as a condition).
+    ///
+    /// `<name>` is looked up against the per-step `variables_at` snapshot
+    /// recorded for `step_id`, mirroring the lookup used by
+    /// `program_search_tool::evaluate` (the only other place in the
+    /// db-backend that consults per-step variable values).  Returns a
+    /// descriptive error for parse failures and unresolved variables;
+    /// callers (`condition_satisfied_at`) translate the error into a
+    /// non-hit so a typo never spuriously stops the runner.
+    fn evaluate_breakpoint_condition(&self, expr: &str, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        let trimmed = expr.trim();
+        if trimmed.is_empty() {
+            return Err("empty condition".into());
+        }
+        const OPS: [(&str, BreakpointConditionOp); 6] = [
+            (">=", BreakpointConditionOp::Ge),
+            ("<=", BreakpointConditionOp::Le),
+            ("==", BreakpointConditionOp::Eq),
+            ("!=", BreakpointConditionOp::Ne),
+            (">", BreakpointConditionOp::Gt),
+            ("<", BreakpointConditionOp::Lt),
+        ];
+        for (token, op) in OPS.iter() {
+            if let Some(idx) = trimmed.find(token) {
+                let lhs = trimmed[..idx].trim();
+                let rhs = trimmed[idx + token.len()..].trim();
+                let lhs_value = self.lookup_variable_int(lhs, step_id)?;
+                let rhs_value: i64 = rhs
+                    .parse()
+                    .map_err(|e| format!("can't parse rhs `{rhs}` as integer: {e}"))?;
+                return Ok(match op {
+                    BreakpointConditionOp::Gt => lhs_value > rhs_value,
+                    BreakpointConditionOp::Lt => lhs_value < rhs_value,
+                    BreakpointConditionOp::Ge => lhs_value >= rhs_value,
+                    BreakpointConditionOp::Le => lhs_value <= rhs_value,
+                    BreakpointConditionOp::Eq => lhs_value == rhs_value,
+                    BreakpointConditionOp::Ne => lhs_value != rhs_value,
+                });
+            }
+        }
+        // Bare-name fallback: truthy iff the variable resolves to a
+        // non-zero integer or boolean `true`.
+        let value = self.lookup_variable_record(trimmed, step_id)?;
+        Ok(match value {
+            ValueRecord::Int { i, .. } => i != 0,
+            ValueRecord::Bool { b, .. } => b,
+            _ => false,
+        })
+    }
+
+    /// Look up `name` in the per-step variables snapshot and coerce
+    /// the recorded value to an integer.  Booleans coerce to 0/1 so
+    /// expressions like `flag == 1` work transparently.  Returns an
+    /// error when the variable doesn't exist on this step or its
+    /// value can't be coerced.
+    fn lookup_variable_int(&self, name: &str, step_id: StepId) -> Result<i64, Box<dyn Error>> {
+        let value = self.lookup_variable_record(name, step_id)?;
+        match value {
+            ValueRecord::Int { i, .. } => Ok(i),
+            ValueRecord::Bool { b, .. } => Ok(if b { 1 } else { 0 }),
+            other => Err(format!("variable `{name}` is not an integer: {other:?}").into()),
+        }
+    }
+
+    /// Look up a variable by name in the per-step variables snapshot.
+    /// Returns the cloned `ValueRecord` so callers can pattern-match
+    /// on the variant.  Mirrors the lookup used by
+    /// `program_search_tool::evaluate`.
+    fn lookup_variable_record(&self, name: &str, step_id: StepId) -> Result<ValueRecord, Box<dyn Error>> {
+        if let Some(vars) = self.reader.variables_at(step_id) {
+            for variable in vars {
+                if self.reader.variable_name(variable.variable_id) == Some(name) {
+                    return Ok(variable.value.clone());
+                }
+            }
+        }
+        Err(format!("variable `{name}` not found at step {step_id:?}").into())
     }
 
     /// Resolves a source path to its `PathId` in the trace database.
@@ -1836,7 +1974,13 @@ impl ReplaySession for MaterializedReplaySession {
         Ok(())
     }
 
-    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>> {
+    fn add_breakpoint(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        condition: Option<String>,
+    ) -> Result<Breakpoint, Box<dyn Error>> {
         let path_id_res: Result<PathId, Box<dyn Error>> = self
             .load_path_id(path)
             .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", path).into());
@@ -1846,6 +1990,7 @@ impl ReplaySession for MaterializedReplaySession {
             enabled: true,
             id: self.breakpoint_next_id as i64,
             column,
+            condition,
         };
         self.breakpoint_next_id += 1;
         // Keyed by `(line, column)` per M1: the same line can carry
@@ -1853,7 +1998,9 @@ impl ReplaySession for MaterializedReplaySession {
         // multi-statement minified line) without overwriting each
         // other, AND a column-less legacy breakpoint coexists with
         // column-aware siblings on the same line (it lives under the
-        // `(line, None)` slot).
+        // `(line, None)` slot).  M9 stores the optional condition
+        // expression alongside the `(line, column)` key — the stop
+        // check evaluates it before honouring the breakpoint hit.
         inner_map.insert((line as usize, column), breakpoint.clone());
         Ok(breakpoint)
     }

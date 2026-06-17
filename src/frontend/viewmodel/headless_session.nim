@@ -682,7 +682,7 @@ proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
 # ---------------------------------------------------------------------------
 
 proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int;
-                    column: int = 0) =
+                    column: int = 0; condition: string = "") =
   ## Send a ``setBreakpoints`` DAP request for a single breakpoint at the
   ## given file and line.  The standard DAP ``setBreakpoints`` command
   ## replaces all breakpoints for the specified source, so calling this
@@ -696,11 +696,21 @@ proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int;
   ## apply: the next ``continue`` stops at the first recorded step on
   ## ``line``, regardless of column.
   ##
+  ## M9 — Column-Aware Conditional Breakpoint: when ``condition`` is
+  ## non-empty the replay engine evaluates the expression against the
+  ## locals recorded at the candidate stop step and only fires the
+  ## breakpoint when the expression yields a truthy value.  Composes
+  ## orthogonally with ``column``: both filters apply when both are
+  ## set.  ``condition = ""`` (the default) preserves the M1
+  ## unconditional behaviour.
+  ##
   ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
-  ## §M1 for the DAP wire contract.
+  ## §M1 and §M9 for the DAP wire contract.
   var bp = %*{"line": line}
   if column > 0:
     bp["column"] = %column
+  if condition.len > 0:
+    bp["condition"] = %condition
   let args = %*{
     "source": {
       "path": file,
@@ -714,13 +724,23 @@ proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int;
 
 proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
                                  file: string; line: int;
-                                 column: int = 0): JsonNode =
+                                 column: int = 0;
+                                 condition: string = ""): JsonNode =
   ## Send a ``setBreakpoints`` request and return the raw DAP response
   ## body.  Mirrors ``setBreakpoint`` but exposes the response so tests
   ## can assert on the bound ``column`` the backend echoes back.
+  ##
+  ## M9 — Column-Aware Conditional Breakpoint: the optional
+  ## ``condition`` parameter is forwarded to the replay engine
+  ## alongside the column.  The DAP response doesn't echo the
+  ## condition back (DAP doesn't define that round-trip slot), but
+  ## the ``verified`` flag and the bound ``column`` confirm the
+  ## request was accepted.
   var bp = %*{"line": line}
   if column > 0:
     bp["column"] = %column
+  if condition.len > 0:
+    bp["condition"] = %condition
   let args = %*{
     "source": {
       "path": file,

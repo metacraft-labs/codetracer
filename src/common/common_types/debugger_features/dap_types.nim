@@ -54,6 +54,13 @@ type
   DapSourceBreakpoint* = ref object
     line*: int
     column*: int
+    ## M9 — Column-Aware Conditional Breakpoint: an optional
+    ## expression evaluated by the replay engine at the candidate
+    ## stop step.  ``""`` (the default for the ref-object's value
+    ## type) preserves the unconditional behaviour M1 shipped with;
+    ## a non-empty string is forwarded to the replay engine on the
+    ## DAP ``setBreakpoints`` request.
+    condition*: cstring
 
   DapSetBreakpointsArguments* = ref object
     source*: DapSource

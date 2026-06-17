@@ -105,7 +105,7 @@ impl FlowPreloader {
         let mut diff_call_keys = HashSet::new();
         // put breakpoints on all of them
         for diff_line in &diff_lines {
-            let _ = replay.add_breakpoint(&diff_line.0.display().to_string(), diff_line.1, None)?;
+            let _ = replay.add_breakpoint(&diff_line.0.display().to_string(), diff_line.1, None, None)?;
         }
         // TODO: breakpoints on function entries or function names as well
         //   so => we can count how many stops?
@@ -414,7 +414,7 @@ impl<'a> CallFlowPreloader<'a> {
             // flow to the enclosing call entry.
             if step_id.0 == 0 && self.mode == FlowMode::Call && self.location.line > 0 {
                 replay.jump_to(StepId(0))?;
-                let bp = replay.add_breakpoint(&self.location.path, self.location.line, None)?;
+                let bp = replay.add_breakpoint(&self.location.path, self.location.line, None, None)?;
                 let hit = replay.step(Action::Continue, true)?;
                 let _ = replay.delete_breakpoint(&bp);
                 if hit {
@@ -1081,6 +1081,7 @@ mod tests {
             _path: &str,
             _line: i64,
             _column: Option<i64>,
+            _condition: Option<String>,
         ) -> Result<Breakpoint, Box<dyn Error>> {
             unimplemented!()
         }

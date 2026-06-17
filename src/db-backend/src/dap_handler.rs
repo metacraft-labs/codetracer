@@ -3199,6 +3199,7 @@ impl Handler {
                 &source_location.path,
                 source_location.line as i64,
                 source_location.column,
+                source_location.condition.clone(),
             )?;
 
             let mut move_error = false;
@@ -3270,6 +3271,7 @@ impl Handler {
             line: line.into(),
             path: self.reader.path(path_id).unwrap_or("").to_string(),
             column: None,
+            condition: None,
         }) {
             return Some(step_id);
         }
@@ -3287,6 +3289,7 @@ impl Handler {
             line: call_target.line,
             path: call_target.path.clone(),
             column: None,
+            condition: None,
         }) {
             self.replay.jump_to(line_step_id)?;
             self.step_id = self.replay.current_step_id();
@@ -3335,13 +3338,32 @@ impl Handler {
             // line-only breakpoints.  Treating 0 as None preserves
             // back-compat without forcing every existing UI surface
             // to switch to an Option-shaped field.
-            let line_specs: Vec<(i64, Option<i64>)> = if let Some(bps) = args.breakpoints {
-                bps.into_iter().map(|b| (b.line, b.column.filter(|c| *c > 0))).collect()
+            // M9: in addition to `column`, also forward
+            // `SourceBreakpoint.condition` to the replay engine so the
+            // Continue stop check can evaluate it.  An empty-string
+            // condition (the same back-compat hazard as `column: 0`)
+            // is normalised to `None` so the unconditional behaviour
+            // M1 shipped with is preserved when frontends ship an
+            // empty placeholder.
+            let line_specs: Vec<(i64, Option<i64>, Option<String>)> = if let Some(bps) = args.breakpoints {
+                bps.into_iter()
+                    .map(|b| {
+                        (
+                            b.line,
+                            b.column.filter(|c| *c > 0),
+                            b.condition.filter(|c| !c.is_empty()),
+                        )
+                    })
+                    .collect()
             } else {
-                args.lines.unwrap_or_default().into_iter().map(|l| (l, None)).collect()
+                args.lines
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|l| (l, None, None))
+                    .collect()
             };
 
-            for (line, column) in line_specs {
+            for (line, column, condition) in line_specs {
                 let source = Some(dap_types::Source {
                     name: args.source.name.clone(),
                     path: Some(path.clone()),
@@ -3356,6 +3378,7 @@ impl Handler {
                     path: path.clone(),
                     line: line as usize,
                     column,
+                    condition: condition.clone(),
                 }) {
                     Ok(breakpoint) => {
                         results.push(dap_types::Breakpoint {
@@ -3431,7 +3454,13 @@ impl Handler {
     }
 
     pub fn add_breakpoint(&mut self, loc: SourceLocation) -> Result<Breakpoint, Box<dyn Error>> {
-        let breakpoint = self.replay.add_breakpoint(&loc.path, loc.line as i64, loc.column)?;
+        // M9: thread `loc.condition` to the replay engine so the
+        // Continue stop check can evaluate it.  The breakpoint
+        // registry is still keyed by `(path, line, column)` — the
+        // condition is carried on the stored `Breakpoint` records.
+        let breakpoint = self
+            .replay
+            .add_breakpoint(&loc.path, loc.line as i64, loc.column, loc.condition.clone())?;
         let entry = self
             .breakpoints
             .entry((loc.path.clone(), loc.line as i64, loc.column))
@@ -3574,7 +3603,7 @@ impl Handler {
                         if !tracepoint_indices.iter().any(|idx| registered[*idx]) {
                             continue;
                         }
-                        match self.replay.add_breakpoint(path, line as i64, None) {
+                        match self.replay.add_breakpoint(path, line as i64, None, None) {
                             Ok(breakpoint) => tracepoint_breakpoints.push(breakpoint),
                             Err(error) => {
                                 warn!("tracepoint breakpoint error: {error:?}");
@@ -3965,7 +3994,9 @@ impl Handler {
             self.complete_move(false, sender)?;
         } else {
             self.replay.disable_breakpoints()?;
-            let bp = self.replay.add_breakpoint(&arg.path, arg.first_loop_line + 1, None)?;
+            let bp = self
+                .replay
+                .add_breakpoint(&arg.path, arg.first_loop_line + 1, None, None)?;
             let location = self.replay.load_location(&mut self.expr_loader)?;
             if location.line < arg.first_loop_line {
                 self.replay.step(Action::Continue, true)?;
@@ -5716,6 +5747,7 @@ mod tests {
             path: path.to_string(),
             line: 3,
             column: None,
+            condition: None,
         };
         handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
@@ -5725,6 +5757,7 @@ mod tests {
                 path: path.to_string(),
                 line: 2,
                 column: None,
+                condition: None,
             },
             sender.clone(),
         )?;

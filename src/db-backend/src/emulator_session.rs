@@ -1100,14 +1100,16 @@ impl EmulatorReplaySession {
 
     /// Allocate and store a new breakpoint record under `(path, line)`.
     ///
-    /// The returned record carries `column = None`; the trait-level
-    /// `add_breakpoint` overlays the actual column (when the DAP client
-    /// requested one) onto the returned record before handing it back.
+    /// The returned record carries `column = None` and `condition =
+    /// None`; the trait-level `add_breakpoint` overlays the actual
+    /// column and condition (when the DAP client requested them) onto
+    /// the returned record before handing it back.
     fn allocate_breakpoint(&mut self, path: &str, line: i64) -> Breakpoint {
         let breakpoint = Breakpoint {
             id: self.next_breakpoint_id,
             enabled: self.breakpoints_enabled,
             column: None,
+            condition: None,
         };
         self.next_breakpoint_id += 1;
         self.breakpoints
@@ -1808,7 +1810,13 @@ impl ReplaySession for EmulatorReplaySession {
         todo!("F5c-3: build per-line history from emulator trace")
     }
 
-    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>> {
+    fn add_breakpoint(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        condition: Option<String>,
+    ) -> Result<Breakpoint, Box<dyn Error>> {
         // The dap_handler shim (`dap_handler::set_breakpoints`, around
         // line 1294) reports `verified: true` whenever `add_breakpoint`
         // returns `Ok`. So all we need to do here is mint a new id and
@@ -1820,8 +1828,13 @@ impl ReplaySession for EmulatorReplaySession {
         // tables are line-granular) — we still thread it onto the
         // returned `Breakpoint` so the DAP response and GUI gutter
         // marker carry the bound column even on emulator-backed traces.
+        // The M9 `condition` is similarly recorded on the returned
+        // `Breakpoint` so the DAP response surfaces it; the emulator
+        // Continue hot path does not yet evaluate the condition (the
+        // M9 enforcement lives on the materialised replay path).
         let mut breakpoint = self.allocate_breakpoint(path, line);
         breakpoint.column = column;
+        breakpoint.condition = condition;
         // M-Step-Stress: resolve the (path, line) to static PCs via the
         // bundled DWARF reverse index and populate the `Continue` hot
         // path's lookup set. A missing DWARF index, an unknown line, or
@@ -2150,7 +2163,7 @@ mod tests {
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
         let bp = session
-            .add_breakpoint("src/main.c", 42, None)
+            .add_breakpoint("src/main.c", 42, None, None)
             .expect("breakpoint must register");
         assert!(bp.enabled, "freshly-added breakpoint must be enabled");
         assert!(bp.id >= 1, "breakpoint id must be a positive monotonic counter");
@@ -3424,7 +3437,7 @@ mod tests {
         let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
 
         let bp = session
-            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None)
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None)
             .expect("add_breakpoint must succeed");
         assert!(bp.enabled, "freshly-added breakpoint must be enabled");
         assert!(
@@ -3444,7 +3457,7 @@ mod tests {
 
         // delete_breakpoints (plural) on a fresh, re-added breakpoint
         // must also empty the set.
-        let _bp = session.add_breakpoint("hello.c", PC_ADD_BODY_LINE, None).unwrap();
+        let _bp = session.add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None).unwrap();
         assert!(!session.breakpoint_static_pcs.is_empty());
         session.delete_breakpoints().unwrap();
         assert!(session.breakpoint_static_pcs.is_empty());
@@ -3630,7 +3643,7 @@ mod tests {
         // PC 0x40103d (the start of `return doubled;` after the
         // assignment to `doubled` is complete).
         let _bp = session
-            .add_breakpoint("hello.c", HELLO_LINE_AFTER_CALL, None)
+            .add_breakpoint("hello.c", HELLO_LINE_AFTER_CALL, None, None)
             .expect("breakpoint must register");
         assert!(
             session.breakpoint_static_pcs.contains(&PC_COMPUTE_LINE_30),
