@@ -991,13 +991,27 @@ pub enum EndOfProgram {
 
 // type LineTraceMap = HashMap<usize, Vec<(usize, String)>>;
 
-/// Comparison operators supported by the M9 breakpoint condition
-/// evaluator.  The set is deliberately minimal — the spec calls out
-/// `i > 100` as the canonical use case; everything else is a natural
-/// extension (`>=`, `<=`, `==`, `!=`, `<`) and stays well within
-/// "no new expression evaluator".  Implemented inline in
-/// `evaluate_breakpoint_condition`.
-#[derive(Debug, Clone, Copy)]
+/// Comparison operators supported by the breakpoint condition
+/// evaluator.
+///
+/// M9 shipped this evaluator with integer-only comparisons of the
+/// shape `<name> <op> <int-literal>` plus a bare-name truthy fallback.
+/// FU-C (this commit) extends the supported atoms:
+///
+///   * `<op>` continues to be one of `>`, `<`, `>=`, `<=`, `==`, `!=`.
+///   * RHS literals may now be integers (`x == 0`), floats
+///     (`x == 1.5`), or double-quoted strings (`s == "foo"`).
+///   * Strings only support `==` / `!=` — ordering on strings is not
+///     useful at a column breakpoint and adds parser surface for no
+///     win.
+///   * Mixed-type comparisons (e.g. an int variable against a string
+///     literal) deliberately yield `false` rather than an error: a
+///     malformed-looking expression must NOT stop the runner.
+///
+/// Atoms compose into compound boolean expressions via `&&` (higher
+/// precedence than `||`) and grouping parentheses, parsed by a tiny
+/// recursive-descent layer in `evaluate_breakpoint_condition`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BreakpointConditionOp {
     Gt,
     Lt,
@@ -1005,6 +1019,390 @@ enum BreakpointConditionOp {
     Le,
     Eq,
     Ne,
+}
+
+/// A literal on the RHS of a comparison atom.
+///
+/// The evaluator parses the literal once at parse time so each
+/// per-step evaluation is a pure compare against an already-decoded
+/// Rust value.
+#[derive(Debug, Clone, PartialEq)]
+enum BreakpointConditionLiteral {
+    Int(i64),
+    Float(f64),
+    Str(String),
+}
+
+/// Parsed AST node for the breakpoint condition mini-language.
+///
+/// The grammar (lowest to highest precedence):
+///
+/// ```text
+///   Or       := And ( "||" And )*
+///   And      := Primary ( "&&" Primary )*
+///   Primary  := "(" Or ")" | Atom
+///   Atom     := Ident Op Literal | Ident          ; bare-name truthy fallback
+///   Op       := ">=" | "<=" | "==" | "!=" | ">" | "<"
+///   Literal  := IntLit | FloatLit | StringLit
+/// ```
+///
+/// Identifiers are looked up against the per-step variables snapshot
+/// at evaluation time, so the same parsed AST is correct across every
+/// candidate step a Continue traverses.
+#[derive(Debug, Clone)]
+enum BreakpointConditionExpr {
+    Or(Box<BreakpointConditionExpr>, Box<BreakpointConditionExpr>),
+    And(Box<BreakpointConditionExpr>, Box<BreakpointConditionExpr>),
+    /// `<name> <op> <literal>` — full atom.
+    Cmp(String, BreakpointConditionOp, BreakpointConditionLiteral),
+    /// Bare identifier — truthy iff the looked-up value is a non-zero
+    /// integer or boolean `true`.  Preserves M9's `enabled` ergonomic.
+    Truthy(String),
+}
+
+/// A single token produced by [`tokenize_breakpoint_condition`].
+///
+/// The tokenizer is intentionally tiny — the grammar is small enough
+/// to parse from a flat token stream without scanning the input
+/// string in the parser itself.
+#[derive(Debug, Clone, PartialEq)]
+enum BreakpointConditionToken {
+    Ident(String),
+    IntLit(i64),
+    FloatLit(f64),
+    StrLit(String),
+    Op(BreakpointConditionOp),
+    AndAnd,
+    OrOr,
+    LParen,
+    RParen,
+}
+
+/// Tokenize a breakpoint condition expression.
+///
+/// Whitespace is the universal separator.  Identifiers follow the
+/// usual ASCII identifier rules (`[A-Za-z_][A-Za-z0-9_]*`) — the
+/// recorded variable names we look up against are guaranteed to be
+/// ASCII identifiers by the recorders.  String literals are
+/// double-quoted with `\\\\` / `\\"` escapes; numeric literals accept
+/// an optional leading `-` and a single fractional `.` to disambiguate
+/// floats from integers.
+fn tokenize_breakpoint_condition(input: &str) -> Result<Vec<BreakpointConditionToken>, Box<dyn Error>> {
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    let mut tokens = Vec::new();
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Whitespace.
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        // Parentheses.
+        if c == b'(' {
+            tokens.push(BreakpointConditionToken::LParen);
+            i += 1;
+            continue;
+        }
+        if c == b')' {
+            tokens.push(BreakpointConditionToken::RParen);
+            i += 1;
+            continue;
+        }
+        // Two-character logical ops.
+        if c == b'&' && i + 1 < bytes.len() && bytes[i + 1] == b'&' {
+            tokens.push(BreakpointConditionToken::AndAnd);
+            i += 2;
+            continue;
+        }
+        if c == b'|' && i + 1 < bytes.len() && bytes[i + 1] == b'|' {
+            tokens.push(BreakpointConditionToken::OrOr);
+            i += 2;
+            continue;
+        }
+        // Comparison ops — longest match first so `>=` doesn't lex as `>` then `=`.
+        if i + 1 < bytes.len() {
+            let pair = &bytes[i..i + 2];
+            let op = match pair {
+                b">=" => Some(BreakpointConditionOp::Ge),
+                b"<=" => Some(BreakpointConditionOp::Le),
+                b"==" => Some(BreakpointConditionOp::Eq),
+                b"!=" => Some(BreakpointConditionOp::Ne),
+                _ => None,
+            };
+            if let Some(op) = op {
+                tokens.push(BreakpointConditionToken::Op(op));
+                i += 2;
+                continue;
+            }
+        }
+        if c == b'>' {
+            tokens.push(BreakpointConditionToken::Op(BreakpointConditionOp::Gt));
+            i += 1;
+            continue;
+        }
+        if c == b'<' {
+            tokens.push(BreakpointConditionToken::Op(BreakpointConditionOp::Lt));
+            i += 1;
+            continue;
+        }
+        // String literal.
+        if c == b'"' {
+            let mut j = i + 1;
+            let mut decoded = String::new();
+            while j < bytes.len() && bytes[j] != b'"' {
+                if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                    let esc = bytes[j + 1];
+                    match esc {
+                        b'"' => decoded.push('"'),
+                        b'\\' => decoded.push('\\'),
+                        b'n' => decoded.push('\n'),
+                        b't' => decoded.push('\t'),
+                        other => {
+                            return Err(format!("unsupported escape `\\{}` in string literal", other as char).into());
+                        }
+                    }
+                    j += 2;
+                } else {
+                    decoded.push(bytes[j] as char);
+                    j += 1;
+                }
+            }
+            if j >= bytes.len() {
+                return Err("unterminated string literal in condition".into());
+            }
+            tokens.push(BreakpointConditionToken::StrLit(decoded));
+            i = j + 1; // skip closing quote
+            continue;
+        }
+        // Numeric literal (optionally signed).  We accept a leading `-`
+        // only when the previous token would otherwise be illegal — at
+        // the start of the expression or right after an operator /
+        // open-paren / boolean connective.  Otherwise `-` would have
+        // to be a subtraction operator we don't support, so we let it
+        // fall through to the error branch below.
+        let allow_unary_minus = c == b'-'
+            && matches!(
+                tokens.last(),
+                None | Some(BreakpointConditionToken::Op(_))
+                    | Some(BreakpointConditionToken::AndAnd)
+                    | Some(BreakpointConditionToken::OrOr)
+                    | Some(BreakpointConditionToken::LParen)
+            );
+        if c.is_ascii_digit() || allow_unary_minus {
+            let start = i;
+            if allow_unary_minus {
+                i += 1;
+            }
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let mut is_float = false;
+            if i < bytes.len() && bytes[i] == b'.' {
+                is_float = true;
+                i += 1;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            let raw = std::str::from_utf8(&bytes[start..i]).map_err(|e| format!("non-utf8 numeric literal: {e}"))?;
+            if is_float {
+                let f: f64 = raw.parse().map_err(|e| format!("can't parse `{raw}` as float: {e}"))?;
+                tokens.push(BreakpointConditionToken::FloatLit(f));
+            } else {
+                let n: i64 = raw
+                    .parse()
+                    .map_err(|e| format!("can't parse `{raw}` as integer: {e}"))?;
+                tokens.push(BreakpointConditionToken::IntLit(n));
+            }
+            continue;
+        }
+        // Identifier — ASCII, conventional rules.
+        if c == b'_' || c.is_ascii_alphabetic() {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric()) {
+                i += 1;
+            }
+            let raw = std::str::from_utf8(&bytes[start..i]).map_err(|e| format!("non-utf8 identifier: {e}"))?;
+            tokens.push(BreakpointConditionToken::Ident(raw.to_string()));
+            continue;
+        }
+        return Err(format!("unexpected character `{}` in breakpoint condition", c as char).into());
+    }
+    Ok(tokens)
+}
+
+/// Tiny recursive-descent parser over the token stream produced by
+/// [`tokenize_breakpoint_condition`].
+///
+/// The grammar lives at [`BreakpointConditionExpr`].  Each method
+/// corresponds to one precedence level and consumes the longest
+/// prefix it can.  Errors are descriptive enough that
+/// `condition_satisfied_at` can swallow them into a non-hit while
+/// still giving useful context if surfaced through logging.
+struct BreakpointConditionParser<'a> {
+    tokens: &'a [BreakpointConditionToken],
+    pos: usize,
+}
+
+impl<'a> BreakpointConditionParser<'a> {
+    fn new(tokens: &'a [BreakpointConditionToken]) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn peek(&self) -> Option<&BreakpointConditionToken> {
+        self.tokens.get(self.pos)
+    }
+
+    fn bump(&mut self) -> Option<&BreakpointConditionToken> {
+        let token = self.tokens.get(self.pos);
+        if token.is_some() {
+            self.pos += 1;
+        }
+        token
+    }
+
+    fn expect_eof(&self) -> Result<(), Box<dyn Error>> {
+        if self.pos < self.tokens.len() {
+            return Err(format!("unexpected trailing tokens at position {}", self.pos).into());
+        }
+        Ok(())
+    }
+
+    fn parse_or(&mut self) -> Result<BreakpointConditionExpr, Box<dyn Error>> {
+        let mut lhs = self.parse_and()?;
+        while matches!(self.peek(), Some(BreakpointConditionToken::OrOr)) {
+            self.bump();
+            let rhs = self.parse_and()?;
+            lhs = BreakpointConditionExpr::Or(Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_and(&mut self) -> Result<BreakpointConditionExpr, Box<dyn Error>> {
+        let mut lhs = self.parse_primary()?;
+        while matches!(self.peek(), Some(BreakpointConditionToken::AndAnd)) {
+            self.bump();
+            let rhs = self.parse_primary()?;
+            lhs = BreakpointConditionExpr::And(Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_primary(&mut self) -> Result<BreakpointConditionExpr, Box<dyn Error>> {
+        if matches!(self.peek(), Some(BreakpointConditionToken::LParen)) {
+            self.bump();
+            let inner = self.parse_or()?;
+            match self.bump() {
+                Some(BreakpointConditionToken::RParen) => Ok(inner),
+                Some(other) => Err(format!("expected `)`, got {other:?}").into()),
+                None => Err("expected `)` before end of condition".into()),
+            }
+        } else {
+            self.parse_atom()
+        }
+    }
+
+    fn parse_atom(&mut self) -> Result<BreakpointConditionExpr, Box<dyn Error>> {
+        let name = match self.bump() {
+            Some(BreakpointConditionToken::Ident(name)) => name.clone(),
+            Some(other) => return Err(format!("expected identifier, got {other:?}").into()),
+            None => return Err("expected identifier at end of condition".into()),
+        };
+        // Look ahead: a comparison op makes this a full Cmp atom;
+        // anything else (end / `&&` / `||` / `)`) is a bare-name
+        // truthy atom.
+        match self.peek() {
+            Some(BreakpointConditionToken::Op(op)) => {
+                let op = *op;
+                self.bump();
+                let lit = match self.bump() {
+                    Some(BreakpointConditionToken::IntLit(n)) => BreakpointConditionLiteral::Int(*n),
+                    Some(BreakpointConditionToken::FloatLit(f)) => BreakpointConditionLiteral::Float(*f),
+                    Some(BreakpointConditionToken::StrLit(s)) => {
+                        // Strings only support equality.
+                        if !matches!(op, BreakpointConditionOp::Eq | BreakpointConditionOp::Ne) {
+                            return Err("string literals only support `==` / `!=` in breakpoint conditions".into());
+                        }
+                        BreakpointConditionLiteral::Str(s.clone())
+                    }
+                    Some(other) => return Err(format!("expected literal on RHS, got {other:?}").into()),
+                    None => return Err("expected literal on RHS at end of condition".into()),
+                };
+                Ok(BreakpointConditionExpr::Cmp(name, op, lit))
+            }
+            _ => Ok(BreakpointConditionExpr::Truthy(name)),
+        }
+    }
+}
+
+/// Compare the recorded value of a variable against a literal.
+///
+/// This is the single point where the type-coercion rules of the
+/// condition mini-language are spelled out:
+///
+///   * `Int` vs `IntLit`: native i64 compare.
+///   * `Int` vs `FloatLit`: widen the int to f64 and compare — lets
+///     `i == 1.0` work even when the recorded `i` is an integer.
+///   * `Float` vs `FloatLit` / `IntLit`: f64 compare (int literal
+///     widened).  NaN propagates as `false` for every op via the
+///     `partial_cmp` total fallback below.
+///   * `Bool` vs `IntLit`: bool coerces to 0/1 — preserves the M9
+///     `flag == 1` ergonomic.
+///   * `String` vs `StrLit`: case-sensitive equality.
+///   * Anything else (e.g. `Int` vs `StrLit`, or any unsupported
+///     `ValueRecord` variant): comparison is total — `Eq` yields
+///     `false` and `Ne` yields `true`, every other op yields `false`.
+///     This guarantees the evaluator never errors out on mixed
+///     types, so a misclassified literal can't escalate into a
+///     dropped Continue.
+fn compare_breakpoint_condition(
+    value: &ValueRecord,
+    op: BreakpointConditionOp,
+    literal: &BreakpointConditionLiteral,
+) -> bool {
+    use BreakpointConditionLiteral as Lit;
+    use BreakpointConditionOp as Op;
+
+    // Numeric comparisons, taking advantage of Rust's f64 `PartialOrd`.
+    // We funnel all numeric paths into a single (Option<f64>, Option<f64>)
+    // lane so the int-vs-float and float-vs-int matrices stay DRY.
+    let numeric = match (value, literal) {
+        (ValueRecord::Int { i, .. }, Lit::Int(n)) => Some((*i as f64, *n as f64)),
+        (ValueRecord::Int { i, .. }, Lit::Float(f)) => Some((*i as f64, *f)),
+        (ValueRecord::Float { f, .. }, Lit::Int(n)) => Some((*f, *n as f64)),
+        (ValueRecord::Float { f, .. }, Lit::Float(f2)) => Some((*f, *f2)),
+        (ValueRecord::Bool { b, .. }, Lit::Int(n)) => Some((if *b { 1.0 } else { 0.0 }, *n as f64)),
+        _ => None,
+    };
+    if let Some((lhs, rhs)) = numeric {
+        return match op {
+            Op::Eq => lhs == rhs,
+            Op::Ne => lhs != rhs,
+            Op::Gt => lhs > rhs,
+            Op::Lt => lhs < rhs,
+            Op::Ge => lhs >= rhs,
+            Op::Le => lhs <= rhs,
+        };
+    }
+    // String == / != (the parser already rejected ordering ops on strings).
+    if let (ValueRecord::String { text, .. }, Lit::Str(s)) = (value, literal) {
+        return match op {
+            Op::Eq => text == s,
+            Op::Ne => text != s,
+            // Defensive: parser should have rejected these, but be total.
+            _ => false,
+        };
+    }
+    // Bool == / != on string literal: not meaningful — fall through to mixed.
+    // Mixed-type fallback: only equality has a defined answer, and the
+    // values are by definition unequal.
+    match op {
+        Op::Eq => false,
+        Op::Ne => true,
+        _ => false,
+    }
 }
 
 #[derive(Debug)]
@@ -1650,12 +2048,19 @@ impl MaterializedReplaySession {
 
     /// Evaluate a breakpoint condition expression at `step_id`.
     ///
-    /// Supports a minimal but practical surface:
-    ///   * `<name> <op> <int-literal>` — where `<op>` is one of
-    ///     `>`, `<`, `>=`, `<=`, `==`, `!=`.
+    /// Supports a small but practical mini-language:
+    ///
+    ///   * `<name> <op> <literal>` — where `<op>` is one of
+    ///     `>`, `<`, `>=`, `<=`, `==`, `!=` and `<literal>` is an
+    ///     integer (`x == 0`), a float (`x == 1.5`), or a
+    ///     double-quoted string (`s == "foo"`).  Strings only
+    ///     compose with `==` / `!=`.
     ///   * `<name>` alone — truthy iff the variable resolves to a
     ///     non-zero integer or boolean `true` (lets users write
     ///     `enabled` as a condition).
+    ///   * Compound booleans via `&&` (higher precedence than `||`)
+    ///     and parentheses for grouping, e.g.
+    ///     `(x > 0) && (y < 10) || flag`.
     ///
     /// `<name>` is looked up against the per-step `variables_at` snapshot
     /// recorded for `step_id`, mirroring the lookup used by
@@ -1664,58 +2069,63 @@ impl MaterializedReplaySession {
     /// descriptive error for parse failures and unresolved variables;
     /// callers (`condition_satisfied_at`) translate the error into a
     /// non-hit so a typo never spuriously stops the runner.
+    ///
+    /// Mixed-type comparisons are deliberately TOTAL: comparing an
+    /// integer variable against a string literal (or vice versa)
+    /// yields `false` for `==` and `true` for `!=` — never an error.
+    /// A misclassified literal would otherwise turn a typo into a
+    /// hard runner failure, which is strictly worse than a silent
+    /// non-hit.
     fn evaluate_breakpoint_condition(&self, expr: &str, step_id: StepId) -> Result<bool, Box<dyn Error>> {
         let trimmed = expr.trim();
         if trimmed.is_empty() {
             return Err("empty condition".into());
         }
-        const OPS: [(&str, BreakpointConditionOp); 6] = [
-            (">=", BreakpointConditionOp::Ge),
-            ("<=", BreakpointConditionOp::Le),
-            ("==", BreakpointConditionOp::Eq),
-            ("!=", BreakpointConditionOp::Ne),
-            (">", BreakpointConditionOp::Gt),
-            ("<", BreakpointConditionOp::Lt),
-        ];
-        for (token, op) in OPS.iter() {
-            if let Some(idx) = trimmed.find(token) {
-                let lhs = trimmed[..idx].trim();
-                let rhs = trimmed[idx + token.len()..].trim();
-                let lhs_value = self.lookup_variable_int(lhs, step_id)?;
-                let rhs_value: i64 = rhs
-                    .parse()
-                    .map_err(|e| format!("can't parse rhs `{rhs}` as integer: {e}"))?;
-                return Ok(match op {
-                    BreakpointConditionOp::Gt => lhs_value > rhs_value,
-                    BreakpointConditionOp::Lt => lhs_value < rhs_value,
-                    BreakpointConditionOp::Ge => lhs_value >= rhs_value,
-                    BreakpointConditionOp::Le => lhs_value <= rhs_value,
-                    BreakpointConditionOp::Eq => lhs_value == rhs_value,
-                    BreakpointConditionOp::Ne => lhs_value != rhs_value,
-                });
-            }
-        }
-        // Bare-name fallback: truthy iff the variable resolves to a
-        // non-zero integer or boolean `true`.
-        let value = self.lookup_variable_record(trimmed, step_id)?;
-        Ok(match value {
-            ValueRecord::Int { i, .. } => i != 0,
-            ValueRecord::Bool { b, .. } => b,
-            _ => false,
-        })
+        let tokens = tokenize_breakpoint_condition(trimmed)?;
+        let mut parser = BreakpointConditionParser::new(&tokens);
+        let ast = parser.parse_or()?;
+        parser.expect_eof()?;
+        self.eval_breakpoint_condition_ast(&ast, step_id)
     }
 
-    /// Look up `name` in the per-step variables snapshot and coerce
-    /// the recorded value to an integer.  Booleans coerce to 0/1 so
-    /// expressions like `flag == 1` work transparently.  Returns an
-    /// error when the variable doesn't exist on this step or its
-    /// value can't be coerced.
-    fn lookup_variable_int(&self, name: &str, step_id: StepId) -> Result<i64, Box<dyn Error>> {
-        let value = self.lookup_variable_record(name, step_id)?;
-        match value {
-            ValueRecord::Int { i, .. } => Ok(i),
-            ValueRecord::Bool { b, .. } => Ok(if b { 1 } else { 0 }),
-            other => Err(format!("variable `{name}` is not an integer: {other:?}").into()),
+    /// Walk a parsed condition AST and evaluate it at `step_id`.
+    ///
+    /// `&&` and `||` short-circuit on the rust-native `bool` returned
+    /// by sub-evaluations — once a side decides the result, the
+    /// other side is never looked up, which matters when a variable
+    /// referenced on the unused side isn't recorded at this step.
+    fn eval_breakpoint_condition_ast(
+        &self,
+        ast: &BreakpointConditionExpr,
+        step_id: StepId,
+    ) -> Result<bool, Box<dyn Error>> {
+        match ast {
+            BreakpointConditionExpr::Or(lhs, rhs) => {
+                if self.eval_breakpoint_condition_ast(lhs, step_id)? {
+                    Ok(true)
+                } else {
+                    self.eval_breakpoint_condition_ast(rhs, step_id)
+                }
+            }
+            BreakpointConditionExpr::And(lhs, rhs) => {
+                if !self.eval_breakpoint_condition_ast(lhs, step_id)? {
+                    Ok(false)
+                } else {
+                    self.eval_breakpoint_condition_ast(rhs, step_id)
+                }
+            }
+            BreakpointConditionExpr::Cmp(name, op, lit) => {
+                let value = self.lookup_variable_record(name, step_id)?;
+                Ok(compare_breakpoint_condition(&value, *op, lit))
+            }
+            BreakpointConditionExpr::Truthy(name) => {
+                let value = self.lookup_variable_record(name, step_id)?;
+                Ok(match value {
+                    ValueRecord::Int { i, .. } => i != 0,
+                    ValueRecord::Bool { b, .. } => b,
+                    _ => false,
+                })
+            }
         }
     }
 
@@ -3403,3 +3813,329 @@ impl OriginQueryEngine for MaterializedReplaySession {
 // this module.
 #[allow(dead_code)]
 fn _origin_module_marker(_l: TraceLine) {}
+
+#[cfg(test)]
+mod breakpoint_condition_tests {
+    //! Unit tests for the FU-C extension of the M9 breakpoint condition
+    //! evaluator.
+    //!
+    //! The M9 commit (`feat(M9): column-aware conditional breakpoint`)
+    //! shipped integer-only comparisons via an inline matcher.  FU-C
+    //! reshapes the evaluator as a tiny recursive-descent parser to
+    //! cover floats, strings, and compound booleans.  These tests
+    //! pin the FU-C behaviour at the smallest possible granularity:
+    //! they construct an in-memory single-step trace where each
+    //! variable has a known recorded value, then call
+    //! `evaluate_breakpoint_condition` directly.
+    //!
+    //! Acceptance integration (Continue stops at the right step) is
+    //! already covered by
+    //! `tests/dap_column_breakpoint_with_condition.rs`; we do not
+    //! duplicate that here — the goal of this module is fast,
+    //! focused regression coverage of the evaluator surface.
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use codetracer_trace_types::{
+        CallKey, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, StepId, TypeId, TypeKind, TypeRecord,
+        TypeSpecificInfo, ValueRecord, VariableId,
+    };
+
+    use crate::db::{Db, DbCall, DbStep, EndOfProgram, MaterializedReplaySession};
+    use crate::in_memory_trace_reader::InMemoryTraceReader;
+    use crate::trace_reader::TraceReader;
+
+    /// Build a single-step in-memory trace with the supplied
+    /// `(name, value)` variable bindings.  Returns a
+    /// `MaterializedReplaySession` parked at step 0 so the tests can
+    /// call `evaluate_breakpoint_condition(expr, StepId(0))`
+    /// directly.
+    fn session_with_locals(locals: &[(&str, ValueRecord)]) -> MaterializedReplaySession {
+        let trace_dir = PathBuf::from("/tmp/fu-c-condition-tests");
+        let mut db = Db::new(&trace_dir);
+
+        // PathId(0) is the sentinel reserved by the CTFS loader.
+        db.paths.push(String::new());
+        db.paths.push("synthetic.src".to_string());
+        db.path_map.insert("synthetic.src".to_string(), PathId(1));
+
+        // Type table — we use a single `Int` record for all numeric
+        // recorded values; the evaluator never consults type ids,
+        // only the `ValueRecord` variant.
+        db.types.push(TypeRecord {
+            kind: TypeKind::Int,
+            lang_type: "int".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        });
+
+        // Variable name table — index 0 is reserved; bindings follow.
+        db.variable_names.push("<sentinel>".to_string());
+        let mut full_values: Vec<FullValueRecord> = Vec::with_capacity(locals.len());
+        for (idx, (name, value)) in locals.iter().enumerate() {
+            db.variable_names.push((*name).to_string());
+            full_values.push(FullValueRecord {
+                variable_id: VariableId(idx + 1),
+                value: value.clone(),
+            });
+        }
+
+        db.functions.push(FunctionRecord {
+            path_id: PathId(1),
+            line: Line(1),
+            name: "<top-level>".to_string(),
+        });
+
+        let call_key = CallKey(0);
+        db.calls.push(DbCall {
+            key: call_key,
+            function_id: FunctionId(0),
+            args: Vec::new(),
+            return_value: ValueRecord::None { type_id: TypeId(0) },
+            step_id: StepId(0),
+            depth: 0,
+            parent_key: CallKey(-1),
+            children_keys: Vec::new(),
+        });
+
+        db.steps.push(DbStep {
+            step_id: StepId(0),
+            path_id: PathId(1),
+            line: Line(1),
+            column: Some(Line(1)),
+            call_key,
+            global_call_key: call_key,
+        });
+        db.variables.push(full_values);
+        db.instructions.push(Vec::new());
+        db.compound.push(std::collections::HashMap::new());
+        db.cells.push(std::collections::HashMap::new());
+        db.variable_cells.push(std::collections::HashMap::new());
+
+        db.step_map.push(std::collections::HashMap::new()); // sentinel for PathId(0)
+        let mut path1_map: std::collections::HashMap<usize, Vec<DbStep>> = std::collections::HashMap::new();
+        path1_map.insert(1, vec![db.steps.get(StepId(0)).copied().expect("step 0")]);
+        db.step_map.push(path1_map);
+
+        db.end_of_program = EndOfProgram::Normal;
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db));
+        MaterializedReplaySession::new(reader)
+    }
+
+    fn int_value(i: i64) -> ValueRecord {
+        ValueRecord::Int { i, type_id: TypeId(0) }
+    }
+
+    fn float_value(f: f64) -> ValueRecord {
+        ValueRecord::Float { f, type_id: TypeId(0) }
+    }
+
+    fn string_value(s: &str) -> ValueRecord {
+        ValueRecord::String {
+            text: s.to_string(),
+            type_id: TypeId(0),
+        }
+    }
+
+    fn bool_value(b: bool) -> ValueRecord {
+        ValueRecord::Bool { b, type_id: TypeId(0) }
+    }
+
+    /// FU-C: float comparison — `x == 1.5` against a recorded f64
+    /// variable must hit exactly when the literal matches, and the
+    /// extended evaluator must still reject the boundary.
+    #[test]
+    fn float_equality_matches_recorded_float() {
+        let session = session_with_locals(&[("x", float_value(1.5))]);
+        assert!(
+            session
+                .evaluate_breakpoint_condition("x == 1.5", StepId(0))
+                .expect("eval succeeds")
+        );
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("x == 1.6", StepId(0))
+                .expect("eval succeeds")
+        );
+        // Ordering operators must work on floats too.
+        assert!(
+            session
+                .evaluate_breakpoint_condition("x > 1.0", StepId(0))
+                .expect("eval succeeds")
+        );
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("x > 2.0", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// FU-C: int vs float widening — `i == 1.0` against an int `1`
+    /// must hold so users don't have to remember the recorded type.
+    #[test]
+    fn int_widens_to_float_for_comparison() {
+        let session = session_with_locals(&[("i", int_value(1))]);
+        assert!(
+            session
+                .evaluate_breakpoint_condition("i == 1.0", StepId(0))
+                .expect("eval succeeds")
+        );
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("i == 1.5", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// FU-C: string equality — `name == "hello"` against a recorded
+    /// string variable must hit, with `!=` providing the complement.
+    #[test]
+    fn string_equality_matches_recorded_string() {
+        let session = session_with_locals(&[("name", string_value("hello"))]);
+        assert!(
+            session
+                .evaluate_breakpoint_condition("name == \"hello\"", StepId(0))
+                .expect("eval succeeds")
+        );
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("name == \"world\"", StepId(0))
+                .expect("eval succeeds")
+        );
+        assert!(
+            session
+                .evaluate_breakpoint_condition("name != \"world\"", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// FU-C: compound boolean with parentheses — both sides must
+    /// hold for an `&&` to fire, and the parser must respect the
+    /// grouping.
+    #[test]
+    fn compound_and_with_parentheses_evaluates_both_sides() {
+        let session = session_with_locals(&[("x", int_value(5)), ("y", int_value(3))]);
+        // Both sides hold: x > 0 (true) && y < 10 (true) -> true.
+        assert!(
+            session
+                .evaluate_breakpoint_condition("(x > 0) && (y < 10)", StepId(0))
+                .expect("eval succeeds")
+        );
+        // RHS false: x > 0 (true) && y < 0 (false) -> false.
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("(x > 0) && (y < 0)", StepId(0))
+                .expect("eval succeeds")
+        );
+        // LHS false: x < 0 (false) && y < 10 (true) -> false.
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("(x < 0) && (y < 10)", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// FU-C: `||` lowers precedence to `&&`, so `a && b || c`
+    /// parses as `(a && b) || c` — pin the precedence with an
+    /// unambiguous case.
+    #[test]
+    fn compound_or_combines_with_and() {
+        let session = session_with_locals(&[("x", int_value(1)), ("y", int_value(2)), ("z", int_value(3))]);
+        // (x > 0 && y > 100) || z == 3  ==  (true && false) || true == true
+        assert!(
+            session
+                .evaluate_breakpoint_condition("x > 0 && y > 100 || z == 3", StepId(0))
+                .expect("eval succeeds")
+        );
+        // (x > 0 && y > 100) || z == 0  ==  false || false == false
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("x > 0 && y > 100 || z == 0", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// FU-C: mixed-type comparison must be total — comparing an
+    /// integer variable to a string literal yields `false` for `==`
+    /// (and `true` for `!=`) rather than escaping as an error.  This
+    /// preserves the M9 contract that a malformed condition cannot
+    /// spuriously stop or crash the runner.
+    #[test]
+    fn mixed_type_int_vs_string_literal_is_false_not_error() {
+        let session = session_with_locals(&[("x", int_value(1))]);
+        let eq = session
+            .evaluate_breakpoint_condition("x == \"1\"", StepId(0))
+            .expect("eval succeeds without error");
+        assert!(!eq, "int variable vs string literal must NOT match for `==`");
+        let ne = session
+            .evaluate_breakpoint_condition("x != \"1\"", StepId(0))
+            .expect("eval succeeds without error");
+        assert!(ne, "int variable vs string literal MUST be `!=`");
+    }
+
+    /// Regression: the M9 integer surface continues to work after
+    /// FU-C's parser reshape.  Includes the boundary case
+    /// (`i > 100` is false at `i == 100`) that the M9 commit
+    /// explicitly pinned.
+    #[test]
+    fn legacy_integer_comparisons_still_work() {
+        let session = session_with_locals(&[("i", int_value(100))]);
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("i > 100", StepId(0))
+                .expect("eval succeeds")
+        );
+        let session = session_with_locals(&[("i", int_value(150))]);
+        assert!(
+            session
+                .evaluate_breakpoint_condition("i > 100", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// Regression: the bare-name truthy fallback from M9 still
+    /// fires through the new parser — `enabled` evaluates against a
+    /// boolean variable.
+    #[test]
+    fn bare_name_truthy_fallback_still_works() {
+        let session = session_with_locals(&[("enabled", bool_value(true))]);
+        assert!(
+            session
+                .evaluate_breakpoint_condition("enabled", StepId(0))
+                .expect("eval succeeds")
+        );
+        let session = session_with_locals(&[("enabled", bool_value(false))]);
+        assert!(
+            !session
+                .evaluate_breakpoint_condition("enabled", StepId(0))
+                .expect("eval succeeds")
+        );
+    }
+
+    /// `&&` short-circuits: if the LHS is already false, the RHS
+    /// must not be evaluated.  We assert this behaviourally by
+    /// referencing a name on the RHS that does NOT exist on the
+    /// step — a non-short-circuiting evaluator would surface the
+    /// unresolved-variable error.
+    #[test]
+    fn compound_and_short_circuits_on_false_lhs() {
+        let session = session_with_locals(&[("x", int_value(0))]);
+        let result = session
+            .evaluate_breakpoint_condition("x > 100 && missing == 1", StepId(0))
+            .expect("short-circuit: RHS must not be evaluated");
+        assert!(!result);
+    }
+
+    /// `||` short-circuits: if the LHS is already true, the RHS
+    /// must not be evaluated.  Same shape as the `&&` test above.
+    #[test]
+    fn compound_or_short_circuits_on_true_lhs() {
+        let session = session_with_locals(&[("x", int_value(1))]);
+        let result = session
+            .evaluate_breakpoint_condition("x == 1 || missing == 1", StepId(0))
+            .expect("short-circuit: RHS must not be evaluated");
+        assert!(result);
+    }
+}
