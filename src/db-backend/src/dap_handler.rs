@@ -1293,18 +1293,22 @@ impl Handler {
     ///     future values) keeps the legacy behaviour intact, so an
     ///     over-eager client never breaks back-compat.
     ///
-    /// The M3 formatted-view runner is deliberately not consulted for
-    /// the backward direction at M7 — the active-source-view path
-    /// projects through the FORWARD sourcemap and would need a
-    /// dedicated reverse-projection runner to be correct in reverse.
-    /// M8 is scoped to add formatted-view stepIn / stepOut; reverse-
-    /// direction formatted projection is parked for a later milestone
-    /// alongside the rest of the reverse formatted UX.  Until then a
-    /// `stepBack` under an active source view falls through to the
-    /// minified-coordinate runner — the same behaviour the legacy
-    /// reverse-next has always had, so this is not a regression.
+    /// FU-D — reverse-direction formatted-view projection.
     ///
-    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M7.
+    /// When the user is viewing a formatted srcview and an active source
+    /// view is set, the runner projects each candidate backward step
+    /// through the SAME forward sourcemap used by the M3 / M8 forward
+    /// path — direction of stepping does not change which sourcemap is
+    /// consulted, only the direction the recorded step cursor walks.
+    /// Without this projection the reverse-step cursor would land at a
+    /// stale formatted (line, column) when the recorder emitted multiple
+    /// minified anchors that project to the same formatted statement.
+    ///
+    /// Falls through to the legacy minified-coordinate runner when no
+    /// active source view is set or the trace is non-materialised (the
+    /// same back-compat contract as M3 / M8 forward).
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M7 + FU-D.
     pub fn step_back_dap(
         &mut self,
         request: dap::Request,
@@ -1314,13 +1318,14 @@ impl Handler {
         self.next_or_step_back_dap(request, granularity, /* forward = */ false, sender)
     }
 
-    /// Shared `next` / `stepBack` runner (M2 + M7).
+    /// Shared `next` / `stepBack` runner (M2 + M7 + FU-D).
     ///
     /// Direction is parametrised by `forward`.  For `forward = true`
     /// this is the M2 path; for `forward = false` it is the M7
-    /// reverse-direction mirror.  The M3 formatted-view runner is
-    /// only consulted in the forward direction — see [`step_back_dap`]
-    /// for the rationale.
+    /// reverse-direction mirror.  The M3 / FU-D formatted-view runner is
+    /// consulted in BOTH directions — the forward sourcemap projects
+    /// recorded → formatted coordinates regardless of which way the
+    /// recorded cursor walks.
     fn next_or_step_back_dap(
         &mut self,
         request: dap::Request,
@@ -1333,13 +1338,13 @@ impl Handler {
             granularity.as_deref(),
             Some(g) if g.eq_ignore_ascii_case("statement")
         );
-        // M3 — Formatted-view step-over.  Only fires in the forward
-        // direction (M7 leaves reverse formatted-view projection for a
-        // later milestone; falling through to the minified runner in
-        // reverse preserves the legacy reverse-step behaviour).
+        // M3 + FU-D — Formatted-view step-over.  Forward (M3) and reverse
+        // (FU-D) share the same runner; the only difference is which way
+        // the recorded step cursor walks.  Both directions project
+        // through the SAME forward sourcemap.
         let advanced_via_formatted_view =
-            if forward && self.active_source_view_path.is_some() && self.trace_kind == TraceKind::Materialized {
-                self.next_dap_formatted_view(use_statement)?
+            if self.active_source_view_path.is_some() && self.trace_kind == TraceKind::Materialized {
+                self.next_or_step_back_dap_formatted_view(use_statement, forward)?
             } else {
                 false
             };
@@ -1384,7 +1389,7 @@ impl Handler {
     /// M3 — set / clear the active formatted source view.
     ///
     /// When ``Some(path)`` subsequent DAP ``next`` requests run through
-    /// the formatted-view runner (see [`Handler::next_dap_formatted_view`]).
+    /// the formatted-view runner (see [`Handler::next_or_step_back_dap_formatted_view`]).
     /// When ``None`` the runner falls back to the legacy minified-
     /// coordinate path.
     ///
@@ -1451,7 +1456,7 @@ impl Handler {
         Ok(())
     }
 
-    /// M3 — formatted-view step-over runner.
+    /// M3 + FU-D — formatted-view step-over runner.
     ///
     /// Strategy: option (b) from the M3 plan — step normally through
     /// the recorded stream, but project each candidate step's location
@@ -1465,16 +1470,28 @@ impl Handler {
     /// line gets skipped, regardless of how the underlying minified
     /// ranges look.
     ///
-    /// Granularity contract:
+    /// Direction (``forward``):
+    ///   * ``true``  — M3 forward step-over (DAP ``next``).  Step the
+    ///     recorded cursor /forwards/ until the projected formatted
+    ///     coordinates differ from the entry projection.
+    ///   * ``false`` — FU-D reverse step-back (DAP ``stepBack``).  Step
+    ///     the recorded cursor /backwards/ under the same
+    ///     projection-comparison stop predicate.  The forward sourcemap
+    ///     is the SAME map in both directions — direction of stepping
+    ///     does not change which sourcemap is consulted; only the way
+    ///     ``next_step_id_relative_to_with_granularity`` walks the
+    ///     recorded stream changes.
+    ///
+    /// Granularity contract (identical in both directions):
     ///   * ``use_statement == false`` → stop at the first candidate
     ///     whose projected formatted /line/ differs from the entry's
     ///     projected line.  Column changes within the same formatted
-    ///     line are NOT a boundary (one F10 = one formatted line).
+    ///     line are NOT a boundary (one F10 / F9 = one formatted line).
     ///   * ``use_statement == true`` → stop at the first candidate
     ///     whose projected formatted ``(line, column)`` tuple differs
     ///     from the entry's projection.  Column changes within the
-    ///     same formatted line ARE a boundary (one Shift-F10 = one
-    ///     formatted statement).
+    ///     same formatted line ARE a boundary (one Shift-F10 /
+    ///     Shift-F9 = one formatted statement).
     ///
     /// Returns:
     ///   * ``Ok(true)`` when the cursor advanced via the formatted-view
@@ -1486,8 +1503,12 @@ impl Handler {
     ///     break navigation.
     ///   * ``Err(_)`` on a real error condition (replay step failure).
     ///
-    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3.
-    fn next_dap_formatted_view(&mut self, use_statement: bool) -> Result<bool, Box<dyn Error>> {
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M3 + FU-D.
+    fn next_or_step_back_dap_formatted_view(
+        &mut self,
+        use_statement: bool,
+        forward: bool,
+    ) -> Result<bool, Box<dyn Error>> {
         // Snapshot the entry's projected formatted location.  If the
         // recorded coordinates do not project (e.g. the active view's
         // map has no segment covering them), bail out and let the
@@ -1505,7 +1526,7 @@ impl Handler {
                 .reader
                 .next_step_id_relative_to_with_granularity(
                     last_step_id,
-                    /* forward = */ true,
+                    forward,
                     /* step_to_different_line = */ false,
                     /* step_to_different_column = */ false,
                 )
@@ -1591,7 +1612,7 @@ impl Handler {
 
     /// M8 — formatted-view step-IN runner.
     ///
-    /// Counterpart of M3's [`Self::next_dap_formatted_view`] but for
+    /// Counterpart of M3's [`Self::next_or_step_back_dap_formatted_view`] but for
     /// the DAP ``stepIn`` request.  The user is at a call site under
     /// the active formatted srcview and wants to land at the FIRST
     /// executed formatted (line, column) inside the callee body — not
@@ -1620,7 +1641,7 @@ impl Handler {
     /// formatted-view path; ``Ok(false)`` when no projection exists
     /// for the entry step so the caller should fall through to the
     /// legacy minified-coordinate runner — same defensive contract as
-    /// M3's [`Self::next_dap_formatted_view`].
+    /// M3's [`Self::next_or_step_back_dap_formatted_view`].
     ///
     /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
     fn step_in_dap_formatted_view(&mut self) -> Result<bool, Box<dyn Error>> {
@@ -1716,7 +1737,7 @@ impl Handler {
     /// Returns ``Ok(true)`` when the cursor advanced via the
     /// formatted-view path; ``Ok(false)`` when no projection exists
     /// for the entry step — same defensive fallback as
-    /// [`Self::next_dap_formatted_view`].
+    /// [`Self::next_or_step_back_dap_formatted_view`].
     ///
     /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
     fn step_out_dap_formatted_view(&mut self) -> Result<bool, Box<dyn Error>> {
