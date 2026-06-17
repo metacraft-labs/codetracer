@@ -145,12 +145,14 @@
   width: 100vw
   display: flex
   flex-direction: column-reverse
+  font-family: "SpaceGrotesk"
+
 
   #status-base
     bottom: 0
     background-color: colors-ui-surface-primary-default
     height: 2em
-    font-size: inherit
+    font-size: 0.75rem
     white-space: nowrap
     position: fixed
     width: 100%
@@ -277,10 +279,10 @@
       display: flex
 
     #file-info-status
-      margin-left: 12px
+      margin-left: 0.6em
       display: flex
       align-items: center
-      gap: 12px
+      gap: 0.6em
 
     #file-info-status-editor-whitespace
       margin-left: 2vw
@@ -293,6 +295,7 @@
       // margin-left: 2vw
       white-space: nowrap
       color: OPERATION_STATUS_COLOR
+      font-family: "SpaceMono"
 
     #version-control-status
       margin-left:10px
@@ -409,8 +412,9 @@
       padding-left: 15px
       overflow-wrap: break-word
 
-      &:focus
-        outline: 2px solid BORDERS_COLOR !important
+      &:focus-visible
+        outline: none !important
+        box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
     .bug-report-button-container
       display: flex
@@ -422,8 +426,9 @@
       padding-bottom: 5px
       margin-bottom: 10px
 
-      &:focus
-        outline: 2px solid BORDERS_COLOR !important
+      &:focus-visible
+        outline: none !important
+        box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
 // [1vw] file info lang , file info encoding [2vw] file info editor whitespace [20vw] operation [25vw] errors, build output buttons [..] location version control status [3vw] end
 

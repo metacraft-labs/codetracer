@@ -14,8 +14,15 @@
 .lm_splitter
   background: colors-ui-surface-primary-default !important
   opacity: unset !important
-  transition: opacity 200ms ease !important
+  transition: background 150ms ease !important
   z-index: 4 !important
+  cursor: col-resize
+
+  &.lm_vertical
+    cursor: row-resize
+
+  &:hover
+    background: colors-ui-border-interactive-default !important
 
 .lm_stack
   overflow: hidden !important
@@ -23,7 +30,6 @@
 .lm_tabs
   width: 100%
   display: flex
-  justify-content: space-between
 
 .lm_splitter.lm_dragging
   background: #444444;
@@ -80,7 +86,7 @@
   // padding-top: 8px
   border-radius: 0.36em
   font-size: inherit
-  padding: 0.5em 0.25em 0em 0.25em
+  padding: 0.5em 0em 0em 0em
   // padding-right: 2px
   // margin-left: 2px
   // padding-right: 10px
@@ -107,9 +113,9 @@
   background-color: colors-ui-surface-primary-default
 
 .lm_title
-  color: HEADER_PANEL_COLOR !important
+  color: colors-ui-text-primary-disabled !important
   // font-family: sans-serif !important
-  font-weight: 500 !important
+  font-weight: 400 !important
   overflow: hidden
   white-space: nowrap
   text-overflow: ellipsis
@@ -120,6 +126,7 @@
 
 .lm_active
   background-color: colors-ui-surface-panel !important
+  color: colors-ui-text-primary-label !important
   //border-radius: 2px
   border-top-left-radius: 0.36em
   border-top-right-radius: 0.36em
@@ -159,17 +166,35 @@
     transform: translate(0em, 0.25625em)
 
 .lm_header .lm_active .lm_title
-  color: HEADER_ACTIVE_PANEL_TEXT_COLOR !important
+  color: colors-ui-text-primary-label !important
 
 .lm_header .lm_controls
   height: 100% !important
   align-items: center !important
 
 .lm_controls > *
+  // Secondary button style — matches [class*="-button-"][class*="-secondary"] in button.styl
   opacity: 1 !important
-//   margin-right: 10px !important
-//   height: 12px !important
-//   width: 12px !important
+  background-color: colors-ui-surface-primary-default !important
+  border: 0.03125em solid colors-ui-border-tertiary !important
+  border-radius: 0.375em !important
+  background-position: center !important
+  background-repeat: no-repeat !important
+  background-size: 1em 1em !important
+  width: 1.5em !important
+  height: 1.5em !important
+  cursor: pointer
+
+  &:focus
+    outline: none !important
+    box-shadow: none !important
+
+  &:focus-visible
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
+
+  &:hover
+    background-color: colors-ui-surface-primary-default-hover !important
 
 .lm_maximise
   background-image: LAYOUT_MAXIMIZE_ICON_PATH !important
@@ -194,6 +219,23 @@
   height: 0.6em !important
   background-size: 0.6em 0.6em
   position: static !important
+  opacity: 1 !important
+
+.lm_header .lm_tab .lm_pin_tab
+  background-image: LAYOUT_TAB_PIN_ICON_PATH !important
+  background-repeat: no-repeat
+  background-position: center
+  background-size: 0.85em 0.85em
+  width: 0.85em !important
+  height: 0.85em !important
+  position: static !important
+  cursor: pointer
+  margin-right: 0.3em
+  opacity: 0.7
+  flex-shrink: 0
+
+  &:hover
+    opacity: 1
 
 .lm_header .lm_tab
   height: 1.01em !important

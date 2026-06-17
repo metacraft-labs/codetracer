@@ -179,6 +179,21 @@ fn md_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // ``emit_writes_csv_json_md`` and ``csv_header_matches_gui_ops_shape``
+    // both mutate the process-global ``CODETRACER_BENCH_OUT`` env var,
+    // and Rust's default test harness runs ``#[test]`` functions in
+    // parallel — when both grab the lock at once, one test's
+    // ``remove_var`` clears the other's ``set_var`` mid-emit, the
+    // fallback path ``manifest_dir/target/codetracer-bench/...`` is
+    // read-only under the Nix build sandbox, ``fs::write`` returns
+    // ``NotFound``, and ``.expect("emit")`` panics (observed
+    // intermittently against codetracer dev's cross-repo CI, e.g.
+    // cross-repo run 27658362322).  Serialise the env-var-touching
+    // tests with a module-local mutex so they take the variable
+    // turn-by-turn.
+    static BENCH_OUT_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn column_name_has_three_dash_separated_segments() {
@@ -206,6 +221,7 @@ mod tests {
 
     #[test]
     fn emit_writes_csv_json_md() {
+        let _guard = BENCH_OUT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("CODETRACER_BENCH_OUT", tmp.path());
@@ -231,6 +247,7 @@ mod tests {
         // line.  The tracepoint bench has a single measured column
         // so the header is `id,language,<column>` — verifying the
         // prefix here keeps the two writers byte-compatible.
+        let _guard = BENCH_OUT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         unsafe {
             std::env::set_var("CODETRACER_BENCH_OUT", tmp.path());

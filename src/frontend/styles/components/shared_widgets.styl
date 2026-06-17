@@ -20,16 +20,6 @@ if !IS_EXTENSION
   ::-webkit-scrollbar-thumb:horizontal:active
     background-color: WEBKIT_SCROLLER_THUMB_ACTIVE_BACKGROUND_COLOR
 
-@font-face {
-  font-family: 'SpaceGrotesk';
-  src: url('../../public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: "FiraCode";
-  src: url('../../public/resources/fonts/fira_code/FiraCode-VariableFont_wght.ttf') format('truetype');
-}
-
 if IS_EXTENSION
   .component-container-html
     height: -webkit-fill-available !important
@@ -100,6 +90,23 @@ TRACE_LOG_EDITOR_Z_INDEX = 50
   height: 100% !important
   min-height: 170px
 
+// Replace Electron/OS default accent color (orange on macOS) with our blue.
+:root
+  accent-color: colors-ui-border-focus
+
+// Show focus ring only on keyboard navigation, never on mouse click.
+// :focus-visible catches buttons/divs, but text inputs ALWAYS satisfy
+// :focus-visible in Chromium (by spec), so we also use a JS-driven
+// data-focus-mode attribute on <html> set by mousedown/keydown listeners
+// in ui_js.nim to suppress the ring for inputs on mouse click.
+*:focus:not(:focus-visible)
+  outline: none !important
+  box-shadow: none !important
+
+[data-focus-mode="mouse"] *:focus
+  outline: none !important
+  box-shadow: none !important
+
 html, body
   padding: 0
   margin: 0
@@ -107,7 +114,9 @@ html, body
     overflow: hidden
 
 body
-  font-family: -apple-system, 'Helvetica Neue', Helvetica, sans-serif !important
+  font-family: "SpaceMono", monospace !important
+  -webkit-font-smoothing: antialiased
+  -moz-osx-font-smoothing: grayscale
   background-color: colors-ui-surface-primary-default !important
 
 [data-tippy-root]
@@ -143,15 +152,14 @@ body
 .separate-bar
   width: 0px
   height: 1em
-  margin-top: 0.4em
-  border-left: 0.12em solid colors-ui-separator-default
+  border-left: 0.031em solid colors-ui-divider-primary
 
 // .wrapper
 //   input
 //     margin-left: 0 !important
 
 // input
-//   font-family: "SpaceGrotesk" !important
+//   font-family: "SpaceMono" !important
 //   font-size: 14px !important
 //   font-style: normal !important
 //   font-weight: 400 !important
@@ -188,36 +196,31 @@ body
 //     white-space: nowrap !important
 
 #root-container
-  // padding 0.25em
   position: fixed
-  height: calc(100vh - 2.27em - 2em)
+  height: calc(100vh - 2.27em - 1.5em)
   top: 2.27em
   left: 0
   right: 0
   z-index: 0
-  display: flex
-  flex-direction: column
   padding-left: 0
   padding-right: 0
+  display: flex
+  flex-direction: column
+  min-height: 0
 
 #ROOT
+  // The auto-hide row and GoldenLayout both rely on #ROOT staying flexible.
+  // A fixed viewport width here collapses the height chain and only tab
+  // headers remain visible after layout restore.
   background-color: colors-ui-surface-primary-default !important
   color: TEXT_CONTENT_COLOR
   height: 100%
-  // Participate in `#auto-hide-layout-row`'s flex row so the GL
-  // container shrinks when the auto-hide side strips appear.  The
-  // older `width: calc(100vw - 0.5em)` pinned ROOT to viewport
-  // width regardless of sibling strip widths, which broke the
-  // strip-tile-with-GL layout: pinning a panel to the left edge
-  // showed the 28px strip but ROOT stayed at full width and
-  // overlapped (visual-audit/strip-layout-verify TODO 5.1(b)).
-  // `flex: 1; min-width: 0` lets ROOT take the remaining flex
-  // space; `min-width: 0` is required because flex items default
-  // to `min-width: auto` which prevents shrinking below content
-  // intrinsic size.
   flex: 1
   min-width: 0
+  min-height: 0
   position: relative
+  overflow: hidden
+  box-sizing: border-box
   padding-right: 0.25em
   padding-left: 0.25em
 
@@ -249,7 +252,7 @@ body
 
 // TODO: Fix it?
 .component-container
-  font-family: "FiraCode" !important
+  font-family: "SpaceMono" !important
   font-size: inherit !important
   line-height: 1.5em !important
   font-weight: 400 !important
@@ -356,7 +359,7 @@ input:checked ~ .checkmark:after
   position: absolute
   background-color: PRIMARY_BASE
   z-index: 3
-  font-family: "FiraCode"
+  font-family: "SpaceMono"
   margin-bottom: 0
   list-style-type: none
   opacity: 0
@@ -405,7 +408,7 @@ input:checked ~ .checkmark:after
 
 .dropdown-list
   border-radius: 0.325em
-  background: DROPDOWN_LIST_FOCUSED_BACKGROUND_COLOR
+  background: colors-ui-surface-base-raised
   color: DROPDOWN_TEXT_BACKGROUND_COLOR
   display: flex
   flex-direction: column
@@ -445,6 +448,12 @@ input:checked ~ .checkmark:after
 //   outline: 4px solid PRIMARY_BASE
 
 .layout-buttons-container
+  // Always render last in the .lm_tabs flex container, pinned to the right.
+  // GL2's tryUpdateTabSizes re-appends tab elements via appendChild (moving
+  // them after our button in the DOM); the CSS order overrides DOM order so
+  // the button stays visually at the far right after collapse/expand.
+  order: 9999
+  margin-left: auto
   width: 1.7em !important
   height: 1.7em !important
   background-color: SECONDARY_BASE
@@ -454,34 +463,40 @@ input:checked ~ .checkmark:after
   background-repeat: no-repeat
   background-position: center
   cursor: pointer
+  border: 0.0625em solid SECONDARY_BASE
+
+  &:focus
+    outline: none !important
+    box-shadow: none !important
+
+  &:focus-visible
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
 
   &:hover
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
 
   &.active
-    background-image: ct-images-layout-tab-active
+    // background-image: ct-images-layout-tab-active
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+    border: 0.0625em solid colors-ui-surface-action-primary !important
 
   .layout-dropdown
     width: fit-content;
+    z-index: 100
     position: absolute;
     top: 100%
-    right: 0px;
-    background-color: DROPDOWN_BASE
-    border-radius: 6px
-    font-family: "SpaceGrotesk"
-    line-height: normal
-    color: PRIMARY_TEXT_COLOR
-    font-weight: 400
-    padding: 4px
+    right: 0 !important
+    font-size: 0.875rem
+    border: 0.0625em solid colors-ui-border-tertiary
 
     .layout-dropdown-node
-      border-radius: 4px
-      padding-left: 4px
-      padding-right: 4px
+      border-top: 0.0625em solid colors-ui-border-tertiary
+      padding-left: 0.5em
+      padding-right: 0.5em
 
       &:hover
-        background-color: ACTIVE_MENU_BACKGROUND
+        background-color: colors-ui-surface-primary-default-hover
 
 
 
@@ -511,7 +526,7 @@ input:checked ~ .checkmark:after
   height: inherit
   justify-content: center
   align-items: center
-  font-family: 'FiraCode'
+  font-family: "SpaceMono"
   // font-size: 14px
   // padding-left: 12px
   // padding-right: 12px

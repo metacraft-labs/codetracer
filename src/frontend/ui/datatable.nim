@@ -159,10 +159,10 @@ proc renderRRTicksLine*(rrTicks: int, minRRTicks: int, maxRRTicks: int, classNam
   let remainingPercent = 101.0 - percent
 
   cstring(
-    &"<div class=\"rr-ticks-time-container\">" &
-    &"<span class=\"rr-ticks-time\">{rrticks}</span>" &
-    &"</div>"&
-    &"<div class=\"rr-ticks-line-container\">" &
+    &"<div class=\"rr-ticks-time-container\" style=\"height:auto;line-height:normal\">" &
+    &"<span class=\"rr-ticks-time\" style=\"display:block;font-size:0.85em;text-indent:0\">{rrticks}</span>" &
+    &"</div>" &
+    &"<div class=\"rr-ticks-line-container\" style=\"margin-top:0.05em\">" &
     &"<span class=\"rr-ticks-line {className}\"></span>" &
     &"<span class=\"rr-ticks-empty-remaining\" style=\"width:{remainingPercent}%; left:{percent}%\"></span>" &
     &"</div>"
@@ -316,7 +316,7 @@ proc tableFooterDom*(table: DataTableComponent): Node =
   info.appendFooterText(cstring"Rows")
 
   let input = document.createElement(cstring"input")
-  input.setAttribute(cstring"class", cstring"ct-input-small mx-2 data-tables-footer-input")
+  input.setAttribute(cstring"class", cstring"data-tables-footer-input ct-input-small mx-2")
   input.value = cstring($(table.startRow))
   input.addEventListener(cstring"keydown", proc(ev: Event) =
     let keyboardEvent = cast[KeyboardEvent](ev)

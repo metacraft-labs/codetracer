@@ -172,7 +172,19 @@ fn leo_search_calltrace_returns_compute_call() {
             );
             assert!(resp.success, "DAP responded with success=false: {resp:?}");
             assert_eq!(resp.command, "ct/search-calltrace");
-            let calls = resp.body.as_array().expect("response body must be a Call array");
+            // VS Code's ``customRequest()`` rejects the pending promise
+            // when a DAP response ``body`` is a top-level JSON array;
+            // the handler now wraps the call list in
+            // ``CallSearchResponseBody { calls: [...] }`` so VS Code's
+            // promise resolves with the object instead of throwing
+            // (which manifested as ``ok: false`` in the WDIO
+            // ``can search the calltrace`` deep tests).  Keep this
+            // reproducer's assertion shape in sync.
+            let calls = resp
+                .body
+                .get("calls")
+                .and_then(|v| v.as_array())
+                .expect("response body must be a {calls: [...]} object");
             assert!(
                 !calls.is_empty(),
                 "expected at least one matching call in body; got {calls:?}",

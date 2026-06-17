@@ -193,8 +193,69 @@ mapped_out = render_file("mapped", mapped_flat, known_vars)
 (OUT_DIR / "alias.styl").write_text(alias_out, encoding="utf-8")
 (OUT_DIR / "mapped.styl").write_text(mapped_out, encoding="utf-8")
 
+# Font paths are relative to the compiled CSS output location
+# (src/build-debug/frontend/styles/), so ../../../../libs/codetracer-design-system/
+# resolves back to the design system submodule at the repo root.
+SG_BASE = "../../../../libs/codetracer-design-system/SpaceGrotesk_Complete/Fonts/WEB/fonts"
+SM_BASE = "../../../../libs/codetracer-design-system/SpaceGrotesk_Complete/Fonts/Space_Mono"
+FM_BASE = "../../../../libs/codetracer-design-system/Fira_Mono"
+
+def font_face(family, weight_value, style, ttf_base, ttf_file, woff2_file=None):
+    src_parts = []
+    if woff2_file:
+        src_parts.append(f"url('{ttf_base}/{woff2_file}') format('woff2')")
+    src_parts.append(f"url('{ttf_base}/{ttf_file}') format('truetype')")
+    src_value = ",\n       ".join(src_parts)
+    lines = [
+        "@font-face {",
+        f"  font-family: \"{family}\";",
+        f"  font-weight: {weight_value};",
+        f"  font-style: {style};",
+        f"  src: {src_value};",
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
+fonts_lines = ["// Auto-generated @font-face declarations from design system fonts", ""]
+
+# Space Grotesk – UI primary font (sourced from libs/codetracer-design-system)
+sg_weights = [
+    (300, "normal", "SpaceGrotesk-Light.ttf",    "SpaceGrotesk-Light.woff2"),
+    (400, "normal", "SpaceGrotesk-Regular.ttf",  "SpaceGrotesk-Regular.woff2"),
+    (500, "normal", "SpaceGrotesk-Medium.ttf",   "SpaceGrotesk-Medium.woff2"),
+    (600, "normal", "SpaceGrotesk-SemiBold.ttf", "SpaceGrotesk-SemiBold.woff2"),
+    (700, "normal", "SpaceGrotesk-Bold.ttf",     "SpaceGrotesk-Bold.woff2"),
+]
+for weight_value, style, ttf, woff2 in sg_weights:
+    fonts_lines.append(font_face("SpaceGrotesk", weight_value, style, SG_BASE, ttf, woff2))
+
+# Space Mono – UI/label secondary font (sourced from libs/codetracer-design-system)
+sm_weights = [
+    (400, "normal", "SpaceMono-Regular.ttf"),
+    (700, "normal", "SpaceMono-Bold.ttf"),
+    (400, "italic", "SpaceMono-Italic.ttf"),
+    (700, "italic", "SpaceMono-BoldItalic.ttf"),
+]
+for weight_value, style, ttf in sm_weights:
+    fonts_lines.append(font_face("SpaceMono", weight_value, style, SM_BASE, ttf))
+
+# Fira Mono – editor/terminal monospace font (sourced from libs/codetracer-design-system)
+fm_weights = [
+    (400, "normal", "FiraMono-Regular.ttf"),
+    (500, "normal", "FiraMono-Medium.ttf"),
+    (700, "normal", "FiraMono-Bold.ttf"),
+]
+for weight_value, style, ttf in fm_weights:
+    fonts_lines.append(font_face("FiraMono", weight_value, style, FM_BASE, ttf))
+
+fonts_out = "\n".join(fonts_lines).rstrip() + "\n"
+(OUT_DIR / "fonts.styl").write_text(fonts_out, encoding="utf-8")
+
 index_out = "\n".join([
     "// Auto-generated import index",
+    "// Note: fonts.styl is NOT included here to avoid duplicate @font-face rules.",
+    "// Fonts are imported once via components/font_family.styl in codetracer.styl.",
     '@import "brand.styl"',
     '@import "alias.styl"',
     '@import "mapped.styl"',
@@ -208,5 +269,6 @@ print(f"[OK] mapped json: {mapped_json}")
 print(f"[OK] wrote      : {OUT_DIR / 'brand.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'alias.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'mapped.styl'}")
+print(f"[OK] wrote      : {OUT_DIR / 'fonts.styl'}")
 print(f"[OK] wrote      : {OUT_DIR / 'index.styl'}")
 PY

@@ -635,6 +635,7 @@ type
     service*:       EventLogService
     dropDowns*: array[EventDropDownBox, bool]
     focusedDropDowns*: array[EventDropDownBox, bool]
+    dropdownOutsideHandlerInstalled*: bool
     selectedKinds*: array[EventLogKind, bool]
     isOptionalColumnsMenuOpen*: bool
     resizeObserver*: ResizeObserver
@@ -1632,6 +1633,7 @@ type
     queries*: seq[string]
     activeCommandName*: cstring
     selected*: int
+    keyNavigation*: bool
     interpreter*: CommandInterpreter
     results*: seq[CommandPanelResult]
     inputField*: dom.Node
@@ -1665,6 +1667,8 @@ type
     folderArrowCharWidth*: int
     search*: bool
     keyNavigation*: bool
+    skipNextBlur*: bool
+    focusByMouse*: bool
 
   TraceLogComponent* = ref object of Component
     table*: DataTableComponent

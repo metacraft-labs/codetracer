@@ -1,0 +1,109 @@
+@import "../generated/index"
+
+/*
+ * menu_item.styl — Design-system menu item component
+ *
+ * Base class: .ct-menu-item
+ * Sub-elements:
+ *   .ct-menu-item-icon      — left icon (svg background or inline)
+ *   .ct-menu-item-label     — primary text (bold)
+ *   .ct-menu-item-sublabel  — secondary / descriptive text
+ *   .ct-menu-item-trailing  — right element (chevron › or checkmark ✓)
+ *
+ * State attributes:
+ *   [data-disabled="true"]  — disabled row
+ *   [data-selected="true"]  — selected row (trailing shows checkmark)
+ *   [data-focused="true"]   — programmatically focused row (keyboard nav)
+ *
+ * Variants:
+ *   Standard  — left icon
+ *   Checkbox  — left .ct-checkmark inside .ct-menu-item-icon
+ */
+
+.ct-menu-item
+  font-size: 0.75rem
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.5em 0.75em
+  min-height: 2.125em
+  width: 100%
+  box-sizing: border-box
+  cursor: pointer
+  user-select: none
+  background: colors-ui-surface-base-raised
+  color: colors-ui-text-primary-body
+  font-family: "SpaceGrotesk"
+  font-size: inherit
+  line-height: 1.2
+  border: none
+  border-bottom: 0.0625em solid colors-ui-border-secondary
+  border-radius: 0
+  outline: none
+  text-align: start
+  transition: background-color 0.12s ease
+
+  // ── Sub-elements ─────────────────────────────────────────
+
+  .ct-menu-item-icon
+    flex: 0 0 1em
+    width: 1em
+    height: 1em
+    display: flex
+    align-items: center
+    justify-content: center
+    color: colors-ui-text-primary-label
+
+  .ct-menu-item-label
+    font-weight: 400
+    color: colors-ui-text-primary-body
+    white-space: nowrap
+    overflow: hidden
+    text-overflow: ellipsis
+
+  .ct-menu-item-sublabel
+    color: colors-ui-text-primary-body-subtle
+    white-space: nowrap
+    overflow: hidden
+    text-overflow: ellipsis
+
+  .ct-menu-item-trailing
+    margin-left: auto
+    flex: 0 0 auto
+    display: flex
+    align-items: center
+    justify-content: center
+    width: 0.5em
+    height: 0.75em
+    background-image: url("data:image/svg+xml,%3Csvg width='5' height='9' viewBox='0 0 5 9' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353516 8.35352L4.35352 4.35352L0.353515 0.353516' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E")
+    background-repeat: no-repeat
+    background-position: center
+    background-size: contain
+
+  // ── Hover ─────────────────────────────────────────────────
+
+  &:hover:not([data-disabled="true"])
+    background: colors-ui-surface-primary-default-hover
+
+  // ── Focused (keyboard navigation or :focus-visible) ───────
+
+  &:focus-visible:not([data-disabled="true"]),
+  &[data-focused="true"]:not([data-disabled="true"])
+    outline: none
+    background: colors-ui-surface-primary-default-hover
+
+  // ── Disabled ──────────────────────────────────────────────
+
+  &[data-disabled="true"]
+    cursor: not-allowed
+    pointer-events: none
+
+    .ct-menu-item-icon,
+    .ct-menu-item-label,
+    .ct-menu-item-sublabel,
+    .ct-menu-item-trailing
+      color: colors-ui-text-primary-disabled
+
+    .ct-checkmark
+      --ct-checkmark-border: rgba(255, 255, 255, 0.14)
+      --ct-checkmark-icon: rgba(255, 255, 255, 0.3)

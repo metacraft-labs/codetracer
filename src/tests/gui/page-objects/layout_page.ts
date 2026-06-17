@@ -284,31 +284,31 @@ export class LayoutPage extends BasePage {
   private programStateTabsCache: ProgramStateTab[] = [];
 
   runToEntryButton(): Locator {
-    return this.page.locator("#run-to-entry-debug");
+    return this.page.locator("#run-to-entry-image");
   }
   continueButton(): Locator {
-    return this.page.locator("#continue-debug");
+    return this.page.locator("#continue-image");
   }
   reverseContinueButton(): Locator {
-    return this.page.locator("#reverse-continue-debug");
+    return this.page.locator("#reverse-continue-image");
   }
   stepOutButton(): Locator {
-    return this.page.locator("#step-out-debug");
+    return this.page.locator("#step-out-image");
   }
   reverseStepOutButton(): Locator {
-    return this.page.locator("#reverse-step-out-debug");
+    return this.page.locator("#reverse-step-out-image");
   }
   stepInButton(): Locator {
-    return this.page.locator("#step-in-debug");
+    return this.page.locator("#step-in-image");
   }
   reverseStepInButton(): Locator {
-    return this.page.locator("#reverse-step-in-debug");
+    return this.page.locator("#reverse-step-in-image");
   }
   nextButton(): Locator {
-    return this.page.locator("#next-debug");
+    return this.page.locator("#next-image");
   }
   reverseNextButton(): Locator {
-    return this.page.locator("#reverse-next-debug");
+    return this.page.locator("#reverse-next-image");
   }
 
   async eventLogTabs(forceReload = false): Promise<EventLogTab[]> {

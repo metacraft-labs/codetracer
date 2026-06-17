@@ -21,6 +21,7 @@ type
     lineNumbers*:            proc(line: int): cstring
     fontSize*:               int
     fontFamily*:             cstring
+    fontLigatures*:          bool
     contextmenu*:            bool
     minimap*:                JsObject
     renderIndentGuides*:     bool

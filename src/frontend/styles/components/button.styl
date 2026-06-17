@@ -2,7 +2,7 @@
 
 // -- Buttons --
 button
-  font-family: 'SpaceGrotesk'
+  font-family: "SpaceMono"
   border-radius: 0.5em !important
   display: inline-flex
   outline: none
@@ -15,11 +15,9 @@ button
   &:hover:not(:disabled)
     color: colors-ui-text-primary-body
 
-  &:focus:not(:disabled)
-    outline: 0.125em solid colors-ui-border-focus !important
-
   &:focus-visible:not(:disabled)
-    outline: 0.125em solid colors-ui-border-focus
+    outline: none !important
+    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
     color: colors-ui-text-primary-body
 
   &:disabled
@@ -79,7 +77,7 @@ button
 // -- Icon-buttons --
 [class*="ct-button-image-"]
   background-position: center
-  background-size: 1em 1em !important
+  background-size: auto 1em !important
   background-repeat: no-repeat
   border-radius: 0.375em !important
 
@@ -96,10 +94,10 @@ button
   max-height: 1.75em
 
 [class*="ct-button-image-sm-"]
-  width: 1.5em
-  max-width: 1.5em
-  height: 1.5em
-  max-height: 1.5em
+  width: 1.25em
+  max-width: 1.25em
+  height: 1.25em
+  max-height: 1.25em
 
 #next-image
   background-image: ct-images-next
@@ -160,10 +158,12 @@ button
 
 #category-image
   background-image: ct-images-layout-tab
+  background-size: 1em auto !important
 
-  &:focus
-    background-image: ct-images-layout-tab-active !important
+  &.open
+    // background-image: ct-images-layout-tab-active !important
     background-color: ACTIVE_LAYOUT_BUTTONS_BACKGROUND
+    border: 0.0625em solid colors-ui-surface-action-primary !important
 
 #close-element
   background-image: ct-images-close-button
@@ -198,7 +198,7 @@ button
 
 #value-history
   background-image: ct-images-value-history-toggle
-  background-size: 0.75em 0.75em !important
+  background-size: 0.6em 0.6em !important
 
   &:hover > .custom-tooltip
     opacity: 1

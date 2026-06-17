@@ -12,7 +12,7 @@
   --ct-gutter-highlight-size: 0.8em
   --ct-gutter-breakpoint-right: 1.05em
   --ct-gutter-trace-right: 0.6em
-  margin-left: 0.125em
+  margin-left: 0
   border-bottom-left-radius: 0.375em
 
 .margin-view-overlays
@@ -45,11 +45,13 @@
 .monaco-editor .margin-view-overlays .codicon.codicon-folding-manual-expanded,
 .monaco-editor .margin-view-overlays .codicon.codicon-folding-manual-collapsed,
 .monaco-editor .margin-view-overlays .codicon.alwaysShowFoldIcons
+  font-size: 0.8em !important
   color: LINE_NUMBERS_TEXT_COLOR !important
   opacity: 1 !important
   display: inline-flex !important
   align-items: center
   justify-content: center
+  transform: translateX(15%)
   width: 100%
   position: relative
   z-index: 7
@@ -158,14 +160,8 @@
     // background-color: inherit !important
     contain: unset !important
 
-
-  .view-line
-    font-family "FiraCode" !important
-    font-weight: 400
-    color: TEXT_CONTENT_COLOR !important
-
   .sticky-line-content
-    font-family "FiraCode" !important
+    font-family "SpaceMono" !important
     font-weight: 400
     color: TEXT_CONTENT_COLOR !important
     background-color: SECONDARY_BASE !important
@@ -201,7 +197,7 @@
   border-radius: 0.375em
   padding-top: 0.25em
   padding-bottom: 0.25em
-  font-family: "SpaceGrotesk"
+  font-family: "SpaceMono"
   font-size: 0.875em
   z-index: 1000
 
@@ -361,7 +357,7 @@
   //   padding-right: 0.625em
   //   // height: 100%
   //   // font-size: 0.8125em
-  //   font-family: "FiraCode"
+  //   font-family: "SpaceMono"
   //   margin: 0.0625em !important
   //   margin-left: 0.125em !important
   //   display: flex
@@ -390,7 +386,7 @@
 
   .flow-parallel-value-name
     // font-size: 0.8125em
-    font-family: "FiraCode"
+    font-family: "SpaceMono"
     background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
     // box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
     color: FLOW_PARALLEL_NAME_COLOR
@@ -419,7 +415,7 @@
 
   .flow-loop-value-name
     // font-size: 0.8125em
-    font-family: "FiraCode"
+    font-family: "SpaceMono"
     background: PRIMARY_BASE
     box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
     color: PRIMARY_TEXT_COLOR
@@ -767,7 +763,7 @@
     position: absolute
     right: var(--ct-gutter-trace-right)
     z-index: 9
-    outline: 0.125em solid SECONDARY_BASE
+    outline: 0.125em solid colors-ui-surface-panel
 
   .gutter-disabled-trace
     width: var(--ct-gutter-trace-size) !important
@@ -779,7 +775,7 @@
     position: absolute
     right: var(--ct-gutter-trace-right)
     z-index: 9
-    outline: 0.125em solid SECONDARY_BASE
+    outline: 0.125em solid colors-ui-surface-panel
 
   .gutter-breakpoint-enabled
     width: var(--ct-gutter-breakpoint-size)
@@ -866,9 +862,9 @@
   margin-left: 0 !important
   font-weight: 300
   text-align: right !important
-  font-family: "FiraCode"
+  font-family: "SpaceMono"
   line-height: inherit
-  font-size: inherit !important
+  font-size: 0.875rem !important
   margin-top: 0em !important
   padding-top: 0.0625em !important
   padding-right: 0 !important
@@ -890,8 +886,8 @@
   background-image: HIGHLIGHT_LINE_ARROW
   background-repeat: no-repeat
   background-position: center
-  background-size: contain
-  transform: translateY(-50%)
+  background-size: 0.47em
+  transform: translate(-40%, -40%)
   z-index: 0
 
 .inline-expanded-value-view
@@ -1034,7 +1030,7 @@ else
 //   padding-right: 0.625em
 //   // height: 100%
 //   // font-size: 0.8125em
-//   font-family: "FiraCode"
+//   font-family: "SpaceMono"
 //   margin: 0.0625em !important
 //   margin-left: 0.125em !important
 //   display: flex
@@ -1072,7 +1068,7 @@ else
 
 .flow-parallel-value-name
   // font-size: 0.8125em
-  font-family: "FiraCode"
+  font-family: "SpaceMono"
   background: FLOW_LOOP_EXPRESSION_BACKGROUND_COLOR
   // box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
   color: FLOW_PARALLEL_NAME_COLOR
@@ -1095,7 +1091,7 @@ else
 
 .flow-loop-value-name
   // font-size: 0.8125em
-  font-family: "FiraCode"
+  font-family: "SpaceMono"
   background: PRIMARY_BASE
   box-shadow: 0.0625em 0.0625em 0.0625em FLOW_LOOP_EXPRESSION_BOX_SHADOW_COLOR
   color: PRIMARY_TEXT_COLOR

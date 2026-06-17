@@ -1527,11 +1527,13 @@ proc restartSubsystem*(data: Data, name: cstring) =
 
 proc commandSelectPrevious* =
   if data.ui.commandPalette.selected > 0:
+    data.ui.commandPalette.keyNavigation = true
     data.ui.commandPalette.selected -= 1
     redrawAll()
 
 proc commandSelectNext* =
   if data.ui.commandPalette.selected < data.ui.commandPalette.results.len - 1:
+    data.ui.commandPalette.keyNavigation = true
     data.ui.commandPalette.selected += 1
     redrawAll()
 
