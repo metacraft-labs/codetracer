@@ -722,6 +722,60 @@ proc setBreakpoint*(s: HeadlessDebugSession; file: string; line: int;
     raise newException(IOError,
       "setBreakpoints failed: " & $resp)
 
+proc addColumnTracepoint*(s: HeadlessDebugSession; file: string; line: int;
+                           column: int; logMessage: string) =
+  ## M10 — register a column-aware DAP *tracepoint* (logpoint) by
+  ## sending a ``setBreakpoints`` DAP request whose
+  ## ``SourceBreakpoint`` carries a non-empty ``logMessage``.  The
+  ## replay engine routes the request to its tracepoint registry
+  ## instead of the breakpoint registry: when the next ``continue``
+  ## traverses the matched ``(file, line, column)`` step the engine
+  ## emits a DAP ``output`` event carrying ``logMessage`` and
+  ## continues WITHOUT stopping.
+  ##
+  ## ``column`` may be ``0`` for the legacy line-only logpoint
+  ## behaviour (fires on every step on the line).  ``logMessage``
+  ## must be non-empty — a tracepoint with no message is a
+  ## breakpoint, so callers should use ``setBreakpoint`` instead.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M10 for the DAP wire contract.
+  doAssert logMessage.len > 0,
+    "addColumnTracepoint: logMessage must be non-empty (a logpoint without " &
+    "a message is a breakpoint — use setBreakpoint instead)"
+  var bp = %*{"line": line, "logMessage": logMessage}
+  if column > 0:
+    bp["column"] = %column
+  let args = %*{
+    "source": {
+      "path": file,
+    },
+    "breakpoints": [bp],
+  }
+  let resp = s.backend.sendDapRequest("setBreakpoints", args)
+  if not resp.getOrDefault("success").getBool(false):
+    raise newException(IOError,
+      "setBreakpoints (logpoint) failed: " & $resp)
+
+proc lastSetTracepointResponse*(s: HeadlessDebugSession;
+                                file: string; line: int;
+                                column: int;
+                                logMessage: string): JsonNode =
+  ## M10 — same wire shape as ``addColumnTracepoint`` but returns the
+  ## raw DAP response so tests can assert on the bound column the
+  ## backend echoes back (mirrors ``lastSetBreakpointsResponse``).
+  doAssert logMessage.len > 0
+  var bp = %*{"line": line, "logMessage": logMessage}
+  if column > 0:
+    bp["column"] = %column
+  let args = %*{
+    "source": {
+      "path": file,
+    },
+    "breakpoints": [bp],
+  }
+  result = s.backend.sendDapRequest("setBreakpoints", args)
+
 proc lastSetBreakpointsResponse*(s: HeadlessDebugSession;
                                  file: string; line: int;
                                  column: int = 0;

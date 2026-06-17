@@ -18,8 +18,9 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::ReplaySession;
 use crate::task::{
-    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, Events, HistoryResultWithRecord,
-    LoadHistoryArg, Location, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, ProgramEvent, RRTicks, VariableWithRecord,
+    Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, DapTracepoint, Events,
+    HistoryResultWithRecord, LoadHistoryArg, Location, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, ProgramEvent,
+    RRTicks, TracepointHit, VariableWithRecord,
 };
 use crate::trace_reader::TraceReader;
 use crate::value::{Type, Value, ValueRecordWithType};
@@ -1032,12 +1033,35 @@ pub struct MaterializedReplaySession {
     /// would match the current step on this line counts as a hit.
     pub breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>>,
     breakpoint_next_id: usize,
+    /// M10 — Per-path table of registered DAP-pipeline tracepoints
+    /// (logpoints), keyed by `(line, column)` in the exact same shape
+    /// as `breakpoint_list`.  When a Continue traverses a recorded
+    /// step that matches any entry here, the engine pushes a
+    /// `TracepointHit` into `pending_tracepoint_hits` and KEEPS GOING
+    /// — the defining difference between a logpoint and a breakpoint.
+    ///
+    /// `column = None` is the legacy line-only slot (back-compat); a
+    /// `Some(c)` slot mirrors M1's column-aware semantics.  Multiple
+    /// tracepoints on the same line, anchored at different columns,
+    /// coexist on the per-line slot map.
+    pub tracepoint_list: Vec<HashMap<(usize, Option<i64>), DapTracepoint>>,
+    tracepoint_next_id: i64,
+    /// M10 — buffered tracepoint hits awaiting drain by the DAP
+    /// handler.  The handler calls `drain_tracepoint_hits()` after
+    /// `step(Action::Continue, ...)` returns and emits one DAP
+    /// `output` event per drained hit.  Cleared on every drain.
+    pending_tracepoint_hits: Vec<TracepointHit>,
 }
 
 impl MaterializedReplaySession {
     pub fn new(reader: Arc<dyn TraceReader>) -> MaterializedReplaySession {
         let mut breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>> = Default::default();
         breakpoint_list.resize_with(reader.path_count(), HashMap::new);
+        // M10 — the tracepoint registry parallels `breakpoint_list`:
+        // one slot per recorded path so the per-path lookup in
+        // `step_matches_any_tracepoint` is O(1) keyed by `path_id`.
+        let mut tracepoint_list: Vec<HashMap<(usize, Option<i64>), DapTracepoint>> = Default::default();
+        tracepoint_list.resize_with(reader.path_count(), HashMap::new);
         MaterializedReplaySession {
             reader,
             local_types: Vec::new(),
@@ -1045,6 +1069,9 @@ impl MaterializedReplaySession {
             call_key: CallKey(0),
             breakpoint_list,
             breakpoint_next_id: 0,
+            tracepoint_list,
+            tracepoint_next_id: 0,
+            pending_tracepoint_hits: Vec::new(),
         }
     }
 
@@ -1415,14 +1442,32 @@ impl MaterializedReplaySession {
                 vec![]
             }
         };
+        // M10 — clear any leftover hits from a previous Continue.  The
+        // DAP handler drains after every step call, but a paranoid
+        // reset here means a malformed caller (or a test rig that
+        // forgets to drain) cannot leak stale hits into the next run.
+        self.pending_tracepoint_hits.clear();
+        let breakpoint_active = !self.breakpoint_list.is_empty();
+        let tracepoint_active = self.tracepoint_list.iter().any(|per_path| !per_path.is_empty());
         for step in steps {
-            if !self.breakpoint_list.is_empty() {
+            // M10 — collect every tracepoint hit on the way to the
+            // eventual breakpoint stop (or end-of-trace).  Tracepoint
+            // matching MUST happen BEFORE the breakpoint check so a
+            // step that satisfies BOTH a breakpoint AND a tracepoint
+            // logs the message BEFORE the engine parks at the
+            // stop point (the convention DAP `output` consumers
+            // expect: the log appears in the trace before the
+            // matching stop event).
+            if tracepoint_active && let Some(hit) = self.step_matches_any_tracepoint(&step) {
+                self.pending_tracepoint_hits.push(hit);
+            }
+            if breakpoint_active {
                 if self.step_matches_any_breakpoint(&step) {
                     self.step_id_jump(step.step_id);
                     // true: has hit a breakpoint
                     return Ok(true);
                 }
-            } else {
+            } else if !tracepoint_active {
                 break;
             }
         }
@@ -1501,6 +1546,58 @@ impl MaterializedReplaySession {
         }
 
         false
+    }
+
+    /// M10 — return the registered DAP-pipeline tracepoint that
+    /// matches `step`, if any.  Mirrors `step_matches_any_breakpoint`
+    /// but for the logpoint registry:
+    ///
+    ///   * a `(line, None)` entry is the legacy line-only slot — fires
+    ///     on every step on the line, regardless of recorded column.
+    ///   * a `(line, Some(c))` entry is column-aware — fires only when
+    ///     the step's recorded `column == Some(c)`.
+    ///
+    /// When BOTH a line-only slot AND a column-aware slot would match
+    /// the same step, the column-aware slot wins — it carries more
+    /// specific information, so its `log_message` is the more
+    /// faithful one to emit.  This mirrors the principle that
+    /// column-aware navigation surfaces are strictly refinements of
+    /// the legacy line-only ones.
+    ///
+    /// Returns `None` when no slot matches, even when the line agrees:
+    /// the tracepoint registry is OPT-IN at the `(line, column)`
+    /// granularity, exactly like the breakpoint registry.
+    fn step_matches_any_tracepoint(&self, step: &DbStep) -> Option<TracepointHit> {
+        let path_idx = step.path_id.0;
+        if path_idx >= self.tracepoint_list.len() {
+            return None;
+        }
+        let line_key = step.line.0 as usize;
+        let table = &self.tracepoint_list[path_idx];
+
+        // M10 — column-aware slot wins when present, because it
+        // describes a strictly narrower target.  The line-only slot is
+        // checked second so a logpoint at `(line=1, col=None)` still
+        // fires on `(line=1, col=14)` steps when no column-anchored
+        // slot covers them.
+        let column_match: Option<&DapTracepoint> = step
+            .column
+            .and_then(|step_col| table.get(&(line_key, Some(step_col.0))));
+        let line_match: Option<&DapTracepoint> = table.get(&(line_key, None));
+
+        let chosen = match (column_match, line_match) {
+            (Some(c), _) if c.enabled => Some(c),
+            (_, Some(l)) if l.enabled => Some(l),
+            _ => None,
+        }?;
+
+        let path = self.reader.path(step.path_id).unwrap_or("").to_string();
+        Some(TracepointHit {
+            path,
+            line: step.line.0,
+            column: step.column.map(|c| c.0),
+            log_message: chosen.log_message.clone(),
+        })
     }
 
     /// Evaluate the breakpoint's optional condition expression against
@@ -2053,6 +2150,58 @@ impl ReplaySession for MaterializedReplaySession {
             }
         }
         Ok(())
+    }
+
+    /// M10 — register a DAP-pipeline tracepoint (logpoint) at
+    /// `(path, line[, column])` carrying `log_message`.  Mirrors
+    /// `add_breakpoint` but writes into the parallel `tracepoint_list`
+    /// registry; the Continue stop check (`step_continue`) consults
+    /// BOTH registries on every step.
+    fn add_tracepoint(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        log_message: String,
+    ) -> Result<DapTracepoint, Box<dyn Error>> {
+        let path_id_res: Result<PathId, Box<dyn Error>> = self
+            .load_path_id(path)
+            .ok_or(format!("can't add a tracepoint: can't find path `{}` in trace", path).into());
+        let path_id = path_id_res?;
+        let inner_map = &mut self.tracepoint_list[path_id.0];
+        let tracepoint = DapTracepoint {
+            id: self.tracepoint_next_id,
+            enabled: true,
+            column,
+            log_message,
+        };
+        self.tracepoint_next_id += 1;
+        // M10 — keyed by `(line, column)` so multiple column-anchored
+        // logpoints on a minified one-liner each carry their own
+        // message and an accompanying `(line, None)` legacy slot
+        // coexists without overwrite.
+        inner_map.insert((line as usize, column), tracepoint.clone());
+        Ok(tracepoint)
+    }
+
+    /// M10 — clear every registered DAP-pipeline tracepoint.  The DAP
+    /// handler invokes this on `set_breakpoints` source-replacement so
+    /// successive requests fully redefine the per-source tracepoint
+    /// set (mirroring DAP `setBreakpoints` replace semantics for
+    /// breakpoints).
+    fn delete_tracepoints(&mut self) -> Result<bool, Box<dyn Error>> {
+        self.tracepoint_list.clear();
+        self.tracepoint_list.resize_with(self.reader.path_count(), HashMap::new);
+        Ok(true)
+    }
+
+    /// M10 — drain and return the buffered tracepoint hits collected
+    /// during the last `step(Action::Continue, ...)` traversal.  The
+    /// caller (the DAP handler) emits one `output` event per hit and
+    /// MUST drain after every Continue so back-to-back Continues
+    /// don't replay the same log lines.
+    fn drain_tracepoint_hits(&mut self) -> Vec<TracepointHit> {
+        std::mem::take(&mut self.pending_tracepoint_hits)
     }
 
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {

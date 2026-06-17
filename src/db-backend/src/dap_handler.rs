@@ -33,9 +33,9 @@ use crate::dap_types;
 use crate::step_lines_loader::StepLinesLoader;
 use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAndValueTuple, TraceKind};
 use crate::task::{
-    Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CallSearchResponseBody,
-    CalltraceLoadArgs, CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DbEventKind,
-    FlowMode, FlowUpdate, FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions,
+    Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CalltraceLoadArgs,
+    CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DapTracepoint, DbEventKind, FlowMode,
+    FlowUpdate, FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction, Instructions,
     LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState, NO_ADDRESS, NO_INDEX,
     NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent, RRGDBStopSignal, RRTicks,
     RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, Stop, StopType, Task,
@@ -137,6 +137,15 @@ pub struct Handler {
     /// — DAP clients that omit `column` continue to stop at the start
     /// of the line.
     pub breakpoints: HashMap<(String, i64, Option<i64>), Vec<Breakpoint>>,
+
+    /// M10 — Per-source DAP-pipeline tracepoint (logpoint) registry
+    /// keyed by `(path, line, column)`.  Mirrors `breakpoints` so the
+    /// per-source clear path on `setBreakpoints` follows the same
+    /// pattern.  Each entry holds the `DapTracepoint` records the
+    /// replay engine returned from `add_tracepoint`.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
+    pub tracepoints: HashMap<(String, i64, Option<i64>), Vec<DapTracepoint>>,
 
     pub trace_kind: TraceKind,
     pub replay: Box<dyn ReplaySession>,
@@ -440,6 +449,7 @@ impl Handler {
             dap_client: DapClient::default(),
             previous_step_id: StepId(0),
             breakpoints: HashMap::new(),
+            tracepoints: HashMap::new(),
             replay,
             ct_rr_args,
             load_flow_index: 0,
@@ -1890,7 +1900,27 @@ impl Handler {
     }
 
     pub fn step_continue(&mut self, forward: bool, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        if !self.replay.step(Action::Continue, forward)? {
+        let hit_breakpoint = self.replay.step(Action::Continue, forward)?;
+        // M10 — drain any DAP-pipeline tracepoint (logpoint) hits the
+        // replay engine collected on the way to the eventual stop.
+        // We emit ONE `output` event per hit BEFORE the
+        // "no breakpoints were hit" notification (when applicable) so
+        // the DAP client's event stream reads:
+        //   output("hit b") output("hit c") notification("no bp")
+        // i.e. the user's log lines appear in source order regardless
+        // of whether a breakpoint ultimately stopped the run.
+        let hits = self.replay.drain_tracepoint_hits();
+        for hit in hits {
+            // Append a newline so consumers that buffer by line — the
+            // standard DAP `output` consumer pattern (terminals,
+            // trace log panes) — render one log line per hit.
+            let message = format!("{}\n", hit.log_message);
+            let event = self
+                .dap_client
+                .output_event("console", &hit.path, hit.line as usize, &message)?;
+            sender.send(event)?;
+        }
+        if !hit_breakpoint {
             self.send_notification(NotificationKind::Info, "No breakpoints were hit!", false, sender)?;
         }
         self.step_id = self.replay.current_step_id();
@@ -3284,6 +3314,7 @@ impl Handler {
             path: self.reader.path(path_id).unwrap_or("").to_string(),
             column: None,
             condition: None,
+            log_message: None,
         }) {
             return Some(step_id);
         }
@@ -3302,6 +3333,7 @@ impl Handler {
             path: call_target.path.clone(),
             column: None,
             condition: None,
+            log_message: None,
         }) {
             self.replay.jump_to(line_step_id)?;
             self.step_id = self.replay.current_step_id();
@@ -3357,13 +3389,52 @@ impl Handler {
             // is normalised to `None` so the unconditional behaviour
             // M1 shipped with is preserved when frontends ship an
             // empty placeholder.
-            let line_specs: Vec<(i64, Option<i64>, Option<String>)> = if let Some(bps) = args.breakpoints {
+            // M10: also clear the parallel tracepoint registry for this
+            // source so back-to-back `setBreakpoints` requests fully
+            // redefine the per-source logpoint set (matching the DAP
+            // `setBreakpoints` replace semantics for breakpoints).
+            self.clear_tracepoints_for_source(&path)?;
+            // M1: keep the `(line, column)` pair from the DAP request so
+            // the breakpoint can be registered at the column the client
+            // asked for.  The legacy `args.lines` fallback (used by very
+            // old DAP clients that don't carry the structured
+            // `breakpoints` array) is column-less by construction.
+            // M1: normalise `column == Some(0)` to `None`.  The DAP
+            // spec doesn't permit column 0 (columns are 1-indexed),
+            // but the Nim frontend's strict ``DapSourceBreakpoint``
+            // ref-object can't elide the key — it ships
+            // ``"column": 0`` to mean "no column" for legacy
+            // line-only breakpoints.  Treating 0 as None preserves
+            // back-compat without forcing every existing UI surface
+            // to switch to an Option-shaped field.
+            // M9: forward `SourceBreakpoint.condition` (empty-string
+            // normalised to `None`) so the Continue stop check can
+            // evaluate the M9 conditional layer.
+            // M10: forward `SourceBreakpoint.log_message`.  When
+            // present, the `(line, column)` pair registers as a
+            // *tracepoint* (DAP logpoint) rather than a breakpoint:
+            // execution passing through `(path, line, column)` emits
+            // an `output` event with `log_message` and continues
+            // without stopping.  Empty-string `log_message` is
+            // normalised to `None` so the conventional "no log" case
+            // takes the breakpoint path even when the Nim frontend
+            // ships an empty placeholder.
+            // M10 alias — the per-breakpoint tuple now carries four
+            // axes (line, column, condition, log_message); clippy's
+            // type-complexity lint trips on the bare tuple so we name
+            // it.  Read it as a "decoded SourceBreakpoint": the
+            // intent-bearing fields after normalisation
+            // (`column == Some(0)` and empty strings collapsed to
+            // `None`).
+            type DecodedSourceBreakpoint = (i64, Option<i64>, Option<String>, Option<String>);
+            let line_specs: Vec<DecodedSourceBreakpoint> = if let Some(bps) = args.breakpoints {
                 bps.into_iter()
                     .map(|b| {
                         (
                             b.line,
                             b.column.filter(|c| *c > 0),
                             b.condition.filter(|c| !c.is_empty()),
+                            b.log_message.filter(|m| !m.is_empty()),
                         )
                     })
                     .collect()
@@ -3371,11 +3442,11 @@ impl Handler {
                 args.lines
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|l| (l, None, None))
+                    .map(|l| (l, None, None, None))
                     .collect()
             };
 
-            for (line, column, condition) in line_specs {
+            for (line, column, condition, log_message) in line_specs {
                 let source = Some(dap_types::Source {
                     name: args.source.name.clone(),
                     path: Some(path.clone()),
@@ -3386,11 +3457,66 @@ impl Handler {
                     adapter_data: None,
                     checksums: None,
                 });
+                // M10 — route to the tracepoint pipeline when
+                // `log_message` is present, otherwise the legacy
+                // breakpoint pipeline.  The DAP response shape is the
+                // same `Breakpoint{verified, column, line, ...}`
+                // either way — DAP clients consult `verified` to know
+                // the request was honoured; they don't currently see a
+                // distinction between bound logpoints and bound
+                // breakpoints on the wire.
+                if let Some(message_text) = log_message.clone() {
+                    match self.add_tracepoint(SourceLocation {
+                        path: path.clone(),
+                        line: line as usize,
+                        column,
+                        condition: condition.clone(),
+                        log_message: Some(message_text),
+                    }) {
+                        Ok(tracepoint) => {
+                            results.push(dap_types::Breakpoint {
+                                id: Some(tracepoint.id),
+                                verified: tracepoint.enabled,
+                                message: None,
+                                source,
+                                line: Some(line),
+                                column: tracepoint.column,
+                                end_line: None,
+                                end_column: None,
+                                instruction_reference: None,
+                                offset: None,
+                                reason: None,
+                            });
+                        }
+                        Err(e) => {
+                            let message = format!(
+                                "failed to set tracepoint at {path}:{line}{}: {e}",
+                                column.map(|c| format!(":{c}")).unwrap_or_default()
+                            );
+                            warn!("{message}");
+                            results.push(dap_types::Breakpoint {
+                                id: None,
+                                verified: false,
+                                message: Some(message),
+                                source,
+                                line: Some(line),
+                                column,
+                                end_line: None,
+                                end_column: None,
+                                instruction_reference: None,
+                                offset: None,
+                                reason: Some("failed".to_string()),
+                            });
+                        }
+                    }
+                    continue;
+                }
                 match self.add_breakpoint(SourceLocation {
                     path: path.clone(),
                     line: line as usize,
                     column,
                     condition: condition.clone(),
+                    log_message: None,
                 }) {
                     Ok(breakpoint) => {
                         results.push(dap_types::Breakpoint {
@@ -3479,6 +3605,61 @@ impl Handler {
             .or_default();
         entry.push(breakpoint.clone());
         Ok(breakpoint)
+    }
+
+    /// M10 — Column-Aware Replay Navigation §M10.  Forward the
+    /// `(path, line, column, log_message)` triple to the replay
+    /// engine's tracepoint registry.  The Continue stop check will
+    /// emit a DAP `output` event with `log_message` when execution
+    /// passes through the matched step and continue WITHOUT
+    /// stopping.  `loc.log_message` must be `Some(...)` — callers
+    /// (currently only `set_breakpoints`) only invoke this when the
+    /// DAP `SourceBreakpoint.logMessage` field is present and
+    /// non-empty.
+    ///
+    /// The local `tracepoints` registry on `Handler` mirrors the
+    /// breakpoint registry shape (keyed by `(path, line, column)`)
+    /// so future per-source clear / delete paths follow the same
+    /// pattern.
+    pub fn add_tracepoint(&mut self, loc: SourceLocation) -> Result<DapTracepoint, Box<dyn Error>> {
+        let log_message = loc
+            .log_message
+            .clone()
+            .ok_or_else(|| Box::<dyn Error>::from("add_tracepoint requires loc.log_message"))?;
+        let tracepoint = self
+            .replay
+            .add_tracepoint(&loc.path, loc.line as i64, loc.column, log_message.clone())?;
+        let entry = self
+            .tracepoints
+            .entry((loc.path.clone(), loc.line as i64, loc.column))
+            .or_default();
+        entry.push(tracepoint.clone());
+        Ok(tracepoint)
+    }
+
+    /// M10 — clear every registered DAP-pipeline tracepoint for the
+    /// given source path.  Invoked at the top of `set_breakpoints` so
+    /// successive requests fully redefine the per-source logpoint
+    /// set (matching the DAP `setBreakpoints` replace semantics).
+    pub fn clear_tracepoints_for_source(&mut self, source_path: &str) -> Result<(), Box<dyn Error>> {
+        let keys = self
+            .tracepoints
+            .keys()
+            .filter(|(path, _line, _column)| path == source_path)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in keys {
+            self.tracepoints.remove(&key);
+        }
+        // Blanket-clear the replay-engine-side registry.  M10 ships
+        // the materialised path; non-materialised backends have a
+        // no-op default impl so this is safe regardless of trace
+        // kind.  A finer per-source delete is a follow-up — the M10
+        // contract only requires that successive `set_breakpoints`
+        // requests don't accumulate stale tracepoints from prior
+        // calls.
+        let _ = self.replay.delete_tracepoints();
+        Ok(())
     }
 
     pub fn delete_breakpoints_for_location(&mut self, loc: SourceLocation, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -5760,6 +5941,7 @@ mod tests {
             line: 3,
             column: None,
             condition: None,
+            log_message: None,
         };
         handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
@@ -5770,6 +5952,7 @@ mod tests {
                 line: 2,
                 column: None,
                 condition: None,
+                log_message: None,
             },
             sender.clone(),
         )?;
@@ -6113,6 +6296,8 @@ mod tests {
                     lang: Lang::Unknown,
                     results: vec![],
                     tracepoint_error: "".to_string(),
+                    column: None,
+                    log_message: None,
                 }],
                 found: vec![],
                 last_count: 0,
@@ -6140,6 +6325,8 @@ mod tests {
                 lang: Lang::Unknown,
                 results: vec![],
                 tracepoint_error: "".to_string(),
+                column: None,
+                log_message: None,
             });
         }
 
@@ -6176,6 +6363,8 @@ mod tests {
                 lang: Lang::Unknown,
                 results: vec![],
                 tracepoint_error: "".to_string(),
+                column: None,
+                log_message: None,
             });
         }
 

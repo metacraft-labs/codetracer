@@ -61,6 +61,15 @@ type
     ## a non-empty string is forwarded to the replay engine on the
     ## DAP ``setBreakpoints`` request.
     condition*: cstring
+    ## M10 — Column-Aware Tracepoint / Logpoint: when non-empty,
+    ## the entry describes a *DAP logpoint* (tracepoint) at
+    ## ``(line, column)`` rather than a breakpoint.  The replay
+    ## engine emits a DAP ``output`` event carrying ``logMessage``
+    ## as execution passes through the matched step and CONTINUES
+    ## without stopping.  ``""`` (the default) preserves the M1
+    ## breakpoint behaviour.  Spec:
+    ## codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
+    logMessage*: cstring
 
   DapSetBreakpointsArguments* = ref object
     source*: DapSource

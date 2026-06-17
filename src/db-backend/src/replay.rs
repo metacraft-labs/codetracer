@@ -5,8 +5,8 @@ use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::task::{
-    Action, Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, Location,
-    ProcessInfo, ProgramEvent, VariableWithRecord,
+    Action, Breakpoint, CallLine, CtLoadLocalsArguments, DapTracepoint, Events, HistoryResultWithRecord,
+    LoadHistoryArg, Location, ProcessInfo, ProgramEvent, TracepointHit, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -130,6 +130,58 @@ pub trait ReplaySession: std::fmt::Debug {
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>>;
     fn enable_breakpoints(&mut self) -> Result<(), Box<dyn Error>>;
     fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>>;
+
+    /// M10 — Column-Aware Replay Navigation §M10.  Register a
+    /// DAP-pipeline-integrated *tracepoint* (logpoint) at
+    /// `(path, line[, column])` carrying `log_message`.
+    ///
+    /// When the replay engine traverses a matched step during a
+    /// `Continue`, it emits a DAP `output` event carrying
+    /// `log_message` and continues WITHOUT stopping (the defining
+    /// difference between a logpoint and a breakpoint).
+    ///
+    /// `column = None` is the legacy line-only logpoint: fires on
+    /// every recorded step on the line.  `column = Some(c)` fires only
+    /// when the step's recorded column equals `c`, mirroring the M1
+    /// column-aware breakpoint contract.
+    ///
+    /// The default implementation returns an error so non-materialized
+    /// backends (emulator, recreator, flow_preloader) surface a typed
+    /// "not supported" rather than silently swallowing the request —
+    /// M10 only wires the materialised path, matching the M1 / M9
+    /// staging pattern for surfaces that haven't been ported to the
+    /// stable Nim worker yet.
+    fn add_tracepoint(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        log_message: String,
+    ) -> Result<DapTracepoint, Box<dyn Error>> {
+        let _ = (path, line, column, log_message);
+        Err("DAP tracepoint (logpoint) registration is only supported by the materialised replay session".into())
+    }
+
+    /// M10 — clear every registered DAP-pipeline tracepoint.  Default
+    /// implementation is a no-op so backends that never register one
+    /// behave correctly when the DAP handler issues a blanket
+    /// `clear_tracepoints` on session teardown.
+    fn delete_tracepoints(&mut self) -> Result<bool, Box<dyn Error>> {
+        Ok(true)
+    }
+
+    /// M10 — drain the list of tracepoint hits collected during the
+    /// last `step(Action::Continue, ...)` traversal.  Each hit
+    /// corresponds to a recorded step the runner passed *through* on
+    /// the way to the eventual stop point (or end-of-trace) that
+    /// matched a registered logpoint.  The DAP handler emits an
+    /// `output` event per drained hit.
+    ///
+    /// Default implementation returns an empty vec (backends without
+    /// tracepoint support never collect hits).
+    fn drain_tracepoint_hits(&mut self) -> Vec<TracepointHit> {
+        Vec::new()
+    }
 
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>>;
     fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>>;
