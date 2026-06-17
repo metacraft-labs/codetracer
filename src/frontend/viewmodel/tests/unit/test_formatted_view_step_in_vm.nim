@@ -29,6 +29,32 @@
 ## debug request so the contract is exercised without depending on
 ## ``prettier`` being on PATH at test time.
 ##
+## Regression note — apparent stdio-bridge deadlock.
+## ------------------------------------------------
+##
+## The M8 work-item commit (3e7deb40) flagged this VM test as a
+## follow-up because it would silently hang under load: the parent
+## process blocked in ``pipe_read`` on the replay-server's stdout while
+## the replay-server's "receiving" thread blocked in ``pipe_read`` on
+## stdin.  The diagnosis at the time was a stdio-bridge race; the
+## actual root cause turned out to be a server-side panic in the
+## value-loader path (``src/db-backend/src/db.rs::type_record``).
+## When the ``ct/load-locals`` reactive auto-loader (triggered by the
+## debugger-position change after ``next``) walks a step whose value
+## record carries a ``TypeId`` not represented in the trace's type
+## table — typical of JS function-bearing locals — the
+## ``MaterializedReplaySession::type_record`` lookup falls into the
+## local-overlay branch and indexes an empty ``Vec`` with ``index 0``,
+## panicking the stable thread mid-request.  The panic dropped the
+## per-thread channel receiver, the response never reached the wire,
+## and the DAP client (this test) blocked forever waiting for a
+## response that the stable thread had committed to producing.  See
+## the defensive fallback in ``MaterializedReplaySession::type_record``
+## that swaps the unchecked ``local_types[idx - base_count]`` for a
+## session-scoped ``<unknown>`` ``TypeRecord``; this keeps the server
+## alive across malformed type ids and makes this VM test pass
+## deterministically.
+##
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_formatted_view_step_in_vm.nim
 

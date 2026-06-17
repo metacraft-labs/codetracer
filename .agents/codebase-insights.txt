@@ -1,4 +1,16 @@
 # Codebase insights
+- 2026-06-17: `MaterializedReplaySession::type_record` in
+  `src/db-backend/src/db.rs` now returns a session-scoped `<unknown>`
+  fallback when the supplied `TypeId` is outside both the base reader's
+  type table and the local overlay.  Trace formats produced by
+  recorders that do not register every typed value (e.g. early JS
+  traces that emit `TypeId(0)` for function-bearing locals) used to
+  panic the "stable" worker thread mid-`ct/load-locals`, dropping the
+  DAP-response channel receiver and stranding the DAP client in
+  `pipe_read` on the replay-server's stdout.  The surface symptom was
+  indistinguishable from a stdio-bridge deadlock; see the regression
+  note in
+  `src/frontend/viewmodel/tests/unit/test_formatted_view_step_in_vm.nim`.
 - 2026-05-20: `FlowMode::Call` returns the whole enclosing function call's step
   window. For top-level Python code (the `<module>` body) the "call" spans
   the entire script execution, so requesting flow at a breakpoint inside a

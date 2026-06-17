@@ -1084,17 +1084,44 @@ impl MaterializedReplaySession {
 
     /// Look up a type by id, checking the local overlay for types
     /// registered during this replay session.
-    #[allow(clippy::expect_used)] // idx < base_count guard ensures the id is valid
+    ///
+    /// Defensive contract: error-shaped `ValueRecord`s synthesised by the
+    /// db-replay loader (and by external recorders) embed
+    /// `TypeId(0)` as an "unknown" placeholder regardless of whether the
+    /// trace actually registered any types.  Combined with traces that
+    /// emit zero types (e.g. early JS recordings before the type-table
+    /// migration), looking up that placeholder used to land on
+    /// `local_types[0]` and panic with `index out of bounds`.  The
+    /// surface symptom was a deadlock from the parent process's point of
+    /// view: the stable thread panicked mid-`ct/load-locals`, the
+    /// receiver was dropped, the response never arrived, and the DAP
+    /// client blocked forever waiting on the pipe.  See the M8 VM test
+    /// regression note in `tests/unit/test_formatted_view_step_in_vm.nim`.
+    ///
+    /// To avoid the panic without changing the shape of valid lookups,
+    /// fall back to a session-scoped `<unknown>` `TypeRecord` whenever
+    /// the id is outside both ranges.  Loaders surface this through the
+    /// usual `Value.typ` field, so the GUI/test sees "unknown" typing
+    /// instead of crashing the replay-server.
     fn type_record(&self, id: TypeId) -> &TypeRecord {
+        use std::sync::OnceLock;
+        static FALLBACK_TYPE: OnceLock<TypeRecord> = OnceLock::new();
         let idx: usize = id.into();
         let base_count = self.reader.type_count();
         if idx < base_count {
-            self.reader
-                .type_record(id)
-                .expect("type_record: invalid TypeId in base reader")
+            // Base reader returned `None` (corrupt index in the type
+            // table) is also surfaced as the same fallback to keep the
+            // server alive across malformed traces.
+            if let Some(rec) = self.reader.type_record(id) {
+                return rec;
+            }
         } else {
-            &self.local_types[idx - base_count]
+            let local_idx = idx - base_count;
+            if let Some(rec) = self.local_types.get(local_idx) {
+                return rec;
+            }
         }
+        FALLBACK_TYPE.get_or_init(default_type_record)
     }
 
     #[allow(clippy::wrong_self_convention)] // Needs &mut self to register types
