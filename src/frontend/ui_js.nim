@@ -3331,8 +3331,18 @@ proc disableAllTracepoints*(data: Data) =
 #
 # See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
 # §M5 for the contract.
-proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int) =
-  data.services.debugger.addColumnBreakpoint(path, line, column)
+proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int,
+                                condition: cstring = cstring"") =
+  ## M1 base — register a column-aware breakpoint via
+  ## ``data.services.debugger.addColumnBreakpoint(path, line, column)``.
+  ##
+  ## M9 — the optional fourth argument ``condition`` is forwarded to
+  ## the underlying service method so the GUI Playwright spec can drive
+  ## a column-aware conditional breakpoint via
+  ## ``data.services.debugger.addColumnBreakpoint.call(svc, path, line,
+  ## column, "i > 100")``.  Empty/missing condition preserves the M1
+  ## unconditional behaviour.
+  data.services.debugger.addColumnBreakpoint(path, line, column, condition)
 
 proc thunkM5StepOverStatement() =
   data.services.debugger.stepOverStatement()

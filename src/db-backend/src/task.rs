@@ -944,6 +944,13 @@ pub struct SourceLocation {
     /// `None` preserves the legacy line-only semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<i64>,
+    /// Optional condition expression for the M9 column-aware
+    /// conditional breakpoint surface.  `None` preserves the
+    /// unconditional behaviour M1 shipped with.  Carried only by
+    /// the breakpoint-set call sites; other consumers of
+    /// `SourceLocation` (e.g. `get_closest_step_id`) ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
 }
 
 impl fmt::Display for SourceLocation {
@@ -2444,6 +2451,18 @@ pub struct Breakpoint {
     /// clients that send only `{line: N}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<i64>,
+    /// Optional condition expression evaluated at the candidate stop
+    /// step.  When `Some(expr)` the Continue stop check evaluates the
+    /// expression against the locals recorded at the matched step and
+    /// only fires the breakpoint when the expression yields a truthy
+    /// value.  `None` preserves the unconditional behaviour M1
+    /// shipped with.  Wired through M9 of the Column-Aware Replay
+    /// Navigation campaign — see
+    /// `codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org`
+    /// §M9.  Composes orthogonally with `column` — both axes are
+    /// honoured when both are `Some`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

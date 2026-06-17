@@ -237,6 +237,7 @@ impl ReplaySession for SyntheticReplaySession {
         _path: &str,
         _line: i64,
         _column: Option<i64>,
+        _condition: Option<String>,
     ) -> Result<Breakpoint, Box<dyn StdError>> {
         unimplemented!("synthetic session: interpreter never calls add_breakpoint")
     }

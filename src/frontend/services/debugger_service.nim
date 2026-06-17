@@ -320,6 +320,13 @@ proc dapSetBreakpoints*(self: DebuggerService) =
   ## DAP request surfaces it; legacy breakpoints (``column == 0``)
   ## fall back to the original line-only payload so older replay
   ## servers (and the existing CI smoke fixtures) keep working.
+  ##
+  ## M9 — when a registered breakpoint carries a non-empty condition
+  ## expression, the DAP request ships it alongside the line/column.
+  ## The replay engine evaluates the condition at the candidate stop
+  ## step (see `db.condition_satisfied_at`).  Empty-string conditions
+  ## are normalised on the replay side to preserve the back-compat
+  ## semantic ("no condition").
   for path, breakpointList in self.breakpointTable:
     var args = DapSetBreakpointsArguments(
       source: DapSource(
@@ -333,7 +340,8 @@ proc dapSetBreakpoints*(self: DebuggerService) =
         args.breakpoints.add(
           DapSourceBreakpoint(
             line: line,
-            column: b.column
+            column: b.column,
+            condition: b.condition
           )
         )
         args.lines.add(line)
@@ -349,6 +357,7 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
     self.breakpointTable[path][line] = UIBreakpoint(
       line: line,
       column: NO_B_COLUMN,
+      condition: cstring"",
       path: path,
       level: if not c: 0 else: 1,
       enabled: true)
@@ -365,7 +374,8 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
   self.data.redraw()
 
 
-proc addColumnBreakpoint*(self: DebuggerService, path: cstring, line: int, column: int) =
+proc addColumnBreakpoint*(self: DebuggerService, path: cstring, line: int, column: int,
+                          condition: cstring = cstring"") =
   ## M1 — Column-Aware Replay Navigation: register a breakpoint
   ## anchored at ``(path, line, column)``.  Stored in the same
   ## ``breakpointTable[path][line]`` slot as a line-only breakpoint
@@ -378,11 +388,20 @@ proc addColumnBreakpoint*(self: DebuggerService, path: cstring, line: int, colum
   ## column-precision breakpoints; the existing
   ## ``addBreakpoint``/``toggleBreakpoint`` path remains line-only
   ## so the gutter-click default behaviour is unchanged.
+  ##
+  ## M9 — Column-Aware Conditional Breakpoint: the optional
+  ## ``condition`` parameter is forwarded to the replay engine on
+  ## the DAP ``setBreakpoints`` request.  When non-empty the engine
+  ## evaluates it against the locals recorded at the matched step
+  ## and only fires the breakpoint when the expression holds.
+  ## Composes orthogonally with ``column`` — both filters apply.
+  ## ``condition = ""`` preserves the M1 unconditional behaviour.
   if not self.breakpointTable.hasKey(path):
     self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
   self.breakpointTable[path][line] = UIBreakpoint(
     line: line,
     column: column,
+    condition: condition,
     path: path,
     level: 0,
     enabled: true)

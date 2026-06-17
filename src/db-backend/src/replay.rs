@@ -101,7 +101,8 @@ pub trait ReplaySession: std::fmt::Debug {
     fn load_callstack(&mut self) -> Result<Vec<CallLine>, Box<dyn Error>>;
     fn load_history(&mut self, arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>>;
 
-    /// Register a breakpoint at `(path, line[, column])`.
+    /// Register a breakpoint at `(path, line[, column])` with an
+    /// optional `condition` expression.
     ///
     /// `column` is `Some(c)` for the M1 column-aware path (matches a
     /// recorded `DbStep` whose `(line, column)` equals the breakpoint
@@ -109,7 +110,21 @@ pub trait ReplaySession: std::fmt::Debug {
     /// any step on the line, regardless of column).  Implementations
     /// MUST keep the legacy line-only behaviour intact when `column`
     /// is `None`.
-    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>>;
+    ///
+    /// `condition` is `Some(expr)` for the M9 conditional path — the
+    /// Continue stop check evaluates `expr` against the locals
+    /// recorded at the matched step and only fires the breakpoint
+    /// when the expression yields a truthy value.  Composes
+    /// orthogonally with `column`: both filters apply when both are
+    /// `Some`.  `None` preserves the unconditional behaviour
+    /// M1 shipped with.
+    fn add_breakpoint(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        condition: Option<String>,
+    ) -> Result<Breakpoint, Box<dyn Error>>;
     fn delete_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<bool, Box<dyn Error>>;
     fn delete_breakpoints(&mut self) -> Result<bool, Box<dyn Error>>;
     fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>>;

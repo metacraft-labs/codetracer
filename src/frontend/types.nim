@@ -79,6 +79,14 @@ type
     ## column)``); the GUI exposes them through the same gutter
     ## marker for now.
     column*: int
+    ## M9 — Column-Aware Conditional Breakpoint: optional condition
+    ## expression evaluated by the replay engine at the candidate
+    ## stop step.  Empty string preserves the unconditional behaviour
+    ## M1 shipped with; a non-empty string is forwarded on the DAP
+    ## ``setBreakpoints`` request so the replay engine can evaluate
+    ## it against the locals at the matched step.  Composes
+    ## orthogonally with ``column``.
+    condition*: cstring
     path*: cstring
     fun*: cstring
     level*: int

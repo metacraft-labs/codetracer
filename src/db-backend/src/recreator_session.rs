@@ -775,7 +775,13 @@ impl ReplaySession for RecreatorReplaySession {
         Ok(())
     }
 
-    fn add_breakpoint(&mut self, path: &str, line: i64, column: Option<i64>) -> Result<Breakpoint, Box<dyn Error>> {
+    fn add_breakpoint(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        condition: Option<String>,
+    ) -> Result<Breakpoint, Box<dyn Error>> {
         self.ensure_active_stable()?;
         // The Nim stable-side `AddBreakpoint` query is currently
         // line-only (M1 only wires the column through the materialised
@@ -783,13 +789,16 @@ impl ReplaySession for RecreatorReplaySession {
         // `Breakpoint` so the DAP response surfaces it and the Continue
         // stop check (which lives in the materialised path) sees a
         // consistent record once the stable side is taught about the
-        // column in a follow-up.
+        // column in a follow-up.  M9 follows the same pattern for the
+        // `condition` field: surfaced on the response, enforced on the
+        // materialised path.
         let mut breakpoint =
             serde_json::from_str::<Breakpoint>(&self.stable.dispatch_replay_query(ReplayQuery::AddBreakpoint {
                 path: path.to_string(),
                 line,
             })?)?;
         breakpoint.column = column;
+        breakpoint.condition = condition;
         Ok(breakpoint)
     }
 
