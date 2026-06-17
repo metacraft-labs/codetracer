@@ -1578,6 +1578,311 @@ impl Handler {
             .translate_for_path(&abs_path, line, col, cache_dir.as_deref())
     }
 
+    /// M8 — formatted-view step-IN runner.
+    ///
+    /// Counterpart of M3's [`Self::next_dap_formatted_view`] but for
+    /// the DAP ``stepIn`` request.  The user is at a call site under
+    /// the active formatted srcview and wants to land at the FIRST
+    /// executed formatted (line, column) inside the callee body — not
+    /// at a minified-column-delta intra-statement step inside the call
+    /// expression.
+    ///
+    /// Strategy mirror of M3, but with the step-in primitive instead
+    /// of the same-or-shallower-depth primitive M3 uses:
+    ///
+    ///   1. Snapshot the entry's projected formatted (line, column).
+    ///   2. Advance the recorded step cursor by ONE minified step
+    ///      forward (the legacy ``step_in`` primitive — semantically
+    ///      "go to the very next recorded step, whatever its depth").
+    ///      This either descends into a callee (depth + 1) or stays at
+    ///      the same depth when the current step does not actually
+    ///      invoke a function.
+    ///   3. While the new step projects to the SAME formatted (line,
+    ///      column) as the entry, keep advancing forward by one
+    ///      recorded step at a time (no depth filter — step-in
+    ///      semantics allow the cursor to descend through nested
+    ///      calls).  Stop when the projection differs (one formatted
+    ///      step-in completed), or the trace boundary is reached, or
+    ///      the safety cap fires.
+    ///
+    /// Returns ``Ok(true)`` when the cursor advanced via the
+    /// formatted-view path; ``Ok(false)`` when no projection exists
+    /// for the entry step so the caller should fall through to the
+    /// legacy minified-coordinate runner — same defensive contract as
+    /// M3's [`Self::next_dap_formatted_view`].
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
+    fn step_in_dap_formatted_view(&mut self) -> Result<bool, Box<dyn Error>> {
+        let Some(entry_projection) = self.project_active_view_for_current_step() else {
+            return Ok(false);
+        };
+
+        let start_step_id = self.step_id;
+        let step_count = self.reader.step_count();
+        let mut last_step_id = start_step_id;
+        let mut count: usize = 0;
+        loop {
+            // step-in advances by exactly one recorded step, regardless
+            // of call depth — this is the semantic difference vs M3's
+            // next runner (which keeps stepping over deeper calls).
+            //
+            // Mirror the materialised session's ``step_in`` primitive
+            // ([`crate::db::MaterializedReplaySession::step_in`]) which
+            // is just ``last_step_id + 1`` clamped to the trace
+            // boundary.  Replicating it inline (instead of calling the
+            // primitive) lets the inner loop keep the same shape as M3
+            // and avoids redundant ``self.replay.step(...)`` driver
+            // calls that would advance ``self.step_id`` on every
+            // iteration.
+            let last_index = if last_step_id.0 < 0 {
+                0usize
+            } else {
+                last_step_id.0 as usize
+            };
+            let next_index = if step_count == 0 || last_index >= step_count - 1 {
+                last_index
+            } else {
+                last_index + 1
+            };
+            let candidate = StepId(next_index as i64);
+            if candidate == last_step_id {
+                break;
+            }
+            last_step_id = candidate;
+            count += 1;
+            if count >= crate::db::NEXT_INTERNAL_STEP_OVERS_LIMIT {
+                break;
+            }
+
+            let Some(candidate_projection) = self.project_active_view_for_step(candidate) else {
+                // No projection at this step — the cursor sits at a
+                // bookkeeping anchor not covered by the sourcemap.
+                // Treat that as "no formatted-side change" and keep
+                // stepping so the runner advances past intra-formatted-
+                // line noise the way M3 does.
+                continue;
+            };
+
+            let line_changed = candidate_projection.path != entry_projection.path
+                || candidate_projection.line != entry_projection.line;
+            let column_changed = candidate_projection.column != entry_projection.column;
+            if line_changed || column_changed {
+                break;
+            }
+        }
+        if last_step_id != start_step_id {
+            let _ = self.replay.jump_to(last_step_id)?;
+            self.step_id = self.replay.current_step_id();
+        }
+        Ok(true)
+    }
+
+    /// M8 — formatted-view step-OUT runner.
+    ///
+    /// Counterpart of M3 / M8-step-in for the DAP ``stepOut`` request.
+    /// The user is inside a callee under the active formatted srcview
+    /// and wants to land at the formatted (line, column) where
+    /// execution resumes in the CALLER — not at the recorded position
+    /// the legacy ``step_out`` lands at (which might project back to
+    /// the same formatted line as the entry when the caller's resume
+    /// position is sourced from a recorded anchor that maps inside the
+    /// same formatted block).
+    ///
+    /// Strategy:
+    ///
+    ///   1. Snapshot the entry's projected formatted (line, column).
+    ///   2. Use the legacy ``step_out`` primitive to walk to the
+    ///      caller's resume step — i.e. one call-depth shallower than
+    ///      the entry frame.  This is the natural starting candidate.
+    ///   3. While the resulting step still projects to the SAME
+    ///      formatted (line, column) as the entry, advance forward at
+    ///      the post-step-out call depth (or shallower) until the
+    ///      projection differs.  This keeps the step-out semantic
+    ///      (we never re-descend into another callee on the way out)
+    ///      while still landing at a meaningful formatted-coordinate
+    ///      boundary.
+    ///
+    /// Returns ``Ok(true)`` when the cursor advanced via the
+    /// formatted-view path; ``Ok(false)`` when no projection exists
+    /// for the entry step — same defensive fallback as
+    /// [`Self::next_dap_formatted_view`].
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
+    fn step_out_dap_formatted_view(&mut self) -> Result<bool, Box<dyn Error>> {
+        let Some(entry_projection) = self.project_active_view_for_current_step() else {
+            return Ok(false);
+        };
+
+        let start_step_id = self.step_id;
+        // Drive the underlying step-out to walk one call depth
+        // shallower than the entry frame.  This mirrors the legacy
+        // step-out semantics and produces the starting candidate for
+        // the projection-based stop predicate below.
+        self.replay.step(Action::StepOut, true)?;
+        self.step_id = self.replay.current_step_id();
+        let mut last_step_id = self.step_id;
+
+        // If the step-out already landed at a different formatted
+        // projection, we're done — no further advance needed.  This is
+        // the common case when the caller's resume line is on a
+        // separate formatted line than the call site.
+        let mut count: usize = 0;
+        loop {
+            let projection = self.project_active_view_for_step(last_step_id);
+            let projection_differs = match projection {
+                Some(p) => {
+                    p.path != entry_projection.path
+                        || p.line != entry_projection.line
+                        || p.column != entry_projection.column
+                }
+                None => false,
+            };
+            if projection_differs {
+                break;
+            }
+            // Same projection — advance one same-or-shallower-depth
+            // step forward.  Using delta=0 ensures we don't accidentally
+            // re-descend into another nested call on the way out (which
+            // would violate the step-out semantic).
+            let candidate = self
+                .reader
+                .next_step_id_relative_to_with_granularity(
+                    last_step_id,
+                    /* forward = */ true,
+                    /* step_to_different_line = */ false,
+                    /* step_to_different_column = */ false,
+                )
+                .0;
+            if candidate == last_step_id {
+                // Trace boundary or no further same-depth step.
+                break;
+            }
+            last_step_id = candidate;
+            count += 1;
+            if count >= crate::db::NEXT_INTERNAL_STEP_OVERS_LIMIT {
+                break;
+            }
+        }
+
+        if last_step_id != self.step_id {
+            let _ = self.replay.jump_to(last_step_id)?;
+            self.step_id = self.replay.current_step_id();
+        }
+        // Surface ``true`` even when the cursor did not actually move
+        // (e.g. trace boundary), mirroring M3's contract: the
+        // formatted-view path WAS taken; the caller MUST NOT then run
+        // the legacy minified-coordinate runner on top.
+        let _ = start_step_id;
+        Ok(true)
+    }
+
+    /// M8 — DAP ``stepIn`` request entry point.
+    ///
+    /// Mirrors the M2 / M3 ``next_dap`` shape: when an active source
+    /// view is set and the trace is materialised, route through
+    /// [`Self::step_in_dap_formatted_view`] so the cursor advances by
+    /// formatted-coordinate boundaries; otherwise dispatch the legacy
+    /// minified-coordinate ``step_in`` so back-compat is bit-for-bit
+    /// identical for clients that haven't opted in.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
+    pub fn step_in_dap(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        self.step_in_or_out_dap(request, /* is_step_in = */ true, sender)
+    }
+
+    /// M8 — DAP ``stepOut`` request entry point.
+    ///
+    /// Mirror of [`Self::step_in_dap`].  Consults the active source
+    /// view; when set, routes through
+    /// [`Self::step_out_dap_formatted_view`] so the cursor advances to
+    /// the formatted-coordinate landing position in the caller frame
+    /// instead of the recorded minified anchor.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
+    pub fn step_out_dap(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        self.step_in_or_out_dap(request, /* is_step_in = */ false, sender)
+    }
+
+    /// M8 — Shared ``stepIn`` / ``stepOut`` runner.
+    ///
+    /// Direction-of-descent is parametrised by ``is_step_in``:
+    ///   * ``true`` → step-in semantics — advance into the next call.
+    ///     Routes to [`Self::step_in_dap_formatted_view`] when the
+    ///     formatted view is active.
+    ///   * ``false`` → step-out semantics — walk to the caller frame.
+    ///     Routes to [`Self::step_out_dap_formatted_view`] when the
+    ///     formatted view is active.
+    ///
+    /// Without an active source view (or on non-materialised traces
+    /// where the runner has no recorded column data to project), the
+    /// dispatcher falls through to the legacy minified-coordinate
+    /// step-in / step-out so the M8 contract preserves back-compat for
+    /// the legacy path bit-for-bit.
+    ///
+    /// Post-step bookkeeping (skip JIT registration stops,
+    /// complete-move event, limit-of-record notifications, DAP
+    /// response) is shared with the M2 / M3 / M7 dispatchers — see
+    /// [`Self::next_or_step_back_dap`] for the same shape.
+    fn step_in_or_out_dap(
+        &mut self,
+        request: dap::Request,
+        is_step_in: bool,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let original_step_id = self.step_id;
+        // M8 — Formatted-view step-IN / step-OUT.  Mirrors the M3
+        // forward-direction dispatch shape.  Reverse-direction
+        // formatted-view step-in / step-out (``ct/reverseStepIn`` /
+        // ``ct/reverseStepOut``) is deliberately out of scope for M8;
+        // they fall through to the legacy minified-coordinate runner
+        // so existing reverse-step UX stays bit-for-bit identical.
+        // This matches M7's stance on reverse formatted-view.
+        let advanced_via_formatted_view =
+            if self.active_source_view_path.is_some() && self.trace_kind == TraceKind::Materialized {
+                if is_step_in {
+                    self.step_in_dap_formatted_view()?
+                } else {
+                    self.step_out_dap_formatted_view()?
+                }
+            } else {
+                false
+            };
+        if !advanced_via_formatted_view {
+            if is_step_in {
+                self.step_in(true)?;
+            } else {
+                self.step_out(true)?;
+            }
+        }
+        self.skip_internal_jit_registration_stops()?;
+        // Surface the post-step location (mirrors M3 / M7's contract).
+        self.complete_move(false, sender.clone())?;
+
+        if self.trace_kind == TraceKind::Materialized {
+            if original_step_id == self.step_id {
+                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                    sender.clone(),
+                )?;
+            } else if self.step_id == StepId(0) {
+                self.send_notification(
+                    NotificationKind::Info,
+                    "Beginning of record reached",
+                    false,
+                    sender.clone(),
+                )?;
+            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
+            }
+        }
+
+        self.respond_dap(request, 0, sender)?;
+        Ok(())
+    }
+
     pub fn step_out(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
         self.replay.step(Action::StepOut, forward)?;
         self.step_id = self.replay.current_step_id();

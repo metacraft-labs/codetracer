@@ -1615,6 +1615,30 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
                 handler.step_back_dap(req, granularity, sender.clone())?;
                 return Ok(());
             }
+            // M8 — `stepIn` / `stepOut` are the formatted-view
+            // counterparts of the M3 `next` dispatch.  We intercept
+            // them here so the active-source-view-aware runner can
+            // project each candidate step through the sourcemap_cache
+            // and stop at a formatted (line, column) boundary instead
+            // of advancing by minified coordinates.  Without an active
+            // source view the M8 dispatcher transparently falls
+            // through to the legacy `step_in` / `step_out` (via
+            // `dap_command_to_step_action`) so back-compat is
+            // bit-for-bit identical for clients that haven't opted
+            // in.  Reverse-direction `ct/reverseStepIn` /
+            // `ct/reverseStepOut` continue to flow through the
+            // legacy path — reverse-formatted projection is out of
+            // M8 scope, matching M7's stance on reverse-step-back.
+            //
+            // Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M8.
+            if req.command == "stepIn" {
+                handler.step_in_dap(req, sender.clone())?;
+                return Ok(());
+            }
+            if req.command == "stepOut" {
+                handler.step_out_dap(req, sender.clone())?;
+                return Ok(());
+            }
             match dap_command_to_step_action(&req.command) {
                 Ok((action, is_reverse)) => {
                     // for now ignoring arguments: they contain threadId, but
