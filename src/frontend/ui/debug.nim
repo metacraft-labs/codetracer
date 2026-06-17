@@ -367,6 +367,34 @@ when defined(js):
   """.}
 
 proc dapStep*(api: MediatorWithSubscribers, action: cstring) =
+  ## Issue a DAP step (`next`, `stepIn`, `stepOut`, `continue` and their
+  ## reverse counterparts) through the mediator API.
+  ##
+  ## Serialization (FU-E): rapid successive step requests — e.g. the user
+  ## clicking step-over multiple times in quick succession or holding the
+  ## F10 key — used to race past one another:
+  ##   1. The first request was sent to the replay backend.
+  ##   2. Before its `stopped` / `CtCompleteMove` notification arrived,
+  ##      a second `next` was fired on top of it.
+  ##   3. The UI's `data.services.debugger.location` / status counters
+  ##      could land on a stale value, and occasionally two requests
+  ##      crossed paths so that one was silently dropped by the backend.
+  ##
+  ## The middleware sets `data.status.stableBusy = true` for every step
+  ## (via the `InternalNewOperation(stableBusy: true)` emit below) and
+  ## resets it to `false` only after the next `CtCompleteMove` arrives
+  ## (see `middleware.nim` — the `CtCompleteMove` handler). We treat
+  ## that flag as the in-flight guard for the DAP step pipeline: a
+  ## fresh step is accepted only when no prior step is still pending.
+  ##
+  ## We deliberately skip the guard during Playwright/headless tests
+  ## that bypass the real status pipeline (e.g. when `data` is nil) so
+  ## the existing scripted step sequences keep working unchanged.
+  when defined(js):
+    if not data.isNil and not data.status.isNil and data.status.stableBusy:
+      clog "dapStep: prior step in flight, dropping rapid duplicate " &
+        $action
+      return
   echo "dap step ", action
   when defined(js):
     if not data.isNil and data.startOptions.inTest:

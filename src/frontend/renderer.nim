@@ -605,6 +605,19 @@ proc step*(
   else:
     cdebug &"renderer: step call for step {action}", taskId
 
+  # FU-E: gate rapid successive DAP step requests on the same in-flight
+  # signal used by `dapStep` in ``ui/debug.nim``.  Without this guard,
+  # holding F10 (or rapid-clicking the toolbar) could queue several
+  # `DapNext` requests before the previous `stopped` / `CtCompleteMove`
+  # notification landed, racing the UI's `currentStep` / location state
+  # and occasionally dropping a request on the backend side.  The
+  # middleware flips `data.status.stableBusy` back to `false` on
+  # `CtCompleteMove`, so this check naturally re-enables stepping the
+  # moment the previous step is acknowledged.
+  if not data.status.isNil and data.status.stableBusy:
+    cdebug &"renderer: step {action} ignored — prior step still in flight", taskId
+    return
+
   # for now directly depend here on the active view
   # maybe we should instead pass it as arg from the action handlers
   var editorView: EditorView
