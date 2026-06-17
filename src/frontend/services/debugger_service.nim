@@ -327,6 +327,13 @@ proc dapSetBreakpoints*(self: DebuggerService) =
   ## step (see `db.condition_satisfied_at`).  Empty-string conditions
   ## are normalised on the replay side to preserve the back-compat
   ## semantic ("no condition").
+  ##
+  ## M10 — when a registered entry carries a non-empty ``logMessage``
+  ## the replay engine treats it as a DAP *tracepoint* (logpoint):
+  ## execution passing through the matched ``(line, column)`` emits a
+  ## DAP ``output`` event carrying the message and CONTINUES without
+  ## stopping.  Empty ``logMessage`` preserves the breakpoint
+  ## behaviour M1/M9 shipped with.
   for path, breakpointList in self.breakpointTable:
     var args = DapSetBreakpointsArguments(
       source: DapSource(
@@ -341,7 +348,8 @@ proc dapSetBreakpoints*(self: DebuggerService) =
           DapSourceBreakpoint(
             line: line,
             column: b.column,
-            condition: b.condition
+            condition: b.condition,
+            logMessage: b.logMessage
           )
         )
         args.lines.add(line)
@@ -370,6 +378,38 @@ proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = f
     #     self.internalAddBreakpointC(path, line)
 
     # TODO self.data.services.editor.open[self.data.services.editor.active].viewLine = line
+  self.dapSetBreakpoints()
+  self.data.redraw()
+
+
+proc addColumnTracepoint*(self: DebuggerService, path: cstring, line: int, column: int,
+                          logMessage: cstring) =
+  ## M10 — Column-Aware Tracepoint / Logpoint: register a DAP
+  ## *logpoint* anchored at ``(path, line, column)`` carrying
+  ## ``logMessage``.  When execution passes through the matched step
+  ## the replay engine emits a DAP ``output`` event carrying the
+  ## message and CONTINUES without stopping — the defining
+  ## difference between a tracepoint (logpoint) and a breakpoint.
+  ##
+  ## Stored in the same ``breakpointTable[path][line]`` slot as a
+  ## column-aware breakpoint; the ``logMessage`` field distinguishes
+  ## the two surfaces.  Mirrors ``addColumnBreakpoint`` (M1) for the
+  ## tracepoint half of the column-aware navigation surface, the
+  ## final piece of the Column-Aware Replay Navigation campaign.
+  ##
+  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
+  ## §M10 for the contract.
+  if not self.breakpointTable.hasKey(path):
+    self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
+  self.breakpointTable[path][line] = UIBreakpoint(
+    line: line,
+    column: column,
+    condition: cstring"",
+    logMessage: logMessage,
+    path: path,
+    level: 0,
+    enabled: true)
+  data.pointList.breakpoints.add(self.breakpointTable[path][line])
   self.dapSetBreakpoints()
   self.data.redraw()
 

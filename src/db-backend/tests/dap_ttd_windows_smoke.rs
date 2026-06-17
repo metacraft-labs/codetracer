@@ -601,6 +601,8 @@ fn build_tracepoint_session(
         lang: Lang::C,
         results: Vec::new(),
         tracepoint_error: String::new(),
+        column: None,
+        log_message: None,
     };
 
     RunTracepointsArg {

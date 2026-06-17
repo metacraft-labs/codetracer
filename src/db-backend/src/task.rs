@@ -951,6 +951,19 @@ pub struct SourceLocation {
     /// `SourceLocation` (e.g. `get_closest_step_id`) ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition: Option<String>,
+    /// M10 — when `Some(text)` the source location describes a DAP
+    /// *logpoint* (tracepoint) rather than a breakpoint: the replay
+    /// engine emits a DAP `output` event carrying `text` when execution
+    /// passes through `(path, line, column)` and continues WITHOUT
+    /// stopping.  `None` preserves the legacy breakpoint behaviour.
+    /// Used by `Handler::set_breakpoints` to route a single
+    /// `SourceBreakpoint` to either the breakpoint or the tracepoint
+    /// registry depending on whether `logMessage` is present on the
+    /// DAP request.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_message: Option<String>,
 }
 
 impl fmt::Display for SourceLocation {
@@ -1023,6 +1036,68 @@ pub struct Tracepoint {
     pub lang: Lang,
     pub results: Vec<Stop>,
     pub tracepoint_error: String,
+    /// M10 — 1-indexed column the tracepoint is anchored at, or `None`
+    /// for the legacy line-only behaviour.  Mirrors `Breakpoint.column`
+    /// from M1: when the DAP `setBreakpoints` request carries
+    /// `{logMessage: "...", column: N}` the resulting tracepoint fires
+    /// only when execution passes through `(path, line, N)`.  When
+    /// `None` the tracepoint fires on every step recorded on
+    /// `(path, line)`, preserving back-compat with the legacy line-only
+    /// logpoint surface.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
+    /// M10 — the DAP `logMessage` literal.  When `Some(text)` the
+    /// tracepoint is a *DAP logpoint*: as the replay engine traverses
+    /// the matched step during Continue, it emits a DAP `output` event
+    /// carrying `text` and continues *without stopping*.  When `None`
+    /// the tracepoint is the legacy Python-session-style trace
+    /// expression carried by `expression` — the
+    /// `handle_trace_steps` pipeline parses and evaluates that
+    /// against the locals at the matched step.  The two paths coexist
+    /// on the same struct so the registry-level identifier is unified
+    /// across the DAP-logpoint and Python-session surfaces.
+    ///
+    /// Spec: codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_message: Option<String>,
+}
+
+/// M10 — minimal registry entry for the DAP-pipeline-integrated
+/// column-aware logpoint.  Stored on `MaterializedReplaySession` in the
+/// same shape as `Breakpoint` so the Continue stop check can mirror
+/// `step_matches_any_breakpoint`.  Kept separate from the heavier
+/// [`Tracepoint`] struct (which carries Python-session pipeline state)
+/// because the DAP-logpoint path only needs the `(line, column,
+/// log_message)` triple plus the registry bookkeeping fields.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct DapTracepoint {
+    pub id: i64,
+    pub enabled: bool,
+    /// 1-indexed column the logpoint is anchored at.  `None` matches
+    /// every step on the line (back-compat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
+    /// The literal text emitted via a DAP `output` event when the
+    /// logpoint fires.  Required — a tracepoint with no message is not
+    /// a logpoint.
+    pub log_message: String,
+}
+
+/// M10 — a single DAP-logpoint hit collected during a Continue
+/// traversal.  The replay engine pushes one of these into
+/// `MaterializedReplaySession::pending_tracepoint_hits` for every
+/// matched step it traverses (without stopping).  The DAP handler
+/// drains the list after `replay.step` returns and emits an `output`
+/// event for each hit.
+#[derive(Debug, Clone)]
+pub struct TracepointHit {
+    pub path: String,
+    pub line: i64,
+    pub column: Option<i64>,
+    pub log_message: String,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

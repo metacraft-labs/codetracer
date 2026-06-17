@@ -87,6 +87,16 @@ type
     ## it against the locals at the matched step.  Composes
     ## orthogonally with ``column``.
     condition*: cstring
+    ## M10 — Column-Aware Tracepoint / Logpoint: when non-empty, the
+    ## entry describes a DAP *logpoint* (tracepoint) at
+    ## ``(line, column)`` rather than a breakpoint.  The replay engine
+    ## emits a DAP ``output`` event carrying ``logMessage`` as
+    ## execution passes through the matched step and CONTINUES
+    ## without stopping.  ``""`` (the default) preserves the M1
+    ## breakpoint behaviour; the GUI keeps the same gutter marker
+    ## table for both surfaces.  Spec:
+    ## codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
+    logMessage*: cstring
     path*: cstring
     fun*: cstring
     level*: int

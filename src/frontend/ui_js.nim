@@ -3329,6 +3329,18 @@ proc thunkM5AddColumnBreakpoint(path: cstring, line, column: int,
   ## unconditional behaviour.
   data.services.debugger.addColumnBreakpoint(path, line, column, condition)
 
+proc thunkM5AddColumnTracepoint(path: cstring, line, column: int,
+                                logMessage: cstring) =
+  ## M10 — register a column-aware tracepoint (DAP logpoint) via
+  ## ``data.services.debugger.addColumnTracepoint(path, line, column,
+  ## logMessage)``.  Same DCE / method-style-dispatch rationale as the
+  ## M1 thunk above (see the M5 banner comment).  Exposed to the JS
+  ## layer so the M10 GUI Playwright spec can drive a column-aware
+  ## logpoint via
+  ## ``data.services.debugger.addColumnTracepoint.call(svc, path, line,
+  ## column, "hit b")``.
+  data.services.debugger.addColumnTracepoint(path, line, column, logMessage)
+
 proc thunkM5StepOverStatement() =
   data.services.debugger.stepOverStatement()
 
@@ -3369,6 +3381,7 @@ proc installM5ColumnAwareServiceMethods() =
   let svc = cast[JsObject](data.services.debugger)
   if not svc.isNil:
     svc["addColumnBreakpoint"] = cast[JsObject](thunkM5AddColumnBreakpoint)
+    svc["addColumnTracepoint"] = cast[JsObject](thunkM5AddColumnTracepoint)
     svc["stepOverStatement"] = cast[JsObject](thunkM5StepOverStatement)
     svc["stepBackStatement"] = cast[JsObject](thunkM5StepBackStatement)
     svc["setActiveSourceView"] = cast[JsObject](thunkM5SetActiveSourceView)
