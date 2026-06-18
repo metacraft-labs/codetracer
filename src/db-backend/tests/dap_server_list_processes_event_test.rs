@@ -339,3 +339,162 @@ fn dap_server_list_processes_event_falls_back_to_recording_id_when_path_empty() 
     let processes = body["processes"].as_array().expect("processes");
     assert_eq!(processes[0]["displayName"], "rec-live-42",);
 }
+
+// ---------------------------------------------------------------------------
+// M29 §5.2 / TCT-M4 — three-trace session manifest test.
+//
+// Pins the `ct/listProcesses` event payload for the canonical
+// `frontend-js → frontend-wasm → backend` shape the TCT-M1/TCT-M4
+// closure plan defines (~Cross-Tracer-Origin-Test.audit.md~ §§ TCT-M1,
+// TCT-M4). Preferred input is the `account-balance-with-wasm` fixture's
+// `session.toml.template` once TCT-M4 lands the on-disk skeleton; until
+// then the test materialises a synthetic equivalent with the same
+// three canonical role tokens so the event-dispatch contract is
+// regression-protected today.
+// ---------------------------------------------------------------------------
+
+/// Locate the TCT-M4 `account-balance-with-wasm/session.toml.template`
+/// relative to this test crate. Returns `None` when the fixture is not
+/// yet materialised on disk so the caller can fall back cleanly to the
+/// synthetic shape (per the M5 SKIP discipline — never silently
+/// downgrade an assertion).
+fn locate_wasm_fixture_template() -> Option<PathBuf> {
+    let candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/cross_process/account-balance-with-wasm/session.toml.template");
+    if candidate.is_file() { Some(candidate) } else { None }
+}
+
+/// Materialise the fixture template by substituting the three
+/// `{{*_recording_id}}` placeholders with stable synthetic ids. The
+/// `regenerate.sh` script would normally stamp UUIDv7 ids; the test
+/// path uses fixed strings so the assertions can pin them.
+fn materialise_wasm_fixture(template_path: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    let text = std::fs::read_to_string(template_path)?;
+    let rendered = text
+        .replace("{{frontend_js_recording_id}}", "rec-fe-js-account-balance")
+        .replace("{{frontend_wasm_recording_id}}", "rec-fe-wasm-account-balance")
+        .replace("{{backend_recording_id}}", "rec-be-account-balance");
+    std::fs::write(dest, rendered)
+}
+
+/// Synthetic three-trace session.toml matching the TCT-M4 fixture
+/// shape — the canonical `frontend-js → frontend-wasm → backend` chain
+/// per `Cross-Tracer-Origin-Test.audit.md` §§ TCT-M1, TCT-M4. Used as
+/// the fall-back when the on-disk fixture has not been materialised
+/// yet so the event-dispatch contract is regression-protected today.
+/// Field values mirror the fixture's `session.toml.template` so the
+/// fixture-path + synthetic-path assertions share a single contract.
+fn wasm_three_trace_session_toml() -> &'static str {
+    r#"
+version = 1
+
+[[trace]]
+recording_id = "rec-fe-js-account-balance"
+path = "./frontend.ct"
+role = "frontend-js"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "rec-fe-wasm-account-balance"
+path = "./frontend-wasm.ct"
+role = "frontend-wasm"
+default_thread_prefix = "wasm"
+
+[[trace]]
+recording_id = "rec-be-account-balance"
+path = "./backend.ct"
+role = "backend"
+default_thread_prefix = "be"
+
+[correlation]
+correlation_index_mode = "eager"
+"#
+}
+
+/// M29 §5.2 / TCT-M4 — the `ct/listProcesses` event dispatched at
+/// session-load for a three-trace `account-balance-with-wasm` manifest
+/// carries exactly three entries in the canonical
+/// `frontend-js → frontend-wasm → backend` order with the wire-shape
+/// fields the renderer's process tree consumes.
+///
+/// Preferred input is the TCT-M4 fixture's `session.toml.template`;
+/// when absent, the test materialises an equivalent synthetic shape so
+/// the dispatch contract is pinned today without blocking on the
+/// recorder-driven fixture infrastructure (see M29 deferred-items
+/// note in the milestone).
+#[test]
+fn dap_server_emits_list_processes_for_three_trace_wasm_fixture() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("session.toml");
+
+    // Stage 1 — prefer the on-disk fixture template; fall back to the
+    // synthetic equivalent when the fixture is not yet materialised.
+    // The fall-back path is *not* a SKIP — the dispatch contract is
+    // assertion-equivalent against the synthetic shape; the fixture
+    // path simply exercises the on-disk template substitution that
+    // TCT-M4's `regenerate.sh` will eventually drive.
+    match locate_wasm_fixture_template() {
+        Some(template) => {
+            materialise_wasm_fixture(&template, &manifest_path).expect("materialise wasm fixture");
+        }
+        None => {
+            std::fs::write(&manifest_path, wasm_three_trace_session_toml()).expect("write synthetic session.toml");
+        }
+    }
+
+    // Stage 2 — drive the production session-load path: real
+    // `SessionManifest::load` parses the on-disk TOML, real
+    // `SessionHandler::new` aggregates the synthetic per-trace handlers.
+    let session = load_session_from_disk(&manifest_path, 3);
+    assert_eq!(session.trace_count(), 3);
+
+    // Stage 3 — dispatch the event the way `dap_server` does in
+    // production; snapshot what landed on the wire.
+    let (tx, rx) = mpsc::channel::<DapMessage>();
+    dispatch_session_load_event(&session, &tx);
+    let messages = drain_messages(&rx);
+
+    // Exactly one event lands per session-load — the §5.2 contract.
+    assert_eq!(messages.len(), 1, "exactly one ct/listProcesses event expected");
+    let (event_name, body) = expect_event(&messages[0]);
+    assert_eq!(event_name, "ct/listProcesses");
+
+    let processes = body["processes"].as_array().expect("processes array");
+    assert_eq!(processes.len(), 3, "three process entries expected");
+
+    // Stage 4 — pin the canonical role ordering. The renderer process
+    // tree walks `SessionHandler::list_processes` output in manifest
+    // order, so `frontend-js → frontend-wasm → backend` is the
+    // ordering the GUI displays per TCT-M1.
+    let roles: Vec<&str> = processes
+        .iter()
+        .map(|p| p["role"].as_str().expect("role string"))
+        .collect();
+    assert_eq!(
+        roles,
+        vec!["frontend-js", "frontend-wasm", "backend"],
+        "canonical role ordering"
+    );
+
+    // Stage 5 — pin each entry's wire-shape fields: `recordingId`,
+    // `role`, `displayName`, `defaultThreadPrefix`, `threadCount`,
+    // `threadIds`. The `threadIds` follow the M24 composition scheme
+    // (`slot << 24 | inner`); slot 0/1/2 with inner thread 1 each.
+    assert_eq!(processes[0]["recordingId"], "rec-fe-js-account-balance");
+    assert_eq!(processes[0]["displayName"], "frontend.ct");
+    assert_eq!(processes[0]["defaultThreadPrefix"], "fe");
+    assert_eq!(processes[0]["threadCount"], 1);
+    assert_eq!(processes[0]["threadIds"], serde_json::json!([1_i64]));
+
+    assert_eq!(processes[1]["recordingId"], "rec-fe-wasm-account-balance");
+    assert_eq!(processes[1]["displayName"], "frontend-wasm.ct");
+    assert_eq!(processes[1]["defaultThreadPrefix"], "wasm");
+    assert_eq!(processes[1]["threadCount"], 1);
+    assert_eq!(processes[1]["threadIds"], serde_json::json!([(1_i64 << 24) | 1]));
+
+    assert_eq!(processes[2]["recordingId"], "rec-be-account-balance");
+    assert_eq!(processes[2]["displayName"], "backend.ct");
+    assert_eq!(processes[2]["defaultThreadPrefix"], "be");
+    assert_eq!(processes[2]["threadCount"], 1);
+    assert_eq!(processes[2]["threadIds"], serde_json::json!([(2_i64 << 24) | 1]));
+}
