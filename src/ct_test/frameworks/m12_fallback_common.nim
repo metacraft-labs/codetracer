@@ -3,6 +3,7 @@ import std/[algorithm, options, os, osproc, sequtils, strutils, tables, times]
 import ../contracts
 import ../discovery
 import native_m11_common
+import ../process_exec
 
 type
   M12FallbackSpec* = object
@@ -184,8 +185,7 @@ proc runShellCommand*(spec: M12FallbackSpec; scope: TestScope;
           message = scope.selector)
     ]
     let started = epochTime()
-    let outcome = execCmdEx(finalCommand, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let outcome = execCapturedShell(finalCommand, cwd = scope.projectRoot)
     let duration = int((epochTime() - started) * 1000)
     if outcome.output.len > 0:
       events.add event(tekOutput, spec.providerId, runId, testId,

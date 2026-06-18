@@ -3,6 +3,7 @@ import std/[algorithm, options, os, osproc, sequtils, strutils, tables, times]
 import ../contracts
 import ../discovery
 import native_m11_common
+import ../process_exec
 
 const
   CrystalSpecProviderId* = "crystal-spec"
@@ -255,8 +256,7 @@ proc recordCrystal(scope: TestScope): ProviderResult[seq[
           "-o", runner, normalizedRelative(scope.projectRoot, scope.file)],
           @CrystalNixPackages)
     createDir(buildRoot)
-    let build = execCmdEx(buildCommand, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let build = execCapturedShell(buildCommand, cwd = scope.projectRoot)
     if build.exitCode != 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,

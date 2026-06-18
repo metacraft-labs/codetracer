@@ -2,6 +2,7 @@ import std/[algorithm, options, os, osproc, sequtils, strutils, tables, times]
 
 import ../contracts
 import ../discovery
+import ../process_exec
 
 proc quoteCommandArg*(value: string): string =
   quoteShell(value)
@@ -79,8 +80,7 @@ proc runCommand*(providerId: string; scope: TestScope; args,
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
     let started = epochTime()
-    let outcome = execCmdEx(command, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let outcome = execCapturedShell(command, cwd = scope.projectRoot)
     let duration = int((epochTime() - started) * 1000)
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
@@ -175,8 +175,7 @@ proc recordCommand*(providerId: string; scope: TestScope; args,
       event(tekRecordStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    let outcome = execCmdEx(command, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let outcome = execCapturedShell(command, cwd = scope.projectRoot)
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = outcome.output)

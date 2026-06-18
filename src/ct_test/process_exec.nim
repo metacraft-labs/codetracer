@@ -85,3 +85,22 @@ proc execCaptured*(argv: openArray[string]; cwd = "";
   result.durationMs = int(completion.elapsedMillis)
   result.peakResidentMemoryBytes = completion.peakResidentMemoryBytes
   result.processCount = completion.processCount
+
+proc execCapturedShell*(command: string; cwd = "";
+                        env: openArray[string] = [];
+                        timeoutMs = -1;
+                        captureLimit = DefaultCaptureLimit): CapturedRun =
+  ## Run a shell command STRING, preserving the exact semantics of the
+  ## ``execCmdEx(command, {poUsePath}, …)`` calls the providers are migrating
+  ## off: the string is handed to the platform shell, so any shell feature the
+  ## command relies on keeps working — pipes/redirections, an inline literal
+  ## like ``ruby -e '…'``, or a ``commandLine(argv, pkgs)`` nix-shell wrapper.
+  ##
+  ## Prefer ``execCaptured`` (argv, no shell round-trip) for plain
+  ## ``commandLine(argv)`` joins; reach for this only where the command is a
+  ## genuine shell string. Both run through the same ``runquota_process``
+  ## launch path, so either way the process work leaves ``execCmdEx`` behind.
+  when defined(windows):
+    execCaptured(@["cmd", "/C", command], cwd, env, timeoutMs, captureLimit)
+  else:
+    execCaptured(@["/bin/sh", "-c", command], cwd, env, timeoutMs, captureLimit)

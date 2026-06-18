@@ -3,6 +3,7 @@ import std/[algorithm, options, os, osproc, sequtils, strutils, tables, times]
 import ../contracts
 import ../discovery
 import native_m11_common
+import ../process_exec
 
 type
   SmartHarnessRecordMode* = enum
@@ -88,7 +89,7 @@ proc isWithinDir(path, dir: string): bool =
 proc recorderHelpLooksReal(spec: SmartHarnessSpec; command: string): bool =
   if not command.isExecutableCandidate:
     return false
-  let help = execCmdEx(commandLine(@[command, "--help"]), options = {poUsePath})
+  let help = execCapturedShell(commandLine(@[command, "--help"]))
   if help.exitCode != 0:
     return false
   let output = help.output.toLowerAscii
@@ -345,8 +346,7 @@ proc runRecorderCommand(spec: SmartHarnessSpec; scope: TestScope;
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
     let started = epochTime()
-    let outcome = execCmdEx(command, options = {poUsePath},
-        workingDir = spec.findRecorderRepo(scope.projectRoot))
+    let outcome = execCapturedShell(command, cwd = spec.findRecorderRepo(scope.projectRoot))
     let duration = int((epochTime() - started) * 1000)
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
