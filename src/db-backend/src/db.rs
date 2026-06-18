@@ -2766,6 +2766,36 @@ impl MaterializedReplaySession {
         patterns: &PatternSet,
         meta_dat_sources_root: Option<&Path>,
     ) -> Result<OriginChain, OriginError> {
+        // M29 §5.1 — delegate to the `_with_cross_process` variant
+        // with no extension so existing single-trace call sites and
+        // unit tests keep working bit-for-bit. The production
+        // dispatcher uses the `_with_cross_process` entry directly
+        // when the session-wide `PairIndex` is available.
+        self.origin_chain_inferred_with_cross_process(args, budget, expr_loader, patterns, meta_dat_sources_root, None)
+    }
+
+    /// M29 §5.1 — production wiring entry point for the materialized
+    /// algorithm.
+    ///
+    /// Runs the single-trace algorithm exactly as
+    /// [`Self::origin_chain_inferred`] does, then consults
+    /// [`crate::cross_process_origin::run`] when `extension` is
+    /// `Some`. The composer detects whether the chain's tail hop
+    /// sits on a receive-marker firing in the current trace; when it
+    /// does, the matched Send marker in any sibling trace is
+    /// resolved via the supplied
+    /// [`crate::cross_process_origin::SiblingChainResolver`] and the
+    /// sibling-side hops are spliced into the chain (a
+    /// `CrossProcessSpan` entry is appended per spec §14.3).
+    pub fn origin_chain_inferred_with_cross_process(
+        &mut self,
+        args: &CtOriginChainArguments,
+        budget: &OriginBudget,
+        expr_loader: &mut ExprLoader,
+        patterns: &PatternSet,
+        meta_dat_sources_root: Option<&Path>,
+        extension: Option<crate::cross_process_origin::CrossProcessExtension<'_>>,
+    ) -> Result<OriginChain, OriginError> {
         let deadline = WallClockDeadline::new(budget.wall_clock_ms);
         let mut metrics = OriginMetrics::default();
 
@@ -3264,7 +3294,7 @@ impl MaterializedReplaySession {
         if terminator.function.is_none() {
             terminator.function = terminator_function_hint;
         }
-        Ok(OriginChain {
+        let chain = OriginChain {
             query_variable: args.variable_name.clone(),
             query_step_id: args.step_id,
             hops,
@@ -3274,7 +3304,12 @@ impl MaterializedReplaySession {
             metrics,
             cross_process_spans: Vec::new(),
             confidence,
-        })
+        };
+        // M29 §5.1 — splice cross-process hops when the chain's tail
+        // lands on a receive marker. Passthrough when `extension` is
+        // `None` (single-trace mode).
+        let (chain, _outcome) = crate::cross_process_origin::run(chain, extension);
+        Ok(chain)
     }
 
     /// Spec §6.1 helper "scan_backward_for_value_change".

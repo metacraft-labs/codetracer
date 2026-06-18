@@ -176,9 +176,7 @@ fn dap_server_emits_list_processes_on_session_load() {
     let (event_name, body) = expect_event(&messages[0]);
     assert_eq!(event_name, "ct/listProcesses", "event name");
 
-    let processes = body["processes"]
-        .as_array()
-        .expect("processes is an array");
+    let processes = body["processes"].as_array().expect("processes is an array");
     assert_eq!(processes.len(), 3, "three process entries expected");
 
     // Pin the three-row payload in manifest order. Each row carries
@@ -276,11 +274,7 @@ fn dap_server_emits_idempotent_list_processes_on_session_reload() {
     let (name2, body2) = expect_event(&messages[1]);
     assert_eq!(name2, "ct/listProcesses");
     let processes_v2 = body2["processes"].as_array().expect("v2 processes");
-    assert_eq!(
-        processes_v2.len(),
-        3,
-        "v2 snapshot is a complete re-emit, not a delta"
-    );
+    assert_eq!(processes_v2.len(), 3, "v2 snapshot is a complete re-emit, not a delta");
     assert_eq!(processes_v2[0]["recordingId"], "rec-frontend-js");
     assert_eq!(processes_v2[1]["recordingId"], "rec-frontend-wasm");
     assert_eq!(processes_v2[1]["role"], "frontend-wasm");

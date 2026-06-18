@@ -289,6 +289,33 @@ pub fn run_omniscient_origin_chain(
     args: &CtOriginChainArguments,
     budget: &OriginBudget,
 ) -> McrOmniscientResult {
+    // M29 §5.1 — delegate to the `_with_cross_process` variant with
+    // no extension so single-trace callers (M20 unit tests,
+    // production browser-replay dispatcher without a session-wide
+    // pair index) keep working bit-for-bit. The production
+    // dispatcher uses the `_with_cross_process` entry directly when
+    // the session-wide `PairIndex` is available.
+    run_omniscient_origin_chain_with_cross_process(omniscient, decoder, args, budget, None)
+}
+
+/// M29 §5.1 — production wiring entry point for the omniscient
+/// algorithm.
+///
+/// Mirrors the M2 materialized
+/// [`crate::db::MaterializedReplaySession::origin_chain_inferred_with_cross_process`]
+/// shape: runs the single-trace algorithm exactly as
+/// [`run_omniscient_origin_chain`] does, then consults
+/// [`crate::cross_process_origin::run`] when `extension` is `Some`.
+/// The dispatcher wires the extension in
+/// [`crate::dap_handler::Handler::emulator_origin_chain`] when the
+/// session-wide pair index is available.
+pub fn run_omniscient_origin_chain_with_cross_process(
+    omniscient: &dyn OmniscientDb,
+    decoder: Option<&OriginMetadataDecoder>,
+    args: &CtOriginChainArguments,
+    budget: &OriginBudget,
+    extension: Option<crate::cross_process_origin::CrossProcessExtension<'_>>,
+) -> McrOmniscientResult {
     let started_at = Instant::now();
     let deadline = WallClockDeadline::new(budget.wall_clock_ms);
     let mut metrics = OriginMetrics::default();
@@ -454,7 +481,7 @@ pub fn run_omniscient_origin_chain(
     metrics.steps_scanned = hops.len() as u64;
     let confidence: f32 = hops.iter().map(|h| h.confidence).fold(1.0_f32, f32::min);
 
-    Ok(OriginChain {
+    let chain = OriginChain {
         query_variable,
         query_step_id: initial_query_step,
         hops,
@@ -464,7 +491,12 @@ pub fn run_omniscient_origin_chain(
         metrics,
         cross_process_spans: Vec::new(),
         confidence,
-    })
+    };
+    // M29 §5.1 — splice cross-process hops when the chain's tail
+    // lands on a receive marker. Passthrough when `extension` is
+    // `None`.
+    let (chain, _outcome) = crate::cross_process_origin::run(chain, extension);
+    Ok(chain)
 }
 
 #[cfg(test)]
