@@ -3,6 +3,7 @@ import std/[json, options, os, osproc, sequtils, strutils, tables]
 import ../contracts
 import ../discovery
 import js_common
+import ../process_exec
 
 const
   JsPlaywrightProviderId* = "js-playwright"
@@ -416,8 +417,7 @@ proc catalogFromFixtureOrCommand(
     scope = if filePath.len > 0: pcsFile else: pcsProject
     command = commandLine(buildPlaywrightCommand(projectRoot, filePath, scope,
         listOnly = true))
-    result = execCmdEx(command, options = {poUsePath},
-        workingDir = projectRoot)
+    result = execCapturedShell(command, cwd = projectRoot)
   if result.exitCode != 0:
     return ProviderResult[TestCatalog](
       diagnostics: @[diagnostic(dsError,
@@ -451,8 +451,7 @@ proc runPlaywright*(
       runId = JsPlaywrightProviderId & ":" & $scope.kind & ":" & scope.file
       command = commandLine(buildPlaywrightCommand(scope.projectRoot,
           scope.file, commandScope))
-      result = execCmdEx(command, options = {poUsePath},
-          workingDir = scope.projectRoot)
+      result = execCapturedShell(command, cwd = scope.projectRoot)
     if result.output.len == 0:
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,

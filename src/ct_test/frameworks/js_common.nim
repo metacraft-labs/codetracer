@@ -4,6 +4,7 @@ import std/[
 
 import ../contracts
 import ../discovery
+import ../process_exec
 
 type
   JsFrameworkKind* = enum
@@ -495,8 +496,7 @@ proc runNodeTestCommand*(providerId: string; scope: TestScope): ProviderResult[
       event(tekRunStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    let result = execCmdEx(command, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let result = execCapturedShell(command, cwd = scope.projectRoot)
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
@@ -581,8 +581,7 @@ proc recordNodeTestCommand*(providerId: string;
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
 
-    let result = execCmdEx(command, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let result = execCapturedShell(command, cwd = scope.projectRoot)
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
