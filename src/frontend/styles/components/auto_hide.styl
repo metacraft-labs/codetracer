@@ -144,33 +144,17 @@
   text-orientation: mixed
   max-height: 120px
 
-// Bottom tabs in the status bar use the shared button primitives instead of
-// the legacy strip-tab div styling. Keep the sizing relative to the inherited
-// font size so the bar scales cleanly with zoom.
-.auto-hide-bottom-tab
+// Bottom tabs in the status bar use ct-button-sm-secondary.
+// Override only the layout properties that differ from button defaults.
+.auto-hide-bottom-tabs .ct-button-sm-secondary
   flex: 0 1 auto !important
   min-width: 0
   max-width: 14em
-  height: 1.833em
-  margin: 0
-  padding-left: 0.833em
-  padding-right: 0.833em
-  border-radius: 0.333em !important
   align-self: center
-  box-sizing: border-box
-  background-color: transparent
   font-size: 0.6em
-  font-weight: 600
-  line-height: 1.2
-  letter-spacing: 0
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
-
-  &:hover
-  &.active
-    color: colors-ui-text-primary-body
-    background-color: colors-ui-surface-primary-tertiary-hover !important
 
 // ---------------------------------------------------------------------------
 // Backdrop — semi-transparent overlay behind the slide-in panel.

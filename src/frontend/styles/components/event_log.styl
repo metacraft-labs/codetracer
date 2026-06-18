@@ -164,6 +164,7 @@
   width: 100%
   margin: 0 !important
   padding: 0
+  list-style: none
   background: colors-ui-surface-base-raised
 
   .dropdown-list-item
@@ -196,9 +197,48 @@
   align-items: stretch
   min-height: 2em
   border-top: 0.0625em solid colors-ui-border-tertiary
+  list-style: none
 
   &:first-child
     border-top: none
+
+  // Left column — tag label checkbox
+  > .ct-checkmark-field
+    padding: 0.25em 0.5em
+    align-items: center
+    gap: 0.375em
+    color: colors-ui-text-primary-body-subtle
+    font-weight: 500
+    line-height: 1.15
+    border-right: 0.0625em solid colors-ui-border-tertiary
+    background: colors-ui-surface-base-raised
+
+    .ct-checkmark
+      --ct-checkmark-size: 1rem
+      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
+      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
+      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+
+// Right column — kind checkboxes in a wrapping flex row
+.dropdown-kind-items
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.125em 0.75em
+  padding: 0.25em 0.625em
+
+  .ct-checkmark-field
+    align-items: center
+    gap: 0.375em
+    color: colors-ui-text-primary-body
+    line-height: 1.15
+    white-space: nowrap
+
+    .ct-checkmark
+      --ct-checkmark-size: 1rem
+      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
+      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
+      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
 
 .toggle-buttons
   display: flex
@@ -209,6 +249,14 @@
   align-items: center
   min-height: 2.4em
   border-bottom: 0.0625em solid colors-ui-border-tertiary
+
+  // Enable/disable toggle — pushed to the far right
+  .toggle-enabled-wrapper
+    display: flex
+    align-items: center
+    gap: 0.375em
+    margin-left: auto
+    padding-right: 0.25em
 
   .ct-tab
     flex: 0 0 auto

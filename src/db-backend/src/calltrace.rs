@@ -364,8 +364,25 @@ impl Calltrace {
             let current_step = reader.step(step_id).expect("load_callstack: invalid step_id");
             let mut call_key = current_step.call_key;
 
-            assert!(call_key.0 >= 0);
-
+            // ``call_key`` can legitimately be ``NO_KEY`` (-1) for
+            // steps recorded after the final ``Return`` event in
+            // the trace — the runner is sitting at "no active
+            // call".  The Leo trace's step 8 (line 12 in
+            // ``flow_test.leo``, after ``compute`` returns) is one
+            // such step.  The earlier ``assert!(call_key.0 >= 0)``
+            // panicked on those steps, taking down the stable
+            // task-thread; subsequent DAP requests routed to the
+            // stable channel then failed with ``SendError`` (the
+            // ``from_stable_receiver`` is dropped on thread exit)
+            // and the WDIO ``can search the calltrace for
+            // <fn>`` deep test timed out at 30 s with no
+            // response ever sent.  Treat ``NO_KEY`` as "empty
+            // call-stack", which is what the loop below already
+            // does — there's no upward chain to walk.
+            //
+            // (See db.rs:123 for the same logic in
+            // ``load_location``: ``NO_KEY`` is explicitly
+            // allowed there.)
             // info!("step {:#?}", current_step);
             while call_key != NO_KEY {
                 let call_record = reader.call(call_key).expect("load_callstack: invalid call_key");

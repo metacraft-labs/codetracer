@@ -110,31 +110,39 @@ fn leo_search_calltrace_returns_compute_call() {
         .expect("load-locals response timed out");
     eprintln!("load-locals seq={load_locals_seq} responded");
 
-    // WDIO uses DAP standard ``next``/``stepIn``/``stepOut`` requests
-    // (not the ct/step custom protocol), so mirror that exactly --
-    // they take a different code path inside the db-backend and the
-    // step_id state transitions differ subtly.
-    for i in 0..4 {
-        let next_seq = client.send_request("next", json!({"threadId": 1})).expect("send next");
+    // Mirror leo-deep.e2e.ts step ordering exactly: 1 stepIn (from
+    // "finds variable with value after stepping into compute"),
+    // 5 stepIn (from "performs multiple step-in operations"),
+    // and 1 stepIn + 1 stepOut (from "step-in enters callee").
+    // That's 7 stepIn + 1 stepOut, which exhausts the 9-step
+    // ``flow_test.leo`` trace -- exactly the state in which
+    // CI's ``can search the calltrace for "compute"`` test was
+    // timing out at 30s (cross-repo run 27679629169).  The
+    // earlier 4×next reproduction (codetracer commit e12f84bf)
+    // did NOT exhaust the trace and therefore missed the bug.
+    for i in 0..7 {
+        let step_in_seq = client
+            .send_request("stepIn", json!({"threadId": 1}))
+            .expect("send stepIn");
         let _ = client
             .recv_response(Duration::from_secs(10))
-            .unwrap_or_else(|e| panic!("next #{i} response timed out: {e}"));
-        eprintln!("DAP next #{i} seq={next_seq} responded");
+            .unwrap_or_else(|e| panic!("stepIn #{i} response timed out: {e}"));
+        eprintln!("DAP stepIn #{i} seq={step_in_seq} responded");
     }
-    let step_in_seq = client
-        .send_request("stepIn", json!({"threadId": 1}))
-        .expect("send stepIn");
-    let _ = client
-        .recv_response(Duration::from_secs(10))
-        .expect("DAP stepIn response timed out");
-    eprintln!("DAP stepIn seq={step_in_seq} responded");
-    let step_out_seq = client
-        .send_request("stepOut", json!({"threadId": 1}))
-        .expect("send stepOut");
-    let _ = client
-        .recv_response(Duration::from_secs(10))
-        .expect("DAP stepOut response timed out");
-    eprintln!("DAP stepOut seq={step_out_seq} responded");
+    // Throw extra stepIn/stepOut at end-of-trace to reproduce the
+    // hang behaviour cross-repo-test exhibits.  The deep test issues
+    // stepIn + stepOut from a state past the last recorded step;
+    // earlier reproductions stopped after the first stepOut and
+    // returned ok in <1s.  Push harder.
+    for i in 0..3 {
+        let step_out_seq = client
+            .send_request("stepOut", json!({"threadId": 1}))
+            .expect("send stepOut");
+        let _ = client
+            .recv_response(Duration::from_secs(10))
+            .unwrap_or_else(|e| panic!("stepOut #{i} response timed out: {e}"));
+        eprintln!("DAP stepOut #{i} seq={step_out_seq} responded");
+    }
 
     // removeAllBreakpoints + addBreakpoint(5) + continue: mirror
     // WDIO's breakpoint exercise.
