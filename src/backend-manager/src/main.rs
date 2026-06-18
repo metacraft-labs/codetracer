@@ -2,6 +2,7 @@
 extern crate log;
 
 mod backend_manager;
+pub mod browser_stream_host;
 pub mod browser_stream_receiver;
 mod config;
 mod dap_init;
@@ -20,7 +21,7 @@ mod trace_metadata;
 use std::error::Error;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -124,6 +125,32 @@ enum Commands {
     Trace {
         #[command(subcommand)]
         action: TraceAction,
+    },
+    /// M26: launch the browser-recorder receiver host.
+    ///
+    /// Listens on a WebSocket endpoint (`ws://<bind>/ct-stream` by
+    /// default) for newline-delimited JSON events produced by
+    /// `@codetracer/runtime-browser`, converts each session into a
+    /// legacy three-file JSON trace (`<program>.ct/{trace,trace_metadata,trace_paths}.json`)
+    /// under `--out-dir`, and runs until the user sends Ctrl+C or sends
+    /// a Close frame from the browser.
+    ///
+    /// Mirrors the `ct dev` / `ct record-web` invocation surface that
+    /// the host-process choice closure for M26 documents
+    /// (`codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`).
+    RecordWeb {
+        /// Bind address (default: `127.0.0.1:9230` — matching the
+        /// browser-runtime endpoint default).
+        #[arg(long, default_value = browser_stream_host::DEFAULT_BIND)]
+        bind: String,
+        /// Directory under which per-program `.ct` trace directories
+        /// land.  Created on demand.
+        #[arg(long, default_value = ".")]
+        out_dir: PathBuf,
+        /// Working directory recorded in `trace_metadata.json`.
+        /// Defaults to the host process's current working directory.
+        #[arg(long)]
+        workdir: Option<PathBuf>,
     },
 }
 
@@ -2980,6 +3007,54 @@ async fn run_trace_info(
 }
 
 // ---------------------------------------------------------------------------
+// `ct record-web` / `ct dev` — M26 browser-recorder receiver host
+// ---------------------------------------------------------------------------
+
+/// Run the M26 browser-stream receiver host.  Binds the WebSocket
+/// listener, prints the bound endpoint to stderr (so callers can wire it
+/// into a dev workflow), and runs until Ctrl+C.
+///
+/// On Unix we install a SIGINT/SIGTERM handler that triggers the graceful
+/// shutdown path on the host; on Windows we use the Ctrl+C handler.
+async fn run_record_web(
+    bind: &str,
+    out_dir: &Path,
+    workdir: Option<&Path>,
+) -> Result<(), Box<dyn Error>> {
+    let bind_addr: std::net::SocketAddr = bind
+        .parse()
+        .map_err(|e| format!("invalid --bind address `{bind}`: {e}"))?;
+    let out_dir = out_dir.to_path_buf();
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|e| format!("failed to create --out-dir `{}`: {e}", out_dir.display()))?;
+    let workdir = workdir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let config = browser_stream_host::BrowserStreamHostConfig {
+        bind: bind_addr,
+        out_dir: out_dir.clone(),
+        workdir,
+    };
+    let host = browser_stream_host::BrowserStreamHost::new(config);
+    let running = host.bind().await?;
+    eprintln!(
+        "codetracer browser-stream host listening on ws://{}{}",
+        running.local_addr,
+        browser_stream_host::DEFAULT_ENDPOINT_PATH,
+    );
+    eprintln!(
+        "writing recorded `.ct` directories under: {}",
+        out_dir.display(),
+    );
+    // Wait for Ctrl+C, then shut down cleanly so in-flight recordings
+    // get a chance to flush.
+    signal::ctrl_c().await?;
+    eprintln!("\ncodetracer browser-stream host: received Ctrl+C, shutting down...");
+    running.stop().await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -3132,6 +3207,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 return mcp_server::run_mcp_server(config).await;
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // RecordWeb subcommand (M26: browser-recorder receiver host)
+    // ------------------------------------------------------------------
+    if let Some(Commands::RecordWeb {
+        bind,
+        out_dir,
+        workdir,
+    }) = &cli.command
+    {
+        flexi_logger::init();
+        return run_record_web(bind, out_dir, workdir.as_deref()).await;
     }
 
     // ------------------------------------------------------------------

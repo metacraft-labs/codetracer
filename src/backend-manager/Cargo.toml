@@ -11,3 +11,25 @@ flexi_logger = "0.31"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
+# M26: WebSocket host process for the browser-recorder receiver.
+# `tokio-tungstenite` brings in `tungstenite` + the futures glue we need to
+# accept connections, read text frames, and dispatch them line-by-line to
+# `browser_stream_receiver::StreamReceiver`.  Default features are enough
+# (we do not need TLS — `ws://` is the documented endpoint for the dev
+# loop; production deployments terminate TLS at a reverse proxy).
+tokio-tungstenite = { version = "0.24", default-features = false, features = [
+  "handshake",
+] }
+futures-util = { version = "0.3", default-features = false, features = [
+  "sink",
+  "std",
+] }
+
+[dev-dependencies]
+# Used by the `record_web` smoke test to exercise the receiver from a real
+# WebSocket client without spinning up a browser.
+tokio-tungstenite = { version = "0.24", default-features = false, features = [
+  "handshake",
+  "connect",
+] }
+tempfile = "3"
