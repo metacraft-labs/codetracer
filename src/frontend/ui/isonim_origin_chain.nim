@@ -57,6 +57,42 @@ proc newOriginChainPanel*(): OriginChainPanel =
     visible: false,
   )
 
+type
+  BreadcrumbChip* = object
+    ## M29 §14.8 — pure-data descriptor for one breadcrumb chip
+    ## rendered in the Origin Chain side panel's `<nav>` strip. Each
+    ## `CrossProcessSpan` in the active chain becomes exactly one
+    ## chip; clicking the chip flips the SessionVM's active
+    ## recording and seeks the editor to the span's first hop.
+    recordingId*: string
+    role*: string
+    label*: string
+    hopIndex*: int
+
+proc chainBreadcrumbChips*(chain: OriginChain): seq[BreadcrumbChip] =
+  ## Derive one breadcrumb chip per `CrossProcessSpan` in
+  ## `chain.crossProcessSpans`, in chain-traversal order (spec §14.8).
+  ## The chip label uses the span's `role` field (e.g. `frontend-js`,
+  ## `backend`); the `recordingId` is the fallback when `role` is
+  ## empty so the chip still has a stable user-visible identity. The
+  ## `hopIndex` cursor records the first hop owned by the span — that
+  ## is the seek target the click handler dispatches.
+  ##
+  ## Returns an empty seq for single-process chains. The renderer
+  ## falls back to the legacy `breadcrumbStack` strip in that case so
+  ## pre-M29 single-recording flows keep their navigation UI.
+  result = @[]
+  for span in chain.crossProcessSpans:
+    let label =
+      if span.role.len > 0: span.role
+      else: span.recordingId
+    result.add(BreadcrumbChip(
+      recordingId: span.recordingId,
+      role: span.role,
+      label: label,
+      hopIndex: int(span.firstHopIndex),
+    ))
+
 proc hopAriaLabel*(hop: OriginHop; index: int): string =
   ## ARIA label for a hop row. Concrete spec example:
   ##   "hop 1: trivial copy at step 478"
@@ -155,13 +191,47 @@ when defined(js):
     section.setAttribute(cstring"aria-label", cstring"Value origin chain")
     parent.appendChild(section)
 
-    # Breadcrumb nav
+    # Breadcrumb nav per spec §14.8: one chip per `CrossProcessSpan`
+    # when the chain crosses processes. Single-process chains fall
+    # back to the legacy `breadcrumbStack` strip so pre-§14.8 flows
+    # keep their navigation UI.
     let nav = document.createElement(cstring"nav")
     nav.setAttribute(cstring"aria-label", cstring"Origin breadcrumbs")
-    for entry in vm.breadcrumbStack.val:
-      let crumb = document.createElement(cstring"button")
-      crumb.innerText = cstring(entry.variableName & "@" & $entry.stepId)
-      nav.appendChild(crumb)
+    let chips = chainBreadcrumbChips(chain)
+    if chips.len > 0:
+      for chip in chips:
+        let chipCopy = chip                  # capture by value for closure
+        let crumb = document.createElement(cstring"button")
+        crumb.setAttribute(cstring"class",
+                           cstring"breadcrumb-chip ct-origin-breadcrumb-chip")
+        crumb.setAttribute(cstring"data-recording-id",
+                           cstring(chipCopy.recordingId))
+        crumb.setAttribute(cstring"data-role", cstring(chipCopy.role))
+        crumb.setAttribute(cstring"aria-label",
+                           cstring("Switch to " & chipCopy.label))
+        crumb.innerText = cstring(chipCopy.label)
+        # The click handler re-derives the span at dispatch time so
+        # the closure captures only plain-data values — cheaper on
+        # Nim-on-JS than capturing the `CrossProcessSpan` object.
+        let handler = proc(_: Event) =
+          let active = vm.activeChain.val
+          if active.isNone:
+            return
+          let activeChain = active.get
+          for s in activeChain.crossProcessSpans:
+            if s.recordingId == chipCopy.recordingId and
+               int(s.firstHopIndex) == chipCopy.hopIndex:
+              vm.onSwitchToSpan(s)
+              return
+        crumb.addEventListener(cstring"click", handler)
+        nav.appendChild(crumb)
+    else:
+      for entry in vm.breadcrumbStack.val:
+        let crumb = document.createElement(cstring"button")
+        crumb.setAttribute(cstring"class",
+                           cstring"breadcrumb-chip ct-origin-breadcrumb-entry")
+        crumb.innerText = cstring(entry.variableName & "@" & $entry.stepId)
+        nav.appendChild(crumb)
     section.appendChild(nav)
 
     let ol = document.createElement(cstring"ol")

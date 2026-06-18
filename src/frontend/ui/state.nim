@@ -308,6 +308,13 @@ proc wireOriginChainBridges(stateVM: StateVM; originVM: OriginChainVM) =
   # StateVM mirror is read by the row renderer.
   stateVM.originPreferences.val = originVM.preferences.val
 
+proc activeOriginChainVM*(): OriginChainVM =
+  ## M29 §14.8 — expose the module-local `OriginChainVM` so the
+  ## bootstrap code path (`ui_js.nim`) can attach it to the active
+  ## `SessionViewModel` after `initStateVMWithStore` finishes.
+  ## Returns ``nil`` until the VM has been created.
+  originChainVMInstance
+
 proc initStateVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel StateVM using an externally-provided
   ## ReplayDataStore (typically the shared store from SessionViewModel

@@ -104,6 +104,12 @@ type
     onPinChainProc*: proc(chain: OriginChain)
       ## Optional bridge installed by `state.nim` to forward pinned
       ## chains into `ScratchpadVM`.
+    onSwitchProcessProc*: proc(recordingId: string)
+      ## Optional bridge installed by `state.nim` to forward
+      ## breadcrumb-chip clicks into `SessionViewModel.onSwitchProcess`
+      ## per spec §14.8. The chip click handler also dispatches a
+      ## seek via `onSeekProc` to the span's first hop so the editor
+      ## scrolls to the recording entry point in the same gesture.
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -219,6 +225,26 @@ proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
     "stepId": hop.stepId,
   }
   vm.store.requestHistoricalNavigation("ct/history-jump", args)
+
+proc onSwitchToSpan*(vm: OriginChainVM; span: CrossProcessSpan) =
+  ## M29 §14.8 — switch the active recording to the one owning
+  ## `span` and seek the editor to the span's first hop in the
+  ## chain. Fires the `onSwitchProcessProc` bridge so the renderer
+  ## routes through `SessionViewModel.onSwitchProcess`; then
+  ## dispatches a seek via `onSeekProc` to the span's first hop so
+  ## the editor follows. Both bridges are optional — unit tests can
+  ## install one without the other and the call is a no-op for
+  ## unconfigured surfaces.
+  if not vm.onSwitchProcessProc.isNil and span.recordingId.len > 0:
+    vm.onSwitchProcessProc(span.recordingId)
+  let chainOpt = vm.activeChain.val
+  if chainOpt.isNone:
+    return
+  let chain = chainOpt.get
+  let idx = int(span.firstHopIndex)
+  if idx < 0 or idx >= chain.hops.len:
+    return
+  vm.onSeekToHop(chain.hops[idx])
 
 proc onPinChain*(vm: OriginChainVM; chain: OriginChain) =
   ## Pin `chain` in both the VM's local list and the scratchpad

@@ -1581,6 +1581,13 @@ when not defined(ctInExtension):
 
       initPanelVM("initStateVMWithStore"):
         state.initStateVMWithStore(activeSessionVM.store)
+        # M29 §14.8 — attach the OriginChainVM to the SessionVM so
+        # the chain panel's breadcrumb chips route process switches
+        # through `SessionViewModel.onSwitchProcess` (and so the
+        # derived `crossProcessSpans` memo sees a live chain).
+        let ocvm = state.activeOriginChainVM()
+        if not ocvm.isNil:
+          activeSessionVM.attachOriginChainVM(ocvm)
       initPanelVM("initDebugControlsVMWithStore"):
         debug.initDebugControlsVMWithStore(activeSessionVM.store)
       initPanelVM("initCalltraceVMWithStore"):

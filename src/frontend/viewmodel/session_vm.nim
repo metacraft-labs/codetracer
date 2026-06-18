@@ -344,6 +344,13 @@ proc attachOriginChainVM*(session: SessionViewModel;
       if chain.isNone:
         return newSeq[CrossProcessSpan]()
       chain.get.crossProcessSpans
+  # M29 §14.8 — install the chain-panel → SessionVM breadcrumb-chip
+  # bridge so clicking a chip rotates the active recording (and the
+  # `stateVM` alias + the host `ct/goto-ticks` bridge) atomically.
+  # Preserve any bridge a caller installed explicitly first.
+  if originVM.onSwitchProcessProc.isNil:
+    originVM.onSwitchProcessProc = proc(recordingId: string) =
+      session.onSwitchProcess(recordingId)
 
 proc dispose*(session: SessionViewModel) =
   ## Tear down all reactive roots.  Call this when the replay session
