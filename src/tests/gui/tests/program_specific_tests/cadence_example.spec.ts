@@ -32,6 +32,7 @@ import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 import { resolveRecorderTestProgram } from "../../lib/sibling-test-programs";
+import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -218,6 +219,26 @@ test.describe("cadence_example — call trace", () => {
     const newLocation = await statusBar.location();
     expect(newLocation.line).not.toBe(initialLocation.line);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Test suite: column-aware breakpoints (M1/M6)
+//
+// Flow/Cadence's recorder maps `DbStep.column` from Cadence's parser
+// `ast.Position{Line, Column}` records.  `flow_test.cdc` line 4 is
+// `    let sum_val: Int = a + b` inside `compute`; the 4-space indent
+// puts `let` at column 5.
+// ---------------------------------------------------------------------------
+
+defineRecorderColumnBreakpointSuite({
+  language: "cadence_example",
+  skipReason:
+    "Cadence recorder pipeline not available (need codetracer-cadence-recorder)",
+  pipelineAvailable: cadencePipelineAvailable,
+  sourcePath: cadenceTestProgram ?? "",
+  sourceFileName: "flow_test.cdc",
+  targetLine: 4,
+  targetColumn: 5,
 });
 
 // ---------------------------------------------------------------------------

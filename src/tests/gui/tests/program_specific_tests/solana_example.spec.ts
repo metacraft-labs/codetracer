@@ -32,6 +32,7 @@ import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 import { hasToolOnPath } from "../../lib/sibling-test-programs";
+import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -241,6 +242,26 @@ test.describe("solana_example — call trace", () => {
     const newLocation = await statusBar.location();
     expect(newLocation.line).not.toBe(initialLocation.line);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Test suite: column-aware breakpoints (M1/M6)
+//
+// Solana's SBF recorder maps `DbStep.column` from DWARF line-tables
+// emitted by `cargo-build-sbf`.  `solana_flow_test.rs` line 17 is
+// `    let sum_val: u64 = add(a, b);` inside `process_instruction`;
+// the 4-space indent puts `let` at column 5.
+// ---------------------------------------------------------------------------
+
+defineRecorderColumnBreakpointSuite({
+  language: "solana_example",
+  skipReason:
+    "Solana recorder pipeline not available (needs codetracer-solana-recorder, cargo-build-sbf, and a Cargo.toml-rooted Solana program in test-programs/solana_example/)",
+  pipelineAvailable: solanaPipelineAvailable,
+  sourcePath: "solana_example/solana_flow_test.rs",
+  sourceFileName: "solana_flow_test.rs",
+  targetLine: 17,
+  targetColumn: 5,
 });
 
 // ---------------------------------------------------------------------------
