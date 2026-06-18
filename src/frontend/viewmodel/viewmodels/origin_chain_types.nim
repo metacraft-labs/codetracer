@@ -100,6 +100,28 @@ type
     name*: string
     scopePath*: string
 
+  CorrelationTransition* = object
+    ## M29 — boundary-crossing transition attached to the receive-
+    ## side hop where the chain jumps into a sibling recording.
+    ## Mirrors `task::CorrelationTransition` on the db-backend side
+    ## (spec §4.4).
+    direction*: string
+    correlatedRecordingId*: string
+    correlatedStepId*: int64
+    boundaryId*: string
+    matchKeyValue*: string
+    displayVariableValue*: Option[string]
+    description*: Option[string]
+
+  CrossProcessSpan* = object
+    ## M29 — contiguous hop range owned by one recording inside an
+    ## `OriginChain` (spec §4.4). One span per recording the chain
+    ## visits, in chain-traversal order.
+    recordingId*: string
+    role*: string
+    firstHopIndex*: uint32
+    lastHopIndex*: uint32
+
   OriginHop* = object
     ## One hop in the chain (spec §4.1 `OriginHop`).
     kind*: OriginKind
@@ -114,6 +136,10 @@ type
     truncatedOperands*: bool
     confidence*: float
     classificationProvenance*: Option[string]
+    correlationTransition*: Option[CorrelationTransition]
+      ## M29 — populated on the receive-side hop that crosses a
+      ## recording boundary. None when the hop stays inside the
+      ## current recording.
 
   Terminator* = object
     ## Final-hop descriptor surfaced in `OriginChain.terminator`
@@ -138,6 +164,11 @@ type
     truncated*: bool
     continuationToken*: Option[string]
     metrics*: OriginMetrics
+    crossProcessSpans*: seq[CrossProcessSpan]
+      ## M29 — per-recording spans across the chain. Empty for
+      ## single-process chains; one entry per recording the chain
+      ## visits (in traversal order) when the chain crosses a
+      ## correlation marker boundary (spec §4.4 + §14.3).
     confidence*: float
 
   OriginSummary* = object
@@ -226,6 +257,19 @@ proc hash*(v: VariableId): Hash =
   h = h !& hash(v.scopePath)
   !$h
 
+proc `==`*(a, b: CorrelationTransition): bool {.noSideEffect.} =
+  a.direction == b.direction and
+    a.correlatedRecordingId == b.correlatedRecordingId and
+    a.correlatedStepId == b.correlatedStepId and
+    a.boundaryId == b.boundaryId and
+    a.matchKeyValue == b.matchKeyValue and
+    a.displayVariableValue == b.displayVariableValue and
+    a.description == b.description
+
+proc `==`*(a, b: CrossProcessSpan): bool {.noSideEffect.} =
+  a.recordingId == b.recordingId and a.role == b.role and
+    a.firstHopIndex == b.firstHopIndex and a.lastHopIndex == b.lastHopIndex
+
 proc `==`*(a, b: OriginHop): bool {.noSideEffect.} =
   if a.kind != b.kind: return false
   if a.targetExpr != b.targetExpr: return false
@@ -238,6 +282,7 @@ proc `==`*(a, b: OriginHop): bool {.noSideEffect.} =
   if a.truncatedOperands != b.truncatedOperands: return false
   if a.confidence != b.confidence: return false
   if a.classificationProvenance != b.classificationProvenance: return false
+  if a.correlationTransition != b.correlationTransition: return false
   if a.operandSnapshots.len != b.operandSnapshots.len: return false
   for i in 0 ..< a.operandSnapshots.len:
     if a.operandSnapshots[i] != b.operandSnapshots[i]: return false
@@ -262,6 +307,9 @@ proc `==`*(a, b: OriginChain): bool {.noSideEffect.} =
   if a.hops.len != b.hops.len: return false
   for i in 0 ..< a.hops.len:
     if a.hops[i] != b.hops[i]: return false
+  if a.crossProcessSpans.len != b.crossProcessSpans.len: return false
+  for i in 0 ..< a.crossProcessSpans.len:
+    if a.crossProcessSpans[i] != b.crossProcessSpans[i]: return false
   true
 
 proc `==`*(a, b: OriginSummary): bool {.noSideEffect.} =
@@ -437,6 +485,31 @@ proc parseFrameTransition*(j: JsonNode): Option[FrameTransition] =
     callKey: int64(j{"callKey"}.getInt(0)),
   ))
 
+proc parseCorrelationTransition*(j: JsonNode): Option[CorrelationTransition] =
+  ## Decode the M29 `correlationTransition` wire field. Returns
+  ## `none` for missing/null nodes so unrelated single-process hops
+  ## leave the field unset.
+  if j.isNil or j.kind != JObject:
+    return none(CorrelationTransition)
+  var t = CorrelationTransition()
+  t.direction = j{"direction"}.getStr("")
+  t.correlatedRecordingId = j{"correlatedRecordingId"}.getStr("")
+  t.correlatedStepId = int64(j{"correlatedStepId"}.getInt(0))
+  t.boundaryId = j{"boundaryId"}.getStr("")
+  t.matchKeyValue = j{"matchKeyValue"}.getStr("")
+  t.displayVariableValue = getOptStr(j{"displayVariableValue"})
+  t.description = getOptStr(j{"description"})
+  some(t)
+
+proc parseCrossProcessSpan*(j: JsonNode): CrossProcessSpan =
+  ## Decode one M29 `CrossProcessSpan` wire entry.
+  if j.isNil or j.kind != JObject:
+    return CrossProcessSpan()
+  result.recordingId = j{"recordingId"}.getStr("")
+  result.role = j{"role"}.getStr("")
+  result.firstHopIndex = uint32(j{"firstHopIndex"}.getInt(0))
+  result.lastHopIndex = uint32(j{"lastHopIndex"}.getInt(0))
+
 proc parseOriginHop*(j: JsonNode): OriginHop =
   if j.isNil or j.kind != JObject:
     return OriginHop()
@@ -457,6 +530,8 @@ proc parseOriginHop*(j: JsonNode): OriginHop =
   result.truncatedOperands = j{"truncatedOperands"}.getBool(false)
   result.confidence = j{"confidence"}.getFloat(0.0)
   result.classificationProvenance = getOptStr(j{"classificationProvenance"})
+  result.correlationTransition = parseCorrelationTransition(
+    j{"correlationTransition"})
 
 proc parseTerminator*(j: JsonNode): Terminator =
   if j.isNil or j.kind != JObject:
@@ -486,6 +561,10 @@ proc parseOriginChain*(j: JsonNode): OriginChain =
   result.truncated = j{"truncated"}.getBool(false)
   result.continuationToken = getOptStr(j{"continuationToken"})
   result.metrics = parseOriginMetrics(j{"metrics"})
+  let spans = j{"crossProcessSpans"}
+  if not spans.isNil and spans.kind == JArray:
+    for n in spans:
+      result.crossProcessSpans.add(parseCrossProcessSpan(n))
   result.confidence = j{"confidence"}.getFloat(0.0)
 
 proc parseOriginSummary*(j: JsonNode): OriginSummary =
