@@ -44,7 +44,7 @@
 //!
 //! ## Algorithm
 //!
-//! Pseudocode (mirrors spec §14.3):
+//! Pseudocode (mirrors spec §14.3 — generalised to N hops per TCT-M3):
 //!
 //! ```text
 //! fn extend_with_cross_process(chain, pair_index, fetch_sibling_chain):
@@ -53,6 +53,7 @@
 //!         match sends.len():
 //!             0 => terminate(RecordingStart, "missing correlation")
 //!             1 => continue chain on sibling.send at send.show_value
+//!                  current_identity = sibling.identity
 //!             _ => terminate(UnknownSource, "ambiguous correlation")
 //! ```
 //!
@@ -63,6 +64,25 @@
 //! the per-trace chain compute. The dispatcher layer wires the
 //! callback to the appropriate per-backend origin path on the
 //! sibling trace.
+//!
+//! ## Recursive composition (TCT-M3)
+//!
+//! The composer walks the boundary recursively: after each successful
+//! sibling hop lands in trace B, the tail of the new chain is itself
+//! tested for a receive marker against trace B's own marker firings
+//! (with the new `current_identity = sibling.identity`). If trace B's
+//! receive marker pairs with a Send in trace C, the composer hops
+//! again. This is the substrate of the JS → WASM → backend three-
+//! tracer scenario (TCT-M3): the JS trace's tail hop crosses the
+//! `js-wasm-realm` boundary into the WASM trace, whose own tail hop
+//! then crosses an HTTP/RPC boundary into the backend trace.
+//!
+//! Recursion is bounded by [`MAX_BOUNDARY_HOPS`] to avoid infinite
+//! loops on cyclic correlation markers. The bound is intentionally
+//! generous (eight hops) since real cross-tracer chains saturate at
+//! three; the cap protects against pathological pair-index shapes
+//! (e.g. a Send-side marker that happens to coincide with a Recv-side
+//! marker in the same trace forming a self-loop).
 
 use crate::correlation_index::{MarkerEventView, PairIndex};
 use crate::correlation_markers::MarkerDirection;
@@ -137,6 +157,57 @@ pub enum CrossProcessOutcome {
 /// composer treats this the same as a missing correlation.
 pub type SiblingChainResolver<'a> = &'a mut dyn FnMut(&str, i64, &str) -> Option<SiblingContinuation>;
 
+/// M29 §5.1 — dispatcher-facing extension context.
+///
+/// Bundles the three inputs the production materialized + omniscient
+/// algorithms need to consult the cross-process composer at the end of
+/// their single-trace walk: the current trace's identity, the session-
+/// wide [`PairIndex`], and the sibling-chain resolver callback.
+///
+/// The dispatcher constructs one of these per `ct/originChain` request
+/// when it knows the session-wide pair index is available
+/// (i.e. running under [`crate::session_handler::SessionHandler`]).
+/// When the dispatcher omits it (single-trace test fixtures, or a
+/// session without correlation markers) the wiring is a no-op and the
+/// algorithms preserve their single-trace behaviour bit-for-bit.
+pub struct CrossProcessExtension<'a> {
+    /// Identity of the trace the per-backend algorithm is running on.
+    pub current_identity: TraceIdentity,
+    /// Session-wide pair index built from
+    /// [`crate::session_handler::SessionHandler::pair_index`].
+    pub pair_index: &'a PairIndex,
+    /// Callback the composer invokes to drive the sibling-side chain.
+    pub resolver: SiblingChainResolver<'a>,
+}
+
+/// M29 §5.1 — production wiring entry point.
+///
+/// Thin shim that the per-backend algorithms call at the end of their
+/// single-trace walk. When `extension` is `Some`, runs the §14.3
+/// composer ([`apply_cross_process_clause`]) on `chain` and returns
+/// the (possibly extended) chain. When `None`, returns `chain`
+/// unchanged so single-trace call sites and test fixtures preserve
+/// their existing behaviour without per-call-site changes.
+///
+/// The returned [`CrossProcessOutcome`] is included so dispatchers can
+/// surface the outcome (e.g. emit a `crossProcessSpan` event) and so
+/// tests can assert the wiring fired. When `extension` is `None` the
+/// outcome is [`CrossProcessOutcome::NoBoundaryFound`].
+pub fn run(chain: OriginChain, extension: Option<CrossProcessExtension<'_>>) -> (OriginChain, CrossProcessOutcome) {
+    match extension {
+        Some(ext) => apply_cross_process_clause(chain, &ext.current_identity, ext.pair_index, ext.resolver),
+        None => (chain, CrossProcessOutcome::NoBoundaryFound),
+    }
+}
+
+/// Upper bound on consecutive boundary hops the composer will follow
+/// before bailing out. Real cross-tracer chains saturate at three
+/// (JS → WASM → backend); eight gives ample headroom for future
+/// multi-tier shapes while guarding against pathological cyclic
+/// markers (e.g. a Send that happens to coincide with a Recv at the
+/// same source location forming a self-loop).
+pub const MAX_BOUNDARY_HOPS: usize = 8;
+
 /// Composer applying the spec §14.3 cross-process clause to an
 /// already-computed single-trace chain.
 ///
@@ -148,20 +219,50 @@ pub type SiblingChainResolver<'a> = &'a mut dyn FnMut(&str, i64, &str) -> Option
 /// outcome enum so callers can surface the §14.3 outcome to the
 /// frontend.
 ///
+/// **Recursion (TCT-M3)** — after a hop lands in trace B, the
+/// composer re-tests trace B's tail hop against trace B's own
+/// receive markers in the pair index and, if a new pair matches,
+/// hops again into trace C. Recursion is bounded by
+/// [`MAX_BOUNDARY_HOPS`]; the final outcome reported to the caller is
+/// the result of the **last** hop attempt:
+///
+/// - one or more `Extended` hops followed by `NoBoundaryFound` on the
+///   final landed trace ⇒ `Extended` (the canonical "chain fully
+///   resolved" report).
+/// - first hop returns `NoBoundaryFound` ⇒ `NoBoundaryFound` (no-op).
+/// - any hop returns `MissingCorrelation` / `AmbiguousCorrelation`
+///   ⇒ that outcome (the chain has already been terminated cleanly
+///   by [`extend_chain_with_send`] / the inline branches below).
+///
 /// **Confidence** — the cross-process hop itself is treated as a
 /// `TrivialCopy` per spec §14.3 (serialisation-aware copy tracking
 /// is applied separately in [`classify_serialiser_pair`]). The
 /// sibling-side hops keep their own confidences; the chain's
-/// composite confidence is recomputed across the joined hop list.
+/// composite confidence is recomputed across the joined hop list
+/// after every hop.
 pub fn apply_cross_process_clause(
-    mut chain: OriginChain,
+    chain: OriginChain,
     current_identity: &TraceIdentity,
     pair_index: &PairIndex,
     resolver: SiblingChainResolver,
 ) -> (OriginChain, CrossProcessOutcome) {
-    // Step 1: seed the per-process span list with the current trace's
-    // owning range. Idempotent — if the chain already carries a span
-    // (e.g. nested cross-process extensions) we preserve it.
+    apply_cross_process_clause_with_cap(chain, current_identity, pair_index, resolver, MAX_BOUNDARY_HOPS)
+}
+
+/// Same as [`apply_cross_process_clause`] but with an explicit
+/// `max_hops` cap. Exposed for tests that need a tighter bound and
+/// for callers that want to tune the recursion depth.
+pub fn apply_cross_process_clause_with_cap(
+    mut chain: OriginChain,
+    current_identity: &TraceIdentity,
+    pair_index: &PairIndex,
+    resolver: SiblingChainResolver,
+    max_hops: usize,
+) -> (OriginChain, CrossProcessOutcome) {
+    // Step 1: seed the per-process span list with the **starting**
+    // trace's owning range. Idempotent — if the chain already carries
+    // a span (e.g. nested cross-process extensions from a previous
+    // call) we preserve it.
     if chain.cross_process_spans.is_empty() && !chain.hops.is_empty() {
         chain.cross_process_spans.push(CrossProcessSpan {
             recording_id: current_identity.recording_id.clone(),
@@ -174,6 +275,92 @@ pub fn apply_cross_process_clause(
         });
     }
 
+    // Track the identity of the trace the chain's tail currently
+    // sits in. Advances after each successful hop so the next
+    // iteration's `find_receive_marker_for_tail` searches against
+    // the correct trace's recv markers.
+    let mut active_identity: TraceIdentity = current_identity.clone();
+    let mut hops_performed: usize = 0;
+
+    loop {
+        if hops_performed >= max_hops {
+            // Hit the recursion cap. Per spec §14.3 the chain so far
+            // is correct; we just stop probing for more boundaries.
+            // The truncated flag signals the caller that the walk
+            // was cut short.
+            chain.truncated = true;
+            return (
+                chain,
+                if hops_performed > 0 {
+                    CrossProcessOutcome::Extended
+                } else {
+                    CrossProcessOutcome::NoBoundaryFound
+                },
+            );
+        }
+
+        let (next_chain, outcome) = try_one_hop(chain, &active_identity, pair_index, resolver);
+        chain = next_chain;
+
+        match outcome {
+            CrossProcessOutcome::Extended => {
+                hops_performed += 1;
+                // Advance `active_identity` to the trace the chain's
+                // tail now sits in. The most recently appended span
+                // is the one for the freshly entered sibling trace —
+                // its `recording_id` + `role` are the source of
+                // truth for the next iteration's substrate check.
+                match chain.cross_process_spans.last() {
+                    Some(span) => {
+                        active_identity = TraceIdentity::new(span.recording_id.clone(), span.role.clone());
+                    }
+                    None => {
+                        // Should never trip: a successful Extended
+                        // outcome always pushes a sibling span. If
+                        // it does, stop recursing defensively.
+                        return (chain, CrossProcessOutcome::Extended);
+                    }
+                }
+                // Loop and probe for another boundary on the new
+                // active trace.
+            }
+            CrossProcessOutcome::NoBoundaryFound => {
+                // Chain is fully resolved. Report Extended if at
+                // least one hop succeeded; otherwise pass through the
+                // no-op outcome.
+                return (
+                    chain,
+                    if hops_performed > 0 {
+                        CrossProcessOutcome::Extended
+                    } else {
+                        CrossProcessOutcome::NoBoundaryFound
+                    },
+                );
+            }
+            CrossProcessOutcome::MissingCorrelation | CrossProcessOutcome::AmbiguousCorrelation { .. } => {
+                // Chain has been terminated cleanly inside
+                // try_one_hop / extend_chain_with_send. Propagate
+                // the terminal outcome and stop.
+                return (chain, outcome);
+            }
+        }
+    }
+}
+
+/// Single boundary hop — the inner loop body of
+/// [`apply_cross_process_clause_with_cap`]. Returns `Extended` if a
+/// matched sibling trace was hopped into; `NoBoundaryFound` if the
+/// tail hop did not land on a receive marker in the current trace;
+/// `MissingCorrelation` / `AmbiguousCorrelation` per spec §14.3
+/// otherwise. The chain's hops list is mutated only on `Extended`;
+/// on `MissingCorrelation` / `AmbiguousCorrelation` only the chain's
+/// terminator is updated.
+fn try_one_hop(
+    mut chain: OriginChain,
+    current_identity: &TraceIdentity,
+    pair_index: &PairIndex,
+    resolver: SiblingChainResolver,
+) -> (OriginChain, CrossProcessOutcome) {
     // Step 2: find the receive marker the tail of the chain landed
     // on. The substrate test is documented in spec §14.3: the
     // **last** hop's `step_id` + `location.path/line` must match a
@@ -900,5 +1087,300 @@ mod tests {
         assert!(matches!(outcome2, CrossProcessOutcome::NoBoundaryFound));
         assert_eq!(chain2.hops.len(), hop_count_after_first);
         assert_eq!(chain2.cross_process_spans.len(), span_count_after_first);
+    }
+
+    /// TCT-M3 (recursive composer): the resolver follows TWO
+    /// consecutive boundary hops in a single invocation — the JS →
+    /// WASM → backend three-tracer scenario from
+    /// `Cross-Tracer-Origin-Test.audit.md`.
+    ///
+    /// Synthetic pair index carries two marker pairs:
+    ///
+    /// - `js-wasm-realm` boundary between trace `rec-js` (Recv at the
+    ///   JS-side imported function call) and trace `rec-wasm` (Send at
+    ///   the WASM-side export thunk).
+    /// - `balance-request` boundary between trace `rec-wasm` (Recv at
+    ///   the WASM-side HTTP-response decode) and trace `rec-be` (Send
+    ///   at the backend `web.json_response`).
+    ///
+    /// The chain starts on `rec-js` (the JS frontend's `balance`
+    /// expression at the boundary line). After one call to
+    /// [`apply_cross_process_clause`] the composer must:
+    ///
+    /// - hop JS → WASM, appending the WASM-side hop;
+    /// - re-test the WASM-side tail hop and hop WASM → backend,
+    ///   appending the backend-side hop;
+    /// - land with three `CrossProcessSpan`s (`js`, `wasm`, `backend`),
+    ///   the chain's tail in the backend trace, and the chain's first
+    ///   hop still on the JS-side `balance` expression.
+    #[test]
+    fn sibling_chain_resolver_walks_two_boundaries() {
+        // JS↔WASM boundary pair.
+        let js_recv = marker_view(
+            "rec-js",
+            12,
+            "frontend/app.js",
+            5,
+            MarkerDirection::Recv,
+            "js-wasm-realm",
+            "computeBalance:42",
+            Some("computeBalance:42"),
+        );
+        let wasm_send = marker_view(
+            "rec-wasm",
+            7,
+            "wasm/compute.rs",
+            10,
+            MarkerDirection::Send,
+            "js-wasm-realm",
+            "computeBalance:42",
+            Some("computeBalance:42"),
+        );
+        // WASM↔backend boundary pair.
+        let wasm_recv = marker_view(
+            "rec-wasm",
+            4,
+            "wasm/compute.rs",
+            15,
+            MarkerDirection::Recv,
+            "balance-request",
+            "user-42",
+            Some("user-42"),
+        );
+        let backend_send = marker_view(
+            "rec-be",
+            9,
+            "backend/server.py",
+            22,
+            MarkerDirection::Send,
+            "balance-request",
+            "user-42",
+            Some("user-42"),
+        );
+
+        let pair_index = PairIndex::build(&[
+            js_recv.clone(),
+            wasm_send.clone(),
+            wasm_recv.clone(),
+            backend_send.clone(),
+        ]);
+
+        // JS-side starting chain — tail hop lands on the JS↔WASM
+        // boundary at frontend/app.js:5 step 12.
+        let js_tail = make_hop(
+            "balance",
+            12,
+            "frontend/app.js",
+            5,
+            OriginKind::TrivialCopy,
+            "balance = computeBalance(user.id)",
+        );
+        let chain = make_chain(vec![js_tail]);
+
+        // WASM-side continuation lands on the WASM↔backend boundary
+        // at wasm/compute.rs:15 step 4 — that itself paires with the
+        // backend send marker so the composer must recurse.
+        let wasm_hop = make_hop(
+            "raw_payload",
+            4,
+            "wasm/compute.rs",
+            15,
+            OriginKind::TrivialCopy,
+            "raw_payload = host_fetch_balance(user_id);",
+        );
+        let wasm_terminator = Terminator::new(TerminatorKind::Computational);
+
+        // Backend-side continuation terminates on a literal (the
+        // database-row field access). Lands at backend/server.py:42,
+        // which carries no further marker so recursion stops.
+        let backend_hop = make_hop(
+            "db_row.balance",
+            9,
+            "backend/server.py",
+            42,
+            OriginKind::FieldAccess,
+            "return web.json_response({'balance': db_row.balance})",
+        );
+        let backend_terminator = Terminator::new(TerminatorKind::Literal);
+
+        // Resolver dispatches on the sibling recording id requested
+        // by the composer. The composer first asks for `rec-wasm`
+        // (the JS↔WASM Send target), then for `rec-be` (the WASM↔
+        // backend Send target).
+        let wasm_continuation = SiblingContinuation {
+            sibling_identity: TraceIdentity::new("rec-wasm", "frontend-wasm"),
+            sibling_hops: vec![wasm_hop.clone()],
+            sibling_terminator: wasm_terminator.clone(),
+            sibling_truncated: false,
+        };
+        let backend_continuation = SiblingContinuation {
+            sibling_identity: TraceIdentity::new("rec-be", "backend"),
+            sibling_hops: vec![backend_hop.clone()],
+            sibling_terminator: backend_terminator.clone(),
+            sibling_truncated: false,
+        };
+        let mut calls: Vec<String> = Vec::new();
+        let mut resolver = |sibling_id: &str, step: i64, _display: &str| -> Option<SiblingContinuation> {
+            calls.push(format!("{sibling_id}@{step}"));
+            match sibling_id {
+                "rec-wasm" => {
+                    assert_eq!(step, 7, "first hop must request the WASM Send step");
+                    Some(wasm_continuation.clone())
+                }
+                "rec-be" => {
+                    assert_eq!(step, 9, "second hop must request the backend Send step");
+                    Some(backend_continuation.clone())
+                }
+                other => panic!("unexpected resolver target: {other}"),
+            }
+        };
+
+        let identity = TraceIdentity::new("rec-js", "frontend-js");
+        let (chain, outcome) =
+            apply_cross_process_clause(chain, &identity, &pair_index, &mut resolver as SiblingChainResolver);
+
+        // The walk traversed exactly two boundaries and the resolver
+        // was invoked once per boundary.
+        assert!(matches!(outcome, CrossProcessOutcome::Extended));
+        assert_eq!(calls.len(), 2, "resolver called once per boundary hop");
+        assert_eq!(calls, vec!["rec-wasm@7".to_string(), "rec-be@9".to_string()]);
+
+        // Three hops, three spans (one per trace).
+        assert_eq!(chain.hops.len(), 3, "JS tail + WASM hop + backend hop");
+        assert_eq!(
+            chain.cross_process_spans.len(),
+            3,
+            "expect frontend-js + frontend-wasm + backend spans"
+        );
+        assert_eq!(chain.cross_process_spans[0].role, "frontend-js");
+        assert_eq!(chain.cross_process_spans[0].recording_id, "rec-js");
+        assert_eq!(chain.cross_process_spans[0].first_hop_index, 0);
+        assert_eq!(chain.cross_process_spans[0].last_hop_index, 0);
+        assert_eq!(chain.cross_process_spans[1].role, "frontend-wasm");
+        assert_eq!(chain.cross_process_spans[1].recording_id, "rec-wasm");
+        assert_eq!(chain.cross_process_spans[1].first_hop_index, 1);
+        assert_eq!(chain.cross_process_spans[1].last_hop_index, 1);
+        assert_eq!(chain.cross_process_spans[1].correlator, "js-wasm-realm");
+        assert_eq!(chain.cross_process_spans[2].role, "backend");
+        assert_eq!(chain.cross_process_spans[2].recording_id, "rec-be");
+        assert_eq!(chain.cross_process_spans[2].first_hop_index, 2);
+        assert_eq!(chain.cross_process_spans[2].last_hop_index, 2);
+        assert_eq!(chain.cross_process_spans[2].correlator, "balance-request");
+
+        // The chain's first hop is still the JS-side `balance`
+        // expression — the recursion preserves the receiver-side
+        // tail hop's identity at index 0.
+        assert_eq!(chain.hops[0].target_expr, "balance");
+        assert_eq!(chain.hops[0].location.path, "frontend/app.js");
+        // The chain's last hop is now in the backend trace.
+        assert_eq!(chain.hops[2].target_expr, "db_row.balance");
+        assert_eq!(chain.hops[2].location.path, "backend/server.py");
+
+        // Both boundary-crossing hops carry their CorrelationTransition
+        // descriptor (recv-side rendering of the boundary).
+        let js_tx = chain.hops[0]
+            .correlation_transition
+            .as_ref()
+            .expect("JS-side hop carries js-wasm-realm transition");
+        assert_eq!(js_tx.boundary_id, "js-wasm-realm");
+        assert_eq!(js_tx.correlated_recording_id, "rec-wasm");
+        assert_eq!(js_tx.correlated_step_id, 7);
+
+        let wasm_tx = chain.hops[1]
+            .correlation_transition
+            .as_ref()
+            .expect("WASM-side hop carries balance-request transition");
+        assert_eq!(wasm_tx.boundary_id, "balance-request");
+        assert_eq!(wasm_tx.correlated_recording_id, "rec-be");
+        assert_eq!(wasm_tx.correlated_step_id, 9);
+
+        // Terminator reflects the deepest sibling's terminator (the
+        // backend trace's literal). Truncated flag stays clear because
+        // we did not hit MAX_BOUNDARY_HOPS.
+        assert!(matches!(chain.terminator.kind, TerminatorKind::Literal));
+        assert!(!chain.truncated);
+    }
+
+    /// Regression: a chain that crosses exactly ONE boundary still
+    /// resolves to the same shape after the recursive refactor as it
+    /// did under the original single-hop code path. The sibling's
+    /// landing hop deliberately points at a location with no further
+    /// receive marker so the recursion bottoms out after one hop.
+    /// Locked-in invariants: `Extended` outcome, exactly two hops,
+    /// exactly two `CrossProcessSpan`s, transition populated on the
+    /// receive-side hop, and terminator from the sibling continuation.
+    #[test]
+    fn sibling_chain_resolver_single_hop_regression() {
+        let recv = marker_view(
+            "rec-fe",
+            12,
+            "frontend/app.js",
+            5,
+            MarkerDirection::Recv,
+            "balance-request",
+            "user-42",
+            Some("user-42"),
+        );
+        let send = marker_view(
+            "rec-be",
+            7,
+            "backend/server.py",
+            5,
+            MarkerDirection::Send,
+            "balance-request",
+            "user-42",
+            Some("user-42"),
+        );
+        let pair_index = PairIndex::build(&[recv, send]);
+
+        let tail_hop = make_hop(
+            "balance",
+            12,
+            "frontend/app.js",
+            5,
+            OriginKind::TrivialCopy,
+            "payload = await response.json()",
+        );
+        let chain = make_chain(vec![tail_hop]);
+
+        // Sibling lands on backend/server.py:99 — far from any further
+        // receive marker, so the recursion stops after one hop.
+        let sibling_hop = make_hop(
+            "db_row.balance",
+            7,
+            "backend/server.py",
+            99,
+            OriginKind::FieldAccess,
+            "balance = db_row.balance",
+        );
+        let sibling_terminator = Terminator::new(TerminatorKind::Computational);
+
+        let mut call_count: u32 = 0;
+        let mut resolver = |sibling_id: &str, step: i64, _display: &str| -> Option<SiblingContinuation> {
+            call_count += 1;
+            assert_eq!(sibling_id, "rec-be");
+            assert_eq!(step, 7);
+            Some(SiblingContinuation {
+                sibling_identity: TraceIdentity::new("rec-be", "backend"),
+                sibling_hops: vec![sibling_hop.clone()],
+                sibling_terminator: sibling_terminator.clone(),
+                sibling_truncated: false,
+            })
+        };
+
+        let identity = TraceIdentity::new("rec-fe", "frontend");
+        let (chain, outcome) =
+            apply_cross_process_clause(chain, &identity, &pair_index, &mut resolver as SiblingChainResolver);
+
+        // Single hop: resolver called exactly once.
+        assert_eq!(call_count, 1, "single-boundary chain hits resolver once");
+        assert!(matches!(outcome, CrossProcessOutcome::Extended));
+        assert_eq!(chain.hops.len(), 2, "tail + sibling hop only");
+        assert_eq!(chain.cross_process_spans.len(), 2, "fe + be spans only");
+        assert_eq!(chain.cross_process_spans[0].role, "frontend");
+        assert_eq!(chain.cross_process_spans[1].role, "backend");
+        assert_recv_hop_carries_transition(&chain, "rec-be", 7);
+        assert!(matches!(chain.terminator.kind, TerminatorKind::Computational));
+        assert!(!chain.truncated);
     }
 }
