@@ -167,5 +167,50 @@ suite "M6 — Column-aware gutter click resolver":
     check resolved.line == 0
     check resolved.column == 0
 
+  # ─── M-capability-flags — disabling per-column breakpoints ───────────────
+
+  test "test_column_breakpoints_disabled_falls_back_to_legacy":
+    ## When the loaded trace's recorder did NOT advertise
+    ## `FLAG_SUPPORTS_COLUMN_BREAKPOINTS` (DAP capability flag
+    ## `supportsColumnBreakpoints = false`), the resolver MUST collapse
+    ## every text click into a legacy `GutterClick` even at columns
+    ## the M6 path would otherwise treat as column-aware.  This is the
+    ## spec contract: clear capability → hide per-column UI.
+    let resolved = resolveColumnClick(
+      line = Line1,
+      monacoColumn = some(ColumnVarB),
+      onGutterElement = false,
+      lineMaxColumn = some(Line1MaxColumn),
+      columnBreakpointsEnabled = false)
+    check resolved.kind == GutterClick
+    check resolved.line == Line1
+    check resolved.column == 0
+    check not resolved.isColumnAware()
+
+  test "test_column_breakpoints_disabled_still_resolves_line_for_gutter":
+    ## With the capability gated off, a gutter click on a real line
+    ## still resolves to a legacy `GutterClick` carrying the line —
+    ## the GUI's legacy line-only breakpoint path keeps working.
+    let resolved = resolveColumnClick(
+      line = Line2,
+      monacoColumn = none(int),
+      onGutterElement = true,
+      columnBreakpointsEnabled = false)
+    check resolved.kind == GutterClick
+    check resolved.line == Line2
+    check resolved.column == 0
+
+  test "test_column_breakpoints_enabled_default_preserves_behaviour":
+    ## The new `columnBreakpointsEnabled` parameter defaults to true
+    ## so existing callers (and the M1/M6 contracts) preserve their
+    ## behaviour: a text click on a column ≥ 2 resolves column-aware.
+    let resolved = resolveColumnClick(
+      line = Line1,
+      monacoColumn = some(ColumnVarC),
+      onGutterElement = false,
+      lineMaxColumn = some(Line1MaxColumn))
+    check resolved.kind == ColumnAwareClick
+    check resolved.column == ColumnVarC
+
 when isMainModule:
   discard

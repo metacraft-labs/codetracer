@@ -70,7 +70,8 @@ proc resolveColumnClick*(
     line: int;
     monacoColumn: Option[int];
     onGutterElement: bool;
-    lineMaxColumn: Option[int] = none(int)): ColumnClickResolution =
+    lineMaxColumn: Option[int] = none(int);
+    columnBreakpointsEnabled: bool = true): ColumnClickResolution =
   ## Decide which breakpoint path a gutter / editor click should
   ## trigger.
   ##
@@ -91,6 +92,16 @@ proc resolveColumnClick*(
   ##   * `lineMaxColumn` — optional upper bound from
   ##     `MonacoTextModel.getLineMaxColumn(line)`.  When provided, the
   ##     resolved column is clamped to `[1, lineMaxColumn]`.
+  ##   * `columnBreakpointsEnabled` — M-capability-flags gate.
+  ##     Defaults to true to preserve the M1/M6 behaviour for legacy
+  ##     callers; the View layer threads
+  ##     `dataServices.debugger.supportsColumnBreakpoints` (sourced
+  ##     from the DAP `Capabilities.supportsColumnBreakpoints` field)
+  ##     into this argument.  When false the resolver collapses every
+  ##     would-be column-aware click into a line-only `GutterClick`
+  ##     so the GUI's Alt+click affordance silently falls back to
+  ##     legacy line-only breakpoints — the spec-mandated behaviour
+  ##     when the recorder does not advertise the capability.
   ##
   ## See the module-doc comment for the three intent buckets the
   ## return value encodes.
@@ -112,6 +123,15 @@ proc resolveColumnClick*(
       column = maxCol
 
   if column < ColumnAwareThreshold:
+    return ColumnClickResolution(kind: GutterClick, line: line, column: 0)
+
+  if not columnBreakpointsEnabled:
+    # M-capability-flags: recorder does not support per-column
+    # breakpoints.  Collapse the would-be column-aware click into a
+    # line-only `GutterClick` so the View layer drives
+    # `addBreakpoint(path, line)` instead of `addColumnBreakpoint`.
+    # Mirrors the back-compat invariant: a clear capability bit means
+    # "fall back to line-only".
     return ColumnClickResolution(kind: GutterClick, line: line, column: 0)
 
   ColumnClickResolution(kind: ColumnAwareClick, line: line, column: column)
