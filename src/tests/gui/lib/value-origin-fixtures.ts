@@ -280,3 +280,54 @@ export function cRrSpecSkipReason(): string | null {
   }
   return null;
 }
+
+/**
+ * TCT-M5 — cross-tracer three-recording fixture probe.
+ *
+ * The `account-balance-with-wasm/` fixture under
+ * `src/db-backend/tests/fixtures/cross_process/` ships sources + a
+ * `session.toml.template` but **no** materialised `.ct` containers
+ * (`frontend.ct` / `frontend-wasm.ct` / `backend.ct`). Materialisation
+ * goes through `regenerate.sh` which is honestly gated on
+ * `wasm-pack` + the wasm32 rustup target + `codetracer-js-recorder` +
+ * `codetracer-python-recorder` + `browser_stream_receiver` + Playwright.
+ *
+ * The GUI E2E spec MUST skip cleanly with a precise sentinel — mirror
+ * of the headless-DAP test pattern at
+ * `src/db-backend/tests/cross_process_origin_test.rs::test_origin_three_trace_chain_balance_to_frontend_expression`.
+ * Returning null means all three containers are on disk + `ct` is
+ * built; otherwise the returned string is the test.skip() reason.
+ */
+export function threeTraceFixtureRoot(): string {
+  return path.join(
+    repoRoot,
+    "src",
+    "db-backend",
+    "tests",
+    "fixtures",
+    "cross_process",
+    "account-balance-with-wasm",
+  );
+}
+
+export function threeTraceFixtureSkipReason(): string | null {
+  if (!isCtBinaryAvailable()) {
+    return "ct binary missing at " + ctBinaryPath() +
+      " — run `just build-once` to produce the Electron build the M5 specs drive";
+  }
+  const root = threeTraceFixtureRoot();
+  for (const name of ["frontend.ct", "frontend-wasm.ct", "backend.ct"]) {
+    const candidate = path.join(root, name);
+    if (!fs.existsSync(candidate)) {
+      return "SKIPPED: account-balance-with-wasm fixture not materialized: " +
+        candidate +
+        " (regenerate.sh requires wasm-pack + rustup target add " +
+        "wasm32-unknown-unknown + codetracer-js-recorder + " +
+        "codetracer-python-recorder)";
+    }
+  }
+  if (!fs.existsSync(path.join(root, "session.toml.template"))) {
+    return "session.toml.template missing under " + root;
+  }
+  return null;
+}
