@@ -29,8 +29,9 @@ use codetracer_trace_types::{EventLogKind, StepId};
 use db_backend::correlation_index::{CorrelationReport, MarkerEventView, PairIndex};
 use db_backend::correlation_markers::{
     BOUNDARY_ID_JS_WASM_REALM, JS_REALM_DIRECTION_ENTER, LANGUAGE_COMMENT_PREFIXES, MarkerDirection,
-    MarkerLoadProgressThrottle, MarkerParseError, MarkerPayload, MarkerScanner, WASM_REALM_DIRECTION_LEAVE,
-    js_realm_marker_payload, parse_toml_markers, wasm_realm_marker_payload,
+    MarkerLoadProgressThrottle, MarkerParseError, MarkerPayload, MarkerScanner, WASM_BATCH_EVENT_SIZE_BYTES,
+    WASM_BATCH_TAG_REALM_BOUNDARY, WASM_REALM_DIRECTION_ENTER, WASM_REALM_DIRECTION_LEAVE, decode_wasm_realm_event,
+    js_realm_marker_payload, parse_toml_markers, parse_wasm_realm_event_json, wasm_realm_marker_payload,
 };
 use db_backend::event_db::{EventDb, SingleTableId, TracepointSourceLocation};
 use db_backend::task::{ProgramEvent, Stop, StopType};
@@ -739,6 +740,117 @@ fn test_js_wasm_realm_boundary_round_trips_through_pair_index() {
     // tracepoint handling instead of poisoning the whole pair index.
     assert!(js_realm_marker_payload(token, "sideways").is_none());
     assert!(wasm_realm_marker_payload(/*direction=*/ 7, 0, 0, token).is_none());
+}
+
+/// End-to-end audit of the M27 → M25 payload bridge.
+///
+/// Synthesises a 32-byte realm-boundary event byte-for-byte the way the
+/// recorder runtime at
+/// `codetracer-wasm-instrumenter/recorder-runtime/host_runtime.js`
+/// packs an `__ct_emit_realm_boundary(direction, fn_kind, fn_index,
+/// token)` call (tag = 4, little-endian fields), runs it through the
+/// receiver-side decoder ([`decode_wasm_realm_event`]), and lifts the
+/// resulting tuple through [`wasm_realm_marker_payload`] into a
+/// [`MarkerPayload`]. Asserts the payload matches what the consumer
+/// expects so the wire shape and the adapter signature stay in sync.
+///
+/// This is the M27 → M25 bridge verification called out in
+/// `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`
+/// M27 under the `:m27_m25_bridge_verification:` property; failures
+/// here indicate the producer's batch layout (the JS runtime) has
+/// drifted from the consumer's expectations (this test + the wire-shape
+/// doc block above [`WASM_BATCH_TAG_REALM_BOUNDARY`]).
+#[test]
+fn test_wasm_realm_event_wire_round_trips_into_marker_payload() {
+    // Pick distinct sentinel values for each field so a misaligned
+    // decode would scramble the result rather than coincidentally
+    // matching a zero-initialised slot.
+    let direction = WASM_REALM_DIRECTION_ENTER; // 0 = entering JS realm
+    let fn_kind: u8 = 1; // 1 = exported function (JS → WASM crossing)
+    let fn_index: u32 = 0x1234_5678;
+    let token: u64 = 0xfeed_face_dead_beef;
+
+    // Pack the slot exactly the way `host_runtime.js`'s
+    // `__ct_emit_realm_boundary` does — tag at offset 0, fn_kind at 1,
+    // direction at 2, fn_index little-endian at 4, token little-endian
+    // at 16. Reserved bytes stay zero.
+    let mut slot = [0u8; WASM_BATCH_EVENT_SIZE_BYTES];
+    slot[0] = WASM_BATCH_TAG_REALM_BOUNDARY;
+    slot[1] = fn_kind;
+    slot[2] = direction as u8;
+    slot[4..8].copy_from_slice(&fn_index.to_le_bytes());
+    slot[16..24].copy_from_slice(&token.to_le_bytes());
+
+    // Round-trip: producer-side bytes → consumer-side decoder → adapter.
+    let (decoded_direction, decoded_fn_kind, decoded_fn_index, decoded_token) =
+        decode_wasm_realm_event(&slot).expect("realm-boundary slot decodes");
+    assert_eq!(decoded_direction, direction);
+    assert_eq!(decoded_fn_kind, fn_kind as i32);
+    assert_eq!(decoded_fn_index, fn_index);
+    assert_eq!(decoded_token, token);
+
+    let payload = wasm_realm_marker_payload(decoded_direction, decoded_fn_kind, decoded_fn_index, decoded_token)
+        .expect("WASM-side adapter accepts decoded tuple");
+    assert_eq!(payload.boundary_id, BOUNDARY_ID_JS_WASM_REALM);
+    assert_eq!(payload.direction, MarkerDirection::Recv);
+    assert_eq!(payload.key_text, "token");
+    assert_eq!(payload.key_value, token.to_string());
+    // The description carries `fn_kind` + `fn_index` so the Event Log
+    // can identify the crossing without re-decoding metadata; pin the
+    // exact spelling so a drift in the format string triggers this test.
+    assert_eq!(
+        payload.description.as_deref(),
+        Some("wasm enter export#305419896"),
+        "fn_index = 0x12345678 = 305419896 decimal"
+    );
+
+    // Skip-and-diagnose contract: a slot whose tag is not 4 is not a
+    // realm-boundary event — the decoder returns None and the consumer
+    // falls through to ordinary tracepoint handling.
+    let mut not_realm = slot;
+    not_realm[0] = 2; // __ct_emit_call tag
+    assert!(decode_wasm_realm_event(&not_realm).is_none());
+    // A short slot (e.g. a truncated tail of the batch buffer) is also
+    // rejected rather than panicking on out-of-bounds access.
+    assert!(decode_wasm_realm_event(&slot[..16]).is_none());
+
+    // -----------------------------------------------------------------
+    // Second wire shape: the JSON-line shape the recorder runtime
+    // ships through the M26 producer (newline-delimited JSON over the
+    // stream socket). `decodeSlot` in
+    // `codetracer-wasm-instrumenter/recorder-runtime/host_runtime.js`
+    // is the canonical encoder; pin the exact line shape so a
+    // producer-side rename surfaces here as a deserialisation failure
+    // rather than a silent pair-index miss.
+    // -----------------------------------------------------------------
+    let json_line = format!(
+        r#"{{"kind":"RealmBoundary","token":"{token}","direction":{direction},"fn_kind":{fn_kind},"fn_index":{fn_index}}}"#
+    );
+    let (j_direction, j_fn_kind, j_fn_index, j_token) =
+        parse_wasm_realm_event_json(&json_line).expect("JSON realm-boundary line parses");
+    assert_eq!(j_direction, direction);
+    assert_eq!(j_fn_kind, fn_kind as i32);
+    assert_eq!(j_fn_index, fn_index);
+    assert_eq!(j_token, token);
+    let json_payload = wasm_realm_marker_payload(j_direction, j_fn_kind, j_fn_index, j_token)
+        .expect("WASM-side adapter accepts JSON-decoded tuple");
+    let bin_payload = wasm_realm_marker_payload(decoded_direction, decoded_fn_kind, decoded_fn_index, decoded_token)
+        .expect("binary path produces the same payload");
+    // Both wire shapes converge to the **same** MarkerPayload — the
+    // pair index doesn't have to care which transport the event
+    // arrived through.
+    assert_eq!(json_payload, bin_payload);
+    // Skip-and-diagnose: wrong discriminator returns None instead of
+    // mis-routing a WasmCall through the realm-boundary adapter.
+    assert!(parse_wasm_realm_event_json(r#"{"kind":"WasmCall","fn_kind":1,"fn_index":7}"#).is_none());
+    // A token above 2^53 round-trips losslessly through the JSON line
+    // because the producer encodes `token` as a decimal string (JSON
+    // numbers would silently lose precision above 2^53).
+    let big_token: u64 = u64::MAX - 7;
+    let big_line =
+        format!(r#"{{"kind":"RealmBoundary","token":"{big_token}","direction":1,"fn_kind":0,"fn_index":0}}"#);
+    let (_, _, _, big_decoded) = parse_wasm_realm_event_json(&big_line).expect("u64::MAX-class token survives");
+    assert_eq!(big_decoded, big_token);
 }
 
 // ---------------------------------------------------------------------------

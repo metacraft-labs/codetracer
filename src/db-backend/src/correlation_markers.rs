@@ -903,6 +903,131 @@ pub const JS_REALM_DIRECTION_LEAVE: &str = "leave";
 pub const WASM_REALM_DIRECTION_ENTER: i32 = 0;
 pub const WASM_REALM_DIRECTION_LEAVE: i32 = 1;
 
+/// Tag byte for a realm-boundary event in the M27 recorder-runtime
+/// batch wire format. The reference encoder is `__ct_emit_realm_boundary`
+/// in `codetracer-wasm-instrumenter/recorder-runtime/host_runtime.js`.
+///
+/// # Canonical wire shape (M27 → M25)
+///
+/// The recorder runtime packs every `__ct_emit_realm_boundary(direction,
+/// fn_kind, fn_index, token)` call into a fixed 32-byte little-endian
+/// slot inside the batch buffer it flushes through `onBatch(buf)` (the
+/// embedder wires that callback to the M26 transport producer in the
+/// browser or to a CTFS writer natively). The byte layout shared with
+/// the producer:
+///
+/// ```text
+///   offset 0  : u8  tag        (= 4 for realm_boundary)
+///   offset 1  : u8  fn_kind    (0 = import, 1 = export)
+///   offset 2  : u8  direction  (0 = enter foreign realm, 1 = leave)
+///   offset 3  : u8  reserved
+///   offset 4  : u32 fn_index   (little-endian)
+///   offset 8  : u32 reserved
+///   offset 12 : u32 reserved
+///   offset 16 : u64 token      (little-endian, monotonic)
+///   offset 24 : u64 reserved
+/// ```
+///
+/// Bridge into `wasm_realm_marker_payload`: zero-extend the `direction`
+/// and `fn_kind` bytes to `i32` (the WASM ABI's `i32` argument type),
+/// pass the decoded `fn_index` as `u32` and the decoded `token` as
+/// `u64`. The receiver-side helper [`decode_wasm_realm_event`] performs
+/// the round-trip and is exercised by
+/// `test_wasm_realm_event_wire_round_trips_into_marker_payload` in
+/// `tests/correlation_markers_test.rs`.
+pub const WASM_BATCH_TAG_REALM_BOUNDARY: u8 = 4;
+
+/// Total size in bytes of one event slot in the M27 recorder-runtime
+/// batch wire format. Pinned here so the receiver-side decoder shares
+/// the constant with the test that pins the layout.
+pub const WASM_BATCH_EVENT_SIZE_BYTES: usize = 32;
+
+/// Decode the four arguments of an `__ct_emit_realm_boundary` call from
+/// a 32-byte slot inside a recorder-runtime batch buffer. Returns
+/// `None` when the slot is not a realm-boundary event (tag != 4) or
+/// when the buffer is too short — matching the skip-and-diagnose
+/// contract of [`MarkerPayload::decode`].
+///
+/// The returned tuple feeds directly into [`wasm_realm_marker_payload`]:
+/// the bridge is `(direction, fn_kind, fn_index, token)` with no
+/// further transformation.
+pub fn decode_wasm_realm_event(slot: &[u8]) -> Option<(i32, i32, u32, u64)> {
+    if slot.len() < WASM_BATCH_EVENT_SIZE_BYTES {
+        return None;
+    }
+    if slot[0] != WASM_BATCH_TAG_REALM_BOUNDARY {
+        return None;
+    }
+    let fn_kind = slot[1] as i32;
+    let direction = slot[2] as i32;
+    let fn_index = u32::from_le_bytes([slot[4], slot[5], slot[6], slot[7]]);
+    let token = u64::from_le_bytes([
+        slot[16], slot[17], slot[18], slot[19], slot[20], slot[21], slot[22], slot[23],
+    ]);
+    Some((direction, fn_kind, fn_index, token))
+}
+
+/// JSON-line shape of a realm-boundary event as the M27 recorder
+/// runtime ships it through the M26 producer (newline-delimited JSON
+/// over the stream socket). The canonical encoder lives in
+/// `codetracer-wasm-instrumenter/recorder-runtime/host_runtime.js`
+/// (`decodeSlot` → tag 4 branch); the JSON shape is:
+///
+/// ```json
+/// {"kind":"RealmBoundary","token":"<decimal>","direction":0|1,
+///  "fn_kind":0|1,"fn_index":<u32>}
+/// ```
+///
+/// `token` is a decimal **string** rather than a JSON number so values
+/// above 2^53 survive a `serde_json` round-trip (JSON numbers are
+/// IEEE-754 doubles and lose precision above that threshold; the
+/// monotonic correlation token is a u64). The two `direction` /
+/// `fn_kind` byte fields ride as plain JSON integers.
+///
+/// We deserialise into this intermediate struct rather than feeding
+/// `serde_json::Value` into [`wasm_realm_marker_payload`] so the field
+/// names + types are pinned by the schema. Drift in either direction
+/// (browser runtime renames a field, or the consumer renames a
+/// parameter) shows up at this boundary as a clean deserialisation
+/// failure instead of a silently mis-paired event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WasmRealmBoundaryWireEvent {
+    /// Discriminator tag — fixed to `"RealmBoundary"` for this event.
+    pub kind: String,
+    /// Decimal-string-encoded u64 correlation token. The string
+    /// representation matches the format
+    /// [`wasm_realm_marker_payload`] uses for its `key_value`, so the
+    /// pair index lookup is byte-for-byte exact.
+    pub token: String,
+    /// `0` = entering the foreign realm, `1` = leaving — same encoding
+    /// as the WASM ABI's i32 direction argument.
+    pub direction: u8,
+    /// `0` = imported function (WASM → JS), `1` = exported function
+    /// (JS → WASM).
+    pub fn_kind: u8,
+    /// Stable index within the import / export section.
+    pub fn_index: u32,
+}
+
+/// Parse one JSON line emitted by the recorder runtime's M26 producer
+/// (a single newline-delimited record off the stream socket) into the
+/// 4-tuple [`wasm_realm_marker_payload`] consumes.
+///
+/// Returns `None` when the line is not a well-formed
+/// `{"kind":"RealmBoundary", ...}` JSON object, when the `kind`
+/// discriminator is not exactly `"RealmBoundary"`, or when the
+/// `token` field cannot be parsed as a u64. Matches the
+/// skip-and-diagnose contract of [`MarkerPayload::decode`].
+pub fn parse_wasm_realm_event_json(line: &str) -> Option<(i32, i32, u32, u64)> {
+    let event: WasmRealmBoundaryWireEvent = serde_json::from_str(line).ok()?;
+    if event.kind != "RealmBoundary" {
+        return None;
+    }
+    let token = event.token.parse::<u64>().ok()?;
+    Some((event.direction as i32, event.fn_kind as i32, event.fn_index, token))
+}
+
 /// Convert a JS-side `__ct.emit({kind: "RealmBoundary", ...})` payload
 /// into the marker payload that drops into the M25 pair index.
 ///
