@@ -32,6 +32,7 @@ import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 import { resolveRecorderTestProgram, hasToolOnPath } from "../../lib/sibling-test-programs";
+import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -216,6 +217,28 @@ test.describe("polkavm_example — call trace", () => {
     const newLocation = await statusBar.location();
     expect(newLocation.line).not.toBe(initialLocation.line);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Test suite: column-aware breakpoints (M1/M6)
+//
+// PolkaVM's recorder consumes pre-compiled `.polkavm` blobs (see the
+// "PolkaVM recorder only accepts pre-compiled .polkavm blobs" insight
+// in `.agents/codebase-insights.txt`).  When the blob carries DWARF
+// debug info, `DbStep.column` is populated from the source-level
+// DWARF line-program.  `flow_test.rs` line 16 is `    let a: u32 = 10;`
+// inside `compute`; the 4-space indent puts `let` at column 5.
+// ---------------------------------------------------------------------------
+
+defineRecorderColumnBreakpointSuite({
+  language: "polkavm_example",
+  skipReason:
+    "PolkaVM recorder pipeline not available (need codetracer-polkavm-recorder and polkatool on PATH)",
+  pipelineAvailable: polkavmPipelineAvailable,
+  sourcePath: polkavmTestProgram ?? "",
+  sourceFileName: "flow_test.rs",
+  targetLine: 16,
+  targetColumn: 5,
 });
 
 // ---------------------------------------------------------------------------

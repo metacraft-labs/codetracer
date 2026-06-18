@@ -30,6 +30,7 @@ import * as process from "node:process";
 import { test, expect, readyOnEntryTest as readyOnEntry, loadedEventLog } from "../../lib/fixtures";
 import { StatusBar } from "../../page-objects/status_bar";
 import { StatePanel } from "../../page-objects/state";
+import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -201,6 +202,27 @@ test.describe("solidity_example — call trace", () => {
   test.fixme("next", async () => {
     // Requires debug movement counter support for EVM/Solidity backend.
   });
+});
+
+// ---------------------------------------------------------------------------
+// Test suite: column-aware breakpoints (M1/M6)
+//
+// Solidity's EVM recorder emits `DbStep.column` from the source-map
+// `s:l:f:j` columns produced by `solc --combined-json srcmap-runtime`.
+// `SolidityExample.sol` line 139 is `        _mint(alice, 1000);` —
+// the 8-space indent puts `_mint` at column 9, the first statement of
+// `runExample`.
+// ---------------------------------------------------------------------------
+
+defineRecorderColumnBreakpointSuite({
+  language: "solidity_example",
+  skipReason:
+    "EVM recorder pipeline not available (need solc + codetracer-evm-recorder)",
+  pipelineAvailable: evmPipelineAvailable,
+  sourcePath: "solidity_example/SolidityExample.sol",
+  sourceFileName: "SolidityExample.sol",
+  targetLine: 139,
+  targetColumn: 9,
 });
 
 // ---------------------------------------------------------------------------

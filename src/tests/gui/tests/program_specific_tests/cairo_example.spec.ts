@@ -32,6 +32,7 @@ import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 import { resolveRecorderTestProgram, hasToolOnPath } from "../../lib/sibling-test-programs";
+import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -215,6 +216,28 @@ test.describe("cairo_example — call trace", () => {
     const newLocation = await statusBar.location();
     expect(newLocation.line).not.toBe(initialLocation.line);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Test suite: column-aware breakpoints (M1/M6)
+//
+// Cairo's recorder lands `DbStep.line/column` against the .cairo
+// source via Sierra debug-info passes that preserve each `let`
+// binding's column.  `flow_test.cairo` line 4 is
+// `    let sum_val: felt252 = a + b;`; the 4-space indent puts `let`
+// at column 5 — a mid-line column that the M6 Alt+click resolver
+// reliably hits.
+// ---------------------------------------------------------------------------
+
+defineRecorderColumnBreakpointSuite({
+  language: "cairo_example",
+  skipReason:
+    "Cairo recorder pipeline not available (need codetracer-cairo-recorder and scarb on PATH)",
+  pipelineAvailable: cairoPipelineAvailable,
+  sourcePath: cairoTestProgram ?? "",
+  sourceFileName: "flow_test.cairo",
+  targetLine: 4,
+  targetColumn: 5,
 });
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ import { StatePanel } from "../../page-objects/state";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 import { hasToolOnPath } from "../../lib/sibling-test-programs";
+import { defineRecorderColumnBreakpointSuite } from "../../lib/column-aware-helpers";
 
 // ---------------------------------------------------------------------------
 // Tool-availability guards
@@ -225,6 +226,27 @@ test.describe("move_example — call trace", () => {
     const newLocation = await statusBar.location();
     expect(newLocation.line).not.toBe(initialLocation.line);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Test suite: column-aware breakpoints (M1/M6)
+//
+// Move's recorder maps `DbStep.column` from compiled-bytecode debug
+// info preserving each `let` binding's column.  `flow_test.move`
+// line 18 is `        let sum_val: u64 = add(a, b);` — the 8-space
+// indent puts `let` at column 9, a mid-line target the M6 Alt+click
+// resolver hits reliably.
+// ---------------------------------------------------------------------------
+
+defineRecorderColumnBreakpointSuite({
+  language: "move_example",
+  skipReason:
+    "Move recorder pipeline not available (need codetracer-move-recorder and aptos/sui on PATH)",
+  pipelineAvailable: movePipelineAvailable,
+  sourcePath: "move_example/sources/flow_test.move",
+  sourceFileName: "flow_test.move",
+  targetLine: 18,
+  targetColumn: 9,
 });
 
 // ---------------------------------------------------------------------------
