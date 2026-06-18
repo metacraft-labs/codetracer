@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>account-balance-with-wasm fixture</title>
+  </head>
+  <body>
+    <!--
+      Cross-Tracer Origin E2E — Fixture A' (three-tracer variant per
+      TCT-M4). The Vite dev server resolves /app.js as an ES module
+      under the codetracer-js-recorder host, which in turn loads the
+      Rust→WASM `balance-calc` crate from ./pkg/. The single
+      observable side-effect is the `#status` element flipping to
+      "stored" once the backend's POST /balance handler replies.
+    -->
+    <main>
+      <h1>Account Balance (WASM)</h1>
+      <p>Status: <span id="status">pending</span></p>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+# Cross-Tracer Origin E2E — Fixture A' WASM compute module
+# (three-tracer variant per Cross-Tracer-Origin-Test.audit.md
+# § TCT-M4).
+#
+# Built by `regenerate.sh` via `wasm-pack build --target web` (or
+# the equivalent `cargo build --target wasm32-unknown-unknown` +
+# `wasm-bindgen` invocation) and the resulting `pkg/` directory is
+# placed at `frontend/pkg/` so Vite's module resolver picks it up
+# from `frontend/app.js`.
+#
+# The crate is intentionally tiny — one exported function, no
+# dependencies beyond `wasm-bindgen` — so the regenerator runs in
+# seconds even on a cold cache.
+[package]
+name = "balance-calc"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

@@ -1,0 +1,34 @@
+# Cross-Tracer Origin E2E — Fixture A' "Account Balance with WASM"
+# (three-tracer session manifest per TCT-M4 / TCT-M1).
+#
+# `regenerate.sh` fills the per-recording `recording_id` UUIDv7
+# placeholders when it refreshes the trace triple. The three
+# `[[trace]]` entries carry the canonical role tokens enforced by
+# `codetracer/src/db-backend/src/session_manifest.rs`
+# (`MAX_TRACES_PER_SESSION = 3`; canonical roles {`frontend-js`,
+# `frontend-wasm`, `backend`}).
+#
+# Canonical reference doc:
+#   codetracer-specs/Trace-Files/Session-Manifest.md § 5
+version = 1
+
+[[trace]]
+recording_id = "{{frontend_js_recording_id}}"
+path = "./frontend.ct"
+role = "frontend-js"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "{{frontend_wasm_recording_id}}"
+path = "./frontend-wasm.ct"
+role = "frontend-wasm"
+default_thread_prefix = "wasm"
+
+[[trace]]
+recording_id = "{{backend_recording_id}}"
+path = "./backend.ct"
+role = "backend"
+default_thread_prefix = "be"
+
+[correlation]
+correlation_index_mode = "eager"
