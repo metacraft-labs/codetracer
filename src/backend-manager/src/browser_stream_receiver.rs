@@ -100,9 +100,21 @@ pub enum BrowserEvent {
         site_id: u32,
     },
     /// Function entry with the given arg values.
-    Call { fn_id: u32, args: Vec<EncodedValue> },
-    /// Function return.
+    ///
+    /// The browser runtime (`@codetracer/runtime-browser`) ships the
+    /// function-id field as camelCase `fnId` on the wire — same as
+    /// `siteId` / `pathId` / `returnValue` on the surrounding variants.
+    /// The explicit `#[serde(rename = "fnId")]` is load-bearing: without
+    /// it serde looks for snake_case `fn_id` and silently fails to
+    /// deserialize every `Call` frame the browser produces.
+    Call {
+        #[serde(rename = "fnId")]
+        fn_id: u32,
+        args: Vec<EncodedValue>,
+    },
+    /// Function return.  See `Call` above for the `fnId` rename rationale.
     Return {
+        #[serde(rename = "fnId")]
         fn_id: u32,
         #[serde(rename = "returnValue")]
         return_value: EncodedValue,
@@ -413,6 +425,45 @@ mod tests {
         let event = parse_event_line(line).expect("valid JSON");
         match event {
             BrowserEvent::Assignment { site_id } => assert_eq!(site_id, 42),
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_call_event_with_camel_case_fn_id() {
+        // The browser runtime ships `fnId` on the wire (camelCase, matching
+        // `siteId`/`pathId`/`returnValue` on the surrounding variants).  The
+        // receiver must accept that shape directly — without
+        // `#[serde(rename = "fnId")]` on the `fn_id` field, every Call frame
+        // the runtime sends would silently fail to deserialize, which is
+        // exactly the bug this regression test guards against.
+        let line = r#"{"kind":"Call","fnId":3,"args":[]}"#;
+        let event = parse_event_line(line).expect("valid JSON");
+        match event {
+            BrowserEvent::Call { fn_id, args } => {
+                assert_eq!(fn_id, 3);
+                assert!(args.is_empty());
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_return_event_with_camel_case_fn_id() {
+        // Mirror of the Call test above for the `Return` variant: `fnId`
+        // (browser-runtime camelCase) + `returnValue` (already renamed) must
+        // both deserialize cleanly into the snake_case Rust fields.
+        let line = r#"{"kind":"Return","fnId":5,"returnValue":{"value":42,"typeKind":"Int"}}"#;
+        let event = parse_event_line(line).expect("valid JSON");
+        match event {
+            BrowserEvent::Return {
+                fn_id,
+                return_value,
+            } => {
+                assert_eq!(fn_id, 5);
+                assert_eq!(return_value.type_kind, "Int");
+                assert_eq!(return_value.value, serde_json::json!(42));
+            }
             other => panic!("unexpected variant: {other:?}"),
         }
     }
