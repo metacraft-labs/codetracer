@@ -80,14 +80,22 @@ proc recordJsTraceWithCall(): tuple[tracePath, sourcePath: string;
   createDir(dir)
 
   let sourcePath = dir / "program.js"
-  # Same fixture shape as the stepIn VM test — a callee on line 1
-  # (defined inline) and a call site on line 2.  This produces the
-  # recorded step sequence:
-  #   <function declaration step>  (line 1)
-  #   <call site step>             (line 2)
-  #   <callee body step>           (line 1, inside the function)
-  #   <caller resume step>         (line 2 or end-of-program)
-  const program = "function f(x) { return x + 1; }\nvar y = f(5);\n"
+  # Three-line fixture: callee on line 1, call site on line 2, and a
+  # POST-CALL statement on line 3 so the JS recorder emits a depth-0
+  # step AFTER the callee returns.  Without that trailing line the
+  # recorder's last step lands inside the callee body
+  # (``return x + 1;`` at line 1 column 17 under the inline form) and
+  # the legacy ``step_out`` primitive — which walks forward looking for
+  # the next step at depth ≤ caller_depth — would clamp at the last
+  # in-callee step instead of advancing to a real caller-resume
+  # position.  The extra ``var z = 10;`` line gives the recorder a
+  # natural depth-0 anchor to land on after the callee returns, so
+  # ``stepOut`` from inside the callee resolves to line 3 — the post-
+  # call resume the M8 contract is supposed to surface.
+  const program =
+    "function f(x) { return x + 1; }\n" &
+    "var y = f(5);\n" &
+    "var z = 10;\n"
   writeFile(sourcePath, program)
 
   let recorder = findJsRecorder()
@@ -193,7 +201,11 @@ suite "M8 — Formatted-view step-OUT through the ViewModel":
     let replayServer = findReplayServer()
     var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    let mapJson = buildIdentityV3Map(FormattedViewPath, 4)
+    # 5 covers lines 1..5 — enough for the 3-line fixture above with
+    # a one-line safety margin so the V3 map is dense across every
+    # recorded line the JS recorder might emit (post-call steps the
+    # recorder anchors past the source's last code line included).
+    let mapJson = buildIdentityV3Map(FormattedViewPath, 5)
     session.installSourceViewForTest(
       recordedPath = fixture.sourcePath,
       formattedViewPath = FormattedViewPath,
