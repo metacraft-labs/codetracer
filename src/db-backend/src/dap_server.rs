@@ -802,16 +802,46 @@ fn build_session_threads_response(session: &SessionHandler) -> Result<Vec<crate:
 /// Build the `ct/listProcesses` payload. Each entry carries the
 /// manifest role, recording id, thread count, and the composed thread
 /// ids the frontend uses to drive cross-trace navigation.
+///
+/// The `displayName` field is the basename of the trace's filesystem
+/// path (or the recording id when no path is available). It is what
+/// the M29 spec example shows the frontend rendering in the process
+/// tree row label.
+///
+/// This builder is shared by the `ct/listProcesses` *request* response
+/// path (see [`handle_request_via_session`]) and the
+/// `ct/listProcesses` *event* dispatched at session-load (see
+/// [`dispatch_session_load_event`]); both surfaces carry the same wire
+/// shape so the frontend has a single deserialiser.
 fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, Box<dyn Error>> {
     let processes = session
         .list_processes(|slot| inner_threads_for_slot(session, slot))
         .map_err(|e| -> Box<dyn Error> { format!("session list_processes failed: {e}").into() })?;
     let processes_json: Vec<Value> = processes
         .into_iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(slot_idx, p)| {
+            // Resolve the display name from the manifest entry — this
+            // is the basename the spec § M29 5.2 example shows ("frontend.ct").
+            // Fall back to the recording id when the path is empty so
+            // the wire shape always carries a non-empty label.
+            let slot = slot_idx as TraceSlot;
+            let display_name = session
+                .trace(slot)
+                .and_then(|loaded| {
+                    loaded
+                        .entry
+                        .path
+                        .file_name()
+                        .and_then(|os| os.to_str())
+                        .map(|s| s.to_string())
+                })
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| p.recording_id.clone());
             json!({
                 "recordingId": p.recording_id,
                 "role": p.role,
+                "displayName": display_name,
                 "defaultThreadPrefix": p.default_thread_prefix,
                 "threadCount": p.thread_count,
                 "threadIds": p.thread_ids,
@@ -819,6 +849,48 @@ fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, B
         })
         .collect();
     Ok(json!({ "processes": processes_json }))
+}
+
+/// M29 §5.2 — dispatch a `ct/listProcesses` DAP **event** carrying the
+/// freshly-loaded session's process list. Called once at session-load
+/// (after every `setup_session` / `wrap_single_trace_as_session`
+/// call) so the frontend's process tree populates without having to
+/// race a follow-up request.
+///
+/// The event body is byte-for-byte equivalent to the
+/// `ct/listProcesses` request response — the frontend can route both
+/// through the same deserialiser. The contract is **idempotent**:
+/// every call rebuilds the full snapshot, so re-loading the session
+/// (e.g. a fresh `launch` request with new `[[trace]]` entries) yields
+/// a complete refreshed process list that supersedes the previous
+/// one. Consumers MUST treat each event as a total snapshot, not a
+/// delta.
+///
+/// Errors building the payload are logged but never surfaced to the
+/// caller — emission is best-effort; a missing event must not block
+/// session bring-up.
+pub fn dispatch_session_load_event(session: &SessionHandler, sender: &Sender<DapMessage>) {
+    let body = match build_ct_list_processes_response(session) {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("ct/listProcesses event: failed to build payload: {e}");
+            return;
+        }
+    };
+    let event = DapMessage::Event(dap::Event {
+        base: dap::ProtocolMessage {
+            // Sequence number is patched by `write_dap_messages` before
+            // the event reaches the wire — passing 0 here matches the
+            // existing pattern used by the `initialized` event.
+            seq: 0,
+            type_: "event".to_string(),
+        },
+        event: "ct/listProcesses".to_string(),
+        body,
+    });
+    if let Err(e) = sender.send(event) {
+        warn!("ct/listProcesses event: failed to enqueue on sender: {e}");
+    }
 }
 
 /// Extract the `threadId` argument from a DAP request, when present.
@@ -2236,11 +2308,23 @@ fn task_thread(
             loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
             loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
         }
+        // M29 §5.2 — emit `ct/listProcesses` on session-load. The
+        // cached-launch path has just built a productive
+        // SessionHandler (manifest-driven or single-trace wrap); the
+        // frontend's process tree consumes this event without having
+        // to race a follow-up request. Idempotent on re-load — every
+        // launch dispatches a fresh snapshot.
+        dispatch_session_load_event(&s, &sender);
         s
     } else {
         // No cached launch yet → synthesise an empty single-trace
         // session whose underlying Handler has `.initialized == false`.
         // Requests are dropped until a `launch` arrives.
+        // M29 §5.2 — no event is dispatched here: the placeholder
+        // carries no real recording, and emitting at this point would
+        // surface a misleading "no processes loaded" snapshot. The
+        // event will fire from the subsequent `launch` branch once
+        // the real session.toml / single-trace is materialised.
         let placeholder = Handler::new(
             TraceKind::Materialized,
             RecreatorArgs {
@@ -2349,6 +2433,10 @@ fn task_thread(
                         error!("session launch error: {e:?}");
                         format!("session launch error: {e:?}")
                     })?;
+                    // M29 §5.2 — emit `ct/listProcesses` on
+                    // session.toml re-load. Idempotent: each launch
+                    // produces a fresh full snapshot.
+                    dispatch_session_load_event(&session, &sender);
                     loaded_trace_folder = Some(launch_trace_folder);
                     loaded_trace_file = Some(launch_trace_file);
                     loaded_raw_diff_index = launch_raw_diff_index;
@@ -2376,6 +2464,11 @@ fn task_thread(
                     })?;
                     session = wrap_single_trace_as_session(handler, launch_trace_folder.clone())
                         .map_err(|e| -> String { format!("session wrap error: {e:?}") })?;
+                    // M29 §5.2 — emit `ct/listProcesses` on single-
+                    // trace launch. The synthetic single-trace
+                    // session yields a one-entry process list with the
+                    // recorded `.ct` file as `displayName`.
+                    dispatch_session_load_event(&session, &sender);
                     loaded_trace_folder = Some(launch_trace_folder);
                     loaded_trace_file = Some(launch_trace_file);
                     loaded_raw_diff_index = launch_raw_diff_index;
@@ -2410,6 +2503,12 @@ fn task_thread(
                 })?;
                 session = wrap_single_trace_as_session(handler, PathBuf::from(""))
                     .map_err(|e| -> String { format!("live session wrap error: {e:?}") })?;
+                // M29 §5.2 — emit `ct/listProcesses` on live-program
+                // launch. Single-entry process list whose
+                // `displayName` falls back to the recording id (path
+                // is empty for live recordings until the recorder
+                // finishes).
+                dispatch_session_load_event(&session, &sender);
                 loaded_trace_folder = None;
                 loaded_trace_file = None;
                 loaded_raw_diff_index = None;
