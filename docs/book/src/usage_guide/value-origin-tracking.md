@@ -77,6 +77,66 @@ chevron expands a per-operand snapshot table (`name = value` rows).
 
 Clicking the badge again collapses the chain.
 
+### Reading an origin chain
+
+Three concepts cover everything you see in the panel:
+
+- **Hops** — each row represents one dataflow step. The
+  classification icon names *what kind* of step it was: a trivial copy
+  (`b = a`), a field or index access (`x.field`, `arr[i]`), a return
+  capture (`y = foo()`), a parameter pass (the callee receives the
+  caller's argument), an explicit computation (`r = a + b`), or — on
+  RR/MCR backends — a cross-thread copy. The full enum is in the
+  [Origin kinds reference](../reference/origin-kinds.md).
+- **Frame transitions** — the inline `↘`/`↗` glyphs mark the hops
+  where the chain crosses a function boundary: `↘` when the chain
+  steps *into* a callee through a `ParameterPass`, `↗` when it returns
+  *up* into the caller through a `ReturnCapture`. The chain seeks to
+  the right frame automatically when you click such a hop.
+- **Terminator** — the bottom row is not a regular hop. It explains
+  *why the backward walk stopped*. The terminator kind is the closed
+  enum `TerminatorKind` — for example `Literal` (a literal expression
+  bottomed out the chain), `Computational` (the chain ended at an
+  expression like `a + b`), `ParameterAtRecordStart` (the value was
+  already in a parameter when recording began), `RecordingStart`
+  (walked off the beginning of the trace), `DepthLimit` /
+  `OutOfBudget` (the walker stopped under a configured cap), or
+  `UnknownSource` / `UnknownVariable` (the classifier could not parse
+  the line). The full enum lives in the
+  [Origin kinds reference](../reference/origin-kinds.md).
+
+The order is always newest-first: the topmost hop is the most recent
+assignment to the queried value, and the terminator at the bottom is
+the original source of the data.
+
+### Pinning, breadcrumbs, and copying
+
+Inside the side panel a few small navigation aids accumulate as you
+work:
+
+- **Breadcrumbs at the top of the panel** record the
+  `(variable, step)` pairs you have already inspected in this session.
+  Clicking a breadcrumb jumps back to that query without re-issuing the
+  backend round-trip. These breadcrumbs are *session-local* — they
+  reflect *your navigation path* through chains, not anything intrinsic
+  to the trace. (Under the hood this is the `breadcrumbStack` signal in
+  `OriginChainVM`.)
+- **Pinning** a hop or a full chain copies it into the **Scratchpad
+  Pane** as a folded card. Pin two chains side-by-side and CodeTracer
+  renders a unified hop diff — useful for "why is iteration 17
+  different from iteration 16?". Right-click a hop or the chain header
+  to access pin actions.
+- **Copy as markdown** (right-click the chain header) serialises the
+  chain to a markdown fragment with the per-hop table, ready to paste
+  into a bug report. The same renderer is exposed as the `markdown`
+  format on the `ct trace origin` CLI.
+
+> **Note:** The breadcrumb chips described above are distinct from
+> the *cross-trace* `CrossProcessSpan` boundary chips covered below
+> in [Cross-tracer sessions](#cross-tracer-sessions) — those chips
+> reflect the chain crossing recording boundaries, not your navigation
+> history.
+
 ### The dedicated side panel
 
 For deeper chains that crowd the narrow State Pane, right-clicking a
@@ -134,6 +194,54 @@ inside a webview. The same gestures apply:
 
 > **Note:** The animated screencast of the VS Code experience is pending
 > — see the M7 verification entries for capture status.
+
+### VS Code Event Log marker chips
+
+When a session has correlation markers (see the M25 docs in the spec),
+the VS Code Event Log gains a row per marker firing with:
+
+- a **direction icon** — `↑` for a `Send` (the marker recorded a
+  value crossing *out* of the recording at this boundary) and `↓` for
+  a `Recv` (the value crossing *in*);
+- a **boundary chip** — the marker's `boundary_id` (for example
+  `http`, `js-wasm-realm`) rendered as a small filled badge;
+- the marker's **`show_value`** — the expression value the marker
+  declaration captured at that firing, formatted per the marker's
+  `format` field (default `summary:80`, middle-ellipsis-truncated).
+
+Clicking the chip on a marker row **jumps to the counterpart row**:
+when the counterpart is in a sibling recording the active process
+switches first (via `ct/listProcesses` + `ct/goto-ticks`), then the
+timeline seeks to the counterpart's step, then the Event Log scrolls
+to highlight the counterpart row. While markers are still loading the
+panel shows a `loading correlation markers… X / Y firings` banner;
+jump buttons defer until both endpoints of a pair are loaded.
+
+The same chips + jump targets render in the CodeTracer Electron GUI's
+Event Log pane — both surfaces drive the same `EventLogVM`.
+
+## Cross-tracer sessions
+
+When CodeTracer opens a multi-recording session via `session.toml`,
+the same Origin Chain Side Panel additionally renders
+**`CrossProcessSpan` boundary chips** at every cross-recording hop.
+A chip shows which recording the next hop range belongs to (one chip
+per process the chain visits — JS frontend, WASM module, Python
+backend, etc.) and clicking it switches the active recording and
+seeks to the matched boundary step.
+
+This is distinct from the session-local breadcrumbs described above:
+breadcrumbs reflect *your navigation history* through prior queries,
+while `CrossProcessSpan` chips are an intrinsic property of the
+returned chain — they tell you "the next K hops happen inside
+recording R" and they survive switching the active recording.
+
+The canonical user-facing walkthrough for cross-tracer chain walking
+lives in [Cross-Tracer Demo](./cross-tracer-demo.md), which boots the
+three-trace `account-balance-with-wasm` fixture so you can right-click
+`balance` in the backend, watch the chain render its `CrossProcessSpan`
+chips, and click through into the JS frontend and the WASM module
+without leaving the GUI.
 
 ## From a Python replay script
 
@@ -308,3 +416,14 @@ pattern added at any level applies uniformly to every caller.
   flag table for `ct trace origin`.
 - [MCP tool reference](../reference/mcp-tools.md) — input/output
   schemas for `get_value_origin` and `resolve_variable_step`.
+- [Origin kinds reference](../reference/origin-kinds.md) — the closed
+  `OriginKind`, `TerminatorKind`, and `FrameTransitionKind` enums with
+  per-variant guidance.
+- [Cross-Tracer Demo](./cross-tracer-demo.md) — interactive launcher
+  for the three-trace cross-process chain-walking scenario.
+- `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md` —
+  the authoritative feature spec (UI layout, wire schemas, algorithm
+  contracts, per-language semantics).
+- `codetracer-specs/Planned-Features/Value-Origin-Campaign-Closeout.md`
+  — campaign close-out memo enumerating the milestone set that lands
+  the four user-facing surfaces described in this chapter.

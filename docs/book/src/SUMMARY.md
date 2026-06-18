@@ -44,6 +44,7 @@
 
 - [ct CLI Reference](./reference/ct_cli.md)
 - [MCP Tool Reference](./reference/mcp-tools.md)
+- [Origin Kinds Reference](./reference/origin-kinds.md)
 - [Recorder CLI Reference](./reference/recorders.md)
 
 ## Building & packaging
