@@ -857,6 +857,136 @@ impl Default for MarkerLoadProgressThrottle {
 }
 
 // ---------------------------------------------------------------------------
+// M27 ↔ M25 bridge: WASM realm-boundary tokens as a `js-wasm-realm`
+// correlation-marker family.
+// ---------------------------------------------------------------------------
+//
+// Context: the M27 milestone (`codetracer-wasm-instrumenter`) emits
+// realm-crossing events through `__ct_emit_realm_boundary(direction,
+// fn_kind, fn_index, token)` in WASM-instrumented modules, paired with
+// a JS-side emission whose JSON shape is
+// `__ct.emit({kind: "RealmBoundary", token, direction: "enter"|"leave"})`.
+// The audit at
+// `codetracer-specs/Planned-Features/Cross-Tracer-Origin-Test.audit.md`
+// (TCT-M2 — "PairIndex bridge") calls this out as a prerequisite for
+// composing the M25 cross-process origin chain over WASM module
+// boundaries.
+//
+// The existing [`MarkerPayload`] schema generalises cleanly to this
+// case — every field has a sensible inhabitant for a realm-boundary
+// firing — so the bridge is a thin adapter (parse the two wire shapes
+// → produce a `MarkerPayload` with the spec's `boundary_id`) rather
+// than a refactor. We deliberately keep both adapter functions in the
+// same module as the rest of the marker schema so the constant is the
+// single source of truth.
+
+/// The boundary id used for every JS↔WASM realm-crossing pair. Spec:
+/// the M25 ↔ M27 bridge family name.
+///
+/// All correlation marker firings produced by either side of a realm
+/// crossing share this `boundary_id`; pairing is by `key_value` =
+/// the monotonic correlation token.
+pub const BOUNDARY_ID_JS_WASM_REALM: &str = "js-wasm-realm";
+
+/// JS-side `direction` field values per the M27 wire shape.
+pub const JS_REALM_DIRECTION_ENTER: &str = "enter";
+pub const JS_REALM_DIRECTION_LEAVE: &str = "leave";
+
+/// WASM-side `direction` argument values per the
+/// `__ct_emit_realm_boundary` ABI documented in
+/// `codetracer-wasm-instrumenter/crates/codetracer-wasm-instrumenter/src/hooks.rs`.
+///
+/// `0` = entering the foreign realm (the JS host) — fired at the call
+/// site immediately before control leaves the WASM module.
+/// `1` = leaving the foreign realm — fired at the return site
+/// immediately after control re-enters the WASM module.
+pub const WASM_REALM_DIRECTION_ENTER: i32 = 0;
+pub const WASM_REALM_DIRECTION_LEAVE: i32 = 1;
+
+/// Convert a JS-side `__ct.emit({kind: "RealmBoundary", ...})` payload
+/// into the marker payload that drops into the M25 pair index.
+///
+/// Pairing convention: the JS-side firing is the **Send** half (the
+/// JS realm is the value-producer at the boundary that's relevant for
+/// the cross-process origin chain — the WASM side is the consumer),
+/// keyed by the monotonic correlation token rendered as decimal so
+/// the `key_value` lookup in [`crate::correlation_index::PairIndex`]
+/// matches byte-for-byte against the WASM-side counterpart.
+///
+/// `direction` is the spec wire spelling (`"enter"` or `"leave"`). It
+/// only carries diagnostic value here — the pair index uses
+/// `MarkerDirection`. We surface the original spelling in
+/// `description` so the Event Log render can show "JS enter→WASM" /
+/// "JS leave→WASM" without re-decoding the metadata slot.
+///
+/// Returns `None` when `direction` is neither `"enter"` nor `"leave"`
+/// — the caller treats this as "not a realm-boundary marker" and
+/// falls through to ordinary tracepoint handling, mirroring
+/// [`MarkerPayload::decode`]'s contract.
+pub fn js_realm_marker_payload(token: u64, direction: &str) -> Option<MarkerPayload> {
+    let (direction_enum, wire_spelling) = match direction {
+        JS_REALM_DIRECTION_ENTER => (MarkerDirection::Send, JS_REALM_DIRECTION_ENTER),
+        JS_REALM_DIRECTION_LEAVE => (MarkerDirection::Send, JS_REALM_DIRECTION_LEAVE),
+        _ => return None,
+    };
+    Some(MarkerPayload {
+        marker_id: 0,
+        boundary_id: BOUNDARY_ID_JS_WASM_REALM.to_string(),
+        direction: direction_enum,
+        key_text: "token".to_string(),
+        key_value: token.to_string(),
+        show_text: None,
+        show_value: None,
+        description: Some(format!("js {wire_spelling} wasm")),
+        format: None,
+    })
+}
+
+/// Convert a WASM-side `__ct_emit_realm_boundary(direction, fn_kind,
+/// fn_index, token)` tuple into the marker payload that drops into
+/// the M25 pair index.
+///
+/// Pairing convention (see [`js_realm_marker_payload`] for the
+/// matching side): the WASM-side firing is the **Recv** half of the
+/// pair so [`crate::correlation_index::PairIndex::counterparts_of`]
+/// turns a JS Send into the WASM Recv that observes the same token.
+///
+/// `fn_kind` is the spec's import / export discriminator from the
+/// instrumenter ABI:
+/// - `0` = imported function (host call from WASM → JS)
+/// - `1` = exported function (host call into WASM)
+///
+/// We surface both `fn_kind` and `fn_index` in `description` so a
+/// reader of the Event Log can identify which WASM function the
+/// crossing applied to without re-decoding the metadata.
+///
+/// Returns `None` when `direction` is neither `0` nor `1`, matching
+/// the JS-side adapter's skip-and-diagnose contract.
+pub fn wasm_realm_marker_payload(direction: i32, fn_kind: i32, fn_index: u32, token: u64) -> Option<MarkerPayload> {
+    let wire_spelling = match direction {
+        WASM_REALM_DIRECTION_ENTER => "enter",
+        WASM_REALM_DIRECTION_LEAVE => "leave",
+        _ => return None,
+    };
+    let kind_label = match fn_kind {
+        0 => "import",
+        1 => "export",
+        _ => "unknown",
+    };
+    Some(MarkerPayload {
+        marker_id: 0,
+        boundary_id: BOUNDARY_ID_JS_WASM_REALM.to_string(),
+        direction: MarkerDirection::Recv,
+        key_text: "token".to_string(),
+        key_value: token.to_string(),
+        show_text: None,
+        show_value: None,
+        description: Some(format!("wasm {wire_spelling} {kind_label}#{fn_index}")),
+        format: None,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

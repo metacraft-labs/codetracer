@@ -28,8 +28,9 @@ use std::path::PathBuf;
 use codetracer_trace_types::{EventLogKind, StepId};
 use db_backend::correlation_index::{CorrelationReport, MarkerEventView, PairIndex};
 use db_backend::correlation_markers::{
-    LANGUAGE_COMMENT_PREFIXES, MarkerDirection, MarkerLoadProgressThrottle, MarkerParseError, MarkerPayload,
-    MarkerScanner, parse_toml_markers,
+    BOUNDARY_ID_JS_WASM_REALM, JS_REALM_DIRECTION_ENTER, LANGUAGE_COMMENT_PREFIXES, MarkerDirection,
+    MarkerLoadProgressThrottle, MarkerParseError, MarkerPayload, MarkerScanner, WASM_REALM_DIRECTION_LEAVE,
+    js_realm_marker_payload, parse_toml_markers, wasm_realm_marker_payload,
 };
 use db_backend::event_db::{EventDb, SingleTableId, TracepointSourceLocation};
 use db_backend::task::{ProgramEvent, Stop, StopType};
@@ -615,6 +616,129 @@ fn scanner_walks_a_temp_workspace() {
     let result2 = MarkerScanner::scan_roots(&[dir.path()]);
     assert_eq!(result2.markers.len(), 1);
     assert!(result2.diagnostics.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// M25 ↔ M27 bridge: the WASM realm-boundary token shape flows into
+// `SessionHandler::pair_index()` as the `js-wasm-realm` family. See
+// `codetracer-specs/Planned-Features/Cross-Tracer-Origin-Test.audit.md`
+// TCT-M2 ("PairIndex bridge") for the spec reference; this test is
+// the Layer-1 verification the audit calls for.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_js_wasm_realm_boundary_round_trips_through_pair_index() {
+    // The cross-tracer scenario: a single JS↔WASM realm crossing
+    // produces one event on each side, paired by the monotonic
+    // correlation token. The two emissions arrive through completely
+    // different wire shapes (JS: `__ct.emit({kind: "RealmBoundary",
+    // token, direction})` — JSON-ish; WASM: `__ct_emit_realm_boundary
+    // (direction, fn_kind, fn_index, token)` — binary tuple from the
+    // M27 ABI in
+    // `codetracer-wasm-instrumenter/.../hooks.rs`). The bridge in
+    // `db-backend::correlation_markers` collapses both shapes into the
+    // same `MarkerPayload` so the existing `PairIndex` does the
+    // pairing without per-shape branches downstream.
+
+    // A monotonic correlation token sourced from `__ct_correlation_token()`.
+    // The JS host runtime returns BigInt; both sides agree on the
+    // unsigned 64-bit value.
+    let token: u64 = 0x0123_4567_89ab_cdef;
+
+    // JS-side emission: the realm is being **entered** (control
+    // crosses from JS into WASM). The adapter classifies this as a
+    // Send.
+    let js_payload =
+        js_realm_marker_payload(token, JS_REALM_DIRECTION_ENTER).expect("JS-side adapter accepts `enter` direction");
+    assert_eq!(js_payload.boundary_id, BOUNDARY_ID_JS_WASM_REALM);
+    assert_eq!(js_payload.direction, MarkerDirection::Send);
+    assert_eq!(js_payload.key_text, "token");
+    assert_eq!(js_payload.key_value, token.to_string());
+
+    // The JS-side payload round-trips through the
+    // `ProgramEvent.metadata` slot the same way every other M25
+    // marker payload does — pins the on-wire shape against accidental
+    // schema drift.
+    let encoded = js_payload.encode();
+    let decoded = MarkerPayload::decode(&encoded).expect("JS-side payload re-decodes");
+    assert_eq!(decoded, js_payload);
+
+    // WASM-side emission: leaving the foreign realm (return path) for
+    // an exported function (fn_kind = 1) — the M27 instrumenter ABI
+    // values. The adapter classifies this as a Recv so the existing
+    // `PairIndex::counterparts_of` walks Send → Recv.
+    let wasm_payload = wasm_realm_marker_payload(
+        WASM_REALM_DIRECTION_LEAVE,
+        /*fn_kind=*/ 1,
+        /*fn_index=*/ 42,
+        token,
+    )
+    .expect("WASM-side adapter accepts direction=1");
+    assert_eq!(wasm_payload.boundary_id, BOUNDARY_ID_JS_WASM_REALM);
+    assert_eq!(wasm_payload.direction, MarkerDirection::Recv);
+    assert_eq!(wasm_payload.key_value, token.to_string());
+
+    // Build the two event views the way `SessionHandler::pair_index`
+    // builds them per-trace: each side carries its own recording id +
+    // step coordinate so the cross-process origin chain can hyperlink
+    // back to either side.
+    const JS_RECORDING: &str = "rec-js";
+    const WASM_RECORDING: &str = "rec-wasm";
+    const JS_STEP: i64 = 17;
+    const WASM_STEP: i64 = 91;
+    let js_event = MarkerEventView::new(JS_RECORDING, JS_STEP, "main.js", 12, js_payload.clone());
+    let wasm_event = MarkerEventView::new(WASM_RECORDING, WASM_STEP, "module.wasm", 0, wasm_payload.clone());
+
+    // Mix in a noise event for a different token so we can prove the
+    // pair index pairs **only** on the matching token. The noise
+    // event uses the same boundary id (it's another realm crossing
+    // earlier in the same trace) but a different token.
+    let other_token: u64 = 1;
+    let noise = MarkerEventView::new(
+        WASM_RECORDING,
+        WASM_STEP - 5,
+        "module.wasm",
+        0,
+        wasm_realm_marker_payload(WASM_REALM_DIRECTION_LEAVE, 0, 7, other_token).unwrap(),
+    );
+
+    // The pair index is built across both sides — this is the shape
+    // `SessionHandler::pair_index()` produces when it walks every
+    // loaded trace's marker firings.
+    let pair_index = PairIndex::build(&[js_event.clone(), wasm_event.clone(), noise]);
+
+    // Counterparts of the JS Send: exactly the WASM Recv with the
+    // same token. The noise Recv with `other_token` is filtered out
+    // by the `key_value` match inside `counterparts_of`.
+    let counterparts = pair_index.counterparts_of(&js_event);
+    assert_eq!(
+        counterparts.len(),
+        1,
+        "expected exactly one WASM Recv for token={token}, got {counterparts:?}"
+    );
+    assert_eq!(counterparts[0].recording_id, WASM_RECORDING);
+    assert_eq!(counterparts[0].step_id, WASM_STEP);
+    assert_eq!(counterparts[0].payload.key_value, token.to_string());
+
+    // Symmetric lookup: from the WASM Recv we recover the JS Send.
+    // The (js_step_id, wasm_step_id) tuple is what M29's cross-
+    // process origin chain extender consumes; pin it explicitly so a
+    // future refactor that flips the Send/Recv convention triggers
+    // this test rather than silently breaking M29.
+    let reverse = pair_index.counterparts_of(&wasm_event);
+    assert_eq!(reverse.len(), 1);
+    assert_eq!(reverse[0].recording_id, JS_RECORDING);
+    assert_eq!(reverse[0].step_id, JS_STEP);
+    let pair_tuple = (reverse[0].step_id, counterparts[0].step_id);
+    assert_eq!(pair_tuple, (JS_STEP, WASM_STEP));
+
+    // The bridge's skip-and-diagnose contract: unknown directions
+    // return None, never panic. This is the contract the
+    // `SessionHandler::pair_index()` walk relies on so a malformed
+    // event in the recorded stream falls through to ordinary
+    // tracepoint handling instead of poisoning the whole pair index.
+    assert!(js_realm_marker_payload(token, "sideways").is_none());
+    assert!(wasm_realm_marker_payload(/*direction=*/ 7, 0, 0, token).is_none());
 }
 
 // ---------------------------------------------------------------------------
