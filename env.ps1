@@ -1,6 +1,25 @@
 [CmdletBinding()]
 param()
 
+# Supported opt-out flags consumed via [Environment]::GetEnvironmentVariable:
+#   WINDOWS_DIY_SYNC=0             — skip the bootstrap (Ensure-*) calls.
+#   WINDOWS_DIY_ENSURE_TTD=0       — skip the post-probe TTD/WinDbg
+#                                    presence assertion (but still try
+#                                    to discover the runtime).
+#   WINDOWS_DIY_SKIP_TTD_PROBE=1   — skip Resolve-TtdRuntimeInfo entirely.
+#                                    Use this on hosted Windows Server
+#                                    2022 runners where the Appx module
+#                                    fails to load with HRESULT
+#                                    0x80131539 ("Operation is not
+#                                    supported on this platform"); the
+#                                    probe also degrades to "TTD
+#                                    unavailable" if it hits that error
+#                                    at runtime, so this flag is mostly
+#                                    a belt-and-braces convenience.
+#   WINDOWS_DIY_SKIP_<STEP>=1      — skip the named bootstrap step (e.g.
+#                                    WINDOWS_DIY_SKIP_CLINGO=1) when
+#                                    WINDOWS_DIY_SYNC is otherwise on.
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -139,6 +158,36 @@ function Resolve-DotnetRoot {
   return (Join-Path $InstallRoot ("dotnet\" + $PinnedSdkVersion))
 }
 
+# Invoke `Get-AppxPackage` defensively.
+#
+# The Appx module ships only with the Desktop edition of Windows; on
+# hosted Windows Server 2022 GitHub Actions runners it fails to load
+# with HRESULT 0x80131539 ("Operation is not supported on this
+# platform.") the moment any cmdlet from it is invoked. We swallow that
+# specific failure (and the related "module not found" variants) so the
+# probe degrades gracefully to "package unavailable" instead of hard
+# failing during `. .\env.ps1`. All other exceptions propagate.
+function Invoke-AppxPackageQuery {
+  param([Parameter(Mandatory = $true)][string]$Name)
+
+  try {
+    return Get-AppxPackage -Name $Name -ErrorAction Stop
+  } catch {
+    $err = $_
+    $msg = ""
+    if ($null -ne $err.Exception) { $msg = [string]$err.Exception.Message }
+    $isPlatformUnsupported =
+      ($msg -match "0x80131539") -or
+      ($msg -match "not supported on this platform") -or
+      ($msg -match "Appx") -or
+      ($msg -match "PackageManager")
+    if ($isPlatformUnsupported) {
+      return $null
+    }
+    throw
+  }
+}
+
 function Resolve-TtdExe {
   $candidates = @()
   $override = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_TTD_EXE")
@@ -159,7 +208,7 @@ function Resolve-TtdExe {
     }
   }
 
-  $ttdPackage = Get-AppxPackage -Name "Microsoft.TimeTravelDebugging" -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
+  $ttdPackage = Invoke-AppxPackageQuery -Name "Microsoft.TimeTravelDebugging" | Sort-Object Version -Descending | Select-Object -First 1
   if ($null -ne $ttdPackage -and -not [string]::IsNullOrWhiteSpace($ttdPackage.InstallLocation)) {
     $candidates += (Join-Path $ttdPackage.InstallLocation "TTD.exe")
   }
@@ -192,7 +241,7 @@ function Resolve-TtdExe {
 function Resolve-AppxPackageInfo {
   param([Parameter(Mandatory = $true)][string]$Name)
 
-  $pkg = Get-AppxPackage -Name $Name -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
+  $pkg = Invoke-AppxPackageQuery -Name $Name | Sort-Object Version -Descending | Select-Object -First 1
   if ($null -eq $pkg) {
     return $null
   }
@@ -933,7 +982,32 @@ $dotnetExe = Join-Path $dotnetRoot "dotnet.exe"
 [Environment]::SetEnvironmentVariable("WINDOWS_DIY_DBGHELP_DLL", "", "Process")
 [Environment]::SetEnvironmentVariable("TTD_MIN_VERSION", $ttdMinVersion, "Process")
 [Environment]::SetEnvironmentVariable("WINDBG_MIN_VERSION", $windbgMinVersion, "Process")
-$ttdRuntime = Resolve-TtdRuntimeInfo
+# WINDOWS_DIY_SKIP_TTD_PROBE=1 lets a caller bypass Resolve-TtdRuntimeInfo
+# entirely. This is primarily for hosted Windows Server 2022 GitHub
+# Actions runners, where the Appx module fails to load with HRESULT
+# 0x80131539. Invoke-AppxPackageQuery already swallows that specific
+# error, but the explicit gate is useful when the caller wants to avoid
+# the probe entirely (e.g. faster startup, or environments where Appx
+# behaves unpredictably).
+$skipTtdProbe = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SKIP_TTD_PROBE" -Default $false
+if ($skipTtdProbe) {
+  Write-Host "WINDOWS_DIY_SKIP_TTD_PROBE=1 — skipping Resolve-TtdRuntimeInfo (TTD treated as absent)."
+  $ttdRuntime = [ordered]@{
+    ttdExe = ""
+    ttdInstallDir = ""
+    ttdVersion = ""
+    ttdReplayDll = ""
+    ttdReplayCpuDll = ""
+    windbgInstallDir = ""
+    windbgVersion = ""
+    cdbExe = ""
+    dbgengDll = ""
+    dbgmodelDll = ""
+    dbghelpDll = ""
+  }
+} else {
+  $ttdRuntime = Resolve-TtdRuntimeInfo
+}
 $ttdExe = [string]$ttdRuntime["ttdExe"]
 $cdbExe = [string]$ttdRuntime["cdbExe"]
 $dbgengDll = [string]$ttdRuntime["dbgengDll"]
