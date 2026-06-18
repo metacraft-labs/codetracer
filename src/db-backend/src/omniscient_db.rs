@@ -538,6 +538,65 @@ where
         || file_exists(CTFS_PARTIAL_GLOBAL_MEMWRITES_FILE)
 }
 
+/// M32 — outcome of [`load_sharded_omniscient_namespaces`]. The
+/// db-backend's sharded-trace open path branches on this to decide
+/// (a) whether the per-slice `memwrites.tc` should be loaded as a
+/// fallback and (b) whether the origin dispatcher should classify
+/// queries against the partial gap list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShardedLoadOutcome {
+    /// No M32 artefact was present at the recording root. Callers
+    /// fall back to the per-slice [`CTFS_MEMWRITES_FILE`] loader.
+    NoGlobalArtefact,
+    /// A `global-memwrites.tc` blob was loaded. The trait surface
+    /// now serves recording-wide queries and the per-slice loader
+    /// MUST be skipped to avoid double-counting.
+    Global,
+    /// A `partial-global-memwrites.tc` blob was loaded; the gap list
+    /// is queryable via [`FfiOmniscientDb::partial_gap_count`] +
+    /// [`FfiOmniscientDb::tick_falls_in_partial_gap`]. The trait
+    /// surface still serves the successful slices' writes; the
+    /// dispatcher consults the gap list to surface
+    /// `TerminatorKind::UnknownSource` for queries crossing a gap.
+    Partial,
+}
+
+/// M32 — recorder + db-backend integration shim: walks the recording
+/// root for `global-memwrites.tc` (preferred) then
+/// `partial-global-memwrites.tc` and drives the appropriate FFI
+/// loader. This is the "prefer global over per-slice" extension the
+/// M32 deferred note flagged on the db-backend side: when a sharded
+/// recording's coordinator has run, the recording-wide log replaces
+/// the per-slice fallback at session-open.
+///
+/// `recording_root` is the directory the trace's CTFS extraction
+/// landed in (the sibling-search root for the global namespaces).
+/// `db` is the FFI handle whose in-shim store will be populated.
+///
+/// Returns [`ShardedLoadOutcome::Global`] when a clean
+/// `global-memwrites.tc` was loaded, [`ShardedLoadOutcome::Partial`]
+/// when a `partial-global-memwrites.tc` was loaded (and the gap list
+/// is now queryable), or [`ShardedLoadOutcome::NoGlobalArtefact`]
+/// when neither was present. The caller decides what to do with the
+/// per-slice fallback based on the outcome.
+///
+/// **Locking discipline:** callers must hold [`omniscient_ffi_lock()`]
+/// across this call — the FFI loaders mutate Nim-global state.
+pub fn load_sharded_omniscient_namespaces(
+    recording_root: &std::path::Path,
+    db: &FfiOmniscientDb,
+) -> ShardedLoadOutcome {
+    let global = recording_root.join(CTFS_GLOBAL_MEMWRITES_FILE);
+    if global.exists() && db.load_global_memwrites_from_path(&global) {
+        return ShardedLoadOutcome::Global;
+    }
+    let partial = recording_root.join(CTFS_PARTIAL_GLOBAL_MEMWRITES_FILE);
+    if partial.exists() && db.load_partial_global_memwrites_from_path(&partial) {
+        return ShardedLoadOutcome::Partial;
+    }
+    ShardedLoadOutcome::NoGlobalArtefact
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
