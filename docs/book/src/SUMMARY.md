@@ -33,6 +33,7 @@
   - [Visual recordings](./usage_guide/visual_recordings.md)
   - [Tracepoints](./usage_guide/tracepoints.md)
   - [Value Origin Tracking](./usage_guide/value-origin-tracking.md)
+  - [Cross-Tracer Demo](./usage_guide/cross-tracer-demo.md)
   - [Variable Rename List](./usage_guide/variable-rename-list.md)
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
   - [Omniscient-DB size benchmark](./usage_guide/omniscient-db-size-bench.md)

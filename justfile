@@ -1281,6 +1281,114 @@ test-cross-process:
   echo
   echo "=== M29 cross-process value-origin envelope passed ==="
 
+# M29 — one-command demo launcher for the three-trace
+# `account-balance-with-wasm` cross-tracer fixture.
+#
+# This recipe materialises the fixture if absent (delegating to
+# `regenerate.sh`, which is honestly gated on wasm-pack + the wasm32
+# rustup target + codetracer-python-recorder + codetracer-js-recorder
+# + browser_stream_receiver + Playwright) and then hands the
+# `session.toml` manifest to `ct replay -t` so the GUI opens the
+# three-trace session for manual chain-walking. Mirrors the
+# `test-cross-process` envelope's prereq probe but skips the cargo
+# / Playwright stages — the goal here is interactive inspection,
+# not regression coverage.
+#
+# Doc page: docs/book/src/usage_guide/cross-tracer-demo.md.
+demo-cross-tracer:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== M29 cross-tracer demo — account-balance-with-wasm ==="
+
+  fixture_dir="src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm"
+  regenerate_script="$fixture_dir/regenerate.sh"
+  template="$fixture_dir/session.toml.template"
+  session="$fixture_dir/session.toml"
+
+  fixture_ready=1
+  for ct in frontend.ct frontend-wasm.ct backend.ct; do
+    if [ ! -e "$fixture_dir/$ct" ]; then
+      fixture_ready=0
+      break
+    fi
+  done
+
+  if [ "$fixture_ready" -eq 0 ]; then
+    if [ ! -x "$regenerate_script" ]; then
+      echo "ERROR: regenerate script missing or not executable: $regenerate_script" >&2
+      exit 1
+    fi
+    echo "[demo] Three-trace fixture not materialised; invoking regenerate.sh"
+    set +e
+    bash "$regenerate_script"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 75 ]; then
+      {
+        echo "ERROR: cross-tracer demo prerequisites are missing."
+        echo
+        echo "To materialise the three-trace fixture you need ALL of:"
+        echo "  - wasm-pack + 'rustup target add wasm32-unknown-unknown'"
+        echo "  - codetracer Python recorder ('codetracer_python_recorder'"
+        echo "    importable from python3; ships with the dev shell)"
+        echo "  - codetracer-js-recorder host ('browser_stream_receiver' on"
+        echo "    PATH; produced by 'just build-once' or the dev shell)"
+        echo "  - Playwright ('npm install playwright' in the fixture's"
+        echo "    frontend/ dir)"
+        echo
+        echo "Re-run 'just demo-cross-tracer' once the gaps above are filled."
+        echo "The regenerator's stderr above lists each missing dependency"
+        echo "individually."
+      } >&2
+      exit 1
+    elif [ "$rc" -ne 0 ]; then
+      echo "ERROR: regenerate.sh exited with status $rc; cannot launch demo." >&2
+      exit "$rc"
+    fi
+  else
+    echo "[demo] Three-trace fixture already materialised; skipping regenerate.sh."
+  fi
+
+  # Step 4 of the task: ensure session.toml carries real UUIDv7s, even
+  # if regenerate.sh's stamp step was bypassed by a partial fixture
+  # refresh. When session.toml is missing or still contains the
+  # double-curly placeholders from the template we re-stamp it using
+  # the same generator regenerate.sh uses (`ct uuid7`, falling back
+  # to python3's uuid module).
+  needs_stamp=0
+  if [ ! -f "$session" ]; then
+    needs_stamp=1
+  elif grep -qE '\{\{[^}]+\}\}' "$session"; then
+    needs_stamp=1
+  fi
+  if [ "$needs_stamp" -eq 1 ]; then
+    if [ ! -f "$template" ]; then
+      echo "ERROR: session.toml.template missing at $template" >&2
+      exit 1
+    fi
+    gen_uuid7() {
+      if ct uuid7 2>/dev/null; then
+        return 0
+      fi
+      python3 -c 'import uuid; print(uuid.uuid4())'
+    }
+    fe_js_id=$(gen_uuid7)
+    fe_wasm_id=$(gen_uuid7)
+    be_id=$(gen_uuid7)
+    placeholder_fe_js='{'"{"'frontend_js_recording_id}'"}"
+    placeholder_fe_wasm='{'"{"'frontend_wasm_recording_id}'"}"
+    placeholder_be='{'"{"'backend_recording_id}'"}"
+    sed \
+      -e "s|$placeholder_fe_js|$fe_js_id|" \
+      -e "s|$placeholder_fe_wasm|$fe_wasm_id|" \
+      -e "s|$placeholder_be|$be_id|" \
+      "$template" >"$session"
+    echo "[demo] Stamped fresh recording-ids into $session"
+  fi
+
+  echo "[demo] Launching CodeTracer GUI with session manifest: $session"
+  exec ct replay -t "$session"
+
 # Elixir materialized trace DAP flow integration test (DB-based, no rr required).
 # Uses CODETRACER_BEAM_RECORDER_PATH for explicit sibling discovery
 # (legacy CODETRACER_ELIXIR_RECORDER_PATH still honored during the BEAM rename
