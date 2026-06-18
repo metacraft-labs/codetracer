@@ -145,6 +145,70 @@ pub struct SessionManifest {
     pub base_dir: PathBuf,
 }
 
+/// Canonical role token: `"frontend-js"`. Single source of truth so the
+/// cross-tracer composer (M29) + the process-tree renderer can compare
+/// against a constant instead of stringly-typed literals scattered
+/// across the codebase.
+pub const ROLE_FRONTEND_JS: &str = "frontend-js";
+/// Canonical role token: `"frontend-wasm"`. Introduced by the
+/// cross-tracer audit (TCT-M1) for the browser-WASM half of the
+/// three-trace north-star scenario.
+pub const ROLE_FRONTEND_WASM: &str = "frontend-wasm";
+/// Canonical role token: `"backend"`.
+pub const ROLE_BACKEND: &str = "backend";
+
+/// Maximum number of `[[trace]]` entries a session manifest may carry.
+/// The cross-tracer audit (TCT-M1) sets the cap at 3 — JS frontend +
+/// WASM frontend + backend. Manifests with more entries are rejected
+/// to keep the multi-process UI affordances (process tree, breadcrumb
+/// chips) bounded; widening this is a separate spec decision.
+pub const MAX_TRACES_PER_SESSION: usize = 3;
+
+/// Normalise a `role = "..."` token at parse time so downstream
+/// consumers see the canonical spelling. Today only `"frontend"` is
+/// remapped (to `"frontend-js"`) to preserve back-compat with §14.1
+/// two-entry manifests authored before TCT-M1. Unknown tokens pass
+/// through verbatim — the canonical role-set is only **enforced** by
+/// [`enforce_three_trace_roles`] when the manifest carries exactly
+/// three entries.
+fn canonicalise_role(token: &str) -> String {
+    match token {
+        "frontend" => ROLE_FRONTEND_JS.to_string(),
+        _ => token.to_string(),
+    }
+}
+
+/// Enforce the TCT-M1 three-trace role contract: when a session
+/// contains exactly three `[[trace]]` entries, exactly one of each
+/// of {`frontend-js`, `frontend-wasm`, `backend`} must appear. The
+/// two-trace + single-trace shapes are intentionally unconstrained
+/// here so legacy manifests + the synthetic `single_trace` manifest
+/// continue to load unchanged.
+fn enforce_three_trace_roles(traces: &[TraceEntry]) -> Result<(), ManifestError> {
+    if traces.len() != MAX_TRACES_PER_SESSION {
+        return Ok(());
+    }
+    let mut has_js = false;
+    let mut has_wasm = false;
+    let mut has_backend = false;
+    for trace in traces {
+        match trace.role.as_str() {
+            ROLE_FRONTEND_JS => has_js = true,
+            ROLE_FRONTEND_WASM => has_wasm = true,
+            ROLE_BACKEND => has_backend = true,
+            other => {
+                return Err(ManifestError::InvalidThreeTraceRole {
+                    role: other.to_string(),
+                });
+            }
+        }
+    }
+    if !(has_js && has_wasm && has_backend) {
+        return Err(ManifestError::IncompleteThreeTraceRoles);
+    }
+    Ok(())
+}
+
 impl SessionManifest {
     /// Construct a single-trace manifest synthetically for the
     /// backwards-compat path: invoking the backend with a bare `.ct`
@@ -243,7 +307,11 @@ impl SessionManifest {
                         current_trace.path = Some(PathBuf::from(unquote(value)?));
                     }
                     "role" => {
-                        current_trace.role = Some(unquote(value)?);
+                        // Canonicalise on parse so the legacy
+                        // `"frontend"` alias collapses to `"frontend-js"`
+                        // before any consumer (process-tree renderer,
+                        // M29 composer, three-trace validator) sees it.
+                        current_trace.role = Some(canonicalise_role(&unquote(value)?));
                     }
                     "default_thread_prefix" => {
                         current_trace.default_thread_prefix = Some(unquote(value)?);
@@ -281,6 +349,15 @@ impl SessionManifest {
         if traces.is_empty() {
             return Err(ManifestError::NoTraces);
         }
+        // TCT-M1: cap the trace count at the cross-tracer audit's
+        // three-process ceiling so the multi-process UI affordances
+        // (process tree, breadcrumb chips) stay bounded.
+        if traces.len() > MAX_TRACES_PER_SESSION {
+            return Err(ManifestError::TooManyTraces {
+                count: traces.len(),
+                max: MAX_TRACES_PER_SESSION,
+            });
+        }
         // Reject duplicate recording ids: they would collide as keys in
         // the SessionHandler's HashMap. A duplicate path is also flagged
         // because it usually indicates a hand-edit typo.
@@ -292,6 +369,10 @@ impl SessionManifest {
                 });
             }
         }
+        // TCT-M1: enforce the canonical role-set on exactly-three
+        // entries. Two-trace + single-trace shapes are intentionally
+        // unconstrained so legacy manifests continue to load.
+        enforce_three_trace_roles(&traces)?;
 
         Ok(SessionManifest {
             version,
@@ -427,14 +508,51 @@ fn unquote(value: &str) -> Result<String, ManifestError> {
 #[derive(Debug)]
 pub enum ManifestError {
     Io(std::io::Error),
-    MalformedLine { line: usize, content: String },
-    MissingField { line: usize, field: String },
-    UnknownTable { line: usize, name: String },
-    UnknownArrayTable { line: usize, name: String },
-    UnknownKey { line: usize, section: String, key: String },
-    UnterminatedString { content: String },
-    DuplicateRecordingId { recording_id: String },
+    MalformedLine {
+        line: usize,
+        content: String,
+    },
+    MissingField {
+        line: usize,
+        field: String,
+    },
+    UnknownTable {
+        line: usize,
+        name: String,
+    },
+    UnknownArrayTable {
+        line: usize,
+        name: String,
+    },
+    UnknownKey {
+        line: usize,
+        section: String,
+        key: String,
+    },
+    UnterminatedString {
+        content: String,
+    },
+    DuplicateRecordingId {
+        recording_id: String,
+    },
     NoTraces,
+    /// Manifest contains more than [`MAX_TRACES_PER_SESSION`]
+    /// `[[trace]]` entries (TCT-M1 cap).
+    TooManyTraces {
+        count: usize,
+        max: usize,
+    },
+    /// Three-trace manifest carries a `role` outside the canonical
+    /// TCT-M1 vocabulary (`"frontend-js"` | `"frontend-wasm"` |
+    /// `"backend"`). The legacy `"frontend"` alias is normalised to
+    /// `"frontend-js"` before this check runs.
+    InvalidThreeTraceRole {
+        role: String,
+    },
+    /// Three-trace manifest is missing at least one of the
+    /// {`frontend-js`, `frontend-wasm`, `backend`} roles, or carries
+    /// a duplicate.
+    IncompleteThreeTraceRoles,
 }
 
 impl fmt::Display for ManifestError {
@@ -467,6 +585,20 @@ impl fmt::Display for ManifestError {
                 write!(f, "session manifest duplicate recording_id: {recording_id:?}")
             }
             ManifestError::NoTraces => write!(f, "session manifest contains no [[trace]] entries"),
+            ManifestError::TooManyTraces { count, max } => write!(
+                f,
+                "session manifest contains {count} [[trace]] entries; the TCT-M1 cap is {max}"
+            ),
+            ManifestError::InvalidThreeTraceRole { role } => write!(
+                f,
+                "three-trace session manifest carries unknown role {role:?}; \
+                 expected one of \"frontend-js\" | \"frontend-wasm\" | \"backend\""
+            ),
+            ManifestError::IncompleteThreeTraceRoles => write!(
+                f,
+                "three-trace session manifest must contain exactly one of each \
+                 of \"frontend-js\", \"frontend-wasm\", \"backend\""
+            ),
         }
     }
 }
@@ -515,7 +647,10 @@ correlation_index_mode = "eager"
             parsed.traces[0].recording_id,
             RecordingId("0194c3b0-7e2c-7e9c-bbbb-111111111111".to_string())
         );
-        assert_eq!(parsed.traces[0].role, "frontend");
+        // TCT-M1: legacy `"frontend"` token in the §14.1 example is
+        // normalised to the canonical `"frontend-js"` on parse so
+        // downstream consumers compare against a single string.
+        assert_eq!(parsed.traces[0].role, ROLE_FRONTEND_JS);
         assert_eq!(parsed.traces[0].default_thread_prefix, "fe");
         assert_eq!(parsed.traces[0].path, PathBuf::from("./web-frontend.ct"));
         assert_eq!(
@@ -638,6 +773,141 @@ default_thread_prefix = "t"
         .unwrap();
         let resolved = manifest.resolved_trace_path(&manifest.traces[0]);
         assert_eq!(resolved, PathBuf::from("/abs/path.ct"));
+    }
+
+    /// TCT-M1 verification: a 3-entry manifest with explicit
+    /// `role = "frontend-js"` / `"frontend-wasm"` / `"backend"` parses
+    /// and the roles assign to the canonical tokens in source order.
+    /// Pinned by `Cross-Tracer-Origin-Test.audit.md` § TCT-M1 acceptance
+    /// criterion ("Rust test loads a synthetic 3-trace manifest and
+    /// asserts processTree.len == 3 with the expected roles").
+    #[test]
+    fn session_toml_parses_three_trace_manifest_with_explicit_roles() {
+        let manifest_text = r#"
+version = 1
+
+[[trace]]
+recording_id = "0194c3b0-7e2c-7e9c-bbbb-111111111111"
+path = "./web-frontend.ct"
+role = "frontend-js"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "0194c3b0-7e2c-7e9c-bbbb-333333333333"
+path = "./browser-wasm.ct"
+role = "frontend-wasm"
+default_thread_prefix = "wasm"
+
+[[trace]]
+recording_id = "0194c3b0-7f5b-7e9c-cccc-222222222222"
+path = "./api-backend.ct"
+role = "backend"
+default_thread_prefix = "be"
+
+[correlation]
+correlation_index_mode = "eager"
+"#;
+        let parsed = SessionManifest::parse(manifest_text, Path::new(".")).unwrap();
+        assert_eq!(parsed.traces.len(), 3);
+        assert_eq!(parsed.traces[0].role, ROLE_FRONTEND_JS);
+        assert_eq!(parsed.traces[1].role, ROLE_FRONTEND_WASM);
+        assert_eq!(parsed.traces[2].role, ROLE_BACKEND);
+        assert_eq!(parsed.traces[0].default_thread_prefix, "fe");
+        assert_eq!(parsed.traces[1].default_thread_prefix, "wasm");
+        assert_eq!(parsed.traces[2].default_thread_prefix, "be");
+    }
+
+    /// TCT-M1: the legacy `"frontend"` token in a two-entry manifest
+    /// is normalised to `"frontend-js"` on parse so consumers compare
+    /// against a single canonical string. The two-entry shape is
+    /// otherwise unconstrained — only three-entry manifests enforce
+    /// the canonical role-set.
+    #[test]
+    fn legacy_frontend_role_alias_normalises_to_frontend_js() {
+        let text = r#"
+[[trace]]
+recording_id = "fe"
+path = "fe.ct"
+role = "frontend"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "be"
+path = "be.ct"
+role = "backend"
+default_thread_prefix = "be"
+"#;
+        let parsed = SessionManifest::parse(text, Path::new(".")).unwrap();
+        assert_eq!(parsed.traces[0].role, ROLE_FRONTEND_JS);
+        assert_eq!(parsed.traces[1].role, ROLE_BACKEND);
+    }
+
+    /// TCT-M1: three-entry manifest with a stray role token is
+    /// rejected with [`ManifestError::InvalidThreeTraceRole`].
+    #[test]
+    fn three_trace_manifest_rejects_unknown_role() {
+        let text = r#"
+[[trace]]
+recording_id = "a"
+path = "a.ct"
+role = "frontend-js"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "b"
+path = "b.ct"
+role = "worker"
+default_thread_prefix = "w"
+
+[[trace]]
+recording_id = "c"
+path = "c.ct"
+role = "backend"
+default_thread_prefix = "be"
+"#;
+        let err = SessionManifest::parse(text, Path::new(".")).unwrap_err();
+        assert!(matches!(err, ManifestError::InvalidThreeTraceRole { .. }));
+    }
+
+    /// TCT-M1: three-entry manifest missing one of the canonical
+    /// roles (here: no `frontend-wasm`) is rejected.
+    #[test]
+    fn three_trace_manifest_rejects_missing_canonical_role() {
+        let text = r#"
+[[trace]]
+recording_id = "a"
+path = "a.ct"
+role = "frontend-js"
+default_thread_prefix = "fe"
+
+[[trace]]
+recording_id = "b"
+path = "b.ct"
+role = "frontend-js"
+default_thread_prefix = "fe2"
+
+[[trace]]
+recording_id = "c"
+path = "c.ct"
+role = "backend"
+default_thread_prefix = "be"
+"#;
+        let err = SessionManifest::parse(text, Path::new(".")).unwrap_err();
+        assert!(matches!(err, ManifestError::IncompleteThreeTraceRoles));
+    }
+
+    /// TCT-M1: a fourth `[[trace]]` exceeds [`MAX_TRACES_PER_SESSION`]
+    /// and is rejected.
+    #[test]
+    fn four_trace_manifest_exceeds_cap_and_is_rejected() {
+        let mut text = String::new();
+        for (i, role) in ["frontend-js", "frontend-wasm", "backend", "extra"].iter().enumerate() {
+            text.push_str(&format!(
+                "[[trace]]\nrecording_id = \"r{i}\"\npath = \"r{i}.ct\"\nrole = \"{role}\"\ndefault_thread_prefix = \"t{i}\"\n\n"
+            ));
+        }
+        let err = SessionManifest::parse(&text, Path::new(".")).unwrap_err();
+        assert!(matches!(err, ManifestError::TooManyTraces { count: 4, max: 3 }));
     }
 
     #[test]

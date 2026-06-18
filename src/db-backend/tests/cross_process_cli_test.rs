@@ -122,9 +122,12 @@ fn test_cli_trace_origin_session_toml_text_format() {
         "thread tag missing; stdout was:\n{}",
         stdout
     );
-    // At least one hop line with an owning-process tag.
+    // At least one hop line with an owning-process tag. Post TCT-M1
+    // the legacy `"frontend"` role is normalised to `"frontend-js"`
+    // by the session-manifest parser, so the rendered tag matches the
+    // canonical token.
     assert!(
-        stdout.contains("hop 1:") && stdout.contains("[frontend]"),
+        stdout.contains("hop 1:") && stdout.contains("[frontend-js]"),
         "hop line missing owning-process tag; stdout was:\n{}",
         stdout
     );
