@@ -67,6 +67,7 @@ const LANGS = {
   "cpp": LangCpp,
   "rs": LangRust,
   "nim": LangNim,
+  "nims": LangNim,
   "go": LangGo,
   "pas": LangPascal,
   "f90": LangFortran,

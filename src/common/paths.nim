@@ -196,6 +196,17 @@ let
   # JavaScript/TypeScript recorder — Node.js CLI installed via npm.
   jsRecorderExe* = when not defined(js): findTool("codetracer-js-recorder") else: codetracerPrefix / "bin" / "codetracer-js-recorder"
 
+  # Nim native recorder — for ``.nim`` (compiled) programs, ``ct record`` first
+  # compiles the source to a native binary via ``nimCompilerExe`` and then
+  # records that binary with the MCR ``ct-mcr`` (``ct_cli``) tool from the
+  # ``codetracer-native-recorder`` repo.  ``CODETRACER_CT_MCR_PATH`` overrides
+  # the lookup; ``CODETRACER_NIM_EXE_PATH`` overrides the compiler used for
+  # both ``nim c`` and ``nim e`` (``.nims`` scripts).
+  mcrRecorderExe* = env.get("CODETRACER_CT_MCR_PATH",
+    when not defined(js): findTool("ct-mcr") else: codetracerPrefix / "bin" / "ct-mcr")
+  nimCompilerExe* = env.get("CODETRACER_NIM_EXE_PATH",
+    when not defined(js): findTool("nim") else: codetracerPrefix / "bin" / "nim")
+
   dbBackendExe* = codetracerPrefix / "bin" / "replay-server"
   backendManagerExe* = codetracerPrefix / "bin" / "session-manager"
   virtualizationLayersExe* = codetracerPrefix / "bin" / "virtualization-layers"
