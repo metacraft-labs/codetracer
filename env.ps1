@@ -2,7 +2,19 @@
 param()
 
 # Supported opt-out flags consumed via [Environment]::GetEnvironmentVariable:
-#   WINDOWS_DIY_SYNC=0             — skip the bootstrap (Ensure-*) calls.
+#   WINDOWS_DIY_SYNC=0             — skip the bootstrap (Ensure-*) calls,
+#                                    including the post-probe
+#                                    Ensure-NodeTooling step that would
+#                                    otherwise shell out to
+#                                    <nodeDir>\npx.cmd (which is only
+#                                    populated once Phase 1 Ensure-Node
+#                                    has run). On hosted GHA Windows
+#                                    Server 2022 runners, set this to 0
+#                                    together with
+#                                    WINDOWS_DIY_SKIP_TTD_PROBE=1 to let
+#                                    env.ps1 source cleanly without
+#                                    touching the Appx module or running
+#                                    yarn install.
 #   WINDOWS_DIY_ENSURE_TTD=0       — skip the post-probe TTD/WinDbg
 #                                    presence assertion (but still try
 #                                    to discover the runtime).
@@ -16,6 +28,12 @@ param()
 #                                    unavailable" if it hits that error
 #                                    at runtime, so this flag is mostly
 #                                    a belt-and-braces convenience.
+#   WINDOWS_DIY_SETUP_NODE_DEPS=0  — skip the yarn install step inside
+#                                    Ensure-NodeTooling even when
+#                                    WINDOWS_DIY_SYNC=1; useful when the
+#                                    caller wants the rest of the
+#                                    toolchain bootstrap but already
+#                                    manages node-packages/ themselves.
 #   WINDOWS_DIY_SKIP_<STEP>=1      — skip the named bootstrap step (e.g.
 #                                    WINDOWS_DIY_SKIP_CLINGO=1) when
 #                                    WINDOWS_DIY_SYNC is otherwise on.
@@ -1162,7 +1180,24 @@ $llvmBinDir = Join-Path $llvmDir "bin"
 $clingoDir = Join-Path $installRoot ("clingo\" + $toolchain["CLINGO_VERSION"])
 $clingoBinDir = Join-Path $clingoDir "bin"
 
-Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
+# Ensure-NodeTooling shells out to npx.cmd under $nodeDir to run `yarn install`
+# in node-packages/ when the stylus/webpack shims aren't yet on disk. When the
+# bootstrap phase is skipped (WINDOWS_DIY_SYNC=0, e.g. on hosted GHA Windows
+# Server 2022 runners — see workflow `value-origin-windows.yml`), Ensure-Node
+# never runs, so $nodeDir\npx.cmd doesn't exist and the function throws,
+# preventing the entire env.ps1 source. Gate it behind the same $doSync flag
+# that gates the Phase 1 Ensure-Node bootstrap (this mirrors the existing
+# `WINDOWS_DIY_ENSURE_TTD=0` discipline around heavy installers).
+#
+# Callers that explicitly want Node deps without the full bootstrap can still
+# set WINDOWS_DIY_SETUP_NODE_DEPS=1 + WINDOWS_DIY_SYNC=0 + a pre-populated
+# nodeDir; in that case they should drive `cd node-packages; npx yarn install`
+# manually after sourcing env.ps1. Ensure-NodeModulesJunction and
+# Ensure-GoldenLayoutAsset are already silent no-ops when their targets don't
+# exist, so they stay unconditional.
+if ($doSync) {
+  Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
+}
 Ensure-NodeModulesJunction -RepoRoot $repoRoot
 Ensure-GoldenLayoutAsset -RepoRoot $repoRoot
 
