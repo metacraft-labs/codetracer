@@ -70,6 +70,11 @@ var USES_MATERIALIZED_TRACES*: array[Lang, bool] = [
 
 USES_MATERIALIZED_TRACES[LangRubyDb] = true
 USES_MATERIALIZED_TRACES[LangNoir] = true
+# LangNim: ``.nim`` programs are compiled with ``nim c`` and recorded with the
+# MCR native recorder; ``.nims`` scripts are evaluated with ``nim e --trace:``
+# from the codetracer-nim M-nim flow.  Both paths produce CTFS ``.ct``
+# containers, so the materialized-traces flag is enabled.
+USES_MATERIALIZED_TRACES[LangNim] = true
 USES_MATERIALIZED_TRACES[LangRustWasm] = true
 USES_MATERIALIZED_TRACES[LangCppWasm] = true
 USES_MATERIALIZED_TRACES[LangPythonDb] = true

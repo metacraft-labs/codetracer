@@ -9,6 +9,7 @@ proc toLang*(lang: string): Lang =
     "rust": LangRust,
     "rs": LangRust,
     "nim": LangNim,
+    "nims": LangNim,
     "go": LangGo,
     "pascal": LangPascal,
     "fortran": LangFortran,

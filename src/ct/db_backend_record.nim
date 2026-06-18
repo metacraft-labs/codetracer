@@ -85,6 +85,109 @@ proc recordWithCtRrSupport(
   result = importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
+proc recordNim(
+    program: string, args: seq[string],
+    traceFolder: string,
+    # M-REC-3: UUIDv7 recording-id string; empty == NO_RECORDING_ID.
+    recordingId: string): Trace =
+  ## Record a Nim program.
+  ##
+  ## Two flows, dispatched on the source extension:
+  ##
+  ## * ``.nims`` — evaluated with ``nim e --trace:<traceFolder>/trace.ct
+  ##   <program>``.  The M-nim tracer (codetracer-nim,
+  ##   ``feature/M-nim-column-aware``) emits a CTFS-format ``.ct`` container
+  ##   straight into the trace folder, which importTrace then ingests.
+  ##
+  ## * ``.nim`` (default) — first compiled to a native binary with
+  ##   ``nim c -o:<binary> <program>`` into the trace folder, then recorded
+  ##   with the MCR ``ct-mcr record`` tool.  MCR writes a ``trace.ct``
+  ##   container next to the binary, again consumable by importTrace.
+  ##
+  ## The temp compile step is the simplest plausible bridge — it intentionally
+  ## does not handle multi-file Nim projects with ``.nimble`` manifests or
+  ## custom ``config.nims``.  Those should land as follow-ups once the basic
+  ## ``ct record example.nim`` flow is wired through.
+  createDir(traceFolder)
+  let ext = program.splitFile.ext.toLowerAscii
+
+  if nimCompilerExe.len == 0:
+    echo "error: Nim compiler not found. Set CODETRACER_NIM_EXE_PATH or ensure `nim` is on PATH."
+    quit(1)
+
+  if ext == ".nims":
+    # ``nim e`` invokes the script VM (the same path the M-nim tracer
+    # instruments).  ``--trace:<path>`` is gated by the optTraceVM global
+    # option in the codetracer-nim fork; the resulting ``.ct`` container
+    # ends up at ``<traceFolder>/trace.ct``.
+    let traceOut = traceFolder / "trace.ct"
+    var nimArgs = @[
+      "e",
+      "--trace:" & traceOut,
+      program
+    ]
+    nimArgs = nimArgs.concat(args)
+    let process = startProcess(
+      nimCompilerExe,
+      args = nimArgs,
+      options = {poParentStreams})
+    let recordPid = process.processId
+    let exitCode = waitForExit(process)
+    if exitCode != 0:
+      echo fmt"error: nim e tracer exited with {exitCode} for {program}"
+      quit(1)
+    return importTrace(traceFolder, recordingId, recordPid, LangNim,
+        DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+
+  # Default (``.nim`` and any other Nim-recognised extension we may add
+  # later): compile to a native binary then hand off to MCR.
+  if mcrRecorderExe.len == 0:
+    echo "error: MCR (ct-mcr) not found. Set CODETRACER_CT_MCR_PATH or build " &
+        "codetracer-native-recorder/ct_cli/ct_cli and add it to PATH."
+    quit(1)
+
+  let compiledName = program.splitFile.name
+  let binaryPath = traceFolder / compiledName
+  let compileArgs = @[
+    "c",
+    "--hints:off",
+    "-d:release",
+    "-o:" & binaryPath,
+    program
+  ]
+  let compileProcess = startProcess(
+    nimCompilerExe,
+    args = compileArgs,
+    options = {poEchoCmd, poParentStreams})
+  let compileExit = waitForExit(compileProcess)
+  if compileExit != 0:
+    echo fmt"error: nim c exited with {compileExit} for {program}"
+    quit(1)
+
+  # MCR ``record -o <out.ct>`` produces a single CTFS container.  We point it
+  # at ``<traceFolder>/trace.ct`` so importTrace's findCtFileInFolder picks
+  # it up by the canonical name.
+  let traceOut = traceFolder / "trace.ct"
+  var recordArgs = @[
+    "record",
+    "-o", traceOut,
+    "--",
+    binaryPath
+  ]
+  recordArgs = recordArgs.concat(args)
+  let process = startProcess(
+    mcrRecorderExe,
+    args = recordArgs,
+    options = {poEchoCmd, poParentStreams})
+  let recordPid = process.processId
+  let exitCode = waitForExit(process)
+  if exitCode != 0:
+    echo fmt"error: ct-mcr record exited with {exitCode} for {binaryPath}"
+    quit(1)
+  result = importTrace(traceFolder, recordingId, recordPid, LangNim,
+      DB_SELF_CONTAINED_DEFAULT, traceKind="db")
+
+
 # rr patches for ruby/other vm-s: not supported now, instead
 # in db backend support only direct traces
 
@@ -319,6 +422,11 @@ proc record(
       return recordDb(LangZsh, zshRecorderExe, executable, args, backend, outputFolder, "", traceId)
     elif lang == LangJavascript:
       return recordDb(LangJavascript, jsRecorderExe, executable, args, backend, outputFolder, "", traceId)
+    elif lang == LangNim:
+      # ``.nim`` / ``.nims`` files dispatch into recordNim, which decides
+      # between the MCR native-binary flow and the M-nim VM tracer based on
+      # the source extension.  See src/ct/db_backend_record.nim:recordNim.
+      return recordNim(executable, args, outputFolder, traceId)
     elif lang in {LangMasm, LangMove, LangSolana, LangSway, LangCairo, LangCircom,
                    LangLeo, LangPolkavm, LangTolk, LangAiken, LangCadence, LangSolidity}:
       # Blockchain/VM recorders: each has a dedicated external binary
