@@ -122,6 +122,33 @@ ct.mark_correlation_recv(request_id, request_body, boundary="inbound")
 The send/recv pair joins at trace load time, and a `ct originChain`
 query on the response value traverses both recordings end-to-end.
 
+## Uploading the recording
+
+Once the daemon has flushed a `.ct` file, you can share it through the
+CodeTracer CI cluster with `ct trace upload`.  Browser recordings
+usually lack the omniscient toolchain locally (no native emulator on
+the page), so M31 lets the client pick how the cluster prepares the
+M18 / M19 omniscient artefacts (`memwrites.tc`, `linehits.tc`,
+`originmeta.tc`, `varwrites.tc`, `source_exprs.tc`) for the uploaded
+slice:
+
+```bash
+ct trace upload --omniscient-db=lazy ./recording.ct
+```
+
+| Mode           | Meaning                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `off`          | Default. Server stores the slice as-is; downstream replay runs Mode 1 with no omniscient acceleration.                                      |
+| `on`           | Eager prep — the server enqueues a high-priority job that builds the omniscient artefacts before the slice becomes replay-ready.            |
+| `lazy`         | Slice becomes replay-ready immediately in Mode 1; the omniscient build runs opportunistically (idle worker, or on the first omniscient query). |
+| `pre-prepared` | The uploaded slice already contains the omniscient namespaces (rare; needs the Nim emulator locally).  The server validates and stores them as-is. |
+
+The mode rides on the CS-M7 `/finalize` body as the camelCase
+`omniscientDbMode` field.  See `Value-Origin-Tracking.milestones.org`
+§M31 for the wire contract and `Architecture/CodeTracer-CI/
+Cluster-Storage-And-Deployment.milestones.org` §CS-M14 for the
+server-side dispatch and worker pipeline.
+
 ## Troubleshooting
 
 - **Events do not appear.** Check the daemon is listening on the

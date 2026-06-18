@@ -372,18 +372,49 @@ proc requestSliceUploadUrl*(client: ApiClient, sessionId: string,
     sliceIndex: jsonBody["sliceIndex"].getInt(),
   )
 
-proc finalizeUploadSession*(client: ApiClient, sessionId: string,
-    totalSlices: int, totalEvents: int, platform: string,
-    bearerToken: string) =
-  ## ``POST /api/v1/traces/{sessionId}/finalize``
-  ## Marks the upload session as complete after all slices have been uploaded.
-  ## The server will process the uploaded slices and make the trace available.
-  let url = client.baseApiUrl & fmt"traces/{sessionId}/finalize"
-  let body = $ %*{
+proc buildFinalizePath*(baseApiUrl, sessionId: string): string =
+  ## URL builder for ``POST /api/v1/traces/{sessionId}/finalize``.
+  ## Extracted as a pure helper so unit tests can pin the URL shape
+  ## without going through the HTTP transport.
+  baseApiUrl & fmt"traces/{sessionId}/finalize"
+
+proc buildFinalizeBody*(totalSlices: int, totalEvents: int,
+    platform: string, omniscientDbMode: string = ""): JsonNode =
+  ## Request-body builder for ``POST .../traces/{sessionId}/finalize``.
+  ##
+  ## M31 (Value-Origin-Tracking spec §M31 and CS-M7 §Finalize) — the
+  ## recording client picks how the cluster prepares the M18 / M19
+  ## omniscient artefacts (``memwrites.tc`` / ``linehits.tc`` /
+  ## ``originmeta.tc`` / ``varwrites.tc`` / ``source_exprs.tc``) by
+  ## signalling on the camelCase ``omniscientDbMode`` field.  Legal
+  ## wire values are ``off`` | ``on`` | ``lazy`` | ``pre-prepared``.
+  ##
+  ## When ``omniscientDbMode`` is the empty string the field is
+  ## *omitted* so a default-mode client (or one that pre-dates M31)
+  ## continues to round-trip the legacy CS-M7 body unchanged — the
+  ## server treats a missing field as ``off`` per the spec.
+  result = %*{
     "totalSlices": totalSlices,
     "totalEvents": totalEvents,
     "platform": platform,
   }
+  if omniscientDbMode.len > 0:
+    result["omniscientDbMode"] = newJString(omniscientDbMode)
+
+proc finalizeUploadSession*(client: ApiClient, sessionId: string,
+    totalSlices: int, totalEvents: int, platform: string,
+    bearerToken: string, omniscientDbMode: string = "") =
+  ## ``POST /api/v1/traces/{sessionId}/finalize``
+  ## Marks the upload session as complete after all slices have been uploaded.
+  ## The server will process the uploaded slices and make the trace available.
+  ##
+  ## ``omniscientDbMode`` (M31): the client-controlled omniscient-DB
+  ## upload mode forwarded on the camelCase finalize body.  Empty
+  ## string means "do not signal" — equivalent to ``off`` on the
+  ## server side per the CS-M7 default.
+  let url = buildFinalizePath(client.baseApiUrl, sessionId)
+  let body = $ buildFinalizeBody(
+    totalSlices, totalEvents, platform, omniscientDbMode)
   let response = client.httpClient.request(
     url, httpMethod = HttpPost, headers = bearerHeaders(bearerToken), body = body)
   ensureSuccess(response, "finalizeUploadSession")

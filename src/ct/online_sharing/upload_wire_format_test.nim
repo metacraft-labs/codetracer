@@ -114,3 +114,72 @@ suite "M-REC-8 — online-sharing client wire format":
     let parsed = parseDownloadShareUrl(url)
     check parsed.orgSlug == "acme"
     check parsed.recordingId == SampleRecordingId
+
+suite "M31 — client-controlled omniscient-DB upload mode":
+  ## Pins the CS-M7 ``/finalize`` body extension that lets the recorder
+  ## client signal how the cluster prepares the M18 / M19 omniscient
+  ## artefacts for the uploaded slice.  See
+  ## ``codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org``
+  ## §M31 — the deliverable ``CLI surface: ct trace upload --omniscient-db=
+  ## {off|on|lazy|pre-prepared} flag wired through to the finalize body``
+  ## and the verification ``test_ct_trace_upload_cli_passes_through_
+  ## omniscient_db_flag``.
+
+  const
+    SampleSessionId = "01949fcc-7d92-7e9c-bbbb-cccccccccccc"
+    SamplePlatform = "linux-x86_64"
+
+  test "finalize body omits omniscientDbMode when mode is unset (legacy round-trip)":
+    # Default ``off`` matches CS-M7 legacy behaviour so pre-M31
+    # recorders continue to round-trip unchanged.  We model "no
+    # client preference" as an empty wire string and assert the JSON
+    # key is absent in that case.
+    let body = buildFinalizeBody(
+      totalSlices = 3, totalEvents = 0, platform = SamplePlatform,
+      omniscientDbMode = "")
+    check body["totalSlices"].getInt == 3
+    check body["totalEvents"].getInt == 0
+    check body["platform"].getStr == SamplePlatform
+    check not body.hasKey("omniscientDbMode")
+    let serialized = $body
+    check "\"omniscientDbMode\"" notin serialized
+    # Snake-case must not leak — the wire grammar is camelCase per
+    # the CS-M7 / M31 contract.
+    check "\"omniscient_db_mode\"" notin serialized
+
+  test "finalize body carries omniscientDbMode for each non-default mode":
+    # Round-trip the three non-default modes that trigger server-side
+    # behaviour (``on`` / ``lazy`` / ``pre-prepared``).  Each value is
+    # the canonical wire spelling per spec §6.8.6.
+    for wireMode in ["on", "lazy", "pre-prepared"]:
+      let body = buildFinalizeBody(
+        totalSlices = 5, totalEvents = 0, platform = SamplePlatform,
+        omniscientDbMode = wireMode)
+      check body.hasKey("omniscientDbMode")
+      check body["omniscientDbMode"].getStr == wireMode
+      # The standard CS-M7 fields must continue to round-trip
+      # alongside the new field.
+      check body["totalSlices"].getInt == 5
+      check body["platform"].getStr == SamplePlatform
+      let parsed = parseJson($body)
+      check parsed["omniscientDbMode"].getStr == wireMode
+
+  test "finalize body explicit off-mode round-trips through the JSON body":
+    # ``off`` is the default both client-side and server-side, but if
+    # the client *does* pin it explicitly (e.g. to override a
+    # tenant-policy preference per the M31 cutover-dial deliverable)
+    # the field must travel the wire as the literal lowercase
+    # ``"off"`` token.
+    let body = buildFinalizeBody(
+      totalSlices = 1, totalEvents = 0, platform = SamplePlatform,
+      omniscientDbMode = "off")
+    check body["omniscientDbMode"].getStr == "off"
+
+  test "finalize path keeps the CS-M7 traces/{sessionId}/finalize shape":
+    # M31 only extends the body — the URL grammar is unchanged.  This
+    # guards against an accidental rename of the finalize endpoint
+    # while the body extension is in flight.
+    let path = buildFinalizePath(SampleBaseApiUrl, SampleSessionId)
+    check path ==
+      "https://web.codetracer.com/api/v1/traces/" &
+        SampleSessionId & "/finalize"

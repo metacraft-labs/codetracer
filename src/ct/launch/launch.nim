@@ -333,7 +333,11 @@ proc runInitial*(conf: CodetracerConf) =
         conf.uploadToken,
         conf.uploadBaseUrl,
         conf.uploadNoPortable,
-        conf.uploadNoSplitUpload)
+        conf.uploadNoSplitUpload,
+        # M31 — forward the client-controlled omniscient-DB upload
+        # mode (``--omniscient-db=off|on|lazy|pre-prepared``) into
+        # the CS-M7 ``/finalize`` body.
+        conf.uploadOmniscientDbMode)
     of StartupCommand.download:
       downloadTraceCommand(conf.traceDownloadUrl,
         conf.downloadToken,

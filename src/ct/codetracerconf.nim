@@ -28,6 +28,35 @@ type
     status,     ## Print run status
     cancel      ## Cancel a run
 
+  OmniscientDbMode* {.pure.} = enum
+    ## M31 — client-controlled omniscient-DB upload mode for
+    ## ``ct trace upload`` (Value-Origin-Tracking milestone M31).
+    ##
+    ## The recording client signals on the CS-M7 ``/finalize`` body
+    ## how the cluster should prepare the M18 / M19 omniscient
+    ## artefacts (``memwrites.tc`` / ``linehits.tc`` /
+    ## ``originmeta.tc`` / ``varwrites.tc`` / ``source_exprs.tc``)
+    ## for the uploaded slice. See spec §6.8.6 for the underlying
+    ## V1 mode model and
+    ## ``codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org``
+    ## §M31 for the wire-contract extension.
+    ##
+    ## - ``off`` (default, CS-M7 legacy behaviour): server stores
+    ##   the slice as-is, no omniscient namespaces; downstream
+    ##   replay runs Mode 1.
+    ## - ``on`` (eager): server enqueues a high-priority prep job
+    ##   that re-emulates the slice and emits the omniscient
+    ##   artefacts before the slice becomes replay-ready.
+    ## - ``lazy``: slice becomes replay-ready immediately in
+    ##   Mode 1; the omniscient build runs opportunistically.
+    ## - ``pre-prepared``: the client uploads a slice that already
+    ##   contains the omniscient namespaces; the server validates
+    ##   and stores them as-is.
+    off,
+    on,
+    lazy,
+    `pre-prepared`
+
   TraceCommand* {.pure.} = enum
     ## Subcommands for ``ct trace``.
     ##
@@ -817,6 +846,22 @@ type
           "and force full trace upload " &
           "even when slices are present"
       .}: bool
+      # M31 — client-controlled omniscient-DB upload mode.
+      # The recorder client picks how the cluster prepares the
+      # M18 / M19 omniscient artefacts for the uploaded slice
+      # (off / on / lazy / pre-prepared). Forwarded to the
+      # CS-M7 ``/finalize`` body as the camelCase
+      # ``omniscientDbMode`` field.  Default ``off`` matches
+      # CS-M7 legacy behaviour so the server treats unsigned
+      # uploads identically to pre-M31 clients.
+      uploadOmniscientDbMode* {.
+        name: "omniscient-db",
+        defaultValue: OmniscientDbMode.off,
+        desc: "how the server prepares the omniscient-DB " &
+          "artefacts for the uploaded slice " &
+          "(off | on | lazy | pre-prepared). " &
+          "See spec §6.8.6 / M31."
+      .}: OmniscientDbMode
     of download:
       traceDownloadUrl* {.
         argument,
@@ -1316,6 +1361,23 @@ type
         defaultValue: ""
         desc: "Target shell (bash, zsh, fish)"
       .}: string
+
+proc omniscientDbModeToWireString*(mode: OmniscientDbMode): string =
+  ## M31 — converts the ``ct trace upload --omniscient-db=`` enum value
+  ## into the canonical lowercase-with-hyphens wire string the CS-M7
+  ## ``/finalize`` body carries on the camelCase ``omniscientDbMode``
+  ## field.
+  ##
+  ## Nim's enum-with-backticks form means
+  ## ``$OmniscientDbMode.pre-prepared`` would round-trip with backticks
+  ## or other quirks attached on some stringifiers; emit the canonical
+  ## wire spelling directly so the JSON body always matches the spec
+  ## §6.8.6 grammar regardless of stringification.
+  case mode
+  of OmniscientDbMode.off: "off"
+  of OmniscientDbMode.on: "on"
+  of OmniscientDbMode.lazy: "lazy"
+  of OmniscientDbMode.`pre-prepared`: "pre-prepared"
 
 proc customValidateConfig*(
     conf: CodetracerConf) =

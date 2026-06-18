@@ -113,7 +113,8 @@ proc uploadSplitTraceFallback(trace: Trace, slicesDir: string,
 proc uploadSplitTrace*(trace: Trace, slicesDir: string,
     org: Option[string],
     token: Option[string] = none(string),
-    baseUrl: Option[string] = none(string)): UploadedInfo =
+    baseUrl: Option[string] = none(string),
+    omniscientDbMode: OmniscientDbMode = OmniscientDbMode.off): UploadedInfo =
   ## Upload each pre-split slice individually using the upload-session API.
   ## No zip/tar — each .ct file is uploaded directly to S3 via a presigned URL.
   ##
@@ -161,6 +162,16 @@ proc uploadSplitTrace*(trace: Trace, slicesDir: string,
       # version). Fall back to the zip-based single-file upload.
       echo "WARNING: upload-session API not available (" & e.msg & ")"
       echo "Falling back to zip-based single-file upload."
+      # M31 — the legacy single-file fallback path has no
+      # ``/finalize`` step that could carry the client-controlled
+      # omniscient-DB mode.  Warn when the client picked a non-default
+      # mode so the silently-dropped signal is at least visible in
+      # the recorder log.
+      if omniscientDbMode != OmniscientDbMode.off:
+        echo "WARNING: --omniscient-db=" &
+          omniscientDbModeToWireString(omniscientDbMode) &
+          " has no effect on the legacy single-file upload path " &
+          "(needs the upload-session API)."
       return uploadSplitTraceFallback(trace, slicesDir, org, token, baseUrl)
 
     echo "Upload session created: " & session.sessionId
@@ -194,9 +205,23 @@ proc uploadSplitTrace*(trace: Trace, slicesDir: string,
 
     # 4. Finalize the upload session. The server will mark the trace as
     # complete and begin any post-upload processing.
+    #
+    # M31 — forward the client-controlled omniscient-DB upload mode on
+    # the CS-M7 ``/finalize`` camelCase body so the cluster knows how
+    # to prepare the omniscient artefacts for this slice.  When the
+    # client picks ``off`` we omit the field entirely so legacy
+    # recorders continue to round-trip unchanged (the server's CS-M7
+    # default is also ``off``).
+    let wireMode =
+      if omniscientDbMode == OmniscientDbMode.off: ""
+      else: omniscientDbModeToWireString(omniscientDbMode)
     client.finalizeUploadSession(
-      session.sessionId, sliceCount, 0, "linux-x86_64", bearerToken)
-    echo "Upload finalized: " & $sliceCount & " slices"
+      session.sessionId, sliceCount, 0, "linux-x86_64", bearerToken,
+      wireMode)
+    echo "Upload finalized: " & $sliceCount & " slices" &
+      (if wireMode.len > 0:
+        " (omniscient-db mode: " & wireMode & ")"
+      else: "")
 
     result.fileId = session.sessionId
 
@@ -209,7 +234,8 @@ proc uploadTrace*(trace: Trace, org: Option[string],
     token: Option[string] = none(string),
     baseUrl: Option[string] = none(string),
     noPortable: bool = false,
-    noSplitUpload: bool = false): UploadedInfo =
+    noSplitUpload: bool = false,
+    omniscientDbMode: OmniscientDbMode = OmniscientDbMode.off): UploadedInfo =
   # Detect and enrich MCR traces before upload. This adds binaries and
   # debug symbols to the .ct container so the trace is self-contained
   # and can be replayed on a different machine (e.g. the CI server).
@@ -228,13 +254,23 @@ proc uploadTrace*(trace: Trace, org: Option[string],
       if sliceCount > 0:
         echo "MCR trace with pre-split slices detected"
         let uploadInfo = uploadSplitTrace(
-          trace, slicesDir, org, token, baseUrl)
+          trace, slicesDir, org, token, baseUrl, omniscientDbMode)
         quit(uploadInfo.exitCode)
 
   # Full upload: zip the entire outputFolder and upload as one file.
   # try to generate a unique path, so even if we don't remove it/clean it up
   #   it's not easy to clash with it on a next upload
   # https://nim-lang.org/docs/oids.html
+  #
+  # M31 — the full-zip single-file path uploads via the legacy
+  # ``upload-url`` + ``confirm-upload`` flow and has no ``/finalize``
+  # step.  Warn so the silently-dropped client-controlled mode is at
+  # least visible in the recorder log.
+  if omniscientDbMode != OmniscientDbMode.off:
+    echo "WARNING: --omniscient-db=" &
+      omniscientDbModeToWireString(omniscientDbMode) &
+      " has no effect on the single-file upload path " &
+      "(needs ct-mcr --split + the upload-session API)."
   let id = $genOid()
   let traceTempUploadZipFolder = codetracerTmpPath / fmt"trace-upload-zips-{id}"
   createDir(traceTempUploadZipFolder)
@@ -271,6 +307,11 @@ proc uploadCommand*(
   uploadBaseUrl: Option[string] = none(string),
   noPortable: bool = false,
   noSplitUpload: bool = false,
+  # M31 — client-controlled omniscient-DB upload mode.  Forwarded to
+  # the CS-M7 ``/finalize`` body as the camelCase ``omniscientDbMode``
+  # field.  Default ``off`` round-trips legacy CS-M7 behaviour
+  # unchanged.
+  omniscientDbMode: OmniscientDbMode = OmniscientDbMode.off,
 ) =
   let config: Config = loadConfig(folder=getCurrentDir(), inTest=false)
 
@@ -292,7 +333,7 @@ proc uploadCommand*(
 
   try:
     uploadInfo = uploadTrace(trace, uploadOrg, uploadToken, uploadBaseUrl,
-      noPortable, noSplitUpload)
+      noPortable, noSplitUpload, omniscientDbMode)
   except CatchableError as e:
     echo e.msg
     quit(1)
