@@ -70,11 +70,27 @@ use ctfs_container::CtfsReader;
 ///
 /// See [`crate::trace_processor`] for how `TraceLowLevelEvent` values are
 /// processed into the `Db` struct (old format path only).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ColumnAwareCapabilities {
+    /// Recorder advertised support for per-column breakpoints
+    /// (meta.dat bit 6 — `FLAG_SUPPORTS_COLUMN_BREAKPOINTS`).
+    pub supports_column_breakpoints: bool,
+    /// Recorder advertised support for per-column step motions
+    /// (meta.dat bit 7 — `FLAG_SUPPORTS_COLUMN_MOTIONS`).
+    pub supports_column_motions: bool,
+}
+
 #[derive(Debug)]
 pub struct CTFSTraceReader {
     /// The fully-populated in-memory database, built from CTFS contents
     /// during [`CTFSTraceReader::open`].
     db: Db,
+    /// M-capability-flags: capability bits decoded from the trace's
+    /// `meta.dat` header.  Surfaced to the DAP layer so the GUI can
+    /// disable per-column affordances when the recorder doesn't support
+    /// them.  Always `Default::default()` (both false) on traces that
+    /// predate the bits — back-compat with the GUI's "no UI" default.
+    column_capabilities: ColumnAwareCapabilities,
 }
 
 impl CTFSTraceReader {
@@ -85,6 +101,14 @@ impl CTFSTraceReader {
     /// reader serves through its `TraceReader` interface.
     pub fn db(&self) -> &Db {
         &self.db
+    }
+
+    /// M-capability-flags accessor — the column-aware capability bits
+    /// decoded from `meta.dat`.  The DAP layer threads these into the
+    /// `Capabilities` response so the GUI gates per-column
+    /// breakpoint / motion affordances on them.
+    pub fn column_capabilities(&self) -> ColumnAwareCapabilities {
+        self.column_capabilities
     }
 
     /// Build a reader directly from a decoded `TraceLowLevelEvent` stream.
@@ -102,7 +126,14 @@ impl CTFSTraceReader {
         let mut db = Db::new(&workdir.to_path_buf());
         let mut processor = TraceProcessor::new(&mut db);
         processor.postprocess(&events)?;
-        Ok(CTFSTraceReader { db })
+        // Legacy event-stream traces never carry meta.dat capability
+        // bits — they were recorded before the M-capability-flags
+        // milestone — so both flags surface as false.  Defaults give
+        // the GUI the safe back-compat answer: hide per-column UI.
+        Ok(CTFSTraceReader {
+            db,
+            column_capabilities: ColumnAwareCapabilities::default(),
+        })
     }
 }
 
@@ -448,7 +479,14 @@ impl CTFSTraceReader {
         }
 
         db.end_of_program = EndOfProgram::Normal;
-        Ok(Some(CTFSTraceReader { db }))
+        // Elixir sidecar traces don't carry meta.dat capability bits
+        // (they're a fundamentally different recorder pipeline that
+        // never opted into CTFS) — surface both bits as false so the
+        // GUI hides per-column UI on those traces.
+        Ok(Some(CTFSTraceReader {
+            db,
+            column_capabilities: ColumnAwareCapabilities::default(),
+        }))
     }
 
     fn ensure_db_path(db: &mut Db, path: &Path) -> PathId {
@@ -763,6 +801,13 @@ impl CTFSTraceReader {
         // and skipping the column buffer avoids an extra allocation
         // per chunk.
         let column_aware = reader.has_column_aware_steps();
+        // M-capability-flags — capture the capability bits before we
+        // drop the reader handle at function exit so the DAP layer
+        // can decide whether to expose per-column UI affordances.
+        let column_capabilities = ColumnAwareCapabilities {
+            supports_column_breakpoints: reader.supports_column_breakpoints(),
+            supports_column_motions: reader.supports_column_motions(),
+        };
         let mut path_id_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut line_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut column_buf: Vec<u64> = if column_aware {
@@ -972,7 +1017,10 @@ impl CTFSTraceReader {
             db.variables.len(),
         );
 
-        Ok(CTFSTraceReader { db })
+        Ok(CTFSTraceReader {
+            db,
+            column_capabilities,
+        })
     }
 
     /// Open an old-format CTFS container by deserializing raw events from
@@ -1024,7 +1072,23 @@ impl CTFSTraceReader {
         let mut processor = TraceProcessor::new(&mut db);
         processor.postprocess(&events)?;
 
-        Ok(CTFSTraceReader { db })
+        // Old-format traces *can* carry the capability bits because
+        // meta.dat is the same wire format on both paths — read them
+        // out of the Rust meta_dat parser the same way the Nim path
+        // does via the FFI.  The parser's own `KNOWN_FLAGS_MASK`
+        // recognises the bits (see this module's accompanying
+        // `meta_dat.rs`); a clear bit (e.g. on truly legacy traces)
+        // surfaces as `false` which is the safe "no per-column UI"
+        // default for the GUI.
+        let column_capabilities = ColumnAwareCapabilities {
+            supports_column_breakpoints: (parsed.flags & meta_dat::FLAG_SUPPORTS_COLUMN_BREAKPOINTS) != 0,
+            supports_column_motions: (parsed.flags & meta_dat::FLAG_SUPPORTS_COLUMN_MOTIONS) != 0,
+        };
+
+        Ok(CTFSTraceReader {
+            db,
+            column_capabilities,
+        })
     }
 
     /// Extract `TraceLowLevelEvent` values from the CTFS container.

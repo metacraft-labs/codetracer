@@ -90,6 +90,22 @@ pub struct Capabilities {
     pub supports_log_points: Option<bool>,
     #[serde(rename = "supportsRestartRequest", skip_serializing_if = "Option::is_none")]
     pub supports_restart_request: Option<bool>,
+    /// CodeTracer extension (M-capability-flags): true iff the loaded
+    /// trace's recorder advertised support for per-column breakpoints
+    /// via `meta.dat` bit 6 (`FLAG_SUPPORTS_COLUMN_BREAKPOINTS`).
+    /// Omitted on the `initialize` response (no trace loaded yet);
+    /// populated on the per-trace capability-refresh hook the GUI
+    /// inspects in `services/debugger_service.nim`.  When `Some(false)`
+    /// the GUI MUST hide the per-column breakpoint affordance.
+    #[serde(rename = "supportsColumnBreakpoints", skip_serializing_if = "Option::is_none")]
+    pub supports_column_breakpoints: Option<bool>,
+    /// CodeTracer extension (M-capability-flags): true iff the loaded
+    /// trace's recorder advertised support for per-column step motions
+    /// via `meta.dat` bit 7 (`FLAG_SUPPORTS_COLUMN_MOTIONS`).  When
+    /// `Some(false)` the GUI MUST hide column-aware step-over /
+    /// step-in / step-out buttons.
+    #[serde(rename = "supportsColumnMotions", skip_serializing_if = "Option::is_none")]
+    pub supports_column_motions: Option<bool>,
 }
 
 pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> dap_types::Variable {

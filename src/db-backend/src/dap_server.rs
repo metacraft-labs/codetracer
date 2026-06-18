@@ -1761,6 +1761,16 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 supports_disassemble_request: Some(true),
                 supports_log_points: Some(true),
                 supports_restart_request: Some(true),
+                // M-capability-flags: the `initialize` response is
+                // sent before any trace has been loaded, so we can't
+                // know yet whether per-column affordances should be
+                // exposed.  Leave the capability bits absent (the
+                // serde wrapper skips `None` so the JSON keys are
+                // omitted entirely) and let the per-trace launch
+                // path overwrite them.  GUI consumers treat absent
+                // = false (the safe back-compat default).
+                supports_column_breakpoints: None,
+                supports_column_motions: None,
             };
             let resp = DapMessage::Response(Response {
                 base: ProtocolMessage {
