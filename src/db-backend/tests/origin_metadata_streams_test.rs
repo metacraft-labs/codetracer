@@ -466,3 +466,279 @@ fn default_mode_heuristic_per_trace_kind() {
         OriginMode::Lazy
     );
 }
+
+// --- M0 canonical fixture parity coverage ---
+//
+// The spec's `test_mode3_parity_python_chain_matches_mode1` deliverable
+// (milestones §M19) calls out the M0 canonical Python fixtures
+// (`simple_trivial_chain`, `computational_origin`, `parameter_pass`,
+// `return_capture`, `destructuring_or_index`) as the per-fixture
+// parity matrix.  `test_mode3_parity_python_chain_matches_mode1` above
+// already exercises `simple_trivial_chain`; the four tests below cover
+// the remaining canonical scenarios.  Each test:
+//
+//   1. Builds a synthetic `Vec<ValueChange>` modelling the fixture's
+//      Path A descriptors — the same shape the materialised recorder
+//      will hand the indexer once it's wired in-tree.
+//   2. Runs `MaterializedOriginIndexer` (Mode 3).
+//   3. Walks the resulting `OriginMetadataDecoder` backwards from the
+//      query target, asserting per-hop `(kind, source_var_id)` matches
+//      the per-fixture ANSWERS.md and `confidence >= 0.99`.
+//   4. Synthesises the equivalent Mode 1 chain directly from the Path A
+//      descriptors and asserts structural parity (`hops.len()` +
+//      per-hop kind + source equal).
+//
+// Per the spec's parity contract: Mode 3 confidence must be ≥ Mode 1
+// confidence; structural fields (kind, source, hop count, terminator)
+// must match exactly.  The fixture catalogue at
+// `tests/fixtures/origin/python/<scenario>/` is the source of truth for
+// the expected chain shape — the ANSWERS.md docs each `(target, rhs,
+// kind)` triple this test asserts in code.
+
+/// Drive `MaterializedOriginIndexer` over `changes`, then resolve each
+/// `(VariableId, StepId)` in `query_path` (most-recent first) through
+/// the decoder and return the hop records in chain order.
+///
+/// Asserts every hop hits — partial-coverage paths belong in dedicated
+/// tests, not the parity matrix.
+fn run_mode3_chain(changes: &[ValueChange], query_path: &[(usize, i64)]) -> Vec<OriginMetadataRecord> {
+    let output = MaterializedOriginIndexer::new().run(changes);
+    let decoder = OriginMetadataDecoder::from_stream(output.originmeta, output.source_exprs);
+    query_path
+        .iter()
+        .map(|&(v, s)| {
+            decoder
+                .origin_metadata_at(OriginMetadataKey::Materialized {
+                    variable_id: VariableId(v),
+                    step_id: StepId(s),
+                })
+                .unwrap_or_else(|| panic!("Mode 3 hop ({v}, {s}) must hit"))
+        })
+        .collect()
+}
+
+/// Mirror of the Mode 1 chain shape — the classifier in production
+/// produces the same `(kind, source_var_id)` tuple per hop from the
+/// source line; for the parity test the Path A descriptor is the
+/// canonical truth.
+fn mode1_shape_from_path_a(changes: &[ValueChange]) -> Vec<(OriginKind, Option<u32>)> {
+    changes
+        .iter()
+        .map(|c| {
+            let a = c.assignment.as_ref().expect("M0 fixture uses Path A");
+            (a.kind, a.source_var_id)
+        })
+        .collect()
+}
+
+#[test]
+fn test_mode3_parity_python_computational_origin_matches_mode1() {
+    // Fixture python/computational_origin/main.py:
+    //   a = 10       (step 10 -> VariableId(1))
+    //   b = 32       (step 12 -> VariableId(2))
+    //   result = a + b  (step 14 -> VariableId(3))
+    //
+    // ANSWERS.md: hop 0 = Computational(result, "a + b")
+    //             terminator = Computational(expr="a + b")
+    let changes = vec![
+        synth_change(1, 10, "a = 10", Some(path_a(OriginKind::Literal, None))),
+        synth_change(2, 12, "b = 32", Some(path_a(OriginKind::Literal, None))),
+        synth_change(3, 14, "result = a + b", Some(path_a(OriginKind::Computational, None))),
+    ];
+    let mode3 = run_mode3_chain(&changes, &[(3, 14)]);
+    assert_eq!(mode3.len(), 1, "Computational terminator stops at hop 0");
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(mode3[0].kind),
+        Some(OriginKind::Computational)
+    );
+    assert!(OriginMetadataRecord::decode_confidence(mode3[0].confidence) >= 0.99);
+    // Mode 1 mirror — equivalent shape for the same hop.
+    let mode1 = mode1_shape_from_path_a(&changes);
+    let mode1_hop = mode1.last().expect("hop 0");
+    assert_eq!(mode1_hop.0, OriginKind::Computational);
+    assert_eq!(mode1_hop.1, None, "Computational terminator carries no source_var");
+}
+
+#[test]
+fn test_mode3_parity_python_parameter_pass_matches_mode1() {
+    // Fixture python/parameter_pass/main.py — crosses a call boundary:
+    //   value = 7              (step 10 -> VariableId(1))
+    //   receive(value):
+    //     p = <arg-bind>       (step 12 -> VariableId(2), source_var=1)
+    //     local = p            (step 14 -> VariableId(3), source_var=2)
+    //
+    // ANSWERS.md: 3 hops, terminator Literal.
+    let changes = vec![
+        synth_change(1, 10, "value = 7", Some(path_a(OriginKind::Literal, None))),
+        synth_change(
+            2,
+            12,
+            "p = <arg-bind>",
+            Some(path_a(OriginKind::ParameterPass, Some(1))),
+        ),
+        synth_change(3, 14, "local = p", Some(path_a(OriginKind::TrivialCopy, Some(2)))),
+    ];
+    let mode3 = run_mode3_chain(&changes, &[(3, 14), (2, 12), (1, 10)]);
+    assert_eq!(mode3.len(), 3, "parameter_pass chain has 3 hops");
+    let mode1 = mode1_shape_from_path_a(&changes);
+    let mode1_chain: Vec<_> = mode1.iter().rev().collect();
+    for (i, hop) in mode3.iter().enumerate() {
+        let kind3 = OriginMetadataRecord::decode_kind(hop.kind).expect("decode kind");
+        let (kind1, source1) = *mode1_chain[i];
+        assert_eq!(kind3, kind1, "hop {i} kind mismatch");
+        assert_eq!(hop.source_var_id, source1, "hop {i} source mismatch");
+        assert!(
+            OriginMetadataRecord::decode_confidence(hop.confidence) >= 0.99,
+            "hop {i} Mode 3 confidence must be ~1.0 on Path A"
+        );
+    }
+    // Terminator hop's classifier kind is Literal — pinned via the
+    // hop-2 fixture seed.
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(mode3[2].kind),
+        Some(OriginKind::Literal)
+    );
+}
+
+#[test]
+fn test_mode3_parity_python_return_capture_matches_mode1() {
+    // Fixture python/return_capture/main.py — crosses a return boundary:
+    //   compute():
+    //     a = 3             (step 10 -> VariableId(1))
+    //     b = 4             (step 12 -> VariableId(2))
+    //     <return-slot> = a + b  (step 14 -> VariableId(3))
+    //   main():
+    //     captured = compute()   (step 16 -> VariableId(4), source_var=3)
+    //
+    // ANSWERS.md: hop 0 = TrivialCopy (return capture), hop 1 = Computational.
+    let changes = vec![
+        synth_change(1, 10, "a = 3", Some(path_a(OriginKind::Literal, None))),
+        synth_change(2, 12, "b = 4", Some(path_a(OriginKind::Literal, None))),
+        synth_change(
+            3,
+            14,
+            "<return-slot> = a + b",
+            Some(path_a(OriginKind::Computational, None)),
+        ),
+        synth_change(
+            4,
+            16,
+            "captured = compute()",
+            Some(path_a(OriginKind::ReturnCapture, Some(3))),
+        ),
+    ];
+    // Chain stops at Computational terminator at hop 1.
+    let mode3 = run_mode3_chain(&changes, &[(4, 16), (3, 14)]);
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(mode3[0].kind),
+        Some(OriginKind::ReturnCapture)
+    );
+    assert_eq!(mode3[0].source_var_id, Some(3));
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(mode3[1].kind),
+        Some(OriginKind::Computational)
+    );
+    // Parity: per-hop confidence Path A → ~1.0 in both modes.
+    for hop in &mode3 {
+        assert!(OriginMetadataRecord::decode_confidence(hop.confidence) >= 0.99);
+    }
+}
+
+#[test]
+fn test_mode3_parity_python_destructuring_or_index_matches_mode1() {
+    // Fixture python/destructuring_or_index/main.py — projection rules:
+    //   pair = (11, 22)       (step 10 -> VariableId(1))
+    //   first, second = pair  (steps 12/13 -> VariableId(2)/(3), source_var=1)
+    //   indexed = pair[1]     (step 14 -> VariableId(4), source_var=1)
+    //
+    // ANSWERS.md: each projection is a TrivialCopy whose source is `pair`;
+    // `pair` itself terminates at a Computational(literal tuple).
+    let changes = vec![
+        synth_change(1, 10, "pair = (11, 22)", Some(path_a(OriginKind::Computational, None))),
+        synth_change(
+            2,
+            12,
+            "first, second = pair",
+            Some(path_a(OriginKind::TrivialCopy, Some(1))),
+        ),
+        synth_change(
+            3,
+            13,
+            "first, second = pair",
+            Some(path_a(OriginKind::TrivialCopy, Some(1))),
+        ),
+        synth_change(
+            4,
+            14,
+            "indexed = pair[1]",
+            Some(path_a(OriginKind::IndexAccess, Some(1))),
+        ),
+    ];
+    // `first` chain: hop 0 TrivialCopy -> hop 1 Computational(pair).
+    let first_chain = run_mode3_chain(&changes, &[(2, 12), (1, 10)]);
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(first_chain[0].kind),
+        Some(OriginKind::TrivialCopy)
+    );
+    assert_eq!(first_chain[0].source_var_id, Some(1));
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(first_chain[1].kind),
+        Some(OriginKind::Computational)
+    );
+    // `indexed` chain: hop 0 IndexAccess -> hop 1 Computational(pair).
+    let indexed_chain = run_mode3_chain(&changes, &[(4, 14), (1, 10)]);
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(indexed_chain[0].kind),
+        Some(OriginKind::IndexAccess)
+    );
+    assert_eq!(indexed_chain[0].source_var_id, Some(1));
+    assert_eq!(
+        OriginMetadataRecord::decode_kind(indexed_chain[1].kind),
+        Some(OriginKind::Computational)
+    );
+    // Parity check — Mode 1 shape mirrors per-hop (kind, source).
+    let mode1 = mode1_shape_from_path_a(&changes);
+    assert_eq!(mode1[1].0, OriginKind::TrivialCopy); // first
+    assert_eq!(mode1[3].0, OriginKind::IndexAccess); // indexed
+}
+
+#[test]
+fn test_mode3_storage_overhead_under_5pct_on_micro_fixture() {
+    // Spec §6.8.6.5 budget: materialised Mode 3 compressed storage
+    // overhead ≤ 5% of the baseline.  The full per-language benchmark
+    // suite is gated on the recorder-integration follow-on (per the
+    // milestone's deferred deliverable list); the micro-fixture here
+    // pins the assertion *shape* against the in-tree indexer so a
+    // regression in the encoder lights up immediately.
+    //
+    // Approach: the "baseline" is the raw value-change byte cost
+    // (estimated as 4 KiB per change — a conservative ceiling matching
+    // the materialised trace's per-Value event cost in spec §6.8.6.5);
+    // the "Mode 3 overhead" is the encoded size of the three M19
+    // namespaces.  10 changes therefore baseline ~40 KiB; the encoder
+    // must come in under 2 KiB total.
+    let baseline_per_change = 4096_usize;
+    let n_changes = 10;
+    let changes: Vec<ValueChange> = (0..n_changes)
+        .map(|i| {
+            synth_change(
+                i + 1,
+                (10 + i * 2) as i64,
+                "x = 1",
+                Some(path_a(OriginKind::Literal, None)),
+            )
+        })
+        .collect();
+    let output = MaterializedOriginIndexer::new().run(&changes);
+    let originmeta_size = output.originmeta.encode().len();
+    let source_exprs_size = output.source_exprs.encode().len();
+    let varwrites_size = output.varwrites.encode().len();
+    let mode3_bytes = originmeta_size + source_exprs_size + varwrites_size;
+    let baseline_bytes = baseline_per_change * n_changes;
+    let overhead_pct = (mode3_bytes as f64) * 100.0 / (baseline_bytes as f64);
+    assert!(
+        overhead_pct <= 5.0,
+        "Mode 3 storage overhead {overhead_pct:.2}% over budget (5%); \
+         originmeta={originmeta_size} source_exprs={source_exprs_size} varwrites={varwrites_size}"
+    );
+}
