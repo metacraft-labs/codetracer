@@ -1123,6 +1123,50 @@ jobs:
           CT_TEST_LANGS: all
         run: nix develop . --command just test-origin-dap
 
+  # M29 cross-process value-origin envelope. Drives the 2-trace + 3-trace
+  # DAP suites and the gated 3-trace Playwright specs through the single
+  # `just test-cross-process` entrypoint canonicalised in
+  # `Cross-Process-Origin-E2E-Test-Design.md` §6.
+  #
+  # Both 3-trace cargo tests skip cleanly when the
+  # `account-balance-with-wasm/` fixture's `.ct` containers aren't
+  # materialised; the envelope invokes `regenerate.sh` first and tolerates
+  # its honest-skip (exit code 75).
+  cross-process-linux:
+    runs-on: [self-hosted, nixos]
+    name: cross-process value-origin (Linux)
+    steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Build frontend (needed by gated Playwright stage)
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
+      - name: Run cross-process envelope
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command just test-cross-process
+
   push-gpg-public-key:
     runs-on: [self-hosted, nixos]
     steps:
