@@ -37,6 +37,13 @@ param()
 #   WINDOWS_DIY_SKIP_<STEP>=1      — skip the named bootstrap step (e.g.
 #                                    WINDOWS_DIY_SKIP_CLINGO=1) when
 #                                    WINDOWS_DIY_SYNC is otherwise on.
+#   WINDOWS_DIY_FORCE_TTD=1        — install only TTD even when
+#                                    WINDOWS_DIY_SYNC=0. Used by the
+#                                    M13 hosted Server 2022 lane,
+#                                    where AppX is unavailable and the
+#                                    msixbundle-download path needs to
+#                                    run without the rest of the
+#                                    toolchain bootstrap.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -927,11 +934,20 @@ Set-EnvDefault -Name "CT_REMOTE_WINDOWS_SOURCE_REPO" -Value (Join-Path $repoRoot
 [Environment]::SetEnvironmentVariable("CARGO_HOME", (Join-Path $installRoot "cargo"), "Process")
 
 $doSync = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SYNC" -Default $true
+$forceTtd = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_FORCE_TTD" -Default $false
+if (-not $doSync -and $forceTtd -and (Test-BootstrapStepEnabled "TTD")) {
+  # WINDOWS_DIY_FORCE_TTD=1 lets a caller install only TTD (via the
+  # msixbundle download path) without enabling the full toolchain
+  # bootstrap. Used by M13's hosted Server 2022 lane: AppX-less SKU
+  # plus only the TTD-recording test needs the rest.
+  Write-Host "WINDOWS_DIY_FORCE_TTD=1 with WINDOWS_DIY_SYNC=0 — installing only TTD."
+  Ensure-Ttd -Root $installRoot -Toolchain $toolchain
+}
 if ($doSync) {
   $arch = Get-WindowsArch
 
   # Phase 1: No dependencies
-  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd -Root $installRoot }
+  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd -Root $installRoot -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "NODE") { Ensure-Node -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "UV")   { Ensure-Uv   -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "GCC")  { Ensure-Gcc  -Root $installRoot -Toolchain $toolchain }
