@@ -31,8 +31,6 @@ let
   ourPkgs = self'.packages;
   preCommit = config.pre-commit;
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
-  runquotaPkgs = inputs'.runquota.packages;
-  reprobuildPkgs = inputs'.reprobuild.packages;
 in
 with pkgs;
 mkShell {
@@ -62,12 +60,6 @@ mkShell {
     # development. Never invoked by any CI lane; building it pulls a
     # ~25-GB Rust workspace, so it intentionally stays out of CI.
     ourPkgs.codex-acp
-
-    # Reprobuild MVP tooling. Sibling/public flakes expose the SAME
-    # binaries used by Reprobuild's own tests. Local-only because
-    # CI lanes don't exercise the Reprobuild path yet.
-    runquotaPkgs.runquota
-    reprobuildPkgs.reprobuild
 
     # LSP / editor integrations.
     nimlsp
@@ -132,27 +124,6 @@ mkShell {
     ln -sf ${preCommit.settings.configFile} .pre-commit-config.yaml
 
     export RUST_LOG=info
-
-    # Reprobuild expects to compile the project provider + interface
-    # extractor against the SAME source the `repro` binary was built
-    # from. The flake input already follows the local sibling via
-    # the `.envrc` override. CI doesn't run reprobuild yet, so these
-    # only matter in interactive sessions.
-    export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
-    export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
-    export BLAKE3_PREFIX=${pkgs.libblake3}
-    export RUNQUOTA_SRC=${inputs.runquota}
-    export XXHASH_PREFIX=${pkgs.xxHash}
-
-    # repro's ASP solver dlopen()s libclingo by leaf name; ensure
-    # the platform loader can find it. Match the flake-pinned clingo
-    # so the ABI lines up with repro itself.
-    ${pkgs.lib.optionalString stdenv.isDarwin ''
-      export DYLD_LIBRARY_PATH="${clingo}/lib''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-    ''}
-    ${pkgs.lib.optionalString stdenv.isLinux ''
-      export LD_LIBRARY_PATH="${clingo}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    ''}
 
     # Tree-sitter-nim parser regen (local checkout — CI clones with
     # submodules: false and skips this).

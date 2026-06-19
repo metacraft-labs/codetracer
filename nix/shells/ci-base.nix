@@ -17,6 +17,8 @@
 let
   ourPkgs = self'.packages;
   toolchainsPkgs = inputs'."codetracer-toolchains".packages;
+  runquotaPkgs = inputs'.runquota.packages;
+  reprobuildPkgs = inputs'.reprobuild.packages;
 
   # Rust toolchain matches main.nix exactly: native build + wasm32-{
   # unknown-unknown, unknown-emscripten, wasip1 } targets needed by
@@ -123,6 +125,13 @@ with pkgs;
     ourPkgs.circom                # codetracer-circom-recorder runtime
     ourPkgs.cargo-stylus          # M28 (Stylus three-way parity)
     foundry                       # M28: cast / forge / anvil
+
+    # Reprobuild MVP CLI — `just build-once`'s scripts/build-once.sh
+    # invokes `repro` on Linux as a hard requirement. Sibling/public
+    # flakes expose the same binaries developers run locally, so the
+    # ci and default shells materialise identical reprobuild closures.
+    runquotaPkgs.runquota
+    reprobuildPkgs.reprobuild
     toolchainsPkgs.go-default     # Go programs in record/replay tests
   ]
   ++ pkgs.lib.optionals (!stdenv.isDarwin) [
@@ -198,5 +207,26 @@ with pkgs;
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
     export CODETRACER_DEV_TOOLS=0
     export CODETRACER_LOG_LEVEL=INFO
+
+    # Reprobuild expects to compile the project provider + interface
+    # extractor against the SAME source the `repro` binary itself was
+    # built from. The flake input already follows the local sibling
+    # via the `.envrc` override. `scripts/build-once.sh` calls `repro`
+    # which reads these.
+    export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
+    export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
+    export BLAKE3_PREFIX=${pkgs.libblake3}
+    export RUNQUOTA_SRC=${inputs.runquota}
+    export XXHASH_PREFIX=${pkgs.xxHash}
+
+    # repro's ASP solver dlopen()s libclingo by leaf name; ensure
+    # the platform loader can find it. Match the flake-pinned clingo
+    # so the ABI lines up with repro itself.
+    ${pkgs.lib.optionalString stdenv.isDarwin ''
+      export DYLD_LIBRARY_PATH="${pkgs.clingo}/lib''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+    ''}
+    ${pkgs.lib.optionalString stdenv.isLinux ''
+      export LD_LIBRARY_PATH="${pkgs.clingo}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    ''}
   '';
 }
