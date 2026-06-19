@@ -863,7 +863,7 @@ if ($doSync) {
   $arch = Get-WindowsArch
 
   # Phase 1: No dependencies
-  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd -Root $installRoot }
+  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd -Root $installRoot -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "NODE") { Ensure-Node -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "UV")   { Ensure-Uv   -Root $installRoot -Arch $arch -Toolchain $toolchain }
   if (Test-BootstrapStepEnabled "GCC")  { Ensure-Gcc  -Root $installRoot -Toolchain $toolchain }
