@@ -808,9 +808,79 @@ impl CTFSTraceReader {
             supports_column_breakpoints: reader.supports_column_breakpoints(),
             supports_column_motions: reader.supports_column_motions(),
         };
+
+        // Build a pure-Rust `GlobalPositionDecoder` for the column-aware
+        // path.  We bypass the Nim FFI's `decodeGlobalPositionIndex`
+        // here for two reasons:
+        //
+        // 1. The FFI's column-aware fallback (when its per-file
+        //    line-length table is empty) returns `gli.resolve(GLI)` —
+        //    which interprets the byte-offset GLI as a line index, so
+        //    DAP `stackTrace` responses surface absurd "line" numbers
+        //    (e.g. line 270 for a 12-line source file).  Recovering
+        //    here keeps the FFI's bug from leaking into the DAP wire.
+        //
+        // 2. The Nim reader's `decodeGlobalPositionIndex` is gated on
+        //    `meta.hasColumnAwareSteps`, which a known recorder-side
+        //    bug leaves clear even though the trace actually carries
+        //    column-aware Layout A data.  The `lineLengthRaw` /
+        //    `lineCountRaw` ungated FFI exposes the per-file tables
+        //    regardless of the meta bit so we can decode reliably.
+        //
+        // The decoder is `None` only when no Layout A data is available
+        // (a legitimate line-only trace) — in that case we use the
+        // legacy `step_locations` path so the line numbers stay
+        // bit-for-bit identical to pre-extension behaviour.
+        let position_decoder: Option<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder> =
+            if column_aware {
+                let path_total = reader.path_count();
+                let mut per_file: Vec<Vec<u32>> = Vec::with_capacity(path_total as usize);
+                let mut any_with_lines = false;
+                for fid in 0..path_total {
+                    let line_count = reader.line_count_raw(fid);
+                    let mut lls: Vec<u32> = Vec::with_capacity(line_count as usize);
+                    for li in 0..line_count {
+                        match reader.line_length_raw(fid, li as u32) {
+                            Some(v) => lls.push(v),
+                            None => {
+                                // Should not happen because `line_count_raw`
+                                // returns the exact populated length, but
+                                // be defensive: a missing entry leaves a
+                                // zero-byte line which the decoder treats
+                                // as a no-op slot.
+                                lls.push(0);
+                            }
+                        }
+                    }
+                    if !lls.is_empty() {
+                        any_with_lines = true;
+                    }
+                    per_file.push(lls);
+                }
+                if any_with_lines {
+                    Some(
+                        codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder::from_line_lengths(
+                            per_file,
+                        ),
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+
         let mut path_id_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut line_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut column_buf: Vec<u64> = if column_aware {
+            vec![0; BULK_STEP_LOCATIONS_CHUNK as usize]
+        } else {
+            Vec::new()
+        };
+        // Raw `global_position_index` buffer — only allocated when we
+        // have a pure-Rust decoder ready to consume them.
+        let mut gli_buf: Vec<u64> = if position_decoder.is_some() {
             vec![0; BULK_STEP_LOCATIONS_CHUNK as usize]
         } else {
             Vec::new()
@@ -843,6 +913,35 @@ impl CTFSTraceReader {
                 // the bulk FFI guarantees min(count, remaining) on
                 // success.  Falling back here would just spin.
                 return Err(format!("step_locations returned 0 entries at step {step_idx}; trace truncated?").into());
+            }
+
+            // When we have a pure-Rust decoder, fetch raw GLIs for the
+            // same step range and override the FFI's (potentially
+            // bogus) (path_id, line, column) interpretation per step.
+            // The FFI buffers stay valid as the legacy fallback (e.g.
+            // when a single step's GLI exceeds the decoder's known
+            // address space — which would only happen on a
+            // partial-trace inconsistency).
+            if let Some(decoder) = position_decoder.as_ref() {
+                let glis_written = reader
+                    .step_global_line_indices(step_idx, want, &mut gli_buf[..want as usize])
+                    .map_err(|e| format!("step_global_line_indices(start={step_idx}, count={want}): {e}"))?;
+                let common = std::cmp::min(glis_written, written) as usize;
+                for offset in 0..common {
+                    match decoder.decode_global_position_index(gli_buf[offset]) {
+                        Ok(pos) => {
+                            path_id_buf[offset] = pos.file;
+                            line_buf[offset] = u64::from(pos.line);
+                            column_buf[offset] = u64::from(pos.column);
+                        }
+                        Err(_) => {
+                            // Fall through: keep the FFI's interpretation,
+                            // which on legitimate edge cases (e.g. step
+                            // GLI past the decoder's known address space)
+                            // is the best signal we have.
+                        }
+                    }
+                }
             }
 
             for offset in 0..written {
