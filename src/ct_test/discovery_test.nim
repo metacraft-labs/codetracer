@@ -14,7 +14,12 @@ proc makeWorkspace(name: string): string =
     removeDir(root)
   createDir(root)
   writeFixture(root / "ct-test.fake", "enabled\n")
-  root
+  # Return the canonical path. On macOS getTempDir() lives under the
+  # /var -> /private/var symlink, and the CLI infers workspaceRoot from
+  # getCurrentDir() (which resolves symlinks); an unresolved root would then
+  # mismatch the CLI's JSON output. Canonicalising here keeps every
+  # root-relative comparison consistent with what the spawned CLI sees.
+  expandFilename(root)
 
 proc fakeFile(root, name: string; markerLine = 2): string =
   let path = root / name
@@ -218,9 +223,15 @@ suite "ct-test M1 discovery skeleton":
     let root = makeWorkspace("cli")
     defer: removeDir(root)
     let selected = fakeFile(root, "tests/cli.fake", markerLine = 2)
+    # Write the throwaway CLI inside src/ct_test so its compile inherits
+    # src/ct_test/nim.cfg: the frameworks reached transitively through
+    # ``ct_test`` now depend on runquota_process, and that cfg supplies its
+    # paths. A temp-dir main would miss the cfg and fail to find the dependency.
     let
-      fakeMain = root / "fake_ct_test_main.nim"
+      fakeMain = "src" / "ct_test" /
+        ("fake_ct_test_main_" & $getCurrentProcessId() & ".nim")
       binary = getTempDir() / ("ct-test-m1-cli-" & $getCurrentProcessId())
+    defer: removeFile(fakeMain)
     writeFixture(fakeMain, """
 import std/os
 

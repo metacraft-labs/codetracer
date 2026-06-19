@@ -45,6 +45,29 @@ The Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app 
 binary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`
 first to rebuild the frontend before running the tests.
 
+## Running the cross-language ct_test provider tests
+
+```
+# From inside the dev shell (provides nim + the gtest/catch2/cmake/ninja
+# toolchain and the CMAKE_PREFIX_PATH / CT_TEST_C{C,XX} the C/C++ providers need)
+just test-ct-providers
+```
+
+This runs the cross-language `ct_test` provider suites (C/C++ GoogleTest/Catch2/CTest, M11
+native, M12 fallback, JavaScript, Ruby) plus the framework gate tests. It first builds the
+native (`ct-mcr`), JavaScript and Ruby recorder siblings in their own pinned dev shells
+(`direnv exec <repo> just build`, via `scripts/build-siblings.sh`) so the recording tests run
+against real recorders; a missing or failed required sibling fails loudly rather than skipping
+(per `codetracer-specs/Working-with-the-CodeTracer-Repos.md` Part 2). Useful overrides:
+
+- `CT_PROVIDERS_SKIP_SIBLINGS=1` — reuse already-built recorders, skip the sibling build step.
+- `CT_PROVIDERS_ALLOW_MISSING=1` — run the suites even if a required recorder sibling is
+  missing/unbuildable (the recording tests then fail honestly instead of aborting up front).
+
+The recorder binaries are discovered via PATH / the documented env vars
+(`CODETRACER_CT_MCR_CMD`, `CODETRACER_JS_RECORDER_PATH`, `CODETRACER_RUBY_RECORDER_PATH`) by
+`scripts/detect-siblings.sh`. See `ci/test/ct-providers.sh`.
+
 ## Windows local setup (non-Nix)
 
 For Windows development (both x64 and ARM64), use the DIY bootstrap:

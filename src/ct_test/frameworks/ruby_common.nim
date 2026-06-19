@@ -3,6 +3,7 @@ import std/[tables, times]
 
 import ../contracts
 import ../discovery
+import ../process_exec
 
 type
   RubyFrameworkKind* = enum
@@ -427,8 +428,7 @@ proc runRubyCommand*(providerId: string; kind: RubyFrameworkKind;
       event(tekRunStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    let result = execCmdEx(command, options = {poUsePath},
-        workingDir = scope.projectRoot)
+    let result = execCapturedShell(command, cwd = scope.projectRoot)
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
@@ -497,11 +497,10 @@ proc rubyEnvOptionPrefix(option: string): tuple[hadValue: bool; oldValue: string
     putEnv("RUBYOPT", option)
 
 proc resolveRspecExecutable(projectRoot: string): ProviderResult[string] =
-  let probe = execCmdEx(
+  let probe = execCapturedShell(
     "ruby -rbundler/setup -e " &
       quoteShell("print Gem.bin_path('rspec-core', 'rspec')"),
-    options = {poUsePath},
-    workingDir = projectRoot)
+    cwd = projectRoot)
   if probe.exitCode != 0:
     return ProviderResult[string](
       diagnostics: @[diagnostic(dsError,
@@ -565,7 +564,8 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
       event(tekRecordStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    var result = (output: "", exitCode: -1)
+    var result: CapturedRun
+    result.exitCode = -1
     let
       rubyOpt = if kind == rfkRSpec:
           some(rubyEnvOptionPrefix("-rbundler/setup"))
@@ -576,8 +576,7 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
         else:
           none(tuple[hadValue: bool; oldValue: string])
     try:
-      result = execCmdEx(command, options = {poUsePath},
-          workingDir = scope.projectRoot)
+      result = execCapturedShell(command, cwd = scope.projectRoot)
     finally:
       if rubyOpt.isSome:
         restoreEnv("RUBYOPT", rubyOpt.get)

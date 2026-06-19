@@ -2,6 +2,7 @@ import std/[algorithm, options, os, osproc, sequtils, strutils, tables, times]
 
 import ../contracts
 import ../discovery
+import ../process_exec
 import native_m11_common as nativeM11
 
 type
@@ -528,9 +529,11 @@ proc runNativeCommand*(providerId: string; kind: CppFrameworkKind;
       event(tekRunStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    let started = epochTime()
-    let result = execCmdEx(command, options = {poUsePath}, workingDir = scope.projectRoot)
-    let duration = int((epochTime() - started) * 1000)
+    # Route the launch through the shared runner (runquota_process) rather than
+    # std/osproc.execCmdEx; ``args`` is passed directly so there is no shell
+    # round-trip, and the runner reports wall time itself.
+    let result = execCaptured(args, cwd = scope.projectRoot)
+    let duration = result.durationMs
     if result.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId, output = result.output,
           durationMs = duration)
