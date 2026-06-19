@@ -14,7 +14,12 @@ proc makeWorkspace(name: string): string =
     removeDir(root)
   createDir(root)
   writeFixture(root / "ct-test.fake", "enabled\n")
-  root
+  # Return the canonical path. On macOS getTempDir() lives under the
+  # /var -> /private/var symlink, and the CLI infers workspaceRoot from
+  # getCurrentDir() (which resolves symlinks); an unresolved root would then
+  # mismatch the CLI's JSON output. Canonicalising here keeps every
+  # root-relative comparison consistent with what the spawned CLI sees.
+  expandFilename(root)
 
 proc fakeFile(root, name: string; markerLine = 2): string =
   let path = root / name
