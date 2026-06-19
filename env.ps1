@@ -1435,8 +1435,25 @@ Prepend-PathEntries -Entries @(
 
 $ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" -Default $true
 if ($ensureParser) {
-  $bash = Get-Command bash -ErrorAction SilentlyContinue
-  if ($null -eq $bash) {
+  # Prefer the Git Bash discovered earlier (WINDOWS_DIY_GIT_BASH_BIN).
+  # On hosted Windows Server 2022, `Get-Command bash` resolves to
+  # C:\Windows\System32\bash.exe — the WSL stub. With no WSL distro
+  # installed it prints "Windows Subsystem for Linux has no installed
+  # distributions." and exits 1, leaking $LASTEXITCODE=1 to the end
+  # of this script and tripping GHA's pwsh exit-code check.
+  $bashExe = ""
+  $gitBashBin = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_GIT_BASH_BIN")
+  if (-not [string]::IsNullOrWhiteSpace($gitBashBin)) {
+    $candidate = Join-Path $gitBashBin "bash.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      $bashExe = $candidate
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($bashExe)) {
+    $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+    if ($null -ne $bashCmd) { $bashExe = $bashCmd.Source }
+  }
+  if ([string]::IsNullOrWhiteSpace($bashExe)) {
     throw "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER=1 but 'bash' is not available on PATH."
   }
   # Pass a forward-slash path: bash reads `\m`, `\c`, ... in a `D:\...`
@@ -1445,7 +1462,7 @@ if ($ensureParser) {
   # parser regeneration was silently skipped. MSYS/Git bash opens a
   # `D:/...` path fine.
   $tsParserScript = (Join-Path (Split-Path -Parent $windowsDir) "ensure_tree_sitter_nim_parser.sh") -replace '\\', '/'
-  & $bash.Source $tsParserScript
+  & $bashExe $tsParserScript
 }
 
 & (Join-Path $windowsDir "setup-codetracer-runtime-env.ps1") -RepoRoot $repoRoot
