@@ -66,7 +66,24 @@ function Ensure-Rust {
   $env:CARGO_HOME = $cargoHome
 
   & $tempExe -y --default-toolchain $rustToolchain --profile minimal --no-modify-path
-  Remove-Item -LiteralPath $tempExe -Force
+  # Windows hosted runners occasionally hold a lock on the just-executed
+  # rustup-init.exe for a few hundred ms after it exits (filesystem
+  # close-handle race in the antivirus / loader path).  Retry the delete
+  # with exponential backoff before giving up.
+  $deleted = $false
+  foreach ($wait in 0, 250, 500, 1000, 2000) {
+    if ($wait -gt 0) { Start-Sleep -Milliseconds $wait }
+    try {
+      Remove-Item -LiteralPath $tempExe -Force -ErrorAction Stop
+      $deleted = $true
+      break
+    } catch {
+      # File still locked; loop and retry.
+    }
+  }
+  if (-not $deleted) {
+    Write-Warning "Could not remove $tempExe after retries; leaving it for the runner cleanup."
+  }
 
   if (-not (Test-Path $rustcExe)) {
     throw "Rust bootstrap did not produce '$rustcExe'."
