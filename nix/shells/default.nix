@@ -19,7 +19,14 @@
             config
             ;
         };
-        ci = import ./ci.nix { inherit pkgs self'; };
+        ci = import ./ci.nix {
+          inherit
+            pkgs
+            inputs
+            self'
+            inputs'
+            ;
+        };
       };
     };
 }
