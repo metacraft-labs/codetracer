@@ -62,6 +62,11 @@ proc checkNonEmptyCtArtifact(events: seq[TestEvent]; label: string): string =
   ""
 
 proc configureAndBuild(root: string): tuple[ok: bool; output: string] =
+  # Start from a clean build tree: a CMakeCache.txt left by a previous run
+  # (e.g. a checkout at a different absolute path, or a stale artifact) makes
+  # cmake abort with "source/binary dir does not match the cache". Removing it
+  # first keeps the configure reproducible regardless of prior state.
+  removeDir(buildDir(root))
   createDir(buildDir(root))
   var cmakeArgs = "cmake -S . -B build"
   if root == gtestRoot():
