@@ -19,8 +19,8 @@ the most widely-used:
 1. `just build-once` - Just builds the project using Tup
 1. `just build-nix` - Builds the project and packages it for Nix
 1. `just build-docs` - Builds the documentation. More info can be found [here](https://dev-docs.codetracer.com/Misc/BuildDocs)
-1. `just cachix-push-nix-package` - Pushes nix package artefacts to cachix
-1. `just cachix-push-devshell` - Pushes the current dev shell to cachix
+1. `just attic-push-nix-package` - Pushes nix package artefacts to Attic
+1. `just attic-push-devshell` - Pushes the current dev shell to Attic
 1. `just reset-db` - Resets the local user's trace database
 1. `just clear-local-traces` - Clears the local user's traces
 1. `just reset-layout` - Resets the GUI window arrangements layout if your user's layout is incompatible with the latest version of CodeTracer. Further [documentation](https://dev-docs.codetracer.com/Introduction/Configuration)

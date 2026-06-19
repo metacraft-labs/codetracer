@@ -341,7 +341,7 @@ package codeTracer:
 
     # POSIX-only / Nix-only tools — guarded off the Windows branch.
     when not defined(windows):
-      "cachix >=0"
+      "attic-client >=0"
       "cargo-nextest >=0"
       "clang >=1"
       "ctags >=0"

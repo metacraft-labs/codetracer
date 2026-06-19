@@ -174,8 +174,8 @@ mkShell {
     # github CLI
     gh
 
-    # cachix support
-    cachix
+    # Attic cache support
+    attic-client
 
     # ruby experimental support
     libyaml
