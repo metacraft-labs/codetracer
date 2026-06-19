@@ -799,10 +799,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh"
@@ -819,10 +817,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
@@ -839,10 +835,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
@@ -947,10 +941,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
@@ -1007,10 +999,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Run Reprobuild macOS smoke
@@ -1027,10 +1017,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Run Reprobuild Linux smoke
@@ -1064,10 +1052,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Setup db-backend siblings
@@ -1105,10 +1091,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Setup db-backend siblings
@@ -1241,10 +1225,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
@@ -1267,10 +1249,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/nix.sh"
@@ -1549,10 +1529,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: "Import GPG key for signing commits"
@@ -1769,10 +1747,8 @@ jobs:
         if: matrix.platform == 'nixos'
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       # --- macOS setup ---
@@ -2029,10 +2005,8 @@ jobs:
         if: matrix.platform == 'nixos'
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer (nix)
@@ -2231,38 +2205,24 @@ jobs:
         # ``.envrc`` does ``use flake``, so we need a working Nix
         # install on the runner first.
         #
-        # We bypass the shared ``setup-nix`` composite because it
-        # pins ``cachix/install-nix-action@v27`` which on
+        # We bypass the shared ``setup-nix`` composite because the
+        # install-nix action used by the regular setup path on
         # ``macos-latest`` (arm64) trips
         # ``eDSRecordAlreadyExists`` while creating the
         # ``_nixbld1`` build user -- the GitHub-hosted Apple Silicon
         # image carries leftover Nix state from its base snapshot
         # that the older installer can't recover from.
         # DeterminateSystems/nix-installer-action is the
-        # recommended workaround on that runner image; cachix on
-        # nixos / darwin self-hosted runners stays on v27 because
-        # those don't trip the same state issue.
+        # recommended workaround on that runner image; the regular
+        # setup path remains fine for nixos / darwin self-hosted
+        # runners because those don't trip the same state issue.
         if: matrix.platform == 'macos'
         uses: DeterminateSystems/nix-installer-action@main
         with:
           extra-conf: |
             access-tokens = github.com=${{ steps.app-token.outputs.token }}
-            substituters = https://cache.nixos.org ${{ vars.SUBSTITUTERS }}
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.TRUSTED_PUBLIC_KEYS }}
-
-      - name: Configure Cachix (macOS)
-        if: matrix.platform == 'macos'
-        # The DeterminateSystems installer doesn't auto-configure
-        # Cachix substituters/auth.  Without this, ``scripts/build-
-        # siblings.sh`` re-evaluates each sibling's flake from
-        # source which (a) prints ``HTTP error 401`` against
-        # metacraft-labs-codetracer.cachix.org and (b) makes the
-        # cold ct-mcr build ~45 min instead of ~10 min.
-        uses: cachix/cachix-action@v15
-        with:
-          name: ${{ vars.CACHIX_CACHE }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: true
+            substituters = https://cache.nixos.org ${{ vars.ATTIC_SUBSTITUTER }}
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
 
       - name: Build ct-mcr via codetracer-native-recorder nix develop (macOS)
         if: matrix.platform == 'macos'
@@ -2400,10 +2360,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Build CodeTracer
@@ -2456,10 +2414,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - name: Resolve codetracer-visual-replay ref
@@ -2637,7 +2593,7 @@ jobs:
         with:
           packages_dir: dist
 
-  push-to-cachix:
+  push-to-attic:
     runs-on: [self-hosted, nixos]
     needs:
       - test-non-gui
@@ -2655,17 +2611,19 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-cachix.sh"
+      - run: "nix develop .#devShells.x86_64-linux.default --command ./ci/deploy/build-nix-and-push-to-attic.sh"
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
 
   build-and-deploy-docs:
     runs-on: [self-hosted, nixos]
-    needs: [push-to-cachix]
+    needs: [push-to-attic]
     if: ${{ github.ref == 'refs/heads/main' && !github.event['codetracer-ci'] }}
     permissions:
       contents: "write"
@@ -2679,10 +2637,8 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
       - run: |
@@ -2710,10 +2666,8 @@ jobs:
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Configure Nix for private repos
         run: |
@@ -2754,10 +2708,8 @@ jobs:
       - name: Install Nix
         uses: metacraft-labs/nixos-modules/.github/install-nix@main
         with:
-          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Configure Nix for private repos
         run: |
