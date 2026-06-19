@@ -564,7 +564,8 @@ proc recordRubyCommand*(providerId: string; kind: RubyFrameworkKind;
       event(tekRecordStarted, providerId, runId, testId, message = command),
       event(tekTestStarted, providerId, runId, testId, message = scope.selector)
     ]
-    var result = (output: "", exitCode: -1)
+    var result: CapturedRun
+    result.exitCode = -1
     let
       rubyOpt = if kind == rfkRSpec:
           some(rubyEnvOptionPrefix("-rbundler/setup"))
