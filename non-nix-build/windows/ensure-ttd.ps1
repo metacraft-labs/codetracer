@@ -149,9 +149,12 @@ function Install-TtdViaMsixBundle {
     Expand-Archive -LiteralPath $bundleAsZip -DestinationPath $bundleExtractDir -Force
 
     $msixPattern = "*-$Arch.msix"
-    $msixCandidates = Get-ChildItem -LiteralPath $bundleExtractDir -Filter $msixPattern -File -ErrorAction SilentlyContinue
-    if ($null -eq $msixCandidates -or $msixCandidates.Count -eq 0) {
-      $available = (Get-ChildItem -LiteralPath $bundleExtractDir -Filter "*.msix" -File -ErrorAction SilentlyContinue |
+    # @(...) forces array semantics so .Count is valid even when
+    # Get-ChildItem returns a single FileInfo (which under
+    # Set-StrictMode -Version Latest would otherwise throw on .Count).
+    $msixCandidates = @(Get-ChildItem -LiteralPath $bundleExtractDir -Filter $msixPattern -File -ErrorAction SilentlyContinue)
+    if ($msixCandidates.Count -eq 0) {
+      $available = @(Get-ChildItem -LiteralPath $bundleExtractDir -Filter "*.msix" -File -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Name }) -join ", "
       throw "WinDbg msixbundle did not contain a $Arch .msix. Available: $available"
     }
