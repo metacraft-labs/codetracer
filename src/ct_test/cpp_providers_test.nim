@@ -68,25 +68,30 @@ proc configureAndBuild(root: string): tuple[ok: bool; output: string] =
   # first keeps the configure reproducible regardless of prior state.
   removeDir(buildDir(root))
   createDir(buildDir(root))
+  # GoogleTest / Catch2 are provided by the campaign dev shell (the
+  # codetracer-toolchains `gtest` / `catch2` packages, exported on
+  # CMAKE_PREFIX_PATH by nix/shells/main.nix). The fixtures therefore configure
+  # with a bare `cmake -S . -B build`: `find_package(GTest)` /
+  # `find_package(Catch2)` resolve via config mode from CMAKE_PREFIX_PATH with
+  # no `-DGTest_DIR` / `-DCatch2_DIR` overrides. Running these tests outside the
+  # dev shell (where the frameworks are absent) is expected to fail the
+  # configure step — that is the same PATH/discovery code path end users hit.
   var cmakeArgs = "cmake -S . -B build"
-  if root == gtestRoot():
-    let
-      gtestOut = execCmdEx("nix build --no-link --print-out-paths nixpkgs#gtest 2>/dev/null | tail -1",
-        options = {poUsePath})
-      gtestDev = execCmdEx("nix build --no-link --print-out-paths nixpkgs#gtest.dev 2>/dev/null | tail -1",
-        options = {poUsePath})
-    if gtestOut.exitCode == 0 and gtestDev.exitCode == 0:
-      let
-        libRoot = gtestOut.output.strip
-        devRoot = gtestDev.output.strip
-      cmakeArgs.add " -DGTest_DIR=" & quoteShell(devRoot / "lib/cmake/GTest")
-      cmakeArgs.add " -DCMAKE_INSTALL_RPATH=" & quoteShell(libRoot / "lib")
-  elif root == catchRoot():
-    let catchOut = execCmdEx("nix build --no-link --print-out-paths nixpkgs#catch2_3 2>/dev/null | tail -1",
-      options = {poUsePath})
-    if catchOut.exitCode == 0:
-      let catchRootPath = catchOut.output.strip
-      cmakeArgs.add " -DCatch2_DIR=" & quoteShell(catchRootPath / "lib/cmake/Catch2")
+  # Build the fixtures with the toolchains' wrapped clang (exported as
+  # CT_TEST_CC / CT_TEST_CXX by nix/shells/main.nix) so the fixture objects link
+  # against the gtest / catch2 packages with a matching C++ ABI. The dev shell's
+  # generic CC=clang / CXX=clang++ point at an unwrapped clang without stdlib
+  # search paths, and the GNU gcc that cmake would otherwise auto-detect uses a
+  # libstdc++ ABI incompatible with the libc++/clang-built frameworks. When the
+  # env vars are unset (e.g. cmake-only smoke runs) cmake falls back to its
+  # default detection.
+  let
+    ctTestCc = getEnv("CT_TEST_CC")
+    ctTestCxx = getEnv("CT_TEST_CXX")
+  if ctTestCc.len > 0:
+    cmakeArgs.add " -DCMAKE_C_COMPILER=" & quoteShell(ctTestCc)
+  if ctTestCxx.len > 0:
+    cmakeArgs.add " -DCMAKE_CXX_COMPILER=" & quoteShell(ctTestCxx)
   let configure = execCmdEx(cmakeArgs, options = {poUsePath},
       workingDir = root)
   if configure.exitCode != 0:

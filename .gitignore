@@ -147,6 +147,15 @@ src/tests/run/quicktests/*/*.js
 client*
 server
 *.nims
+# ct_test ships a checked-in NimScript config that resolves the runquota_process
+# import paths from RUNQUOTA_SRC when the relative sibling layout is unavailable
+# (git worktrees, CI). It must be tracked despite the blanket *.nims ignore.
+!src/ct_test/config.nims
+# ct_test C/C++ provider fixtures build into an in-tree build/ directory and the
+# provider suites compile to bare (extension-less) binaries next to their .nim
+# sources; both are reproducible test artifacts that must not be committed.
+src/ct_test/fixtures/*/build/
+src/ct_test/*_test
 *.log
 format.js
 config/.config.yaml

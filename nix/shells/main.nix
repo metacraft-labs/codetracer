@@ -190,6 +190,21 @@ mkShell {
     # Go (needed by ct-native-replay build for Go programs)
     toolchainsPkgs.go-default
 
+    # C/C++ test-framework toolchain for the ct_test cross-language provider
+    # suite (cpp-gtest / cpp-catch2 / cpp-ctest fixtures). gtest and catch2
+    # ship their CMake config-modules in the `.dev` output; the shellHook below
+    # appends those dev outputs to CMAKE_PREFIX_PATH so `find_package(GTest)` /
+    # `find_package(Catch2)` resolve from the dev shell without passing
+    # `-DGTest_DIR` / `-DCatch2_DIR`. ninja is the cmake generator used by the
+    # fixtures' configure step. cmake drives the configure/build itself and is
+    # taken from the toolchains flake so the shell does not depend on a cmake
+    # that happens to be in the user's profile (the cpp providers shell out to
+    # `cmake -S . -B build` / `ctest`).
+    toolchainsPkgs.cmake
+    toolchainsPkgs.gtest
+    toolchainsPkgs.catch2
+    toolchainsPkgs.ninja
+
     # Lean 4 - theorem prover and functional programming language
     lean4
 
@@ -341,6 +356,29 @@ mkShell {
     ''}
 
     export RUST_LOG=info
+
+    # CMAKE_PREFIX_PATH — make `find_package(GTest)` / `find_package(Catch2)`
+    # resolve from the dev shell for the ct_test C/C++ provider fixtures.
+    # Adding gtest/catch2 to `packages` only puts their binaries on PATH; CMake
+    # config-mode discovery searches each <prefix>/lib/cmake/<Name>, so the
+    # store prefixes that actually contain the config-modules must be on
+    # CMAKE_PREFIX_PATH. gtest ships them in its `.dev` output; catch2 ships
+    # them in its single default output. With this set the fixtures configure
+    # with a bare `cmake -S . -B build` — no `-DGTest_DIR` / `-DCatch2_DIR`.
+    export CMAKE_PREFIX_PATH="${toolchainsPkgs.gtest.dev}:${toolchainsPkgs.catch2}''${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+
+    # CT_TEST_CC / CT_TEST_CXX — the C/C++ compiler the ct_test cpp providers
+    # must build their GoogleTest / Catch2 fixtures with. The gtest and catch2
+    # nix packages are built with the codetracer-toolchains clang stdenv, so the
+    # fixtures have to be compiled and linked with that SAME wrapped clang or the
+    # C++ ABI mismatches (e.g. linking the gcc libstdc++ `__cxx11` string ABI
+    # against a libc++/clang-built gtest yields "undefined symbols"). The dev
+    # shell otherwise leaks a generic CC=clang / CXX=clang++ that resolves to an
+    # *unwrapped* clang with no stdlib search paths (`<iostream> file not
+    # found`), so the providers cannot rely on CC/CXX and instead pass these
+    # wrapped paths to cmake via -DCMAKE_C_COMPILER / -DCMAKE_CXX_COMPILER.
+    export CT_TEST_CC="${toolchainsPkgs.clang}/bin/cc"
+    export CT_TEST_CXX="${toolchainsPkgs.clang}/bin/c++"
 
     # NODE MODULES
     export NIX_NODE_PATH="${ourPkgs.node-modules-derivation}/bin/node_modules"

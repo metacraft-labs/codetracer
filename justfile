@@ -604,6 +604,18 @@ test-visual-replay-gate:
 test-m16-release-gate:
   bash ci/test/m16-release-gate.sh
 
+# Run the cross-language ct-test provider suites (C/C++ GoogleTest/Catch2/CTest,
+# M11 native, M12 fallback, JavaScript, Ruby) plus the framework gate tests.
+# First builds the native/js/ruby recorder siblings in their own pinned dev
+# shells (`direnv exec <repo> just build`, via scripts/build-siblings.sh) so the
+# recording tests run against real recorders — a missing/failed required sibling
+# fails loudly rather than skipping. Set CT_PROVIDERS_SKIP_SIBLINGS=1 to reuse
+# already-built recorders. Run from inside the dev shell (it provides nim plus
+# the gtest/catch2/cmake/ninja toolchain and CMAKE_PREFIX_PATH / CT_TEST_C{C,XX}
+# the C/C++ providers need). See ci/test/ct-providers.sh.
+test-ct-providers:
+  bash ci/test/ct-providers.sh
+
 make-quick-mr name message:
   # EXPECTS changes to be manually added with `git add`
   # before running!
