@@ -36,11 +36,24 @@ jobs:
     runs-on: [self-hosted, nixos]
 
     steps:
+      - name: Mint installation token for cross-repo sibling access
+        # GitHub free plan restricts org-level secrets with visibility
+        # ALL from being readable inside private repos, so we mint
+        # per-run installation tokens from the repo-local
+        # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
+        # secrets via the CI Token Provider GitHub App.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout codetracer
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -49,7 +62,7 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Resolve rr-backend ref
         id: resolve-ref
@@ -75,7 +88,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-backend
           ref: ${{ steps.resolve-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'true'
 
       - name: Unfold native-backend submodules into parent index
@@ -138,7 +151,7 @@ jobs:
           repo: metacraft-labs/codetracer-trace-format
           ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Resolve codetracer-trace-format-nim ref
@@ -163,7 +176,7 @@ jobs:
           repo: metacraft-labs/codetracer-trace-format-nim
           ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Resolve codetracer-native-recorder ref
@@ -191,7 +204,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
       - name: Allow direnv in cloned codetracer-native-recorder
@@ -266,11 +279,24 @@ jobs:
     runs-on: [self-hosted, nixos]
 
     steps:
+      - name: Mint installation token for cross-repo sibling access
+        # GitHub free plan restricts org-level secrets with visibility
+        # ALL from being readable inside private repos, so we mint
+        # per-run installation tokens from the repo-local
+        # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
+        # secrets via the CI Token Provider GitHub App.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout codetracer
         uses: actions/checkout@v5
         with:
           submodules: recursive
-          token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          token: ${{ steps.ci_token.outputs.token }}
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -279,7 +305,7 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Resolve shell-recorders ref
         id: resolve-ref
@@ -302,7 +328,7 @@ jobs:
           repo: metacraft-labs/codetracer-shell-recorders
           ref: ${{ steps.resolve-ref.outputs.ref }}
           path: ${{ github.workspace }}/../codetracer-shell-recorders
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Build shell trace writer
         run: |
