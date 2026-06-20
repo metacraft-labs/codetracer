@@ -655,11 +655,11 @@ tail pid_or_current_or_last kind process="default" instance_index="0":
 build-nix:
   nix build --print-build-logs '.?submodules=1#codetracer' --show-trace --keep-failed
 
-cachix-push-nix-package:
-  cachix push metacraft-labs-codetracer $(nix build --print-out-paths ".?submodules=1#codetracer")
+attic-push-nix-package:
+  attic push metacraft-codetracer $(nix build --print-out-paths ".?submodules=1#codetracer")
 
-cachix-push-devshell:
-  cachix push metacraft-labs-codetracer $(nix build --print-out-paths .#devShells.x86_64-linux.default)
+attic-push-devshell:
+  attic push metacraft-codetracer $(nix build --print-out-paths .#devShells.x86_64-linux.default)
 
 reset-db:
   rm -rf ~/.local/share/codetracer/trace_index.db
