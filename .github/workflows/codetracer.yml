@@ -12,6 +12,11 @@ permissions:
   id-token: write
 
 jobs:
+  # NOTE: all `runs-on: windows-latest` jobs in this file are intentionally
+  # left on the hosted runner until a self-hosted Windows runner is
+  # provisioned (tracked separately — see Windows-Runner-via-Reprobuild
+  # write-up). Do not migrate the windows-* jobs piecemeal; either move
+  # the whole platform or none of it.
   windows-bootstrap-smoke:
     runs-on: windows-latest
     steps:
@@ -1282,6 +1287,11 @@ jobs:
       - lint-nix
       - lint-rust
 
+    # TODO: migrate the matrix to self-hosted runners once the apt-get install
+    # libssl-dev / libbpf-dev / libelf-dev / zlib1g-dev steps and the manual
+    # nim/openssl/zlib downloads are replaced with nix equivalents. The macos
+    # legs additionally need a self-hosted macOS Intel runner (we only have
+    # aarch64-darwin self-hosted hosts today).
     strategy:
       fail-fast: false
       matrix:
@@ -1578,6 +1588,9 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp CodeTracer.AppImage.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage.asc
 
   dmg-build:
+    # TODO: migrate to [self-hosted, darwin, nix-darwin, aarch64-darwin] once
+    # the `brew install awscli` step + signing flow are rewired through the
+    # nix dev shell (Homebrew is not installed on the nix-darwin runners).
     runs-on: macos-latest
     needs:
       - lint-bash
@@ -1623,6 +1636,9 @@ jobs:
           aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp ./non-nix-build/CodeTracer.dmg.asc s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-arm64.dmg.asc --checksum-algorithm CRC32
 
   dmg-lib-check:
+    # TODO: migrate to [self-hosted, darwin, nix-darwin, aarch64-darwin] once
+    # the `brew install awscli` + `brew install sevenzip` steps are replaced
+    # with nix equivalents (Homebrew is not installed on the nix-darwin runners).
     runs-on: macos-latest
     needs:
       - dmg-build
@@ -1655,6 +1671,9 @@ jobs:
           ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct --version
 
   appimage-lib-check:
+    # TODO: migrate to [self-hosted, nixos] once the `sudo snap install
+    # aws-cli` + `sudo apt-get install fuse libfuse2` steps are replaced with
+    # nix equivalents (snap + apt are unavailable on the NixOS runners).
     runs-on: ubuntu-latest
     needs:
       - appimage-build
@@ -1690,6 +1709,10 @@ jobs:
   # don't need FUSE in the runner.  See
   # scripts/test-appimage-cross-distro.sh.
   appimage-cross-distro:
+    # TODO: migrate to [self-hosted, nixos] once the `sudo snap install
+    # aws-cli` step is replaced with a nix equivalent (snap is unavailable
+    # on the NixOS runners). The cross-distro smoke uses Docker, which the
+    # bare-metal NixOS runners can also expose.
     runs-on: ubuntu-latest
     needs:
       - appimage-build
@@ -1730,6 +1753,11 @@ jobs:
         include:
           - platform: nixos
             runner: [self-hosted, nixos]
+          # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
+          # once the macOS-only steps in this job (`brew install just`,
+          # `actions/setup-python`, `brew install awscli`) are replaced with nix
+          # equivalents — they assume Homebrew, which is not installed on the
+          # nix-darwin runners.
           - platform: macos
             runner: macos-latest
     runs-on: ${{ matrix.runner }}
@@ -1983,6 +2011,10 @@ jobs:
         include:
           - platform: nixos
             runner: [self-hosted, nixos]
+          # TODO: migrate macos leg to [self-hosted, darwin, nix-darwin, aarch64-darwin]
+          # once the macOS-only steps (`brew install just`, `actions/setup-python`)
+          # are replaced with nix equivalents (Homebrew is not installed on the
+          # nix-darwin runners).
           - platform: macos
             runner: macos-latest
     runs-on: ${{ matrix.runner }}
@@ -2618,7 +2650,7 @@ jobs:
       - test-ui-tests
       - create-release
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, nixos]
     steps:
       - name: Download built distributions
         uses: actions/download-artifact@v6
