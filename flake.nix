@@ -2,9 +2,9 @@
   description = "Code Tracer";
 
   nixConfig = {
-    extra-substituters = [ "https://metacraft-labs-codetracer.cachix.org" ];
+    extra-substituters = [ "https://cache.metacraft-labs.com/metacraft-codetracer" ];
     extra-trusted-public-keys = [
-      "metacraft-labs-codetracer.cachix.org-1:6p7pd81m6sIh59yr88yGPU9TFYJZkIrFZoFBWj/y4aE="
+      "metacraft-codetracer:9OV9wCDX560bt5/MrD4dlqnPpCitAEjpoqhNfQpWY3U="
     ];
   };
 
@@ -51,7 +51,7 @@
     # archive endpoint.
     noir = {
       # Bumped from 334c1ee9 to 5e98f904 (empty commit) to side-step
-      # the stale narinfo on metacraft-labs-codetracer.cachix.org +
+      # the stale narinfo on the legacy CodeTracer binary cache +
       # the per-runner fetcher-cache-v2.sqlite which both pin
       # 334c1ee9 to a NAR hash that no longer matches the actual
       # git content.  See CI-stabilization §4.
