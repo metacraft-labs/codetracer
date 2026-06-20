@@ -1800,16 +1800,52 @@ sync-design-tokens:
 # a browser or Electron.  They run with both the native (C) and JavaScript
 # backends to catch platform-specific bugs like JS serialization issues.
 #
-# Skip patterns:
+# Skip patterns (both backends):
 #   integration/real_backend_test  — requires stdio_backend (native process spawning)
 #   integration/language_smoke_test — requires headless_session + ct binary
 #   multi-replay/multi_session_test — requires headless_session
 #   noir-space-ship/noir_space_ship_test — requires headless_session
+#
+# JS-backend-only skip:
+#   agentic-coding/*  — these tests import std/osproc (native process
+#     spawning) which cannot compile under `nim js` (osproc exports
+#     quoteShell, unavailable on the JS target). They run on the native
+#     backend only; the native lane covers them.
+#
+# `vm-test-prereqs` runs as a prerequisite so isonim's
+# build/tailwind-styles.json exists before any test compile — views and
+# session-chrome tests transitively `staticRead` it at Nim compile time
+# (see isonim/src/isonim/dsl/tailwind.nim), an uncatchable error if the
+# file is missing. This is the same tailwind-extract step that the heavier
+# `build-once` runs first, factored out so the lightweight ViewModel test
+# lanes don't pull in the full reprobuild frontend build. CI logs are
+# captured under test-logs/ for the Full Log Preservation policy
+# (ci-workflow-standards.md).
+
+# Generate isonim's build/tailwind-styles.json (compile-time staticRead
+# dependency of the ViewModel tests' isonim imports). Idempotent; cheap.
+vm-test-prereqs:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  isonim_root=""
+  for candidate in ../isonim ../../isonim; do
+    if [ -f "$candidate/tools/tailwind-extract.mjs" ]; then
+      isonim_root="$(cd "$candidate" && pwd)"
+      break
+    fi
+  done
+  if [ -z "$isonim_root" ]; then
+    echo "Error: isonim sibling not found (expected ../isonim)." >&2
+    exit 1
+  fi
+  (cd "$isonim_root" && just build-tailwind)
 
 # Compile and run all ViewModel headless tests with the native (C) backend.
-test-vm-native:
+test-vm-native: vm-test-prereqs
   #!/usr/bin/env bash
   set -e
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-native.log) 2>&1
   echo "=== ViewModel tests (native backend) ==="
   failed=0
   passed=0
@@ -1849,9 +1885,11 @@ test-vm-native:
 
 # Compile and run JS-compatible ViewModel headless tests via nim js + node.
 # Skips tests that require native process spawning (stdio_backend, headless_session).
-test-vm-js:
+test-vm-js: vm-test-prereqs
   #!/usr/bin/env bash
   set -e
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-js.log) 2>&1
   echo "=== ViewModel tests (JS backend) ==="
   failed=0
   passed=0
@@ -1861,6 +1899,7 @@ test-vm-js:
     ! -path '*/integration/language_smoke_test.nim' \
     ! -path '*/multi-replay/*' \
     ! -path '*/noir-space-ship/*' \
+    ! -path '*/agentic-coding/*' \
     | sort); do
     name=$(basename "$f" .nim)
     cache="/tmp/ct-nim-cache/vm-js-$name"
