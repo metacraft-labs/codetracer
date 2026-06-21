@@ -27,7 +27,8 @@
 //!           bit 6       — FLAG_SUPPORTS_COLUMN_BREAKPOINTS (M-capability-flags)
 //!           bit 7       — FLAG_SUPPORTS_COLUMN_MOTIONS (M-capability-flags)
 //!           bit 8       — FLAG_HAS_CALL_STREAM (M17a/M17b — dedicated calls.dat)
-//!           bits 8..=15 — reserved (must be 0; readers reject if set)
+//!           bit 9       — FLAG_HAS_STEP_STREAM (M23a — dedicated steps.dat)
+//!           bits 10..=15 — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -169,6 +170,21 @@ pub const FLAG_SUPPORTS_COLUMN_MOTIONS: u16 = 1 << 7;
 /// Nim writer's `meta_dat.nim` bit 8.
 pub const FLAG_HAS_CALL_STREAM: u16 = 1 << 8;
 
+/// Flag bit 9 — `FLAG_HAS_STEP_STREAM` (M23a).  When set the container ships a
+/// dedicated, SEEKABLE `steps.dat` compact execution stream
+/// (AbsoluteStep/DeltaStep + Raise/Catch/ThreadSwitch, +  its `steps.idx`
+/// companion index) alongside the unified `events.log`, so the step timeline
+/// can be read on demand without scanning the unified stream
+/// (`trace-events.md` §"Execution Stream (`steps.dat`)").  The bit is purely
+/// additive: a reader that ignores it still reads the unified stream unchanged.
+/// The consumer migration (the db-backend reading steps from `steps.dat`) is a
+/// later milestone (M22); for now this reader only needs to RECOGNISE the bit so
+/// a step-split bundle's meta.dat parses cleanly (not rejected as a "newer
+/// writer") and the GUI can still open the trace.  Must match
+/// `codetracer_trace_writer::meta_dat::FLAG_HAS_STEP_STREAM` and the canonical
+/// Nim writer's `meta_dat.nim` bit 9.
+pub const FLAG_HAS_STEP_STREAM: u16 = 1 << 9;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -181,7 +197,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_ALTERNATE_SOURCE_VIEWS
     | FLAG_SUPPORTS_COLUMN_BREAKPOINTS
     | FLAG_SUPPORTS_COLUMN_MOTIONS
-    | FLAG_HAS_CALL_STREAM;
+    | FLAG_HAS_CALL_STREAM
+    | FLAG_HAS_STEP_STREAM;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -1110,19 +1127,21 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 9 is the lowest still-reserved flag after M17a/M17b allocated
-        // bit 8 (FLAG_HAS_CALL_STREAM).  Bits 0..=8 are FLAG_HAS_MCR_FIELDS /
+        // Bit 10 is the lowest still-reserved flag after M17a/M17b allocated
+        // bit 8 (FLAG_HAS_CALL_STREAM) and M23a allocated bit 9
+        // (FLAG_HAS_STEP_STREAM).  Bits 0..=9 are FLAG_HAS_MCR_FIELDS /
         // FLAG_HAS_REPLAY_LAUNCH_FIELDS / FLAG_HAS_LAYOUT_SNAPSHOT /
         // FLAG_HAS_TRACE_FILTER_PROVENANCE / FLAG_HAS_COLUMN_AWARE_STEPS /
         // FLAG_HAS_ALTERNATE_SOURCE_VIEWS / FLAG_SUPPORTS_COLUMN_BREAKPOINTS /
-        // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM.
+        // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM /
+        // FLAG_HAS_STEP_STREAM.
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0;
-        buf[7] = 0b0000_0010; // = bit 9, lowest reserved
+        buf[7] = 0b0000_0100; // = bit 10, lowest reserved
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0000_0010_0000_0000);
-                assert_eq!(unknown_bits, 0b0000_0010_0000_0000);
+                assert_eq!(flags, 0b0000_0100_0000_0000);
+                assert_eq!(unknown_bits, 0b0000_0100_0000_0000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
@@ -1138,6 +1157,24 @@ mod tests {
         buf[7] = ((FLAG_HAS_CALL_STREAM >> 8) & 0xFF) as u8;
         let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected has_call_stream to parse, got {e:?}"));
         assert_eq!(parsed.flags & FLAG_HAS_CALL_STREAM, FLAG_HAS_CALL_STREAM);
+    }
+
+    /// M23a — the `has_step_stream` flag (bit 9) parses cleanly (it is a KNOWN
+    /// flag now, so a step-split bundle's meta.dat is accepted, not rejected as a
+    /// "newer writer"). Regression guard so the GUI/db-backend still OPEN a
+    /// `has_step_stream` bundle (mirrors `accepts_has_call_stream_flag` for the
+    /// M17b call-stream split).
+    #[test]
+    fn accepts_has_step_stream_flag() {
+        // The step stream ships alongside the call stream, so test both the
+        // step bit alone AND the combined call+step bits a real M23a bundle sets.
+        for bits in [FLAG_HAS_STEP_STREAM, FLAG_HAS_CALL_STREAM | FLAG_HAS_STEP_STREAM] {
+            let mut buf = writer_compat_fixture_bytes();
+            buf[6] = (bits & 0xFF) as u8;
+            buf[7] = ((bits >> 8) & 0xFF) as u8;
+            let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
+            assert_eq!(parsed.flags & bits, bits);
+        }
     }
 
     /// Capability bits parse cleanly when paired with the wire-format
