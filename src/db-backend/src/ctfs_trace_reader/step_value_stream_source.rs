@@ -247,12 +247,16 @@ impl SeekableValueStream {
 /// Reconstruct the per-step `Vec<FullValueRecord>` (the materialized
 /// `db.variables[step]` shape) from a value record's stream events.
 ///
-/// Only the `StepValues` event contributes variable snapshots; the other
-/// value-stream events (`BindVariable`, `Cell*`, `Assign*`, …) drive the
-/// cell/compound history the db-backend serves through `cell_changes_for` /
-/// `compound_at`, which M22 keeps on the materialized path (see the module
-/// docs). The builder emits at most one `StepValues` per step, but we iterate
-/// defensively to tolerate any future shape.
+/// Only the `StepValues` event contributes variable snapshots. The other
+/// value-stream event shapes (`BindVariable`, `Cell*`, `Assign*`, …) would drive
+/// a cell/compound history, but the PRODUCTION Nim `MultiStreamTraceWriter` does
+/// not emit them — it records inline full values per step (`StepValues`), so a
+/// production split bundle's cell history is legitimately empty and locals come
+/// entirely from this snapshot (M23e-2; see the module docs and
+/// `tests/ctfs_split_only_full_db_test.rs`). The cell/compound accessors
+/// (`cell_changes_for` / `compound_at`) are only populated on the legacy
+/// `events.log` path. The builder emits at most one `StepValues` per step, but
+/// we iterate defensively to tolerate any future shape.
 pub fn step_values_to_full_records(events: &[ValueStreamEvent]) -> Vec<FullValueRecord> {
     let mut out = Vec::new();
     for event in events {

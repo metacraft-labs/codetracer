@@ -1376,6 +1376,21 @@ fn is_db_trace(folder: &Path, trace_file: &Path) -> bool {
     false
 }
 
+/// Classify a CTFS container as a DB (materialized) trace this backend can
+/// serve.
+///
+/// A container qualifies if it carries EITHER stream layout:
+///   - `steps.dat` — the PRODUCTION split-stream format. Every live recorder
+///     (Ruby/Python/JS/shell, via the Nim `MultiStreamTraceWriter` FFI) emits
+///     this and NEVER `events.log`; `CTFSTraceReader::open` serves it through
+///     `open_new_format_nim` (the split streams are read directly, `events.log`
+///     is never consulted). This is the canonical path.
+///   - `events.log` — the LEGACY/secondary fallback layout: the secondary Rust
+///     `CtfsTraceWriter`'s combined stream and test fixtures. It is NOT produced
+///     by live recording. We still accept it here so legacy/test bundles open;
+///     `CTFSTraceReader::open` routes them through `open_old_format`
+///     (`TraceProcessor::postprocess`). See `M23e` in
+///     `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
 fn is_codetracer_ctfs_file(path: &Path) -> bool {
     let Ok(reader) = CtfsReader::open(path) else {
         return false;

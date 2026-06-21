@@ -178,12 +178,22 @@ impl CTFSTraceReader {
     }
 }
 
-/// Returns `true` if the CTFS container uses the new pre-processed format
-/// (detected by the presence of `steps.dat`), meaning postprocessing can
+/// Returns `true` if the CTFS container uses the new pre-processed split-stream
+/// format (detected by the presence of `steps.dat`), meaning postprocessing can
 /// be skipped entirely.
 ///
+/// This is the PRODUCTION format: the Nim `MultiStreamTraceWriter` that every
+/// live recorder (Ruby/Python/JS/shell) drives via FFI emits ONLY the split
+/// per-kind streams (`steps.dat`/`calls.dat`/`values.dat`/`events.dat` +
+/// interning) and NO `events.log`. Such bundles are served via
+/// [`CTFSTraceReader::open_new_format_nim`], which reads the split streams
+/// directly and never consults `events.log`.
+///
 /// Returns `false` for old-format containers that store raw events in
-/// `events.log` and require [`TraceProcessor::postprocess`].
+/// `events.log` and require [`TraceProcessor::postprocess`]. That path is the
+/// LEGACY/secondary-Rust-writer/test fallback only — NOT produced by live
+/// recording. See the `M23e` audit in
+/// `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
 fn is_new_format(ctfs: &CtfsReader) -> bool {
     ctfs.has_file("steps.dat")
 }
@@ -193,11 +203,16 @@ impl CTFSTraceReader {
     /// in-memory database.
     ///
     /// Automatically detects the container format:
-    /// - **New format** (has `steps.dat`): loads pre-processed data directly,
-    ///   skipping [`TraceProcessor::postprocess`]. Startup is bounded by I/O
-    ///   and decompression, not by trace size.
-    /// - **Old format** (has `events.log`): deserializes events and runs
-    ///   [`TraceProcessor::postprocess`] to build the `Db`.
+    /// - **New format** (has `steps.dat`): the PRODUCTION split-stream format
+    ///   emitted by every live recorder. Loads pre-processed data directly via
+    ///   [`open_new_format_nim`](Self::open_new_format_nim), skipping
+    ///   [`TraceProcessor::postprocess`]. Startup is bounded by I/O and
+    ///   decompression, not by trace size. `events.log` is never read on this
+    ///   path.
+    /// - **Old format** (has `events.log`): the LEGACY/secondary-Rust-writer/
+    ///   test fallback (NOT produced by live recording). Deserializes events and
+    ///   runs [`TraceProcessor::postprocess`] to build the `Db`. See the `M23e`
+    ///   audit in `Trace-Based-Incremental-Testing.milestones.org`.
     ///
     /// # Errors
     ///
@@ -1256,6 +1271,18 @@ impl CTFSTraceReader {
     /// `events.log` and running `TraceProcessor::postprocess` to build
     /// the in-memory `Db`.
     ///
+    /// LEGACY / NON-PRODUCTION PATH (M23e bounding). This `events.log` reader is
+    /// NOT the production path. Production `.ct` bundles are split-stream-only
+    /// (`steps.dat` present) and served by [`open_new_format_nim`] — they never
+    /// reach here. `events.log` survives ONLY as: (a) the secondary Rust
+    /// `CtfsTraceWriter`'s combined stream (not used by live recording),
+    /// (b) test fixtures, and (c) possibly the streaming/follow-mode reader
+    /// (assessed separately in M23e-5). It is deliberately retained — NOT
+    /// removed — so those legacy/test bundles keep opening. See `M23e` in
+    /// `Trace-Based-Incremental-Testing.milestones.org`. The parity between this
+    /// path and the split path is verified by
+    /// `tests/ctfs_split_only_full_db_test.rs`.
+    ///
     /// Trace metadata is read from `meta.dat` — the canonical binary
     /// format defined in `codetracer-specs/Trace-Files/CTFS-Binary-Format.md`
     /// §8.  M-REC-1.5 (pre-1.0) retired the legacy `meta.json` fallback;
@@ -1327,7 +1354,15 @@ impl CTFSTraceReader {
         })
     }
 
-    /// Extract `TraceLowLevelEvent` values from the CTFS container.
+    /// Extract `TraceLowLevelEvent` values from the CTFS container's
+    /// `events.log`.
+    ///
+    /// LEGACY / NON-PRODUCTION PATH (M23e bounding). `events.log` is the
+    /// legacy combined event stream — the secondary Rust `CtfsTraceWriter`
+    /// format, test fixtures, and the streaming/follow-mode reader. It is NOT
+    /// emitted by live recorders (whose split-stream bundles route through
+    /// [`open_new_format_nim`] and never call this). Retained for back-compat
+    /// per `M23e`; do not treat it as the canonical event source.
     ///
     /// Supports three data layouts, detected automatically:
     ///
