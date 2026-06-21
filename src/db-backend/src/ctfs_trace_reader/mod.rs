@@ -179,8 +179,8 @@ impl CTFSTraceReader {
 }
 
 /// Returns `true` if the CTFS container uses the new pre-processed split-stream
-/// format (detected by the presence of `steps.dat`), meaning postprocessing can
-/// be skipped entirely.
+/// format that must be read via the Nim FFI ([`CTFSTraceReader::open_new_format_nim`]),
+/// meaning postprocessing can be skipped entirely.
 ///
 /// This is the PRODUCTION format: the Nim `MultiStreamTraceWriter` that every
 /// live recorder (Ruby/Python/JS/shell) drives via FFI emits ONLY the split
@@ -189,13 +189,33 @@ impl CTFSTraceReader {
 /// [`CTFSTraceReader::open_new_format_nim`], which reads the split streams
 /// directly and never consults `events.log`.
 ///
+/// Detection: `steps.dat` present AND `events.log` ABSENT.
+///
+/// The `events.log`-presence guard is the M23e-4 interop boundary. The
+/// SECONDARY Rust `CtfsTraceWriter` now also DEFAULT-emits the split streams
+/// (M23e-4) — but ADDITIVELY, alongside `events.log` — and its split wire
+/// formats are NOT byte-compatible with the Nim FFI reader for the
+/// step/value/io-event streams (only the `calls.dat` (M20) and the binary
+/// interning tables (M23d) were cross-matched; the Rust `steps.idx`/`values.idx`/
+/// `events.idx` carry a bare `[chunk_size][offsets…]` index and a header-less
+/// chunk layout, whereas the Nim exec/value/event readers expect a
+/// `total_events` header+trailer and a per-chunk u32 count, and the Rust zstd
+/// frames omit the pledged content size the Nim decompressor requires). Routing
+/// such a Rust-writer bundle through the Nim reader yields zero steps/calls. So a
+/// bundle that carries BOTH `steps.dat` and `events.log` is the Rust-writer
+/// combined format: we read it via the LEGACY `events.log` postprocessing path
+/// (which builds the correct full `Db`), and the Rust-side SEEKABLE readers
+/// (`calls.dat`/`steps.dat`/`values.dat`, all written by and matched to the same
+/// Rust crate) still attach for on-demand reads. Only a split-ONLY bundle (the
+/// production Nim writer's `events.log`-free layout) takes the Nim FFI path.
+///
 /// Returns `false` for old-format containers that store raw events in
 /// `events.log` and require [`TraceProcessor::postprocess`]. That path is the
 /// LEGACY/secondary-Rust-writer/test fallback only — NOT produced by live
 /// recording. See the `M23e` audit in
 /// `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
 fn is_new_format(ctfs: &CtfsReader) -> bool {
-    ctfs.has_file("steps.dat")
+    ctfs.has_file("steps.dat") && !ctfs.has_file("events.log")
 }
 
 impl CTFSTraceReader {
@@ -203,16 +223,22 @@ impl CTFSTraceReader {
     /// in-memory database.
     ///
     /// Automatically detects the container format:
-    /// - **New format** (has `steps.dat`): the PRODUCTION split-stream format
-    ///   emitted by every live recorder. Loads pre-processed data directly via
+    /// - **New format** (`steps.dat` present, `events.log` ABSENT): the
+    ///   PRODUCTION split-stream format emitted by every live recorder (the Nim
+    ///   `MultiStreamTraceWriter`). Loads pre-processed data directly via
     ///   [`open_new_format_nim`](Self::open_new_format_nim), skipping
     ///   [`TraceProcessor::postprocess`]. Startup is bounded by I/O and
     ///   decompression, not by trace size. `events.log` is never read on this
     ///   path.
-    /// - **Old format** (has `events.log`): the LEGACY/secondary-Rust-writer/
-    ///   test fallback (NOT produced by live recording). Deserializes events and
-    ///   runs [`TraceProcessor::postprocess`] to build the `Db`. See the `M23e`
-    ///   audit in `Trace-Based-Incremental-Testing.milestones.org`.
+    /// - **Old/combined format** (`events.log` present): the LEGACY/secondary-
+    ///   Rust-writer/test fallback (NOT produced by live recording). Deserializes
+    ///   events and runs [`TraceProcessor::postprocess`] to build the `Db`. This
+    ///   includes the M23e-4 secondary Rust-writer combined bundle, which ALSO
+    ///   ships the split streams additively but whose split wire formats are not
+    ///   Nim-FFI-readable for steps/values/events — see [`is_new_format`] for the
+    ///   interop boundary. The Rust-side seekable streams still attach below for
+    ///   on-demand reads. See the `M23e` audit in
+    ///   `Trace-Based-Incremental-Testing.milestones.org`.
     ///
     /// # Errors
     ///
@@ -2086,11 +2112,28 @@ mod tests {
         let old_ctfs = CtfsReader::open(&old_path).unwrap();
         assert!(!is_new_format(&old_ctfs));
 
-        // New format: has steps.dat
+        // New (production Nim) format: has steps.dat, NO events.log.
         let new_path = dir.path().join("new.ct");
         ctfs_container::write_minimal_ctfs(&new_path, &[("meta.dat", &dat), ("steps.dat", b"data")]).unwrap();
         let new_ctfs = CtfsReader::open(&new_path).unwrap();
         assert!(is_new_format(&new_ctfs));
+
+        // M23e-4 combined (secondary Rust-writer) format: has BOTH steps.dat AND
+        // events.log. This MUST take the legacy events.log path — the Rust split
+        // wire formats are not Nim-FFI-readable for steps/values/events — so
+        // `is_new_format` is false.
+        let combined_path = dir.path().join("combined.ct");
+        ctfs_container::write_minimal_ctfs(
+            &combined_path,
+            &[("meta.dat", &dat), ("steps.dat", b"data"), ("events.log", b"data")],
+        )
+        .unwrap();
+        let combined_ctfs = CtfsReader::open(&combined_path).unwrap();
+        assert!(
+            !is_new_format(&combined_ctfs),
+            "a bundle with both steps.dat and events.log is the Rust-writer combined format \
+             and must read via the legacy events.log path"
+        );
     }
 
     // ── M43: GUI latency benchmarks ────────────────────────────────────
