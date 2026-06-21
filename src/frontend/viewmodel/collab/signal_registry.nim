@@ -120,6 +120,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     vscBackendAuthoritative,
     "Variable data and source excerpt are backend-derived for a debugger tick.")
 
+  # M29 multi-process session surface.
+  entries.addEntry("ProcessTreeVM", "entries", vscBackendAuthoritative,
+    "Process/recording rows mirror the ct/listProcesses backend reply.")
+  entries.addEntry("SessionViewModel", "activeProcessRecordingId",
+    vscSharedSessionViewState,
+    "The active recording selection is shared session view state over a stable recordingId.")
+  entries.addDerived("SessionViewModel", ["crossProcessSpans"])
+
   entries.addEntry("CalltraceVM", "scrollPosition", vscRendererLocal,
     "Viewport scroll offset is a renderer projection, not shared intent.")
   entries.addEntry("CalltraceVM", "viewportHeight", vscRendererLocal,
@@ -155,8 +163,42 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Selected variable path is shared session view state.",
     requiresStableId = true,
     stableIdNote = "String paths are not durable variable identities across backend snapshots.")
+  # M4 Value Origin Tracking surface mirrored onto the State Pane.
+  entries.addEntry("StateVM", "expandedOrigins", vscSharedSessionViewState,
+    "Per-row origin-chain expansion set is shared session view state.",
+    requiresStableId = true,
+    stableIdNote = "VariableId is a (name + scopePath) string key that can drift; needs stable variable ids.")
+  entries.addMany("StateVM", ["breadcrumbStack", "originPreferences"],
+    vscSharedSessionViewState,
+    "Origin breadcrumb navigation and user-mutable badge/chain preferences are shared view state.")
+  entries.addEntry("StateVM", "originSummaries", vscBackendAuthoritative,
+    "Origin summaries are populated from the ct/load-locals backend response.")
+  entries.addEntry("StateVM", "originMetadataMode", vscBackendAuthoritative,
+    "Origin-metadata mode label is bridged from the db-backend ct/originMode reply.")
+  entries.addEntry("StateVM", "lastContextMenu", vscRendererLocal,
+    "Most-recent right-click context menu is a transient local render artefact.")
   entries.addDerived("StateVM", ["currentVariables", "isLoading",
       "codeStateLine"])
+
+  # M4 Value Origin Tracking — dedicated VM behind the State Pane badge,
+  # the side panel, the scratchpad pins, and the editor hover card.
+  entries.addEntry("OriginChainVM", "expandedOrigins",
+    vscSharedSessionViewState,
+    "Per-row origin-chain expansion set is shared session view state.",
+    requiresStableId = true,
+    stableIdNote = "VariableId is a (name + scopePath) string key that can drift; needs stable variable ids.")
+  entries.addMany("OriginChainVM",
+    ["pinnedChains", "breadcrumbStack", "preferences", "sidePanelOpen"],
+    vscSharedSessionViewState,
+    "User-pinned chains, breadcrumb navigation, badge/chain preferences, and side-panel visibility are shared logical view state.")
+  entries.addMany("OriginChainVM",
+    ["activeChain", "loading", "inFlightSummary", "lastResolvedSummaries"],
+    vscBackendAuthoritative,
+    "Resolved chains/summaries and their request-lifecycle loading flags come from ct/originChain + ct/originSummary backend responses.")
+  entries.addMany("OriginChainVM",
+    ["placeholderFillQueue", "latestRequestId"],
+    vscRendererLocal,
+    "Pending-fill queue and the stale-response request counter are local request-batching bookkeeping.")
 
   entries.addEntry("EventLogVM", "selectedRow", vscSharedSessionViewState,
     "Event-log selection is logical session state.",
@@ -170,7 +212,28 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
       "loadingState"],
     vscBackendAuthoritative,
     "Event-log rows/count/loading are backend query results.")
-  entries.addDerived("EventLogVM", ["totalPages", "isLoading"])
+  # M25b correlation-marker surface. The marker rows, the per-key
+  # counterpart cache, and the load banner are all populated from
+  # backend responses (`ct/event-load`, `ct/pairIndexLookup`,
+  # `ct/markerLoad*` DAP events), so they are backend facts that must
+  # stream from the owning peer rather than CRDT-merge between users.
+  entries.addMany("EventLogVM",
+    ["markerRows", "counterpartCache", "loadingBanner", "emptyState"],
+    vscBackendAuthoritative,
+    "Marker rows/cache/load-banner/empty-state are derived from backend marker responses.")
+  # The toast is a one-time, per-workspace discovery hint with no
+  # collaborative meaning; the dismissal log persists locally through
+  # the preferences bridge (spec §7). Both stay renderer-local.
+  entries.addMany("EventLogVM", ["toastState", "dismissedWorkspaces"],
+    vscRendererLocal,
+    "Discovery toast and its per-workspace dismissal log are local UI hints.")
+  # `filterBar` is the parsed projection of `searchQuery` (already
+  # shared). It is a mutable signal rather than a memo, but it carries
+  # the same shared filter intent.
+  entries.addEntry("EventLogVM", "filterBar", vscSharedSessionViewState,
+    "Parsed marker filter bar mirrors the shared search/filter intent.")
+  entries.addDerived("EventLogVM",
+    ["totalPages", "isLoading", "visibleMarkerRows"])
 
   entries.addMany("FlowVM", ["flowMode", "showRawValues"],
     vscSharedSessionViewState,
@@ -237,9 +300,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     requiresStableId = true,
     stableIdNote = "Point rows need stable ids before concurrent list operations.")
 
-  entries.addMany("ScratchpadVM", ["entries", "localsByExpression"],
+  entries.addMany("ScratchpadVM",
+    ["entries", "localsByExpression", "chainEntries"],
     vscSharedSessionViewState,
-    "Scratchpad/watch-like entries are user-authored shared session state.")
+    "Scratchpad/watch-like entries (including pinned origin-chain entries) are user-authored shared session state.")
   entries.addDerived("ScratchpadVM", ["isEmpty", "rowCount"])
 
   entries.addMany("ShellVM", ["inputBuffer", "scrollPosition", "historyIndex"],
