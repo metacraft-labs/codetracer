@@ -564,6 +564,23 @@ impl<'a> CallFlowPreloader<'a> {
         let mut before_first_move = true;
         // let tracked_call_key_result = self.call_key_from(&self.location);
         let mut tracked_call_key = NO_KEY;
+
+        // Stall detection for forward-only (non-materialized / MCR streaming)
+        // replay. Materialized traces delimit the active call via `call_key`
+        // changes; MCR locations carry only a frame-depth call key, and a
+        // line-granularity `Step{Next}` over a function's epilogue (the
+        // closing `}` / return sequence) can single-step many instructions
+        // that all map to the SAME source line and SAME call depth before the
+        // function actually returns. Without a stall guard the flow walker
+        // re-issues `Step{Next}` up to STEP_COUNT_LIMIT (10000) times on that
+        // one line, which makes `ct/load-flow` take far longer than the DAP
+        // client's flow-event timeout. When the same (line, call_key) repeats
+        // for `MAX_NONPROGRESSING_STEPS` consecutive steps we treat the
+        // function body as exhausted and finish the flow — the values for
+        // every distinct source line in the call have already been captured.
+        const MAX_NONPROGRESSING_STEPS: i64 = 8;
+        let mut last_seen_line: i64 = -1;
+        let mut nonprogressing_steps: i64 = 0;
         // match tracked_call_key_result {
         //     Ok(call_key) => {
         //         tracked_call_key = call_key;
@@ -607,6 +624,25 @@ impl<'a> CallFlowPreloader<'a> {
                 "  location for step count {}: {}:{}",
                 step_count, new_location.path, new_location.line
             );
+
+            // Forward-only stall guard (see MAX_NONPROGRESSING_STEPS above).
+            // Only applies to non-materialized traces; materialized traces
+            // already terminate precisely via call_key changes.
+            if self.trace_kind != TraceKind::Materialized && self.mode == FlowMode::Call {
+                if new_location.line == last_seen_line {
+                    nonprogressing_steps += 1;
+                    if nonprogressing_steps >= MAX_NONPROGRESSING_STEPS {
+                        info!(
+                            "  flow: line {} repeated {} times without progress — finishing flow",
+                            new_location.line, nonprogressing_steps
+                        );
+                        break;
+                    }
+                } else {
+                    nonprogressing_steps = 0;
+                    last_seen_line = new_location.line;
+                }
+            }
 
             let new_call_key = match self.call_key_from(&new_location) {
                 Ok(call_key) => call_key,
