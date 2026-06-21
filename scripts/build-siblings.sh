@@ -287,6 +287,25 @@ build_sibling \
 	ct_cli/ct_cli \
 	"just build-ct-mcr"
 
+# JavaScript recorder (Node CLI + napi-rs native addon).
+#
+# The canonical build is the recorder repo's own `just build` recipe, which
+# runs `just build-native` (`npx napi build --release` for the
+# crates/recorder_native addon) followed by `npm run build` (TypeScript ->
+# dist for every npm workspace).  Both steps need the workspace's
+# node_modules, so prime them with `npm install` first; npm install is cheap
+# and idempotent on re-runs.  The artifact `scripts/detect-siblings.sh` and
+# `ci/test/ct-providers.sh` look for is the compiled CLI entrypoint at
+# packages/cli/dist/index.js (the JS recorder surfaced on PATH as
+# codetracer-js-recorder).  Without this entry `build-siblings.sh --only
+# codetracer-js-recorder` matched nothing, so CI never built the JS recorder
+# and all JS-gated ViewModel / node:test recording assertions silently
+# skipped.
+build_sibling \
+	codetracer-js-recorder \
+	packages/cli/dist/index.js \
+	"npm install && just build"
+
 # Ruby native extension.  The build target installs into the gem dir; the
 # detect-siblings check is for the wrapper binary at
 # gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder.
