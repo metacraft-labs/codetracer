@@ -359,6 +359,7 @@ dependencies = [
  "serde",
  "serde_json",
  "zeekstd",
+ "zstd",
 ]
 
 [[package]]

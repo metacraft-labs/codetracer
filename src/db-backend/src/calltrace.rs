@@ -40,16 +40,40 @@ impl Calltrace {
     pub fn new(reader: &dyn TraceReader) -> Self {
         let mut call_states = DistinctVec::new();
         let mut calls = DistinctVec::new();
-        for call_key_int in 0..reader.call_count() {
-            let call_key = CallKey(call_key_int as i64);
-            let call_record = reader.call(call_key).expect("Calltrace::new: invalid call key");
-            call_states.push(CallState {
-                expanded: false,
-                hidden_children: false,
-                non_expanded_kind: CalltraceNonExpandedKind::Calls,
-                children_count: call_record.children_keys.len(),
-            });
-            calls.push(call_record.clone());
+
+        // M17b — prefer the SEEKABLE `calls.dat` path when the reader exposes
+        // one: the call tree then loads independently from `calls.dat`
+        // (decompressing only the chunks it touches) rather than from the
+        // fully-materialized `Db`. A reader without a seekable stream (legacy
+        // `.ct`, or the in-memory/test readers) returns `None` and we fall back
+        // to the borrowing `call`/`call_count` path — identical behaviour to
+        // before.
+        if let Some(seekable_count) = reader.seekable_call_count() {
+            for call_key_int in 0..seekable_count {
+                let call_key = CallKey(call_key_int as i64);
+                let call_record = reader
+                    .seekable_call(call_key)
+                    .expect("Calltrace::new: invalid seekable call key");
+                call_states.push(CallState {
+                    expanded: false,
+                    hidden_children: false,
+                    non_expanded_kind: CalltraceNonExpandedKind::Calls,
+                    children_count: call_record.children_keys.len(),
+                });
+                calls.push(call_record);
+            }
+        } else {
+            for call_key_int in 0..reader.call_count() {
+                let call_key = CallKey(call_key_int as i64);
+                let call_record = reader.call(call_key).expect("Calltrace::new: invalid call key");
+                call_states.push(CallState {
+                    expanded: false,
+                    hidden_children: false,
+                    non_expanded_kind: CalltraceNonExpandedKind::Calls,
+                    children_count: call_record.children_keys.len(),
+                });
+                calls.push(call_record.clone());
+            }
         }
         let global_call_lines = DistinctVec::new();
 

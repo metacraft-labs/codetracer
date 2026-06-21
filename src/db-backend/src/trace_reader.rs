@@ -110,6 +110,37 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// Total number of recorded calls.
     fn call_count(&self) -> usize;
 
+    // ── Seekable call tree (M17b) ────────────────────────────────────
+    //
+    // The default `call`/`call_count` above serve the call tree from a
+    // fully-materialized `Db`. A SEEKABLE reader (the db-backend's
+    // `CTFSTraceReader` over a `has_call_stream` `.ct`) can instead serve the
+    // call tree ON DEMAND from the dedicated `calls.dat` stream, decompressing
+    // only the chunk a request needs — so a network-loaded `.ct` never
+    // materializes the whole call tree (Trace-Files-Overview.md §"Random-access
+    // seeking"; trace-events.md "Call tree loads independently … no step
+    // scanning needed").
+    //
+    // These are additive, default-`None` hooks so every existing reader keeps
+    // its current behaviour; consumers that want the seekable path (e.g.
+    // `Calltrace::new`) check `seekable_call_count()` first and fall back to the
+    // materialized `call`/`call_count` when it is `None`.
+
+    /// `Some(n)` when this reader serves the call tree from a SEEKABLE
+    /// `calls.dat` stream (on-demand, not from a materialized `Db`), where `n`
+    /// is the call count; `None` for fully-materialized readers.
+    fn seekable_call_count(&self) -> Option<usize> {
+        None
+    }
+
+    /// Fetch one call by key from the SEEKABLE `calls.dat` stream, decompressing
+    /// only the chunk that holds it. Returns an OWNED [`DbCall`] (the seekable
+    /// path does not keep calls resident, unlike the borrowing `call`). Returns
+    /// `None` when this reader has no seekable stream or the key is out of range.
+    fn seekable_call(&self, _key: CallKey) -> Option<DbCall> {
+        None
+    }
+
     // ── Events ──────────────────────────────────────────────────────
 
     /// All recorded events, in order.

@@ -4,6 +4,7 @@ import
   launch/[launch, help_delegate],
   ../frontend/viewmodel/agent_evidence,
   cli/e2e_tests,
+  ../ct_test/incremental_cli,
   codetracerconf, confutils,
   version
 
@@ -56,7 +57,15 @@ try:
   when not defined(js):
     let args = commandLineParams()
     if args.len > 0 and args[0] == "test":
-      quit(runE2eTestCli(args[1 .. ^1]))
+      # M18: `ct test --incremental ...` performs standalone trace-based
+      # incremental test selection (record a baseline, decide skip-vs-rerun)
+      # WITHOUT reprobuild, reusing the proven engine vendored under src/ct_test.
+      # The existing `ct test e2e ...` reprobuild-HCR surface is unchanged: only
+      # the explicit `--incremental` token is intercepted here.
+      let testArgs = args[1 .. ^1]
+      if testArgs.len > 0 and testArgs[0] == "--incremental":
+        quit(runIncremental(testArgs[1 .. ^1]))
+      quit(runE2eTestCli(testArgs))
 
     # M7 / M8: the help-delegate ``ct-complete`` / ``ct-completions``
     # subcommands take *raw* arguments that may legitimately start

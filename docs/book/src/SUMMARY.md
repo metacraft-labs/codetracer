@@ -32,6 +32,7 @@
   - [Graphical interface](./usage_guide/gui.md)
   - [Visual recordings](./usage_guide/visual_recordings.md)
   - [Tracepoints](./usage_guide/tracepoints.md)
+  - [Incremental Testing](./usage_guide/incremental-testing.md)
   - [Value Origin Tracking](./usage_guide/value-origin-tracking.md)
   - [Cross-Tracer Demo](./usage_guide/cross-tracer-demo.md)
   - [Variable Rename List](./usage_guide/variable-rename-list.md)
