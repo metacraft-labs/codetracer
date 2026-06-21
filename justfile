@@ -1955,6 +1955,97 @@ test-vm-js: vm-test-prereqs
 # Run ViewModel headless tests on both native and JS backends.
 test-vm: test-vm-native test-vm-js
 
+# Compile + run the recorder-gated ViewModel headless tests that live under
+# src/frontend/viewmodel/tests/unit/ (the column-aware / formatted-view /
+# statement-step suites).  These are NOT covered by `test-vm` above, which
+# only globs src/tests/gui/tests/*_test.nim — these files are named
+# test_*_vm.nim and sit in the viewmodel unit dir, so without this recipe they
+# never ran in CI at all.
+#
+# Each of these tests drives a real recorder (the JS recorder for the core M1
+# column-breakpoint / formatted-view / statement-step cases) plus the same-repo
+# replay-server, then asserts column/value flow end-to-end.  They route a
+# missing recorder sibling through recorder_gate's uniform
+# `MISSING-RECORDER SKIP:` marker rather than failing.  To make them actually
+# RUN (instead of silently skipping) this recipe first builds the JS recorder
+# sibling via scripts/build-siblings.sh (the canonical `direnv exec <repo> just
+# build` path) and ensures replay-server is built, then guards against the
+# vacuous all-skipped outcome so a missing recorder can't masquerade as a pass.
+test-vm-recorder-gated: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-recorder-gated.log) 2>&1
+  echo "=== Recorder-gated ViewModel tests (JS recorder + replay-server) ==="
+
+  # Build the JS recorder sibling so CODETRACER_JS_RECORDER_PATH resolves and
+  # the JS-gated tests run for real.  build-siblings.sh reports its own
+  # per-repo PASS/SKIP/FAIL and exits non-zero on a build failure.
+  bash scripts/build-siblings.sh --only codetracer-js-recorder
+
+  # replay-server is a same-repo cargo artefact the tests fail loudly without.
+  if [ ! -x src/db-backend/target/debug/replay-server ] \
+     && [ ! -x src/db-backend/target/release/replay-server ] \
+     && [ ! -x src/build-debug/bin/replay-server ]; then
+    echo "Building replay-server (db-backend) ..."
+    (cd src/db-backend && cargo build --bin replay-server)
+  fi
+
+  # Discover the sibling recorders / tools the tests look up by env var.
+  source scripts/detect-siblings.sh
+
+  failed=0
+  passed=0
+  skipped=0
+  for f in $(find src/frontend/viewmodel/tests/unit \
+      -name 'test_column_*_vm.nim' \
+      -o -name 'test_formatted_view_step_*_vm.nim' \
+      -o -name 'test_statement_step_*_vm.nim' | sort); do
+    name=$(basename "$f" .nim)
+    cache="/tmp/ct-nim-cache/vm-gated-$name"
+    echo -n "  $f ... "
+    output=$(nim c -r --hints:off \
+      --path:src/frontend/viewmodel \
+      --nimcache:"$cache" \
+      -o:"$cache/$name" \
+      "$f" 2>&1) || true
+    oks=$(echo "$output" | grep -c '\[OK\]' || true)
+    fails=$(echo "$output" | grep -c '\[FAILED\]' || true)
+    skips=$(echo "$output" | grep -c 'MISSING-RECORDER SKIP:' || true)
+    if [ "$fails" -gt 0 ]; then
+      echo "FAILED ($oks OK, $fails FAILED)"
+      echo "$output" | grep '\[FAILED\]' | sed 's/^/    /'
+      failed=$((failed + 1))
+    elif [ "$skips" -gt 0 ]; then
+      echo "SKIPPED (missing recorder)"
+      echo "$output" | grep 'MISSING-RECORDER SKIP:' | head -1 | sed 's/^/    /'
+      skipped=$((skipped + 1))
+    elif [ "$oks" -eq 0 ]; then
+      echo "COMPILE ERROR / no tests ran"
+      echo "$output" | grep 'Error:' | head -2 | sed 's/^/    /'
+      failed=$((failed + 1))
+    else
+      echo "OK ($oks tests)"
+      passed=$((passed + 1))
+    fi
+  done
+
+  echo ""
+  echo "Recorder-gated VM: $passed passed, $skipped skipped, $failed failed"
+  # Zero-test guard (Cross-Repo-CI-Integration.md "Zero-Test Guard"): when CI
+  # builds the JS recorder sibling, these tests MUST run — an all-skipped /
+  # all-empty outcome means the recorder wasn't actually wired in, which is a
+  # silent cross-repo coverage gap, so fail it.
+  if [ "$failed" -gt 0 ]; then
+    exit 1
+  fi
+  if [ "$passed" -eq 0 ]; then
+    echo "ERROR: no recorder-gated ViewModel test ran (all skipped/empty)." >&2
+    echo "  The JS recorder sibling was expected to be built — see" >&2
+    echo "  codetracer-specs/Testing/Cross-Repo-CI-Integration.md (Zero-Test Guard)." >&2
+    exit 1
+  fi
+
 # Run the headless agentic CodeTracer matrix. This invokes Agent Harbor's
 # existing CodeTracer contract E2E tests for the real REST/scenario side, then
 # runs the CodeTracer service/ViewModel/DeepReview headless matrix.

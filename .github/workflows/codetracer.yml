@@ -1293,6 +1293,32 @@ jobs:
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
+      - name: Clone codetracer-js-recorder sibling
+        # The recorder-gated ViewModel tests
+        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
+        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
+        # column-aware trace and replay it through headless_session.  Without
+        # the sibling on disk they all hit recorder_gate's
+        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
+        # / statement-step coverage silently vanished from CI.  Clone it into
+        # the workspace-sibling layout the tests resolve
+        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
+        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: main
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.app-token.outputs.token }}
+          submodules: 'false'
+
+      - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
+        # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
+        # replay-server, then runs the recorder-gated unit VM suites with a
+        # zero-test guard that fails if they all skip (so a missing recorder
+        # cannot masquerade as a pass).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
