@@ -75,7 +75,7 @@ package codetracerReprobuildHcrMcrDap:
         ]),
       inputs = @["hcr_target.nim"],
       outputs = @["build/hcr_target"],
-      dependencyPolicy = declaredOnlyDependencyPolicy())
+      dependencyPolicy = defaultDependencyPolicy())
 
     let runTarget = buildAction("run-hcr-target",
       codetracerReprobuildHcrMcrDap.executable("sh").subcmd_2d_c(
