@@ -271,10 +271,8 @@ pub fn nim_local_source_name(recorded: &str) -> Option<String> {
     // This rules out the obvious compiler temporaries which either start with
     // an uppercase-`T`/`TM`/`FR` prefix followed by digits, contain a `:` (Nim
     // keeps `:tmp`-style names in some lowerings), or are bare hash blobs.
-    let stripped = recorded.strip_suffix(|c: char| c.is_ascii_digit());
-    if stripped.is_none() {
-        return None;
-    }
+    // Require a trailing digit run; bail out early when the name has none.
+    recorded.strip_suffix(|c: char| c.is_ascii_digit())?;
 
     // Find where the trailing run of digits begins.
     let digits_start = recorded
@@ -305,8 +303,12 @@ fn is_plausible_nim_source_ident(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
-    let mut chars = name.chars();
-    let first = chars.next().unwrap();
+    // `name` is non-empty (checked above), so the first char is always present;
+    // fall back to rejecting the name rather than unwrapping under the crate's
+    // `deny(clippy::unwrap_used)` policy.
+    let Some(first) = name.chars().next() else {
+        return false;
+    };
     if !(first.is_ascii_alphabetic() || first == '_') {
         return false;
     }
