@@ -5,8 +5,8 @@ use log::{info, warn};
 use num_bigint::BigInt;
 
 use codetracer_trace_types::{
-    CallKey, FullValueRecord, FunctionId, FunctionRecord, NO_KEY, PathId, Place, StepId, TypeId, TypeKind, TypeRecord,
-    TypeSpecificInfo, ValueRecord, VariableId,
+    CallKey, FullValueRecord, FunctionId, FunctionRecord, Line, NO_KEY, PathId, Place, StepId, TypeId, TypeKind,
+    TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
 };
 
 use crate::db::{CellChange, DbCall, DbRecordEvent, DbStep, EndOfProgram, NEXT_INTERNAL_STEP_OVERS_LIMIT};
@@ -139,6 +139,73 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// `None` when this reader has no seekable stream or the key is out of range.
     fn seekable_call(&self, _key: CallKey) -> Option<DbCall> {
         None
+    }
+
+    // ── Seekable step + value streams (M22) ──────────────────────────
+    //
+    // M17b made the CALL tree seekable; the per-step source LINE and the
+    // per-step VARIABLE VALUES still came from a fully-materialized `Db`. These
+    // additive, default-`None` hooks let a SEEKABLE reader (the db-backend's
+    // `CTFSTraceReader` over a `has_step_stream` + `has_value_stream` `.ct`)
+    // serve a step's line and a step's variable values ON DEMAND from
+    // `steps.dat`/`values.dat`, decompressing only the chunk a request needs —
+    // so a network-loaded `.ct` never materializes the whole step/value stream
+    // (Trace-Files-Overview.md §"Random-access seeking").
+    //
+    // As with the call hooks, these are default-`None` so every existing reader
+    // keeps its current behaviour; consumers that want the seekable path check
+    // the count hook first and fall back to the materialized
+    // `step`/`variables_at` when it is `None`.
+
+    /// `Some(n)` when this reader serves the step timeline from a SEEKABLE
+    /// `steps.dat` stream (on-demand, not from a materialized `Db`), where `n`
+    /// is the step-record count; `None` for fully-materialized readers.
+    fn seekable_step_count(&self) -> Option<usize> {
+        None
+    }
+
+    /// Fetch the `(path_id, line)` of a step from the SEEKABLE `steps.dat`
+    /// stream, decompressing only the chunk that holds it. Returns `None` when
+    /// this reader has no seekable stream, the id is out of range, or the record
+    /// at that index carries no source line (a Raise/Catch/ThreadSwitch marker).
+    fn seekable_step_line(&self, _step_id: StepId) -> Option<(PathId, Line)> {
+        None
+    }
+
+    /// `Some(n)` when this reader serves per-step variable values from a SEEKABLE
+    /// `values.dat` stream (on-demand), where `n` is the value-record count
+    /// (== step count by the parallel-index invariant); `None` otherwise.
+    fn seekable_value_count(&self) -> Option<usize> {
+        None
+    }
+
+    /// Fetch the variable values visible at a step from the SEEKABLE
+    /// `values.dat` stream, decompressing only the chunk that holds it. Returns
+    /// OWNED [`FullValueRecord`]s (an empty vec for a step with no variable
+    /// activity). Returns `None` when this reader has no seekable stream or the
+    /// id is out of range.
+    fn seekable_variables_at(&self, _step_id: StepId) -> Option<Vec<FullValueRecord>> {
+        None
+    }
+
+    /// Per-step variable values as an OWNED vec, PREFERRING the seekable
+    /// `values.dat` stream when present and falling back to the materialized
+    /// `variables_at` otherwise.
+    ///
+    /// This is the M22 production read path for step variables: the DAP
+    /// variable handlers (`load_locals`, `load_value`) call it so a
+    /// `has_value_stream` `.ct` reads a step's values ON DEMAND from
+    /// `values.dat` (bounded decompression) instead of from a fully-materialized
+    /// `Db`. The fallback keeps legacy (flag-off) bundles bit-for-bit unchanged.
+    ///
+    /// Returns `None` only when the step id is out of range on BOTH paths.
+    fn variables_at_owned(&self, step_id: StepId) -> Option<Vec<FullValueRecord>> {
+        if self.seekable_value_count().is_some()
+            && let Some(values) = self.seekable_variables_at(step_id)
+        {
+            return Some(values);
+        }
+        self.variables_at(step_id).map(|v| v.to_vec())
     }
 
     // ── Events ──────────────────────────────────────────────────────

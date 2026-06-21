@@ -6,6 +6,7 @@
 pub mod call_stream_source;
 pub mod ctfs_container;
 pub mod meta_dat;
+pub mod step_value_stream_source;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -106,6 +107,22 @@ pub struct CTFSTraceReader {
     /// reader don't re-open the container. Always `None` for legacy (flag-off)
     /// traces, which keep the existing fully-materialized path unchanged.
     call_stream: Option<std::sync::Arc<call_stream_source::SeekableCallStream>>,
+    /// M22 — the SEEKABLE `steps.dat` execution stream.
+    ///
+    /// `Some` only when the container advertises `has_step_stream` (bit 9) AND
+    /// ships `steps.dat`/`steps.idx`. When present, a step's source `(path_id,
+    /// line)` is served ON DEMAND from `steps.dat` via `seekable_step_line`
+    /// (decompressing only the needed chunk) rather than from the materialized
+    /// `db.steps`. Always `None` for legacy (flag-off) traces.
+    step_stream: Option<std::sync::Arc<step_value_stream_source::SeekableStepStream>>,
+    /// M22 — the SEEKABLE `values.dat` parallel value stream.
+    ///
+    /// `Some` only when the container advertises `has_value_stream` (bit 10) AND
+    /// ships `values.dat`/`values.idx`. When present, a step's variable values
+    /// are served ON DEMAND from `values.dat` via `seekable_variables_at`
+    /// rather than from the materialized `db.variables`. Always `None` for
+    /// legacy (flag-off) traces.
+    value_stream: Option<std::sync::Arc<step_value_stream_source::SeekableValueStream>>,
 }
 
 impl CTFSTraceReader {
@@ -152,6 +169,11 @@ impl CTFSTraceReader {
             // stream), so there is no seekable `calls.dat` to attach. The
             // fully-materialized `db.calls` serves the call tree.
             call_stream: None,
+            // The seekable `steps.dat`/`values.dat` streams (if any) are attached
+            // centrally by `open()`, which has the `.ct` path. `from_*`
+            // constructors that lack a path leave these `None`.
+            step_stream: None,
+            value_stream: None,
         })
     }
 }
@@ -225,6 +247,50 @@ impl CTFSTraceReader {
             Ok(None) => None,
             Err(e) => {
                 info!("CTFS: calls.dat present but unreadable ({e}); falling back to materialized call tree");
+                None
+            }
+        };
+
+        // M22 — attach the SEEKABLE `steps.dat` execution stream when the
+        // container advertises one (`has_step_stream`). A step's source line is
+        // then served on-demand from `steps.dat` (bounded decompression) rather
+        // than from the materialized `db.steps`. A flag-off container yields
+        // `None`, preserving the existing fully-materialized behaviour exactly.
+        // A present-but-corrupt stream is logged and ignored (we keep the
+        // materialized `db.steps` fallback) rather than failing the open.
+        reader.step_stream = match step_value_stream_source::SeekableStepStream::open(path) {
+            Ok(Some(stream)) => {
+                info!(
+                    "CTFS: seekable steps.dat attached ({} steps, chunk_size {}) — step lines served on-demand",
+                    stream.step_count(),
+                    stream.chunk_size(),
+                );
+                Some(std::sync::Arc::new(stream))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                info!("CTFS: steps.dat present but unreadable ({e}); falling back to materialized step table");
+                None
+            }
+        };
+
+        // M22 — attach the SEEKABLE `values.dat` parallel value stream when the
+        // container advertises one (`has_value_stream`). A step's variable values
+        // are then served on-demand from `values.dat` rather than from the
+        // materialized `db.variables`. Same fall-back/back-compat discipline as
+        // the step stream above.
+        reader.value_stream = match step_value_stream_source::SeekableValueStream::open(path) {
+            Ok(Some(stream)) => {
+                info!(
+                    "CTFS: seekable values.dat attached ({} value records, chunk_size {}) — step values served on-demand",
+                    stream.value_count(),
+                    stream.chunk_size(),
+                );
+                Some(std::sync::Arc::new(stream))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                info!("CTFS: values.dat present but unreadable ({e}); falling back to materialized value table");
                 None
             }
         };
@@ -536,6 +602,11 @@ impl CTFSTraceReader {
             // BEAM sidecar bundles ship a JSONL session log, not a `calls.dat`
             // call stream, so there is no seekable stream to attach.
             call_stream: None,
+            // The seekable `steps.dat`/`values.dat` streams (if any) are attached
+            // centrally by `open()`, which has the `.ct` path. `from_*`
+            // constructors that lack a path leave these `None`.
+            step_stream: None,
+            value_stream: None,
         }))
     }
 
@@ -1173,6 +1244,11 @@ impl CTFSTraceReader {
             // `open()`, which has the `.ct` path. `from_*` constructors that
             // lack a path leave this `None`.
             call_stream: None,
+            // The seekable `steps.dat`/`values.dat` streams (if any) are attached
+            // centrally by `open()`, which has the `.ct` path. `from_*`
+            // constructors that lack a path leave these `None`.
+            step_stream: None,
+            value_stream: None,
         })
     }
 
@@ -1243,6 +1319,11 @@ impl CTFSTraceReader {
             column_capabilities,
             // Attached centrally by `open()` (which has the `.ct` path).
             call_stream: None,
+            // The seekable `steps.dat`/`values.dat` streams (if any) are attached
+            // centrally by `open()`, which has the `.ct` path. `from_*`
+            // constructors that lack a path leave these `None`.
+            step_stream: None,
+            value_stream: None,
         })
     }
 
@@ -1470,6 +1551,32 @@ impl TraceReader for CTFSTraceReader {
 
     fn seekable_call(&self, key: CallKey) -> Option<DbCall> {
         self.call_stream.as_ref().and_then(|s| s.call(key))
+    }
+
+    // ── Seekable step + value streams (M22) ──────────────────────────
+    //
+    // When the container ships `has_step_stream` / `has_value_stream` streams,
+    // a step's source line and a step's variable values are served on-demand
+    // from `steps.dat` / `values.dat` (decompressing only the needed chunk).
+    // The materialized `db.steps` / `db.variables` remain populated for the
+    // borrowing `step` / `variables_at` above (so other consumers and the
+    // legacy path keep working), but the seekable hooks let the production DAP
+    // variable path read values WITHOUT scanning the whole materialized stream.
+
+    fn seekable_step_count(&self) -> Option<usize> {
+        self.step_stream.as_ref().map(|s| s.step_count())
+    }
+
+    fn seekable_step_line(&self, step_id: StepId) -> Option<(PathId, Line)> {
+        self.step_stream.as_ref().and_then(|s| s.step_line(step_id))
+    }
+
+    fn seekable_value_count(&self) -> Option<usize> {
+        self.value_stream.as_ref().map(|s| s.value_count())
+    }
+
+    fn seekable_variables_at(&self, step_id: StepId) -> Option<Vec<FullValueRecord>> {
+        self.value_stream.as_ref().and_then(|s| s.variables_at(step_id))
     }
 
     // ── Events ──────────────────────────────────────────────────────

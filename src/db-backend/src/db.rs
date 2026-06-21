@@ -2296,11 +2296,11 @@ impl ReplaySession for MaterializedReplaySession {
     }
 
     fn load_locals(&mut self, arg: CtLoadLocalsArguments) -> Result<Vec<VariableWithRecord>, Box<dyn Error>> {
-        let variables_for_step = self
-            .reader
-            .variables_at(self.step_id)
-            .map(|v| v.to_vec())
-            .unwrap_or_default();
+        // M22 — prefer the SEEKABLE `values.dat` stream when the trace ships one
+        // (`variables_at_owned` reads the step's values on-demand, decompressing
+        // only the needed chunk); fall back to the materialized `db.variables`
+        // for legacy (flag-off) traces.
+        let variables_for_step = self.reader.variables_at_owned(self.step_id).unwrap_or_default();
         let full_value_locals: Vec<VariableWithRecord> = variables_for_step
             .iter()
             .map(|v| VariableWithRecord {
@@ -2361,8 +2361,10 @@ impl ReplaySession for MaterializedReplaySession {
         // TODO: a more optimal way: cache a hashmap? or change structure?
         // or again start directly loading available values matching all expressions in the same time?:
         //   taking a set of expressions: probably best(maybe add an additional load_values)
-        if let Some(variables) = self.reader.variables_at(self.step_id) {
-            for variable in variables {
+        // M22 — prefer the SEEKABLE `values.dat` stream (on-demand, bounded
+        // decompression) when present; fall back to the materialized table.
+        if let Some(variables) = self.reader.variables_at_owned(self.step_id) {
+            for variable in &variables {
                 let name = self.reader.variable_name(variable.variable_id).unwrap_or("");
                 if name == expression {
                     return Ok(self.to_value_record_with_type(&variable.value.clone()));

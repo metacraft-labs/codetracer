@@ -29,6 +29,16 @@ use crate::trace_reader::TraceReader;
 /// on-demand `calls.dat` stream (see
 /// [`crate::ctfs_trace_reader::call_stream_source`]).
 ///
+/// M22 extends the seek-off-the-full-load fix to the EXECUTION + VALUE streams:
+/// when a `.ct` ships `steps.dat`/`values.dat` (the `has_step_stream` /
+/// `has_value_stream` flags), the production DAP variable path
+/// (`Db::load_locals` / `Db::load_value` via the trait's
+/// [`variables_at_owned`](crate::trace_reader::TraceReader::variables_at_owned))
+/// and step-line lookups are served ON DEMAND from those streams by
+/// [`CTFSTraceReader`](crate::ctfs_trace_reader::CTFSTraceReader) (decompressing
+/// only the needed chunk), NOT from a fully-materialized `Db` (see
+/// [`crate::ctfs_trace_reader::step_value_stream_source`]).
+///
 /// `InMemoryTraceReader` is therefore intentionally retained ONLY as:
 ///   - a test adapter (`db.rs`, `tracepoint_interpreter`, `diff.rs` test/helper
 ///     paths construct a small `Db` directly), and
@@ -39,6 +49,25 @@ use crate::trace_reader::TraceReader;
 ///
 /// It must NEVER be the reader for a large/network-loaded materialized `.ct`;
 /// those flow through [`CTFSTraceReader::open`](crate::ctfs_trace_reader::CTFSTraceReader::open).
+///
+/// ## What still materializes a full `Db` after M22 (the honest remainder)
+///
+/// M22 retires the step/value FULL-LOAD on the live DAP/network read path. Two
+/// paths still operate over a resident `Db` BY DESIGN, and are NOT the
+/// network/large-trace GUI path:
+///   - **`diff.rs::index_diff`** — a batch CLI subcommand. It opens via
+///     [`CTFSTraceReader::open`] but then `clone()`s the whole `Db` into an
+///     `InMemoryTraceReader` to drive `FlowPreloader` / `MaterializedReplaySession`,
+///     which scan the ENTIRE trace to index per-line flow. Making that seekable
+///     means rewriting the flow preloader to not need a resident `Db` — a larger
+///     refactor scoped out of this milestone.
+///   - **Cell / compound history** (`cell_changes_for`, `compound_at`,
+///     `cells_at`, `variable_cells_at`) — still served from the materialized
+///     `Db`. The value stream carries the underlying `Cell*`/`Assign*` events
+///     ([`step_value_stream_source`](crate::ctfs_trace_reader::step_value_stream_source)
+///     documents this), but reconstructing the cross-step cell-change index
+///     on-demand is a follow-up; the per-step VARIABLE SNAPSHOT (the dominant
+///     DAP variable view) is the part M22 makes seekable.
 #[derive(Debug, Clone)]
 pub struct InMemoryTraceReader {
     pub db: Db,

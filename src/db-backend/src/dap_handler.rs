@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use codetracer_trace_types::{
-    CallKey, EventLogKind, FullValueRecord, Line, NO_KEY, PathId, StepId, TypeKind, VariableId,
+    CallKey, EventLogKind, Line, NO_KEY, PathId, StepId, TypeKind, VariableId,
 };
 
 use crate::calltrace::Calltrace;
@@ -5554,8 +5554,11 @@ impl Handler {
             )?;
             return Ok(());
         }
-        let empty_vars: Vec<FullValueRecord> = vec![];
-        let vars_slice = self.reader.variables_at(self.step_id).unwrap_or(&empty_vars);
+        // M22 — prefer the SEEKABLE `values.dat` stream (on-demand, bounded
+        // decompression) when the trace ships one; fall back to the materialized
+        // table for legacy bundles. Owned vec so the closure below can call other
+        // `&self.reader` methods without a borrow conflict.
+        let vars_slice = self.reader.variables_at_owned(self.step_id).unwrap_or_default();
         // §P6.4 — surrounding step position threaded into the
         // per-position resolver, computed once per frame.
         let (file, line, col) = self.current_step_location();
