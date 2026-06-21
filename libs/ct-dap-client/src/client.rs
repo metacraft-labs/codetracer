@@ -148,6 +148,23 @@ impl DapStdioClient {
         for (key, value) in extra_envs {
             command.env(*key, *value);
         }
+        // Put db-backend (and every process it spawns — ct-native-replay,
+        // the replay-worker, debugserver/lldb) into a NEW process group whose
+        // leader is db-backend itself.  Teardown then signals the whole group
+        // (`killpg`) so the replay descendants are reaped together with the
+        // parent.  Without this, killing only the direct child orphans the
+        // replay-worker + debugserver; on macOS those orphans keep the
+        // fixed-address MCR replay mappings (§6B.5) reserved and squat the
+        // bootstrap socket, so the NEXT *_mcr_streaming_flow_test in a
+        // sequential `cargo nextest` run fails its mmap reservation /
+        // boundary handshake.  Process-group reaping is what makes
+        // back-to-back flow tests reliable without a manual `pkill`.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // 0 ⇒ the child becomes the leader of a new group equal to its pid.
+            command.process_group(0);
+        }
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -222,14 +239,43 @@ impl DapStdioClient {
         })
     }
 
-    /// Disconnect and kill the db-backend process.
+    /// Kill the db-backend process AND every replay descendant it spawned.
+    ///
+    /// `spawn_with_envs` made db-backend a process-group leader, so on Unix we
+    /// signal the whole group (negative pid ⇒ `killpg`).  We send `SIGTERM`
+    /// first (lets debugserver detach the replay child cleanly), then `SIGKILL`
+    /// as a backstop, then `wait()` the direct child to reap it.  This is the
+    /// load-bearing teardown that stops orphaned replay-workers from squatting
+    /// the fixed MCR replay addresses between sequential flow tests.
+    fn kill_process_tree(&mut self) {
+        #[cfg(unix)]
+        {
+            let pid = self.child.id() as i32;
+            // SAFETY: `pid` is db-backend's own pid (a group leader since
+            // spawn); -pid targets that group via the documented kill(2)
+            // negative-pid contract.  Both signals are no-ops if the group is
+            // already gone, so the calls are race-safe against natural exit.
+            unsafe {
+                libc::killpg(pid, libc::SIGTERM);
+            }
+            // Brief grace period for an orderly debugserver detach, then SIGKILL
+            // the whole group to guarantee no replay descendant survives.
+            std::thread::sleep(Duration::from_millis(150));
+            unsafe {
+                libc::killpg(pid, libc::SIGKILL);
+            }
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    /// Disconnect and kill the db-backend process (and its replay descendants).
     pub fn disconnect(mut self) -> Result<(), BoxError> {
         // Send disconnect request, ignore errors (process may already be gone)
         let _ = self.send_request("disconnect", json!({}));
-        // Give it a moment then kill
+        // Give it a moment then kill the whole process group.
         std::thread::sleep(Duration::from_millis(100));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.kill_process_tree();
         Ok(())
     }
 
@@ -685,6 +731,21 @@ impl DapStdioClient {
         let current = self.seq;
         self.seq += 1;
         current
+    }
+}
+
+impl Drop for DapStdioClient {
+    /// Safety net for the `disconnect()`/`finish()` teardown.
+    ///
+    /// Tests normally call `FlowTestRunner::finish()` (→ `disconnect()`) which
+    /// reaps the process group explicitly.  But a test that panics mid-flow
+    /// (e.g. an `expect(...)` on a flow assertion) unwinds WITHOUT calling
+    /// `finish`, so the only thing that runs is this `Drop`.  Reaping the whole
+    /// process group here is what keeps a FAILED `*_mcr_streaming_flow_test`
+    /// from leaking a replay-worker/debugserver that squats the fixed replay
+    /// addresses and breaks the NEXT test in a sequential `cargo nextest` run.
+    fn drop(&mut self) {
+        self.kill_process_tree();
     }
 }
 

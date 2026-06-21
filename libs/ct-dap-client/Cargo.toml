@@ -10,3 +10,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_repr = "0.1"
 log = "0.4"
+# Used by the test-support DapStdioClient to reap the db-backend process
+# GROUP (killpg) on teardown so orphaned replay-worker / debugserver children
+# don't squat the fixed MCR replay addresses between sequential flow tests.
+# Only referenced under cfg(unix); on Windows it links but stays unused.
+libc = "0.2"
