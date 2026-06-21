@@ -286,14 +286,37 @@ pub trait TraceReader: std::fmt::Debug + Send {
     // any implementation of the trait gets them for free.
 
     /// Convert a `TypeId` to the frontend `Type` representation.
-    #[allow(clippy::expect_used)]
+    ///
+    /// A `TypeId` that is not present in the trace's interning type table
+    /// MUST NOT panic the server: it degrades to a `<unknown>` placeholder
+    /// type so the request that triggered the lookup still produces a
+    /// response and the per-request channel is never dropped mid-flight.
+    ///
+    /// Why this matters on the new (seek-based / Nim-FFI) reader path: the
+    /// reactive `ct/load-locals` auto-loader that fires after a navigation
+    /// renders every local in the current frame. JS (and similar dynamic)
+    /// recorders can emit value records whose `TypeId` is not represented
+    /// in the trace's type table — typically function-bearing locals. An
+    /// unchecked `expect("invalid TypeId")` here panicked the stable
+    /// thread, dropped its response channel, and left the DAP client
+    /// blocked forever waiting for a `stopped`/response that the panicked
+    /// thread had committed to producing (e.g. the depth-changing
+    /// `stepIn`/`stepOut` ViewModel acceptance tests would hang). This is
+    /// the same defensive policy already applied to the materialized
+    /// `MaterializedReplaySession::type_record` path
+    /// (`db.rs::default_type_record`); applying it uniformly here keeps the
+    /// server alive across malformed/absent type ids on the new-format
+    /// reader too.
     fn to_ct_type(&self, type_id: &TypeId) -> Type {
         if self.type_count() == 0 {
             // Probably an rr trace case — no type information available.
             warn!("to_ct_type: returning placeholder type (assuming rr trace)");
             return Type::new(TypeKind::None, "<None>");
         }
-        let type_record = self.type_record(*type_id).expect("to_ct_type: invalid TypeId");
+        let Some(type_record) = self.type_record(*type_id) else {
+            warn!("to_ct_type: TypeId {type_id:?} not in type table; using <unknown> placeholder");
+            return Type::new(TypeKind::None, "<unknown>");
+        };
         match type_record.kind {
             TypeKind::Struct => {
                 let mut t = Type::new(type_record.kind, &type_record.lang_type);
@@ -306,13 +329,17 @@ pub trait TraceReader: std::fmt::Debug + Send {
 
     /// Return the field names for a struct type, or an empty vec for
     /// non-struct types.
-    #[allow(clippy::expect_used)]
+    ///
+    /// An absent `TypeId` degrades to an empty field list rather than
+    /// panicking — same rationale as [`to_ct_type`](Self::to_ct_type):
+    /// a missing type record must never bring down the stable thread and
+    /// hang the DAP client.
     fn get_field_names(&self, type_id: &TypeId) -> Vec<String> {
-        match &self
-            .type_record(*type_id)
-            .expect("get_field_names: invalid TypeId")
-            .specific_info
-        {
+        let Some(type_record) = self.type_record(*type_id) else {
+            warn!("get_field_names: TypeId {type_id:?} not in type table; returning no field names");
+            return Vec::new();
+        };
+        match &type_record.specific_info {
             TypeSpecificInfo::Struct { fields } => fields.iter().map(|field| field.name.clone()).collect(),
             _ => Vec::new(),
         }
@@ -322,7 +349,11 @@ pub trait TraceReader: std::fmt::Debug + Send {
     ///
     /// This is recursive: compound value records (sequences, structs,
     /// tuples, variants, references) recurse into their children.
-    #[allow(clippy::expect_used)]
+    ///
+    /// Type lookups go through [`to_ct_type`](Self::to_ct_type) /
+    /// [`type_record`](Self::type_record) and degrade to a `<unknown>`
+    /// placeholder on an absent `TypeId` rather than panicking, so a
+    /// malformed/absent type id can never drop the request channel.
     fn to_ct_value(&self, record: &ValueRecord) -> Value {
         match record {
             ValueRecord::Int { i, type_id } => {
@@ -353,10 +384,19 @@ pub trait TraceReader: std::fmt::Debug + Send {
                 let typ = if !is_slice {
                     self.to_ct_type(type_id)
                 } else {
-                    let type_record = self
-                        .type_record(*type_id)
-                        .expect("to_ct_value: invalid TypeId for slice");
-                    Type::new(TypeKind::Slice, &type_record.lang_type)
+                    // An absent slice TypeId degrades to a `<unknown>`
+                    // slice type rather than panicking — same defensive
+                    // policy as `to_ct_type` (keeps the stable thread
+                    // alive so the request still produces a response).
+                    match self.type_record(*type_id) {
+                        Some(type_record) => Type::new(TypeKind::Slice, &type_record.lang_type),
+                        None => {
+                            warn!(
+                                "to_ct_value: slice TypeId {type_id:?} not in type table; using <unknown> placeholder"
+                            );
+                            Type::new(TypeKind::Slice, "<unknown>")
+                        }
+                    }
                 };
                 let mut res = Value::new(TypeKind::Seq, typ);
                 res.elements = elements.iter().map(|e| self.to_ct_value(e)).collect();
