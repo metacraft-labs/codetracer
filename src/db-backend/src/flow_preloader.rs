@@ -992,7 +992,21 @@ impl<'a> CallFlowPreloader<'a> {
                 depth_limit: -1, // NO_DEPTH_LIMIT
             }) {
                 for local in &locals {
-                    let value_name = local.expression.clone();
+                    // Nim emits locals/parameters into DWARF under disambiguated
+                    // names (`a_p0`, `sum_1`, …) rather than their source spelling.
+                    // When the flow walker falls back to trace-embedded locals
+                    // (e.g. it is stopped on inlined Nim runtime code such as
+                    // `system.nim`, which has no tree-sitter var list), de-suffix
+                    // those names back to the source identifier so the flow
+                    // overlay surfaces `a`/`sum` instead of `a_p0`/`sum_1`. The
+                    // helper returns `None` for compiler temporaries and for
+                    // languages whose locals are not suffixed (C/C++/…), so this
+                    // is a no-op everywhere except genuine Nim source variables.
+                    let value_name = if self.lang == Lang::Nim {
+                        nim_mangling::nim_local_source_name(&local.expression).unwrap_or_else(|| local.expression.clone())
+                    } else {
+                        local.expression.clone()
+                    };
                     let ct_value = to_ct_value(&local.value);
                     flow_view_update
                         .steps

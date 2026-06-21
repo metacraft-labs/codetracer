@@ -238,6 +238,95 @@ pub fn extract_module_name(path: &Path) -> Option<String> {
     path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
 }
 
+/// Recover the Nim *source* name of a local or parameter from the name the Nim
+/// compiler emits into the generated C / DWARF debug info.
+///
+/// Nim does not mangle the names of locals and parameters the way it mangles
+/// module-level globals; instead it appends a small disambiguation suffix so
+/// that several source-level identifiers that share a name (e.g. a shadowed
+/// variable) stay distinct in the generated C:
+///
+///   * **parameters** become `<name>_p<index>` — e.g. source `a` → `a_p0`,
+///     source `b` → `b_p1` (the index is the parameter position).
+///   * **locals** become `<name>_<counter>` — e.g. source `sum` → `sum_1`,
+///     `doubled` → `doubled_1` (the counter is a per-proc disambiguation id;
+///     Nim 2.x emits it even when there is no actual collision).
+///
+/// This is the inverse of the suffix strategies in `flow_preloader`'s
+/// tree-sitter path (which appends `_pN` / `_N` to a known source name to find
+/// the recorded value). When the flow walker has to fall back to
+/// trace-embedded locals (e.g. it is stopped on inlined Nim runtime code such
+/// as `system.nim` that has no tree-sitter var list), those locals arrive
+/// under their *recorded* names, so we de-suffix here to surface them under
+/// the source names the editor / flow overlay expects.
+///
+/// Returns `Some(source_name)` only when `recorded` is a plausible source
+/// identifier carrying one of the two recognised suffixes. Compiler-internal
+/// temporaries (`colontmpD_`, `TM__<hash>_<n>`, `T<n>_`, `FR_`, `nimErr_`,
+/// `:tmp`, …) and already-unsuffixed names return `None`, so the caller keeps
+/// their recorded name untouched and never invents a bogus source variable.
+pub fn nim_local_source_name(recorded: &str) -> Option<String> {
+    // Only de-suffix names that look like ordinary source identifiers:
+    // an ASCII-alphabetic / underscore lead, then alphanumerics / underscores.
+    // This rules out the obvious compiler temporaries which either start with
+    // an uppercase-`T`/`TM`/`FR` prefix followed by digits, contain a `:` (Nim
+    // keeps `:tmp`-style names in some lowerings), or are bare hash blobs.
+    let stripped = recorded.strip_suffix(|c: char| c.is_ascii_digit());
+    if stripped.is_none() {
+        return None;
+    }
+
+    // Find where the trailing run of digits begins.
+    let digits_start = recorded
+        .rfind(|c: char| !c.is_ascii_digit())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    if digits_start == 0 || digits_start == recorded.len() {
+        // All-digit name, or no digits at all — not a suffixed source local.
+        return None;
+    }
+    let (head, _digits) = recorded.split_at(digits_start);
+
+    // Parameter form: `<name>_p<index>`.
+    // Local form:     `<name>_<counter>`.
+    let base = head.strip_suffix("_p").or_else(|| head.strip_suffix('_'))?;
+
+    if !is_plausible_nim_source_ident(base) {
+        return None;
+    }
+
+    Some(base.to_string())
+}
+
+/// Whether `name` looks like a user-written Nim identifier (as opposed to a
+/// compiler-generated temporary). Keeps the de-suffixing in
+/// [`nim_local_source_name`] from rewriting internal names.
+fn is_plausible_nim_source_ident(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    if name.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '_')) {
+        return false;
+    }
+    // Reject the well-known compiler-temporary families. These never name a
+    // user variable, so even if one happened to carry a trailing digit run we
+    // must not surface it under a "source" name.
+    const TEMP_PREFIXES: [&str; 4] = ["colontmp", "TM_", "FR_", "nimErr"];
+    if TEMP_PREFIXES.iter().any(|p| name.starts_with(p)) {
+        return false;
+    }
+    // Single uppercase letter temporaries like `T`, `T2_` collapse to `T`.
+    if name.len() == 1 && first.is_ascii_uppercase() {
+        return false;
+    }
+    true
+}
+
 /// Helper for iterating over mangled name candidates without allocations.
 ///
 /// Generates candidates lazily by mutating an internal buffer.
@@ -413,6 +502,39 @@ impl MangledNameDualIterator {
 #[allow(clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_nim_local_source_name() {
+        // Parameters: `<name>_p<index>` -> `<name>`.
+        assert_eq!(nim_local_source_name("a_p0").as_deref(), Some("a"));
+        assert_eq!(nim_local_source_name("b_p1").as_deref(), Some("b"));
+        assert_eq!(nim_local_source_name("count_p12").as_deref(), Some("count"));
+
+        // Locals: `<name>_<counter>` -> `<name>`.
+        assert_eq!(nim_local_source_name("sum_1").as_deref(), Some("sum"));
+        assert_eq!(nim_local_source_name("doubled_1").as_deref(), Some("doubled"));
+        assert_eq!(nim_local_source_name("final_1").as_deref(), Some("final"));
+        assert_eq!(nim_local_source_name("my_var_3").as_deref(), Some("my_var"));
+
+        // Unsuffixed source names stay untouched.
+        assert_eq!(nim_local_source_name("final"), None);
+        assert_eq!(nim_local_source_name("result"), None);
+        assert_eq!(nim_local_source_name("cmdCount"), None);
+
+        // Compiler temporaries must never collapse to a fake source name.
+        assert_eq!(nim_local_source_name("colontmpD_"), None);
+        assert_eq!(nim_local_source_name("colontmpD__3"), None);
+        assert_eq!(nim_local_source_name("TM__6kWszpSpa6Bvg0OQCatwZw_2"), None);
+        assert_eq!(nim_local_source_name("nimErr_"), None);
+        assert_eq!(nim_local_source_name("FR_"), None);
+        assert_eq!(nim_local_source_name("T2_"), None);
+        assert_eq!(nim_local_source_name("gEnv"), None);
+
+        // Degenerate inputs.
+        assert_eq!(nim_local_source_name(""), None);
+        assert_eq!(nim_local_source_name("_1"), None);
+        assert_eq!(nim_local_source_name("123"), None);
+    }
 
     /// Helper to encode module name and return as String (for tests only)
     fn encode_module_name_test(name: &str, style: NimManglingStyle) -> String {
