@@ -29,7 +29,8 @@
 //!           bit 8       — FLAG_HAS_CALL_STREAM (M17a/M17b — dedicated calls.dat)
 //!           bit 9       — FLAG_HAS_STEP_STREAM (M23a — dedicated steps.dat)
 //!           bit 10      — FLAG_HAS_VALUE_STREAM (M23b — dedicated values.dat)
-//!           bits 11..=15 — reserved (must be 0; readers reject if set)
+//!           bit 11      — FLAG_HAS_IO_EVENT_STREAM (M23c — dedicated events.dat)
+//!           bits 12..=15 — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -205,6 +206,25 @@ pub const FLAG_HAS_STEP_STREAM: u16 = 1 << 9;
 /// canonical Nim writer's `meta_dat.nim` bit 10.
 pub const FLAG_HAS_VALUE_STREAM: u16 = 1 << 10;
 
+/// Flag bit 11 — `FLAG_HAS_IO_EVENT_STREAM` (M23c).  When set the container
+/// ships a dedicated, SEEKABLE `events.dat` I/O event stream (the
+/// `EventLogKind`-tagged stdout/stderr/file/network/error/log events, + its
+/// `events.idx` companion index) alongside the unified `events.log`.  Each
+/// record carries `kind` (u8) / `step_id` (varint cross-reference to the
+/// execution stream) / `metadata` / `content`, so the event-log pane can
+/// paginate it directly without scanning the unified stream
+/// (`trace-events.md` §"IO Event Stream (`events.dat`)").  NOTE the file naming
+/// — the legacy combined stream is `events.log`; this NEW I/O stream is the
+/// distinct `events.dat`.  The bit is purely additive: a reader that ignores it
+/// still reads the unified stream unchanged.  The consumer migration (the
+/// event-log pane reading from `events.dat`) is a later milestone; for now this
+/// reader only needs to RECOGNISE the bit so an io-event-split bundle's meta.dat
+/// parses cleanly (not rejected as a "newer writer") and the GUI can still open
+/// the trace.  Must match
+/// `codetracer_trace_writer::meta_dat::FLAG_HAS_IO_EVENT_STREAM` and the
+/// canonical Nim writer's `meta_dat.nim` bit 11.
+pub const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -219,7 +239,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_SUPPORTS_COLUMN_MOTIONS
     | FLAG_HAS_CALL_STREAM
     | FLAG_HAS_STEP_STREAM
-    | FLAG_HAS_VALUE_STREAM;
+    | FLAG_HAS_VALUE_STREAM
+    | FLAG_HAS_IO_EVENT_STREAM;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -1148,22 +1169,23 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 11 is the lowest still-reserved flag after M17a/M17b allocated
+        // Bit 12 is the lowest still-reserved flag after M17a/M17b allocated
         // bit 8 (FLAG_HAS_CALL_STREAM), M23a allocated bit 9
-        // (FLAG_HAS_STEP_STREAM), and M23b allocated bit 10
-        // (FLAG_HAS_VALUE_STREAM).  Bits 0..=10 are FLAG_HAS_MCR_FIELDS /
+        // (FLAG_HAS_STEP_STREAM), M23b allocated bit 10
+        // (FLAG_HAS_VALUE_STREAM), and M23c allocated bit 11
+        // (FLAG_HAS_IO_EVENT_STREAM).  Bits 0..=11 are FLAG_HAS_MCR_FIELDS /
         // FLAG_HAS_REPLAY_LAUNCH_FIELDS / FLAG_HAS_LAYOUT_SNAPSHOT /
         // FLAG_HAS_TRACE_FILTER_PROVENANCE / FLAG_HAS_COLUMN_AWARE_STEPS /
         // FLAG_HAS_ALTERNATE_SOURCE_VIEWS / FLAG_SUPPORTS_COLUMN_BREAKPOINTS /
         // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM /
-        // FLAG_HAS_STEP_STREAM / FLAG_HAS_VALUE_STREAM.
+        // FLAG_HAS_STEP_STREAM / FLAG_HAS_VALUE_STREAM / FLAG_HAS_IO_EVENT_STREAM.
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0;
-        buf[7] = 0b0000_1000; // = bit 11, lowest reserved
+        buf[7] = 0b0001_0000; // = bit 12, lowest reserved
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0000_1000_0000_0000);
-                assert_eq!(unknown_bits, 0b0000_1000_0000_0000);
+                assert_eq!(flags, 0b0001_0000_0000_0000);
+                assert_eq!(unknown_bits, 0b0001_0000_0000_0000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
@@ -1213,6 +1235,28 @@ mod tests {
         for bits in [
             FLAG_HAS_VALUE_STREAM,
             FLAG_HAS_CALL_STREAM | FLAG_HAS_STEP_STREAM | FLAG_HAS_VALUE_STREAM,
+        ] {
+            let mut buf = writer_compat_fixture_bytes();
+            buf[6] = (bits & 0xFF) as u8;
+            buf[7] = ((bits >> 8) & 0xFF) as u8;
+            let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
+            assert_eq!(parsed.flags & bits, bits);
+        }
+    }
+
+    /// M23c — the `has_io_event_stream` flag (bit 11) parses cleanly (it is a
+    /// KNOWN flag now, so an io-event-split bundle's meta.dat is accepted, not
+    /// rejected as a "newer writer"). Regression guard so the GUI/db-backend
+    /// still OPEN a `has_io_event_stream` bundle (mirrors
+    /// `accepts_has_value_stream_flag` for the M23b value-stream split).
+    #[test]
+    fn accepts_has_io_event_stream_flag() {
+        // The I/O event stream ships alongside the call+step+value streams, so
+        // test the io-event bit alone AND the combined all-four bits a real M23c
+        // bundle sets.
+        for bits in [
+            FLAG_HAS_IO_EVENT_STREAM,
+            FLAG_HAS_CALL_STREAM | FLAG_HAS_STEP_STREAM | FLAG_HAS_VALUE_STREAM | FLAG_HAS_IO_EVENT_STREAM,
         ] {
             let mut buf = writer_compat_fixture_bytes();
             buf[6] = (bits & 0xFF) as u8;
