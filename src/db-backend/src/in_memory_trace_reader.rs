@@ -15,6 +15,30 @@ use crate::trace_reader::TraceReader;
 /// inner `Db`.  This is the "zero-cost" adapter: no extra allocation
 /// or transformation is needed because the data already lives in
 /// memory in the right shape.
+///
+/// # Scope (M17b): small-trace / test / placeholder ONLY — NOT the network path
+///
+/// This reader serves every lookup over a FULLY-MATERIALIZED in-memory `Db`
+/// (HashMaps/Vecs of steps/values/cells for the whole trace). It does NOT seek.
+/// Per `Trace-Files-Overview.md` §"Random-access seeking" the production reader
+/// for a materialized `.ct` — especially one loaded over the network — must NOT
+/// materialize the whole trace; that is the job of the SEEKABLE
+/// [`crate::ctfs_trace_reader::CTFSTraceReader`], which `trace_processor.rs`
+/// documents as the path traces "must be read through". M17b additionally routes
+/// the call tree of a `has_call_stream` `.ct` off this full-load path onto the
+/// on-demand `calls.dat` stream (see
+/// [`crate::ctfs_trace_reader::call_stream_source`]).
+///
+/// `InMemoryTraceReader` is therefore intentionally retained ONLY as:
+///   - a test adapter (`db.rs`, `tracepoint_interpreter`, `diff.rs` test/helper
+///     paths construct a small `Db` directly), and
+///   - an explicit, small/empty PLACEHOLDER for code paths that don't read a
+///     materialized `Db` at all — e.g. the MCR/emulator replay session in
+///     `dap_server.rs`, which owns its own state machine and only needs a
+///     non-`None` `reader` field (an EMPTY `Db`).
+///
+/// It must NEVER be the reader for a large/network-loaded materialized `.ct`;
+/// those flow through [`CTFSTraceReader::open`](crate::ctfs_trace_reader::CTFSTraceReader::open).
 #[derive(Debug, Clone)]
 pub struct InMemoryTraceReader {
     pub db: Db,

@@ -3,6 +3,7 @@
 //! See the module-level documentation on [`CTFSTraceReader`] for design
 //! rationale and the two-format approach.
 
+pub mod call_stream_source;
 pub mod ctfs_container;
 pub mod meta_dat;
 
@@ -91,6 +92,20 @@ pub struct CTFSTraceReader {
     /// them.  Always `Default::default()` (both false) on traces that
     /// predate the bits — back-compat with the GUI's "no UI" default.
     column_capabilities: ColumnAwareCapabilities,
+    /// M17b — the SEEKABLE `calls.dat` call-tree source.
+    ///
+    /// `Some` only when the container advertises the `has_call_stream`
+    /// capability flag (bit 8 in `meta.dat`) AND ships `calls.dat`/`calls.idx`.
+    /// When present, the call tree is served ON DEMAND from `calls.dat` by
+    /// `call(key)` (decompressing only the needed chunk) rather than from the
+    /// fully-materialized `db.calls` — so a network-loaded `.ct` never
+    /// materializes the whole call tree (Trace-Files-Overview.md §"Random-access
+    /// seeking"; trace-events.md "Call tree loads independently").
+    ///
+    /// Shared behind an `Arc` so cheap clones / concurrent readers over the same
+    /// reader don't re-open the container. Always `None` for legacy (flag-off)
+    /// traces, which keep the existing fully-materialized path unchanged.
+    call_stream: Option<std::sync::Arc<call_stream_source::SeekableCallStream>>,
 }
 
 impl CTFSTraceReader {
@@ -133,6 +148,10 @@ impl CTFSTraceReader {
         Ok(CTFSTraceReader {
             db,
             column_capabilities: ColumnAwareCapabilities::default(),
+            // No `.ct` path is available here (events come from an in-memory
+            // stream), so there is no seekable `calls.dat` to attach. The
+            // fully-materialized `db.calls` serves the call tree.
+            call_stream: None,
         })
     }
 }
@@ -176,13 +195,41 @@ impl CTFSTraceReader {
             return Ok(reader);
         }
 
-        if is_new_format(&ctfs) {
+        let mut reader = if is_new_format(&ctfs) {
             info!("CTFS new format detected — skipping postprocessing");
-            Self::open_new_format(&mut ctfs, path)
+            Self::open_new_format(&mut ctfs, path)?
         } else {
             info!("CTFS old format detected — running postprocessing");
-            Self::open_old_format(&mut ctfs)
-        }
+            Self::open_old_format(&mut ctfs)?
+        };
+
+        // M17b — attach the SEEKABLE `calls.dat` call-tree source when the
+        // container advertises one. This is the path that lets a network-loaded
+        // `.ct` serve its call tree on-demand without materializing the whole
+        // trace. A flag-off (legacy) container yields `None`, preserving the
+        // existing fully-materialized behaviour exactly.
+        //
+        // A `calls.dat` that is present-but-corrupt is logged and ignored (we
+        // fall back to the materialized `db.calls`) rather than failing the open
+        // — opening the trace at all is strictly more useful than refusing it,
+        // and the materialized path is always available as a safe fallback.
+        reader.call_stream = match call_stream_source::SeekableCallStream::open(path) {
+            Ok(Some(stream)) => {
+                info!(
+                    "CTFS: seekable calls.dat attached ({} calls, chunk_size {}) — call tree served on-demand",
+                    stream.call_count(),
+                    stream.chunk_size(),
+                );
+                Some(std::sync::Arc::new(stream))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                info!("CTFS: calls.dat present but unreadable ({e}); falling back to materialized call tree");
+                None
+            }
+        };
+
+        Ok(reader)
     }
 
     /// Construct a [`CTFSTraceReader`] from raw bytes already in memory.
@@ -486,6 +533,9 @@ impl CTFSTraceReader {
         Ok(Some(CTFSTraceReader {
             db,
             column_capabilities: ColumnAwareCapabilities::default(),
+            // BEAM sidecar bundles ship a JSONL session log, not a `calls.dat`
+            // call stream, so there is no seekable stream to attach.
+            call_stream: None,
         }))
     }
 
@@ -1119,6 +1169,10 @@ impl CTFSTraceReader {
         Ok(CTFSTraceReader {
             db,
             column_capabilities,
+            // The seekable `calls.dat` stream (if any) is attached centrally by
+            // `open()`, which has the `.ct` path. `from_*` constructors that
+            // lack a path leave this `None`.
+            call_stream: None,
         })
     }
 
@@ -1187,6 +1241,8 @@ impl CTFSTraceReader {
         Ok(CTFSTraceReader {
             db,
             column_capabilities,
+            // Attached centrally by `open()` (which has the `.ct` path).
+            call_stream: None,
         })
     }
 
@@ -1397,6 +1453,23 @@ impl TraceReader for CTFSTraceReader {
 
     fn call_count(&self) -> usize {
         self.db.calls.len()
+    }
+
+    // ── Seekable call tree (M17b) ────────────────────────────────────
+    //
+    // When the container ships a `has_call_stream` `calls.dat`, the call tree is
+    // served on-demand from it (see `call_stream_source`). The materialized
+    // `db.calls` remains populated for the borrowing `call`/`call_count` above
+    // (so other consumers and the legacy path keep working), but the seekable
+    // hooks let `Calltrace::new` read the tree WITHOUT scanning the whole
+    // materialized stream.
+
+    fn seekable_call_count(&self) -> Option<usize> {
+        self.call_stream.as_ref().map(|s| s.call_count())
+    }
+
+    fn seekable_call(&self, key: CallKey) -> Option<DbCall> {
+        self.call_stream.as_ref().and_then(|s| s.call(key))
     }
 
     // ── Events ──────────────────────────────────────────────────────

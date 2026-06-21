@@ -26,6 +26,7 @@
 //!           bit 5       — FLAG_HAS_ALTERNATE_SOURCE_VIEWS
 //!           bit 6       — FLAG_SUPPORTS_COLUMN_BREAKPOINTS (M-capability-flags)
 //!           bit 7       — FLAG_SUPPORTS_COLUMN_MOTIONS (M-capability-flags)
+//!           bit 8       — FLAG_HAS_CALL_STREAM (M17a/M17b — dedicated calls.dat)
 //!           bits 8..=15 — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
@@ -156,6 +157,18 @@ pub const FLAG_SUPPORTS_COLUMN_BREAKPOINTS: u16 = 1 << 6;
 /// `FLAG_HAS_COLUMN_AWARE_STEPS`.
 pub const FLAG_SUPPORTS_COLUMN_MOTIONS: u16 = 1 << 7;
 
+/// Flag bit 8 — `FLAG_HAS_CALL_STREAM` (M17a/M17b).  When set the container
+/// ships a dedicated, SEEKABLE `calls.dat` call stream (+ its `calls.idx`
+/// companion index) alongside the unified `events.log`, so the call tree can be
+/// read on demand without scanning the step/value events
+/// (`trace-events.md` §"Call Stream (`calls.dat`)").  The bit is purely
+/// additive: a reader that ignores it still reads the unified stream unchanged,
+/// but the db-backend's seekable `CTFSTraceReader` honors it to serve the call
+/// tree from `calls.dat` (see `call_stream_source`).  Must match
+/// `codetracer_trace_writer::meta_dat::FLAG_HAS_CALL_STREAM` and the canonical
+/// Nim writer's `meta_dat.nim` bit 8.
+pub const FLAG_HAS_CALL_STREAM: u16 = 1 << 8;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -167,7 +180,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_COLUMN_AWARE_STEPS
     | FLAG_HAS_ALTERNATE_SOURCE_VIEWS
     | FLAG_SUPPORTS_COLUMN_BREAKPOINTS
-    | FLAG_SUPPORTS_COLUMN_MOTIONS;
+    | FLAG_SUPPORTS_COLUMN_MOTIONS
+    | FLAG_HAS_CALL_STREAM;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -1096,22 +1110,34 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 8 is the lowest still-reserved flag after the
-        // M-capability-flags milestone allocated bits 6 and 7.  Bits
-        // 0..=7 are FLAG_HAS_MCR_FIELDS / FLAG_HAS_REPLAY_LAUNCH_FIELDS
-        // / FLAG_HAS_LAYOUT_SNAPSHOT / FLAG_HAS_TRACE_FILTER_PROVENANCE
-        // / FLAG_HAS_COLUMN_AWARE_STEPS / FLAG_HAS_ALTERNATE_SOURCE_VIEWS
-        // / FLAG_SUPPORTS_COLUMN_BREAKPOINTS / FLAG_SUPPORTS_COLUMN_MOTIONS.
+        // Bit 9 is the lowest still-reserved flag after M17a/M17b allocated
+        // bit 8 (FLAG_HAS_CALL_STREAM).  Bits 0..=8 are FLAG_HAS_MCR_FIELDS /
+        // FLAG_HAS_REPLAY_LAUNCH_FIELDS / FLAG_HAS_LAYOUT_SNAPSHOT /
+        // FLAG_HAS_TRACE_FILTER_PROVENANCE / FLAG_HAS_COLUMN_AWARE_STEPS /
+        // FLAG_HAS_ALTERNATE_SOURCE_VIEWS / FLAG_SUPPORTS_COLUMN_BREAKPOINTS /
+        // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM.
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0;
-        buf[7] = 0b0000_0001; // = bit 8, lowest reserved
+        buf[7] = 0b0000_0010; // = bit 9, lowest reserved
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0000_0001_0000_0000);
-                assert_eq!(unknown_bits, 0b0000_0001_0000_0000);
+                assert_eq!(flags, 0b0000_0010_0000_0000);
+                assert_eq!(unknown_bits, 0b0000_0010_0000_0000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
+    }
+
+    /// M17b — the `has_call_stream` flag (bit 8) parses cleanly (it is a KNOWN
+    /// flag now, so a split bundle's meta.dat is accepted, not rejected as a
+    /// "newer writer"). Regression guard for the db-backend seekable reader.
+    #[test]
+    fn accepts_has_call_stream_flag() {
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6] = (FLAG_HAS_CALL_STREAM & 0xFF) as u8;
+        buf[7] = ((FLAG_HAS_CALL_STREAM >> 8) & 0xFF) as u8;
+        let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected has_call_stream to parse, got {e:?}"));
+        assert_eq!(parsed.flags & FLAG_HAS_CALL_STREAM, FLAG_HAS_CALL_STREAM);
     }
 
     /// Capability bits parse cleanly when paired with the wire-format
