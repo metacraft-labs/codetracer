@@ -256,17 +256,15 @@ fn real_legacy_ct_reads_unchanged_with_no_seekable_stream() {
 /// `ruby_split.ct` fixture (a genuine flag-ON Ruby recording) is served through
 /// the seekable path, fetching a call by key with bounded decompression.
 ///
-/// IMPORTANT (honest limitation): `ruby_split.ct` was produced by the Nim
-/// `multi_stream_writer`, whose `calls.dat` does NOT ship the Rust-style
-/// `calls.idx` companion seek index the M17a `CallStreamReader` requires. So
-/// over THIS bundle the seekable reader cannot index `calls.dat` and `open`
-/// fails with a missing-`calls.idx` error — the db-backend then falls back to
-/// the materialized call tree (which is what `CTFSTraceReader::open` does). This
-/// test therefore SKIPS (does not fail) when the bundle lacks `calls.idx`, and
-/// otherwise (a Rust-writer split bundle) asserts the bounded-decompression
-/// property. The Rust-writer in-test fixtures
-/// (`fetch_call_by_key_decompresses_only_its_chunk`) prove the property
-/// unconditionally. The Nim-writer `calls.idx` gap is tracked for M20.
+/// M20 (RESOLVED): `ruby_split.ct` is now produced by the Nim
+/// `multi_stream_writer` WITH the Rust-compatible chunked-Zstd `calls.dat` plus
+/// its companion `calls.idx` seek index (the M20 fix to `call_stream.nim`). The
+/// M17a `CallStreamReader` can therefore index a Nim-written split bundle, and
+/// this test asserts — no longer skips — that the real recorded bundle is served
+/// through the seekable path with bounded decompression. (Pre-M20 the Nim writer
+/// shipped a `calls.dat`+`calls.off` VariableRecordTable with no `calls.idx`, so
+/// this test had to skip; that gap is closed.) The only remaining tolerated skip
+/// is a genuinely-absent fixture (e.g. a sparse checkout).
 #[test]
 fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -276,19 +274,11 @@ fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
         return;
     }
 
-    let stream = match SeekableCallStream::open(&fixture) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            eprintln!("skipping: ruby_split.ct exposes no seekable stream (flag clear)");
-            return;
-        }
-        Err(e) => {
-            // Nim-writer split bundle without a Rust-style calls.idx — documented
-            // limitation; the materialized path still serves the call tree.
-            eprintln!("skipping real_split_ct_serves_calls_seekably: seekable open unsupported for this bundle ({e})");
-            return;
-        }
-    };
+    // M20: a Nim-written split bundle MUST now be seekable — open must succeed
+    // and expose a stream (the fixture carries has_call_stream + calls.idx).
+    let stream = SeekableCallStream::open(&fixture)
+        .expect("M20: Nim-written ruby_split.ct must open seekably (calls.idx present)")
+        .expect("M20: ruby_split.ct must expose a seekable call stream (has_call_stream set)");
 
     let n = stream.call_count();
     assert!(n >= 1, "real bundle has at least one call");
