@@ -62,6 +62,16 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # TODO(cross-repo-ci): the sibling-revision resolution in this workflow
+      # (this step and the codetracer-trace-format / -nim / native-recorder
+      # resolve steps below) reads .github/sibling-pins and
+      # .github/rr-backend-pin.txt. Per
+      # codetracer-specs/Testing/Cross-Repo-CI-Integration.md, CI MUST NOT use
+      # those legacy files; sibling revisions should come from the
+      # repo-workspaces workspace-lock model
+      # (.repo/manifests/locks/<project>/index.json -> per-commit manifest XML).
+      # Migrate once the shared lock-resolution helper exists; until then the
+      # sibling-pins fallback is kept to avoid a half-migration.
       - name: Resolve rr-backend ref
         id: resolve-ref
         run: |
