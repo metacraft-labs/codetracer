@@ -6112,7 +6112,10 @@ mod tests {
 
         let reader = CTFSTraceReader::open(&ct_path)
             .unwrap_or_else(|e| panic!("CTFS open failed for {}: {}", ct_path.display(), e));
-        reader.db().clone()
+        // `materialized_db()` rehydrates the value table on the M24c production
+        // lazy path (where `db().variables` is empty) so the handler built from
+        // this cloned `Db` sees the full per-step values.
+        reader.materialized_db()
     }
 
     fn setup_db() -> Db {

@@ -123,6 +123,19 @@ pub struct CTFSTraceReader {
     /// rather than from the materialized `db.variables`. Always `None` for
     /// legacy (flag-off) traces.
     value_stream: Option<std::sync::Arc<step_value_stream_source::SeekableValueStream>>,
+    /// M24c — the LAZY per-step value cache backing the borrowing
+    /// `variables_at()` accessor on a PRODUCTION split bundle.
+    ///
+    /// `Some` ONLY when the new-format (Nim FFI) reader skipped eager value
+    /// materialization at open AND a `has_value_stream` `values.dat` attached —
+    /// i.e. exactly when a step's values can be served on-demand. When present,
+    /// `db.variables` is EMPTY (not materialized at open) and `variables_at()`
+    /// borrows through this cache, decompressing only the requested step's chunk
+    /// on first access. `None` on every other path (legacy `events.log`,
+    /// Rust-writer combined bundles, `from_*` constructors, or a corrupt value
+    /// stream), where the fully-materialized `db.variables` serves the borrow —
+    /// so those paths stay bit-for-bit unchanged.
+    lazy_values: Option<step_value_stream_source::LazyValueCache>,
 }
 
 impl CTFSTraceReader {
@@ -135,12 +148,66 @@ impl CTFSTraceReader {
         &self.db
     }
 
+    /// M24c — a FULLY-MATERIALIZED clone of the in-memory `Db`, rehydrating the
+    /// per-step value table from the lazy value cache when the reader is on the
+    /// production lazy path (where `self.db.variables` is intentionally empty).
+    ///
+    /// Most consumers should borrow values through the `TraceReader::variables_at`
+    /// trait method (which already prefers the lazy/seekable path). But a few
+    /// `Db`-CONSUMING callers clone the whole `Db` and then iterate
+    /// `db.variables` directly (e.g. the reprobuild origin-namespace / value-change
+    /// encoder, which by its nature needs the COMPLETE value table). For those,
+    /// this method reconstructs `db.variables` from the seekable stream so the
+    /// cloned `Db` is self-contained and matches the eager-materialization result
+    /// exactly. On every non-lazy reader it is just `db().clone()`.
+    pub fn materialized_db(&self) -> Db {
+        let mut db = self.db.clone();
+        if let Some(lazy) = self.lazy_values.as_ref() {
+            // The lazy path left `db.variables` empty; rebuild it per step so a
+            // raw `db.variables.get(step)` consumer sees the same values the
+            // trait accessor serves.
+            debug_assert!(db.variables.is_empty());
+            db.variables.clear();
+            for step_idx in 0..db.steps.len() {
+                let sid = StepId(step_idx as i64);
+                let values = lazy.get(sid).map(|s| s.to_vec()).unwrap_or_default();
+                db.variables.push(values);
+            }
+        }
+        db
+    }
+
     /// M-capability-flags accessor — the column-aware capability bits
     /// decoded from `meta.dat`.  The DAP layer threads these into the
     /// `Capabilities` response so the GUI gates per-column
     /// breakpoint / motion affordances on them.
     pub fn column_capabilities(&self) -> ColumnAwareCapabilities {
         self.column_capabilities
+    }
+
+    /// M24c — number of per-step value slots already DECODED by the lazy value
+    /// cache, or `None` when the reader is not on the lazy (production split)
+    /// path. `Some(0)` right after open proves the value table was NOT
+    /// materialized; the count rises by at most one per distinct step borrowed.
+    /// Exposed for the M24c lazy-open / bounded-decompression tests.
+    pub fn lazy_values_populated(&self) -> Option<usize> {
+        self.lazy_values.as_ref().map(|c| c.populated_count())
+    }
+
+    /// M24c — number of distinct `values.dat` Zstd chunks the seekable value
+    /// overlay has inflated so far, or `None` when no overlay is attached.
+    /// Counter-proof for the bounded-decompression property: fetching one step's
+    /// values inflates at most one chunk.
+    pub fn value_stream_chunk_decompressions(&self) -> Option<u64> {
+        self.value_stream.as_ref().map(|s| s.chunk_decompressions())
+    }
+
+    /// M24c — number of distinct `values.dat` Zstd chunks the LAZY value cache's
+    /// own backing stream (the one the borrowing `variables_at` reads through)
+    /// has inflated so far, or `None` when not on the lazy path. The counterpart
+    /// of [`Self::value_stream_chunk_decompressions`] for the borrowing path.
+    pub fn lazy_values_chunk_decompressions(&self) -> Option<u64> {
+        self.lazy_values.as_ref().map(|c| c.chunk_decompressions())
     }
 
     /// Build a reader directly from a decoded `TraceLowLevelEvent` stream.
@@ -174,6 +241,7 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            lazy_values: None,
         })
     }
 }
@@ -648,6 +716,7 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            lazy_values: None,
         }))
     }
 
@@ -1161,52 +1230,97 @@ impl CTFSTraceReader {
 
         // ── Variables ──────────────────────────────────────────────────
         //
-        // For each step, read variable values via the structured FFI.
-        // step_value returns (varname_id, type_id, cbor_data) where
-        // cbor_data is a CBOR-encoded ValueRecord (tagged with "kind").
-        for step_idx in 0..step_count {
-            let val_count = reader.step_value_count(step_idx);
-            let mut step_values: Vec<FullValueRecord> = Vec::with_capacity(val_count as usize);
+        // M24c — LAZY value path. The PRODUCTION split bundle (M24a-2) ships a
+        // SPEC-canonical `has_value_stream` `values.dat` that the Rust
+        // `ValueStreamReader` reads directly (verified: the seekable overlay
+        // engages on production). When that stream is available we DO NOT decode
+        // the whole value table here — doing so was the O(trace size)
+        // materialization M24 set out to remove. Instead we attach a
+        // `LazyValueCache` over the seekable stream and leave `db.variables`
+        // EMPTY. A step's values are then decoded on first borrow, decompressing
+        // only that step's chunk (`variables_at`/`variables_at_owned` both prefer
+        // the stream). The decoded records are byte-identical to what this loop
+        // used to push, because both decode the same `StepValues` CBOR.
+        //
+        // We open the seekable stream HERE (atomically with the skip decision) so
+        // the open never ends up with neither a materialized table nor a stream:
+        //   - stream opens  → skip eager decode, attach the lazy cache.
+        //   - stream absent → a value-less or pre-M24a-2 (flag-off) bundle; fall
+        //     back to eager FFI materialization exactly as before, so older
+        //     bundles and the corrupt-stream case stay correct.
+        let lazy_values = match step_value_stream_source::SeekableValueStream::open(ct_file_path) {
+            Ok(Some(stream)) => {
+                let stream = std::sync::Arc::new(stream);
+                info!(
+                    "Nim reader: values served LAZILY from seekable values.dat ({} records) — \
+                     value table not materialized at open",
+                    stream.value_count(),
+                );
+                Some(step_value_stream_source::LazyValueCache::new(
+                    stream,
+                    step_count as usize,
+                ))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                info!("Nim reader: values.dat present but unreadable ({e}); materializing value table eagerly");
+                None
+            }
+        };
 
-            for v in 0..val_count {
-                match reader.step_value(step_idx, v) {
-                    Ok((varname_id, _type_id, data)) => {
-                        // Decode the CBOR-encoded ValueRecord. The Nim
-                        // writer produces CBOR maps with a "kind" tag
-                        // matching the serde(tag = "kind") layout of
-                        // ValueRecord.
-                        let value = if data.is_empty() {
-                            ValueRecord::None { type_id: TypeId(0) }
-                        } else {
-                            match cbor4ii::serde::from_reader::<ValueRecord, _>(data.as_slice()) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    log::warn!(
-                                        "step {step_idx} value {v}: CBOR decode failed: {e}, using Raw fallback"
-                                    );
-                                    ValueRecord::Raw {
-                                        r: format!("<cbor decode error: {e}>"),
-                                        type_id: TypeId(0),
+        if lazy_values.is_none() {
+            // Eager fallback: no seekable value stream is available (a value-less
+            // or pre-M24a-2 flag-off bundle, or an unreadable stream). Decode the
+            // full value table via the FFI so the borrowing `variables_at` keeps
+            // returning the same data it always did.
+            //
+            // For each step, read variable values via the structured FFI.
+            // step_value returns (varname_id, type_id, cbor_data) where
+            // cbor_data is a CBOR-encoded ValueRecord (tagged with "kind").
+            for step_idx in 0..step_count {
+                let val_count = reader.step_value_count(step_idx);
+                let mut step_values: Vec<FullValueRecord> = Vec::with_capacity(val_count as usize);
+
+                for v in 0..val_count {
+                    match reader.step_value(step_idx, v) {
+                        Ok((varname_id, _type_id, data)) => {
+                            // Decode the CBOR-encoded ValueRecord. The Nim
+                            // writer produces CBOR maps with a "kind" tag
+                            // matching the serde(tag = "kind") layout of
+                            // ValueRecord.
+                            let value = if data.is_empty() {
+                                ValueRecord::None { type_id: TypeId(0) }
+                            } else {
+                                match cbor4ii::serde::from_reader::<ValueRecord, _>(data.as_slice()) {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        log::warn!(
+                                            "step {step_idx} value {v}: CBOR decode failed: {e}, using Raw fallback"
+                                        );
+                                        ValueRecord::Raw {
+                                            r: format!("<cbor decode error: {e}>"),
+                                            type_id: TypeId(0),
+                                        }
                                     }
                                 }
-                            }
-                        };
-                        step_values.push(FullValueRecord {
-                            variable_id: VariableId(varname_id as usize),
-                            value,
-                        });
-                    }
-                    Err(e) => {
-                        log::warn!("step {step_idx} value {v}: read failed: {e}");
-                        break;
+                            };
+                            step_values.push(FullValueRecord {
+                                variable_id: VariableId(varname_id as usize),
+                                value,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("step {step_idx} value {v}: read failed: {e}");
+                            break;
+                        }
                     }
                 }
+
+                db.variables.push(step_values);
             }
 
-            db.variables.push(step_values);
+            info!("Nim reader: variables materialized for {} steps", db.variables.len());
         }
-
-        info!("Nim reader: variables loaded for {} steps", db.variables.len());
 
         // ── Events ─────────────────────────────────────────────────────
         //
@@ -1290,6 +1404,10 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            // M24c — when set, `db.variables` is empty and step values are served
+            // LAZILY from the seekable `values.dat` stream (built above). The
+            // `value_stream` overlay itself is attached centrally by `open()`.
+            lazy_values,
         })
     }
 
@@ -1377,6 +1495,7 @@ impl CTFSTraceReader {
             // constructors that lack a path leave these `None`.
             step_stream: None,
             value_stream: None,
+            lazy_values: None,
         })
     }
 
@@ -1568,6 +1687,17 @@ impl TraceReader for CTFSTraceReader {
     }
 
     fn variables_at(&self, step_id: StepId) -> Option<&[FullValueRecord]> {
+        // M24c — on a PRODUCTION split bundle the value table is NOT materialized
+        // at open; a step's values are borrowed LAZILY from the seekable
+        // `values.dat` stream (decompressing only that step's chunk on first
+        // access, then memoized). `db.variables` is empty on this path, so we
+        // serve the borrow from the lazy cache. Every other path (legacy
+        // `events.log`, Rust-writer combined bundles, value-less / pre-M24a-2
+        // bundles) leaves `lazy_values` `None` and serves the fully-materialized
+        // `db.variables` — bit-for-bit unchanged.
+        if let Some(lazy) = self.lazy_values.as_ref() {
+            return lazy.get(step_id);
+        }
         self.db.variables.get(step_id).map(|v| v.as_slice())
     }
 

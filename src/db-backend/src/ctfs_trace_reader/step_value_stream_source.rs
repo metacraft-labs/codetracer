@@ -35,7 +35,9 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use once_cell::sync::OnceCell;
 
 use codetracer_trace_types::{FullValueRecord, Line, PathId, StepId, TypeId, ValueRecord, VariableId};
 
@@ -289,6 +291,106 @@ fn decode_value(blob: &[u8]) -> ValueRecord {
                 type_id: TypeId(0),
             }
         }
+    }
+}
+
+/// A LAZY, per-step value cache backing the borrowing `variables_at()` accessor
+/// for a PRODUCTION split bundle (M24c).
+///
+/// The M22 `variables_at_owned` hot path already reads a step's values ON DEMAND
+/// through [`SeekableValueStream`] (bounded decompression). But the borrowing
+/// `TraceReader::variables_at(step) -> Option<&[FullValueRecord]>` API — used by
+/// the full-trace value-history scans in `db.rs` — needs STABLE storage to hand
+/// out a `&[…]`. Previously the new-format reader (`open_new_format_nim`)
+/// satisfied that by EAGERLY decoding every step's values into `db.variables` at
+/// open time (O(trace size) materialization — the exact thing M24's acceptance
+/// forbids).
+///
+/// This cache removes that eager cost: at open it allocates one EMPTY
+/// [`OnceCell`] slot per step (cheap — no decode, no decompression). The first
+/// borrow of step `N`'s values decompresses ONLY that step's `values.dat` chunk
+/// (through the same seekable reader the owned path uses) and memoizes the
+/// decoded records in the slot. Subsequent borrows of the same step return the
+/// cached slice with no further work. So opening a production `.ct` no longer
+/// decodes the whole value stream up front, while the borrowing API keeps
+/// returning a stable, byte-identical slice.
+///
+/// The outer `Vec<OnceCell<…>>` is allocated once at the trace's step count and
+/// never resized, so a `&` into a populated slot stays valid for the reader's
+/// lifetime (the `Vec` never reallocates). `OnceCell` gives safe interior
+/// mutability behind `&self`, matching the `variables_at(&self, …)` signature.
+pub struct LazyValueCache {
+    stream: Arc<SeekableValueStream>,
+    /// One slot per step; `OnceCell` is empty until the step's values are first
+    /// borrowed, then holds the boxed decoded records for the reader's lifetime.
+    slots: Vec<OnceCell<Box<[FullValueRecord]>>>,
+}
+
+impl std::fmt::Debug for LazyValueCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let populated = self.slots.iter().filter(|c| c.get().is_some()).count();
+        f.debug_struct("LazyValueCache")
+            .field("steps", &self.slots.len())
+            .field("populated", &populated)
+            .finish()
+    }
+}
+
+impl LazyValueCache {
+    /// Build a lazy value cache over `step_count` steps, served from the seekable
+    /// `values.dat` stream. No values are decoded here — every slot starts empty.
+    pub fn new(stream: Arc<SeekableValueStream>, step_count: usize) -> LazyValueCache {
+        let mut slots = Vec::with_capacity(step_count);
+        slots.resize_with(step_count, OnceCell::new);
+        LazyValueCache { stream, slots }
+    }
+
+    /// Number of steps this cache spans.
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// `true` when the cache spans no steps.
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
+    /// Number of step slots that have actually been decoded so far. Lets a test
+    /// prove that opening the trace populated NOTHING (the whole value stream is
+    /// not materialized at open) and that one borrow populated exactly one slot.
+    pub fn populated_count(&self) -> usize {
+        self.slots.iter().filter(|c| c.get().is_some()).count()
+    }
+
+    /// Number of distinct `values.dat` Zstd chunks the backing stream has
+    /// inflated so far (bounded-decompression probe for the borrowing
+    /// `variables_at` path, which reads through this cache's own stream).
+    pub fn chunk_decompressions(&self) -> u64 {
+        self.stream.chunk_decompressions()
+    }
+
+    /// Borrow step `step_id`'s values, decoding (and memoizing) them from the
+    /// seekable stream on first access. Returns `None` for an out-of-range id so
+    /// the caller can fall through to whatever fallback it has.
+    ///
+    /// The returned slice is byte-identical to the records the eager
+    /// materialization used to push into `db.variables[step]` (both decode the
+    /// same `StepValues` CBOR through [`step_values_to_full_records`]).
+    pub fn get(&self, step_id: StepId) -> Option<&[FullValueRecord]> {
+        if step_id.0 < 0 {
+            return None;
+        }
+        let slot = self.slots.get(step_id.0 as usize)?;
+        let boxed = slot.get_or_init(|| {
+            // A step with no recorded values, or an out-of-range read the stream
+            // declines, both yield an empty record list — the same answer the
+            // eager path produced (`db.variables.push(vec![])`).
+            self.stream
+                .variables_at(step_id)
+                .unwrap_or_default()
+                .into_boxed_slice()
+        });
+        Some(boxed)
     }
 }
 

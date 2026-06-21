@@ -95,7 +95,12 @@ pub fn load_and_postprocess_trace(trace_folder: &Path) -> Result<Db, Box<dyn Err
     };
 
     let reader = CTFSTraceReader::open(&ct_path)?;
-    Ok(reader.db().clone())
+    // Use the FULLY-MATERIALIZED Db: this caller (and its downstream value-change
+    // encoder) iterates `db.variables` directly, so on the M24c production lazy
+    // path — where `db().variables` is intentionally empty — we rehydrate the
+    // value table from the seekable stream. On non-lazy readers this is just a
+    // plain clone.
+    Ok(reader.materialized_db())
 }
 
 // loop shape 2:
