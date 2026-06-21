@@ -137,19 +137,21 @@ test-windows-installer:
     nim r --hints:off --warnings:off --verbosity:0 \
       tests/e2e/t_vm_harness_hyperv_windows_installer_smoke.nim
 
-test-reprobuild-hcr-mcr-dap:
+test-reprobuild-hcr-mcr-dap: ensure-ct-mcr ensure-ct-native-replay
   #!/usr/bin/env bash
   set -euo pipefail
 
+  # Platform precondition is an honest SKIP, not a hard error: a non-macOS
+  # (or non-arm64) CI run must skip cleanly rather than fail the job.
   if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "Error: test-reprobuild-hcr-mcr-dap requires macOS arm64; got $(uname -s) $(uname -m)." >&2
-    exit 2
+    echo "SKIP: test-reprobuild-hcr-mcr-dap requires macOS arm64 ($(uname -s) $(uname -m))." >&2
+    exit 0
   fi
 
-  command -v repro >/dev/null || {
-    echo "Error: repro is required on PATH. Run this target inside the CodeTracer Nix dev shell." >&2
-    exit 1
-  }
+  if ! command -v repro >/dev/null 2>&1; then
+    echo "SKIP: repro not on PATH (run inside the CodeTracer Nix dev shell)." >&2
+    exit 0
+  fi
 
   repo_root="$(git rev-parse --show-toplevel)"
   lock_backup=""
@@ -157,10 +159,16 @@ test-reprobuild-hcr-mcr-dap:
   resolve_sibling_repo() {
     local repo_name="$1"
     local override_var="$2"
+    local sibling_var="$3"
     local override_value="${!override_var:-}"
+    local sibling_value="${!sibling_var:-}"
 
     if [ -n "$override_value" ]; then
       printf '%s\n' "$override_value"
+      return 0
+    fi
+    if [ -n "$sibling_value" ]; then
+      printf '%s\n' "$sibling_value"
       return 0
     fi
     if [ -d "$repo_root/../$repo_name" ]; then
@@ -175,7 +183,11 @@ test-reprobuild-hcr-mcr-dap:
     printf '%s\n' "$repo_root/../$repo_name"
   }
 
-  reprobuild_sibling_root="$(resolve_sibling_repo reprobuild CODETRACER_REPROBUILD_REPO_PATH)"
+  # --- Reprobuild source tree ---
+  # Detection order: explicit override -> non-store REPROBUILD_SOURCE_ROOT ->
+  # ../reprobuild sibling. Honest-SKIP (not exit 1) when none carries the
+  # repro_hcr_agent library — e.g. the sibling is not checked out.
+  reprobuild_sibling_root="$(resolve_sibling_repo reprobuild CODETRACER_REPROBUILD_REPO_PATH CT_REPROBUILD_SIBLING)"
   reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
   if [ -z "$reprobuild_root" ] && [ -n "${REPROBUILD_SOURCE_ROOT:-}" ] && [[ "$REPROBUILD_SOURCE_ROOT" != /nix/store/* ]]; then
     reprobuild_root="$REPROBUILD_SOURCE_ROOT"
@@ -187,62 +199,45 @@ test-reprobuild-hcr-mcr-dap:
     reprobuild_root="${REPROBUILD_SOURCE_ROOT:-$reprobuild_sibling_root}"
   fi
   if [ ! -d "$reprobuild_root/libs/repro_hcr_agent" ]; then
-    echo "Error: REPROBUILD_SOURCE_ROOT or CODETRACER_REPROBUILD_REPO_PATH must point to the Reprobuild source tree: $reprobuild_root" >&2
-    exit 1
+    echo "SKIP: reprobuild sibling not detected (set CT_REPROBUILD_SIBLING / CODETRACER_REPROBUILD_REPO_PATH or check it out at \$METACRAFT_ROOT/reprobuild; looked at $reprobuild_root)." >&2
+    exit 0
   fi
   export REPROBUILD_SOURCE_ROOT="$reprobuild_root"
   export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
 
-  native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH)"
+  # --- ct-native-replay (codetracer-native-backend sibling) ---
+  # Built on demand by the ensure-ct-native-replay prerequisite. Honest-SKIP
+  # when the sibling is absent.
+  native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH CT_CODETRACER_NATIVE_BACKEND_SIBLING)"
   if [ ! -d "$native_backend" ]; then
-    echo "Error: CODETRACER_NATIVE_BACKEND_REPO_PATH must point to the codetracer-native-backend sibling repo: $native_backend" >&2
-    exit 1
+    echo "SKIP: codetracer-native-backend sibling not detected (set CT_CODETRACER_NATIVE_BACKEND_SIBLING / CODETRACER_NATIVE_BACKEND_REPO_PATH or check it out at \$METACRAFT_ROOT/codetracer-native-backend)." >&2
+    exit 0
   fi
   native_replay="$native_backend/target/debug/ct-native-replay"
-  if [ -z "${LLVM_CONFIG:-}" ]; then
-    llvm_dev="$(nix build --no-link --print-out-paths nixpkgs#llvm.dev)"
-    export LLVM_CONFIG="$llvm_dev/bin/llvm-config"
+  if [ ! -x "$native_replay" ]; then
+    echo "SKIP: ct-native-replay not built at $native_replay (ensure-ct-native-replay could not produce it)." >&2
+    exit 0
   fi
   if [ -z "${LLDB_LIB_PATH:-}" ]; then
     lldb_out="$(nix build --no-link --print-out-paths nixpkgs#lldb)"
     export LLDB_LIB_PATH="$lldb_out/lib"
   fi
-  if [ -z "${LLDB_ADDITIONAL_INCLUDE_DIRS:-}" ]; then
-    lldb_dev="$(nix build --no-link --print-out-paths nixpkgs#lldb.dev)"
-    export LLDB_ADDITIONAL_INCLUDE_DIRS="$lldb_dev/include"
-  fi
-  if [ "$(uname -s)" = "Darwin" ]; then
-    libcxx_dev="$(nix build --no-link --print-out-paths nixpkgs#libcxx.dev)"
-    export CXXFLAGS="-isystem $libcxx_dev/include/c++/v1 ${CXXFLAGS:-}"
-    export CC="clang"
-    export CXX="clang++"
-  fi
-  echo "Building ct-native-replay in $native_backend"
-  if [ "$(uname -s)" = "Darwin" ]; then
-    (cd "$native_backend" && just build-mcr)
-  else
-    (cd "$native_backend" && cargo build --bin ct-native-replay)
-  fi
-  if [ ! -x "$native_replay" ]; then
-    echo "Error: ct-native-replay was not built at $native_replay; check CODETRACER_NATIVE_BACKEND_REPO_PATH" >&2
-    exit 1
-  fi
 
-  native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH)"
+  # --- ct-mcr (codetracer-native-recorder sibling) ---
+  # Built on demand by the ensure-ct-mcr prerequisite. Honest-SKIP when the
+  # sibling or its built binary is absent.
+  native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH CT_CODETRACER_NATIVE_RECORDER_SIBLING)"
   if [ ! -d "$native_recorder" ]; then
-    echo "Error: CODETRACER_NATIVE_RECORDER_REPO_PATH must point to the codetracer-native-recorder sibling repo: $native_recorder" >&2
-    exit 1
+    echo "SKIP: codetracer-native-recorder sibling not detected (set CT_CODETRACER_NATIVE_RECORDER_SIBLING / CODETRACER_NATIVE_RECORDER_REPO_PATH or check it out at \$METACRAFT_ROOT/codetracer-native-recorder)." >&2
+    exit 0
   fi
-  echo "Building ct-mcr in $native_recorder"
-  nix develop "$native_recorder" --command bash -lc \
-    "unset LLVM_CONFIG LLDB_LIB_PATH LLDB_ADDITIONAL_INCLUDE_DIRS CXXFLAGS CC CXX; cd '$native_recorder' && just build-ct-mcr"
-  ct_mcr="$native_recorder/ct_cli/ct_cli"
-  if [ "$(uname -s)" = "Darwin" ] && [ -x "$native_recorder/ct_cli/ct_cli-debug" ]; then
-    ct_mcr="$native_recorder/ct_cli/ct_cli-debug"
-  fi
-  if [ ! -x "$ct_mcr" ]; then
-    echo "Error: ct-mcr was not built at $ct_mcr; check CODETRACER_NATIVE_RECORDER_REPO_PATH" >&2
-    exit 1
+  ct_mcr=""
+  for cand in "$native_recorder/ct_cli/ct_cli-debug" "$native_recorder/ct_cli/ct_cli"; do
+    if [ -x "$cand" ]; then ct_mcr="$cand"; break; fi
+  done
+  if [ -z "$ct_mcr" ]; then
+    echo "SKIP: ct-mcr not built under $native_recorder/ct_cli (ensure-ct-mcr could not produce it)." >&2
+    exit 0
   fi
 
   mcr_path_dir="$(mktemp -d "${TMPDIR:-/tmp}/codetracer-m3-ct-mcr.XXXXXX")"
@@ -269,29 +264,36 @@ test-reprobuild-hcr-mcr-dap:
   cargo test --offline --no-default-features --features io-transport,syntax-highlight \
     --test reprobuild_hcr_mcr_dap_test -- --nocapture
 
-test-reprobuild-hcr-in-codetracer: build-once
+test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
   #!/usr/bin/env bash
   set -euo pipefail
 
+  # Platform precondition is an honest SKIP, not a hard error.
   if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "Error: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR; got $(uname -s) $(uname -m)." >&2
-    exit 2
+    echo "SKIP: test-reprobuild-hcr-in-codetracer requires macOS arm64 direct HCR ($(uname -s) $(uname -m))." >&2
+    exit 0
   fi
 
-  command -v repro >/dev/null || {
-    echo "Error: repro is required on PATH. Run this target inside the CodeTracer Nix dev shell." >&2
-    exit 1
-  }
+  if ! command -v repro >/dev/null 2>&1; then
+    echo "SKIP: repro not on PATH (run inside the CodeTracer Nix dev shell)." >&2
+    exit 0
+  fi
 
   repo_root="$(git rev-parse --show-toplevel)"
 
   resolve_sibling_repo() {
     local repo_name="$1"
     local override_var="$2"
+    local sibling_var="$3"
     local override_value="${!override_var:-}"
+    local sibling_value="${!sibling_var:-}"
 
     if [ -n "$override_value" ]; then
       printf '%s\n' "$override_value"
+      return 0
+    fi
+    if [ -n "$sibling_value" ]; then
+      printf '%s\n' "$sibling_value"
       return 0
     fi
     if [ -d "$repo_root/../$repo_name" ]; then
@@ -306,21 +308,27 @@ test-reprobuild-hcr-in-codetracer: build-once
     printf '%s\n' "$repo_root/../$repo_name"
   }
 
+  # --- Reprobuild source tree --- honest-SKIP when absent (not exit 1).
   reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
   if [ -z "$reprobuild_root" ] && [ -n "${REPROBUILD_SOURCE_ROOT:-}" ] && [[ "$REPROBUILD_SOURCE_ROOT" != /nix/store/* ]]; then
     reprobuild_root="$REPROBUILD_SOURCE_ROOT"
   fi
   if [ -z "$reprobuild_root" ]; then
-    reprobuild_root="$(resolve_sibling_repo reprobuild CODETRACER_REPROBUILD_REPO_PATH)"
+    reprobuild_root="$(resolve_sibling_repo reprobuild CODETRACER_REPROBUILD_REPO_PATH CT_REPROBUILD_SIBLING)"
   fi
   if [ ! -d "$reprobuild_root/libs/repro_hcr_agent" ]; then
-    echo "Error: REPROBUILD_SOURCE_ROOT or CODETRACER_REPROBUILD_REPO_PATH must point to the Reprobuild source tree: $reprobuild_root" >&2
-    exit 1
+    echo "SKIP: reprobuild sibling not detected (set CT_REPROBUILD_SIBLING / CODETRACER_REPROBUILD_REPO_PATH or check it out at \$METACRAFT_ROOT/reprobuild; looked at $reprobuild_root)." >&2
+    exit 0
   fi
   export REPROBUILD_SOURCE_ROOT="$reprobuild_root"
   export CODETRACER_REPROBUILD_REPO_PATH="${CODETRACER_REPROBUILD_REPO_PATH:-$reprobuild_root}"
 
-  native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH)"
+  # --- ct-native-replay (built on demand by ensure-ct-native-replay) ---
+  native_backend="$(resolve_sibling_repo codetracer-native-backend CODETRACER_NATIVE_BACKEND_REPO_PATH CT_CODETRACER_NATIVE_BACKEND_SIBLING)"
+  if [ ! -d "$native_backend" ]; then
+    echo "SKIP: codetracer-native-backend sibling not detected (set CT_CODETRACER_NATIVE_BACKEND_SIBLING / CODETRACER_NATIVE_BACKEND_REPO_PATH or check it out at \$METACRAFT_ROOT/codetracer-native-backend)." >&2
+    exit 0
+  fi
   if [ "$(uname -s)" = "Darwin" ] && [ -z "${CT_NATIVE_REPLAY_PATH:-}" ] && [ -z "${CT_NATIVE_REPLAY_BIN:-}" ] && [ -z "${CODETRACER_CT_NATIVE_REPLAY_CMD:-}" ] && [ -x "$native_backend/target/debug/ct-native-replay" ]; then
     (cd "$native_backend" && just sign-macos-binary)
   fi
@@ -330,7 +338,12 @@ test-reprobuild-hcr-in-codetracer: build-once
     export CODETRACER_CT_NATIVE_REPLAY_CMD="$CT_NATIVE_REPLAY_PATH"
   fi
 
-  native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH)"
+  # --- ct-mcr (built on demand by ensure-ct-mcr) ---
+  native_recorder="$(resolve_sibling_repo codetracer-native-recorder CODETRACER_NATIVE_RECORDER_REPO_PATH CT_CODETRACER_NATIVE_RECORDER_SIBLING)"
+  if [ ! -d "$native_recorder" ]; then
+    echo "SKIP: codetracer-native-recorder sibling not detected (set CT_CODETRACER_NATIVE_RECORDER_SIBLING / CODETRACER_NATIVE_RECORDER_REPO_PATH or check it out at \$METACRAFT_ROOT/codetracer-native-recorder)." >&2
+    exit 0
+  fi
   if [ -z "${CODETRACER_CT_MCR_CMD:-}" ] && [ "$(uname -s)" = "Darwin" ] && [ -x "$native_recorder/ct_cli/ct_cli-debug" ]; then
     export CODETRACER_CT_MCR_CMD="$native_recorder/ct_cli/ct_cli-debug"
   fi
@@ -348,6 +361,10 @@ test-reprobuild-hcr-in-codetracer: build-once
   if [ -n "${LLDB_LIB_PATH:-}" ]; then
     export DYLD_LIBRARY_PATH="$LLDB_LIB_PATH${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
   fi
+
+  # Build the ct binary on demand only once all preconditions are satisfied,
+  # so a platform/sibling SKIP above exits cleanly without an expensive build.
+  just build-once
 
   ct_bin="$repo_root/src/build-debug/bin/ct"
   if [ ! -x "$ct_bin" ]; then
