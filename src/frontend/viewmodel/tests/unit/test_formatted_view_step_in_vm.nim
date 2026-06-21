@@ -61,6 +61,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -102,9 +103,11 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  # Returns "" when neither CODETRACER_JS_RECORDER_PATH nor a built
+  # sibling is found, so the caller gates the test through
+  # requireRecorderOrSkip (recorder_gate.nim) for a uniform, greppable
+  # missing-recorder skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   result = getTempDir() / ("ct_fmt_view_step_in_vm_" & $getCurrentProcessId())
@@ -207,63 +210,69 @@ const FormattedViewPath = "/tmp/m8-vm-step-in-formatted-view.fmt.js"
 suite "M8 — Formatted-view step-IN through the ViewModel":
 
   test "test_formatted_view_step_in_lands_at_first_formatted_callee_line":
-    ## STRICT (Test A) — with the formatted srcview active, ``stepIn``
-    ## from the call site (line 2 of the fixture, where ``var y = f(5)``
-    ## sits) MUST land at the first executed formatted line of the
-    ## callee.  Under an identity sourcemap the formatted line of the
-    ## callee's first body equals the recorded minified line — i.e.
-    ## line 1.  This proves the M8 stepIn runner correctly descended
-    ## into the callee under the formatted-view dispatch.
-    let fixture = recordJsTraceWithCall()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT (Test A) — with the formatted srcview active, ``stepIn``
+      ## from the call site (line 2 of the fixture, where ``var y = f(5)``
+      ## sits) MUST land at the first executed formatted line of the
+      ## callee.  Under an identity sourcemap the formatted line of the
+      ## callee's first body equals the recorded minified line — i.e.
+      ## line 1.  This proves the M8 stepIn runner correctly descended
+      ## into the callee under the formatted-view dispatch.
+      let fixture = recordJsTraceWithCall()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Install identity sourcemap so the runner has a projection.
-    let mapJson = buildIdentityV3Map(FormattedViewPath, 4)
-    session.installSourceViewForTest(
-      recordedPath = fixture.sourcePath,
-      formattedViewPath = FormattedViewPath,
-      sourcemapV3Json = mapJson)
-    session.setActiveSourceView(FormattedViewPath)
+      # Install identity sourcemap so the runner has a projection.
+      let mapJson = buildIdentityV3Map(FormattedViewPath, 4)
+      session.installSourceViewForTest(
+        recordedPath = fixture.sourcePath,
+        formattedViewPath = FormattedViewPath,
+        sourcemapV3Json = mapJson)
+      session.setActiveSourceView(FormattedViewPath)
 
-    # The recorder lands on the first recorded user step which under
-    # this fixture is the function declaration step (line 1) — JS
-    # hoists the function so the very first user step the recorder
-    # captures is the declaration, then continues onto the call site
-    # at line 2.  Walk forward until we sit at the call site (line 2).
-    var safety = 0
-    while session.getCurrentLine() != 2 and safety < 16:
-      session.stepForward()
-      inc safety
-    check session.getCurrentLine() == 2
+      # The recorder lands on the first recorded user step which under
+      # this fixture is the function declaration step (line 1) — JS
+      # hoists the function so the very first user step the recorder
+      # captures is the declaration, then continues onto the call site
+      # at line 2.  Walk forward until we sit at the call site (line 2).
+      var safety = 0
+      while session.getCurrentLine() != 2 and safety < 16:
+        session.stepForward()
+        inc safety
+      check session.getCurrentLine() == 2
 
-    # stepIn from the call site at line 2 MUST descend into the callee
-    # and land at line 1 (the body of ``function f(x) { return x + 1;}``).
-    session.stepIn()
-    check session.getCurrentLine() == 1
+      # stepIn from the call site at line 2 MUST descend into the callee
+      # and land at line 1 (the body of ``function f(x) { return x + 1;}``).
+      session.stepIn()
+      check session.getCurrentLine() == 1
 
   test "test_minified_view_step_in_preserves_legacy_single_step":
-    ## STRICT (Test B) — back-compat: WITHOUT activating the formatted
-    ## view, ``stepIn`` advances by the legacy single-recorded-step
-    ## primitive.  At the call site (line 2), stepIn MUST land on line
-    ## 1 — the callee body — because the recorder ordered the steps
-    ## that way.  This pins that M8's intercept layer is transparent to
-    ## clients who haven't toggled the formatted view.
-    let fixture = recordJsTraceWithCall()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT (Test B) — back-compat: WITHOUT activating the formatted
+      ## view, ``stepIn`` advances by the legacy single-recorded-step
+      ## primitive.  At the call site (line 2), stepIn MUST land on line
+      ## 1 — the callee body — because the recorder ordered the steps
+      ## that way.  This pins that M8's intercept layer is transparent to
+      ## clients who haven't toggled the formatted view.
+      let fixture = recordJsTraceWithCall()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # No active source view installed — legacy minified mode.
-    # Walk forward to the call site at line 2.
-    var safety = 0
-    while session.getCurrentLine() != 2 and safety < 16:
-      session.stepForward()
-      inc safety
-    check session.getCurrentLine() == 2
+      # No active source view installed — legacy minified mode.
+      # Walk forward to the call site at line 2.
+      var safety = 0
+      while session.getCurrentLine() != 2 and safety < 16:
+        session.stepForward()
+        inc safety
+      check session.getCurrentLine() == 2
 
-    # Legacy stepIn: lands at the next recorded step (the callee body).
-    session.stepIn()
-    check session.getCurrentLine() == 1
+      # Legacy stepIn: lands at the next recorded step (the callee body).
+      session.stepIn()
+      check session.getCurrentLine() == 1
 
 when isMainModule:
   discard

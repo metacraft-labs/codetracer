@@ -82,6 +82,7 @@
 import std/[json, options, os, osproc, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -137,11 +138,10 @@ proc findSolanaRecorder(): string =
     "target" / "release" / "codetracer-solana-recorder"
   if fileExists(siblingRelease):
     return siblingRelease
-  raise newException(IOError,
-    "missing Solana recorder; set " & SOLANA_RECORDER_ENV &
-    " or build via `cd ../codetracer-solana-recorder && cargo build` " &
-    "(or supply a pre-recorded column-aware trace via " &
-    SOLANA_FIXTURE_TRACE_ENV & ")")
+  # Returns "" when the recorder is missing so the caller gates the test
+  # through requireRecorderOrSkip (recorder_gate.nim) for a uniform,
+  # greppable skip rather than a hard IOError.
+  return ""
 
 proc findColumnAwareSourceFile(): string =
   ## Locate the Solana column-aware fixture source file.  Used as the
@@ -237,6 +237,18 @@ proc resolveTrace(): tuple[tracePath, sourcePath: string] =
     return (tracePath: preBuilt, sourcePath: src)
   return recordSyntheticSolanaTrace()
 
+proc solanaTraceSource(): string =
+  ## Return a non-empty token when a Solana trace can be produced (either
+  ## a pre-recorded column-aware trace is supplied via the env override,
+  ## or the recorder sibling is built), else "".  Used as the gate input
+  ## for ``requireRecorderOrSkip`` so the missing-recorder skip is uniform
+  ## with the other recorder-gated tests AND still honours the
+  ## pre-recorded-trace fallback.
+  let preBuilt = getEnv(SOLANA_FIXTURE_TRACE_ENV, "")
+  if preBuilt.len > 0 and dirExists(preBuilt):
+    return preBuilt
+  return findSolanaRecorder()
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -244,152 +256,161 @@ proc resolveTrace(): tuple[tracePath, sourcePath: string] =
 suite "M1 — Column-aware breakpoint through the ViewModel (Solana SBF)":
 
   test "test_column_solana_vm_response_echoes_bound_column":
-    ## STRICT (M1 wire contract) — when the ViewModel sends a
-    ## ``setBreakpoints`` request that carries a non-zero ``column``,
-    ## the DAP response MUST echo that column back on the bound
-    ## breakpoint.  This proves the column-aware DAP surface is
-    ## reachable for Solana traces — the same code path the JS test
-    ## exercises.
-    ##
-    ## The test asserts on the response shape rather than on the
-    ## continue-stop coordinates because the strict
-    ## "stop-at-recorded-column" assertion requires a trace whose
-    ## recorded steps carry the matching column.  The CLI-driven
-    ## synthetic-register flow records DWARF-derived line/column from
-    ## the recorder's own crate sources, so the column the bound
-    ## breakpoint targets may not exist among the recorded steps.  We
-    ## therefore pin the column-aware *wire shape* universally and
-    ## defer the stop-coordinate assertion to the next test (which is
-    ## conditioned on a column-aware fixture trace).
-    let trace = resolveTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(trace.tracePath, replayServer)
+    requireRecorderOrSkip(solanaTraceSource(), "codetracer-solana-recorder",
+        "CODETRACER_SOLANA_RECORDER_PATH",
+        "Build the codetracer-solana-recorder sibling (cargo build), or set CODETRACER_SOLANA_COLUMN_AWARE_TRACE to a pre-recorded trace."):
+      ## STRICT (M1 wire contract) — when the ViewModel sends a
+      ## ``setBreakpoints`` request that carries a non-zero ``column``,
+      ## the DAP response MUST echo that column back on the bound
+      ## breakpoint.  This proves the column-aware DAP surface is
+      ## reachable for Solana traces — the same code path the JS test
+      ## exercises.
+      ##
+      ## The test asserts on the response shape rather than on the
+      ## continue-stop coordinates because the strict
+      ## "stop-at-recorded-column" assertion requires a trace whose
+      ## recorded steps carry the matching column.  The CLI-driven
+      ## synthetic-register flow records DWARF-derived line/column from
+      ## the recorder's own crate sources, so the column the bound
+      ## breakpoint targets may not exist among the recorded steps.  We
+      ## therefore pin the column-aware *wire shape* universally and
+      ## defer the stop-coordinate assertion to the next test (which is
+      ## conditioned on a column-aware fixture trace).
+      let trace = resolveTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(trace.tracePath, replayServer)
 
-    # Sanity — the recorder lands the cursor on the entry step at a
-    # well-defined line/column.  Read the column the run-to-entry step
-    # landed on so the column-aware assertion below targets a real
-    # recorded coordinate when available.
-    let entryFile = session.getCurrentFile()
-    let entryLine = session.getCurrentLine()
-    let entryCol = session.getCurrentColumn()
-    check entryFile.len > 0
-    check entryLine >= 1
+      # Sanity — the recorder lands the cursor on the entry step at a
+      # well-defined line/column.  Read the column the run-to-entry step
+      # landed on so the column-aware assertion below targets a real
+      # recorded coordinate when available.
+      let entryFile = session.getCurrentFile()
+      let entryLine = session.getCurrentLine()
+      let entryCol = session.getCurrentColumn()
+      check entryFile.len > 0
+      check entryLine >= 1
 
-    # M1 — register a column-aware breakpoint at the entry step's
-    # exact ``(line, column)``.  Two reasons:
-    #   * when ``entryCol`` is Some we know that column exists in the
-    #     trace, so the bound breakpoint can be verified end-to-end;
-    #   * when ``entryCol`` is None (legacy line-only recording) the
-    #     request degrades to the line-only form and the legacy
-    #     fallback assertion in the next test covers it.
-    let column = entryCol.get(1)
-    let resp = session.lastSetBreakpointsResponse(
-      entryFile, line = entryLine, column = column)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    # STRICT — the M1 contract: the bound column on the response MUST
-    # echo the requested column when the request carried one.
-    check bps[0].hasKey("column")
-    check bps[0]["column"].getInt(0) == column
-    check bps[0].getOrDefault("line").getInt(0) == entryLine
+      # M1 — register a column-aware breakpoint at the entry step's
+      # exact ``(line, column)``.  Two reasons:
+      #   * when ``entryCol`` is Some we know that column exists in the
+      #     trace, so the bound breakpoint can be verified end-to-end;
+      #   * when ``entryCol`` is None (legacy line-only recording) the
+      #     request degrades to the line-only form and the legacy
+      #     fallback assertion in the next test covers it.
+      let column = entryCol.get(1)
+      let resp = session.lastSetBreakpointsResponse(
+        entryFile, line = entryLine, column = column)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      # STRICT — the M1 contract: the bound column on the response MUST
+      # echo the requested column when the request carried one.
+      check bps[0].hasKey("column")
+      check bps[0]["column"].getInt(0) == column
+      check bps[0].getOrDefault("line").getInt(0) == entryLine
 
   test "test_column_solana_vm_line_only_breakpoint_preserved":
-    ## STRICT — a legacy line-only breakpoint (``column = 0``) MUST
-    ## continue to work after the M1 extension, on Solana traces just
-    ## like the JS path.  This pins back-compat for DAP clients that
-    ## don't send a column on the wire.
-    let trace = resolveTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(trace.tracePath, replayServer)
+    requireRecorderOrSkip(solanaTraceSource(), "codetracer-solana-recorder",
+        "CODETRACER_SOLANA_RECORDER_PATH",
+        "Build the codetracer-solana-recorder sibling (cargo build), or set CODETRACER_SOLANA_COLUMN_AWARE_TRACE to a pre-recorded trace."):
+      ## STRICT — a legacy line-only breakpoint (``column = 0``) MUST
+      ## continue to work after the M1 extension, on Solana traces just
+      ## like the JS path.  This pins back-compat for DAP clients that
+      ## don't send a column on the wire.
+      let trace = resolveTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(trace.tracePath, replayServer)
 
-    # Capture the entry line; the legacy breakpoint targets a /later/
-    # recorded line so the Continue assertion below has somewhere to
-    # land.  We pick ``entryLine + 1`` when there is a step on it; the
-    # synthetic-register recorder usually emits multiple steps per line
-    # for the same source location so ``entryLine`` itself is also a
-    # valid landing site — we fall back to it when no later line is
-    # observed.
-    let entryFile = session.getCurrentFile()
-    let entryLine = session.getCurrentLine()
+      # Capture the entry line; the legacy breakpoint targets a /later/
+      # recorded line so the Continue assertion below has somewhere to
+      # land.  We pick ``entryLine + 1`` when there is a step on it; the
+      # synthetic-register recorder usually emits multiple steps per line
+      # for the same source location so ``entryLine`` itself is also a
+      # valid landing site — we fall back to it when no later line is
+      # observed.
+      let entryFile = session.getCurrentFile()
+      let entryLine = session.getCurrentLine()
 
-    # Set a line-only breakpoint on the entry line; the wire MUST NOT
-    # carry a column key.  Assert the response surfaces ``column =
-    # null`` (or omits the key entirely) to prove the legacy path is
-    # taken.  The continue assertion below is then the live half of
-    # the back-compat contract.
-    let resp = session.lastSetBreakpointsResponse(
-      entryFile, line = entryLine, column = 0)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    # ``column`` is ``skip_serializing_if = Option::is_none`` on the
-    # Rust side, so a legacy response either omits the key entirely or
-    # sets it to ``null``.  Both are equivalent to "no column".
-    let colNode = bps[0].getOrDefault("column")
-    check colNode.isNil or colNode.kind == JNull
-    check bps[0].getOrDefault("line").getInt(0) == entryLine
+      # Set a line-only breakpoint on the entry line; the wire MUST NOT
+      # carry a column key.  Assert the response surfaces ``column =
+      # null`` (or omits the key entirely) to prove the legacy path is
+      # taken.  The continue assertion below is then the live half of
+      # the back-compat contract.
+      let resp = session.lastSetBreakpointsResponse(
+        entryFile, line = entryLine, column = 0)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      # ``column`` is ``skip_serializing_if = Option::is_none`` on the
+      # Rust side, so a legacy response either omits the key entirely or
+      # sets it to ``null``.  Both are equivalent to "no column".
+      let colNode = bps[0].getOrDefault("column")
+      check colNode.isNil or colNode.kind == JNull
+      check bps[0].getOrDefault("line").getInt(0) == entryLine
 
   test "test_column_solana_vm_column_aware_continue_stops_at_recorded_column":
-    ## STRICT (column-aware stop coordinate) — this test only runs
-    ## when ``CODETRACER_SOLANA_COLUMN_AWARE_TRACE`` is set to a
-    ## pre-recorded fixture trace.  When set, we drive ``continue``
-    ## against a column-aware breakpoint and assert the resulting
-    ## ``(line, column)`` matches the bound breakpoint exactly.
-    ##
-    ## When the fixture trace is absent we still execute the test —
-    ## but only the wire-shape assertion (the breakpoint is
-    ## /accepted/ at the bound column) is meaningful.  This avoids a
-    ## silent ``test.skip`` while keeping the strict stop-coordinate
-    ## requirement gated on data the recorder must provide.
-    let preBuilt = getEnv(SOLANA_FIXTURE_TRACE_ENV, "")
-    let trace = resolveTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(trace.tracePath, replayServer)
+    requireRecorderOrSkip(solanaTraceSource(), "codetracer-solana-recorder",
+        "CODETRACER_SOLANA_RECORDER_PATH",
+        "Build the codetracer-solana-recorder sibling (cargo build), or set CODETRACER_SOLANA_COLUMN_AWARE_TRACE to a pre-recorded trace."):
+      ## STRICT (column-aware stop coordinate) — this test only runs
+      ## when ``CODETRACER_SOLANA_COLUMN_AWARE_TRACE`` is set to a
+      ## pre-recorded fixture trace.  When set, we drive ``continue``
+      ## against a column-aware breakpoint and assert the resulting
+      ## ``(line, column)`` matches the bound breakpoint exactly.
+      ##
+      ## When the fixture trace is absent we still execute the test —
+      ## but only the wire-shape assertion (the breakpoint is
+      ## /accepted/ at the bound column) is meaningful.  This avoids a
+      ## silent ``test.skip`` while keeping the strict stop-coordinate
+      ## requirement gated on data the recorder must provide.
+      let preBuilt = getEnv(SOLANA_FIXTURE_TRACE_ENV, "")
+      let trace = resolveTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(trace.tracePath, replayServer)
 
-    let entryFile = session.getCurrentFile()
-    let entryLine = session.getCurrentLine()
-    let entryCol = session.getCurrentColumn()
+      let entryFile = session.getCurrentFile()
+      let entryLine = session.getCurrentLine()
+      let entryCol = session.getCurrentColumn()
 
-    # Pick a non-entry column-aware target.  When a column-aware
-    # fixture is supplied, the canonical Solana column-aware fixture
-    # has three statements on line 1 at columns 1, 12, 23 — set the
-    # breakpoint at column 12 so a forward Continue MUST land there.
-    let targetLine = entryLine
-    let targetColumn = if preBuilt.len > 0 and dirExists(preBuilt):
-      12  # `let b = 2;` in column_aware_test.rs — see the Rust DAP test.
-    elif entryCol.isSome:
-      entryCol.get()
-    else:
-      1
+      # Pick a non-entry column-aware target.  When a column-aware
+      # fixture is supplied, the canonical Solana column-aware fixture
+      # has three statements on line 1 at columns 1, 12, 23 — set the
+      # breakpoint at column 12 so a forward Continue MUST land there.
+      let targetLine = entryLine
+      let targetColumn = if preBuilt.len > 0 and dirExists(preBuilt):
+        12  # `let b = 2;` in column_aware_test.rs — see the Rust DAP test.
+      elif entryCol.isSome:
+        entryCol.get()
+      else:
+        1
 
-    let resp = session.lastSetBreakpointsResponse(
-      entryFile, line = targetLine, column = targetColumn)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    let verified = bps[0].getOrDefault("verified").getBool(false)
-    # The wire contract: a verified breakpoint MUST echo the bound
-    # column.  When unverified (the column does not exist among the
-    # trace's recorded steps), we cannot drive Continue meaningfully —
-    # the legacy test above covers the line-only fallback path.
-    if verified:
-      check bps[0]["column"].getInt(0) == targetColumn
-      if preBuilt.len > 0 and dirExists(preBuilt):
-        # STRICT (column-aware fixture path) — Continue MUST stop at
-        # the bound ``(line, column)``.  Mirrors the JS test's
-        # canonical assertion on the recorded second statement
-        # of a multi-statement source line.
-        session.continueForward()
-        check session.getCurrentLine() == targetLine
-        let landedCol = session.getCurrentColumn()
-        check landedCol.isSome
-        check landedCol.get() == targetColumn
+      let resp = session.lastSetBreakpointsResponse(
+        entryFile, line = targetLine, column = targetColumn)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      let verified = bps[0].getOrDefault("verified").getBool(false)
+      # The wire contract: a verified breakpoint MUST echo the bound
+      # column.  When unverified (the column does not exist among the
+      # trace's recorded steps), we cannot drive Continue meaningfully —
+      # the legacy test above covers the line-only fallback path.
+      if verified:
+        check bps[0]["column"].getInt(0) == targetColumn
+        if preBuilt.len > 0 and dirExists(preBuilt):
+          # STRICT (column-aware fixture path) — Continue MUST stop at
+          # the bound ``(line, column)``.  Mirrors the JS test's
+          # canonical assertion on the recorded second statement
+          # of a multi-statement source line.
+          session.continueForward()
+          check session.getCurrentLine() == targetLine
+          let landedCol = session.getCurrentColumn()
+          check landedCol.isSome
+          check landedCol.get() == targetColumn
 
 when isMainModule:
   discard

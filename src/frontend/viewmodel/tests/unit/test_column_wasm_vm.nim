@@ -48,6 +48,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Repo + tool discovery
@@ -232,8 +233,9 @@ template gateOnWasmRecorder(testName: string, body: untyped): untyped =
     if wasmFixture.len == 0:
       reasons.add "column_aware.wasm fixture not found (set " &
         "CODETRACER_WASM_COLUMN_AWARE_WASM)"
-    echo "SKIPPED " & testName & ": " & reasons.join("; ")
-    skip()
+    skipMissingRecorder("codetracer-wasm-recorder (wazero)",
+      "CODETRACER_WASM_VM_PATH",
+      "Missing: " & reasons.join("; ") & ".")
   else:
     body
 

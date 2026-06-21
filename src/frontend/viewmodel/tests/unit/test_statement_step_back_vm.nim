@@ -47,6 +47,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -89,9 +90,11 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  # Returns "" when neither CODETRACER_JS_RECORDER_PATH nor a built
+  # sibling is found, so the caller gates the test through
+  # requireRecorderOrSkip (recorder_gate.nim) for a uniform, greppable
+  # missing-recorder skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   ## Per-process temp directory for the JS source + recorded trace.
@@ -169,120 +172,129 @@ proc recordTinyJsTrace(): tuple[tracePath, sourcePath: string;
 suite "M7 — Statement-granularity step BACK through the ViewModel":
 
   test "test_statement_step_back_vm_advances_one_statement_per_invocation":
-    ## Park the cursor on line 2 (via two forward steps to walk past
-    ## the multi-statement line 1), then issue ``stepBackStatement``
-    ## twice and assert successive reverse landings at line 1 col
-    ## ``var b`` and then col ``var a``.  The column-aware backward
-    ## runner MUST fire the strictly-LESS column predicate on the
-    ## same-line hop — symmetric to the M2 forward strictly-GREATER
-    ## assertion.
-    ##
-    ## Why we walk to line 2 first instead of jumping: ``headless_session``
-    ## doesn't expose a jump-to-step primitive; the canonical way to
-    ## park the cursor on a known position is to step into it.  Doing
-    ## so also keeps the test honest — it proves both the forward
-    ## and backward runners agree on the column landing for the same
-    ## fixture, on the same replay-server instance.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## Park the cursor on line 2 (via two forward steps to walk past
+      ## the multi-statement line 1), then issue ``stepBackStatement``
+      ## twice and assert successive reverse landings at line 1 col
+      ## ``var b`` and then col ``var a``.  The column-aware backward
+      ## runner MUST fire the strictly-LESS column predicate on the
+      ## same-line hop — symmetric to the M2 forward strictly-GREATER
+      ## assertion.
+      ##
+      ## Why we walk to line 2 first instead of jumping: ``headless_session``
+      ## doesn't expose a jump-to-step primitive; the canonical way to
+      ## park the cursor on a known position is to step into it.  Doing
+      ## so also keeps the test honest — it proves both the forward
+      ## and backward runners agree on the column landing for the same
+      ## fixture, on the same replay-server instance.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Sanity — initial cursor is at line 1 column 1 (start of `var a`).
-    check session.getCurrentFile().endsWith("program.js")
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    check initialCol.isSome
-    check initialCol.get() == fixture.colVarA
+      # Sanity — initial cursor is at line 1 column 1 (start of `var a`).
+      check session.getCurrentFile().endsWith("program.js")
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      check initialCol.isSome
+      check initialCol.get() == fixture.colVarA
 
-    # Walk forward to line 2 via two statement-granularity hops — the
-    # exact sequence the M2 forward test pins.  The first lands on
-    # ``var b`` (same line, col transition); the second lands on
-    # line 2.  Sanity-check each landing before reversing direction
-    # so a failure in the forward path doesn't masquerade as a
-    # backward failure.
-    session.stepOverStatement()
-    check session.getCurrentLine() == 1
-    let afterFirstForward = session.getCurrentColumn()
-    check afterFirstForward.isSome
-    check afterFirstForward.get() == fixture.colVarB
+      # Walk forward to line 2 via two statement-granularity hops — the
+      # exact sequence the M2 forward test pins.  The first lands on
+      # ``var b`` (same line, col transition); the second lands on
+      # line 2.  Sanity-check each landing before reversing direction
+      # so a failure in the forward path doesn't masquerade as a
+      # backward failure.
+      session.stepOverStatement()
+      check session.getCurrentLine() == 1
+      let afterFirstForward = session.getCurrentColumn()
+      check afterFirstForward.isSome
+      check afterFirstForward.get() == fixture.colVarB
 
-    session.stepOverStatement()
-    check session.getCurrentLine() == fixture.lineTwo
+      session.stepOverStatement()
+      check session.getCurrentLine() == fixture.lineTwo
 
-    # First backward statement step from line 2 — MUST land on the
-    # LAST statement of line 1 (``var b``, the closest prior step on
-    # a different line).  This is the line-boundary half of the
-    # backward runner predicate.
-    session.stepBackStatement()
-    check session.getCurrentLine() == 1
-    let afterFirstReverse = session.getCurrentColumn()
-    check afterFirstReverse.isSome
-    check afterFirstReverse.get() == fixture.colVarB
+      # First backward statement step from line 2 — MUST land on the
+      # LAST statement of line 1 (``var b``, the closest prior step on
+      # a different line).  This is the line-boundary half of the
+      # backward runner predicate.
+      session.stepBackStatement()
+      check session.getCurrentLine() == 1
+      let afterFirstReverse = session.getCurrentColumn()
+      check afterFirstReverse.isSome
+      check afterFirstReverse.get() == fixture.colVarB
 
-    # Second backward statement step — MUST land on ``var a`` (col
-    # transition within line 1, fired by the strictly-LESS column
-    # predicate).  This is the column-aware half of the M7 contract
-    # at the ViewModel surface.
-    session.stepBackStatement()
-    check session.getCurrentLine() == 1
-    let afterSecondReverse = session.getCurrentColumn()
-    check afterSecondReverse.isSome
-    check afterSecondReverse.get() == fixture.colVarA
+      # Second backward statement step — MUST land on ``var a`` (col
+      # transition within line 1, fired by the strictly-LESS column
+      # predicate).  This is the column-aware half of the M7 contract
+      # at the ViewModel surface.
+      session.stepBackStatement()
+      check session.getCurrentLine() == 1
+      let afterSecondReverse = session.getCurrentColumn()
+      check afterSecondReverse.isSome
+      check afterSecondReverse.get() == fixture.colVarA
 
   test "test_step_back_vm_legacy_line_granularity_preserved":
-    ## Non-negotiable back-compat: ``stepBackward`` (no granularity)
-    ## advances by /line/ in reverse, skipping the same-line column-
-    ## deltas.  From line 2 one legacy ``stepBackward`` MUST land on
-    ## line 1.  This pins the M7 back-compat assertion: the pre-M7
-    ## reverse-next UX (line-granularity) is unchanged.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## Non-negotiable back-compat: ``stepBackward`` (no granularity)
+      ## advances by /line/ in reverse, skipping the same-line column-
+      ## deltas.  From line 2 one legacy ``stepBackward`` MUST land on
+      ## line 1.  This pins the M7 back-compat assertion: the pre-M7
+      ## reverse-next UX (line-granularity) is unchanged.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Park on line 2 by walking forward — same prologue as the
-    # backward-statement test above so any forward-side drift is
-    # caught by both tests.
-    check session.getCurrentLine() == 1
-    session.stepForward()  # legacy line-granularity step — lands on line 2
-    check session.getCurrentLine() == fixture.lineTwo
+      # Park on line 2 by walking forward — same prologue as the
+      # backward-statement test above so any forward-side drift is
+      # caught by both tests.
+      check session.getCurrentLine() == 1
+      session.stepForward()  # legacy line-granularity step — lands on line 2
+      check session.getCurrentLine() == fixture.lineTwo
 
-    # Legacy stepBack: one hop lands on the prior /line/, not on a
-    # specific column.  The runner stops at the first `(line,
-    # call_key)` change going backward — that is the last step of
-    # line 1 (the closest prior step on a different line).
-    session.stepBackward()
-    check session.getCurrentLine() == 1
+      # Legacy stepBack: one hop lands on the prior /line/, not on a
+      # specific column.  The runner stops at the first `(line,
+      # call_key)` change going backward — that is the last step of
+      # line 1 (the closest prior step on a different line).
+      session.stepBackward()
+      check session.getCurrentLine() == 1
 
   test "test_statement_step_back_vm_single_statement_line_matches_line_granularity":
-    ## On a single-statement line ``stepBackStatement`` MUST behave
-    ## indistinguishably from ``stepBackward`` — i.e. it advances to
-    ## the prior executed line, the same way line-granularity would.
-    ## We prove this by walking forward to line 2 in both sessions,
-    ## then running the two granularities backward from there and
-    ## asserting the resulting (line, column) tuples agree.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## On a single-statement line ``stepBackStatement`` MUST behave
+      ## indistinguishably from ``stepBackward`` — i.e. it advances to
+      ## the prior executed line, the same way line-granularity would.
+      ## We prove this by walking forward to line 2 in both sessions,
+      ## then running the two granularities backward from there and
+      ## asserting the resulting (line, column) tuples agree.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
 
-    # Run A: walk forward to line 2 via legacy stepForward, then take
-    # one legacy stepBackward.  This lands on the last step of line 1.
-    var sessA = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    sessA.stepForward()
-    check sessA.getCurrentLine() == fixture.lineTwo
-    sessA.stepBackward()
-    let afterLineGranularity = (sessA.getCurrentLine(), sessA.getCurrentColumn())
+      # Run A: walk forward to line 2 via legacy stepForward, then take
+      # one legacy stepBackward.  This lands on the last step of line 1.
+      var sessA = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      sessA.stepForward()
+      check sessA.getCurrentLine() == fixture.lineTwo
+      sessA.stepBackward()
+      let afterLineGranularity = (sessA.getCurrentLine(), sessA.getCurrentColumn())
 
-    # Run B: walk forward to line 2 via legacy stepForward, then take
-    # one statement stepBack from there.  This MUST land at the same
-    # ``(line, column)`` tuple as Run A — proving the two
-    # granularities collapse when the entry sits on a
-    # single-statement line.
-    var sessB = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    sessB.stepForward()
-    check sessB.getCurrentLine() == fixture.lineTwo
-    sessB.stepBackStatement()
-    let afterStatementGranularity = (sessB.getCurrentLine(), sessB.getCurrentColumn())
+      # Run B: walk forward to line 2 via legacy stepForward, then take
+      # one statement stepBack from there.  This MUST land at the same
+      # ``(line, column)`` tuple as Run A — proving the two
+      # granularities collapse when the entry sits on a
+      # single-statement line.
+      var sessB = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      sessB.stepForward()
+      check sessB.getCurrentLine() == fixture.lineTwo
+      sessB.stepBackStatement()
+      let afterStatementGranularity = (sessB.getCurrentLine(), sessB.getCurrentColumn())
 
-    check afterLineGranularity == afterStatementGranularity
+      check afterLineGranularity == afterStatementGranularity
 
 when isMainModule:
   discard

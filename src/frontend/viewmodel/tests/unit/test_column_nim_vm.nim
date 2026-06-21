@@ -46,6 +46,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -94,9 +95,10 @@ proc findCodetracerNim(): string =
   for c in candidates:
     if fileExists(c):
       return c
-  raise newException(IOError,
-    "missing codetracer-nim compiler; set CODETRACER_NIM_BIN or build " &
-    "the codetracer-nim sibling repo (./build_all.sh)")
+  # Returns "" when the patched compiler is missing so the caller gates
+  # the test through requireRecorderOrSkip (recorder_gate.nim) for a
+  # uniform, greppable skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   ## Per-process temp directory for the Nim source + recorded trace.  We
@@ -182,93 +184,99 @@ proc recordNimVmTrace(): NimColumnFixture =
 suite "M1 — Column-aware breakpoint (Nim VM tracer) through the ViewModel":
 
   test "test_column_nim_vm_stops_at_recorded_column":
-    ## Drive the ViewModel via headless_session.nim, set a breakpoint
-    ## at a known non-entry column on line 1 of the column-aware Nim
-    ## VM trace, continue, and assert that ``(line, column)`` of the
-    ## stop matches the bound coordinates.
-    let fixture = recordNimVmTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findCodetracerNim(), "codetracer-nim (patched compiler)",
+        "CODETRACER_NIM_BIN",
+        "Build the codetracer-nim sibling (./build_all.sh)."):
+      ## Drive the ViewModel via headless_session.nim, set a breakpoint
+      ## at a known non-entry column on line 1 of the column-aware Nim
+      ## VM trace, continue, and assert that ``(line, column)`` of the
+      ## stop matches the bound coordinates.
+      let fixture = recordNimVmTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Sanity — the recorder lands the cursor on the first vmgen opcode
-    # of line 1 at run-to-entry; the column-aware writer emits column 1
-    # (the absolute step at the start of the line).  This pins the
-    # initial state so the post-Continue assertions have a defined
-    # starting point.
-    check session.getCurrentFile().endsWith("cols.nims")
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    # M1 strict — column-aware traces MUST surface a column at entry.
-    # The Nim writer's ``enableColumnAwareSteps`` opt-in flag is the
-    # wire-level contract this assertion pins; a ``None`` here means
-    # the Nim VM tracer regressed to legacy line-only emission.
-    check initialCol.isSome
-    check initialCol.get() == 1
+      # Sanity — the recorder lands the cursor on the first vmgen opcode
+      # of line 1 at run-to-entry; the column-aware writer emits column 1
+      # (the absolute step at the start of the line).  This pins the
+      # initial state so the post-Continue assertions have a defined
+      # starting point.
+      check session.getCurrentFile().endsWith("cols.nims")
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      # M1 strict — column-aware traces MUST surface a column at entry.
+      # The Nim writer's ``enableColumnAwareSteps`` opt-in flag is the
+      # wire-level contract this assertion pins; a ``None`` here means
+      # the Nim VM tracer regressed to legacy line-only emission.
+      check initialCol.isSome
+      check initialCol.get() == 1
 
-    # M1 — set a breakpoint at the SECOND vmgen-emitted column on
-    # line 1.  Picking a column that is NOT the entry column (1) is
-    # what makes this assertion strict: a line-only fallback would
-    # (wrongly) land at column 1, so the post-Continue check on
-    # ``(line, column)`` MUST fail in that regression scenario.
-    #
-    # The bound column on the response MUST echo back exactly.
-    let resp = session.lastSetBreakpointsResponse(
-      fixture.sourcePath, line = 1, column = fixture.targetColumn)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    check bps[0].hasKey("column")
-    check bps[0]["column"].getInt(0) == fixture.targetColumn
-    check bps[0].getOrDefault("line").getInt(0) == 1
+      # M1 — set a breakpoint at the SECOND vmgen-emitted column on
+      # line 1.  Picking a column that is NOT the entry column (1) is
+      # what makes this assertion strict: a line-only fallback would
+      # (wrongly) land at column 1, so the post-Continue check on
+      # ``(line, column)`` MUST fail in that regression scenario.
+      #
+      # The bound column on the response MUST echo back exactly.
+      let resp = session.lastSetBreakpointsResponse(
+        fixture.sourcePath, line = 1, column = fixture.targetColumn)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      check bps[0].hasKey("column")
+      check bps[0]["column"].getInt(0) == fixture.targetColumn
+      check bps[0].getOrDefault("line").getInt(0) == 1
 
-    # Continue forward.  The replay engine MUST honour the column —
-    # otherwise it would (wrongly) stop at one of the EARLIER vmgen
-    # steps on line 1.  Assert exact match on both axes.
-    session.continueForward()
-    check session.getCurrentLine() == 1
-    let afterCol = session.getCurrentColumn()
-    check afterCol.isSome
-    check afterCol.get() == fixture.targetColumn
+      # Continue forward.  The replay engine MUST honour the column —
+      # otherwise it would (wrongly) stop at one of the EARLIER vmgen
+      # steps on line 1.  Assert exact match on both axes.
+      session.continueForward()
+      check session.getCurrentLine() == 1
+      let afterCol = session.getCurrentColumn()
+      check afterCol.isSome
+      check afterCol.get() == fixture.targetColumn
 
   test "test_column_nim_vm_line_only_breakpoint_preserved":
-    ## Legacy line-only breakpoints (``column = 0``) MUST continue to
-    ## work after the M1 extension on a Nim recording.  This pins
-    ## back-compat for DAP clients that don't send a column.  The Nim
-    ## recorder still emits a column on every step (column-aware mode
-    ## is trace-global), so a line-only match must fire on the FIRST
-    ## same-line step regardless of recorded column.
-    var fixture = recordNimVmTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findCodetracerNim(), "codetracer-nim (patched compiler)",
+        "CODETRACER_NIM_BIN",
+        "Build the codetracer-nim sibling (./build_all.sh)."):
+      ## Legacy line-only breakpoints (``column = 0``) MUST continue to
+      ## work after the M1 extension on a Nim recording.  This pins
+      ## back-compat for DAP clients that don't send a column.  The Nim
+      ## recorder still emits a column on every step (column-aware mode
+      ## is trace-global), so a line-only match must fire on the FIRST
+      ## same-line step regardless of recorded column.
+      var fixture = recordNimVmTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Set a line-only breakpoint on line 2 (the `echo` statement).
-    # Wire SHOULD NOT carry a column key — assert the response
-    # surfaces column=None to prove the legacy path is taken.
-    let resp = session.lastSetBreakpointsResponse(
-      fixture.sourcePath, line = fixture.legacyLine, column = 0)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    # ``column`` is ``skip_serializing_if = Option::is_none`` on the
-    # Rust side, so a legacy response either omits the key entirely
-    # or sets it to null.  Both are equivalent to "no column".
-    let colNode = bps[0].getOrDefault("column")
-    check colNode.isNil or colNode.kind == JNull
+      # Set a line-only breakpoint on line 2 (the `echo` statement).
+      # Wire SHOULD NOT carry a column key — assert the response
+      # surfaces column=None to prove the legacy path is taken.
+      let resp = session.lastSetBreakpointsResponse(
+        fixture.sourcePath, line = fixture.legacyLine, column = 0)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      # ``column`` is ``skip_serializing_if = Option::is_none`` on the
+      # Rust side, so a legacy response either omits the key entirely
+      # or sets it to null.  Both are equivalent to "no column".
+      let colNode = bps[0].getOrDefault("column")
+      check colNode.isNil or colNode.kind == JNull
 
-    # Continue forward — MUST stop on line 2.  The Nim recorder
-    # emits a column for every step (column-aware mode is trace-global)
-    # so the landed column is not None — line-only matching just means
-    # the breakpoint hit fires regardless of column, not that the
-    # recorded step's column is absent.
-    session.continueForward()
-    check session.getCurrentLine() == fixture.legacyLine
-    let landedCol = session.getCurrentColumn()
-    if landedCol.isSome:
-      check landedCol.get() >= 1
+      # Continue forward — MUST stop on line 2.  The Nim recorder
+      # emits a column for every step (column-aware mode is trace-global)
+      # so the landed column is not None — line-only matching just means
+      # the breakpoint hit fires regardless of column, not that the
+      # recorded step's column is absent.
+      session.continueForward()
+      check session.getCurrentLine() == fixture.legacyLine
+      let landedCol = session.getCurrentColumn()
+      if landedCol.isSome:
+        check landedCol.get() >= 1
 
 when isMainModule:
   discard

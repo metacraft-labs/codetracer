@@ -48,6 +48,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -90,9 +91,11 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  # Returns "" when neither CODETRACER_JS_RECORDER_PATH nor a built
+  # sibling is found, so the caller gates the test through
+  # requireRecorderOrSkip (recorder_gate.nim) for a uniform, greppable
+  # missing-recorder skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   ## Per-process temp directory for the JS source + recorded trace.
@@ -220,91 +223,100 @@ const FmtLine2 = 3
 suite "M3 — Formatted-view step-over through the ViewModel":
 
   test "test_formatted_view_step_over_advances_one_formatted_line":
-    ## STRICT: with the formatted srcview active, ``stepForward`` from
-    ## ``var a`` (formatted line 1) MUST land at the formatted line
-    ## representation of ``var b`` (formatted line 3) — not at the
-    ## ``var b`` column on the same minified line.  This is the M3
-    ## contract: one formatted line per step under the formatted view.
-    let fixture = recordMinifiedJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT: with the formatted srcview active, ``stepForward`` from
+      ## ``var a`` (formatted line 1) MUST land at the formatted line
+      ## representation of ``var b`` (formatted line 3) — not at the
+      ## ``var b`` column on the same minified line.  This is the M3
+      ## contract: one formatted line per step under the formatted view.
+      let fixture = recordMinifiedJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Inject a synthetic srcview V3 map under the recorded minified
-    # path.  The map sends minified (1, colS1) → formatted (FmtLine1,1)
-    # and minified (1, colS2) → formatted (FmtLine2, 1) so the formatted-
-    # view runner has a meaningful per-statement projection to step
-    # through.
-    let mapJson = buildMinifiedToFormattedMapV3(
-      FormattedViewPath,
-      fixture.colS1, fixture.colS2,
-      FmtLine1, FmtLine2)
-    session.installSourceViewForTest(
-      recordedPath = fixture.sourcePath,
-      formattedViewPath = FormattedViewPath,
-      sourcemapV3Json = mapJson)
-    session.setActiveSourceView(FormattedViewPath)
+      # Inject a synthetic srcview V3 map under the recorded minified
+      # path.  The map sends minified (1, colS1) → formatted (FmtLine1,1)
+      # and minified (1, colS2) → formatted (FmtLine2, 1) so the formatted-
+      # view runner has a meaningful per-statement projection to step
+      # through.
+      let mapJson = buildMinifiedToFormattedMapV3(
+        FormattedViewPath,
+        fixture.colS1, fixture.colS2,
+        FmtLine1, FmtLine2)
+      session.installSourceViewForTest(
+        recordedPath = fixture.sourcePath,
+        formattedViewPath = FormattedViewPath,
+        sourcemapV3Json = mapJson)
+      session.setActiveSourceView(FormattedViewPath)
 
-    # Sanity — initial position.  The recorder lands on minified line 1
-    # column colS1.  The replay-server's stack-frame translation already
-    # surfaces the formatted-view coordinates, so the ViewModel store
-    # sees formatted line FmtLine1 after activation.
-    check session.getCurrentLine() == FmtLine1
+      # Sanity — initial position.  The recorder lands on minified line 1
+      # column colS1.  The replay-server's stack-frame translation already
+      # surfaces the formatted-view coordinates, so the ViewModel store
+      # sees formatted line FmtLine1 after activation.
+      check session.getCurrentLine() == FmtLine1
 
-    # First formatted-view step.  Without the M3 reverse-mapping the
-    # runner would advance from minified (1, colS1) directly to
-    # minified line 2 (the M2 line-granularity hop), bypassing the
-    # ``var b`` column entirely.  With M3 active the runner must stop
-    # at the formatted line that the next-column projection lands on.
-    session.stepForward()
-    check session.getCurrentLine() == FmtLine2
+      # First formatted-view step.  Without the M3 reverse-mapping the
+      # runner would advance from minified (1, colS1) directly to
+      # minified line 2 (the M2 line-granularity hop), bypassing the
+      # ``var b`` column entirely.  With M3 active the runner must stop
+      # at the formatted line that the next-column projection lands on.
+      session.stepForward()
+      check session.getCurrentLine() == FmtLine2
 
   test "test_minified_view_step_over_preserves_legacy_line_granularity":
-    ## Non-negotiable back-compat: WITHOUT activating the formatted
-    ## view, ``stepForward`` MUST behave exactly like M1/M2's
-    ## line-granularity runner — advancing past every same-minified-
-    ## line column delta directly to the next minified line.  Users
-    ## who haven't toggled the formatted view see the legacy behaviour
-    ## unchanged.
-    let fixture = recordMinifiedJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## Non-negotiable back-compat: WITHOUT activating the formatted
+      ## view, ``stepForward`` MUST behave exactly like M1/M2's
+      ## line-granularity runner — advancing past every same-minified-
+      ## line column delta directly to the next minified line.  Users
+      ## who haven't toggled the formatted view see the legacy behaviour
+      ## unchanged.
+      let fixture = recordMinifiedJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    check initialCol.isSome
-    check initialCol.get() == fixture.colS1
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      check initialCol.isSome
+      check initialCol.get() == fixture.colS1
 
-    # Legacy step-over: lands directly on minified line 2.
-    session.stepForward()
-    check session.getCurrentLine() == fixture.lineTwo
+      # Legacy step-over: lands directly on minified line 2.
+      session.stepForward()
+      check session.getCurrentLine() == fixture.lineTwo
 
   test "test_formatted_view_step_over_statement_composes_with_m2":
-    ## STRICT: with the formatted srcview active, ``stepOverStatement``
-    ## advances one /formatted statement/ per invocation — i.e. it
-    ## stops at the next change in the formatted (line, column) tuple.
-    ## On our fixture each minified column maps to a distinct formatted
-    ## line, so the first ``stepOverStatement`` from formatted line 1
-    ## MUST land at formatted line FmtLine2 (the projected ``var b``).
-    ## This pins that M3 composes with M2 — statement granularity under
-    ## the formatted view stops at the formatted-side statement
-    ## boundary, not at the minified one.
-    let fixture = recordMinifiedJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT: with the formatted srcview active, ``stepOverStatement``
+      ## advances one /formatted statement/ per invocation — i.e. it
+      ## stops at the next change in the formatted (line, column) tuple.
+      ## On our fixture each minified column maps to a distinct formatted
+      ## line, so the first ``stepOverStatement`` from formatted line 1
+      ## MUST land at formatted line FmtLine2 (the projected ``var b``).
+      ## This pins that M3 composes with M2 — statement granularity under
+      ## the formatted view stops at the formatted-side statement
+      ## boundary, not at the minified one.
+      let fixture = recordMinifiedJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    let mapJson = buildMinifiedToFormattedMapV3(
-      FormattedViewPath,
-      fixture.colS1, fixture.colS2,
-      FmtLine1, FmtLine2)
-    session.installSourceViewForTest(
-      recordedPath = fixture.sourcePath,
-      formattedViewPath = FormattedViewPath,
-      sourcemapV3Json = mapJson)
-    session.setActiveSourceView(FormattedViewPath)
+      let mapJson = buildMinifiedToFormattedMapV3(
+        FormattedViewPath,
+        fixture.colS1, fixture.colS2,
+        FmtLine1, FmtLine2)
+      session.installSourceViewForTest(
+        recordedPath = fixture.sourcePath,
+        formattedViewPath = FormattedViewPath,
+        sourcemapV3Json = mapJson)
+      session.setActiveSourceView(FormattedViewPath)
 
-    check session.getCurrentLine() == FmtLine1
-    session.stepOverStatement()
-    check session.getCurrentLine() == FmtLine2
+      check session.getCurrentLine() == FmtLine1
+      session.stepOverStatement()
+      check session.getCurrentLine() == FmtLine2
 
 when isMainModule:
   discard

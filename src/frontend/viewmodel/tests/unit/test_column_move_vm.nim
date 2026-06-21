@@ -64,6 +64,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture constants — pinned from the actual recorder output for the
@@ -248,11 +249,9 @@ template gateOnMoveRecorder(testName: string, body: untyped): untyped =
   ## ``fixture``, ``tracePath``, and ``session`` to ``body``.
   let recorderPath = findColumnAwareMoveRecorder()
   if recorderPath.len == 0:
-    echo "SKIPPED " & testName & ": CODETRACER_MOVE_RECORDER_PATH unset " &
-      "(column-aware Move recorder builds live in the sibling " &
-      "codetracer-move-recorder repo; set " &
-      "CODETRACER_MOVE_RECORDER_PATH to opt in)"
-    skip()
+    skipMissingRecorder("codetracer-move-recorder",
+      "CODETRACER_MOVE_RECORDER_PATH",
+      "Build the codetracer-move-recorder sibling (just build-release).")
   else:
     let recorder {.inject.} = recorderPath
     let fixture {.inject.} = findColumnAwareFixture()

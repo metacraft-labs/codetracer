@@ -27,6 +27,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Repo root discovery — shared with the JS sibling test
@@ -149,10 +150,10 @@ template gateOnNargo(testName: string, body: untyped): untyped =
   ## ``fixture``, and ``session`` to ``body``.
   let nargoPath = findColumnAwareNargo()
   if nargoPath.len == 0:
-    echo "SKIPPED " & testName & ": NARGO_PATH unset (column-aware nargo " &
-      "builds live on the `feature/M-noir-column-aware` branch of the " &
-      "sibling noir repo; set NARGO_PATH to opt in)"
-    skip()
+    skipMissingRecorder("noir (column-aware nargo)",
+      "NARGO_PATH",
+      "Build the column-aware nargo from the noir sibling " &
+        "(feature/M-noir-column-aware branch).")
   else:
     let fixture {.inject.} = materializeNoirFixture()
     let replayServer {.inject.} = findReplayServer()

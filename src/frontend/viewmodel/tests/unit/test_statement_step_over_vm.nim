@@ -41,6 +41,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -83,9 +84,11 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  # Returns "" when neither CODETRACER_JS_RECORDER_PATH nor a built
+  # sibling is found, so the caller gates the test through
+  # requireRecorderOrSkip (recorder_gate.nim) for a uniform, greppable
+  # missing-recorder skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   ## Per-process temp directory for the JS source + recorded trace.  We
@@ -180,100 +183,109 @@ proc recordTinyJsTrace(): tuple[tracePath, sourcePath: string;
 suite "M2 — Statement-granularity step-over through the ViewModel":
 
   test "test_statement_step_over_vm_advances_one_statement_per_invocation":
-    ## Drive the ViewModel via headless_session.nim, issue
-    ## ``stepOverStatement`` twice, and assert that the cursor lands at
-    ## ``var b`` (column transition within line 1) on the first hop and
-    ## on line 2 (line transition) on the second hop.
-    ##
-    ## The fixture has two statements on line 1 (`var a = 1; var b = 2;`)
-    ## followed by one statement on line 2 (`var c = a + b;`).  Three
-    ## statement-granularity step-overs would walk through the entire
-    ## program; the test asserts the first two transitions exactly to
-    ## pin the column-aware boundary check at the runner level.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## Drive the ViewModel via headless_session.nim, issue
+      ## ``stepOverStatement`` twice, and assert that the cursor lands at
+      ## ``var b`` (column transition within line 1) on the first hop and
+      ## on line 2 (line transition) on the second hop.
+      ##
+      ## The fixture has two statements on line 1 (`var a = 1; var b = 2;`)
+      ## followed by one statement on line 2 (`var c = a + b;`).  Three
+      ## statement-granularity step-overs would walk through the entire
+      ## program; the test asserts the first two transitions exactly to
+      ## pin the column-aware boundary check at the runner level.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Sanity — the recorder lands the cursor on line 1 column 1 at
-    # run-to-entry.  This pins the initial state so the post-step
-    # assertions have a defined starting point.
-    check session.getCurrentFile().endsWith("program.js")
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    check initialCol.isSome
-    check initialCol.get() == fixture.colVarA
+      # Sanity — the recorder lands the cursor on line 1 column 1 at
+      # run-to-entry.  This pins the initial state so the post-step
+      # assertions have a defined starting point.
+      check session.getCurrentFile().endsWith("program.js")
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      check initialCol.isSome
+      check initialCol.get() == fixture.colVarA
 
-    # First statement step: var a -> var b on the SAME line.  The
-    # column-aware runner MUST honour the column transition — a
-    # line-granularity runner would skip line 1 entirely and land on
-    # line 2.  Asserting `line == 1, col == colVarB` is the M2 contract
-    # at the ViewModel surface: statement granularity activates the
-    # in-line column boundary check.
-    session.stepOverStatement()
-    check session.getCurrentLine() == 1
-    let afterFirst = session.getCurrentColumn()
-    check afterFirst.isSome
-    check afterFirst.get() == fixture.colVarB
+      # First statement step: var a -> var b on the SAME line.  The
+      # column-aware runner MUST honour the column transition — a
+      # line-granularity runner would skip line 1 entirely and land on
+      # line 2.  Asserting `line == 1, col == colVarB` is the M2 contract
+      # at the ViewModel surface: statement granularity activates the
+      # in-line column boundary check.
+      session.stepOverStatement()
+      check session.getCurrentLine() == 1
+      let afterFirst = session.getCurrentColumn()
+      check afterFirst.isSome
+      check afterFirst.get() == fixture.colVarB
 
-    # Second statement step: var b -> line 2.  After exhausting line 1,
-    # the runner advances to the next line just like a line-granularity
-    # runner would — there are no more in-line statement boundaries to
-    # stop at.
-    session.stepOverStatement()
-    check session.getCurrentLine() == fixture.lineTwo
+      # Second statement step: var b -> line 2.  After exhausting line 1,
+      # the runner advances to the next line just like a line-granularity
+      # runner would — there are no more in-line statement boundaries to
+      # stop at.
+      session.stepOverStatement()
+      check session.getCurrentLine() == fixture.lineTwo
 
   test "test_step_over_vm_legacy_line_granularity_preserved":
-    ## Non-negotiable back-compat: ``stepOver`` (no granularity)
-    ## advances by /line/, skipping the same-line column-deltas.  Line
-    ## 1 has two statements, so one legacy ``stepOver`` from the
-    ## first MUST land on line 2 directly without stopping at the
-    ## ``var b`` column transition.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## Non-negotiable back-compat: ``stepOver`` (no granularity)
+      ## advances by /line/, skipping the same-line column-deltas.  Line
+      ## 1 has two statements, so one legacy ``stepOver`` from the
+      ## first MUST land on line 2 directly without stopping at the
+      ## ``var b`` column transition.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    check initialCol.isSome
-    check initialCol.get() == fixture.colVarA
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      check initialCol.isSome
+      check initialCol.get() == fixture.colVarA
 
-    # Legacy step-over: one hop lands on the next executed line, not on
-    # the next column on the same line.
-    session.stepForward()
-    check session.getCurrentLine() == fixture.lineTwo
+      # Legacy step-over: one hop lands on the next executed line, not on
+      # the next column on the same line.
+      session.stepForward()
+      check session.getCurrentLine() == fixture.lineTwo
 
   test "test_statement_step_over_vm_single_statement_line_matches_line_granularity":
-    ## On a single-statement line ``stepOverStatement`` MUST behave
-    ## indistinguishably from ``stepOver`` — i.e. it advances to the
-    ## next executed line, the same way line-granularity would.  We
-    ## prove this by parking on line 2 (single statement), running
-    ## both granularities from the same starting point, and asserting
-    ## the resulting line/column tuples agree.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## On a single-statement line ``stepOverStatement`` MUST behave
+      ## indistinguishably from ``stepOver`` — i.e. it advances to the
+      ## next executed line, the same way line-granularity would.  We
+      ## prove this by parking on line 2 (single statement), running
+      ## both granularities from the same starting point, and asserting
+      ## the resulting line/column tuples agree.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
 
-    # Run A: park on line 2 via legacy stepOver, then take one
-    # legacy stepOver from there.  This advances off the recorded
-    # program (only two lines exist).
-    var sessA = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    sessA.stepForward()
-    check sessA.getCurrentLine() == fixture.lineTwo
-    let beforeA = (sessA.getCurrentLine(), sessA.getCurrentColumn())
-    sessA.stepForward()
-    let afterLineGranularity = (sessA.getCurrentLine(), sessA.getCurrentColumn())
+      # Run A: park on line 2 via legacy stepOver, then take one
+      # legacy stepOver from there.  This advances off the recorded
+      # program (only two lines exist).
+      var sessA = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      sessA.stepForward()
+      check sessA.getCurrentLine() == fixture.lineTwo
+      let beforeA = (sessA.getCurrentLine(), sessA.getCurrentColumn())
+      sessA.stepForward()
+      let afterLineGranularity = (sessA.getCurrentLine(), sessA.getCurrentColumn())
 
-    # Run B: park on line 2 via legacy stepOver, then take one
-    # statement stepOver from there.  This MUST land at the same
-    # `(line, column)` tuple as Run A.
-    var sessB = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    sessB.stepForward()
-    check sessB.getCurrentLine() == fixture.lineTwo
-    let beforeB = (sessB.getCurrentLine(), sessB.getCurrentColumn())
-    check beforeA == beforeB  # sanity: both runs started from same spot
-    sessB.stepOverStatement()
-    let afterStatementGranularity = (sessB.getCurrentLine(), sessB.getCurrentColumn())
+      # Run B: park on line 2 via legacy stepOver, then take one
+      # statement stepOver from there.  This MUST land at the same
+      # `(line, column)` tuple as Run A.
+      var sessB = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      sessB.stepForward()
+      check sessB.getCurrentLine() == fixture.lineTwo
+      let beforeB = (sessB.getCurrentLine(), sessB.getCurrentColumn())
+      check beforeA == beforeB  # sanity: both runs started from same spot
+      sessB.stepOverStatement()
+      let afterStatementGranularity = (sessB.getCurrentLine(), sessB.getCurrentColumn())
 
-    check afterLineGranularity == afterStatementGranularity
+      check afterLineGranularity == afterStatementGranularity
 
 when isMainModule:
   discard

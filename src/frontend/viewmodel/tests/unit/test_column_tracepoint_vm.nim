@@ -41,6 +41,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -82,9 +83,11 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  # Returns "" when neither CODETRACER_JS_RECORDER_PATH nor a built
+  # sibling is found, so the caller gates the test through
+  # requireRecorderOrSkip (recorder_gate.nim) for a uniform, greppable
+  # missing-recorder skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   result = getTempDir() / ("ct_column_tp_vm_" & $getCurrentProcessId())
@@ -161,137 +164,146 @@ proc collectOutputs(events: seq[JsonNode]; needle: string): seq[string] =
 suite "M10 — Column-aware tracepoint (DAP logpoint) through the ViewModel":
 
   test "test_column_tracepoint_vm_emits_log_at_recorded_column":
-    ## STRICT — a column-aware tracepoint anchored at the SECOND
-    ## statement of line 1 (column ``lineCol14``) MUST cause at
-    ## least one DAP ``output`` event ("hit b") on Continue, and
-    ## MUST NOT stop execution at the matched step.  We assert the
-    ## run reaches end-of-trace (line 2).
-    ##
-    ## NOTE on hit count — the JS recorder may emit MULTIPLE
-    ## recorded steps at the same `(line, column)` coordinate for
-    ## a single source statement (e.g. one for the variable
-    ## declaration, one for the expression evaluation).  The M10
-    ## column-precision contract guarantees the tracepoint fires
-    ## ONLY at the matched column — it does NOT guarantee
-    ## one-fire-per-statement, which is a recorder-side property
-    ## the column-aware navigation surface MUST tolerate.  The
-    ## strict "exactly one" form of the contract is pinned by the
-    ## headless DAP test on a synthetic trace with a known step
-    ## layout.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT — a column-aware tracepoint anchored at the SECOND
+      ## statement of line 1 (column ``lineCol14``) MUST cause at
+      ## least one DAP ``output`` event ("hit b") on Continue, and
+      ## MUST NOT stop execution at the matched step.  We assert the
+      ## run reaches end-of-trace (line 2).
+      ##
+      ## NOTE on hit count — the JS recorder may emit MULTIPLE
+      ## recorded steps at the same `(line, column)` coordinate for
+      ## a single source statement (e.g. one for the variable
+      ## declaration, one for the expression evaluation).  The M10
+      ## column-precision contract guarantees the tracepoint fires
+      ## ONLY at the matched column — it does NOT guarantee
+      ## one-fire-per-statement, which is a recorder-side property
+      ## the column-aware navigation surface MUST tolerate.  The
+      ## strict "exactly one" form of the contract is pinned by the
+      ## headless DAP test on a synthetic trace with a known step
+      ## layout.
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Sanity — the recorder lands the cursor on line 1 column 1 at
-    # run-to-entry.
-    check session.getCurrentFile().endsWith("program.js")
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    check initialCol.isSome
-    check initialCol.get() == fixture.lineCol1
+      # Sanity — the recorder lands the cursor on line 1 column 1 at
+      # run-to-entry.
+      check session.getCurrentFile().endsWith("program.js")
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      check initialCol.isSome
+      check initialCol.get() == fixture.lineCol1
 
-    # M10 — register a column-aware tracepoint at line 1, column 14
-    # carrying logMessage "hit b".  The DAP response MUST verify the
-    # request and echo the bound column.
-    let resp = session.lastSetTracepointResponse(
-      fixture.sourcePath, line = 1, column = fixture.lineCol14,
-      logMessage = "hit b")
-    check resp.getOrDefault("success").getBool(false)
-    let tps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check tps.kind == JArray
-    check tps.len == 1
-    check tps[0].getOrDefault("verified").getBool(false)
-    check tps[0].hasKey("column")
-    check tps[0]["column"].getInt(0) == fixture.lineCol14
-    check tps[0].getOrDefault("line").getInt(0) == 1
+      # M10 — register a column-aware tracepoint at line 1, column 14
+      # carrying logMessage "hit b".  The DAP response MUST verify the
+      # request and echo the bound column.
+      let resp = session.lastSetTracepointResponse(
+        fixture.sourcePath, line = 1, column = fixture.lineCol14,
+        logMessage = "hit b")
+      check resp.getOrDefault("success").getBool(false)
+      let tps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check tps.kind == JArray
+      check tps.len == 1
+      check tps[0].getOrDefault("verified").getBool(false)
+      check tps[0].hasKey("column")
+      check tps[0]["column"].getInt(0) == fixture.lineCol14
+      check tps[0].getOrDefault("line").getInt(0) == 1
 
-    # Continue forward.  The replay engine MUST:
-    #   1. Emit at least one `output` event with "hit b" as it
-    #      traverses the matched step.
-    #   2. NOT stop at the matched step — the tracepoint is
-    #      log-and-continue.
-    #   3. Reach end-of-trace (line 2 is the only later step).
-    session.continueForward()
-    let events = session.drainEvents()
-    let hits = collectOutputs(events, "hit b")
-    check hits.len >= 1
-    check session.getCurrentLine() == fixture.legacyLine
+      # Continue forward.  The replay engine MUST:
+      #   1. Emit at least one `output` event with "hit b" as it
+      #      traverses the matched step.
+      #   2. NOT stop at the matched step — the tracepoint is
+      #      log-and-continue.
+      #   3. Reach end-of-trace (line 2 is the only later step).
+      session.continueForward()
+      let events = session.drainEvents()
+      let hits = collectOutputs(events, "hit b")
+      check hits.len >= 1
+      check session.getCurrentLine() == fixture.legacyLine
 
   test "test_column_tracepoint_vm_skips_same_line_other_columns":
-    ## STRICT — a column-aware tracepoint MUST NOT fire on other
-    ## columns on the same line.  Mirrors the M1 anti-regression
-    ## (``column_breakpoint_skips_same_line_other_columns``) at the
-    ## logpoint surface: we set the tracepoint at the FIRST statement
-    ## (column 1) so a line-only fallback would fire on every
-    ## subsequent step on line 1 (cols 12, 23).  The M10 contract
-    ## forbids any such spurious hit — the tracepoint MUST fire only
-    ## at column 1 (the starting step is skipped by `step_continue`,
-    ## so we expect ZERO "only-col-1" hits on line 1).
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT — a column-aware tracepoint MUST NOT fire on other
+      ## columns on the same line.  Mirrors the M1 anti-regression
+      ## (``column_breakpoint_skips_same_line_other_columns``) at the
+      ## logpoint surface: we set the tracepoint at the FIRST statement
+      ## (column 1) so a line-only fallback would fire on every
+      ## subsequent step on line 1 (cols 12, 23).  The M10 contract
+      ## forbids any such spurious hit — the tracepoint MUST fire only
+      ## at column 1 (the starting step is skipped by `step_continue`,
+      ## so we expect ZERO "only-col-1" hits on line 1).
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    let resp = session.lastSetTracepointResponse(
-      fixture.sourcePath, line = 1, column = fixture.lineCol1,
-      logMessage = "only-col-1")
-    check resp.getOrDefault("success").getBool(false)
-    let tps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check tps.kind == JArray
-    check tps.len == 1
-    check tps[0].getOrDefault("verified").getBool(false)
-    check tps[0]["column"].getInt(0) == fixture.lineCol1
+      let resp = session.lastSetTracepointResponse(
+        fixture.sourcePath, line = 1, column = fixture.lineCol1,
+        logMessage = "only-col-1")
+      check resp.getOrDefault("success").getBool(false)
+      let tps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check tps.kind == JArray
+      check tps.len == 1
+      check tps[0].getOrDefault("verified").getBool(false)
+      check tps[0]["column"].getInt(0) == fixture.lineCol1
 
-    # Compute the baseline number of hits a line-only tracepoint
-    # would produce — this lets us assert that the column-aware
-    # tracepoint at col 1 produces STRICTLY fewer hits (proving the
-    # other columns on line 1 are filtered out).
-    var baselineSession = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    discard baselineSession.lastSetTracepointResponse(
-      fixture.sourcePath, line = 1, column = 0, logMessage = "baseline-legacy")
-    baselineSession.continueForward()
-    let baselineHits = collectOutputs(baselineSession.drainEvents(), "baseline-legacy")
-    # M10 — fixture must produce at least one recorded step after
-    # the starting step on line 1, otherwise the column-precision
-    # comparison below is vacuous.
-    check baselineHits.len >= 1
+      # Compute the baseline number of hits a line-only tracepoint
+      # would produce — this lets us assert that the column-aware
+      # tracepoint at col 1 produces STRICTLY fewer hits (proving the
+      # other columns on line 1 are filtered out).
+      var baselineSession = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      discard baselineSession.lastSetTracepointResponse(
+        fixture.sourcePath, line = 1, column = 0, logMessage = "baseline-legacy")
+      baselineSession.continueForward()
+      let baselineHits = collectOutputs(baselineSession.drainEvents(), "baseline-legacy")
+      # M10 — fixture must produce at least one recorded step after
+      # the starting step on line 1, otherwise the column-precision
+      # comparison below is vacuous.
+      check baselineHits.len >= 1
 
-    session.continueForward()
-    let events = session.drainEvents()
-    let hits = collectOutputs(events, "only-col-1")
-    # M10 — the column-aware tracepoint at col 1 must fire FEWER
-    # times than a line-only legacy tracepoint that fires on every
-    # step on the line.  Without column-precision the two surfaces
-    # would be indistinguishable; the strict inequality is the
-    # observable proof that the column filter is honoured.
-    check hits.len < baselineHits.len
+      session.continueForward()
+      let events = session.drainEvents()
+      let hits = collectOutputs(events, "only-col-1")
+      # M10 — the column-aware tracepoint at col 1 must fire FEWER
+      # times than a line-only legacy tracepoint that fires on every
+      # step on the line.  Without column-precision the two surfaces
+      # would be indistinguishable; the strict inequality is the
+      # observable proof that the column filter is honoured.
+      check hits.len < baselineHits.len
 
   test "test_column_tracepoint_vm_line_only_legacy_preserved":
-    ## STRICT — a legacy line-only tracepoint (``column = 0``) MUST
-    ## fire on every recorded step on the line, regardless of
-    ## recorded column.  We assert at least one hit (preserving the
-    ## "logpoint always fires at least once on the matched line"
-    ## semantic that DAP clients depend on).
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT — a legacy line-only tracepoint (``column = 0``) MUST
+      ## fire on every recorded step on the line, regardless of
+      ## recorded column.  We assert at least one hit (preserving the
+      ## "logpoint always fires at least once on the matched line"
+      ## semantic that DAP clients depend on).
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    let resp = session.lastSetTracepointResponse(
-      fixture.sourcePath, line = 1, column = 0,
-      logMessage = "legacy")
-    check resp.getOrDefault("success").getBool(false)
-    let tps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check tps.kind == JArray
-    check tps.len == 1
-    check tps[0].getOrDefault("verified").getBool(false)
-    # A legacy line-only tracepoint MUST NOT spuriously surface a
-    # column on the response.
-    let colNode = tps[0].getOrDefault("column")
-    check colNode.isNil or colNode.kind == JNull
+      let resp = session.lastSetTracepointResponse(
+        fixture.sourcePath, line = 1, column = 0,
+        logMessage = "legacy")
+      check resp.getOrDefault("success").getBool(false)
+      let tps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check tps.kind == JArray
+      check tps.len == 1
+      check tps[0].getOrDefault("verified").getBool(false)
+      # A legacy line-only tracepoint MUST NOT spuriously surface a
+      # column on the response.
+      let colNode = tps[0].getOrDefault("column")
+      check colNode.isNil or colNode.kind == JNull
 
-    session.continueForward()
-    let events = session.drainEvents()
-    let hits = collectOutputs(events, "legacy")
-    check hits.len >= 1
+      session.continueForward()
+      let events = session.drainEvents()
+      let hits = collectOutputs(events, "legacy")
+      check hits.len >= 1
 
 when isMainModule:
   discard

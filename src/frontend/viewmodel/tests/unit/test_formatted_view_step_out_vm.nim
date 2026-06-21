@@ -24,6 +24,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -65,9 +66,11 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  # Returns "" when neither CODETRACER_JS_RECORDER_PATH nor a built
+  # sibling is found, so the caller gates the test through
+  # requireRecorderOrSkip (recorder_gate.nim) for a uniform, greppable
+  # missing-recorder skip rather than a hard IOError.
+  return ""
 
 proc fixtureDir(): string =
   result = getTempDir() / ("ct_fmt_view_step_out_vm_" & $getCurrentProcessId())
@@ -188,58 +191,64 @@ proc walkToCalleeBody(s: HeadlessDebugSession; calleeLine, callerLine: int) =
 suite "M8 — Formatted-view step-OUT through the ViewModel":
 
   test "test_formatted_view_step_out_returns_to_formatted_caller_line":
-    ## STRICT (Test A) — with the formatted srcview active and the
-    ## cursor inside the callee body (line 1, depth 1), ``stepOut``
-    ## MUST advance to the caller's resume line.  Under the identity
-    ## sourcemap fixture the formatted line equals the recorded line,
-    ## so the assertion is "the cursor is no longer on the callee body
-    ## line" — i.e. either at the call site line (some recorders
-    ## anchor the post-call step at the call site) or past it.  This
-    ## pins the M8 stepOut contract: the cursor lands at a formatted
-    ## line that DIFFERS from the callee body line.
-    let fixture = recordJsTraceWithCall()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT (Test A) — with the formatted srcview active and the
+      ## cursor inside the callee body (line 1, depth 1), ``stepOut``
+      ## MUST advance to the caller's resume line.  Under the identity
+      ## sourcemap fixture the formatted line equals the recorded line,
+      ## so the assertion is "the cursor is no longer on the callee body
+      ## line" — i.e. either at the call site line (some recorders
+      ## anchor the post-call step at the call site) or past it.  This
+      ## pins the M8 stepOut contract: the cursor lands at a formatted
+      ## line that DIFFERS from the callee body line.
+      let fixture = recordJsTraceWithCall()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # 5 covers lines 1..5 — enough for the 3-line fixture above with
-    # a one-line safety margin so the V3 map is dense across every
-    # recorded line the JS recorder might emit (post-call steps the
-    # recorder anchors past the source's last code line included).
-    let mapJson = buildIdentityV3Map(FormattedViewPath, 5)
-    session.installSourceViewForTest(
-      recordedPath = fixture.sourcePath,
-      formattedViewPath = FormattedViewPath,
-      sourcemapV3Json = mapJson)
-    session.setActiveSourceView(FormattedViewPath)
+      # 5 covers lines 1..5 — enough for the 3-line fixture above with
+      # a one-line safety margin so the V3 map is dense across every
+      # recorded line the JS recorder might emit (post-call steps the
+      # recorder anchors past the source's last code line included).
+      let mapJson = buildIdentityV3Map(FormattedViewPath, 5)
+      session.installSourceViewForTest(
+        recordedPath = fixture.sourcePath,
+        formattedViewPath = FormattedViewPath,
+        sourcemapV3Json = mapJson)
+      session.setActiveSourceView(FormattedViewPath)
 
-    walkToCalleeBody(session, fixture.calleeLine, fixture.callerLine)
+      walkToCalleeBody(session, fixture.calleeLine, fixture.callerLine)
 
-    let entryLine = session.getCurrentLine()
-    check entryLine == fixture.calleeLine
+      let entryLine = session.getCurrentLine()
+      check entryLine == fixture.calleeLine
 
-    # stepOut from inside the callee MUST advance off the callee body line.
-    session.stepOut()
-    let landed = session.getCurrentLine()
-    check landed != fixture.calleeLine
+      # stepOut from inside the callee MUST advance off the callee body line.
+      session.stepOut()
+      let landed = session.getCurrentLine()
+      check landed != fixture.calleeLine
 
   test "test_minified_view_step_out_preserves_legacy_step_out":
-    ## STRICT (Test B) — back-compat: WITHOUT activating the formatted
-    ## view, ``stepOut`` advances out of the callee frame using the
-    ## legacy depth-1 step-out primitive.  The landing line MUST differ
-    ## from the callee body line (the legacy step-out always exits the
-    ## current frame).  This pins that M8's intercept layer is
-    ## transparent to clients who haven't toggled the formatted view.
-    let fixture = recordJsTraceWithCall()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      ## STRICT (Test B) — back-compat: WITHOUT activating the formatted
+      ## view, ``stepOut`` advances out of the callee frame using the
+      ## legacy depth-1 step-out primitive.  The landing line MUST differ
+      ## from the callee body line (the legacy step-out always exits the
+      ## current frame).  This pins that M8's intercept layer is
+      ## transparent to clients who haven't toggled the formatted view.
+      let fixture = recordJsTraceWithCall()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    walkToCalleeBody(session, fixture.calleeLine, fixture.callerLine)
-    let entryLine = session.getCurrentLine()
-    check entryLine == fixture.calleeLine
+      walkToCalleeBody(session, fixture.calleeLine, fixture.callerLine)
+      let entryLine = session.getCurrentLine()
+      check entryLine == fixture.calleeLine
 
-    session.stepOut()
-    let landed = session.getCurrentLine()
-    check landed != fixture.calleeLine
+      session.stepOut()
+      let landed = session.getCurrentLine()
+      check landed != fixture.calleeLine
 
 when isMainModule:
   discard

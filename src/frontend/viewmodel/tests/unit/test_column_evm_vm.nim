@@ -33,6 +33,7 @@
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -232,9 +233,9 @@ suite "M-evm — Column-aware breakpoint through the ViewModel (EVM trace)":
     let recorder = findEvmRecorder()
     let fixtureSrc = findColumnAwareFixture()
     if recorder.len == 0 or fixtureSrc.len == 0:
-      echo "[Skipped] CODETRACER_EVM_RECORDER_PATH unset and no sibling " &
-        "codetracer-evm-recorder build found; skipping M-evm ViewModel test"
-      skip()
+      skipMissingRecorder("codetracer-evm-recorder",
+        "CODETRACER_EVM_RECORDER_PATH",
+        "Build the codetracer-evm-recorder sibling (cargo build).")
     else:
       let fixture = recordEvmTrace(recorder, fixtureSrc)
       let replayServer = findReplayServer()
@@ -315,9 +316,9 @@ suite "M-evm — Column-aware breakpoint through the ViewModel (EVM trace)":
     let recorder = findEvmRecorder()
     let fixtureSrc = findColumnAwareFixture()
     if recorder.len == 0 or fixtureSrc.len == 0:
-      echo "[Skipped] CODETRACER_EVM_RECORDER_PATH unset and no sibling " &
-        "codetracer-evm-recorder build found; skipping M-evm ViewModel test"
-      skip()
+      skipMissingRecorder("codetracer-evm-recorder",
+        "CODETRACER_EVM_RECORDER_PATH",
+        "Build the codetracer-evm-recorder sibling (cargo build).")
     else:
       let fixture = recordEvmTrace(recorder, fixtureSrc)
       let replayServer = findReplayServer()

@@ -81,6 +81,7 @@
 import std/[json, options, os, osproc, streams, strtabs, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -131,10 +132,10 @@ proc findFlowRecorder(): string =
   for c in candidates:
     if fileExists(c):
       return c
-  raise newException(IOError,
-    "missing Flow recorder; set CODETRACER_CADENCE_RECORDER_PATH or " &
-    "build the codetracer-flow-recorder sibling repo (cargo build).  " &
-    "Required for the M1 Cadence ViewModel test.")
+  # Returns "" when the recorder is missing so the caller gates the test
+  # through requireRecorderOrSkip (recorder_gate.nim) for a uniform,
+  # greppable skip rather than a hard IOError.
+  return ""
 
 proc findCadenceHelper(): string =
   ## Locate the Go-built ``cadence-trace-helper`` binary.  Required by
@@ -262,84 +263,90 @@ proc recordCadenceTrace(): tuple[tracePath, sourcePath: string;
 suite "M1 — Column-aware breakpoint through the ViewModel (Cadence/Flow)":
 
   test "test_column_flow_vm_stops_at_recorded_column":
-    ## Drive the ViewModel via headless_session.nim against a Cadence
-    ## recording: set a breakpoint at the SECOND statement on the
-    ## multi-statement line, continue, and assert that the
-    ## ``(line, column)`` of the stop matches.
-    let fixture = recordCadenceTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    defer: session.close()
+    requireRecorderOrSkip(findFlowRecorder(), "codetracer-flow-recorder",
+        "CODETRACER_CADENCE_RECORDER_PATH",
+        "Build the codetracer-flow-recorder sibling (cargo build) + its Go cadence-trace-helper."):
+      ## Drive the ViewModel via headless_session.nim against a Cadence
+      ## recording: set a breakpoint at the SECOND statement on the
+      ## multi-statement line, continue, and assert that the
+      ## ``(line, column)`` of the stop matches.
+      let fixture = recordCadenceTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      defer: session.close()
 
-    # Sanity — the initial position lands somewhere inside the Cadence
-    # program.  The Flow recorder's first reported step is typically
-    # the first executable statement (the ``main`` entrypoint).  We
-    # don't pin a specific initial column here — Cadence's first step
-    # depends on the helper's startup sequence — but the file must be
-    # the recorded Cadence source.
-    check session.getCurrentFile().endsWith("flow_column_test.cdc")
+      # Sanity — the initial position lands somewhere inside the Cadence
+      # program.  The Flow recorder's first reported step is typically
+      # the first executable statement (the ``main`` entrypoint).  We
+      # don't pin a specific initial column here — Cadence's first step
+      # depends on the helper's startup sequence — but the file must be
+      # the recorded Cadence source.
+      check session.getCurrentFile().endsWith("flow_column_test.cdc")
 
-    # M1 — set a breakpoint at the SECOND statement (``let b``) on the
-    # multi-statement line.  The bound column on the response MUST echo
-    # back exactly the column the Cadence parser would assign.
-    let resp = session.lastSetBreakpointsResponse(
-      fixture.sourcePath, line = fixture.statementLine,
-      column = fixture.colB)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    check bps[0].hasKey("column")
-    check bps[0]["column"].getInt(0) == fixture.colB
-    check bps[0].getOrDefault("line").getInt(0) == fixture.statementLine
+      # M1 — set a breakpoint at the SECOND statement (``let b``) on the
+      # multi-statement line.  The bound column on the response MUST echo
+      # back exactly the column the Cadence parser would assign.
+      let resp = session.lastSetBreakpointsResponse(
+        fixture.sourcePath, line = fixture.statementLine,
+        column = fixture.colB)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      check bps[0].hasKey("column")
+      check bps[0]["column"].getInt(0) == fixture.colB
+      check bps[0].getOrDefault("line").getInt(0) == fixture.statementLine
 
-    # Continue forward.  The replay engine MUST honour the column —
-    # otherwise it would (wrongly) stop at the first ``let a`` step on
-    # the same line (the same-line fallback the M1 anti-regression
-    # guards against).  Assert exact match on both axes.
-    session.continueForward()
-    check session.getCurrentLine() == fixture.statementLine
-    let afterCol = session.getCurrentColumn()
-    check afterCol.isSome
-    check afterCol.get() == fixture.colB
+      # Continue forward.  The replay engine MUST honour the column —
+      # otherwise it would (wrongly) stop at the first ``let a`` step on
+      # the same line (the same-line fallback the M1 anti-regression
+      # guards against).  Assert exact match on both axes.
+      session.continueForward()
+      check session.getCurrentLine() == fixture.statementLine
+      let afterCol = session.getCurrentColumn()
+      check afterCol.isSome
+      check afterCol.get() == fixture.colB
 
   test "test_column_flow_vm_line_only_breakpoint_preserved":
-    ## Legacy line-only breakpoints — ``setBreakpoint`` with
-    ## ``column = 0`` — MUST continue to work after the M1 extension
-    ## on Cadence traces.  Pins back-compat for DAP clients that don't
-    ## send a column.
-    let fixture = recordCadenceTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
-    defer: session.close()
+    requireRecorderOrSkip(findFlowRecorder(), "codetracer-flow-recorder",
+        "CODETRACER_CADENCE_RECORDER_PATH",
+        "Build the codetracer-flow-recorder sibling (cargo build) + its Go cadence-trace-helper."):
+      ## Legacy line-only breakpoints — ``setBreakpoint`` with
+      ## ``column = 0`` — MUST continue to work after the M1 extension
+      ## on Cadence traces.  Pins back-compat for DAP clients that don't
+      ## send a column.
+      let fixture = recordCadenceTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+      defer: session.close()
 
-    # Set a line-only breakpoint on the next line (``let d``).  Wire
-    # SHOULD NOT carry a column key — assert the response surfaces
-    # column=None to prove the legacy path is taken.
-    let resp = session.lastSetBreakpointsResponse(
-      fixture.sourcePath, line = fixture.legacyLine, column = 0)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    # ``column`` is ``skip_serializing_if = Option::is_none`` on the
-    # Rust side, so a legacy response either omits the key entirely or
-    # sets it to null.  Both are equivalent to "no column".
-    let colNode = bps[0].getOrDefault("column")
-    check colNode.isNil or colNode.kind == JNull
+      # Set a line-only breakpoint on the next line (``let d``).  Wire
+      # SHOULD NOT carry a column key — assert the response surfaces
+      # column=None to prove the legacy path is taken.
+      let resp = session.lastSetBreakpointsResponse(
+        fixture.sourcePath, line = fixture.legacyLine, column = 0)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      # ``column`` is ``skip_serializing_if = Option::is_none`` on the
+      # Rust side, so a legacy response either omits the key entirely or
+      # sets it to null.  Both are equivalent to "no column".
+      let colNode = bps[0].getOrDefault("column")
+      check colNode.isNil or colNode.kind == JNull
 
-    # Continue forward.  Should stop at the first step of the legacy
-    # line.  The Cadence helper still emits a column for the recorded
-    # step in column-aware mode — line-only matching just means the
-    # breakpoint hit fires regardless of column, NOT that the recorded
-    # step's column is absent.
-    session.continueForward()
-    check session.getCurrentLine() == fixture.legacyLine
-    let landedCol = session.getCurrentColumn()
-    if landedCol.isSome:
-      check landedCol.get() >= 1
+      # Continue forward.  Should stop at the first step of the legacy
+      # line.  The Cadence helper still emits a column for the recorded
+      # step in column-aware mode — line-only matching just means the
+      # breakpoint hit fires regardless of column, NOT that the recorded
+      # step's column is absent.
+      session.continueForward()
+      check session.getCurrentLine() == fixture.legacyLine
+      let landedCol = session.getCurrentColumn()
+      if landedCol.isSome:
+        check landedCol.get() >= 1
 
 when isMainModule:
   discard

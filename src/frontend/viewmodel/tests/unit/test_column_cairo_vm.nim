@@ -78,6 +78,7 @@
 import std/[json, options, os, osproc, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -214,12 +215,10 @@ template gateOnCairo(testName: string, body: untyped): untyped =
   let recorderPath = findCairoRecorder()
   let preBuilt = getEnv(CAIRO_FIXTURE_TRACE_ENV, "")
   if recorderPath.len == 0 and not (preBuilt.len > 0 and dirExists(preBuilt)):
-    echo "SKIPPED " & testName & ": " & CAIRO_RECORDER_ENV &
-      " unset and no sibling-repo Cairo recorder build found (and no " &
-      CAIRO_FIXTURE_TRACE_ENV & " override).  Build via " &
-      "`cd ../codetracer-cairo-recorder && cargo build` or set " &
-      CAIRO_RECORDER_ENV & " to opt in."
-    skip()
+    skipMissingRecorder("codetracer-cairo-recorder",
+      CAIRO_RECORDER_ENV,
+      "Build the codetracer-cairo-recorder sibling (cargo build), or set " &
+        CAIRO_FIXTURE_TRACE_ENV & " to a pre-recorded column-aware trace.")
   else:
     let trace {.inject.} = resolveTrace(recorderPath)
     let replayServer {.inject.} = findReplayServer()

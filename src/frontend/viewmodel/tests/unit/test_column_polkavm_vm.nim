@@ -30,6 +30,7 @@
 import std/[json, options, os, osproc, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture discovery
@@ -75,10 +76,10 @@ proc findPolkavmRecorder(): string =
     "target" / "debug" / "codetracer-polkavm-recorder"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing PolkaVM recorder; set CODETRACER_POLKAVM_RECORDER_PATH or " &
-    "build the sibling codetracer-polkavm-recorder repo " &
-    "(`cargo build`)")
+  # Returns "" when the recorder is missing so the caller gates the test
+  # through requireRecorderOrSkip (recorder_gate.nim) for a uniform,
+  # greppable skip rather than a hard IOError.
+  return ""
 
 proc findPolkavmBlob(): string =
   ## Default ``flow_test.polkavm`` lives at
@@ -138,69 +139,78 @@ proc newPolkavmFixtureSession(): tuple[session: HeadlessDebugSession;
 suite "M-polkavm — Column-aware breakpoint through the ViewModel":
 
   test "test_column_polkavm_vm_setBreakpoints_response_echoes_bound_column":
-    ## STRICT — column-aware ``setBreakpoints`` against a real PolkaVM
-    ## trace MUST surface ``column`` on the response.  Recorder-pipeline
-    ## analogue of the M1 JS wire-contract assertion.
-    let f = newPolkavmFixtureSession()
-    # Column-aware bp at col 5 on the current line.  Default
-    # ``flow_test.polkavm`` has no DWARF, so pin the WIRE-LEVEL
-    # invariant only: ``column`` MUST be echoed; ``verified`` MAY be
-    # false when no step has that column.
-    const ProbeColumn = 5
-    let resp = f.session.lastSetBreakpointsResponse(
-      f.sourceFile, line = f.startLine, column = ProbeColumn)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    let echoed = bps[0].getOrDefault("column")
-    check (not echoed.isNil) and echoed.kind == JInt
-    check echoed.getInt(0) == ProbeColumn
-    check bps[0].getOrDefault("line").getInt(0) == f.startLine
+    requireRecorderOrSkip(findPolkavmRecorder(), "codetracer-polkavm-recorder",
+        "CODETRACER_POLKAVM_RECORDER_PATH",
+        "Build the codetracer-polkavm-recorder sibling (cargo build)."):
+      ## STRICT — column-aware ``setBreakpoints`` against a real PolkaVM
+      ## trace MUST surface ``column`` on the response.  Recorder-pipeline
+      ## analogue of the M1 JS wire-contract assertion.
+      let f = newPolkavmFixtureSession()
+      # Column-aware bp at col 5 on the current line.  Default
+      # ``flow_test.polkavm`` has no DWARF, so pin the WIRE-LEVEL
+      # invariant only: ``column`` MUST be echoed; ``verified`` MAY be
+      # false when no step has that column.
+      const ProbeColumn = 5
+      let resp = f.session.lastSetBreakpointsResponse(
+        f.sourceFile, line = f.startLine, column = ProbeColumn)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      let echoed = bps[0].getOrDefault("column")
+      check (not echoed.isNil) and echoed.kind == JInt
+      check echoed.getInt(0) == ProbeColumn
+      check bps[0].getOrDefault("line").getInt(0) == f.startLine
 
   test "test_column_polkavm_vm_line_only_breakpoint_preserved":
-    ## STRICT — legacy line-only breakpoints (``column = 0``) keep
-    ## working end-to-end on a PolkaVM trace.  The wire MUST NOT carry
-    ## ``column`` and the response MUST surface ``column = None``.
-    let f = newPolkavmFixtureSession()
-    # ``column = 0`` omits the column key on the wire.
-    let resp = f.session.lastSetBreakpointsResponse(
-      f.sourceFile, line = f.startLine, column = 0)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    # A line-only bp MUST NOT surface a column — would mislead DAP
-    # clients into reading the request as column-aware.
-    let colNode = bps[0].getOrDefault("column")
-    check colNode.isNil or colNode.kind == JNull
+    requireRecorderOrSkip(findPolkavmRecorder(), "codetracer-polkavm-recorder",
+        "CODETRACER_POLKAVM_RECORDER_PATH",
+        "Build the codetracer-polkavm-recorder sibling (cargo build)."):
+      ## STRICT — legacy line-only breakpoints (``column = 0``) keep
+      ## working end-to-end on a PolkaVM trace.  The wire MUST NOT carry
+      ## ``column`` and the response MUST surface ``column = None``.
+      let f = newPolkavmFixtureSession()
+      # ``column = 0`` omits the column key on the wire.
+      let resp = f.session.lastSetBreakpointsResponse(
+        f.sourceFile, line = f.startLine, column = 0)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      # A line-only bp MUST NOT surface a column — would mislead DAP
+      # clients into reading the request as column-aware.
+      let colNode = bps[0].getOrDefault("column")
+      check colNode.isNil or colNode.kind == JNull
 
   test "test_column_polkavm_vm_complete_move_carries_column_option":
-    ## STRICT — ``ct/complete-move`` exposes ``column`` as
-    ## ``Option<int>``: ``Some(c)`` with DWARF, ``None`` without.
-    ## Without this a DWARF-rich blob would surface columns as JSON
-    ## null and the GUI gutter glyph would lose its anchor.
-    let f = newPolkavmFixtureSession()
-    check (not f.session.lastCompleteMoveEvent.isNil)
-    let body = f.session.lastCompleteMoveEvent.getOrDefault("body")
-    check (not body.isNil)
-    check body.hasKey("location")
-    let loc = body["location"]
-    # MUST carry ``line``; MAY carry ``column`` (null or positive int).
-    check loc.hasKey("line")
-    check loc["line"].getInt(0) >= 1
-    if loc.hasKey("column"):
-      let c = loc["column"]
-      check c.kind == JNull or (c.kind == JInt and c.getInt(0) >= 1)
+    requireRecorderOrSkip(findPolkavmRecorder(), "codetracer-polkavm-recorder",
+        "CODETRACER_POLKAVM_RECORDER_PATH",
+        "Build the codetracer-polkavm-recorder sibling (cargo build)."):
+      ## STRICT — ``ct/complete-move`` exposes ``column`` as
+      ## ``Option<int>``: ``Some(c)`` with DWARF, ``None`` without.
+      ## Without this a DWARF-rich blob would surface columns as JSON
+      ## null and the GUI gutter glyph would lose its anchor.
+      let f = newPolkavmFixtureSession()
+      check (not f.session.lastCompleteMoveEvent.isNil)
+      let body = f.session.lastCompleteMoveEvent.getOrDefault("body")
+      check (not body.isNil)
+      check body.hasKey("location")
+      let loc = body["location"]
+      # MUST carry ``line``; MAY carry ``column`` (null or positive int).
+      check loc.hasKey("line")
+      check loc["line"].getInt(0) >= 1
+      if loc.hasKey("column"):
+        let c = loc["column"]
+        check c.kind == JNull or (c.kind == JInt and c.getInt(0) >= 1)
 
-    # ``getCurrentColumn`` MUST mirror the wire shape.
-    let observed = f.session.getCurrentColumn()
-    if loc.hasKey("column") and loc["column"].kind == JInt:
-      check observed.isSome
-      check observed.get() == loc["column"].getInt(0)
-    else:
-      check observed.isNone
+      # ``getCurrentColumn`` MUST mirror the wire shape.
+      let observed = f.session.getCurrentColumn()
+      if loc.hasKey("column") and loc["column"].kind == JInt:
+        check observed.isSome
+        check observed.get() == loc["column"].getInt(0)
+      else:
+        check observed.isNone
 
 when isMainModule:
   discard

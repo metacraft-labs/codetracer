@@ -35,12 +35,18 @@
 ##     Defaults to ``../../../../../codetracer-js-recorder/packages/cli/dist/index.js``.
 ##
 ## Both tools ship pre-built in the standard checkout layout — neither
-## envvar is normally required.  When either is missing the test fails
-## loudly per the M1 contract ("no test.skip, no #[ignore]").
+## envvar is normally required.  A missing replay-server still fails
+## loudly (it is a same-repo build artefact).  A missing JS recorder
+## sibling, however, is a cross-repo host prerequisite: it is reported as
+## a uniform, greppable SKIP via ``recorder_gate.skipMissingRecorder``
+## (prefix ``MISSING-RECORDER SKIP:``) so a not-checked-out recorder reads
+## the same way across every recorder-gated headless_session test, rather
+## than as an opaque IOError.  See ``recorder_gate.nim``.
 
 import std/[json, options, os, osproc, strutils, unittest]
 
 import ../../headless_session
+import recorder_gate
 
 # ---------------------------------------------------------------------------
 # Fixture preparation
@@ -76,6 +82,11 @@ proc findReplayServer(): string =
     "`cd src/db-backend && cargo build`")
 
 proc findJsRecorder(): string =
+  ## Locate the JS recorder CLI.  Returns the empty string when neither
+  ## ``CODETRACER_JS_RECORDER_PATH`` nor a built sibling is found so the
+  ## caller can gate the test through ``skipMissingRecorder`` — see
+  ## ``recorder_gate.nim`` for why missing-recorder handling is a uniform
+  ## skip across these headless_session tests rather than a hard IOError.
   let envPath = getEnv("CODETRACER_JS_RECORDER_PATH", "")
   if envPath.len > 0 and fileExists(envPath):
     return envPath
@@ -83,9 +94,7 @@ proc findJsRecorder(): string =
     "packages" / "cli" / "dist" / "index.js"
   if fileExists(candidate):
     return candidate
-  raise newException(IOError,
-    "missing JS recorder; set CODETRACER_JS_RECORDER_PATH or build " &
-    "the codetracer-js-recorder sibling repo (npm run build)")
+  return ""
 
 proc fixtureDir(): string =
   ## Per-process temp directory for the JS source + recorded trace.  We
@@ -162,78 +171,84 @@ suite "M1 — Column-aware breakpoint through the ViewModel":
     ## Drive the ViewModel via headless_session.nim, set a breakpoint
     ## at column N within a multi-statement line, continue, and assert
     ## that ``(line, column)`` of the stop matches.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Sanity — the recorder lands the cursor on line 1 column 1 at
-    # run-to-entry.  This pins the initial state so the post-Continue
-    # assertions have a defined starting point.
-    check session.getCurrentFile().endsWith("program.js")
-    check session.getCurrentLine() == 1
-    let initialCol = session.getCurrentColumn()
-    check initialCol.isSome
-    check initialCol.get() == fixture.lineCol1
+      # Sanity — the recorder lands the cursor on line 1 column 1 at
+      # run-to-entry.  This pins the initial state so the post-Continue
+      # assertions have a defined starting point.
+      check session.getCurrentFile().endsWith("program.js")
+      check session.getCurrentLine() == 1
+      let initialCol = session.getCurrentColumn()
+      check initialCol.isSome
+      check initialCol.get() == fixture.lineCol1
 
-    # M1 — set a breakpoint at the SECOND statement on line 1.  The
-    # bound column on the response MUST echo back exactly.
-    let resp = session.lastSetBreakpointsResponse(
-      fixture.sourcePath, line = 1, column = fixture.lineCol14)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    check bps[0].hasKey("column")
-    check bps[0]["column"].getInt(0) == fixture.lineCol14
-    check bps[0].getOrDefault("line").getInt(0) == 1
+      # M1 — set a breakpoint at the SECOND statement on line 1.  The
+      # bound column on the response MUST echo back exactly.
+      let resp = session.lastSetBreakpointsResponse(
+        fixture.sourcePath, line = 1, column = fixture.lineCol14)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      check bps[0].hasKey("column")
+      check bps[0]["column"].getInt(0) == fixture.lineCol14
+      check bps[0].getOrDefault("line").getInt(0) == 1
 
-    # Continue forward.  The replay engine MUST honour the column —
-    # otherwise it would (wrongly) stop at the same step we started on
-    # (line 1, col 1) since the loop in step_continue skips the current
-    # step but a line-only fallback would still hit step 0's successor
-    # at column 12 only by luck.  Assert exact match on both axes.
-    session.continueForward()
-    check session.getCurrentLine() == 1
-    let afterCol = session.getCurrentColumn()
-    check afterCol.isSome
-    check afterCol.get() == fixture.lineCol14
+      # Continue forward.  The replay engine MUST honour the column —
+      # otherwise it would (wrongly) stop at the same step we started on
+      # (line 1, col 1) since the loop in step_continue skips the current
+      # step but a line-only fallback would still hit step 0's successor
+      # at column 12 only by luck.  Assert exact match on both axes.
+      session.continueForward()
+      check session.getCurrentLine() == 1
+      let afterCol = session.getCurrentColumn()
+      check afterCol.isSome
+      check afterCol.get() == fixture.lineCol14
 
   test "test_column_breakpoint_vm_line_only_breakpoint_preserved":
     ## Legacy line-only breakpoints — ``setBreakpoint`` with ``column =
     ## 0`` — MUST continue to work after the M1 extension.  This pins
     ## back-compat for DAP clients that don't send a column.
-    let fixture = recordTinyJsTrace()
-    let replayServer = findReplayServer()
-    var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
+    requireRecorderOrSkip(findJsRecorder(), "codetracer-js-recorder",
+        "CODETRACER_JS_RECORDER_PATH",
+        "Build the codetracer-js-recorder sibling (just build)."):
+      let fixture = recordTinyJsTrace()
+      let replayServer = findReplayServer()
+      var session = newHeadlessDebugSession(fixture.tracePath, replayServer)
 
-    # Set a line-only breakpoint on line 2.  Wire SHOULD NOT carry a
-    # column key — assert the response surfaces column=None to prove
-    # the legacy path is taken.
-    let resp = session.lastSetBreakpointsResponse(
-      fixture.sourcePath, line = fixture.legacyLine, column = 0)
-    check resp.getOrDefault("success").getBool(false)
-    let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
-    check bps.kind == JArray
-    check bps.len == 1
-    check bps[0].getOrDefault("verified").getBool(false)
-    # `column` is `skip_serializing_if = Option::is_none` on the Rust
-    # side, so a legacy response either omits the key entirely or sets
-    # it to null.  Both are equivalent to "no column".
-    let colNode = bps[0].getOrDefault("column")
-    check colNode.isNil or colNode.kind == JNull
+      # Set a line-only breakpoint on line 2.  Wire SHOULD NOT carry a
+      # column key — assert the response surfaces column=None to prove
+      # the legacy path is taken.
+      let resp = session.lastSetBreakpointsResponse(
+        fixture.sourcePath, line = fixture.legacyLine, column = 0)
+      check resp.getOrDefault("success").getBool(false)
+      let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
+      check bps.kind == JArray
+      check bps.len == 1
+      check bps[0].getOrDefault("verified").getBool(false)
+      # `column` is `skip_serializing_if = Option::is_none` on the Rust
+      # side, so a legacy response either omits the key entirely or sets
+      # it to null.  Both are equivalent to "no column".
+      let colNode = bps[0].getOrDefault("column")
+      check colNode.isNil or colNode.kind == JNull
 
-    # Continue forward.  Should stop at the first step of line 2.
-    session.continueForward()
-    check session.getCurrentLine() == fixture.legacyLine
-    # The recorder still emits a column for traces in column-aware mode
-    # — line-only matching just means the breakpoint hit fires
-    # regardless of column, NOT that the recorded step's column is
-    # absent.  We just check that we landed on line 2 and that the
-    # column (if present) is the first statement column on that line.
-    let landedCol = session.getCurrentColumn()
-    if landedCol.isSome:
-      check landedCol.get() >= 1
+      # Continue forward.  Should stop at the first step of line 2.
+      session.continueForward()
+      check session.getCurrentLine() == fixture.legacyLine
+      # The recorder still emits a column for traces in column-aware mode
+      # — line-only matching just means the breakpoint hit fires
+      # regardless of column, NOT that the recorded step's column is
+      # absent.  We just check that we landed on line 2 and that the
+      # column (if present) is the first statement column on that line.
+      let landedCol = session.getCurrentColumn()
+      if landedCol.isSome:
+        check landedCol.get() >= 1
 
 when isMainModule:
   discard
