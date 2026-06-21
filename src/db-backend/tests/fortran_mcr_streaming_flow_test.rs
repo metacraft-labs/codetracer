@@ -37,6 +37,11 @@ fn fortran_mcr_streaming_flow_variables_and_values() {
         return;
     }
 
+    if !Language::Fortran.compiler_available() {
+        eprintln!("SKIPPED: Fortran compiler (gfortran) not found on PATH");
+        return;
+    }
+
     let db_backend = find_db_backend();
 
     // --- locate the Fortran test program ---

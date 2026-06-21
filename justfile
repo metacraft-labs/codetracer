@@ -2011,7 +2011,13 @@ ensure-ct-mcr:
     fi
     sibling="$CT_CODETRACER_NATIVE_RECORDER_SIBLING"
     if command -v repro >/dev/null 2>&1; then
-        repro build --cwd "$sibling" ct-mcr
+        # ``repro build`` operates on the project at the current working
+        # directory (the CLI has no ``--cwd`` flag); cd into the sibling
+        # first so the recorder's ``ct-mcr`` target resolves there.
+        # ``--tool-provisioning=nix`` is required: reprobuild refuses an
+        # implicit PATH fallback for ``uses`` declarations and the Nix-based
+        # sibling resolves its toolchain through its flake.
+        ( cd "$sibling" && repro build --tool-provisioning=nix ct-mcr )
     elif [ "${OS:-}" = "Windows_NT" ]; then
         # Windows DIY: no Nix dev shell, invoke the sibling's
         # Windows-specific build target directly. env.ps1 has already
@@ -2028,12 +2034,36 @@ ensure-ct-mcr:
     fi
 
 # Build ct-native-replay from the sibling codetracer-native-backend
-# checkout. The sibling's Justfile uses ``build`` (cargo build) as its
-# canonical recipe and does not yet expose a dedicated
-# ``build-ct-native-replay`` target; the recipe below follows the
-# policy's three-way fallback shape so the wiring stays consistent and
-# will pick up a future ``build-ct-native-replay`` target without
-# consumer-side changes.
+# checkout.
+#
+# Unlike ``ensure-ct-mcr``, this recipe does NOT route through
+# ``repro build``: codetracer-native-backend is a plain cargo project
+# with no reprobuild project file, so ``repro build ct-native-replay``
+# fails with "build target module not found: ct-native-replay.nim".
+# Per cross-repo-builds.md, build the sibling via ITS OWN canonical
+# ``just`` target instead.
+#
+# Target selection (the backend's justfile defines these):
+#   * macOS  -> ``build-mcr``  (provisions LLVM_CONFIG / LLDB_LIB_PATH
+#               from nix, runs ``cargo build``, then ``fix-lldb-rpath``
+#               + ``sign-macos-binary`` so ct-native-replay can load
+#               liblldb via @rpath and spawn dyld-interposed tools).
+#   * Linux  -> ``build``      (plain ``cargo build``; lldb-sys links
+#               against the nix liblldb directly, no rpath rewrite or
+#               codesign needed).
+# Both land the binary at ``$sibling/target/debug/ct-native-replay``.
+#
+# The Nix build runs through ``nix develop '.?submodules=1'`` rather than
+# ``direnv exec`` -- mirroring ``build-once`` above for ct-mcr. The
+# backend's ``flake.nix`` shellHook is what creates the runtime
+# ``target/debug/liblldb.dylib`` symlink and exports
+# ``CT_NATIVE_REPLAY_RPATH`` (baked into the binary by ``build.rs`` so
+# ``@rpath/liblldb.dylib`` resolves at run time). ``direnv exec`` on the
+# sibling can silently fall back to a hookless environment when the
+# sibling's flake-override plugin or path inputs are out of sync, which
+# yields a binary with no liblldb RPATH that aborts when a child
+# ct-native-replay process is spawned. ``nix develop`` evaluates the
+# devShell directly and always runs the shellHook.
 ensure-ct-native-replay:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2042,40 +2072,122 @@ ensure-ct-native-replay:
         exit 0
     fi
     sibling="$CT_CODETRACER_NATIVE_BACKEND_SIBLING"
-    # Helper to invoke the sibling's policy-canonical target when
-    # available and fall back to ``cargo build --bin ct-native-replay``
-    # otherwise. The sibling repo currently exposes ``just build``
-    # (cargo build) rather than a dedicated ``build-ct-native-replay``
-    # recipe; the fallback lets the consumer stay stable until that
-    # target lands.
-    _diy_build() {
-        cd "$sibling"
-        if just --list 2>/dev/null | grep -qE '^\s*build-ct-native-replay\b'; then
-            just build-ct-native-replay
-        else
-            cargo build --bin ct-native-replay
+    # Pick the backend just target that produces a working
+    # ct-native-replay on this platform (see recipe header).
+    case "$(uname -s)" in
+        Darwin) backend_target=build-mcr ;;
+        *)      backend_target=build ;;
+    esac
+    # On macOS the liblldb runtime wiring (the ``target/debug/liblldb.dylib``
+    # symlink + the ``CT_NATIVE_REPLAY_RPATH`` that build.rs bakes into the
+    # binary so a *child* ct-native-replay can load liblldb under SIP) is
+    # normally done by the backend's flake shellHook. We provision it here
+    # too so the build is correct even when the sibling's dev shell is
+    # entered hookless (e.g. its workspace flake.lock can't evaluate under
+    # a dirty checkout). MCR's GDB-RSP client needs Apple's Xcode LLDB at
+    # run time, with the Nix liblldb dir kept on RPATH for the compile-time
+    # symbols. This mirrors codetracer-native-backend/nix/shells/main.nix.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        mkdir -p "$sibling/target/debug"
+        apple_lldb="/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/LLDB"
+        if [ -f "$apple_lldb" ]; then
+            ln -sf "$apple_lldb" "$sibling/target/debug/liblldb.dylib"
+        elif [ -n "${LLDB_LIB_PATH:-}" ] && [ -e "${LLDB_LIB_PATH%/}/liblldb.dylib" ]; then
+            ln -sf "${LLDB_LIB_PATH%/}/liblldb.dylib" "$sibling/target/debug/liblldb.dylib"
         fi
-    }
-    if command -v repro >/dev/null 2>&1; then
-        repro build --cwd "$sibling" ct-native-replay
-    elif [ "${OS:-}" = "Windows_NT" ]; then
-        # Windows DIY: short-circuit before direnv (see ensure-ct-mcr
-        # for rationale). cargo must be on PATH (rustup-init or
-        # equivalent) for this branch to succeed; env.ps1 does NOT
-        # provision rust today. The recipe still wires correctly; a
-        # missing cargo surfaces a clear "command not found" rather
-        # than a silent skip.
-        _diy_build
-    elif command -v direnv >/dev/null 2>&1 && [ -f "$sibling/.envrc" ]; then
-        direnv allow "$sibling"
-        direnv exec "$sibling" just -f "$sibling/Justfile" build-ct-native-replay
+        nix_lldb_dir="${LLDB_LIB_PATH:-}"
+        if [ -z "$nix_lldb_dir" ] && command -v nix >/dev/null 2>&1; then
+            nix_lldb_dir="$(nix build --no-link --print-out-paths nixpkgs#lldb 2>/dev/null)/lib" || nix_lldb_dir=""
+        fi
+        export CT_NATIVE_REPLAY_RPATH="$sibling/target/debug/:${nix_lldb_dir:+$nix_lldb_dir}"
+    fi
+    if [ "${OS:-}" = "Windows_NT" ]; then
+        # Windows DIY: short-circuit before nix (see ensure-ct-mcr for
+        # rationale). cargo must be on PATH (rustup-init or equivalent)
+        # for this branch to succeed; env.ps1 does NOT provision rust
+        # today. The recipe still wires correctly; a missing cargo
+        # surfaces a clear "command not found" rather than a silent skip.
+        cd "$sibling" && just build
+    elif command -v nix >/dev/null 2>&1 && [ -f "$sibling/flake.nix" ] && \
+         ( cd "$sibling" && nix develop '.?submodules=1' --command true >/dev/null 2>&1 ); then
+        # Preferred path (CI + clean dev checkouts): build inside the
+        # sibling's own Nix dev shell so its pinned LLVM/LLDB toolchain is
+        # used and its shellHook runs. This is exactly the backend's own CI
+        # invocation (``nix develop .?submodules=1 --command just build``).
+        # ``cd "$sibling"`` + local ``.`` flake ref honours the dirty
+        # working tree; the ``nix develop ... true`` guard above confirms
+        # the devShell actually evaluates before we commit to this branch
+        # (the sibling's ``path:libs/...`` flake inputs can fail to lock
+        # under a dirty workspace checkout). ``unset`` clears LLDB/CXX env
+        # leaking from the codetracer shell so the sibling hook owns it.
+        ( cd "$sibling" && nix develop '.?submodules=1' --command bash -lc \
+            "unset LLVM_CONFIG LLDB_LIB_PATH LLDB_ADDITIONAL_INCLUDE_DIRS CXXFLAGS CC CXX; just $backend_target" )
+    elif command -v just >/dev/null 2>&1; then
+        # Fallback: the sibling dev shell could not be evaluated, but we are
+        # already inside the codetracer Nix dev shell which provides cargo +
+        # LLVM/LLDB. ``build-mcr`` itself provisions LLVM_CONFIG/LLDB_LIB_PATH
+        # via ``nix build`` when unset, and the macOS block above has already
+        # set CT_NATIVE_REPLAY_RPATH + the liblldb symlink so the resulting
+        # binary is runtime-loadable. (On Linux ``build`` links liblldb
+        # directly; no extra wiring needed.)
+        ( cd "$sibling" && just "$backend_target" )
     else
-        _diy_build
+        cd "$sibling" && cargo build --bin ct-native-replay
     fi
 
-# Run the DAP-flow integration tests (Ada / C++ / D / Fortran / Go /
-# Pascal) under ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``.
-# These tests SKIP when ct-mcr / ct-native-replay are not on PATH; the
-# ensure-* prerequisites build the sibling binaries first.
+# Run the DAP-flow integration tests (Ada / C / C++ / D / Fortran / Go /
+# Pascal / Nim / Rust) under
+# ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``.
+#
+# The ``ensure-*`` prerequisites build the sibling binaries; this recipe
+# then makes them discoverable to the Rust tests:
+#   * ``test_harness::is_mcr_available()`` requires ``ct-mcr`` ON PATH
+#     (it ignores CODETRACER_CT_MCR_CMD), so we symlink the recorder's
+#     ct_cli as ``ct-mcr`` into a scratch dir prepended to PATH.
+#   * ``test_harness::find_ct_rr_support()`` honours CT_NATIVE_REPLAY_PATH
+#     first, then PATH, then ``../../codetracer-native-backend/target/
+#     debug``; we export the explicit path so the right binary is used.
+# Tests whose language compiler is absent honest-SKIP (``SKIPPED:`` line)
+# rather than failing.
 test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Resolve the sibling binaries built by the ensure-* prerequisites.
+    if [ -n "${CT_CODETRACER_NATIVE_BACKEND_SIBLING:-}" ]; then
+        native_backend="$CT_CODETRACER_NATIVE_BACKEND_SIBLING"
+    else
+        native_backend="$(cd "$(git rev-parse --show-toplevel)/../codetracer-native-backend" 2>/dev/null && pwd || true)"
+    fi
+    if [ -n "${CT_CODETRACER_NATIVE_RECORDER_SIBLING:-}" ]; then
+        native_recorder="$CT_CODETRACER_NATIVE_RECORDER_SIBLING"
+    else
+        native_recorder="$(cd "$(git rev-parse --show-toplevel)/../codetracer-native-recorder" 2>/dev/null && pwd || true)"
+    fi
+
+    replay="${native_backend:-}/target/debug/ct-native-replay${EXE_SUFFIX:-}"
+    # Prefer the debug-symbol ct_cli build on macOS (ct_cli-debug); fall
+    # back to the plain ct_cli on Linux / Windows.
+    ct_mcr=""
+    for cand in "${native_recorder:-}/ct_cli/ct_cli-debug" "${native_recorder:-}/ct_cli/ct_cli"; do
+        if [ -x "$cand" ]; then ct_mcr="$cand"; break; fi
+    done
+
+    # If a sibling binary is genuinely absent (ensure-* SKIP'd), the Rust
+    # tests detect the missing tool and emit SKIPPED lines themselves; we
+    # still run cargo so that signal is visible (per cross-repo-builds.md).
+    extra_path=""
+    if [ -n "$ct_mcr" ]; then
+        mcr_dir="$(mktemp -d "${TMPDIR:-/tmp}/ct-mcr-path.XXXXXX")"
+        ln -sf "$ct_mcr" "$mcr_dir/ct-mcr"
+        extra_path="$mcr_dir:"
+        export CODETRACER_CT_MCR_CMD="$ct_mcr"
+    fi
+    if [ -x "$replay" ]; then
+        export CT_NATIVE_REPLAY_PATH="$replay"
+        export CT_NATIVE_REPLAY_BIN="$replay"
+        export CODETRACER_CT_NATIVE_REPLAY_CMD="$replay"
+        extra_path="$extra_path${native_backend}/target/debug:"
+    fi
+    export PATH="${extra_path}${PATH}"
+
     cd src/db-backend && cargo test --test '*_mcr_streaming_flow_test'

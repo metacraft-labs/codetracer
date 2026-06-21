@@ -118,6 +118,15 @@ _ct_detect_summary() {
 # language-recorder bench harnesses) work without LD_LIBRARY_PATH
 # wrangling.  Idempotent: skips when patchelf is missing or the binary
 # already points at a valid liblldb / libstdc++.
+# Expose the sibling directory (when the repo is checked out, regardless of
+# whether ct-native-replay has been built yet) so the consumer `just`
+# recipe `ensure-ct-native-replay` can build it on demand. Per
+# metacraft-dev-guidelines/policies/cross-repo-builds.md §2.1, the dev
+# shell MUST export the canonical CT_<NAME>_SIBLING path var; the build
+# recipe — not detection — is responsible for triggering the build.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native-backend" ]; then
+	export CT_CODETRACER_NATIVE_BACKEND_SIBLING="$_CT_WORKSPACE_ROOT/codetracer-native-backend"
+fi
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" ]; then
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug:$PATH"
 	if command -v patchelf >/dev/null 2>&1 && command -v ldd >/dev/null 2>&1; then
@@ -164,6 +173,12 @@ fi
 # Also prepend the binary's directory to PATH so the Rust `find_ct_mcr` in
 # codetracer-native-backend (which accepts either `ct-mcr` or `ct_cli`)
 # always finds it via the same PATH lookup end users get.
+# Expose the sibling directory (when the repo is checked out, regardless of
+# whether ct_cli has been built yet) so the consumer `just` recipe
+# `ensure-ct-mcr` can build it on demand. Per cross-repo-builds.md §2.1.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-native-recorder" ]; then
+	export CT_CODETRACER_NATIVE_RECORDER_SIBLING="$_CT_WORKSPACE_ROOT/codetracer-native-recorder"
+fi
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_cli/ct_cli" ]; then
 	export CODETRACER_CT_MCR_CMD="$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_cli/ct_cli"
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-native-recorder/ct_cli:$PATH"

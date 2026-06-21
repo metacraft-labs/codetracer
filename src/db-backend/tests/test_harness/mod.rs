@@ -299,6 +299,37 @@ impl Language {
         }
     }
 
+    /// External compiler binaries that ``ct-native-replay build`` invokes to
+    /// compile a source program of this language. The slice lists acceptable
+    /// alternatives — the language's compiler is considered available when
+    /// *any* of them is on PATH. An empty slice means "no extra
+    /// language-specific compiler is required beyond what the dev shell
+    /// always provides" (e.g. C / C++ use the always-present cc / c++).
+    ///
+    /// Used by the MCR DAP flow tests to honest-SKIP (per
+    /// metacraft-dev-guidelines/policies/cross-repo-builds.md) when a
+    /// language toolchain is absent on the runner, rather than panicking on
+    /// the ``ct-native-replay build`` failure.
+    pub fn required_compilers(&self) -> &'static [&'static str] {
+        match self {
+            Language::Ada => &["gnatmake"],
+            Language::Fortran => &["gfortran"],
+            Language::Pascal => &["fpc"],
+            Language::D => &["gdc", "ldc2", "dmd"],
+            Language::Go => &["go", "gccgo"],
+            // C / C++ are built with the always-present cc / c++ in the dev
+            // shell; no extra language-specific compiler gate is needed.
+            _ => &[],
+        }
+    }
+
+    /// True when this language's required compiler (if any) is on PATH. A
+    /// language with no extra required compiler is always "available".
+    pub fn compiler_available(&self) -> bool {
+        let candidates = self.required_compilers();
+        candidates.is_empty() || candidates.iter().any(|c| find_on_path(c).is_some())
+    }
+
     /// Returns true for DB-based trace languages (Python, Ruby, Noir, RustWasm) that don't use rr.
     pub fn is_db_trace(&self) -> bool {
         matches!(
