@@ -107,10 +107,10 @@ with pkgs;
     python3Packages.distutils
     shellcheck
 
-    # Cachix push + GitHub CLI + AWS artifact upload — used by
-    # several CI steps (cachix push at the end of a successful nix
+    # Attic cache push + GitHub CLI + AWS artifact upload — used by
+    # several CI steps (attic push at the end of a successful nix
     # build, gh for dispatch/observe, awscli2 for artifact storage).
-    cachix
+    attic-client
     gh
     awscli2
 

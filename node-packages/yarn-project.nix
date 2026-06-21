@@ -45,7 +45,7 @@ let
   # Our ``yarn.lock`` pins platform-specific optional dependencies (esbuild,
   # @parcel/watcher, ...) for every OS/CPU, so the resulting cache — and hence
   # the fixed-output hash — differs per build platform. Select the hash for the
-  # host system; the Linux hash is what CI / the Cachix cache is built against.
+  # host system; the Linux hash is what CI / the binary cache is built against.
   #
   # To add a new platform: build once, take the ``got:`` hash from the
   # "hash mismatch" error, and add it below.
