@@ -5,6 +5,7 @@
 
 pub mod block_overlay;
 pub mod call_stream_source;
+pub mod cow_namespace_reader;
 pub mod ctfs_container;
 pub mod follow_stream_source;
 pub mod meta_dat;
