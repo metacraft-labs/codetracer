@@ -11,6 +11,7 @@ pub mod cow_namespace_reader;
 pub mod cow_namespace_writer;
 pub mod ctfs_container;
 pub mod follow_stream_source;
+pub mod http_range_source;
 pub mod interval_tagged_map;
 pub mod lazy_population_store;
 pub mod materialization_cache;
