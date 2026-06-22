@@ -68,7 +68,7 @@ pub struct SeekableStepStream {
     /// `open` is the only constructor, but kept optional for future in-memory
     /// sources that cannot be re-opened — those simply fall back to sequential).
     path: Option<PathBuf>,
-    record_count: u64,
+    record_count: AtomicU64,
     chunk_size: usize,
     /// Number of *distinct* Zstd chunks this source has had to decompress since
     /// it was opened.
@@ -84,7 +84,7 @@ pub struct SeekableStepStream {
 impl std::fmt::Debug for SeekableStepStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SeekableStepStream")
-            .field("record_count", &self.record_count)
+            .field("record_count", &self.record_count.load(Ordering::Relaxed))
             .field("chunk_size", &self.chunk_size)
             .field(
                 "chunk_decompressions",
@@ -108,7 +108,7 @@ impl SeekableStepStream {
                 Ok(Some(SeekableStepStream {
                     reader: Mutex::new(reader),
                     path: Some(path.to_path_buf()),
-                    record_count,
+                    record_count: AtomicU64::new(record_count),
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
@@ -144,7 +144,7 @@ impl SeekableStepStream {
                 Ok(Some(SeekableStepStream {
                     reader: Mutex::new(reader),
                     path: None,
-                    record_count,
+                    record_count: AtomicU64::new(record_count),
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
@@ -155,7 +155,7 @@ impl SeekableStepStream {
 
     /// Total number of execution-stream records in the stream.
     pub fn step_count(&self) -> usize {
-        self.record_count as usize
+        self.record_count.load(Ordering::Relaxed) as usize
     }
 
     /// The fixed records-per-chunk seek granularity.
@@ -195,7 +195,7 @@ impl SeekableStepStream {
     /// inverse, so the returned location is byte-identical to the materialized
     /// `DbStep`'s `(path_id, line)`.
     pub fn step_line(&self, step_id: StepId) -> Option<(PathId, Line)> {
-        if step_id.0 < 0 || step_id.0 as u64 >= self.record_count {
+        if step_id.0 < 0 || step_id.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
         }
         let mut reader = self.reader.lock().ok()?;
@@ -222,6 +222,21 @@ impl SeekableStepStream {
             _ => None,
         }
     }
+
+    /// Refresh this stream in place from an already-refreshed CTFS reader.
+    pub fn refresh_from_ctfs(&self, ctfs: &mut CtfsReader) -> Result<(), String> {
+        let Some(reader) = open_step_reader_from_ctfs(ctfs)? else {
+            return Ok(());
+        };
+        let record_count = reader.count();
+        let mut guard = self
+            .reader
+            .lock()
+            .map_err(|_| "steps.dat reader mutex poisoned".to_string())?;
+        *guard = reader;
+        self.record_count.store(record_count, Ordering::Relaxed);
+        Ok(())
+    }
 }
 
 /// A seekable, on-demand view over a container's `values.dat` parallel value
@@ -233,7 +248,7 @@ impl SeekableStepStream {
 /// `N` ↔ step `N`) the integer step index IS the value-record index.
 pub struct SeekableValueStream {
     reader: Mutex<ValueStreamReader>,
-    record_count: u64,
+    record_count: AtomicU64,
     chunk_size: usize,
     /// Distinct-chunk decompression counter (bounded-decompression probe), as on
     /// [`SeekableStepStream`].
@@ -243,7 +258,7 @@ pub struct SeekableValueStream {
 impl std::fmt::Debug for SeekableValueStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SeekableValueStream")
-            .field("record_count", &self.record_count)
+            .field("record_count", &self.record_count.load(Ordering::Relaxed))
             .field("chunk_size", &self.chunk_size)
             .field(
                 "chunk_decompressions",
@@ -264,7 +279,7 @@ impl SeekableValueStream {
                 let chunk_size = reader.chunk_size();
                 Ok(Some(SeekableValueStream {
                     reader: Mutex::new(reader),
-                    record_count,
+                    record_count: AtomicU64::new(record_count),
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
@@ -298,7 +313,7 @@ impl SeekableValueStream {
                 let chunk_size = reader.chunk_size();
                 Ok(Some(SeekableValueStream {
                     reader: Mutex::new(reader),
-                    record_count,
+                    record_count: AtomicU64::new(record_count),
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
@@ -309,7 +324,7 @@ impl SeekableValueStream {
 
     /// Total number of value records in the stream (equals the step count).
     pub fn value_count(&self) -> usize {
-        self.record_count as usize
+        self.record_count.load(Ordering::Relaxed) as usize
     }
 
     /// The fixed records-per-chunk seek granularity.
@@ -337,7 +352,7 @@ impl SeekableValueStream {
     /// rather than failing the whole step, mirroring the materialized
     /// new-format reader (`open_new_format_nim`).
     pub fn variables_at(&self, step_id: StepId) -> Option<Vec<FullValueRecord>> {
-        if step_id.0 < 0 || step_id.0 as u64 >= self.record_count {
+        if step_id.0 < 0 || step_id.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
         }
         let mut reader = self.reader.lock().ok()?;
@@ -351,6 +366,57 @@ impl SeekableValueStream {
 
         Some(step_values_to_full_records(&record.events))
     }
+
+    /// Refresh this stream in place from an already-refreshed CTFS reader.
+    pub fn refresh_from_ctfs(&self, ctfs: &mut CtfsReader) -> Result<(), String> {
+        let Some(reader) = open_value_reader_from_ctfs(ctfs)? else {
+            return Ok(());
+        };
+        let record_count = reader.count();
+        let mut guard = self
+            .reader
+            .lock()
+            .map_err(|_| "values.dat reader mutex poisoned".to_string())?;
+        *guard = reader;
+        self.record_count.store(record_count, Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+fn open_step_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<StepStreamReader>, String> {
+    let meta = match ctfs.read_file("meta.dat") {
+        Ok(meta) => meta,
+        Err(_) => return Ok(None),
+    };
+    if !meta_dat_has_step_stream(&meta) {
+        return Ok(None);
+    }
+    let dat = match ctfs.read_file("steps.dat") {
+        Ok(dat) => dat,
+        Err(_) => return Ok(None),
+    };
+    let idx = ctfs
+        .read_file("steps.idx")
+        .map_err(|e| format!("steps.idx missing despite has_step_stream flag: {e}"))?;
+    StepStreamReader::from_files(&meta, dat, idx)
+}
+
+fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStreamReader>, String> {
+    let meta = match ctfs.read_file("meta.dat") {
+        Ok(meta) => meta,
+        Err(_) => return Ok(None),
+    };
+    if !meta_dat_has_value_stream(&meta) {
+        return Ok(None);
+    }
+    let dat = match ctfs.read_file("values.dat") {
+        Ok(dat) => dat,
+        Err(_) => return Ok(None),
+    };
+    let idx = ctfs
+        .read_file("values.idx")
+        .map_err(|e| format!("values.idx missing despite has_value_stream flag: {e}"))?;
+    ValueStreamReader::from_files(&meta, dat, idx)
 }
 
 /// Reconstruct the per-step `Vec<FullValueRecord>` (the materialized

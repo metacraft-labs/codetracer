@@ -290,7 +290,9 @@ fn read_exact_at(source: &dyn BlockSource, offset: u64, buf: &mut [u8], context:
         .checked_add(buf.len() as u64)
         .ok_or_else(|| CtfsError::Corrupt(format!("{context}: read offset overflow")))?;
     if end > source.current_size() {
-        return Err(CtfsError::Corrupt(format!("{context}: read extends beyond end of container")));
+        return Err(CtfsError::Corrupt(format!(
+            "{context}: read extends beyond end of container"
+        )));
     }
     let read = source.read_at(offset, buf)?;
     if read != buf.len() {
@@ -631,6 +633,8 @@ pub struct CtfsReader {
     block_size: usize,
     /// Number of entries per mapping block (`block_size / 8`).
     entries_per_block: usize,
+    /// Maximum number of file entries in Block 0's root directory.
+    max_root_entries: usize,
     /// Parsed file directory, keyed by decoded name.
     files: HashMap<String, FileEntry>,
 }
@@ -739,6 +743,7 @@ impl CtfsReader {
             source,
             block_size,
             entries_per_block,
+            max_root_entries,
             files,
         })
     }
@@ -763,6 +768,51 @@ impl CtfsReader {
     /// without ever loading the whole (still-growing) container into memory.
     pub fn open_follow(path: &Path) -> Result<Self, CtfsError> {
         Self::from_source(Box::new(FollowFileSource::open(path)?))
+    }
+
+    /// Re-observe the backing source and refresh Block 0's file directory.
+    ///
+    /// Fixed sources keep the same directory. Follow/HTTP sources can surface
+    /// newly-committed `FileEntry.Size` values without replacing this reader.
+    pub fn refresh(&mut self) -> Result<(), CtfsError> {
+        self.source.refresh()?;
+        let total = self.source.current_size();
+        let entry_start = HEADER_SIZE + EXTENDED_HEADER_SIZE;
+        let mut files = HashMap::new();
+
+        for i in 0..self.max_root_entries {
+            let offset = (entry_start + i * FILE_ENTRY_SIZE) as u64;
+            if offset + FILE_ENTRY_SIZE as u64 > total {
+                break;
+            }
+            let mut entry_buf = [0u8; FILE_ENTRY_SIZE];
+            read_exact_at(self.source.as_ref(), offset, &mut entry_buf, "file entry")?;
+
+            let size = u64::from_le_bytes(
+                entry_buf[0..8]
+                    .try_into()
+                    .map_err(|_| CtfsError::Corrupt("file entry size slice".to_string()))?,
+            );
+            let map_block = u64::from_le_bytes(
+                entry_buf[8..16]
+                    .try_into()
+                    .map_err(|_| CtfsError::Corrupt("file entry map_block slice".to_string()))?,
+            );
+            let name_encoded = u64::from_le_bytes(
+                entry_buf[16..24]
+                    .try_into()
+                    .map_err(|_| CtfsError::Corrupt("file entry name slice".to_string()))?,
+            );
+
+            if name_encoded == 0 {
+                continue;
+            }
+
+            let name = base40_decode(name_encoded);
+            files.insert(name.clone(), FileEntry { name, size, map_block });
+        }
+        self.files = files;
+        Ok(())
     }
 
     /// Read the full contents of a named internal file.
@@ -1404,7 +1454,11 @@ mod tests {
             Some(100),
             "appended bytes must NOT be visible before refresh()"
         );
-        assert_eq!(follow.current_size(), size_before, "raw size unchanged before refresh()");
+        assert_eq!(
+            follow.current_size(),
+            size_before,
+            "raw size unchanged before refresh()"
+        );
 
         // AFTER refresh: the grown FileEntry.Size and the larger raw size are
         // visible, and the appended bytes read back correctly.
@@ -1414,7 +1468,10 @@ mod tests {
             Some(150),
             "refresh() must observe the grown FileEntry.Size"
         );
-        assert!(follow.current_size() >= data_block_offset + 150, "raw size covers appended bytes");
+        assert!(
+            follow.current_size() >= data_block_offset + 150,
+            "raw size covers appended bytes"
+        );
 
         let mut buf = vec![0u8; 50];
         follow.read_at(data_block_offset + 100, &mut buf).unwrap();

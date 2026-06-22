@@ -47,7 +47,7 @@ use super::ctfs_container::CtfsReader;
 /// trace is never materialized.
 pub struct SeekableCallStream {
     reader: Mutex<CallStreamReader>,
-    record_count: u64,
+    record_count: AtomicU64,
     chunk_size: usize,
     /// Number of *distinct* Zstd chunks this source has had to decompress since
     /// it was opened.
@@ -63,7 +63,7 @@ pub struct SeekableCallStream {
 impl std::fmt::Debug for SeekableCallStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SeekableCallStream")
-            .field("record_count", &self.record_count)
+            .field("record_count", &self.record_count.load(Ordering::Relaxed))
             .field("chunk_size", &self.chunk_size)
             .field(
                 "chunk_decompressions",
@@ -86,7 +86,7 @@ impl SeekableCallStream {
                 let chunk_size = reader.chunk_size();
                 Ok(Some(SeekableCallStream {
                     reader: Mutex::new(reader),
-                    record_count,
+                    record_count: AtomicU64::new(record_count),
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
@@ -120,7 +120,7 @@ impl SeekableCallStream {
                 let chunk_size = reader.chunk_size();
                 Ok(Some(SeekableCallStream {
                     reader: Mutex::new(reader),
-                    record_count,
+                    record_count: AtomicU64::new(record_count),
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
@@ -131,7 +131,7 @@ impl SeekableCallStream {
 
     /// Total number of call records in the stream.
     pub fn call_count(&self) -> usize {
-        self.record_count as usize
+        self.record_count.load(Ordering::Relaxed) as usize
     }
 
     /// The fixed records-per-chunk seek granularity.
@@ -157,7 +157,7 @@ impl SeekableCallStream {
     /// whole call, because the call-tree STRUCTURE is what the seekable path
     /// must serve.
     pub fn call(&self, key: CallKey) -> Option<DbCall> {
-        if key.0 < 0 || key.0 as u64 >= self.record_count {
+        if key.0 < 0 || key.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
         }
         let mut reader = self.reader.lock().ok()?;
@@ -175,6 +175,62 @@ impl SeekableCallStream {
 
         Some(call_stream_record_to_db_call(&record))
     }
+
+    /// Materialize the call stream into db-backend calls plus their step ranges.
+    ///
+    /// Follow-mode production readers keep the seekable stream as the canonical
+    /// refreshed source, but some `TraceReader` consumers still use the
+    /// borrowing materialized call APIs. This gives the owner a consistent
+    /// snapshot after a follow refresh.
+    pub fn calls_and_ranges(&self) -> Result<Vec<(DbCall, u64, u64)>, String> {
+        let mut reader = self
+            .reader
+            .lock()
+            .map_err(|_| "calls.dat reader mutex poisoned".to_string())?;
+        let count = self.record_count.load(Ordering::Relaxed);
+        let mut calls = Vec::with_capacity(count as usize);
+        for key in 0..count {
+            let record = reader
+                .read(key)
+                .map_err(|e| format!("calls.dat[{key}] read failed: {e}"))?;
+            let call = call_stream_record_to_db_call(&record);
+            calls.push((call, record.first_step_id, record.last_step_id));
+        }
+        Ok(calls)
+    }
+
+    /// Refresh this stream in place from an already-refreshed CTFS reader.
+    pub fn refresh_from_ctfs(&self, ctfs: &mut CtfsReader) -> Result<(), String> {
+        let Some(reader) = open_call_reader_from_ctfs(ctfs)? else {
+            return Ok(());
+        };
+        let record_count = reader.count();
+        let mut guard = self
+            .reader
+            .lock()
+            .map_err(|_| "calls.dat reader mutex poisoned".to_string())?;
+        *guard = reader;
+        self.record_count.store(record_count, Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStreamReader>, String> {
+    let meta = match ctfs.read_file("meta.dat") {
+        Ok(meta) => meta,
+        Err(_) => return Ok(None),
+    };
+    if !meta_dat_has_call_stream(&meta) {
+        return Ok(None);
+    }
+    let dat = match ctfs.read_file("calls.dat") {
+        Ok(dat) => dat,
+        Err(_) => return Ok(None),
+    };
+    let idx = ctfs
+        .read_file("calls.idx")
+        .map_err(|e| format!("calls.idx missing despite has_call_stream flag: {e}"))?;
+    CallStreamReader::from_files(&meta, dat, idx)
 }
 
 /// Convert a `calls.dat` [`CallStreamRecord`] into the db-backend's [`DbCall`].

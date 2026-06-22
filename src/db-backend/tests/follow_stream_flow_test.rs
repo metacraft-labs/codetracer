@@ -24,9 +24,11 @@ use codetracer_trace_types::{CallKey, FunctionId, Line, PathId, StepId, TypeId, 
 
 use codetracer_trace_writer::call_stream::CallStreamRecord;
 
+use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::ctfs_trace_reader::follow_stream_source::{
     FollowCallStreamSource, FollowReader, FollowStepStreamSource, FollowValueStreamSource,
 };
+use db_backend::trace_reader::TraceReader;
 
 mod stream_writer;
 use stream_writer::IncrementalCtfsStreamWriter;
@@ -37,9 +39,7 @@ const PATH_ID: usize = 3;
 /// Build the fixture's expected `(path_id, line)` sequence: `total` steps at
 /// lines `100, 101, 102, …`. Used to drive BOTH the writer and the assertions.
 fn expected_steps(total: usize) -> Vec<(PathId, Line)> {
-    (0..total)
-        .map(|i| (PathId(PATH_ID), Line(100 + i as i64)))
-        .collect()
+    (0..total).map(|i| (PathId(PATH_ID), Line(100 + i as i64))).collect()
 }
 
 /// M1 — a growing split-stream `.ct` is live-tailed through the db-backend
@@ -101,7 +101,8 @@ fn e2e_streaming_reader_real_product() {
         writer.flush_chunk(&steps[lo..hi]).unwrap();
         let new = reader.refresh().unwrap();
         assert_eq!(
-            new, CHUNK_SIZE,
+            new,
+            CHUNK_SIZE,
             "chunk {c}: flushing it bounds chunk {} which becomes decodable",
             c - 1
         );
@@ -129,7 +130,9 @@ fn e2e_streaming_reader_real_product() {
     assert!(reader.is_finalized(), "meta.dat committed ⇒ reader finalized");
     assert_eq!(reader.step_count(), total, "must see ALL steps after finalization");
     for (i, (pid, line)) in steps.iter().enumerate() {
-        let got = reader.step(i).unwrap_or_else(|| panic!("step {i} missing after finalization"));
+        let got = reader
+            .step(i)
+            .unwrap_or_else(|| panic!("step {i} missing after finalization"));
         assert_eq!(got.path_id, *pid, "step {i} path_id mismatch");
         assert_eq!(got.line, *line, "step {i} line mismatch");
     }
@@ -169,7 +172,11 @@ fn e2e_streaming_reader_drains_trailing_chunk_on_finalize() {
     writer.finalize().unwrap();
     reader.refresh().unwrap();
     assert!(reader.is_finalized());
-    assert_eq!(reader.step_count(), 2 * CHUNK_SIZE, "trailing chunk drained on finalize");
+    assert_eq!(
+        reader.step_count(),
+        2 * CHUNK_SIZE,
+        "trailing chunk drained on finalize"
+    );
 }
 
 /// Build a `values.dat` per-step value record carrying a single `Int(name=i)`
@@ -260,7 +267,11 @@ fn test_followvaluesource_observes_growth() {
     writer.finalize_all_streams().unwrap();
     reader.refresh().unwrap();
     assert!(reader.is_finalized());
-    assert_eq!(reader.value_count(), total, "all value records visible after finalization");
+    assert_eq!(
+        reader.value_count(),
+        total,
+        "all value records visible after finalization"
+    );
     for step in 0..total {
         let vars = reader.variables_at(step).unwrap();
         assert_eq!(vars[0].variable_id.0, step);
@@ -289,7 +300,11 @@ fn test_followcallsource_observes_growth() {
 
     // First chunk: trailing, deferred.
     writer.flush_call_chunk(&all[0..CHUNK_SIZE]).unwrap();
-    assert_eq!(reader.call_count(), 0, "appended calls must NOT be visible before refresh()");
+    assert_eq!(
+        reader.call_count(),
+        0,
+        "appended calls must NOT be visible before refresh()"
+    );
     let new = reader.refresh().unwrap();
     assert_eq!(new, 0, "the sole flushed call chunk is the trailing chunk ⇒ deferred");
 
@@ -313,7 +328,11 @@ fn test_followcallsource_observes_growth() {
     writer.finalize_all_streams().unwrap();
     reader.refresh().unwrap();
     assert!(reader.is_finalized());
-    assert_eq!(reader.call_count() as u64, total, "all calls visible after finalization");
+    assert_eq!(
+        reader.call_count() as u64,
+        total,
+        "all calls visible after finalization"
+    );
     for key in 0..(total as usize) {
         let call = reader.call(key).unwrap();
         assert_eq!(call.key, CallKey(key as i64));
@@ -364,7 +383,11 @@ fn e2e_streaming_reader_real_product_all_streams() {
         writer.flush_value_chunk(&values[lo..hi]).unwrap();
         writer.flush_call_chunk(&calls[lo..hi]).unwrap();
         let (s, v, c) = reader.refresh().unwrap();
-        assert_eq!((s, v, c), (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE), "chunk {chunk}: each stream advances");
+        assert_eq!(
+            (s, v, c),
+            (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
+            "chunk {chunk}: each stream advances"
+        );
         assert!(!reader.is_finalized());
         let visible = chunk * CHUNK_SIZE;
         assert_eq!(reader.steps().step_count(), visible);
@@ -404,4 +427,140 @@ fn e2e_streaming_reader_real_product_all_streams() {
         assert_eq!(call.key, CallKey(i as i64));
         assert_eq!(call.function_id, FunctionId(100 + i));
     }
+}
+
+/// M8 — the production `CTFSTraceReader::open_follow` path observes appended
+/// split-stream chunks in place after `refresh()`.
+///
+/// This is deliberately NOT the parallel `FollowReader` path above. The reader
+/// goes through the shipped new-format open path (`open_new_format_nim`), keeps
+/// the Nim FFI handle alive for refresh, and serves steps/values/calls through
+/// the M22/M24c Rust seekable caches opened from the same follow-backed CTFS
+/// source. Appended chunks are invisible before refresh and visible after it.
+#[test]
+fn e2e_production_ctfs_reader_follow_refreshes_seekable_caches() {
+    let dir = tempfile::tempdir().unwrap();
+    let ct_path = dir.path().join("production-follow.ct");
+
+    const CHUNK_SIZE: usize = 2;
+    let steps = expected_steps(CHUNK_SIZE * 2);
+    let values: Vec<_> = (0..CHUNK_SIZE * 2).map(value_record_for).collect();
+    let calls: Vec<_> = (0..(CHUNK_SIZE * 2) as u64).map(call_record_for).collect();
+
+    let mut writer = IncrementalCtfsStreamWriter::create(&ct_path, CHUNK_SIZE).unwrap();
+    writer.flush_chunk(&steps[0..CHUNK_SIZE]).unwrap();
+    writer.flush_value_chunk(&values[0..CHUNK_SIZE]).unwrap();
+    writer.flush_call_chunk(&calls[0..CHUNK_SIZE]).unwrap();
+    writer.finalize_all_streams().unwrap();
+
+    let mut reader = CTFSTraceReader::open_follow(&ct_path).expect("production follow open");
+    assert_eq!(reader.step_count(), CHUNK_SIZE, "initial production step count");
+    assert_eq!(reader.call_count(), CHUNK_SIZE, "initial materialized call count");
+    assert_eq!(reader.seekable_step_count(), Some(CHUNK_SIZE), "initial seekable steps");
+    assert_eq!(
+        reader.seekable_value_count(),
+        Some(CHUNK_SIZE),
+        "initial seekable values"
+    );
+    assert_eq!(reader.seekable_call_count(), Some(CHUNK_SIZE), "initial seekable calls");
+    assert!(
+        reader.step(StepId(CHUNK_SIZE as i64)).is_none(),
+        "appended step not present yet"
+    );
+    assert!(
+        reader.seekable_variables_at(StepId(CHUNK_SIZE as i64)).is_none(),
+        "appended value not present yet"
+    );
+    assert!(
+        reader.seekable_call(CallKey(CHUNK_SIZE as i64)).is_none(),
+        "appended call not present yet"
+    );
+    assert!(
+        reader.call(CallKey(CHUNK_SIZE as i64)).is_none(),
+        "appended materialized call not present yet"
+    );
+
+    writer.flush_chunk(&steps[CHUNK_SIZE..CHUNK_SIZE * 2]).unwrap();
+    writer.flush_value_chunk(&values[CHUNK_SIZE..CHUNK_SIZE * 2]).unwrap();
+    writer.flush_call_chunk(&calls[CHUNK_SIZE..CHUNK_SIZE * 2]).unwrap();
+
+    assert_eq!(
+        reader.step_count(),
+        CHUNK_SIZE,
+        "appended production steps remain invisible before refresh"
+    );
+    assert_eq!(
+        reader.seekable_value_count(),
+        Some(CHUNK_SIZE),
+        "appended production values remain invisible before refresh"
+    );
+    assert_eq!(
+        reader.seekable_call_count(),
+        Some(CHUNK_SIZE),
+        "appended production calls remain invisible before refresh"
+    );
+    assert_eq!(
+        reader.call_count(),
+        CHUNK_SIZE,
+        "appended materialized calls remain invisible before refresh"
+    );
+
+    reader.refresh().expect("production follow refresh");
+
+    assert_eq!(
+        reader.step_count(),
+        CHUNK_SIZE * 2,
+        "refresh grows lazy production steps"
+    );
+    assert_eq!(reader.seekable_step_count(), Some(CHUNK_SIZE * 2));
+    assert_eq!(reader.seekable_value_count(), Some(CHUNK_SIZE * 2));
+    assert_eq!(reader.seekable_call_count(), Some(CHUNK_SIZE * 2));
+    assert_eq!(
+        reader.call_count(),
+        CHUNK_SIZE * 2,
+        "refresh grows materialized production calls"
+    );
+
+    let appended = CHUNK_SIZE;
+    let step = reader
+        .step(StepId(appended as i64))
+        .expect("appended production step visible");
+    assert_eq!(step.path_id, PathId(PATH_ID));
+    assert_eq!(step.line, Line(100 + appended as i64));
+
+    let vars = reader
+        .variables_at(StepId(appended as i64))
+        .expect("appended production values visible");
+    assert_eq!(vars.len(), 1);
+    assert_eq!(vars[0].variable_id.0, appended);
+    assert!(matches!(vars[0].value, ValueRecord::Int { i, .. } if i == (appended as i64) * 10));
+
+    let call = reader
+        .seekable_call(CallKey(appended as i64))
+        .expect("appended production call visible");
+    assert_eq!(call.key, CallKey(appended as i64));
+    assert_eq!(call.function_id, FunctionId(100 + appended));
+
+    let materialized_call = reader
+        .call(CallKey(appended as i64))
+        .expect("appended materialized call visible");
+    assert_eq!(materialized_call.key, CallKey(appended as i64));
+    assert_eq!(materialized_call.function_id, FunctionId(100 + appended));
+    assert!(
+        reader.instructions_at(StepId(appended as i64)).is_some(),
+        "refresh extends per-step scaffolding for appended steps"
+    );
+    assert!(
+        reader.compound_at(StepId(appended as i64)).is_some(),
+        "refresh extends compound scaffolding for appended steps"
+    );
+
+    let db = reader.materialized_db();
+    assert_eq!(db.steps.len(), CHUNK_SIZE * 2, "materialized Db sees refreshed steps");
+    assert_eq!(
+        db.variables.len(),
+        CHUNK_SIZE * 2,
+        "materialized Db sees refreshed values"
+    );
+    assert_eq!(db.calls.len(), CHUNK_SIZE * 2, "materialized Db sees refreshed calls");
 }

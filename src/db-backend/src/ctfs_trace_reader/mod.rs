@@ -94,6 +94,12 @@ pub struct ColumnAwareCapabilities {
     pub supports_column_motions: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CallRange {
+    entry_step: u64,
+    exit_step: u64,
+}
+
 #[derive(Debug)]
 pub struct CTFSTraceReader {
     /// The fully-populated in-memory database, built from CTFS contents
@@ -195,6 +201,18 @@ pub struct CTFSTraceReader {
     /// where the M24c lazy / M25b parallel whole-table build serves
     /// `steps_on_line` exactly as before.
     step_map: Option<step_map_namespace::StepMapNamespace>,
+    /// Follow-mode CTFS source retained by [`open_follow`](Self::open_follow)
+    /// so [`refresh`](Self::refresh) can observe appended split-stream chunks
+    /// through the same production reader path.
+    follow_ctfs: Option<CtfsReader>,
+    /// Filesystem path backing the follow source and Nim FFI handle.
+    follow_path: Option<PathBuf>,
+    /// New-format Nim handle retained only for production follow refresh.
+    #[cfg(feature = "nim-reader")]
+    nim_reader: Option<std::sync::Mutex<NimTraceReaderHandle>>,
+    /// New-format call entry/exit ranges used to rebuild step→call maps when a
+    /// follow refresh grows the lazy step cache.
+    call_ranges: Vec<CallRange>,
 }
 
 /// M24c-steps — the memoized whole-table step views the lazy step path builds on
@@ -366,6 +384,162 @@ impl CTFSTraceReader {
         self.step_map.as_ref()
     }
 
+    /// Refresh a reader opened with [`open_follow`](Self::open_follow).
+    ///
+    /// This keeps the production `CTFSTraceReader` object alive while making
+    /// appended split-stream chunks visible through the same Nim FFI handle and
+    /// Rust seekable caches that normal new-format opens use.
+    pub fn refresh(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some(ctfs) = self.follow_ctfs.as_mut() else {
+            return Ok(());
+        };
+        ctfs.refresh()?;
+
+        #[cfg(feature = "nim-reader")]
+        if let (Some(path), Some(reader)) = (self.follow_path.as_ref(), self.nim_reader.as_ref()) {
+            reader
+                .lock()
+                .map_err(|_| std::io::Error::other("Nim trace reader mutex poisoned"))?
+                .refresh(&path.to_string_lossy())?;
+        }
+
+        if let Some(stream) = self.call_stream.as_ref() {
+            stream.refresh_from_ctfs(ctfs)?;
+        }
+        if let Some(stream) = self.step_stream.as_ref() {
+            stream.refresh_from_ctfs(ctfs)?;
+        }
+        if let Some(stream) = self.value_stream.as_ref() {
+            stream.refresh_from_ctfs(ctfs)?;
+        }
+
+        if !self.refresh_follow_calls_from_stream()? {
+            #[cfg(feature = "nim-reader")]
+            self.refresh_follow_calls_from_nim()?;
+        }
+        self.refresh_lazy_follow_caches();
+        Ok(())
+    }
+
+    fn refresh_follow_calls_from_stream(&mut self) -> Result<bool, Box<dyn Error>> {
+        let Some(stream) = self.call_stream.as_ref() else {
+            return Ok(false);
+        };
+        let calls = stream.calls_and_ranges()?;
+        self.db.calls.items.clear();
+        self.call_ranges.clear();
+        self.db.calls.items.reserve(calls.len());
+        self.call_ranges.reserve(calls.len());
+        for (call, entry_step, exit_step) in calls {
+            self.db.calls.items.push(call);
+            self.call_ranges.push(CallRange { entry_step, exit_step });
+        }
+        Ok(true)
+    }
+
+    #[cfg(feature = "nim-reader")]
+    fn refresh_follow_calls_from_nim(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some(reader) = self.nim_reader.as_ref() else {
+            return Ok(());
+        };
+        let reader = reader
+            .lock()
+            .map_err(|_| std::io::Error::other("Nim trace reader mutex poisoned"))?;
+
+        let call_count = reader.call_count();
+        let mut calls = Vec::with_capacity(call_count as usize);
+        let mut call_ranges = Vec::with_capacity(call_count as usize);
+
+        for key in 0..call_count {
+            let (function_id, parent_key, entry_step, exit_step, depth, children_count) =
+                reader.call_fields(key).map_err(|e| format!("call {key}: {e}"))?;
+
+            let mut children_keys = Vec::with_capacity(children_count as usize);
+            for c in 0..children_count {
+                let child_key = reader
+                    .call_child(key, c)
+                    .map_err(|e| format!("call {key} child {c}: {e}"))?;
+                children_keys.push(CallKey(child_key as i64));
+            }
+
+            let arg_count = reader.call_arg_count(key);
+            let mut args: Vec<FullValueRecord> = Vec::with_capacity(arg_count as usize);
+            for arg_idx in 0..arg_count {
+                match reader.call_arg(key, arg_idx) {
+                    Ok((varname_id, data)) => {
+                        let value = if data.is_empty() {
+                            ValueRecord::None { type_id: TypeId(0) }
+                        } else {
+                            match cbor4ii::serde::from_reader::<ValueRecord, _>(data.as_slice()) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    log::warn!("call {key} arg {arg_idx}: CBOR decode failed: {e}, using Raw fallback");
+                                    ValueRecord::Raw {
+                                        r: format!("<cbor decode error: {e}>"),
+                                        type_id: TypeId(0),
+                                    }
+                                }
+                            }
+                        };
+                        args.push(FullValueRecord {
+                            variable_id: VariableId(varname_id as usize),
+                            value,
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!("call {key} arg {arg_idx}: read failed: {e}");
+                        break;
+                    }
+                }
+            }
+
+            calls.push(DbCall {
+                key: CallKey(key as i64),
+                function_id: FunctionId(function_id as usize),
+                args,
+                return_value: ValueRecord::None { type_id: TypeId(0) },
+                step_id: StepId(entry_step as i64),
+                depth: depth as usize,
+                parent_key: CallKey(parent_key),
+                children_keys,
+            });
+            call_ranges.push(CallRange { entry_step, exit_step });
+        }
+
+        self.db.calls.items = calls;
+        self.call_ranges = call_ranges;
+        Ok(())
+    }
+
+    fn refresh_lazy_follow_caches(&mut self) {
+        let Some(step_stream) = self.step_stream.as_ref().cloned() else {
+            return;
+        };
+        let step_count = step_stream.step_count();
+        if let Some(lazy) = self.lazy_steps.as_ref()
+            && lazy.len() != step_count
+        {
+            let (call_keys, global_call_keys) = build_step_call_maps(&self.call_ranges, step_count);
+            self.lazy_steps = Some(step_value_stream_source::LazyStepCache::new(
+                step_stream.clone(),
+                call_keys,
+                global_call_keys,
+            ));
+            self.lazy_steps_full = Some(std::sync::OnceLock::new());
+        }
+        self.db.instructions.items.resize_with(step_count, Vec::new);
+        self.db.compound.items.resize_with(step_count, HashMap::new);
+        self.db.cells.items.resize_with(step_count, HashMap::new);
+        self.db.variable_cells.items.resize_with(step_count, HashMap::new);
+
+        if let (Some(value_stream), Some(lazy_values)) =
+            (self.value_stream.as_ref().cloned(), self.lazy_values.as_ref())
+            && lazy_values.len() != step_count
+        {
+            self.lazy_values = Some(step_value_stream_source::LazyValueCache::new(value_stream, step_count));
+        }
+    }
+
     /// M-capability-flags accessor — the column-aware capability bits
     /// decoded from `meta.dat`.  The DAP layer threads these into the
     /// `Capabilities` response so the GUI gates per-column
@@ -438,6 +612,11 @@ impl CTFSTraceReader {
             // `step-map.ns` to attach. `open()` attaches it on the path-bearing
             // constructors.
             step_map: None,
+            follow_ctfs: None,
+            follow_path: None,
+            #[cfg(feature = "nim-reader")]
+            nim_reader: None,
+            call_ranges: Vec::new(),
         })
     }
 }
@@ -480,6 +659,36 @@ impl CTFSTraceReader {
 /// `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
 fn is_new_format(ctfs: &CtfsReader) -> bool {
     ctfs.has_file("steps.dat") && !ctfs.has_file("events.log")
+}
+
+fn build_step_call_maps(call_ranges: &[CallRange], step_count: usize) -> (Vec<CallKey>, Vec<CallKey>) {
+    let mut step_to_call_key: Vec<CallKey> = vec![CallKey(-1); step_count];
+    for (key_idx, range) in call_ranges.iter().enumerate() {
+        let call_key = CallKey(key_idx as i64);
+        let start = range.entry_step as usize;
+        let end = std::cmp::min(range.exit_step as usize + 1, step_count);
+        if start < end {
+            step_to_call_key[start..end].fill(call_key);
+        }
+    }
+
+    let mut step_to_global_call_key: Vec<CallKey> = vec![CallKey(-1); step_count];
+    if !call_ranges.is_empty() {
+        let mut call_idx: usize = 0;
+        let mut current_global_key = CallKey(0);
+        for (step_idx, slot) in step_to_global_call_key.iter_mut().enumerate() {
+            while call_idx + 1 < call_ranges.len() && call_ranges[call_idx + 1].entry_step <= step_idx as u64 {
+                call_idx += 1;
+                current_global_key = CallKey(call_idx as i64);
+            }
+            if call_ranges[call_idx].entry_step <= step_idx as u64 {
+                current_global_key = CallKey(call_idx as i64);
+            }
+            *slot = current_global_key;
+        }
+    }
+
+    (step_to_call_key, step_to_global_call_key)
 }
 
 /// M26 — the `<ct>.step-map.ns` SIDECAR path for a given `.ct` file. Appending
@@ -527,21 +736,38 @@ impl CTFSTraceReader {
     /// - (Old format only) The `TraceProcessor` fails during postprocessing
     pub fn open(path: &Path) -> Result<Self, Box<dyn Error>> {
         let mut ctfs = CtfsReader::open(path)?;
+        Self::open_with_ctfs(path, &mut ctfs, false).map(|mut reader| {
+            reader.follow_ctfs = None;
+            reader.follow_path = None;
+            reader
+        })
+    }
 
+    /// Open a `.ct` through a follow-capable source and keep the production
+    /// reader refreshable in place.
+    pub fn open_follow(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let mut ctfs = CtfsReader::open_follow(path)?;
+        let mut reader = Self::open_with_ctfs(path, &mut ctfs, true)?;
+        reader.follow_ctfs = Some(ctfs);
+        reader.follow_path = Some(path.to_path_buf());
+        Ok(reader)
+    }
+
+    fn open_with_ctfs(path: &Path, ctfs: &mut CtfsReader, follow: bool) -> Result<Self, Box<dyn Error>> {
         // BEAM-recorder traces ship a sidecar layout (`trace_meta.json` +
         // `runtime_session.jsonl`) that the Nim seek-based reader cannot
         // parse. Detect those first so we route them through the dedicated
         // sidecar path rather than the new-format CTFS code.
-        if let Some(reader) = Self::open_elixir_sidecar_format(&mut ctfs, path)? {
+        if let Some(reader) = Self::open_elixir_sidecar_format(ctfs, path)? {
             return Ok(reader);
         }
 
-        let mut reader = if is_new_format(&ctfs) {
+        let mut reader = if is_new_format(ctfs) {
             info!("CTFS new format detected — skipping postprocessing");
-            Self::open_new_format(&mut ctfs, path)?
+            Self::open_new_format(ctfs, path, follow)?
         } else {
             info!("CTFS old format detected — running postprocessing");
-            Self::open_old_format(&mut ctfs)?
+            Self::open_old_format(ctfs)?
         };
 
         // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
@@ -556,7 +782,7 @@ impl CTFSTraceReader {
         // and the materialized path is always available as a safe fallback.
         // Read through the already-open CtfsReader so any caller-provided
         // BlockSource/overlay is preserved; do not reopen the filesystem path.
-        reader.call_stream = match call_stream_source::SeekableCallStream::open_from_ctfs(&mut ctfs) {
+        reader.call_stream = match call_stream_source::SeekableCallStream::open_from_ctfs(ctfs) {
             Ok(Some(stream)) => {
                 info!(
                     "CTFS: seekable calls.dat attached ({} calls, chunk_size {}) — call tree served on-demand",
@@ -579,7 +805,7 @@ impl CTFSTraceReader {
         // `None`, preserving the existing fully-materialized behaviour exactly.
         // A present-but-corrupt stream is logged and ignored (we keep the
         // materialized `db.steps` fallback) rather than failing the open.
-        reader.step_stream = match step_value_stream_source::SeekableStepStream::open_from_ctfs(&mut ctfs) {
+        reader.step_stream = match step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs) {
             Ok(Some(stream)) => {
                 info!(
                     "CTFS: seekable steps.dat attached ({} steps, chunk_size {}) — step lines served on-demand",
@@ -600,7 +826,7 @@ impl CTFSTraceReader {
         // are then served on-demand from `values.dat` rather than from the
         // materialized `db.variables`. Same fall-back/back-compat discipline as
         // the step stream above.
-        reader.value_stream = match step_value_stream_source::SeekableValueStream::open_from_ctfs(&mut ctfs) {
+        reader.value_stream = match step_value_stream_source::SeekableValueStream::open_from_ctfs(ctfs) {
             Ok(Some(stream)) => {
                 info!(
                     "CTFS: seekable values.dat attached ({} value records, chunk_size {}) — step values served on-demand",
@@ -633,7 +859,10 @@ impl CTFSTraceReader {
         // whole-table fallback) rather than failing the open — opening the trace
         // is strictly more useful than refusing it, and the fallback always
         // yields identical breakpoints.
-        reader.step_map = Self::load_step_map_namespace(&mut ctfs, path);
+        reader.step_map = Self::load_step_map_namespace(ctfs, path);
+        if follow {
+            reader.refresh_follow_calls_from_stream()?;
+        }
 
         Ok(reader)
     }
@@ -1001,6 +1230,11 @@ impl CTFSTraceReader {
             // attach one if present, but these traces are fully materialized so
             // the whole-table path serves breakpoints.
             step_map: None,
+            follow_ctfs: None,
+            follow_path: None,
+            #[cfg(feature = "nim-reader")]
+            nim_reader: None,
+            call_ranges: Vec::new(),
         }))
     }
 
@@ -1057,10 +1291,10 @@ impl CTFSTraceReader {
     /// Without `nim-reader`, returns an error indicating the format is
     /// recognized but the reader is not available.
     #[allow(unused_variables, clippy::needless_return)]
-    fn open_new_format(ctfs: &mut CtfsReader, ct_path: &Path) -> Result<Self, Box<dyn Error>> {
+    fn open_new_format(ctfs: &mut CtfsReader, ct_path: &Path, follow: bool) -> Result<Self, Box<dyn Error>> {
         #[cfg(feature = "nim-reader")]
         {
-            return Self::open_new_format_nim(ctfs, ct_path);
+            return Self::open_new_format_nim(ctfs, ct_path, follow);
         }
 
         #[cfg(not(feature = "nim-reader"))]
@@ -1087,7 +1321,7 @@ impl CTFSTraceReader {
     /// end-to-end and populates metadata + interning tables. Full Db
     /// population (steps, calls, events, step_map) comes next.
     #[cfg(feature = "nim-reader")]
-    fn open_new_format_nim(ctfs: &mut CtfsReader, ct_file_path: &Path) -> Result<Self, Box<dyn Error>> {
+    fn open_new_format_nim(ctfs: &mut CtfsReader, ct_file_path: &Path, follow: bool) -> Result<Self, Box<dyn Error>> {
         use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
         use num_traits::FromPrimitive;
         use std::path::PathBuf;
@@ -1177,10 +1411,6 @@ impl CTFSTraceReader {
         //
         // We also store entry_step/exit_step per call so we can later
         // assign call_key to each step.
-        struct CallRange {
-            entry_step: u64,
-            exit_step: u64,
-        }
         let mut call_ranges: Vec<CallRange> = Vec::with_capacity(call_count as usize);
 
         for key in 0..call_count {
@@ -1249,48 +1479,8 @@ impl CTFSTraceReader {
 
         info!("Nim reader: {} calls loaded", db.calls.len());
 
-        // ── Step→call mapping ──────────────────────────────────────────
-        //
-        // Build a vector mapping each step index to its innermost
-        // (deepest) enclosing call_key, using the entry_step/exit_step
-        // ranges. A step at index S belongs to the deepest call whose
-        // range [entry_step, exit_step] contains S.
-        //
-        // We sweep calls in key order (which matches recording order)
-        // and use a simple stack to track the current innermost call.
-        let mut step_to_call_key: Vec<CallKey> = vec![CallKey(-1); step_count as usize];
-
-        // For each call, mark all steps in [entry_step, exit_step] with
-        // this call_key. Because calls are ordered by entry_step and
-        // children appear after their parent, later (deeper) calls
-        // overwrite parent assignments — giving us the innermost call.
-        for (key_idx, range) in call_ranges.iter().enumerate() {
-            let call_key = CallKey(key_idx as i64);
-            let start = range.entry_step as usize;
-            let end = std::cmp::min(range.exit_step as usize + 1, step_count as usize);
-            step_to_call_key[start..end].fill(call_key);
-        }
-
-        // Build global_call_key: for each step, the call_key of the last
-        // call that started at or before that step. We sweep calls in
-        // order and advance through steps.
-        let mut step_to_global_call_key: Vec<CallKey> = vec![CallKey(-1); step_count as usize];
-        if call_count > 0 {
-            let mut call_idx: usize = 0;
-            let mut current_global_key = CallKey(0);
-            for (step_idx, slot) in step_to_global_call_key.iter_mut().enumerate() {
-                // Advance to the last call whose entry_step <= step_idx.
-                while call_idx + 1 < call_count as usize && call_ranges[call_idx + 1].entry_step <= step_idx as u64 {
-                    call_idx += 1;
-                    current_global_key = CallKey(call_idx as i64);
-                }
-                // Also check the first call.
-                if call_ranges[call_idx].entry_step <= step_idx as u64 {
-                    current_global_key = CallKey(call_idx as i64);
-                }
-                *slot = current_global_key;
-            }
-        }
+        let (mut step_to_call_key, mut step_to_global_call_key) =
+            build_step_call_maps(&call_ranges, step_count as usize);
 
         // ── Steps ──────────────────────────────────────────────────────
         //
@@ -1411,6 +1601,10 @@ impl CTFSTraceReader {
         } else {
             match step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs) {
                 Ok(Some(stream)) => {
+                    if follow && stream.step_count() != step_to_call_key.len() {
+                        (step_to_call_key, step_to_global_call_key) =
+                            build_step_call_maps(&call_ranges, stream.step_count());
+                    }
                     let stream = std::sync::Arc::new(stream);
                     info!(
                         "Nim reader: steps served LAZILY (range-aware) from seekable steps.dat \
@@ -1445,7 +1639,11 @@ impl CTFSTraceReader {
             // split-bundle full-DB contract asserts (the per-step maps EXIST but
             // are empty because a production split bundle carries no Cell/Assign
             // events). See `tests/ctfs_split_only_full_db_test.rs`.
-            for _ in 0..step_count {
+            let lazy_step_count = lazy_steps
+                .as_ref()
+                .map(|cache| cache.len())
+                .unwrap_or(step_count as usize);
+            for _ in 0..lazy_step_count {
                 db.instructions.push(vec![]);
                 db.compound.push(HashMap::new());
                 db.cells.push(HashMap::new());
@@ -1611,10 +1809,12 @@ impl CTFSTraceReader {
                      value table not materialized at open",
                     stream.value_count(),
                 );
-                Some(step_value_stream_source::LazyValueCache::new(
-                    stream,
-                    step_count as usize,
-                ))
+                let cache_step_count = if follow && stream.value_count() != step_count as usize {
+                    stream.value_count()
+                } else {
+                    step_count as usize
+                };
+                Some(step_value_stream_source::LazyValueCache::new(stream, cache_step_count))
             }
             Ok(None) => None,
             Err(e) => {
@@ -1787,6 +1987,15 @@ impl CTFSTraceReader {
             // path-less reconstruction of this struct stays on the whole-table
             // fallback.
             step_map: None,
+            follow_ctfs: None,
+            follow_path: None,
+            #[cfg(feature = "nim-reader")]
+            nim_reader: if follow {
+                Some(std::sync::Mutex::new(reader))
+            } else {
+                None
+            },
+            call_ranges,
         })
     }
 
@@ -1880,6 +2089,11 @@ impl CTFSTraceReader {
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
             // M26 — attached centrally by `open()` (which has the `.ct` path).
             step_map: None,
+            follow_ctfs: None,
+            follow_path: None,
+            #[cfg(feature = "nim-reader")]
+            nim_reader: None,
+            call_ranges: Vec::new(),
         })
     }
 
