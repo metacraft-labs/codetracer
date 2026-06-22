@@ -166,6 +166,13 @@ pub struct CTFSTraceReader {
     /// whole-table operations remain correct and identical to the eager path.
     /// `None` whenever `lazy_steps` is `None`.
     lazy_steps_full: Option<std::sync::OnceLock<LazyFullSteps>>,
+    /// M25b — the ACCESS STRATEGY the on-first-demand whole-table build
+    /// (`lazy_full_steps`) uses to populate `db.steps` / `db.step_map`. Defaults
+    /// to the LOCAL parallel disjoint-range strategy (every trace is local
+    /// today; the network forward strategy is the M25c placeholder). Only the
+    /// whole-table build — which is already on-demand — is affected; opening the
+    /// trace and point lookups stay lazy/bounded.
+    step_build_strategy: step_value_stream_source::StepBuildStrategy,
 }
 
 /// M24c-steps — the memoized whole-table step views the lazy step path builds on
@@ -281,18 +288,19 @@ impl CTFSTraceReader {
                     step_map: Vec::new(),
                 };
             };
-            // M25a — build the whole-table view through the SAME unified replay
-            // engine the lazy per-slot fill uses, just over the FULL `[0, count)`
-            // range with a whole-table sink. The per-step processing (reconstruct
-            // the `DbStep`, push it, index it into the line→step map) lives once,
-            // in `step_value_stream_source`, so this whole-table build and the
-            // lazy point-lookup fill can never diverge. Iterating ascending
-            // inflates each `steps.dat` chunk at most once.
-            let count = lazy.len();
+            // M25b — build the whole-table view through the unified M25a engine,
+            // but according to the reader's ACCESS STRATEGY. The active LOCAL
+            // strategy splits the FULL `[0, count)` range into DISJOINT shards
+            // replayed on independent per-thread readers and merges them
+            // deterministically — byte-identical to the sequential single-stream
+            // build. The per-step processing (reconstruct the `DbStep`, push it,
+            // index it into the line→step map) still lives once, in
+            // `step_value_stream_source`, so the parallel whole-table build, the
+            // sequential build, and the lazy point-lookup fill can never diverge.
+            // Point lookups stay single-chunk lazy (this whole-table build runs
+            // only on first slice / line-map demand, exactly as in M24c).
             let path_count = self.db.paths.len();
-            let mut sink = step_value_stream_source::WholeStepTableSink::new(path_count, count);
-            lazy.replay_range(0..count, &mut [&mut sink]);
-            let (steps, step_map) = sink.into_parts();
+            let (steps, step_map) = lazy.build_whole_table(path_count, self.step_build_strategy);
             LazyFullSteps { steps, step_map }
         })
     }
@@ -387,6 +395,7 @@ impl CTFSTraceReader {
             lazy_values: None,
             lazy_steps: None,
             lazy_steps_full: None,
+            step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
         })
     }
 }
@@ -864,6 +873,7 @@ impl CTFSTraceReader {
             lazy_values: None,
             lazy_steps: None,
             lazy_steps_full: None,
+            step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
         }))
     }
 
@@ -1642,6 +1652,10 @@ impl CTFSTraceReader {
                 None
             },
             lazy_steps,
+            // M25b — the LOCAL parallel disjoint-range whole-table build is the
+            // active strategy for the (filesystem-backed) production split bundle
+            // this path opens.
+            step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
         })
     }
 
@@ -1732,6 +1746,7 @@ impl CTFSTraceReader {
             lazy_values: None,
             lazy_steps: None,
             lazy_steps_full: None,
+            step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
         })
     }
 

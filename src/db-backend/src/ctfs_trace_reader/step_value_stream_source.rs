@@ -33,7 +33,7 @@
 //! (the CTFS container is opened read-only), so independent readers never
 //! contend — see the concurrent-readers test.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -56,6 +56,15 @@ use codetracer_trace_writer::value_stream::ValueStreamEvent;
 /// whole trace is never materialized.
 pub struct SeekableStepStream {
     reader: Mutex<StepStreamReader>,
+    /// The `.ct` container path this source was opened from. Retained so the
+    /// M25b LOCAL parallel whole-table build can open INDEPENDENT per-thread
+    /// reader handles over the SAME container (each with its own one-chunk
+    /// decompression cache) — disjoint ranges then replay concurrently without
+    /// contending on this source's `Mutex` or thrashing a single cached chunk.
+    /// `None` for sources not opened from a path (currently always `Some`, since
+    /// `open` is the only constructor, but kept optional for future in-memory
+    /// sources that cannot be re-opened — those simply fall back to sequential).
+    path: Option<PathBuf>,
     record_count: u64,
     chunk_size: usize,
     /// Number of *distinct* Zstd chunks this source has had to decompress since
@@ -92,6 +101,7 @@ impl SeekableStepStream {
                 let chunk_size = reader.chunk_size();
                 Ok(Some(SeekableStepStream {
                     reader: Mutex::new(reader),
+                    path: Some(path.to_path_buf()),
                     record_count,
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
@@ -115,6 +125,22 @@ impl SeekableStepStream {
     /// (bounded-decompression probe; see [`Self::chunk_decompressions`] field).
     pub fn chunk_decompressions(&self) -> u64 {
         self.chunk_decompressions.load(Ordering::Relaxed)
+    }
+
+    /// Open an INDEPENDENT sibling source over the SAME `.ct` container (M25b).
+    ///
+    /// The returned source has its OWN [`StepStreamReader`] and one-chunk
+    /// decompression cache, so it can replay a disjoint step range on its own
+    /// thread without touching this source's `Mutex` or cache. Returns `None`
+    /// when this source has no retained path (an in-memory source that cannot be
+    /// re-opened) or the re-open fails — the caller then falls back to driving
+    /// the range through this (shared) source instead.
+    pub fn open_sibling(&self) -> Option<SeekableStepStream> {
+        let path = self.path.as_ref()?;
+        match SeekableStepStream::open(path) {
+            Ok(Some(sibling)) => Some(sibling),
+            _ => None,
+        }
     }
 
     /// Fetch the `(path_id, line)` of step `step_id` from the SEEKABLE
@@ -496,6 +522,253 @@ pub fn replay_steps_into_sinks(
     }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// M25b — ACCESS-STRATEGY SEAM + LOCAL parallel disjoint-range whole-table build.
+//
+// M25a unified the per-step PROCESSING into one engine. M25b chooses HOW the
+// whole-table build (`[0, count)`) drives that engine. An audit found NO network
+// `.ct` loader today — every trace is LOCAL (on the filesystem) — so the LOCAL
+// strategy is the active path: when the trace is available locally we can launch
+// MULTIPLE THREADS that examine DISJOINT RANGES of the step file in parallel and
+// merge the per-thread partials deterministically. The NETWORK forward strategy
+// (replay forward from a search hit over a streamed `.ct`) is M25c; it is left as
+// an explicit placeholder so M25c can slot in without touching the engine.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// How the on-demand WHOLE-TABLE step build populates the step views (M25b seam).
+///
+/// The build always reconstructs the same `db.steps` + line→step map through the
+/// SAME M25a engine ([`replay_steps_into_sinks`]); the strategy only chooses
+/// WHICH ranges run on WHICH threads. Results are byte-identical across
+/// strategies (the merge is deterministic and range-ordered).
+#[derive(Debug, Clone, Copy)]
+pub enum StepBuildStrategy {
+    /// LOCAL filesystem trace (the active path, M25b): split `[0, count)` into
+    /// `threads` disjoint contiguous ranges and replay each on its own thread
+    /// over an INDEPENDENT per-thread reader (its own one-chunk cache), then
+    /// merge in range order. `threads == 1` (or a trace too small to split)
+    /// degrades to the sequential single-stream build.
+    Local {
+        /// Upper bound on the number of worker threads (and therefore disjoint
+        /// ranges). Clamped to `[1, count]` at build time.
+        threads: usize,
+    },
+    /// NETWORK forward-from-search trace (M25c placeholder, NOT active in M25b).
+    /// Reserved so the network access strategy can plug in later without
+    /// changing the engine or the whole-table sinks. The build falls back to the
+    /// sequential single-stream path until M25c implements it.
+    NetworkForward,
+}
+
+impl Default for StepBuildStrategy {
+    /// All traces are LOCAL today (no network loader exists yet — see the M25b
+    /// audit), so the default is the LOCAL parallel strategy sized to the
+    /// machine's available parallelism, bounded to a sane cap.
+    fn default() -> Self {
+        StepBuildStrategy::Local {
+            threads: default_build_threads(),
+        }
+    }
+}
+
+/// Upper bound on whole-table build worker threads: the machine's available
+/// parallelism, clamped to `[1, MAX_BUILD_THREADS]`. A defensive cap keeps the
+/// build from oversubscribing on very large machines (the work is I/O- and
+/// decompression-bound; past a handful of disjoint readers there is no further
+/// win and each extra reader re-opens the container).
+fn default_build_threads() -> usize {
+    const MAX_BUILD_THREADS: usize = 8;
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, MAX_BUILD_THREADS)
+}
+
+/// Split `[0, count)` into at most `threads` DISJOINT, contiguous, ascending
+/// ranges that exactly tile `[0, count)` (no gaps, no overlap). The first
+/// `count % threads` ranges get one extra element so the union is always the
+/// whole `[0, count)` regardless of divisibility. Empty ranges are omitted, so a
+/// `count` smaller than `threads` yields exactly `count` singleton ranges.
+fn split_disjoint_ranges(count: usize, threads: usize) -> Vec<std::ops::Range<usize>> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let threads = threads.clamp(1, count);
+    let base = count / threads;
+    let remainder = count % threads;
+    let mut ranges = Vec::with_capacity(threads);
+    let mut lo = 0usize;
+    for i in 0..threads {
+        // The first `remainder` shards are one element larger so the shards tile
+        // `[0, count)` exactly even when `count` is not a multiple of `threads`.
+        let len = base + if i < remainder { 1 } else { 0 };
+        let hi = lo + len;
+        if hi > lo {
+            ranges.push(lo..hi);
+        }
+        lo = hi;
+    }
+    ranges
+}
+
+/// Build the WHOLE-TABLE step views (`Vec<DbStep>` + per-path line→`[DbStep]`
+/// map) over `[0, count)` according to `strategy`, returning a result
+/// BYTE-IDENTICAL to the sequential single-stream build (M25b).
+///
+/// * `LOCAL { threads }` with `threads > 1` AND a multi-range split AND a
+///   re-openable container: splits `[0, count)` into disjoint contiguous ranges,
+///   replays each on its OWN thread through the SAME M25a engine over an
+///   INDEPENDENT per-thread reader, then MERGES the per-thread partials in range
+///   order. The merge is deterministic: the `DbStep` arrays concatenate by
+///   ascending range (so `steps[i]` is step `i`), and each path's line→step
+///   lists concatenate in range order (so a line's step list is in ascending
+///   step order — IDENTICAL to the sequential build, where the single ascending
+///   walk appends in step order).
+/// * Otherwise (sequential fallback: `threads <= 1`, `count` too small to split,
+///   no re-openable sibling reader, or `NetworkForward`): drives the engine once
+///   over `[0, count)` on the shared `stream`.
+///
+/// Concurrency safety: each thread owns a DISJOINT range and writes only its OWN
+/// `WholeStepTableSink` (no shared mutable state between threads — the threads
+/// never touch each other's partials, and each reads through its own reader).
+/// The MERGE runs single-threaded after all threads join. There is therefore no
+/// data race by construction.
+pub fn build_whole_step_table(
+    stream: &SeekableStepStream,
+    call_keys: &[CallKey],
+    global_call_keys: &[CallKey],
+    path_count: usize,
+    strategy: StepBuildStrategy,
+) -> (Vec<DbStep>, Vec<std::collections::HashMap<usize, Vec<DbStep>>>) {
+    let count = call_keys.len();
+
+    // Decide the disjoint-range split. Only the LOCAL strategy parallelizes;
+    // NetworkForward is an M25c placeholder that uses the sequential path today.
+    let threads = match strategy {
+        StepBuildStrategy::Local { threads } => threads,
+        StepBuildStrategy::NetworkForward => 1,
+    };
+    let ranges = if threads > 1 {
+        split_disjoint_ranges(count, threads)
+    } else {
+        Vec::new()
+    };
+
+    // Parallel path requires (a) more than one shard and (b) the ability to open
+    // independent per-thread readers so threads don't serialize on the shared
+    // `stream`'s `Mutex`. If either is unavailable, fall back to sequential.
+    if ranges.len() > 1
+        && let Some(partials) = build_partials_parallel(stream, call_keys, global_call_keys, path_count, &ranges)
+    {
+        return merge_partials(path_count, count, partials);
+    }
+
+    // ── Sequential fallback (M25a behaviour, unchanged) ──
+    let mut sink = WholeStepTableSink::new(path_count, count);
+    replay_steps_into_sinks(stream, call_keys, global_call_keys, 0..count, &mut [&mut sink]);
+    sink.into_parts()
+}
+
+/// Replay each disjoint `range` on its OWN thread into a per-thread
+/// `WholeStepTableSink`, returning the partials in RANGE ORDER, or `None` if a
+/// per-thread reader could not be opened (caller falls back to sequential).
+///
+/// Each thread opens an INDEPENDENT sibling reader over the same container, so
+/// the threads neither contend on the shared source's `Mutex` nor thrash a
+/// single one-chunk cache. The shared `stream` is used only to open siblings
+/// (and as the fallback reader for the first shard, which can reuse it since the
+/// build thread is otherwise idle while workers run). We use [`std::thread::scope`]
+/// so the borrowed `call_keys` / `global_call_keys` slices can be shared by
+/// reference without `'static` bounds or extra allocation.
+fn build_partials_parallel(
+    stream: &SeekableStepStream,
+    call_keys: &[CallKey],
+    global_call_keys: &[CallKey],
+    path_count: usize,
+    ranges: &[std::ops::Range<usize>],
+) -> Option<Vec<WholeStepTableSink>> {
+    // Pre-open one independent reader per shard BEFORE spawning, so a failure to
+    // re-open the container aborts cleanly to the sequential path rather than
+    // leaving some shards built and some not.
+    let mut readers: Vec<SeekableStepStream> = Vec::with_capacity(ranges.len());
+    for _ in ranges {
+        readers.push(stream.open_sibling()?);
+    }
+
+    let results: Vec<WholeStepTableSink> = std::thread::scope(|scope| {
+        let handles: Vec<_> = ranges
+            .iter()
+            .cloned()
+            .zip(readers)
+            .map(|(range, reader)| {
+                scope.spawn(move || {
+                    // Each worker owns its DISJOINT range, its OWN reader, and its
+                    // OWN sink — no shared mutable state, so the replay is race-free.
+                    let span = range.len();
+                    let mut sink = WholeStepTableSink::new(path_count, span);
+                    replay_steps_into_sinks(
+                        &reader,
+                        call_keys,
+                        global_call_keys,
+                        range,
+                        &mut [&mut sink],
+                    );
+                    sink
+                })
+            })
+            .collect();
+        // Join in spawn (== range) order so the partials stay range-ordered for a
+        // deterministic merge. Propagate a worker panic by resuming it on this thread
+        // rather than `expect()` (the bin crate denies clippy::expect_used).
+        handles
+            .into_iter()
+            .map(|h| match h.join() {
+                Ok(sink) => sink,
+                Err(panic_payload) => std::panic::resume_unwind(panic_payload),
+            })
+            .collect()
+    });
+
+    Some(results)
+}
+
+/// Merge per-thread (range-ordered) `WholeStepTableSink` partials into the final
+/// whole-table views, BYTE-IDENTICAL to the sequential single-stream build.
+///
+/// * `steps`: concatenated in range order — since the ranges tile `[0, count)`
+///   ascending and each partial holds its range's steps in index order,
+///   `steps[i]` is exactly step `i`.
+/// * `step_map`: for each path, each line's step list from each partial (already
+///   in ascending step order within the partial) is appended in range order, so
+///   the final per-line list is in global ascending step order — IDENTICAL to the
+///   sequential build's single ascending append.
+fn merge_partials(
+    path_count: usize,
+    count: usize,
+    partials: Vec<WholeStepTableSink>,
+) -> (Vec<DbStep>, Vec<std::collections::HashMap<usize, Vec<DbStep>>>) {
+    let mut steps: Vec<DbStep> = Vec::with_capacity(count);
+    let mut step_map: Vec<std::collections::HashMap<usize, Vec<DbStep>>> = Vec::with_capacity(path_count);
+    step_map.resize_with(path_count, std::collections::HashMap::new);
+
+    for partial in partials {
+        let (part_steps, part_map) = partial.into_parts();
+        steps.extend(part_steps);
+        // Grow the merged map if a shard referenced a higher path id than the
+        // pre-sized count (mirrors the eager loop's `while step_map.len() <= …`).
+        while step_map.len() < part_map.len() {
+            step_map.push(std::collections::HashMap::new());
+        }
+        for (path_id, by_line) in part_map.into_iter().enumerate() {
+            for (line, mut shard_steps) in by_line {
+                step_map[path_id].entry(line).or_default().append(&mut shard_steps);
+            }
+        }
+    }
+
+    (steps, step_map)
+}
+
 /// Sink that memoizes each reconstructed step into a `LazyStepCache`'s per-slot
 /// `OnceCell` array (M25a). This is what `LazyStepCache::fill_range_for` feeds
 /// the unified engine, so the lazy per-slot fill shares the engine with the
@@ -779,6 +1052,25 @@ impl LazyStepCache {
         replay_steps_into_sinks(&self.stream, &self.call_keys, &self.global_call_keys, range, sinks);
     }
 
+    /// Build the WHOLE-TABLE step views (`Vec<DbStep>` + per-path line→`[DbStep]`
+    /// map) for this cache's full `[0, len())` range according to `strategy`
+    /// (M25b). On the LOCAL strategy with parallelism, `[0, len())` is split into
+    /// disjoint ranges replayed on independent per-thread readers and merged
+    /// deterministically — byte-identical to the sequential single-stream build.
+    ///
+    /// This is the parallel counterpart of driving [`Self::replay_range`] over
+    /// `[0, len())` with a single [`WholeStepTableSink`]; the on-first-demand
+    /// `lazy_full_steps` whole-table build calls THIS so the local parallel
+    /// strategy is used while the per-slot point-lookup fill stays single-chunk
+    /// lazy. Point lookups never go through here.
+    pub fn build_whole_table(
+        &self,
+        path_count: usize,
+        strategy: StepBuildStrategy,
+    ) -> (Vec<DbStep>, Vec<std::collections::HashMap<usize, Vec<DbStep>>>) {
+        build_whole_step_table(&self.stream, &self.call_keys, &self.global_call_keys, path_count, strategy)
+    }
+
     /// Borrow step `step_id`, filling its RANGE from the seekable stream on first
     /// access. Returns `None` for an out-of-range id so the caller can fall
     /// through. The returned `&DbStep` is byte-identical to the record the eager
@@ -803,6 +1095,45 @@ impl LazyStepCache {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// `split_disjoint_ranges` must TILE `[0, count)` exactly: no gaps, no
+    /// overlaps, ascending, and the union is the whole range — the invariant the
+    /// M25b parallel build relies on for `steps[i] == step i` after the merge.
+    fn assert_tiles(count: usize, threads: usize) {
+        let ranges = split_disjoint_ranges(count, threads);
+        // Union covers [0, count) exactly, ascending, contiguous.
+        let mut expected = 0usize;
+        for r in &ranges {
+            assert_eq!(r.start, expected, "range {r:?} must start where the previous ended");
+            assert!(r.end > r.start, "no empty ranges (got {r:?})");
+            expected = r.end;
+        }
+        assert_eq!(expected, count, "ranges must cover all of [0, {count})");
+        // At most `threads` shards, and exactly `min(threads, count)` when count>0.
+        if count > 0 {
+            assert_eq!(ranges.len(), threads.clamp(1, count), "shard count for count={count}, threads={threads}");
+        } else {
+            assert!(ranges.is_empty());
+        }
+    }
+
+    /// The disjoint-range split tiles `[0, count)` exactly across a spread of
+    /// divisible and indivisible cases, including count < threads.
+    #[test]
+    fn disjoint_ranges_tile_exactly() {
+        for &(count, threads) in &[
+            (0usize, 4usize),
+            (1, 4),
+            (3, 4),   // fewer steps than threads → singleton shards
+            (8, 4),   // evenly divisible
+            (10, 4),  // remainder 2 → first two shards larger
+            (5000, 7),
+            (5002, 8),
+            (100, 1), // single thread → one shard
+        ] {
+            assert_tiles(count, threads);
+        }
+    }
 
     /// A `StepValues` event with two values reconstructs two `FullValueRecord`s
     /// with the right ids and decoded values.
