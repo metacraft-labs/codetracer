@@ -17,8 +17,7 @@ on:
       - 'ci/test/elixir-flow-cross-repo.sh'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
-      - '.github/sibling-pins'
-      - '.github/sibling-pins.json'
+      - 'scripts/resolve-sibling-rev.sh'
       - '.github/workflows/beam-flow.yml'
   push:
     branches: [main]
@@ -29,17 +28,16 @@ on:
       - 'ci/test/elixir-flow-cross-repo.sh'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
-      - '.github/sibling-pins'
-      - '.github/sibling-pins.json'
+      - 'scripts/resolve-sibling-rev.sh'
       - '.github/workflows/beam-flow.yml'
   workflow_dispatch:
     inputs:
       beam_recorder_ref:
-        description: 'codetracer-beam-recorder ref (default: .github/sibling-pins)'
+        description: 'codetracer-beam-recorder ref (default: workspace lock)'
         required: false
         default: ''
       trace_format_ref:
-        description: 'codetracer-trace-format ref (default: .github/sibling-pins)'
+        description: 'codetracer-trace-format ref (default: workspace lock)'
         required: false
         default: ''
 
@@ -72,6 +70,41 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.app-token.outputs.token }}
 
+      - name: Checkout metacraft-manifests (workspace locks)
+        uses: actions/checkout@v5
+        with:
+          repository: metacraft-labs/metacraft-manifests
+          ref: latest
+          path: _manifests
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve cross-repo workspace-lock SHA
+        shell: bash
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
+            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
+            *) CANDS="${{ github.sha }}" ;;
+          esac
+          LOCK_SHA=""
+          for c in $CANDS; do
+            [ -z "$c" ] && continue
+            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
+            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+                 --repo codetracer --sibling codetracer-trace-format \
+                 --manifest-dir "${{ github.workspace }}/_manifests" \
+                 --sha "$c" --no-walk >/dev/null 2>&1; then
+              LOCK_SHA="$c"; break
+            fi
+          done
+          if [ -z "$LOCK_SHA" ]; then
+            echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
+            exit 1
+          fi
+          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
+          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
+          echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
+
       - name: Resolve sibling refs
         id: refs
         run: |
@@ -79,10 +112,14 @@ jobs:
           BEAM_REF="${{ github.event.inputs.beam_recorder_ref }}"
           TRACE_FORMAT_REF="${{ github.event.inputs.trace_format_ref }}"
           if [[ -z "$BEAM_REF" ]]; then
-            BEAM_REF="$(grep '^codetracer-beam-recorder ' .github/sibling-pins | cut -d' ' -f2)"
+            BEAM_REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+              --repo codetracer --sibling codetracer-beam-recorder \
+              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
           fi
           if [[ -z "$TRACE_FORMAT_REF" ]]; then
-            TRACE_FORMAT_REF="$(grep '^codetracer-trace-format ' .github/sibling-pins | cut -d' ' -f2)"
+            TRACE_FORMAT_REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+              --repo codetracer --sibling codetracer-trace-format \
+              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
           fi
           [[ "$BEAM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-beam-recorder ref must be a 40-char SHA: $BEAM_REF" >&2; exit 1; }
           [[ "$TRACE_FORMAT_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-trace-format ref must be a 40-char SHA: $TRACE_FORMAT_REF" >&2; exit 1; }

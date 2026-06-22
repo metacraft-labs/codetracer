@@ -7,16 +7,48 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Checkout metacraft-manifests (workspace locks)
+      uses: actions/checkout@v5
+      with:
+        repository: metacraft-labs/metacraft-manifests
+        ref: latest
+        path: _manifests
+        token: ${{ inputs.gh-token }}
+
+    - name: Resolve cross-repo workspace-lock SHA
+      shell: bash
+      run: |
+        case "${{ github.event_name }}" in
+          pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
+          push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
+          *) CANDS="${{ github.sha }}" ;;
+        esac
+        LOCK_SHA=""
+        for c in $CANDS; do
+          [ -z "$c" ] && continue
+          [ "$c" = "0000000000000000000000000000000000000000" ] && continue
+          if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+               --repo codetracer --sibling codetracer-trace-format \
+               --manifest-dir "${{ github.workspace }}/_manifests" \
+               --sha "$c" --no-walk >/dev/null 2>&1; then
+            LOCK_SHA="$c"; break
+          fi
+        done
+        if [ -z "$LOCK_SHA" ]; then
+          echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
+          exit 1
+        fi
+        echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
+        echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
+        echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
+
     - name: Resolve codetracer-trace-format ref
       id: resolve-trace-format-ref
       shell: bash
       run: |
-        PINS="${{ github.workspace }}/.github/sibling-pins"
-        REF="main"
-        if [ -f "${PINS}" ]; then
-          PIN_REF="$(grep '^codetracer-trace-format ' "${PINS}" | cut -d' ' -f2)" || true
-          [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
-        fi
+        REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+          --repo codetracer --sibling codetracer-trace-format \
+          --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
         echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
     - name: Clone codetracer-trace-format sibling
@@ -32,12 +64,9 @@ runs:
       id: resolve-trace-format-nim-ref
       shell: bash
       run: |
-        PINS="${{ github.workspace }}/.github/sibling-pins"
-        REF="main"
-        if [ -f "${PINS}" ]; then
-          PIN_REF="$(grep '^codetracer-trace-format-nim ' "${PINS}" | cut -d' ' -f2)" || true
-          [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
-        fi
+        REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+          --repo codetracer --sibling codetracer-trace-format-nim \
+          --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
         echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
     - name: Clone codetracer-trace-format-nim sibling
@@ -53,12 +82,9 @@ runs:
       id: resolve-native-recorder-ref
       shell: bash
       run: |
-        PINS="${{ github.workspace }}/.github/sibling-pins"
-        REF="main"
-        if [ -f "${PINS}" ]; then
-          PIN_REF="$(grep '^codetracer-native-recorder ' "${PINS}" | cut -d' ' -f2)" || true
-          [ -n "${PIN_REF}" ] && REF="${PIN_REF}"
-        fi
+        REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
+          --repo codetracer --sibling codetracer-native-recorder \
+          --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
         echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
     - name: Clone codetracer-native-recorder sibling

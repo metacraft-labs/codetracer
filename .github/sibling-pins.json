@@ -1,6 +1,0 @@
-{
-  "//": "JSON-form sibling pin map. The plain-text `.github/sibling-pins` file is the source of truth for codetracer's existing tooling (grep-based lookups in CI scripts and detect-siblings.sh); this JSON file mirrors the BEAM-flow-relevant subset for cross-repo CI workflows that prefer structured sibling-pin manifests (see codetracer-beam-recorder/.github/sibling-pins.json for the convention). Update both files when bumping a sibling SHA used by BEAM tests.",
-  "codetracer-beam-recorder": "d6e11e42cfc18886cfda423a38168ab5f3cdeb64",
-  "codetracer-elixir-recorder": "a8630a06813919a50b7cbe3a0c50c24987e2b3fd",
-  "codetracer-trace-format": "e77c44df96fe51511dc7bb148a51c3da39ff63eb"
-}

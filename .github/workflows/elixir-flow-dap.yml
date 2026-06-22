@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       beam_recorder_ref:
-        description: 'codetracer-beam-recorder ref (default: .github/sibling-pins)'
+        description: 'codetracer-beam-recorder ref (default: workspace lock)'
         required: false
         default: ''
       trace_format_ref:
-        description: 'codetracer-trace-format ref (default: .github/sibling-pins)'
+        description: 'codetracer-trace-format ref (default: workspace lock)'
         required: false
         default: ''
 

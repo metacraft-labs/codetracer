@@ -104,11 +104,27 @@ resolve_beam_recorder() {
 	fail "recorder build succeeded but no recorder binary was found under target/{debug,release}"
 }
 
+# Resolve a sibling repo's workspace-locked revision via the single approved
+# resolver. In CI, $CT_MANIFEST_DIR + $CT_LOCK_SHA address the shallow manifest
+# checkout; locally, both are unset and the resolver auto-discovers
+# .repo/manifests and walks from HEAD.
+resolve_sibling_rev() { # $1 = sibling repo name
+	local args=(--repo codetracer --sibling "$1")
+	[ -n "${CT_MANIFEST_DIR:-}" ] && args+=(--manifest-dir "$CT_MANIFEST_DIR")
+	[ -n "${CT_LOCK_SHA:-}" ] && args+=(--sha "$CT_LOCK_SHA" --no-walk)
+	"$REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
+}
+
 print_pin_summary() {
-	local pins="$REPO_ROOT/.github/sibling-pins"
-	if [[ -f $pins ]]; then
-		grep -E '^(codetracer-beam-recorder|codetracer-elixir-recorder|codetracer-trace-format) ' "$pins" || true
-	fi
+	# Best-effort summary of the workspace-locked sibling revisions (the lock
+	# is the single source of pins). Don't abort the run if a lock is missing
+	# here — this is purely informational; the clone steps fail loudly.
+	local name rev
+	for name in codetracer-beam-recorder codetracer-trace-format; do
+		if rev="$(resolve_sibling_rev "$name" 2>/dev/null)"; then
+			echo "$name (workspace lock): $rev"
+		fi
+	done
 	if [[ -d "$CODETRACER_BEAM_RECORDER_PATH/.git" ]]; then
 		echo "codetracer-beam-recorder HEAD: $(git -C "$CODETRACER_BEAM_RECORDER_PATH" rev-parse HEAD)"
 	fi

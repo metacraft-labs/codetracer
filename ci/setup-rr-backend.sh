@@ -4,10 +4,12 @@ set -euo pipefail
 # Clone and build codetracer-native-backend (formerly codetracer-rr-backend) for CI.
 #
 # Resolves the rr-backend ref from (in order):
-#   1. $RR_BACKEND_REF env var (explicit override)
-#   2. .github/sibling-pins (sibling-pins lock, plain text format)
-#   3. .github/rr-backend-pin.txt (legacy pin file)
-#   4. "main" (fallback)
+#   1. $RR_BACKEND_REF env var (explicit manual override)
+#   2. The repo-workspaces workspace lock, via scripts/resolve-sibling-rev.sh
+#      (the single approved source of sibling revisions). In CI, the lock is
+#      addressed by $CT_MANIFEST_DIR + $CT_LOCK_SHA; locally the resolver
+#      auto-discovers .repo/manifests and walks from HEAD. A missing lock
+#      fails loudly — there is no "main" fallback.
 #
 # Requires GH_TOKEN to be set for cloning the private repo.
 # Exports CODETRACER_RR_BACKEND_PRESENT=1 and updated PATH/LD_LIBRARY_PATH
@@ -19,35 +21,26 @@ REPO_ROOT="$(pwd)"
 # (../codetracer/libs/ct-dap-client) resolve correctly.
 CLONE_DIR="${CLONE_DIR:-$(pwd)/../codetracer-native-backend}"
 
+# Resolve a sibling repo's workspace-locked revision via the single approved
+# resolver. In CI, $CT_MANIFEST_DIR + $CT_LOCK_SHA address the shallow manifest
+# checkout; locally, both are unset and the resolver auto-discovers
+# .repo/manifests and walks from HEAD.
+resolve_sibling_rev() { # $1 = sibling repo name
+	local args=(--repo codetracer --sibling "$1")
+	[ -n "${CT_MANIFEST_DIR:-}" ] && args+=(--manifest-dir "$CT_MANIFEST_DIR")
+	[ -n "${CT_LOCK_SHA:-}" ] && args+=(--sha "$CT_LOCK_SHA" --no-walk)
+	"$REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
+}
+
 resolve_ref() {
-	# 1. Explicit override
+	# Explicit manual override (dispatch-style), if set.
 	if [[ -n ${RR_BACKEND_REF:-} ]]; then
 		echo "$RR_BACKEND_REF"
 		return
 	fi
 
-	# 2. sibling-pins (plain text: name sha branch)
-	if [[ -f .github/sibling-pins ]]; then
-		local pin
-		pin=$(grep '^codetracer-native-backend ' .github/sibling-pins | cut -d' ' -f2) || true
-		if [[ -n $pin ]]; then
-			echo "$pin"
-			return
-		fi
-	fi
-
-	# 3. Legacy pin file
-	if [[ -f .github/rr-backend-pin.txt ]]; then
-		local ref
-		ref=$(head -1 .github/rr-backend-pin.txt | tr -d '[:space:]')
-		if [[ -n $ref ]]; then
-			echo "$ref"
-			return
-		fi
-	fi
-
-	# 4. Fallback
-	echo "main"
+	# Otherwise resolve from the workspace lock (fails loudly if unlocked).
+	resolve_sibling_rev codetracer-native-backend
 }
 
 clone_rr_backend() {
@@ -114,9 +107,9 @@ build_rr_support() {
 	elif [[ -x "${CLONE_DIR}/target/debug/ct-native-replay" ]]; then
 		binary="${CLONE_DIR}/target/debug/ct-native-replay"
 	elif [[ -x "${CLONE_DIR}/result/bin/ct-rr-support" ]]; then
-		binary="${CLONE_DIR}/result/bin/ct-rr-support"  # legacy fallback
+		binary="${CLONE_DIR}/result/bin/ct-rr-support" # legacy fallback
 	elif [[ -x "${CLONE_DIR}/target/debug/ct-rr-support" ]]; then
-		binary="${CLONE_DIR}/target/debug/ct-rr-support"  # legacy fallback
+		binary="${CLONE_DIR}/target/debug/ct-rr-support" # legacy fallback
 	fi
 
 	if [[ -z $binary ]]; then
@@ -167,9 +160,9 @@ export_to_github_env() {
 	elif [[ -x "${CLONE_DIR}/target/debug/ct-native-replay" ]]; then
 		ct_rr_support="$(cd "${CLONE_DIR}/target/debug" && pwd)/ct-native-replay"
 	elif [[ -x "${CLONE_DIR}/result/bin/ct-rr-support" ]]; then
-		ct_rr_support="$(cd "${CLONE_DIR}/result/bin" && pwd)/ct-rr-support"  # legacy
+		ct_rr_support="$(cd "${CLONE_DIR}/result/bin" && pwd)/ct-rr-support" # legacy
 	elif [[ -x "${CLONE_DIR}/target/debug/ct-rr-support" ]]; then
-		ct_rr_support="$(cd "${CLONE_DIR}/target/debug" && pwd)/ct-rr-support"  # legacy
+		ct_rr_support="$(cd "${CLONE_DIR}/target/debug" && pwd)/ct-rr-support" # legacy
 	fi
 
 	if [[ -n ${GITHUB_ENV:-} ]]; then

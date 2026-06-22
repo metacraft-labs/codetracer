@@ -28,7 +28,15 @@
 #   CT_NATIVE_REPLAY_PATH        Path to a pre-built ct-native-replay binary
 #                                (legacy: CT_RR_SUPPORT_PATH also accepted)
 #   METACRAFT_WORKSPACE_ROOT     Workspace root containing codetracer-native-backend
-#   RR_BACKEND_REF               Git ref to clone (CI only, default: from pin file)
+#   RR_BACKEND_REF               Git ref to clone (explicit manual override).
+#                                When unset, the rr-backend revision is resolved
+#                                from the repo-workspaces workspace lock via
+#                                scripts/resolve-sibling-rev.sh (a missing lock
+#                                fails loudly; there is no "main" fallback).
+#   CT_MANIFEST_DIR/CT_LOCK_SHA  CI-only: address the shallow manifest checkout
+#                                and locked commit for the resolver. Unset
+#                                locally, where the resolver auto-discovers
+#                                .repo/manifests and walks from HEAD.
 #
 set -euo pipefail
 
@@ -37,7 +45,6 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PIN_FILE="$REPO_ROOT/.github/rr-backend-pin.txt"
 LOG_DIR="$REPO_ROOT/target/cross-test-logs"
 CLONE_DIR="$REPO_ROOT/target/rr-backend-clone"
 
@@ -158,20 +165,25 @@ check_prerequisites
 # ---------------------------------------------------------------------------
 # Resolve pinned rr-backend ref (for CI cloning)
 # ---------------------------------------------------------------------------
+# Resolve a sibling repo's workspace-locked revision via the single approved
+# resolver. In CI, $CT_MANIFEST_DIR + $CT_LOCK_SHA address the shallow manifest
+# checkout; locally, both are unset and the resolver auto-discovers
+# .repo/manifests and walks from HEAD.
+resolve_sibling_rev() { # $1 = sibling repo name
+	local args=(--repo codetracer --sibling "$1")
+	[ -n "${CT_MANIFEST_DIR:-}" ] && args+=(--manifest-dir "$CT_MANIFEST_DIR")
+	[ -n "${CT_LOCK_SHA:-}" ] && args+=(--sha "$CT_LOCK_SHA" --no-walk)
+	"$REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
+}
+
 resolve_pin_ref() {
+	# Explicit manual override (dispatch-style), if set.
 	if [[ -n ${RR_BACKEND_REF:-} ]]; then
 		echo "$RR_BACKEND_REF"
 		return
 	fi
-	if [[ -f $PIN_FILE ]]; then
-		local ref
-		ref="$(head -1 "$PIN_FILE" | tr -d '[:space:]')"
-		if [[ -n $ref ]]; then
-			echo "$ref"
-			return
-		fi
-	fi
-	echo "main"
+	# Otherwise resolve from the workspace lock (fails loudly if unlocked).
+	resolve_sibling_rev codetracer-native-backend
 }
 
 # ---------------------------------------------------------------------------
