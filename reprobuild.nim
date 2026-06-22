@@ -3,8 +3,26 @@ import std/[os, strutils]
 import repro_dsl_stdlib
 
 const
-  BuildDebugRoot = "src/build-debug"
   PublicResourceRoot = "src/public"
+
+# Reprobuild's output root.
+#
+# On Linux this is ``src/build-debug-repro`` rather than ``src/build-debug`` so
+# the reprobuild and legacy tup builds do not fight over the same directory:
+# tup refuses to build when its variant dir (``src/build-debug``) contains files
+# it did not create, so a reprobuild build that wrote there would break a later
+# ``tup build-debug`` (and vice versa). macOS/Windows have no tup build, so they
+# keep ``src/build-debug``.
+#
+# This MUST be a compile-time constant, not a runtime ``getEnv``: reprobuild
+# keys its lowered-graph cache on the compiled provider artifact, so a value
+# read at provider-run time is silently ignored whenever the graph is served
+# from cache (``providerInvocations: 0``). Baking it into the constant makes the
+# output root part of that cache key. Release variants would follow the same
+# scheme (``src/build-release-repro``).
+const BuildDebugRoot =
+  when defined(linux): "src/build-debug-repro"
+  else: "src/build-debug"
 
 # Windows: extra C/linker flags so the bundled libzip C sources compile under
 # MinGW UCRT (mirror of src/Tuprules.tup's NIM_WINDOWS_CFLAGS / DYNLIB_OVERRIDE_FLAGS
@@ -406,7 +424,7 @@ package codeTracer:
         discard readDevEnvFile(inputFile)
 
     setEnv "CODETRACER_REPO_ROOT_PATH", projectRoot
-    setEnv "CODETRACER_PREFIX", projectRoot / "src" / "build-debug"
+    setEnv "CODETRACER_PREFIX", projectRoot / BuildDebugRoot
     setEnv "CODETRACER_DEV_TOOLS", "0"
     setEnv "CODETRACER_LOG_LEVEL", "INFO"
     setEnv "RUST_LOG", "info"
@@ -414,7 +432,7 @@ package codeTracer:
     setEnv "REPROBUILD_USE_SYSTEM_HASH_LIBS", "1"
     appendPath "NODE_PATH", projectRoot / "node_modules"
     prependPath "PATH", projectRoot / "node_modules" / ".bin"
-    prependPath "PATH", projectRoot / "src" / "build-debug" / "bin"
+    prependPath "PATH", projectRoot / BuildDebugRoot / "bin"
 
     let metacraftScripts = metacraftScriptsPath(projectRoot, workspaceRoot)
     if metacraftScripts.len > 0:

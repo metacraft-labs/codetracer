@@ -42,6 +42,17 @@ MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
 esac
 
 if [ -n "$ct_reprobuild_host" ]; then
+	# Where the reprobuild build writes its output tree (`bin/ct`, `public/`,
+	# `config/`, …). On Linux this is `src/build-debug-repro` so the reprobuild
+	# and tup builds don't fight over tup's `build-debug` variant directory; on
+	# macOS/Windows (no tup build) it stays `src/build-debug`. This MUST match
+	# `BuildDebugRoot` in reprobuild.nim, which is the source of truth.
+	if [ "$ct_reprobuild_host" = "linux" ]; then
+		ct_repro_out_root="src/build-debug-repro"
+	else
+		ct_repro_out_root="src/build-debug"
+	fi
+
 	repro_bin="${REPROBUILD_BIN:-}"
 	reprobuild_root="${CODETRACER_REPROBUILD_REPO_PATH:-}"
 
@@ -290,7 +301,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 	# passwordless sudo is unavailable), so it is safe to call on macOS
 	# too. Windows has no Linux setcap concept, so skip it there.
 	if [ "$ct_reprobuild_host" = "linux" ] || [ "$ct_reprobuild_host" = "darwin" ]; then
-		scripts/post-build-setcap.sh src/build-debug/bin/ct
+		scripts/post-build-setcap.sh "$ct_repro_out_root/bin/ct"
 	fi
 	exit 0
 fi
