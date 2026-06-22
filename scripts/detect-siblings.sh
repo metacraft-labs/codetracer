@@ -356,6 +356,29 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/noir" ]; then
 	fi
 fi
 
+# --- codetracer-nim (patched Nim providing the `nim --trace` column-aware tracer) ---
+# The column-aware Nim ViewModel test (test_column_nim_vm.nim) drives the
+# codetracer-nim compiler's `--trace` recorder.  Export CODETRACER_NIM_BIN to the
+# built bin/nim, and put libpcre on the library path: bin/nim dlopen()s libpcre
+# (the `re`/`pcre` stdlib) at run time and fails with "could not load
+# libpcre.so(.3|.1|)" when invoked from a shell that lacks it (e.g. the
+# codetracer dev shell rather than codetracer-nim's own).  Mirror the lldb
+# nix-build resolution used for ct-native-replay above.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim" ]; then
+	export CODETRACER_NIM_BIN="$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim"
+	export PATH="$_CT_WORKSPACE_ROOT/codetracer-nim/bin:$PATH"
+	_ct_pcre_dir=""
+	if command -v nix >/dev/null 2>&1; then
+		_ct_pcre_dir="$(nix build --no-link --print-out-paths "nixpkgs#pcre.out" 2>/dev/null)/lib"
+	fi
+	if [ -n "$_ct_pcre_dir" ] && [ -d "$_ct_pcre_dir" ]; then
+		export LD_LIBRARY_PATH="$_ct_pcre_dir:${LD_LIBRARY_PATH:-}"
+		export CODETRACER_RECORDER_LD_LIBRARY_PATH="$_ct_pcre_dir${CODETRACER_RECORDER_LD_LIBRARY_PATH:+:$CODETRACER_RECORDER_LD_LIBRARY_PATH}"
+	fi
+	unset _ct_pcre_dir
+	_ct_detect_summary "codetracer-nim (bin/nim --trace available)"
+fi
+
 # --- codetracer-wasm-recorder ---
 # The wazero binary lives in the repo root (not target/release/).
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-wasm-recorder" ]; then
