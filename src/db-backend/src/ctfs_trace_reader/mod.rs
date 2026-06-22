@@ -14,6 +14,7 @@ pub mod follow_stream_source;
 pub mod http_range_source;
 pub mod interval_tagged_map;
 pub mod lazy_population_store;
+pub mod linehits_namespace;
 pub mod materialization_cache;
 pub mod meta_dat;
 pub mod server_prep_encoding;

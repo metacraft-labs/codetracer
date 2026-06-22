@@ -72,7 +72,7 @@ const KIND_LEAF: u8 = 1;
 /// Leaf descriptor width — Type A is 8 bytes, Type B is 16 bytes (§10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CowLeafType {
-    /// 8-byte descriptors (many small entries: `memwrites.tc`, `linehits.tc`).
+    /// 8-byte descriptors (many small entries, e.g. `memwrites.tc`).
     TypeA,
     /// 16-byte descriptors (fewer large entries: `threads.ns`, `slc-*.ns`).
     TypeB,

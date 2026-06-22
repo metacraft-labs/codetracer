@@ -22,13 +22,13 @@
 //!
 //! * The spec's `step-map.ns` (magic `STMP`) is **not emitted by any writer** —
 //!   it is a documented-but-unbuilt format.
-//! * The Nim `MultiStreamTraceWriter` has a separate, OPT-IN `LinehitsBuilder`
-//!   (`codetracer-trace-format-nim/.../linehits_builder.nim`) that records the
-//!   SAME `line → [step_id]` mapping into a `linehits` CTFS namespace, but
-//!   `enableLinehits` is only ever called from that repo's tests, and even then
-//!   the finalized namespace is **never serialized into the container** in the
-//!   writer's `close()` path. So `linehits.tc` is not consumable from a `.ct`
-//!   either.
+//! * The Nim `MultiStreamTraceWriter` also has an OPT-IN `LinehitsBuilder`
+//!   (`codetracer-trace-format-nim/.../linehits_builder.nim`) that records a
+//!   related `line → [step_id]` mapping and, as of the M8 CoW namespace slice,
+//!   serializes it as `linehits.tc` through an `NSB1` CoW namespace. That
+//!   namespace serves omniscient line-hit consumers; breakpoint resolution still
+//!   uses this `STMP` table when present because its shape is purpose-built for
+//!   `(path_id, line) → sorted step_ids`.
 //!
 //! Therefore M26 implements the CONSUMER against the spec's flat `STMP` layout
 //! (which is self-contained and trivially seekable, unlike the B-tree namespace
@@ -251,7 +251,9 @@ impl StepMapNamespace {
     /// "closest line" fallback uses this to decide whether the prepopulated
     /// table can answer for a path at all before scanning lines.
     pub fn has_path(&self, path_id: PathId) -> bool {
-        self.by_path.get(&(path_id.0)).is_some_and(|by_line| !by_line.is_empty())
+        self.by_path
+            .get(&(path_id.0))
+            .is_some_and(|by_line| !by_line.is_empty())
     }
 }
 
@@ -275,10 +277,7 @@ pub fn serialize_step_map(entries: &[(PathId, usize, Vec<StepId>)]) -> Vec<u8> {
     for (path_id, line, step_ids) in entries {
         let mut ids: Vec<i64> = step_ids.iter().map(|s| s.0).collect();
         ids.sort_unstable();
-        by_path
-            .entry(path_id.0 as u64)
-            .or_default()
-            .insert(*line as u32, ids);
+        by_path.entry(path_id.0 as u64).or_default().insert(*line as u32, ids);
     }
 
     let path_count = by_path.len();
