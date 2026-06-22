@@ -53,70 +53,27 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
+      - name: Setup dev env
+        # setup-dev-env installs Nix (with the Attic substituter/keys) and
+        # clones the cross-repo siblings adjacent to this checkout at the
+        # workspace-lock-pinned revisions (recursive submodules), replacing
+        # the former Checkout-manifests / Resolve-lock / per-sibling
+        # clone-repo machinery. The rr_backend_ref workflow_dispatch input
+        # overrides codetracer-native-backend's locked revision (empty =>
+        # lock). The native-backend submodule unfold below is still bespoke
+        # because the path:-flake-input visibility fix is specific to this
+        # repo's flake.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Checkout metacraft-manifests (workspace locks)
-        uses: actions/checkout@v5
-        with:
-          repository: metacraft-labs/metacraft-manifests
-          ref: latest
-          path: _manifests
-          token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Resolve cross-repo workspace-lock SHA
-        shell: bash
-        run: |
-          case "${{ github.event_name }}" in
-            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-            *) CANDS="${{ github.sha }}" ;;
-          esac
-          LOCK_SHA=""
-          for c in $CANDS; do
-            [ -z "$c" ] && continue
-            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-                 --repo codetracer --sibling codetracer-trace-format \
-                 --manifest-dir "${{ github.workspace }}/_manifests" \
-                 --sha "$c" --no-walk >/dev/null 2>&1; then
-              LOCK_SHA="$c"; break
-            fi
-          done
-          if [ -z "$LOCK_SHA" ]; then
-            echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
-            exit 1
-          fi
-          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-          echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
-
-      - name: Resolve rr-backend ref
-        id: resolve-ref
-        shell: bash
-        run: |
-          if [ -n "${{ github.event.inputs.rr_backend_ref }}" ]; then
-            REF="${{ github.event.inputs.rr_backend_ref }}"
-          else
-            REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-              --repo codetracer --sibling codetracer-native-backend \
-              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          fi
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "Resolved rr-backend ref: $REF"
-
-      - name: Clone native-backend
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-backend
-          ref: ${{ steps.resolve-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'true'
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: |
+            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref }}
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            codetracer-native-recorder
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has
@@ -154,76 +111,6 @@ jobs:
             git -C "$PARENT" rm -f --cached "${sub}" >/dev/null 2>&1 || true
             git -C "$PARENT" add -f "${sub}" 2>/dev/null || true
           done < <(git -C "$PARENT" submodule status --recursive 2>/dev/null)
-
-      - name: Resolve codetracer-trace-format ref
-        id: resolve-trace-format-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-trace-format \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-trace-format sibling
-        # src/db-backend/Cargo.toml has path deps like
-        # ``../../../codetracer-trace-format/codetracer_ctfs``.  Without
-        # this clone the integration-tests step's cargo invocations
-        # abort during workspace resolution with ``failed to load
-        # source for dependency codetracer_ctfs``.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-trace-format-nim ref
-        id: resolve-trace-format-nim-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-trace-format-nim \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-trace-format-nim sibling
-        # codetracer_trace_writer_nim's build.rs reads
-        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``;
-        # nim-reader is a default feature of replay-server, so cargo
-        # builds the script and panics without this sibling.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format-nim
-          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-native-recorder ref
-        id: resolve-mcr-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-native-recorder \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-native-recorder sibling
-        # src/db-backend/build.rs canonicalizes
-        # ``../../../codetracer-native-recorder`` to locate the Nim
-        # ct_emulator sources.  Without the sibling clone the
-        # ``cargo build`` invocations inside run-cross-repo-tests.sh
-        # panic with ``expected sibling codetracer-native-recorder
-        # repo: NotFound``.  codetracer-native-recorder has no
-        # .gitmodules, so pass submodules: 'false'.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-recorder
-          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # db-backend's build.rs (and the integration tests that build
@@ -316,69 +203,21 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
+      - name: Setup dev env
+        # setup-dev-env installs Nix (with the Attic substituter/keys) and
+        # clones codetracer-shell-recorders adjacent to this checkout at the
+        # workspace-lock-pinned revision, replacing the former
+        # Checkout-manifests / Resolve-lock / clone-repo steps. The
+        # shell_recorders_ref workflow_dispatch input overrides the locked
+        # revision (empty => lock).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Checkout metacraft-manifests (workspace locks)
-        uses: actions/checkout@v5
-        with:
-          repository: metacraft-labs/metacraft-manifests
-          ref: latest
-          path: _manifests
-          token: ${{ steps.ci_token.outputs.token }}
-
-      - name: Resolve cross-repo workspace-lock SHA
-        shell: bash
-        run: |
-          case "${{ github.event_name }}" in
-            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-            *) CANDS="${{ github.sha }}" ;;
-          esac
-          LOCK_SHA=""
-          for c in $CANDS; do
-            [ -z "$c" ] && continue
-            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-                 --repo codetracer --sibling codetracer-trace-format \
-                 --manifest-dir "${{ github.workspace }}/_manifests" \
-                 --sha "$c" --no-walk >/dev/null 2>&1; then
-              LOCK_SHA="$c"; break
-            fi
-          done
-          if [ -z "$LOCK_SHA" ]; then
-            echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
-            exit 1
-          fi
-          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-          echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
-
-      - name: Resolve shell-recorders ref
-        id: resolve-ref
-        shell: bash
-        run: |
-          if [ -n "${{ github.event.inputs.shell_recorders_ref }}" ]; then
-            REF="${{ github.event.inputs.shell_recorders_ref }}"
-          else
-            REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-              --repo codetracer --sibling codetracer-shell-recorders \
-              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          fi
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "Resolved shell-recorders ref: $REF"
-
-      - name: Clone shell-recorders
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-shell-recorders
-          ref: ${{ steps.resolve-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-shell-recorders
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: |
+            codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref }}
 
       - name: Build shell trace writer
         run: |

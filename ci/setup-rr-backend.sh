@@ -45,6 +45,17 @@ resolve_ref() {
 
 clone_rr_backend() {
 	local ref="$1"
+
+	# If the sibling was already provided at the expected location (e.g.
+	# cloned by the shared setup-dev-env CI action at the workspace-locked
+	# revision), reuse it instead of re-cloning. This keeps the script
+	# working both in CI (where setup-dev-env may pre-clone siblings) and
+	# locally (where the sibling typically already lives next to this repo).
+	if [[ -d "$CLONE_DIR/.git" ]]; then
+		echo "Reusing already-provided codetracer-native-backend at $CLONE_DIR"
+		return 0
+	fi
+
 	echo "Cloning codetracer-native-backend at ref: $ref"
 
 	if [[ -z ${GH_TOKEN:-} ]]; then
@@ -188,9 +199,15 @@ export_to_github_env() {
 }
 
 main() {
-	local ref
-	ref=$(resolve_ref)
-	echo "Using rr-backend ref: $ref"
+	# Only resolve a sibling revision when we actually need to clone. If the
+	# sibling is already present (provided by setup-dev-env in CI, or living
+	# next to this repo locally), skip resolution entirely — the resolver and
+	# its workspace-lock lookup are not needed in that case.
+	local ref=""
+	if [[ ! -d "$CLONE_DIR/.git" ]]; then
+		ref=$(resolve_ref)
+		echo "Using rr-backend ref: $ref"
+	fi
 
 	clone_rr_backend "$ref"
 	build_rr_support

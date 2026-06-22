@@ -1,104 +1,45 @@
 name: Setup db-backend siblings
-description: Clone sibling repositories required by src/db-backend path dependencies.
+description: >
+  Clone the sibling repositories required by ``src/db-backend``'s path
+  dependencies (codetracer-trace-format, codetracer-trace-format-nim,
+  codetracer-native-recorder), each at the revision pinned by the
+  repo-workspaces workspace lock. This is a thin wrapper over the shared
+  ``setup-dev-env`` action: it clones the three siblings adjacent to the
+  host checkout (``../<name>``) and installs the ``dev-exec`` wrapper. Nix
+  itself is installed by ``setup-dev-env`` when ``env-flavor: nix``; jobs
+  that already run their own ``setup-nix`` step can still call this action —
+  installing Nix twice is idempotent.
 inputs:
   gh-token:
     description: GitHub token with access to sibling repositories.
     required: true
+  substituters:
+    description: Optional Nix substituters forwarded to setup-dev-env.
+    required: false
+    default: ""
+  trusted-public-keys:
+    description: Optional Nix trusted-public-keys forwarded to setup-dev-env.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
-    - name: Checkout metacraft-manifests (workspace locks)
-      uses: actions/checkout@v5
+    - name: Setup dev env (clone db-backend siblings + install Nix)
+      # setup-dev-env resolves each sibling's revision from the per-commit
+      # repo-workspaces workspace lock (the single approved source of sibling
+      # revisions) and clones it to ../<name>. codetracer-native-recorder /
+      # codetracer-trace-format / codetracer-trace-format-nim have no
+      # .gitmodules; the recursive-submodule update is best-effort and a
+      # no-op for them. The bespoke "direnv allow" fixup that used to live
+      # here is left to the calling jobs (only the db-backend build.rs path
+      # needs it, and those jobs already perform it).
+      uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
       with:
-        repository: metacraft-labs/metacraft-manifests
-        ref: latest
-        path: _manifests
-        token: ${{ inputs.gh-token }}
-
-    - name: Resolve cross-repo workspace-lock SHA
-      shell: bash
-      run: |
-        case "${{ github.event_name }}" in
-          pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-          push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-          *) CANDS="${{ github.sha }}" ;;
-        esac
-        LOCK_SHA=""
-        for c in $CANDS; do
-          [ -z "$c" ] && continue
-          [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-          if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-               --repo codetracer --sibling codetracer-trace-format \
-               --manifest-dir "${{ github.workspace }}/_manifests" \
-               --sha "$c" --no-walk >/dev/null 2>&1; then
-            LOCK_SHA="$c"; break
-          fi
-        done
-        if [ -z "$LOCK_SHA" ]; then
-          echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
-          exit 1
-        fi
-        echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-        echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-        echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
-
-    - name: Resolve codetracer-trace-format ref
-      id: resolve-trace-format-ref
-      shell: bash
-      run: |
-        REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-          --repo codetracer --sibling codetracer-trace-format \
-          --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-    - name: Clone codetracer-trace-format sibling
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/codetracer-trace-format
-        ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
-        path: ${{ github.workspace }}/../codetracer-trace-format
+        env-flavor: nix
         gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Resolve codetracer-trace-format-nim ref
-      id: resolve-trace-format-nim-ref
-      shell: bash
-      run: |
-        REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-          --repo codetracer --sibling codetracer-trace-format-nim \
-          --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-    - name: Clone codetracer-trace-format-nim sibling
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/codetracer-trace-format-nim
-        ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
-        path: ${{ github.workspace }}/../codetracer-trace-format-nim
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Resolve codetracer-native-recorder ref
-      id: resolve-native-recorder-ref
-      shell: bash
-      run: |
-        REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-          --repo codetracer --sibling codetracer-native-recorder \
-          --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-    - name: Clone codetracer-native-recorder sibling
-      uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-      with:
-        repo: metacraft-labs/codetracer-native-recorder
-        ref: ${{ steps.resolve-native-recorder-ref.outputs.ref }}
-        path: ${{ github.workspace }}/../codetracer-native-recorder
-        gh-token: ${{ inputs.gh-token }}
-        submodules: 'false'
-
-    - name: Allow codetracer-native-recorder direnv
-      shell: bash
-      run: |
-        if command -v direnv >/dev/null 2>&1; then
-          direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
-        fi
+        substituters: ${{ inputs.substituters }}
+        trusted-public-keys: ${{ inputs.trusted-public-keys }}
+        siblings: |
+          codetracer-trace-format
+          codetracer-trace-format-nim
+          codetracer-native-recorder

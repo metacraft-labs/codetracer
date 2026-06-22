@@ -63,93 +63,41 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
+      - name: Setup dev env
+        # setup-dev-env installs Nix (with the Attic substituter/keys) and
+        # clones the cross-repo siblings adjacent to this checkout at the
+        # workspace-lock-pinned revisions, replacing the former
+        # Checkout-manifests / Resolve-lock / Resolve-refs / clone-repo
+        # machinery. The beam_recorder_ref / trace_format_ref
+        # workflow_dispatch inputs override the locked revisions (empty =>
+        # lock). codetracer-trace-format is also cloned as a sibling here so
+        # its workspace-locked SHA is available for the in-repo
+        # libs/codetracer-trace-format swap below (the beam recorder reads
+        # the in-repo path, not the sibling).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: |
+            codetracer-beam-recorder=${{ github.event.inputs.beam_recorder_ref }}
+            codetracer-trace-format=${{ github.event.inputs.trace_format_ref }}
 
-      - name: Checkout metacraft-manifests (workspace locks)
-        uses: actions/checkout@v5
-        with:
-          repository: metacraft-labs/metacraft-manifests
-          ref: latest
-          path: _manifests
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Resolve cross-repo workspace-lock SHA
+      - name: Swap libs/codetracer-trace-format for the pinned sibling clone
+        # The beam recorder's trace shim reuses the shared CTFS writer at
+        # the in-repo path libs/codetracer-trace-format. setup-dev-env
+        # cloned codetracer-trace-format at the workspace-locked (or
+        # dispatch-overridden) revision adjacent to this checkout; mirror
+        # it into libs/ so the recorder build picks up the pinned source
+        # instead of the submodule-pinned copy.
         shell: bash
         run: |
-          case "${{ github.event_name }}" in
-            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-            *) CANDS="${{ github.sha }}" ;;
-          esac
-          LOCK_SHA=""
-          for c in $CANDS; do
-            [ -z "$c" ] && continue
-            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-                 --repo codetracer --sibling codetracer-trace-format \
-                 --manifest-dir "${{ github.workspace }}/_manifests" \
-                 --sha "$c" --no-walk >/dev/null 2>&1; then
-              LOCK_SHA="$c"; break
-            fi
-          done
-          if [ -z "$LOCK_SHA" ]; then
-            echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
-            exit 1
-          fi
-          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-          echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
-
-      - name: Resolve sibling refs
-        id: refs
-        run: |
           set -euo pipefail
-          BEAM_REF="${{ github.event.inputs.beam_recorder_ref }}"
-          TRACE_FORMAT_REF="${{ github.event.inputs.trace_format_ref }}"
-          if [[ -z "$BEAM_REF" ]]; then
-            BEAM_REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-              --repo codetracer --sibling codetracer-beam-recorder \
-              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          fi
-          if [[ -z "$TRACE_FORMAT_REF" ]]; then
-            TRACE_FORMAT_REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-              --repo codetracer --sibling codetracer-trace-format \
-              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          fi
-          [[ "$BEAM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-beam-recorder ref must be a 40-char SHA: $BEAM_REF" >&2; exit 1; }
-          [[ "$TRACE_FORMAT_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "codetracer-trace-format ref must be a 40-char SHA: $TRACE_FORMAT_REF" >&2; exit 1; }
-          echo "beam-ref=$BEAM_REF" >> "$GITHUB_OUTPUT"
-          echo "trace-format-ref=$TRACE_FORMAT_REF" >> "$GITHUB_OUTPUT"
-          echo "codetracer-beam-recorder ref: $BEAM_REF"
-          echo "codetracer-trace-format ref: $TRACE_FORMAT_REF"
-
-      - name: Clone codetracer-beam-recorder
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-beam-recorder
-          ref: ${{ steps.refs.outputs.beam-ref }}
-          path: ${{ github.workspace }}/../codetracer-beam-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
-
-      - name: Replace trace-format with pinned sibling clone
-        run: rm -rf libs/codetracer-trace-format
-
-      - name: Clone codetracer-trace-format
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          ref: ${{ steps.refs.outputs.trace-format-ref }}
-          path: ${{ github.workspace }}/libs/codetracer-trace-format
-          gh-token: ${{ steps.app-token.outputs.token }}
-          # codetracer-trace-format has no .gitmodules; the upstream
-          # clone-repo action's sed step crashes on missing file when
-          # submodules: 'true' is set.
-          submodules: 'false'
+          SRC="${{ github.workspace }}/../codetracer-trace-format"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
 
       # Zero-test guard verification: prove that a non-existent test name
       # produces a "0 tests" cargo output and that the guard rejects it.
