@@ -63,8 +63,8 @@ use std::error::Error;
 use super::block_overlay::{BlockSink, CtfsBlockOverlay};
 use super::coverage_namespace::{Coverage, CoverageMap, CoverageState};
 use super::interval_tagged_map::{IntervalTaggedMap, MemWriteEntry, TickTagged};
-use super::lazy_population_store::{persist_into_overlay, StoreError};
-use super::server_prep_encoding::{encode_memwrites, CollapsedMemwrites};
+use super::lazy_population_store::{StoreError, persist_into_overlay};
+use super::memwrites_namespace::encode_memwrites_cow_namespace;
 
 /// The records a [`Recreator`] produces for one re-executed tick interval.
 ///
@@ -212,12 +212,12 @@ impl MaterializationCache {
     pub fn writes_in_range(&self, address: u64, tick_lo: u64, tick_hi: u64) -> Option<Vec<MemWriteEntry>> {
         match self.coverage.coverage_of(tick_lo, tick_hi) {
             Coverage::NotCovered { .. } => None,
-            Coverage::Covered { .. } => Some(self.memwrites.merge_read(
-                address,
-                &self.covering_interval_ids(),
-                tick_lo,
-                tick_hi,
-            )),
+            Coverage::Covered { .. } => {
+                Some(
+                    self.memwrites
+                        .merge_read(address, &self.covering_interval_ids(), tick_lo, tick_hi),
+                )
+            }
         }
     }
 
@@ -281,12 +281,13 @@ impl MaterializationCache {
     /// `Persist` flushes to the `.ct`; `InMemory` keeps the cache session-local
     /// and leaves the backing byte-unchanged.
     ///
-    /// The memwrites are emitted as a single flat (address, tick)-ordered image
-    /// via the authoritative server-prep layout, so a persisted image is
-    /// forward-compatible with a server-prepped slice and reloads through the M5
-    /// warm-restart reader.
+    /// The memwrites are emitted as a CoW namespace keyed by address, with each
+    /// value payload retaining the producing interval id. The warm-restart reader
+    /// can still flatten the image for today's query surface, while the persisted
+    /// bytes preserve sparse sub-list structure for future live omniscient map
+    /// wiring.
     pub fn persist(&self, overlay: &mut CtfsBlockOverlay) -> Result<(), StoreError> {
-        let image = self.encode_memwrites_image();
+        let image = self.encode_memwrites_image()?;
         persist_into_overlay(overlay, &self.coverage, image.as_deref(), None)
     }
 
@@ -296,23 +297,10 @@ impl MaterializationCache {
         super::lazy_population_store::flush_overlay(overlay, sink)
     }
 
-    /// Encode the materialized writes across ALL covered intervals into one flat
-    /// (address-major, tick-minor) `memwrites.tc` image, or `None` when empty.
-    fn encode_memwrites_image(&self) -> Option<Vec<u8>> {
-        let covering = self.covering_interval_ids();
-        let mut per_address: Vec<(u64, Vec<MemWriteEntry>)> = Vec::new();
-        for key in self.memwrites.keys() {
-            // Merge across the whole tick domain (u64::MAX upper bound) so every
-            // sub-list contributes; merge_read keeps it tick-sorted.
-            let writes = self.memwrites.merge_read(key, &covering, 0, u64::MAX);
-            if !writes.is_empty() {
-                per_address.push((key, writes));
-            }
-        }
-        if per_address.is_empty() {
-            return None;
-        }
-        Some(encode_memwrites(&CollapsedMemwrites { per_address }))
+    /// Encode the materialized writes across ALL covered intervals into a CoW
+    /// `memwrites.tc` namespace image, or `None` when empty.
+    fn encode_memwrites_image(&self) -> Result<Option<Vec<u8>>, StoreError> {
+        encode_memwrites_cow_namespace(&self.memwrites).map_err(|e| StoreError::Decode(e.to_string()))
     }
 }
 
@@ -322,8 +310,11 @@ mod tests {
     use super::*;
     use crate::ctfs_trace_reader::block_overlay::{FileBlockSink, NoOpBlockSink, OverlayMode};
     use crate::ctfs_trace_reader::coverage_namespace::CTFS_COVERAGE_FILE;
-    use crate::ctfs_trace_reader::ctfs_container::{write_minimal_ctfs, CtfsReader, InMemoryBlockSource, LocalFileSource};
-    use crate::ctfs_trace_reader::lazy_population_store::WarmRestartReader;
+    use crate::ctfs_trace_reader::ctfs_container::{
+        CtfsReader, InMemoryBlockSource, LocalFileSource, write_minimal_ctfs,
+    };
+    use crate::ctfs_trace_reader::lazy_population_store::{CTFS_MEMWRITES_FILE, WarmRestartReader};
+    use crate::ctfs_trace_reader::memwrites_namespace::MemwritesNamespace;
 
     const ADDR: u64 = 0x4000;
 
@@ -401,7 +392,9 @@ mod tests {
         assert_eq!(rec.calls, 1, "cache hit must NOT re-execute");
 
         // The covered query is served from the materialized maps.
-        let served = cache.writes_in_range(ADDR, 0, 1000).expect("covered range served from maps");
+        let served = cache
+            .writes_in_range(ADDR, 0, 1000)
+            .expect("covered range served from maps");
         let ticks: Vec<u64> = served.iter().map(|w| w.tick).collect();
         assert_eq!(ticks, vec![100, 500], "materialized writes served from the cache");
         assert_eq!(rec.calls, 1, "serving from maps must NOT re-execute");
@@ -422,7 +415,12 @@ mod tests {
         let mut rec = FakeRecreator::new().with_interval(1000, vec![mw(1100, 7), mw(1900, 8)]);
 
         // [1000, 2000) is uncovered → cache miss → recreator called exactly once.
-        assert_eq!(cache.coverage_of(1000, 2000), Coverage::NotCovered { missing: vec![(1000, 2000)] });
+        assert_eq!(
+            cache.coverage_of(1000, 2000),
+            Coverage::NotCovered {
+                missing: vec![(1000, 2000)]
+            }
+        );
         let out = cache.ensure_interval_materialized(&mut rec, 1000, 2000).unwrap();
         assert_eq!(out, EnsureOutcome::CacheMiss);
         assert_eq!(rec.calls, 1, "uncovered interval re-executes exactly once");
@@ -443,9 +441,30 @@ mod tests {
         // warm-restart reader serves the covered interval.
         let mut reader = CtfsReader::open(&path).unwrap();
         assert!(reader.has_file(CTFS_COVERAGE_FILE), "coverage.tc persisted to .ct");
+        let memwrites_image = reader.read_file(CTFS_MEMWRITES_FILE).unwrap();
+        assert_eq!(
+            &memwrites_image[0..4],
+            b"NSB1",
+            "live write-back persists memwrites.tc as CoW"
+        );
+        let mem_ns = MemwritesNamespace::open(&memwrites_image).unwrap();
+        assert_eq!(
+            mem_ns
+                .writes_for_address(ADDR)
+                .unwrap()
+                .iter()
+                .map(|(interval_id, write)| (*interval_id, write.tick))
+                .collect::<Vec<_>>(),
+            vec![(0, 1100), (0, 1900)],
+            "CoW memwrites payload preserves sparse interval ids"
+        );
         let warm = WarmRestartReader::open(&mut reader).unwrap();
         assert!(matches!(warm.coverage_of(1000, 2000), Coverage::Covered { .. }));
-        let reloaded = warm.writes_in_range(ADDR, 1000, 2000).unwrap().expect("covered after warm restart");
+        let reloaded = warm
+            .writes_in_range(ADDR, 1000, 2000)
+            .unwrap()
+            .expect("covered after warm restart");
+        assert_eq!(reloaded, vec![mw(1100, 7), mw(1900, 8)]);
         assert_eq!(reloaded.iter().map(|w| w.tick).collect::<Vec<_>>(), vec![1100, 1900]);
 
         // A subsequent identical query against the live cache is a HIT — the
@@ -462,7 +481,10 @@ mod tests {
         let mut cache = MaterializationCache::new();
 
         // Pre-seed coverage as if a prior session already materialized [0, 5000).
-        cache.coverage.coverage_add(0, 5000, CoverageState::CollapsedComplete).unwrap();
+        cache
+            .coverage
+            .coverage_add(0, 5000, CoverageState::CollapsedComplete)
+            .unwrap();
         cache.interval_ids.insert(0, 0);
         cache.memwrites.append(ADDR, 0, mw(2500, 42));
 
@@ -507,7 +529,11 @@ mod tests {
         let mut noop = NoOpBlockSink;
         cache.flush(&mut overlay, &mut noop).unwrap();
         drop(overlay);
-        assert_eq!(std::fs::read(&path).unwrap(), raw_before, "InMemory mode leaves .ct unchanged");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            raw_before,
+            "InMemory mode leaves .ct unchanged"
+        );
 
         // The live cache still serves the interval for the session.
         let served = cache.writes_in_range(ADDR, 0, 1000).unwrap();
@@ -524,9 +550,15 @@ mod tests {
             .with_interval(1000, vec![mw(1100, 2)]);
 
         // Materialize the distant interval first.
-        assert_eq!(cache.ensure_interval_materialized(&mut rec, 5000, 6000).unwrap(), EnsureOutcome::CacheMiss);
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 5000, 6000).unwrap(),
+            EnsureOutcome::CacheMiss
+        );
         // Then the earlier one.
-        assert_eq!(cache.ensure_interval_materialized(&mut rec, 1000, 2000).unwrap(), EnsureOutcome::CacheMiss);
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 1000, 2000).unwrap(),
+            EnsureOutcome::CacheMiss
+        );
         assert_eq!(rec.calls, 2);
 
         // Both populated intervals are covered; the gap between them is not.
@@ -536,11 +568,21 @@ mod tests {
 
         // Each interval serves its own writes.
         assert_eq!(
-            cache.writes_in_range(ADDR, 1000, 2000).unwrap().iter().map(|w| w.tick).collect::<Vec<_>>(),
+            cache
+                .writes_in_range(ADDR, 1000, 2000)
+                .unwrap()
+                .iter()
+                .map(|w| w.tick)
+                .collect::<Vec<_>>(),
             vec![1100]
         );
         assert_eq!(
-            cache.writes_in_range(ADDR, 5000, 6000).unwrap().iter().map(|w| w.tick).collect::<Vec<_>>(),
+            cache
+                .writes_in_range(ADDR, 5000, 6000)
+                .unwrap()
+                .iter()
+                .map(|w| w.tick)
+                .collect::<Vec<_>>(),
             vec![5100]
         );
     }

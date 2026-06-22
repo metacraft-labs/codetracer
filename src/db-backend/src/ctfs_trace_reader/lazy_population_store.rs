@@ -36,7 +36,8 @@ use super::block_overlay::{BlockSink, CtfsBlockOverlay};
 use super::coverage_namespace::{Coverage, CoverageError, CoverageMap};
 use super::ctfs_container::{CtfsError, CtfsReader};
 use super::interval_tagged_map::{IntervalTaggedMap, MemWriteEntry};
-use super::server_prep_encoding::{decode_linehits, decode_memwrites};
+use super::memwrites_namespace::MemwritesNamespace;
+use super::server_prep_encoding::{WLOG_MAGIC, decode_linehits, decode_memwrites};
 
 /// The CTFS internal-file name for a collapsed/sparse memory-write map image.
 pub const CTFS_MEMWRITES_FILE: &str = "memwrites.tc";
@@ -130,6 +131,14 @@ pub fn load_memwrites_from_container(reader: &mut CtfsReader) -> Result<Vec<(u64
         return Ok(Vec::new());
     }
     let image = reader.read_file(CTFS_MEMWRITES_FILE)?;
+    if image.starts_with(&super::cow_namespace_reader::COW_NS_MAGIC) {
+        return MemwritesNamespace::open(&image)
+            .and_then(|ns| ns.all_writes())
+            .map_err(|e| StoreError::Decode(e.to_string()));
+    }
+    if image.starts_with(&WLOG_MAGIC) {
+        return decode_memwrites(&image).map_err(StoreError::Decode);
+    }
     decode_memwrites(&image).map_err(StoreError::Decode)
 }
 
@@ -227,7 +236,7 @@ pub fn encode_single_interval_memwrites(
     tick_lo: u64,
     tick_hi: u64,
 ) -> Option<Vec<u8>> {
-    use super::server_prep_encoding::{encode_memwrites, CollapsedMemwrites};
+    use super::server_prep_encoding::{CollapsedMemwrites, encode_memwrites};
     let mut per_address: Vec<(u64, Vec<MemWriteEntry>)> = Vec::new();
     for key in map.keys() {
         let writes = map.merge_read(key, &[interval_id], tick_lo, tick_hi);
@@ -248,7 +257,7 @@ mod tests {
     use crate::ctfs_trace_reader::block_overlay::{FileBlockSink, NoOpBlockSink, OverlayMode};
     use crate::ctfs_trace_reader::collapse::collapse_region;
     use crate::ctfs_trace_reader::coverage_namespace::CoverageState;
-    use crate::ctfs_trace_reader::ctfs_container::{write_minimal_ctfs, InMemoryBlockSource, LocalFileSource};
+    use crate::ctfs_trace_reader::ctfs_container::{InMemoryBlockSource, LocalFileSource, write_minimal_ctfs};
     use crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry;
 
     const K: u64 = 1000;
@@ -309,7 +318,10 @@ mod tests {
         assert!(reader.has_file("memwrites.tc"), "memwrites.tc persisted");
         let reloaded_cov = load_coverage_from_container(&mut reader).unwrap();
         // The collapsed region reloads as covered + collapsed.
-        assert_eq!(reloaded_cov.coverage_of(0, 2000), Coverage::Covered { all_collapsed: true });
+        assert_eq!(
+            reloaded_cov.coverage_of(0, 2000),
+            Coverage::Covered { all_collapsed: true }
+        );
         let reloaded_writes = load_memwrites_from_container(&mut reader).unwrap();
         let ticks: Vec<u64> = reloaded_writes.iter().map(|(_, w)| w.tick).collect();
         assert_eq!(ticks, vec![100, 1100]);
@@ -333,7 +345,10 @@ mod tests {
         assert_eq!(raw_after, raw_before, "InMemory mode leaves backing unchanged");
         // A reader over the unchanged backing sees NO coverage namespace.
         let reader2 = CtfsReader::open(&path2).unwrap();
-        assert!(!reader2.has_file("coverage.tc"), "InMemory persist did not touch backing");
+        assert!(
+            !reader2.has_file("coverage.tc"),
+            "InMemory persist did not touch backing"
+        );
     }
 
     /// `e2e_warm_restart_reuses_coverage` — a second open over the same persisted
@@ -409,6 +424,9 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].state, CoverageState::Sparse);
         // The query is covered (sparse), and the maps serve the writes.
-        assert_eq!(reloaded.coverage_of(3000, 4000), Coverage::Covered { all_collapsed: false });
+        assert_eq!(
+            reloaded.coverage_of(3000, 4000),
+            Coverage::Covered { all_collapsed: false }
+        );
     }
 }

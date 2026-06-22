@@ -229,6 +229,24 @@ impl<R: TickTagged> IntervalTaggedMap<R> {
         self.keys.keys().copied().collect()
     }
 
+    /// Return every record for `key`, grouped by its producing interval id.
+    ///
+    /// This is the persistence-oriented view used by the CoW namespace encoder:
+    /// sparse images need to keep the interval id next to each value so a future
+    /// warm restart can distinguish independently-materialized sub-lists instead
+    /// of flattening them prematurely.
+    pub fn records_by_interval(&self, key: u64) -> Vec<(u32, Vec<R>)> {
+        self.keys
+            .get(&key)
+            .map(|kv| {
+                kv.sublists
+                    .iter()
+                    .map(|(interval_id, records)| (*interval_id, records.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Whether the map has any records.
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
