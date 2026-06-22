@@ -879,14 +879,17 @@ when defined(js):
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))
     # Position each trace tooltip to the right of its row instead of the
-    # viewport center.  Event delegation on the container handles newly
-    # rendered traces after reactive updates without re-attaching listeners.
+    # viewport center.  Event delegation on #welcomeScreen handles all
+    # traces without re-attaching listeners after reactive updates.
     # ``mouseover`` bubbles, so ``closest('.recent-trace')`` reliably
     # identifies the trace row even when the event originates from an inner
-    # span.
+    # span.  We query the container by id to avoid Nim variable-name
+    # mangling inside {.emit:}.
     {.emit: """
-(function(container) {
-  container.addEventListener('mouseover', function(e) {
+(function() {
+  var cont = document.getElementById('welcomeScreen');
+  if (!cont) return;
+  cont.addEventListener('mouseover', function(e) {
     var trace = e.target.closest('.recent-trace');
     if (!trace) return;
     var tooltip = trace.querySelector('.recent-trace-tooltip');
@@ -896,5 +899,5 @@ when defined(js):
     tooltip.style.top = (rect.top + rect.height / 2) + 'px';
     tooltip.style.transform = 'translateY(-50%)';
   });
-})(container);
+})();
 """.}
