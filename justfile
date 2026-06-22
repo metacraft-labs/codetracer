@@ -1772,22 +1772,12 @@ cross-test-rust-flow:
 cross-test-go-flow:
   bash scripts/run-cross-repo-tests.sh go-flow
 
-show-rr-backend-pin:
-  @cat .github/rr-backend-pin.txt 2>/dev/null || echo "main (default)"
-
-update-rr-backend-pin ref="":
-  #!/usr/bin/env bash
-  PIN_FILE=".github/rr-backend-pin.txt"
-  OLD_REF="$(cat "$PIN_FILE" 2>/dev/null || echo "main")"
-  OLD_REF="$(echo "$OLD_REF" | tr -d '[:space:]')"
-  NEW_REF="{{ref}}"
-  if [[ -z "$NEW_REF" ]]; then
-    echo "Usage: just update-rr-backend-pin <git-ref>"
-    echo "Current pin: $OLD_REF"
-    exit 1
-  fi
-  echo "$NEW_REF" > "$PIN_FILE"
-  echo "Updated rr-backend pin: $OLD_REF -> $NEW_REF"
+# Note: cross-repo sibling revisions are no longer pinned in repo-local files.
+# They are resolved from the repo-workspaces workspace lock via
+# scripts/resolve-sibling-rev.sh (see
+# codetracer-specs/Testing/Cross-Repo-CI-Integration.md). To test against a
+# specific sibling revision, set the RR_BACKEND_REF override or use the
+# workflow_dispatch inputs.
 
 sync-design-tokens:
     rm -rf ./src/frontend/styles/generated
