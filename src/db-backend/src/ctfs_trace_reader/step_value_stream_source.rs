@@ -39,7 +39,9 @@ use std::sync::{Arc, Mutex};
 
 use once_cell::sync::OnceCell;
 
-use codetracer_trace_types::{FullValueRecord, Line, PathId, StepId, TypeId, ValueRecord, VariableId};
+use codetracer_trace_types::{CallKey, FullValueRecord, Line, PathId, StepId, TypeId, ValueRecord, VariableId};
+
+use crate::db::DbStep;
 
 use codetracer_trace_reader::step_stream_reader::{open_step_stream, StepStreamReader};
 use codetracer_trace_reader::value_stream_reader::{open_value_stream, ValueStreamReader};
@@ -391,6 +393,183 @@ impl LazyValueCache {
                 .into_boxed_slice()
         });
         Some(boxed)
+    }
+}
+
+/// A RANGE-AWARE, LAZY per-step `DbStep` cache backing the borrowing `step()`
+/// accessor for a PRODUCTION split bundle (M24c-steps).
+///
+/// ## Why this exists
+///
+/// `open_new_format_nim` used to EAGERLY materialize the WHOLE `db.steps` array
+/// at open: a chunked FFI loop decoded every step's `(path_id, line)` and pushed
+/// a `DbStep` per step (O(trace size) — the exact cost M24's acceptance forbids
+/// for production open). This cache removes that eager cost for the common
+/// (non-column-aware) production bundle, mirroring the proven [`LazyValueCache`]
+/// pattern but RANGE-AWARE: a point `step(id)` lookup fills only the RANGE
+/// (one `steps.dat` chunk) that contains `id`, NOT the whole array.
+///
+/// ## What it stores
+///
+/// * `stream` — the seekable `steps.dat` source (M24a-1 spec format). A step's
+///   `(path_id, line)` is decoded on demand, decompressing only its chunk.
+/// * `call_keys` / `global_call_keys` — the per-step innermost / last-started
+///   call keys. These are CHEAP O(steps) integer fills computed at open from the
+///   call entry/exit ranges (the same arrays the eager loop built), kept resident
+///   so a `DbStep` can be reconstructed without re-deriving the call mapping.
+/// * `slots` — one [`OnceCell`] per step; empty until that step's chunk is first
+///   filled, then holds the reconstructed `DbStep` for the reader's lifetime.
+///
+/// ## Range awareness
+///
+/// A `steps.dat` read decompresses a fixed-size chunk. To make the cache "aware
+/// of which RANGES are populated", a first touch of step `N` fills EVERY slot in
+/// `N`'s chunk `[chunk_lo, chunk_hi)` from that single decompression — so a
+/// subsequent touch of a neighbour in the same range is a pure cache hit (no new
+/// decompression), and the populated set is exactly the set of touched chunks.
+/// The whole array is never filled by a point lookup.
+///
+/// ## Column-aware traces
+///
+/// This cache is built ONLY for NON-column-aware traces, where the seekable
+/// stream's `(path_id, line)` is byte-identical to the eager materialization and
+/// `DbStep.column` is always `None` (see the parity test and the routing in
+/// `open_new_format_nim`). Column-aware traces keep eager materialization so the
+/// `GlobalPositionDecoder` column / line override stays bit-for-bit correct.
+///
+/// The outer `Vec<OnceCell<…>>` is sized once to the step count and never
+/// resized, so a `&DbStep` into a populated slot stays valid for the cache's
+/// lifetime.
+pub struct LazyStepCache {
+    stream: Arc<SeekableStepStream>,
+    /// Innermost (deepest) enclosing call key per step, computed at open.
+    call_keys: Vec<CallKey>,
+    /// Last-started call key at-or-before each step, computed at open.
+    global_call_keys: Vec<CallKey>,
+    /// One slot per step; empty until the step's chunk is first filled.
+    slots: Vec<OnceCell<DbStep>>,
+    /// Records-per-chunk granularity of the backing `steps.dat` stream — the size
+    /// of the RANGE a single point lookup populates.
+    chunk_size: usize,
+}
+
+impl std::fmt::Debug for LazyStepCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let populated = self.slots.iter().filter(|c| c.get().is_some()).count();
+        f.debug_struct("LazyStepCache")
+            .field("steps", &self.slots.len())
+            .field("populated", &populated)
+            .field("chunk_size", &self.chunk_size)
+            .finish()
+    }
+}
+
+impl LazyStepCache {
+    /// Build a lazy step cache over `step_count` steps served from the seekable
+    /// `steps.dat` stream. The two call-key arrays MUST be `step_count` long (the
+    /// caller computes them from the call entry/exit ranges, exactly as the eager
+    /// loop did). No step lines are decoded here — every slot starts empty.
+    pub fn new(
+        stream: Arc<SeekableStepStream>,
+        call_keys: Vec<CallKey>,
+        global_call_keys: Vec<CallKey>,
+    ) -> LazyStepCache {
+        let step_count = call_keys.len();
+        debug_assert_eq!(
+            global_call_keys.len(),
+            step_count,
+            "call-key arrays must agree on the step count"
+        );
+        let chunk_size = stream.chunk_size().max(1);
+        let mut slots = Vec::with_capacity(step_count);
+        slots.resize_with(step_count, OnceCell::new);
+        LazyStepCache {
+            stream,
+            call_keys,
+            global_call_keys,
+            slots,
+            chunk_size,
+        }
+    }
+
+    /// Number of steps this cache spans.
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// `true` when the cache spans no steps.
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
+    }
+
+    /// Number of step slots actually filled so far. Lets a test prove that
+    /// opening the trace populated NOTHING (the whole step array is not built at
+    /// open) and that a point lookup filled only its RANGE (one chunk's worth of
+    /// slots), not the whole array.
+    pub fn populated_count(&self) -> usize {
+        self.slots.iter().filter(|c| c.get().is_some()).count()
+    }
+
+    /// Number of distinct `steps.dat` Zstd chunks the backing stream has inflated
+    /// so far (bounded-decompression probe for the borrowing `step` path).
+    pub fn chunk_decompressions(&self) -> u64 {
+        self.stream.chunk_decompressions()
+    }
+
+    /// Reconstruct a single `DbStep` from the seekable stream + the resident
+    /// call-key arrays. Steps whose stream record carries no source line (a
+    /// Raise/Catch/ThreadSwitch marker) — or an out-of-range read — degrade to a
+    /// `(PathId(0), Line(0))` location, the same neutral slot the materialized
+    /// path produced for a marker step.
+    fn reconstruct(&self, index: usize) -> DbStep {
+        let (path_id, line) = self
+            .stream
+            .step_line(StepId(index as i64))
+            .unwrap_or((PathId(0), Line(0)));
+        DbStep {
+            step_id: StepId(index as i64),
+            path_id,
+            line,
+            // Non-column-aware route only — see the type docs.
+            column: None,
+            call_key: self.call_keys.get(index).copied().unwrap_or(CallKey(-1)),
+            global_call_key: self.global_call_keys.get(index).copied().unwrap_or(CallKey(-1)),
+        }
+    }
+
+    /// Fill every still-empty slot in the chunk-aligned RANGE that contains
+    /// `index`. Reading the FIRST slot in the range decompresses that chunk once;
+    /// the remaining reads in the same range are cache hits on the stream's
+    /// one-chunk cache, so the whole range is populated for a single
+    /// decompression. Range awareness: a point lookup populates exactly its
+    /// chunk's slots, never the whole array.
+    fn fill_range_for(&self, index: usize) {
+        let lo = (index / self.chunk_size) * self.chunk_size;
+        let hi = std::cmp::min(lo + self.chunk_size, self.slots.len());
+        for i in lo..hi {
+            // `get_or_init` only reconstructs (and thus reads the stream) when the
+            // slot is empty; already-filled neighbours are skipped.
+            let _ = self.slots[i].get_or_init(|| self.reconstruct(i));
+        }
+    }
+
+    /// Borrow step `step_id`, filling its RANGE from the seekable stream on first
+    /// access. Returns `None` for an out-of-range id so the caller can fall
+    /// through. The returned `&DbStep` is byte-identical to the record the eager
+    /// materialization used to push into `db.steps[step_id]` for a non-column-aware
+    /// trace (both decode the same packed `(path_id, line)` and derive the same
+    /// call keys).
+    pub fn get(&self, step_id: StepId) -> Option<&DbStep> {
+        if step_id.0 < 0 {
+            return None;
+        }
+        let index = step_id.0 as usize;
+        if index >= self.slots.len() {
+            return None;
+        }
+        // Fill the whole range so neighbours are free; then borrow this slot.
+        self.fill_range_for(index);
+        self.slots[index].get()
     }
 }
 

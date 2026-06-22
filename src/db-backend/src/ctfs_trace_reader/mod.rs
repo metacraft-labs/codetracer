@@ -136,6 +136,46 @@ pub struct CTFSTraceReader {
     /// stream), where the fully-materialized `db.variables` serves the borrow —
     /// so those paths stay bit-for-bit unchanged.
     lazy_values: Option<step_value_stream_source::LazyValueCache>,
+    /// M24c-steps — the RANGE-AWARE LAZY per-step `DbStep` cache backing the
+    /// borrowing `step()` accessor on a PRODUCTION (non-column-aware) split
+    /// bundle.
+    ///
+    /// `Some` ONLY when the new-format (Nim FFI) reader skipped eager step
+    /// materialization at open AND a `has_step_stream` `steps.dat` attached AND
+    /// the trace is NOT column-aware (so the seekable stream's `(path_id, line)`
+    /// is byte-identical to the eager result and `DbStep.column` is `None`). When
+    /// present, `db.steps` is EMPTY (not materialized at open) and `step()`
+    /// borrows through this cache, filling only the requested step's chunk-aligned
+    /// RANGE on first access. `None` on every other path (legacy `events.log`,
+    /// Rust-writer combined bundles, column-aware traces, `from_*` constructors,
+    /// or a corrupt step stream), where the fully-materialized `db.steps` serves
+    /// the borrow — so those paths stay bit-for-bit unchanged.
+    lazy_steps: Option<step_value_stream_source::LazyStepCache>,
+    /// M24c-steps — on-demand WHOLE-TABLE views for the slice / line-map
+    /// accessors (`steps_from`, `steps_on_line`, `step_map_for_path`) when on the
+    /// lazy step path.
+    ///
+    /// `step()` is range-aware (point lookups fill one chunk). But the slice /
+    /// line-map accessors return contiguous / aggregate borrows the lazy cache
+    /// cannot synthesize cheaply, AND they are used by genuinely O(trace) full
+    /// scans (breakpoint-resolution Continue, history). When the FIRST such
+    /// accessor is invoked we materialize the full `Vec<DbStep>` + line→steps map
+    /// ONCE through the lazy cache (each step's chunk inflated at most once),
+    /// memoize it here, and serve every later slice/map borrow from it — so
+    /// point-lookup navigation stays lazy/bounded while the inherently
+    /// whole-table operations remain correct and identical to the eager path.
+    /// `None` whenever `lazy_steps` is `None`.
+    lazy_steps_full: Option<std::sync::OnceLock<LazyFullSteps>>,
+}
+
+/// M24c-steps — the memoized whole-table step views the lazy step path builds on
+/// first slice/line-map demand. Holds the contiguous `DbStep` array (backing
+/// `steps_from`) and the path → line → `[DbStep]` map (backing `steps_on_line` /
+/// `step_map_for_path`), reconstructed once from the lazy cache.
+#[derive(Debug)]
+struct LazyFullSteps {
+    steps: Vec<DbStep>,
+    step_map: Vec<HashMap<usize, Vec<DbStep>>>,
 }
 
 impl CTFSTraceReader {
@@ -162,19 +202,134 @@ impl CTFSTraceReader {
     /// exactly. On every non-lazy reader it is just `db().clone()`.
     pub fn materialized_db(&self) -> Db {
         let mut db = self.db.clone();
+
+        // M24c-steps — the lazy step path left `db.steps` / `db.step_map` empty;
+        // rebuild the whole-table view so a raw `db.steps` / `db.step_map`
+        // consumer sees exactly what the eager path produced.
+        if self.lazy_steps.is_some() {
+            let full = self.lazy_full_steps();
+            db.steps.clear();
+            db.steps.items.extend_from_slice(&full.steps);
+            db.step_map.clear();
+            db.step_map.items.extend_from_slice(&full.step_map);
+            // Re-create the per-step parallel scaffolding the eager loop pushed
+            // (empty on a production split bundle — only the legacy `events.log`
+            // path populates these), so a cloned `Db`'s parallel vectors line up
+            // with `db.steps`.
+            db.instructions.clear();
+            db.compound.clear();
+            db.cells.clear();
+            db.variable_cells.clear();
+            for _ in 0..full.steps.len() {
+                db.instructions.push(vec![]);
+                db.compound.push(HashMap::new());
+                db.cells.push(HashMap::new());
+                db.variable_cells.push(HashMap::new());
+            }
+        }
+
+        // The step count to iterate values over: the rebuilt table on the lazy
+        // step path, otherwise the already-materialized `db.steps`.
+        let step_total = db.steps.len();
         if let Some(lazy) = self.lazy_values.as_ref() {
             // The lazy path left `db.variables` empty; rebuild it per step so a
             // raw `db.variables.get(step)` consumer sees the same values the
             // trait accessor serves.
             debug_assert!(db.variables.is_empty());
             db.variables.clear();
-            for step_idx in 0..db.steps.len() {
+            for step_idx in 0..step_total {
                 let sid = StepId(step_idx as i64);
                 let values = lazy.get(sid).map(|s| s.to_vec()).unwrap_or_default();
                 db.variables.push(values);
             }
         }
         db
+    }
+
+    /// M24c-steps — the memoized WHOLE-TABLE step view for the lazy step path,
+    /// built ONCE on first slice / line-map demand and reused thereafter.
+    ///
+    /// `step()` is range-aware (a point lookup fills one chunk). But the slice /
+    /// line-map accessors (`steps_from`, `steps_on_line`, `step_map_for_path`)
+    /// return contiguous / aggregate borrows the per-slot cache cannot synthesize,
+    /// AND they back genuinely O(trace) full scans (breakpoint-resolution Continue,
+    /// history). So the FIRST such accessor reconstructs the full `DbStep` array +
+    /// the path → line → `[DbStep]` map through the lazy cache (each step's chunk
+    /// inflated at most once), memoizes it, and serves every later slice/map borrow
+    /// from it. Point-lookup navigation stays lazy/bounded; the inherently
+    /// whole-table operations stay correct and identical to the eager path.
+    ///
+    /// Returns an empty whole-table view if called when `lazy_steps_full` is
+    /// `None` (i.e. off the lazy step path) — the trait accessors guard that, so
+    /// this stays internal and the fallback is never reached in practice.
+    fn lazy_full_steps(&self) -> &LazyFullSteps {
+        // Off the lazy step path this is unreachable (the accessors gate on
+        // `lazy_steps.is_some()`), but we return a process-wide empty view rather
+        // than panicking so the function is total. `OnceLock` keeps the empty view
+        // a single shared allocation.
+        let Some(cell) = self.lazy_steps_full.as_ref() else {
+            static EMPTY: std::sync::OnceLock<LazyFullSteps> = std::sync::OnceLock::new();
+            return EMPTY.get_or_init(|| LazyFullSteps {
+                steps: Vec::new(),
+                step_map: Vec::new(),
+            });
+        };
+        cell.get_or_init(|| {
+            let Some(lazy) = self.lazy_steps.as_ref() else {
+                return LazyFullSteps {
+                    steps: Vec::new(),
+                    step_map: Vec::new(),
+                };
+            };
+            let count = lazy.len();
+            let mut steps: Vec<DbStep> = Vec::with_capacity(count);
+            // Build the same line→steps map the eager loop built: one HashMap per
+            // path id, keyed by line, holding every step on that line in step order.
+            let path_count = self.db.paths.len();
+            let mut step_map: Vec<HashMap<usize, Vec<DbStep>>> = Vec::with_capacity(path_count);
+            step_map.resize_with(path_count, HashMap::new);
+            for i in 0..count {
+                let sid = StepId(i as i64);
+                // `get` fills the step's chunk-aligned range; iterating in order
+                // touches each chunk exactly once.
+                let step = match lazy.get(sid) {
+                    Some(s) => *s,
+                    None => continue,
+                };
+                steps.push(step);
+                let path_id = step.path_id;
+                while step_map.len() <= path_id.0 {
+                    step_map.push(HashMap::new());
+                }
+                if step.line.0 >= 0 {
+                    step_map[path_id.0].entry(step.line.0 as usize).or_default().push(step);
+                }
+            }
+            LazyFullSteps { steps, step_map }
+        })
+    }
+
+    /// M24c-steps — number of step slots already filled by the lazy step cache,
+    /// or `None` when the reader is not on the lazy step path. `Some(0)` right
+    /// after open proves the step table was NOT materialized; a point lookup
+    /// raises it by at most one chunk's worth of slots (range-aware fill).
+    pub fn lazy_steps_populated(&self) -> Option<usize> {
+        self.lazy_steps.as_ref().map(|c| c.populated_count())
+    }
+
+    /// M24c-steps — number of distinct `steps.dat` Zstd chunks the lazy step
+    /// cache's backing stream has inflated so far, or `None` when not on the lazy
+    /// step path. Counter-proof for the bounded-decompression property: a point
+    /// `step()` lookup inflates at most one `steps.dat` chunk.
+    pub fn lazy_steps_chunk_decompressions(&self) -> Option<u64> {
+        self.lazy_steps.as_ref().map(|c| c.chunk_decompressions())
+    }
+
+    /// M24c-steps — `true` when the whole-table step view has already been
+    /// materialized (a slice / line-map accessor was invoked). Lets a test prove
+    /// that pure point-lookup navigation never triggers the full materialization.
+    pub fn lazy_full_steps_materialized(&self) -> Option<bool> {
+        self.lazy_steps_full.as_ref().map(|c| c.get().is_some())
     }
 
     /// M-capability-flags accessor — the column-aware capability bits
@@ -242,6 +397,8 @@ impl CTFSTraceReader {
             step_stream: None,
             value_stream: None,
             lazy_values: None,
+            lazy_steps: None,
+            lazy_steps_full: None,
         })
     }
 }
@@ -717,6 +874,8 @@ impl CTFSTraceReader {
             step_stream: None,
             value_stream: None,
             lazy_values: None,
+            lazy_steps: None,
+            lazy_steps_full: None,
         }))
     }
 
@@ -1102,6 +1261,76 @@ impl CTFSTraceReader {
             };
 
 
+        // ── M24c-steps: RANGE-AWARE LAZY step path ─────────────────────
+        //
+        // The PRODUCTION split bundle ships a SPEC-canonical `has_step_stream`
+        // `steps.dat` that the Rust `StepStreamReader` reads directly (M24a-1).
+        // When that stream is available AND the trace is NOT column-aware, we DO
+        // NOT decode the whole step table here — that eager loop was the
+        // O(trace size) materialization M24 set out to remove. Instead we attach a
+        // `LazyStepCache` over the seekable stream (plus the cheap, already-computed
+        // call-key arrays) and leave `db.steps` / `db.step_map` EMPTY. A step is
+        // then reconstructed on first borrow, decompressing only that step's
+        // chunk-aligned RANGE. The reconstructed `DbStep` is byte-identical to what
+        // this loop pushes, because both decode the same packed `(path_id, line)`
+        // (`steps.dat` GLI ↔ the bulk FFI's line-only path) and derive the same
+        // call keys.
+        //
+        // Column-aware traces are EXCLUDED: their eager path overrides
+        // `(path_id, line)` via the pure-Rust `GlobalPositionDecoder` and sets
+        // `DbStep.column`, which the line-only `steps.dat` GLI cannot reproduce.
+        // For those, and for any bundle lacking a seekable step stream (value-less
+        // / pre-M24a / legacy / corrupt-stream), we fall back to the eager loop —
+        // correctness first.
+        let lazy_steps = if column_aware {
+            None
+        } else {
+            match step_value_stream_source::SeekableStepStream::open(ct_file_path) {
+                Ok(Some(stream)) => {
+                    let stream = std::sync::Arc::new(stream);
+                    info!(
+                        "Nim reader: steps served LAZILY (range-aware) from seekable steps.dat \
+                         ({} records, chunk_size {}) — step table not materialized at open",
+                        stream.step_count(),
+                        stream.chunk_size(),
+                    );
+                    Some(step_value_stream_source::LazyStepCache::new(
+                        stream,
+                        step_to_call_key.clone(),
+                        step_to_global_call_key.clone(),
+                    ))
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    info!("Nim reader: steps.dat present but unreadable ({e}); materializing step table eagerly");
+                    None
+                }
+            }
+        };
+
+        if lazy_steps.is_some() {
+            info!("Nim reader: step table NOT materialized at open (lazy range-aware path)");
+
+            // Even on the lazy step path we still allocate the EMPTY per-step
+            // parallel scaffolding (`instructions`/`compound`/`cells`/
+            // `variable_cells`) the eager loop pushes. These are empty
+            // HashMaps/Vecs — NO step decode, NO decompression, NO scan — so the
+            // O(trace size) cost the lazy path removes (the step-record decode and
+            // the line→step map build) is untouched. But they keep the borrowing
+            // accessors returning `Some(empty)` (not `None`) per step, which the
+            // split-bundle full-DB contract asserts (the per-step maps EXIST but
+            // are empty because a production split bundle carries no Cell/Assign
+            // events). See `tests/ctfs_split_only_full_db_test.rs`.
+            for _ in 0..step_count {
+                db.instructions.push(vec![]);
+                db.compound.push(HashMap::new());
+                db.cells.push(HashMap::new());
+                db.variable_cells.push(HashMap::new());
+            }
+        }
+
+        // Eager step materialization. Skipped entirely on the lazy path above; the
+        // per-step scaffolding for that path is allocated (empty) just above.
         let mut path_id_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut line_buf: Vec<u64> = vec![0; BULK_STEP_LOCATIONS_CHUNK as usize];
         let mut column_buf: Vec<u64> = if column_aware {
@@ -1117,7 +1346,7 @@ impl CTFSTraceReader {
             Vec::new()
         };
         let mut step_idx: u64 = 0;
-        while step_idx < step_count {
+        while lazy_steps.is_none() && step_idx < step_count {
             let want = std::cmp::min(BULK_STEP_LOCATIONS_CHUNK, step_count - step_idx);
             let written = if column_aware {
                 reader
@@ -1226,7 +1455,9 @@ impl CTFSTraceReader {
             step_idx += written;
         }
 
-        info!("Nim reader: {} steps loaded", db.steps.len());
+        if lazy_steps.is_none() {
+            info!("Nim reader: {} steps loaded", db.steps.len());
+        }
 
         // ── Variables ──────────────────────────────────────────────────
         //
@@ -1371,9 +1602,14 @@ impl CTFSTraceReader {
         // Match the same logic as TraceProcessor::postprocess: if the
         // last event is an Error on the last step, mark it as an error
         // termination.
-        db.end_of_program = if !db.events.is_empty() && !db.steps.is_empty() {
+        // Use the FFI `step_count` (the real recorded step total) rather than
+        // `db.steps.len()` so this stays correct on the M24c-steps LAZY path,
+        // where `db.steps` is intentionally empty (the step table is reconstructed
+        // on demand). On the eager path `db.steps.len() == step_count`, so the
+        // result is unchanged.
+        db.end_of_program = if !db.events.is_empty() && step_count > 0 {
             let last_event = &db.events[db.events.len() - 1];
-            let on_last_step = (last_event.step_id.0 as usize) == db.steps.len() - 1;
+            let on_last_step = (last_event.step_id.0 as usize) == (step_count as usize) - 1;
             if last_event.kind == EventLogKind::Error && on_last_step {
                 let reason = format!("error: {}", last_event.content);
                 EndOfProgram::Error { reason }
@@ -1408,6 +1644,16 @@ impl CTFSTraceReader {
             // LAZILY from the seekable `values.dat` stream (built above). The
             // `value_stream` overlay itself is attached centrally by `open()`.
             lazy_values,
+            // M24c-steps — when set, `db.steps` / `db.step_map` are empty and
+            // steps are served LAZILY (range-aware) from the seekable `steps.dat`
+            // stream (built above). The slice / line-map accessors memoize a
+            // whole-table view through `lazy_steps_full` on first demand.
+            lazy_steps_full: if lazy_steps.is_some() {
+                Some(std::sync::OnceLock::new())
+            } else {
+                None
+            },
+            lazy_steps,
         })
     }
 
@@ -1496,6 +1742,8 @@ impl CTFSTraceReader {
             step_stream: None,
             value_stream: None,
             lazy_values: None,
+            lazy_steps: None,
+            lazy_steps_full: None,
         })
     }
 
@@ -1679,10 +1927,26 @@ impl TraceReader for CTFSTraceReader {
     // ── Per-step data ───────────────────────────────────────────────
 
     fn step(&self, id: StepId) -> Option<&DbStep> {
+        // M24c-steps — on a PRODUCTION (non-column-aware) split bundle the step
+        // table is NOT materialized at open; a step is reconstructed LAZILY from
+        // the seekable `steps.dat` stream (filling only its chunk-aligned RANGE on
+        // first access, then memoized). `db.steps` is empty on this path, so we
+        // serve the borrow from the lazy cache. Every other path (legacy
+        // `events.log`, Rust-writer combined bundles, column-aware traces, value-
+        // less / pre-M24a bundles) leaves `lazy_steps` `None` and serves the
+        // fully-materialized `db.steps` — bit-for-bit unchanged.
+        if let Some(lazy) = self.lazy_steps.as_ref() {
+            return lazy.get(id);
+        }
         self.db.steps.get(id)
     }
 
     fn step_count(&self) -> usize {
+        // On the lazy step path `db.steps` is empty; the real count is the lazy
+        // cache's span (== the recorded step total).
+        if let Some(lazy) = self.lazy_steps.as_ref() {
+            return lazy.len();
+        }
         self.db.steps.len()
     }
 
@@ -1787,10 +2051,24 @@ impl TraceReader for CTFSTraceReader {
     }
 
     fn steps_on_line(&self, path_id: PathId, line: usize) -> Option<&Vec<DbStep>> {
+        // M24c-steps — the line-map accessors back breakpoint resolution. On the
+        // lazy step path the line→steps map is materialized ONCE on first demand
+        // (see `lazy_full_steps`) and served from there; identical to the eager
+        // `db.step_map`. Off the lazy path, serve the materialized map directly.
+        if self.lazy_steps.is_some() {
+            return self
+                .lazy_full_steps()
+                .step_map
+                .get(path_id.0)
+                .and_then(|by_line| by_line.get(&line));
+        }
         self.db.step_map.get(path_id).and_then(|by_line| by_line.get(&line))
     }
 
     fn step_map_for_path(&self, path_id: PathId) -> Option<&HashMap<usize, Vec<DbStep>>> {
+        if self.lazy_steps.is_some() {
+            return self.lazy_full_steps().step_map.get(path_id.0);
+        }
         self.db.step_map.get(path_id)
     }
 
@@ -1805,9 +2083,18 @@ impl TraceReader for CTFSTraceReader {
     }
 
     fn steps_from(&self, start_id: StepId) -> &[DbStep] {
+        // M24c-steps — `steps_from` backs genuinely O(trace) full scans
+        // (breakpoint-resolution Continue, step-over depth walks, history). On the
+        // lazy step path the contiguous `DbStep` array is materialized ONCE on
+        // first demand and served from there; identical to the eager `db.steps`.
+        let items: &[DbStep] = if self.lazy_steps.is_some() {
+            &self.lazy_full_steps().steps
+        } else {
+            &self.db.steps.items
+        };
         let start = start_id.0 as usize;
-        if start < self.db.steps.items.len() {
-            &self.db.steps.items[start..]
+        if start < items.len() {
+            &items[start..]
         } else {
             &[]
         }
