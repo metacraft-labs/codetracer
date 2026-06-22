@@ -531,8 +531,10 @@ pub fn replay_steps_into_sinks(
 // strategy is the active path: when the trace is available locally we can launch
 // MULTIPLE THREADS that examine DISJOINT RANGES of the step file in parallel and
 // merge the per-thread partials deterministically. The NETWORK forward strategy
-// (replay forward from a search hit over a streamed `.ct`) is M25c; it is left as
-// an explicit placeholder so M25c can slot in without touching the engine.
+// (replay forward from a search hit over a streamed `.ct`) is M25c, implemented
+// as the [`replay_forward_until`] / [`find_next_line_hit`] forward primitive
+// below behind the same `StepBuildStrategy::NetworkForward` seam — no change to
+// the engine.
 // ───────────────────────────────────────────────────────────────────────────
 
 /// How the on-demand WHOLE-TABLE step build populates the step views (M25b seam).
@@ -553,10 +555,19 @@ pub enum StepBuildStrategy {
         /// ranges). Clamped to `[1, count]` at build time.
         threads: usize,
     },
-    /// NETWORK forward-from-search trace (M25c placeholder, NOT active in M25b).
-    /// Reserved so the network access strategy can plug in later without
-    /// changing the engine or the whole-table sinks. The build falls back to the
-    /// sequential single-stream path until M25c implements it.
+    /// NETWORK forward-from-search trace (M25c). For a `.ct` streamed over the
+    /// network, random access is expensive, so a "find the next breakpoint /
+    /// tracepoint hit from position P" search must populate FORWARD from `P`
+    /// toward the hit ONLY — never touching the whole file. That search-scoped
+    /// forward population is [`find_next_line_hit`] / [`replay_forward_until`].
+    ///
+    /// The WHOLE-TABLE build ([`build_whole_step_table`]) under this strategy
+    /// still uses the sequential single-stream path: a whole-table build by
+    /// definition reads `[0, count)`, so there is nothing to bound forward — the
+    /// network win is in the SEARCH path, which avoids the whole-table build
+    /// entirely. (No live network `.ct` LOADER exists in the db-backend yet; the
+    /// forward primitive is implemented + unit-tested in isolation behind this
+    /// seam, ready to wire when network loading lands — see M25c.)
     NetworkForward,
 }
 
@@ -767,6 +778,142 @@ fn merge_partials(
     }
 
     (steps, step_map)
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// M25c — NETWORK forward-from-search population primitive.
+//
+// Owner guidance (M25c): "When the file is being loaded from the internet, it
+// makes sense to process the events only from the STARTING POINT of the search
+// going forward (when looking for the next breakpoint or tracepoint hit)."
+//
+// Where the M25b LOCAL strategy splits `[0, count)` into disjoint ranges and
+// builds the WHOLE table (random access is cheap on a local filesystem), the
+// NETWORK strategy must NOT touch the whole file: a "find the next hit of line L
+// (or a tracepoint) from position P" query should fetch/decompress ONLY the
+// chunks from `P` forward up to the FIRST matching step — and stop there.
+//
+// [`replay_forward_until`] is that primitive. It is built on the SAME M25a
+// engine ([`reconstruct_db_step`]) so a forward scan reconstructs each step
+// byte-identically to the lazy per-slot fill, the whole-table build, and the
+// omniscient build — the strategy changes only WHICH chunks get fetched, never
+// the answer.
+//
+// HONEST SCOPE: an audit found NO network/remote `.ct` LOADER in the db-backend
+// today (only an HTTP omniscient-PREP trigger). So this primitive cannot yet be
+// validated against a live streamed `.ct`; it is implemented + unit-tested in
+// ISOLATION over a local seekable stream (the chunk-fetch pattern is identical
+// regardless of where the bytes come from) and wired behind the existing
+// `StepBuildStrategy::NetworkForward` seam, ready for when network loading and
+// the search integration land. See the M25c milestone note.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Replay the seekable `steps.dat` stream FORWARD from `start_step`,
+/// reconstructing each `DbStep` ONCE (via [`reconstruct_db_step`]) and feeding
+/// it to `sink` in ascending index order, STOPPING as soon as `predicate(step)`
+/// is satisfied — the M25c network forward-from-search primitive.
+///
+/// Returns `Some(hit)` where `hit` is the FIRST step at-or-after `start_step`
+/// for which `predicate` returned `true` (its `step_id.0` equals the index it
+/// was found at), or `None` if the scan reached the end of the trace without a
+/// match.
+///
+/// ## Bounded fetch (the whole point)
+///
+/// The scan walks indices `start_step, start_step+1, …` and stops at the hit. A
+/// `steps.dat` read decompresses a fixed-size chunk and the reader caches the
+/// most-recent chunk, so an ascending forward scan inflates each chunk it
+/// touches AT MOST ONCE and touches ONLY the chunks spanning
+/// `[start_step, hit]`. When the hit is early, this is STRICTLY FEWER chunks
+/// than a whole-table build over `[0, count)` would inflate — the
+/// network-friendly property the M25c milestone requires. The
+/// [`SeekableStepStream::chunk_decompressions`] counter is the counter-proof.
+///
+/// The `sink` is populated INCREMENTALLY as the scan advances (chunk by chunk,
+/// bounded) — so a forward search can drive a search-scoped population (e.g. a
+/// partial line→step map) without ever building the whole table. The matching
+/// step itself IS handed to the sink before the scan stops, so the sink ends
+/// populated up to and including the hit.
+///
+/// `start_step` is clamped to `[0, call_keys.len()]`; a `start_step` at or past
+/// the end yields `None` immediately (no chunk is fetched).
+pub fn replay_forward_until(
+    stream: &SeekableStepStream,
+    call_keys: &[CallKey],
+    global_call_keys: &[CallKey],
+    start_step: usize,
+    mut predicate: impl FnMut(&DbStep) -> bool,
+    sink: &mut dyn StepReplaySink,
+) -> Option<StepId> {
+    let count = call_keys.len();
+    for index in start_step..count {
+        let step = reconstruct_db_step(stream, call_keys, global_call_keys, index);
+        // Populate the sink BEFORE testing the predicate so the search-scoped
+        // population includes the hit step (the next breakpoint/tracepoint hit
+        // is itself part of the data a caller wants populated).
+        sink.accept_step(index, &step);
+        if predicate(&step) {
+            return Some(StepId(index as i64));
+        }
+    }
+    None
+}
+
+/// A no-op [`StepReplaySink`] for forward scans that only need the HIT step id,
+/// not an incremental population (e.g. a pure `find_next_line_hit`). Using it
+/// keeps [`replay_forward_until`] the single forward-scan path whether or not
+/// the caller wants the steps materialized.
+#[derive(Debug, Default)]
+pub struct DiscardStepSink;
+
+impl StepReplaySink for DiscardStepSink {
+    fn accept_step(&mut self, _index: usize, _step: &DbStep) {}
+}
+
+/// Find the NEXT step at-or-after `from_step` whose source location is exactly
+/// `(path_id, line)`, according to `strategy` (M25c).
+///
+/// This is the search the breakpoint/tracepoint resolver drives ("find the next
+/// hit of line L from the current position"). The RESULT is identical across
+/// strategies — it is always the same next-hit step the full line→step map
+/// (`steps_on_line`) lookup would resolve. The strategy only changes WHICH
+/// chunks get fetched to compute it:
+///
+/// * [`StepBuildStrategy::NetworkForward`]: forward-scan from `from_step`
+///   through [`replay_forward_until`], decompressing ONLY the chunks from
+///   `from_step` up to the first match — never the whole trace. This is the
+///   network-friendly path: a found-early hit fetches far fewer chunks than a
+///   whole-table build.
+/// * [`StepBuildStrategy::Local`]: the LOCAL access is cheap, so this still
+///   forward-scans through the SAME primitive (identical result) — callers that
+///   want the whole-table line→step map use [`build_whole_step_table`] /
+///   `steps_on_line` directly; this entry point is the search-scoped primitive
+///   the NetworkForward strategy needs and the Local strategy can reuse.
+///
+/// Returns the matching [`StepId`], or `None` when no step at-or-after
+/// `from_step` lands on `(path_id, line)` (end-of-trace / no-further-hit).
+pub fn find_next_line_hit(
+    stream: &SeekableStepStream,
+    call_keys: &[CallKey],
+    global_call_keys: &[CallKey],
+    path_id: PathId,
+    line: Line,
+    from_step: usize,
+    _strategy: StepBuildStrategy,
+) -> Option<StepId> {
+    // Both strategies resolve the SAME next hit; the forward primitive fetches
+    // bounded chunks. (A future NETWORK loader can branch here to feed the
+    // search-scoped population into a partial map; today both paths only need
+    // the hit id, so a discarding sink keeps the scan allocation-free.)
+    let mut sink = DiscardStepSink;
+    replay_forward_until(
+        stream,
+        call_keys,
+        global_call_keys,
+        from_step,
+        |step| step.path_id == path_id && step.line == line,
+        &mut sink,
+    )
 }
 
 /// Sink that memoizes each reconstructed step into a `LazyStepCache`'s per-slot
@@ -1069,6 +1216,33 @@ impl LazyStepCache {
         strategy: StepBuildStrategy,
     ) -> (Vec<DbStep>, Vec<std::collections::HashMap<usize, Vec<DbStep>>>) {
         build_whole_step_table(&self.stream, &self.call_keys, &self.global_call_keys, path_count, strategy)
+    }
+
+    /// Find the NEXT step at-or-after `from_step` that lands on `(path_id,
+    /// line)`, delegating to the unified [`find_next_line_hit`] forward primitive
+    /// over this cache's seekable stream and resident call-key arrays (M25c).
+    ///
+    /// Under [`StepBuildStrategy::NetworkForward`] this fetches ONLY the
+    /// `steps.dat` chunks from `from_step` up to the hit — never the whole table
+    /// — yet returns the SAME step the whole-table `steps_on_line` lookup would.
+    /// This is the search-scoped population the breakpoint/tracepoint resolver
+    /// would drive over a streamed `.ct`; the whole-table build stays untouched.
+    pub fn find_next_line_hit(
+        &self,
+        path_id: PathId,
+        line: Line,
+        from_step: usize,
+        strategy: StepBuildStrategy,
+    ) -> Option<StepId> {
+        find_next_line_hit(
+            &self.stream,
+            &self.call_keys,
+            &self.global_call_keys,
+            path_id,
+            line,
+            from_step,
+            strategy,
+        )
     }
 
     /// Borrow step `step_id`, filling its RANGE from the seekable stream on first
