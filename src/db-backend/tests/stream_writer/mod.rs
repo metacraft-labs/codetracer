@@ -31,8 +31,12 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use codetracer_trace_types::{Line, PathId};
-use codetracer_trace_writer::meta_dat::{encode_meta_dat, FLAG_HAS_STEP_STREAM};
+use codetracer_trace_writer::call_stream::{encode_call_stream, CallStreamRecord};
+use codetracer_trace_writer::meta_dat::{
+    encode_meta_dat, FLAG_HAS_CALL_STREAM, FLAG_HAS_STEP_STREAM, FLAG_HAS_VALUE_STREAM,
+};
 use codetracer_trace_writer::step_stream::{encode_step_stream, StepStreamBuilder};
+use codetracer_trace_writer::value_stream::{encode_value_stream, ValueRecordEntry, ValueStreamEvent};
 use codetracer_trace_types::{StepRecord, TraceLowLevelEvent};
 
 const BLOCK_SIZE: usize = 4096;
@@ -44,8 +48,20 @@ const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
 const CTFS_VERSION_V4: u8 = 4;
 const BASE40_CHARS: &[u8; 40] = b"\x000123456789abcdefghijklmnopqrstuvwxyz./-";
 
-/// The fixed root-directory order of the three files this writer manages.
-const FILES: [&str; 3] = ["steps.dat", "steps.idx", "meta.dat"];
+/// The fixed root-directory order of the files this writer manages. The
+/// value/call streams are declared up front (size 0) so the multi-stream follow
+/// reader can open the container before any chunk of any stream exists, exactly
+/// as a live recorder creates the directory up front. A stream the test never
+/// flushes simply stays at size 0 (its FileEntry advertises an empty file).
+const FILES: [&str; 7] = [
+    "steps.dat",
+    "steps.idx",
+    "values.dat",
+    "values.idx",
+    "calls.dat",
+    "calls.idx",
+    "meta.dat",
+];
 
 fn base40_encode(name: &str) -> u64 {
     let mut encoded: u64 = 0;
@@ -80,6 +96,14 @@ pub struct IncrementalCtfsStreamWriter {
     all_steps: Vec<TraceLowLevelEvent>,
     /// Number of chunks already flushed to `steps.dat` / `steps.idx`.
     chunks_flushed: usize,
+    /// Accumulated value records, re-encoded whole on each value-chunk flush.
+    all_values: Vec<ValueRecordEntry>,
+    /// Number of chunks already flushed to `values.dat` / `values.idx`.
+    value_chunks_flushed: usize,
+    /// Accumulated call records, re-encoded whole on each call-chunk flush.
+    all_calls: Vec<CallStreamRecord>,
+    /// Number of chunks already flushed to `calls.dat` / `calls.idx`.
+    call_chunks_flushed: usize,
 }
 
 impl IncrementalCtfsStreamWriter {
@@ -110,6 +134,10 @@ impl IncrementalCtfsStreamWriter {
             files,
             all_steps: Vec::new(),
             chunks_flushed: 0,
+            all_values: Vec::new(),
+            value_chunks_flushed: 0,
+            all_calls: Vec::new(),
+            call_chunks_flushed: 0,
         };
 
         // Grow the backing file to cover the reserved blocks (block 0 + the
@@ -140,49 +168,117 @@ impl IncrementalCtfsStreamWriter {
         let stream = builder.finish();
         let encoded = encode_step_stream(&stream, self.chunk_size, 3).expect("encode_step_stream");
 
-        // `idx` layout: [chunk_size u32][offset_0 u64]...[offset_{n-1} u64].
-        // The new chunk is index `chunks_flushed`; its `.dat` bytes span
-        // [offset[c], offset[c+1]) (or to dat end for the last chunk).
         let c = self.chunks_flushed;
-        let offsets = parse_idx_offsets(&encoded.idx);
-        assert!(c < offsets.len(), "encoder produced fewer chunks than flushed");
-        let dat_start = offsets[c] as usize;
-        let dat_end = if c + 1 < offsets.len() {
-            offsets[c + 1] as usize
-        } else {
-            encoded.dat.len()
-        };
-        let chunk_dat = &encoded.dat[dat_start..dat_end];
-
-        // Append the chunk bytes to steps.dat.
-        self.append_to_file("steps.dat", chunk_dat)?;
-
-        // Append this chunk's offset to steps.idx. The on-disk steps.idx must be
-        // [chunk_size u32] followed by one u64 offset per flushed chunk. On the
-        // FIRST flush, write the 4-byte header too.
-        if c == 0 {
-            let mut idx_init = Vec::new();
-            idx_init.extend_from_slice(&(self.chunk_size as u32).to_le_bytes());
-            idx_init.extend_from_slice(&(offsets[0]).to_le_bytes());
-            self.append_to_file("steps.idx", &idx_init)?;
-        } else {
-            self.append_to_file("steps.idx", &offsets[c].to_le_bytes())?;
-        }
-
+        self.append_stream_chunk("steps.dat", "steps.idx", &encoded.dat, &encoded.idx, c)?;
         self.chunks_flushed += 1;
         self.flush_block_zero()?;
         self.file.flush()?;
         Ok(())
     }
 
+    /// Encode the accumulated value records and append the next chunk to
+    /// `values.dat` / `values.idx`, growing both files' `FileEntry.Size`.
+    ///
+    /// `new_values` is appended to the running value record list (one record per
+    /// step, parallel-indexed). Like [`Self::flush_chunk`], the whole value
+    /// stream is re-encoded and only the new chunk's bytes/offset are appended.
+    pub fn flush_value_chunk(&mut self, new_values: &[ValueRecordEntry]) -> std::io::Result<()> {
+        self.all_values.extend_from_slice(new_values);
+        let encoded = encode_value_stream(&self.all_values, self.chunk_size, 3).expect("encode_value_stream");
+        let c = self.value_chunks_flushed;
+        self.append_stream_chunk("values.dat", "values.idx", &encoded.dat, &encoded.idx, c)?;
+        self.value_chunks_flushed += 1;
+        self.flush_block_zero()?;
+        self.file.flush()?;
+        Ok(())
+    }
+
+    /// Encode the accumulated call records and append the next chunk to
+    /// `calls.dat` / `calls.idx`, growing both files' `FileEntry.Size`.
+    pub fn flush_call_chunk(&mut self, new_calls: &[CallStreamRecord]) -> std::io::Result<()> {
+        self.all_calls.extend_from_slice(new_calls);
+        let encoded = encode_call_stream(&self.all_calls, self.chunk_size, 3).expect("encode_call_stream");
+        let c = self.call_chunks_flushed;
+        self.append_stream_chunk("calls.dat", "calls.idx", &encoded.dat, &encoded.idx, c)?;
+        self.call_chunks_flushed += 1;
+        self.flush_block_zero()?;
+        self.file.flush()?;
+        Ok(())
+    }
+
+    /// Append the chunk at index `c` from a freshly-encoded `dat`/`idx` pair to
+    /// the on-disk `<name>.dat` / `<name>.idx`, growing both files'
+    /// `FileEntry.Size`. Shared by every per-stream flush so the
+    /// "extract chunk `c`'s bytes + its offset and append them" logic lives once.
+    ///
+    /// The on-disk `<name>.idx` is `[chunk_size u32]` followed by one u64 offset
+    /// per flushed chunk; on the FIRST flush we write the 4-byte header too.
+    fn append_stream_chunk(
+        &mut self,
+        dat_name: &str,
+        idx_name: &str,
+        dat: &[u8],
+        idx: &[u8],
+        c: usize,
+    ) -> std::io::Result<()> {
+        let offsets = parse_idx_offsets(idx);
+        assert!(c < offsets.len(), "encoder produced fewer chunks than flushed");
+        let dat_start = offsets[c] as usize;
+        let dat_end = if c + 1 < offsets.len() {
+            offsets[c + 1] as usize
+        } else {
+            dat.len()
+        };
+        self.append_to_file(dat_name, &dat[dat_start..dat_end])?;
+
+        if c == 0 {
+            let mut idx_init = Vec::new();
+            idx_init.extend_from_slice(&(self.chunk_size as u32).to_le_bytes());
+            idx_init.extend_from_slice(&offsets[0].to_le_bytes());
+            self.append_to_file(idx_name, &idx_init)?;
+        } else {
+            self.append_to_file(idx_name, &offsets[c].to_le_bytes())?;
+        }
+        Ok(())
+    }
+
     /// Commit `meta.dat` (with the `has_step_stream` flag) as the finalization
     /// signal, growing its `FileEntry.Size`.
     pub fn finalize(&mut self) -> std::io::Result<()> {
-        let meta = encode_meta_dat("rec", "prog", &[], "/wd", "test-recorder", &[], FLAG_HAS_STEP_STREAM);
+        self.finalize_with_flags(FLAG_HAS_STEP_STREAM)
+    }
+
+    /// Commit `meta.dat` advertising every split stream this writer flushed
+    /// (steps always; values/calls when at least one chunk of each was flushed),
+    /// as the finalization signal. Used by the multi-stream follow test so the
+    /// finalized container's capability flags match what was written.
+    pub fn finalize_all_streams(&mut self) -> std::io::Result<()> {
+        let mut flags = FLAG_HAS_STEP_STREAM;
+        if self.value_chunks_flushed > 0 {
+            flags |= FLAG_HAS_VALUE_STREAM;
+        }
+        if self.call_chunks_flushed > 0 {
+            flags |= FLAG_HAS_CALL_STREAM;
+        }
+        self.finalize_with_flags(flags)
+    }
+
+    /// Commit `meta.dat` with an explicit capability-flag set.
+    fn finalize_with_flags(&mut self, flags: u16) -> std::io::Result<()> {
+        let meta = encode_meta_dat("rec", "prog", &[], "/wd", "test-recorder", &[], flags);
         self.append_to_file("meta.dat", &meta)?;
         self.flush_block_zero()?;
         self.file.flush()?;
         Ok(())
+    }
+
+    /// A `ValueRecordEntry` carrying one `StepValues` event with the given
+    /// `(name_id, CBOR ValueRecord)` pairs — a convenience for building value
+    /// fixtures in the multi-stream follow test.
+    pub fn step_values_record(values: Vec<(u64, Vec<u8>)>) -> ValueRecordEntry {
+        ValueRecordEntry {
+            events: vec![ValueStreamEvent::StepValues { values }],
+        }
     }
 
     // ── internals ─────────────────────────────────────────────────────────
