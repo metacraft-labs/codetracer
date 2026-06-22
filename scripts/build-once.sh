@@ -6,30 +6,13 @@ set -euo pipefail
 # ``isonim/dsl/tailwind``, which ``staticRead``s that file at Nim compile
 # time — a missing file is an uncatchable compile error
 # (see isonim/src/isonim/dsl/tailwind.nim), so the ``frontend-ui-js``
-# build action fails without it. Regenerate it each run (cheap) from the
-# isonim sibling using its own ``build-tailwind`` recipe.
-isonim_root=""
-for candidate in ../isonim ../../isonim; do
-	if [ -f "$candidate/tools/tailwind-extract.mjs" ]; then
-		isonim_root="$(cd "$candidate" && pwd)"
-		break
-	fi
-done
-if [ -n "$isonim_root" ]; then
-	# Failures here must propagate: ui_js.nim's compile-time staticRead
-	# of build/tailwind-styles.json is uncatchable, so silently swallowing
-	# a tailwind-extract failure here only resurfaces as an opaque Nim
-	# compile error several minutes later. The isonim Justfile's
-	# ``build-tailwind`` recipe handles ``yarn install`` provisioning, so
-	# the recipe path is the preferred one when ``just`` is available.
-	if command -v just >/dev/null 2>&1; then
-		(cd "$isonim_root" && just build-tailwind)
-	else
-		(cd "$isonim_root" &&
-			{ [ -d node_modules ] || yarn install --frozen-lockfile; } &&
-			node tools/tailwind-extract.mjs)
-	fi
-fi
+# build action fails without it. ``build-tailwind.sh`` regenerates it each
+# run (cheap), driving the extract over BOTH isonim's and CodeTracer's own
+# ``.nim`` sources so frontend-only utility classes are not silently
+# dropped. Failures must propagate — the uncatchable staticRead otherwise
+# resurfaces as an opaque Nim compile error several minutes later.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$SCRIPT_DIR/build-tailwind.sh"
 
 # Reprobuild branch: macOS (Darwin) and Linux both use Nix tool
 # provisioning (the codetracer dev shell provisions every `uses:` tool
@@ -41,7 +24,19 @@ fi
 # and is built end-to-end via the local `repro` binary.
 case "$(uname -s)" in
 Darwin) ct_reprobuild_host="darwin" ;;
-Linux) ct_reprobuild_host="linux" ;;
+Linux)
+	# Reprobuild is the default build driver on macOS, but on Linux it is
+	# still experimental: keep `just build-once` on the legacy tup path by
+	# default while we gain more experience with reprobuild here. Developers
+	# can opt in per-invocation with CODETRACER_REPROBUILD_LINUX=1. Windows
+	# keeps the reprobuild branch because it has no tup fallback in this
+	# script.
+	if [ -n "${CODETRACER_REPROBUILD_LINUX:-}" ]; then
+		ct_reprobuild_host="linux"
+	else
+		ct_reprobuild_host=""
+	fi
+	;;
 MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
 *) ct_reprobuild_host="" ;;
 esac

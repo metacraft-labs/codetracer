@@ -1844,18 +1844,10 @@ sync-design-tokens:
 vm-test-prereqs:
   #!/usr/bin/env bash
   set -euo pipefail
-  isonim_root=""
-  for candidate in ../isonim ../../isonim; do
-    if [ -f "$candidate/tools/tailwind-extract.mjs" ]; then
-      isonim_root="$(cd "$candidate" && pwd)"
-      break
-    fi
-  done
-  if [ -z "$isonim_root" ]; then
-    echo "Error: isonim sibling not found (expected ../isonim)." >&2
-    exit 1
-  fi
-  (cd "$isonim_root" && just build-tailwind)
+  # Same tailwind-extract step build-once runs first, factored into a
+  # shared script so the style map scans CodeTracer's frontend .nim
+  # sources (not just isonim's recognized files).
+  bash scripts/build-tailwind.sh
 
 # Compile and run all ViewModel headless tests with the native (C) backend.
 test-vm-native: vm-test-prereqs
