@@ -26,6 +26,7 @@
 use std::path::PathBuf;
 
 use db_backend::ctfs_trace_reader::cow_namespace_reader::{CowLeafType, CowNamespaceReader};
+use db_backend::ctfs_trace_reader::cow_namespace_writer::CowNamespaceWriter;
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cow_namespace")
@@ -100,5 +101,58 @@ fn rust_reader_round_trips_nim_cow_image() {
         expected.len(),
         reader.commit_id(),
         reader.root_page()
+    );
+}
+
+/// M4 — emit a CoW namespace image written by the **Rust** writer
+/// ([`CowNamespaceWriter`]) plus its `(key, descriptor-hex)` manifest, into the
+/// shared fixtures dir. The Nim test `test_cow_btree.nim::"rust-written CoW
+/// image reads back through loadCowBTree"` reads it back, proving the Rust
+/// writer's on-disk page format is byte-compatible with the Nim reader — the
+/// reverse direction of `rust_reader_round_trips_nim_cow_image`, closing the
+/// bidirectional wire-format loop the M5/M6 Rust replay-time write path depends
+/// on.
+///
+/// This is a generator, not an assertion test: it writes the fixture, then
+/// re-reads it through the Rust reader as a self-check. The Nim consumer test
+/// skips cleanly when the fixture is absent.
+#[test]
+fn gen_rust_written_cow_fixture_for_nim() {
+    let dir = fixture_dir();
+    std::fs::create_dir_all(&dir).expect("create fixtures dir");
+
+    let mut w = CowNamespaceWriter::new(CowLeafType::TypeA, false);
+    // Force real leaf + internal splits (Type A order is (4096-8)/16 = 255).
+    const N: u64 = 300;
+    for i in 1..=N {
+        let key = i * 3;
+        w.insert_and_commit(key, &key.to_le_bytes()).expect("insert");
+    }
+    // In-place UPDATE so the latest committed value must win on read-back.
+    w.insert_and_commit(3 * 7, &0xDEAD_BEEFu64.to_le_bytes()).expect("update");
+
+    let image = w.serialize();
+    let image_path = dir.join("cow_btree_rust_typea.cowbt");
+    let manifest_path = dir.join("cow_btree_rust_typea.manifest");
+    std::fs::write(&image_path, &image).expect("write image");
+
+    let mut manifest = String::new();
+    for i in 1..=N {
+        let key = i * 3;
+        let val: u64 = if key == 21 { 0xDEAD_BEEF } else { key };
+        let hex: String = val.to_le_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        manifest.push_str(&format!("{key} {hex}\n"));
+    }
+    std::fs::write(&manifest_path, &manifest).expect("write manifest");
+
+    // Self-check: the Rust reader round-trips the Rust-written image.
+    let r = CowNamespaceReader::open(&image, CowLeafType::TypeA).expect("open Rust-written image");
+    assert_eq!(r.key_count().expect("count"), N as usize);
+    assert_eq!(r.lookup(21).expect("lookup 21"), &0xDEAD_BEEFu64.to_le_bytes());
+
+    eprintln!(
+        "OK: wrote Rust-written CoW fixture ({} keys) to {} for the Nim cross-read",
+        N,
+        image_path.display()
     );
 }

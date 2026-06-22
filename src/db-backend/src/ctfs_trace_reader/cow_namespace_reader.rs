@@ -332,6 +332,44 @@ impl<'a> CowNamespaceReader<'a> {
         })
     }
 
+    /// Every live key in the committed tree, ascending. Walks every leaf
+    /// reachable from the committed root. O(tree size); used by callers that
+    /// need to enumerate a small namespace's full key set (e.g. rebuilding the
+    /// `coverage.tc` in-memory row map at session start), not the hot path.
+    pub fn keys(&self) -> Result<Vec<u64>, CowNsError> {
+        let mut keys = Vec::new();
+        let mut stack = vec![self.root];
+        let page_count = self.image.len() / PAGE_SIZE;
+        // Guard against a corrupt cyclic image: never visit more pages than exist.
+        let mut budget = page_count + 1;
+        while let Some(page_num) = stack.pop() {
+            if budget == 0 {
+                return Err(CowNsError::OutOfBounds {
+                    section: "keys_budget",
+                    at: page_num,
+                });
+            }
+            budget -= 1;
+            let page = self.page_slice(page_num, "node")?;
+            let count = read_u16(page, 2, "node.count")? as usize;
+            if page[0] == KIND_LEAF {
+                for i in 0..count {
+                    keys.push(Self::node_key(page, i, "leaf.key")?);
+                }
+            } else {
+                for c in 0..=count {
+                    let child_off = NODE_HEADER_BYTES + count * 8 + c * 8;
+                    let child = read_u64(page, child_off, "internal.child")?;
+                    if child != 0 && (child as usize) < page_count {
+                        stack.push(child);
+                    }
+                }
+            }
+        }
+        keys.sort_unstable();
+        Ok(keys)
+    }
+
     /// Count the live keys by walking every leaf reachable from the committed
     /// root. O(tree size); used by tests / diagnostics, not the hot path.
     pub fn key_count(&self) -> Result<usize, CowNsError> {

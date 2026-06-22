@@ -5,9 +5,12 @@
 
 pub mod block_overlay;
 pub mod call_stream_source;
+pub mod coverage_namespace;
 pub mod cow_namespace_reader;
+pub mod cow_namespace_writer;
 pub mod ctfs_container;
 pub mod follow_stream_source;
+pub mod interval_tagged_map;
 pub mod meta_dat;
 pub mod step_map_namespace;
 pub mod step_value_stream_source;
