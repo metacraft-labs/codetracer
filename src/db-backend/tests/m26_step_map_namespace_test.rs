@@ -1,7 +1,7 @@
-//! M26 — BREAKPOINT line→step resolution PREFERS the prepopulated `step-map.ns`
-//! breakpoint index when a `.ct` carries one, WITHOUT materializing the whole
-//! step table; and falls back to the M24c lazy / M25b parallel whole-table build
-//! when the index is absent.
+//! M26 / M26b — BREAKPOINT line→step resolution PREFERS the prepopulated
+//! `step-map.ns` breakpoint index when a `.ct` carries one, WITHOUT materializing
+//! the whole step table; and falls back to the M24c lazy / M25b parallel
+//! whole-table build when the index is absent.
 //!
 //! ## What this proves
 //!
@@ -14,18 +14,23 @@
 //! 3. FALLBACK — a bundle WITHOUT the index resolves correctly via the
 //!    whole-table build (unchanged M24c/M25b behaviour).
 //!
-//! ## Why the index here is REAL, not faked
+//! ## M26b — the index is REAL and PRODUCED BY THE NIM WRITER
 //!
-//! No production writer emits `step-map.ns` yet (the Nim `MultiStreamTraceWriter`
-//! has only an opt-in, tests-only, never-serialized `LinehitsBuilder`; the
-//! spec's `STMP` namespace has no emitter). So this test DERIVES the index from
-//! the SAME recorded steps the whole-table build reconstructs — by replaying the
-//! production bundle's whole-table line→step map and serializing it through the
-//! production `serialize_step_map` into the spec's §4.1 `STMP` layout, dropped as
-//! a `<ct>.step-map.ns` sidecar. The index therefore contains exactly the data a
-//! recording-time emitter would compute; M26 wires the CONSUMER, and production
-//! emission is a separate writer-side toggle (documented in the module + the
-//! milestone).
+//! As of M26b the Nim `MultiStreamTraceWriter` EMITS the spec's §4.1 `STMP`
+//! namespace as a container-internal `step-map.ns` file BY DEFAULT on the
+//! line-only production write path (see
+//! `codetracer-trace-format-nim/src/codetracer_trace_writer/step_map_builder.nim`
+//! and `multi_stream_writer.nim`). So `write_production_bundle` below — the exact
+//! FFI write path every live recorder drives — now yields a `.ct` that ALREADY
+//! carries the prepopulated breakpoint table. This test closes the write↔read
+//! loop: the bytes the Nim writer serialized are parsed back by the M26 Rust
+//! consumer (`StepMapNamespace::parse`) and asserted IDENTICAL to the whole-table
+//! `step_map_for_path` derivation, line by line.
+//!
+//! For the FALLBACK / malformed scenarios we need a bundle WITHOUT a usable
+//! internal index. Since emission is now default-on, those bundles are
+//! synthesized by STRIPPING the `step-map.ns` root entry from a produced `.ct`
+//! (`strip_internal_step_map`) — yielding a genuine legacy (pre-M26b) bundle.
 //!
 //! Requires the `nim-reader` feature (the production split-stream reader).
 
@@ -34,11 +39,11 @@
 
 use std::path::{Path, PathBuf};
 
-use codetracer_trace_types::{Line, PathId, StepId, TypeId, TypeKind, ValueRecord};
+use codetracer_trace_types::{Line, StepId, TypeId, TypeKind, ValueRecord};
 
 use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
 
-use db_backend::ctfs_trace_reader::step_map_namespace::{serialize_step_map, StepMapNamespace, STEP_MAP_FILE};
+use db_backend::ctfs_trace_reader::step_map_namespace::{StepMapNamespace, STEP_MAP_FILE};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::trace_reader::TraceReader;
 
@@ -104,33 +109,69 @@ fn expected_step_count() -> usize {
     USER_STEPS + 2
 }
 
-/// Build the `step-map.ns` SIDECAR for a bundle by REPLAYING its whole-table
-/// line→step map (the exact data the whole-table build produces) and
-/// serializing it into the spec's §4.1 `STMP` layout. This is the data a
-/// recording-time emitter would write — derived from the trace, never faked.
-fn write_step_map_sidecar(ct_path: &Path) {
-    // Open WITHOUT a sidecar present, then drive the whole-table line→step map
-    // through `step_map_for_path` (the M24c/M25b build) to get the ground-truth
-    // (path, line) -> [step_id] data.
-    let reader = CTFSTraceReader::open(ct_path).expect("open production for sidecar build");
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
-    let line_map = reader
-        .step_map_for_path(path_id)
-        .expect("path has a whole-table line map")
-        .clone();
-
-    let mut entries: Vec<(PathId, usize, Vec<StepId>)> = Vec::new();
-    for (line, steps) in line_map.iter() {
-        let ids: Vec<StepId> = steps.iter().map(|s| s.step_id).collect();
-        entries.push((path_id, *line, ids));
+/// The CTFS base40 file-name alphabet (`\0`, `0-9`, `a-z`, `.`, `/`, `-`),
+/// matching `codetracer-trace-format-nim/src/codetracer_ctfs/base40.nim` and the
+/// reader's `base40_encode`. Used only to LOCATE the `step-map.ns` root entry
+/// when synthesizing a legacy (no-index) bundle.
+fn base40_encode(name: &str) -> u64 {
+    let mut val: u64 = 0;
+    let mut mult: u64 = 1;
+    for i in 0..12 {
+        let mut idx: u64 = 0;
+        if let Some(c) = name.as_bytes().get(i).copied() {
+            idx = match c {
+                b'0'..=b'9' => (c - b'0') as u64 + 1,
+                b'a'..=b'z' => (c - b'a') as u64 + 11,
+                b'.' => 37,
+                b'/' => 38,
+                b'-' => 39,
+                _ => 0,
+            };
+        }
+        val += idx * mult;
+        mult *= 40;
     }
+    val
+}
 
-    let blob = serialize_step_map(&entries);
-    let mut name = ct_path.file_name().unwrap().to_os_string();
-    name.push(".");
-    name.push(STEP_MAP_FILE);
-    let sidecar = ct_path.parent().unwrap().join(name);
-    std::fs::write(&sidecar, &blob).expect("write step-map.ns sidecar");
+/// Synthesize a LEGACY (pre-M26b) bundle from a produced `.ct` by zeroing the
+/// `step-map.ns` root directory entry in place. The CTFS root layout is
+/// `[8-byte header][8-byte ext header][31 x 24-byte file entries]`, each entry
+/// `[size:u64][map_block:u64][name:u64]` (see the reader's container parse). A
+/// zeroed entry is skipped at open, so the resulting bundle reads exactly as a
+/// pre-M26b `.ct` that never carried the index — exercising the whole-table
+/// fallback. Panics if the entry is not found (the writer must have emitted it).
+fn strip_internal_step_map(ct_path: &Path) {
+    const HEADER_SIZE: usize = 8;
+    const EXT_HEADER_SIZE: usize = 8;
+    const FILE_ENTRY_SIZE: usize = 24;
+    const MAX_ROOT_ENTRIES: usize = 31;
+
+    let target = base40_encode(STEP_MAP_FILE);
+    let mut data = std::fs::read(ct_path).expect("read produced .ct");
+    let entry_start = HEADER_SIZE + EXT_HEADER_SIZE;
+    let mut stripped = false;
+    for i in 0..MAX_ROOT_ENTRIES {
+        let off = entry_start + i * FILE_ENTRY_SIZE;
+        if off + FILE_ENTRY_SIZE > data.len() {
+            break;
+        }
+        let name = u64::from_le_bytes(data[off + 16..off + 24].try_into().unwrap());
+        if name == target {
+            // Zero the whole 24-byte entry so the reader treats the slot as free.
+            for b in &mut data[off..off + FILE_ENTRY_SIZE] {
+                *b = 0;
+            }
+            stripped = true;
+            break;
+        }
+    }
+    assert!(
+        stripped,
+        "step-map.ns root entry must be present (the Nim writer emits it by default) — \
+         M26b regression if missing"
+    );
+    std::fs::write(ct_path, &data).expect("rewrite stripped .ct");
 }
 
 /// The ground-truth `(line -> ascending step ids)` set the whole-table build
@@ -148,13 +189,13 @@ fn expected_line_steps(line: usize) -> Vec<StepId> {
 #[test]
 fn bundle_with_step_map_attaches_index() {
     let dir = tempfile::tempdir().unwrap();
+    // M26b — the Nim writer emits step-map.ns by default; no sidecar needed.
     let ct = write_production_bundle(dir.path());
-    write_step_map_sidecar(&ct);
 
     let reader = CTFSTraceReader::open(&ct).expect("open with step-map.ns");
     assert!(
         reader.has_prepopulated_step_map(),
-        "a bundle carrying step-map.ns must attach the prepopulated index"
+        "a production bundle must carry the Nim-emitted step-map.ns and attach the prepopulated index"
     );
 
     let ns: &StepMapNamespace = reader.step_map().expect("index attached");
@@ -174,7 +215,6 @@ fn bundle_with_step_map_attaches_index() {
 fn index_resolution_matches_whole_table() {
     let dir = tempfile::tempdir().unwrap();
     let ct = write_production_bundle(dir.path());
-    write_step_map_sidecar(&ct);
 
     let reader = CTFSTraceReader::open(&ct).expect("open with step-map.ns");
     let path_id = reader.path_id_for(SRC).expect("source path interned");
@@ -202,7 +242,6 @@ fn index_resolution_matches_whole_table() {
 fn index_resolution_does_not_build_whole_table() {
     let dir = tempfile::tempdir().unwrap();
     let ct = write_production_bundle(dir.path());
-    write_step_map_sidecar(&ct);
 
     let reader = CTFSTraceReader::open(&ct).expect("open with step-map.ns");
     let path_id = reader.path_id_for(SRC).expect("source path interned");
@@ -239,7 +278,9 @@ fn index_resolution_does_not_build_whole_table() {
 fn bundle_without_step_map_falls_back_to_whole_table() {
     let dir = tempfile::tempdir().unwrap();
     let ct = write_production_bundle(dir.path());
-    // NO sidecar written.
+    // Synthesize a LEGACY bundle by stripping the Nim-emitted internal index, so
+    // the whole-table fallback path is exercised exactly as on a pre-M26b `.ct`.
+    strip_internal_step_map(&ct);
 
     let reader = CTFSTraceReader::open(&ct).expect("open without step-map.ns");
     assert!(
@@ -277,17 +318,21 @@ fn bundle_without_step_map_falls_back_to_whole_table() {
 #[test]
 fn index_and_fallback_agree() {
     let dir = tempfile::tempdir().unwrap();
-    let ct = write_production_bundle(dir.path());
 
-    // Fallback reader (no sidecar).
-    let fallback = CTFSTraceReader::open(&ct).expect("open fallback");
-    let fpath = fallback.path_id_for(SRC).expect("path");
-
-    // Index reader (with sidecar).
-    write_step_map_sidecar(&ct);
-    let indexed = CTFSTraceReader::open(&ct).expect("open indexed");
+    // Indexed reader — the native bundle carries the Nim-emitted step-map.ns.
+    let indexed_ct = write_production_bundle(dir.path());
+    let indexed = CTFSTraceReader::open(&indexed_ct).expect("open indexed");
     let ipath = indexed.path_id_for(SRC).expect("path");
     assert!(indexed.has_prepopulated_step_map());
+
+    // Fallback reader — a separate bundle with the internal index stripped, so it
+    // resolves via the whole-table build.
+    let fallback_dir = tempfile::tempdir().unwrap();
+    let fallback_ct = write_production_bundle(fallback_dir.path());
+    strip_internal_step_map(&fallback_ct);
+    let fallback = CTFSTraceReader::open(&fallback_ct).expect("open fallback");
+    let fpath = fallback.path_id_for(SRC).expect("path");
+    assert!(!fallback.has_prepopulated_step_map());
 
     for line_off in 0..DISTINCT_LINES {
         let line = 10 + line_off;
@@ -309,6 +354,12 @@ fn index_and_fallback_agree() {
 fn malformed_step_map_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let ct = write_production_bundle(dir.path());
+
+    // Strip the (valid) internal index so the corrupt SIDECAR is the only
+    // candidate — otherwise the internal index (which takes precedence) would
+    // mask the malformed sidecar and this test wouldn't exercise the bad-bytes
+    // path.
+    strip_internal_step_map(&ct);
 
     // Write a corrupt sidecar (bad magic).
     let mut name = ct.file_name().unwrap().to_os_string();
