@@ -312,12 +312,14 @@
           transition: opacity 0.2s ease, visibility 0.2s ease
           pointer-events: none
           z-index: 1000
-          max-width: 25em
+          max-width: 40em
           line-height: 1.4
+          overflow-wrap: break-word
+          word-break: break-all
           // Position is set via JavaScript on hover (right of the trace row).
-          // Safe off-screen default so it never flashes at center.
-          left: -624.9375em
-          top: -624.9375em
+          // Off-screen default in px so it never flashes at center.
+          left: -9999px
+          top: -9999px
           transform: none
 
     // Recent folders styles - in welcome-left-panel
