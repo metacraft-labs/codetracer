@@ -296,6 +296,227 @@ fn decode_value(blob: &[u8]) -> ValueRecord {
     }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// M25a — UNIFIED, range-scoped CTFS-stream replay engine.
+//
+// Owner guidance (M25): "Most likely we can end up with the SAME code that
+// builds the omniscient DB tables and populates the local in-memory tables
+// during replay by processing the events in the other regular CTFS streams
+// until a breakpoint is hit." So the M24c lazy on-demand population
+// (`LazyStepCache`/`LazyValueCache` range fill), the on-first-demand whole-table
+// build (`lazy_full_steps`), and — when wired — the omniscient line-hit build
+// must all share ONE "replay the regular CTFS streams forward over a step
+// RANGE, reconstruct each step, populate the target sinks" routine, not two (or
+// three) parallel implementations.
+//
+// The engine here is the single event-processing core. It is RANGE-PARAMETERIZED
+// (it walks an arbitrary `Range<usize>` of step indices, building on M24c's
+// range awareness) so the later M25b (LOCAL parallel-over-disjoint-ranges) and
+// M25c (NETWORK forward-from-search) access strategies can drive it over their
+// own ranges WITHOUT changing the per-step processing — they only choose WHICH
+// ranges to replay and on WHICH threads. That access-strategy seam is left for
+// M25b/M25c; this milestone unifies the processing core only.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Reconstruct a single `DbStep` for step `index` from the seekable `steps.dat`
+/// stream plus the resident per-step call-key arrays — the ONE place a `DbStep`
+/// is built on the lazy/replay path.
+///
+/// This is the exact reconstruction the M24c `LazyStepCache::reconstruct` did
+/// inline; it is hoisted to a free function so every replay sink and every
+/// range-fill caller produces byte-identical steps. Steps whose stream record
+/// carries no source line (a Raise/Catch/ThreadSwitch marker) — or an
+/// out-of-range read — degrade to a `(PathId(0), Line(0))` location, the same
+/// neutral slot the materialized path produced for a marker step. `column` is
+/// always `None`: the lazy/replay path is only taken for NON-column-aware
+/// traces (column-aware traces keep eager materialization), exactly as the M24c
+/// routing documents.
+pub fn reconstruct_db_step(
+    stream: &SeekableStepStream,
+    call_keys: &[CallKey],
+    global_call_keys: &[CallKey],
+    index: usize,
+) -> DbStep {
+    let (path_id, line) = stream.step_line(StepId(index as i64)).unwrap_or((PathId(0), Line(0)));
+    DbStep {
+        step_id: StepId(index as i64),
+        path_id,
+        line,
+        column: None,
+        call_key: call_keys.get(index).copied().unwrap_or(CallKey(-1)),
+        global_call_key: global_call_keys.get(index).copied().unwrap_or(CallKey(-1)),
+    }
+}
+
+/// A SINK the unified replay engine feeds each reconstructed step into.
+///
+/// The engine ([`replay_steps_into_sinks`]) owns the "walk a step RANGE, decode
+/// each `steps.dat` record once, reconstruct the `DbStep`" loop; a sink decides
+/// what to DO with each step. This is the M25a unification seam: the M24c
+/// per-slot lazy cache, the whole-table line→step map build, and the omniscient
+/// line-hit build are all just different sinks over the SAME engine, so the
+/// event-processing logic exists exactly once.
+pub trait StepReplaySink {
+    /// Accept the reconstructed `DbStep` at `index`. Called once per step in the
+    /// engine's range, in ascending index order.
+    fn accept_step(&mut self, index: usize, step: &DbStep);
+}
+
+/// Sink that records every step's `(file_id, line, step_id)` as an omniscient
+/// LINE-HIT (`linehits.tc`), keyed by source line — the same line→step/tick
+/// mapping `FfiOmniscientDb::push_line_hit` builds recorder-side.
+///
+/// This is the concrete proof that the omniscient-DB build and the lazy
+/// in-memory population now go through the SAME engine: the lazy step path runs
+/// [`replay_steps_into_sinks`] with the in-memory step sinks; an omniscient build
+/// runs the SAME engine with THIS sink to populate `linehits.tc`. The engine
+/// processes each `steps.dat` event exactly once for either target.
+///
+/// We collect into a plain `Vec` (rather than calling the FFI directly) so the
+/// engine stays free of FFI/locking concerns and the omniscient build path can
+/// drive the actual `push_line_hit` from the collected hits under whatever
+/// locking discipline it already holds (see `omniscient_db::omniscient_ffi_lock`).
+/// A step's `tick` on the line-only materialized path is its step index — the
+/// monotonic execution counter the line-hit index keys on.
+#[derive(Debug, Default)]
+pub struct LineHitSink {
+    /// `(file_id, line, tick)` triples in step order, ready to feed
+    /// `FfiOmniscientDb::push_line_hit`.
+    hits: Vec<(u32, u32, u64)>,
+}
+
+impl LineHitSink {
+    /// A fresh, empty line-hit sink.
+    pub fn new() -> Self {
+        LineHitSink { hits: Vec::new() }
+    }
+
+    /// The collected `(file_id, line, tick)` line-hit triples, in step order.
+    pub fn hits(&self) -> &[(u32, u32, u64)] {
+        &self.hits
+    }
+
+    /// Consume the sink, returning the collected line-hit triples.
+    pub fn into_hits(self) -> Vec<(u32, u32, u64)> {
+        self.hits
+    }
+}
+
+impl StepReplaySink for LineHitSink {
+    fn accept_step(&mut self, index: usize, step: &DbStep) {
+        // Only steps with a real source line contribute a line hit — exactly the
+        // `line.0 >= 0` guard the in-memory `step_map` build uses, so the two
+        // sinks see a consistent line→step set for the same range.
+        if step.line.0 >= 0 {
+            self.hits.push((step.path_id.0 as u32, step.line.0 as u32, index as u64));
+        }
+    }
+}
+
+/// Sink that builds the WHOLE-TABLE step views the slice / line-map accessors
+/// need: the contiguous `DbStep` array (backing `steps_from`) and the
+/// path → line → `[DbStep]` map (backing `steps_on_line` / `step_map_for_path`).
+///
+/// This is the same per-step processing the M24c `lazy_full_steps` loop did
+/// inline; hoisting it into a sink lets the on-first-demand whole-table build
+/// run through the SAME unified engine as the lazy per-slot fill and the
+/// omniscient build (M25a). Driving it over `[0, count)` reproduces the eager
+/// `open_new_format_nim` step-loop's `db.steps` / `db.step_map` byte-for-byte.
+pub struct WholeStepTableSink {
+    /// Contiguous reconstructed steps, pushed in ascending index order.
+    steps: Vec<DbStep>,
+    /// Per-path `line → [DbStep]` map, pre-sized to the trace's path count.
+    step_map: Vec<std::collections::HashMap<usize, Vec<DbStep>>>,
+}
+
+impl WholeStepTableSink {
+    /// A whole-table sink pre-sized for `path_count` paths and `step_count`
+    /// steps (capacity hints only — the map grows if a step references a
+    /// higher path id, exactly as the eager loop's `while step_map.len() <= …`
+    /// guard does).
+    pub fn new(path_count: usize, step_count: usize) -> Self {
+        let mut step_map = Vec::with_capacity(path_count);
+        step_map.resize_with(path_count, std::collections::HashMap::new);
+        WholeStepTableSink {
+            steps: Vec::with_capacity(step_count),
+            step_map,
+        }
+    }
+
+    /// Consume the sink, returning `(steps, step_map)`.
+    pub fn into_parts(self) -> (Vec<DbStep>, Vec<std::collections::HashMap<usize, Vec<DbStep>>>) {
+        (self.steps, self.step_map)
+    }
+}
+
+impl StepReplaySink for WholeStepTableSink {
+    fn accept_step(&mut self, _index: usize, step: &DbStep) {
+        self.steps.push(*step);
+        let path_id = step.path_id.0;
+        while self.step_map.len() <= path_id {
+            self.step_map.push(std::collections::HashMap::new());
+        }
+        if step.line.0 >= 0 {
+            self.step_map[path_id].entry(step.line.0 as usize).or_default().push(*step);
+        }
+    }
+}
+
+/// The UNIFIED replay engine (M25a).
+///
+/// Walks the step `range` over the seekable `steps.dat` stream, reconstructing
+/// each `DbStep` ONCE (via [`reconstruct_db_step`]) and feeding it to every sink
+/// in ascending index order. Range-scoped by construction: callers pass the
+/// exact `[lo, hi)` they need (one chunk for a point lookup, `[0, count)` for a
+/// whole-table build, or a disjoint shard for a future M25b parallel fill) and
+/// the engine touches only that range — it never materializes the whole table
+/// unless the caller asks for `[0, count)`.
+///
+/// Because `steps.dat` reads decompress a fixed-size chunk and the reader caches
+/// the most-recent chunk, iterating a contiguous range ascending inflates each
+/// chunk at most once (the M24c bounded-decompression property is preserved —
+/// the engine does not change the read pattern, only consolidates the loop).
+///
+/// The range is clamped to `[0, call_keys.len())` so an out-of-range request is
+/// a no-op rather than a panic.
+pub fn replay_steps_into_sinks(
+    stream: &SeekableStepStream,
+    call_keys: &[CallKey],
+    global_call_keys: &[CallKey],
+    range: std::ops::Range<usize>,
+    sinks: &mut [&mut dyn StepReplaySink],
+) {
+    let lo = range.start;
+    let hi = std::cmp::min(range.end, call_keys.len());
+    for index in lo..hi {
+        let step = reconstruct_db_step(stream, call_keys, global_call_keys, index);
+        for sink in sinks.iter_mut() {
+            sink.accept_step(index, &step);
+        }
+    }
+}
+
+/// Sink that memoizes each reconstructed step into a `LazyStepCache`'s per-slot
+/// `OnceCell` array (M25a). This is what `LazyStepCache::fill_range_for` feeds
+/// the unified engine, so the lazy per-slot fill shares the engine with the
+/// whole-table / omniscient sinks instead of looping the reconstruction inline.
+///
+/// `get_or_init` keeps the fill idempotent: an already-populated neighbour slot
+/// is left as-is (the reconstructed step the engine hands us is simply dropped),
+/// preserving the exact populated-set / bounded-decompression behaviour the M24c
+/// range-aware fill had (a step already in the cache is never overwritten).
+struct SlotFillSink<'a> {
+    slots: &'a [OnceCell<DbStep>],
+}
+
+impl StepReplaySink for SlotFillSink<'_> {
+    fn accept_step(&mut self, index: usize, step: &DbStep) {
+        if let Some(slot) = self.slots.get(index) {
+            let _ = slot.get_or_init(|| *step);
+        }
+    }
+}
+
 /// A LAZY, per-step value cache backing the borrowing `variables_at()` accessor
 /// for a PRODUCTION split bundle (M24c).
 ///
@@ -517,40 +738,45 @@ impl LazyStepCache {
     }
 
     /// Reconstruct a single `DbStep` from the seekable stream + the resident
-    /// call-key arrays. Steps whose stream record carries no source line (a
-    /// Raise/Catch/ThreadSwitch marker) — or an out-of-range read — degrade to a
-    /// `(PathId(0), Line(0))` location, the same neutral slot the materialized
-    /// path produced for a marker step.
+    /// call-key arrays. Delegates to the UNIFIED [`reconstruct_db_step`] so the
+    /// lazy path, the whole-table build, and the omniscient build all produce
+    /// byte-identical steps (M25a).
     fn reconstruct(&self, index: usize) -> DbStep {
-        let (path_id, line) = self
-            .stream
-            .step_line(StepId(index as i64))
-            .unwrap_or((PathId(0), Line(0)));
-        DbStep {
-            step_id: StepId(index as i64),
-            path_id,
-            line,
-            // Non-column-aware route only — see the type docs.
-            column: None,
-            call_key: self.call_keys.get(index).copied().unwrap_or(CallKey(-1)),
-            global_call_key: self.global_call_keys.get(index).copied().unwrap_or(CallKey(-1)),
-        }
+        reconstruct_db_step(&self.stream, &self.call_keys, &self.global_call_keys, index)
     }
 
     /// Fill every still-empty slot in the chunk-aligned RANGE that contains
-    /// `index`. Reading the FIRST slot in the range decompresses that chunk once;
-    /// the remaining reads in the same range are cache hits on the stream's
-    /// one-chunk cache, so the whole range is populated for a single
-    /// decompression. Range awareness: a point lookup populates exactly its
-    /// chunk's slots, never the whole array.
+    /// `index`, driving the UNIFIED [`replay_steps_into_sinks`] engine over that
+    /// range with a slot-filling sink (M25a). Reading the FIRST slot in the range
+    /// decompresses that chunk once; the remaining reads in the same range are
+    /// cache hits on the stream's one-chunk cache, so the whole range is populated
+    /// for a single decompression. Range awareness: a point lookup populates
+    /// exactly its chunk's slots, never the whole array.
     fn fill_range_for(&self, index: usize) {
         let lo = (index / self.chunk_size) * self.chunk_size;
         let hi = std::cmp::min(lo + self.chunk_size, self.slots.len());
-        for i in lo..hi {
-            // `get_or_init` only reconstructs (and thus reads the stream) when the
-            // slot is empty; already-filled neighbours are skipped.
-            let _ = self.slots[i].get_or_init(|| self.reconstruct(i));
-        }
+        let mut sink = SlotFillSink { slots: &self.slots };
+        replay_steps_into_sinks(
+            &self.stream,
+            &self.call_keys,
+            &self.global_call_keys,
+            lo..hi,
+            &mut [&mut sink],
+        );
+    }
+
+    /// Replay a step `range` into a set of EXTERNAL sinks (M25a) through the
+    /// SAME unified engine the per-slot fill uses, reusing this cache's seekable
+    /// `steps.dat` stream and resident call-key arrays. This is the shared entry
+    /// the on-first-demand whole-table build (`lazy_full_steps`) and the
+    /// omniscient line-hit build drive, so no caller re-implements the
+    /// "decode each step, reconstruct it, populate the target" logic.
+    ///
+    /// The lazy per-slot cache is NOT touched here — the external sinks own their
+    /// own storage. Iterating `[0, len())` ascending inflates each `steps.dat`
+    /// chunk at most once (the engine preserves the read pattern).
+    pub fn replay_range(&self, range: std::ops::Range<usize>, sinks: &mut [&mut dyn StepReplaySink]) {
+        replay_steps_into_sinks(&self.stream, &self.call_keys, &self.global_call_keys, range, sinks);
     }
 
     /// Borrow step `step_id`, filling its RANGE from the seekable stream on first

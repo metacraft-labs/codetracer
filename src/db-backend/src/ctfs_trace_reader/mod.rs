@@ -281,30 +281,18 @@ impl CTFSTraceReader {
                     step_map: Vec::new(),
                 };
             };
+            // M25a — build the whole-table view through the SAME unified replay
+            // engine the lazy per-slot fill uses, just over the FULL `[0, count)`
+            // range with a whole-table sink. The per-step processing (reconstruct
+            // the `DbStep`, push it, index it into the line→step map) lives once,
+            // in `step_value_stream_source`, so this whole-table build and the
+            // lazy point-lookup fill can never diverge. Iterating ascending
+            // inflates each `steps.dat` chunk at most once.
             let count = lazy.len();
-            let mut steps: Vec<DbStep> = Vec::with_capacity(count);
-            // Build the same line→steps map the eager loop built: one HashMap per
-            // path id, keyed by line, holding every step on that line in step order.
             let path_count = self.db.paths.len();
-            let mut step_map: Vec<HashMap<usize, Vec<DbStep>>> = Vec::with_capacity(path_count);
-            step_map.resize_with(path_count, HashMap::new);
-            for i in 0..count {
-                let sid = StepId(i as i64);
-                // `get` fills the step's chunk-aligned range; iterating in order
-                // touches each chunk exactly once.
-                let step = match lazy.get(sid) {
-                    Some(s) => *s,
-                    None => continue,
-                };
-                steps.push(step);
-                let path_id = step.path_id;
-                while step_map.len() <= path_id.0 {
-                    step_map.push(HashMap::new());
-                }
-                if step.line.0 >= 0 {
-                    step_map[path_id.0].entry(step.line.0 as usize).or_default().push(step);
-                }
-            }
+            let mut sink = step_value_stream_source::WholeStepTableSink::new(path_count, count);
+            lazy.replay_range(0..count, &mut [&mut sink]);
+            let (steps, step_map) = sink.into_parts();
             LazyFullSteps { steps, step_map }
         })
     }
