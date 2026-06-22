@@ -100,7 +100,25 @@ const MultiStmtLine = 2
 const ColLetA = 9
 const ColLetB = 27
 const ColLetC = 45
-const AssertLine = 3
+# The real `nargo trace` does NOT record a step on the `assert(...)`
+# source line (line 3): the Noir tracer steps the constraint system
+# statement-by-statement and the assertion constraint collapses into
+# the function epilogue, so the recorded statement steps are line 1
+# (entry), line 2 (the three `let`s at cols 9/27/45) and the closing
+# brace.  A line-only breakpoint therefore must target a line that the
+# recorder genuinely emits — line 2, the multi-statement line — rather
+# than the `assert` line the recorder never visits.  This mirrors how
+# the Cairo / Wasm sibling tests anchor their line-only case on a
+# guaranteed-present landing site.
+#
+# At launch the headless session is already stopped on the FIRST step
+# of line 2 (col 9 = `a`).  A column-less `continue` with a line-only
+# breakpoint on line 2 therefore advances forward and stops on the NEXT
+# recorded step that still satisfies the (line-only) breakpoint — col
+# 27 (`b`).  That the match ignores the column (it fires on `b` even
+# though no column was supplied) is exactly the back-compat guarantee
+# under test; the distinct column-aware case (which would skip `b` and
+# require an explicit column) is covered by the other two tests.
 
 proc fixtureDir(): string =
   result = getTempDir() / ("ct_column_noir_vm_" & $getCurrentProcessId())
@@ -186,12 +204,29 @@ suite "M1 — Column-aware breakpoint through the ViewModel (Noir)":
       check afterCol.get() == ColLetB
 
   test "test_column_noir_vm_line_only_breakpoint_preserved":
-    ## Back-compat: ``setBreakpoint`` with ``column = 0`` MUST stop at
-    ## the first step of the matched line and surface column=None on
-    ## the DAP response.
+    ## Back-compat: ``setBreakpoint`` with ``column = 0`` MUST bind to
+    ## the line regardless of column and surface column=None on the DAP
+    ## response, and a subsequent ``continue`` MUST stop on a recorded
+    ## step of that line whose column it did NOT have to match.
+    ##
+    ## We anchor on ``MultiStmtLine`` (line 2) — a line the Noir tracer
+    ## genuinely records (three `let` steps at cols 9/27/45) — because
+    ## the recorder emits no step on the `assert(...)` line (see the
+    ## `MultiStmtLine` note above).  The session launches already parked
+    ## on the first step of line 2 (col 9 = `a`), so ``continue`` with a
+    ## column-less breakpoint advances to the NEXT step that satisfies
+    ## the line-only match — col 27 (`b`).  Firing on `b` without ever
+    ## supplying its column is precisely the legacy guarantee: the match
+    ## consults only the line.
     gateOnNargo("test_column_noir_vm_line_only_breakpoint_preserved"):
+      # Sanity: the launch position is the first `let` on line 2, so the
+      # line-only continue below has somewhere further on the line to go.
+      check session.getCurrentLine() == MultiStmtLine
+      let startCol = session.getCurrentColumn()
+      check startCol.isSome
+      check startCol.get() == ColLetA
       let resp = session.lastSetBreakpointsResponse(
-        fixture.sourcePath, line = AssertLine, column = 0)
+        fixture.sourcePath, line = MultiStmtLine, column = 0)
       check resp.getOrDefault("success").getBool(false)
       let bps = resp.getOrDefault("body").getOrDefault("breakpoints")
       check bps.kind == JArray
@@ -201,11 +236,14 @@ suite "M1 — Column-aware breakpoint through the ViewModel (Noir)":
       let colNode = bps[0].getOrDefault("column")
       check colNode.isNil or colNode.kind == JNull
       session.continueForward()
-      check session.getCurrentLine() == AssertLine
-      # Recorder still emits a column even in line-only-breakpoint mode.
+      check session.getCurrentLine() == MultiStmtLine
+      # The line-only breakpoint matched `b` (col 27) without the test
+      # ever supplying a column — proof the match ignores the column.
+      # The recorder still attaches the real column to the stop, so it
+      # surfaces here even though the breakpoint was column-less.
       let landedCol = session.getCurrentColumn()
-      if landedCol.isSome:
-        check landedCol.get() >= 1
+      check landedCol.isSome
+      check landedCol.get() == ColLetB
 
   test "test_column_noir_vm_skips_same_line_other_columns":
     ## STRICT — column 45 (`c`); a line-only fallback would (wrongly)
@@ -228,7 +266,6 @@ suite "M1 — Column-aware breakpoint through the ViewModel (Noir)":
       let afterCol = session.getCurrentColumn()
       check afterCol.isSome
       check afterCol.get() == ColLetC
-      discard ColLetA  # documents column 9; suppress unused-warning
 
 when isMainModule:
   discard
