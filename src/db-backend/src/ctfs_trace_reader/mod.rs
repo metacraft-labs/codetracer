@@ -5,6 +5,7 @@
 
 pub mod call_stream_source;
 pub mod ctfs_container;
+pub mod follow_stream_source;
 pub mod meta_dat;
 pub mod step_map_namespace;
 pub mod step_value_stream_source;

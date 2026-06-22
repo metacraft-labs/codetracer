@@ -364,6 +364,214 @@ impl BlockSource for LocalFileSource {
     }
 }
 
+/// A `BlockSource` that follows a *growing* local `.ct` file during live
+/// recording (M1).
+///
+/// Where [`LocalFileSource`] snapshots the container length at open and only
+/// re-observes it on an explicit [`BlockSource::refresh`], `FollowFileSource`
+/// is purpose-built for the *write-during-read* case: a recorder is still
+/// appending blocks to the container, growing individual internal files
+/// (`steps.dat`, `steps.idx`, `values.dat`, …) and updating their
+/// `FileEntry.Size` entries in Block 0 as each chunk is flushed (the CTFS
+/// streaming/reader protocol — see CTFS-Binary-Format.md §6 "Reader Protocol"
+/// and §7 "Streaming and Seeking During Active Writing", and the reference
+/// implementation in `codetracer_ctfs::concurrent_reader::ConcurrentCtfsReader`).
+///
+/// It exposes two follow-specific observations on top of the positional read
+/// path:
+///
+/// - [`current_size`](BlockSource::current_size) reflects the *raw container
+///   length* (so positional block reads that land in newly-appended blocks
+///   succeed once those bytes are on disk), refreshed by
+///   [`refresh`](BlockSource::refresh).
+/// - [`file_size`](FollowFileSource::file_size) returns the latest committed
+///   `FileEntry.Size` for a named internal file, re-read from Block 0 on
+///   `refresh()`. This is the growth signal a follow reader watches: when the
+///   recorder flushes a new `steps.dat` chunk, `steps.dat`'s `FileEntry.Size`
+///   grows and its companion `steps.idx` gains a new offset entry, so the
+///   newly-committed records become visible.
+/// - [`is_finalized`](BlockSource::is_finalized) becomes `true` once the
+///   container carries a non-empty `meta.dat` (new split-stream format) or
+///   `meta.json` (legacy format) — the writer commits terminal metadata last,
+///   so its presence means no further growth will occur and a follow reader can
+///   stop polling.
+///
+/// `refresh()` re-reads ONLY Block 0's `FileEntry` array (a single positional
+/// read per entry), never the whole container, so polling a multi-gigabyte
+/// growing trace stays O(max_root_entries) per refresh regardless of trace
+/// size — exactly the cheap reader-protocol re-read the concurrent reader uses.
+#[derive(Debug)]
+pub struct FollowFileSource {
+    file: File,
+    /// Raw container length observed at open / last `refresh`.
+    size: u64,
+    /// Block size, parsed from the extended header at open. Needed to locate the
+    /// Block 0 `FileEntry` array on each `refresh`.
+    block_size: usize,
+    /// Number of root directory entries (extended header `max_root_entries`).
+    max_root_entries: usize,
+    /// The latest `FileEntry.Size` per internal file name, re-read from Block 0
+    /// on every `refresh`. This is the per-file growth signal — distinct from
+    /// the raw container `size`, which only ever grows monotonically as bytes
+    /// land on disk.
+    file_sizes: HashMap<String, u64>,
+    /// `true` once a non-empty `meta.dat` / `meta.json` is observed.
+    finalized: bool,
+}
+
+/// Names whose non-empty presence seals a recording: the new split-stream
+/// binary metadata (`meta.dat`) and the legacy JSON metadata (`meta.json`).
+/// Either committed and non-empty means the writer has finished.
+const FINALIZATION_META_FILES: [&str; 2] = ["meta.dat", "meta.json"];
+
+impl FollowFileSource {
+    /// Open `path` for follow-mode positional reads and take an initial
+    /// observation of Block 0 (`FileEntry` sizes + finalization state).
+    ///
+    /// The container must already exist and carry a valid header (the recorder
+    /// writes Block 0 before any data chunk); a not-yet-created or header-less
+    /// file is a [`CtfsError`], matching the concurrent reader's open contract.
+    pub fn open(path: &Path) -> Result<Self, CtfsError> {
+        let file = File::open(path)?;
+        let size = file.metadata()?.len();
+        // Parse the extended header to locate the FileEntry array. We read it
+        // here (not lazily) so a malformed container fails fast at open.
+        let mut header = [0u8; HEADER_SIZE + EXTENDED_HEADER_SIZE];
+        Self::pread_into(&file, 0, &mut header)?;
+        if header[..5] != CTFS_MAGIC {
+            return Err(CtfsError::InvalidMagic);
+        }
+        let version = header[5];
+        if !(CTFS_VERSION_MIN..=CTFS_VERSION_MAX).contains(&version) {
+            return Err(CtfsError::UnsupportedVersion(version));
+        }
+        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
+        let max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
+        if !matches!(block_size, 1024 | 2048 | 4096) {
+            return Err(CtfsError::Corrupt(format!("invalid block size: {block_size}")));
+        }
+
+        let mut source = FollowFileSource {
+            file,
+            size,
+            block_size,
+            max_root_entries,
+            file_sizes: HashMap::new(),
+            finalized: false,
+        };
+        source.reobserve_block_zero()?;
+        Ok(source)
+    }
+
+    /// The latest committed `FileEntry.Size` for a named internal file, or
+    /// `None` if no entry for that name has been observed yet.
+    ///
+    /// This is the growth signal a follow reader watches between
+    /// [`refresh`](BlockSource::refresh) calls: a recorder flushing a new chunk
+    /// grows the target file's `FileEntry.Size`, and the next `refresh()` makes
+    /// the larger size visible here.
+    pub fn file_size(&self, name: &str) -> Option<u64> {
+        self.file_sizes.get(name).copied()
+    }
+
+    /// Re-read Block 0's `FileEntry` array and the finalization state. Shared by
+    /// `open` and `refresh`. Mirrors `ConcurrentCtfsReader::refresh`: one
+    /// positional read per root entry, no whole-container scan.
+    fn reobserve_block_zero(&mut self) -> Result<(), CtfsError> {
+        let entry_start = (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64;
+        for i in 0..self.max_root_entries {
+            let offset = entry_start + (i * FILE_ENTRY_SIZE) as u64;
+            // Stop once an entry would run past the bytes currently on disk —
+            // a still-growing container may not yet have all entry slots
+            // materialized, exactly as the directory parse tolerates.
+            if offset + FILE_ENTRY_SIZE as u64 > self.size {
+                break;
+            }
+            let mut buf = [0u8; FILE_ENTRY_SIZE];
+            Self::pread_into(&self.file, offset, &mut buf)?;
+            let size = u64::from_le_bytes(
+                buf[0..8]
+                    .try_into()
+                    .map_err(|_| CtfsError::Corrupt("follow: file entry size slice".to_string()))?,
+            );
+            let name_encoded = u64::from_le_bytes(
+                buf[16..24]
+                    .try_into()
+                    .map_err(|_| CtfsError::Corrupt("follow: file entry name slice".to_string()))?,
+            );
+            if name_encoded == 0 {
+                continue;
+            }
+            let name = base40_decode(name_encoded);
+            self.file_sizes.insert(name, size);
+        }
+
+        // Finalization: a non-empty meta file means the writer committed
+        // terminal metadata and the trace is sealed.
+        if !self.finalized {
+            for meta in FINALIZATION_META_FILES {
+                if self.file_sizes.get(meta).copied().unwrap_or(0) > 0 {
+                    self.finalized = true;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Cross-platform positional read of exactly `buf.len()` bytes at `offset`,
+    /// shared by the open/refresh Block 0 reads and [`BlockSource::read_at`].
+    fn pread_into(file: &File, offset: u64, buf: &mut [u8]) -> Result<(), CtfsError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            file.read_exact_at(buf, offset)?;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileExt;
+            let mut read = 0usize;
+            while read < buf.len() {
+                let n = file.seek_read(&mut buf[read..], offset + read as u64)?;
+                if n == 0 {
+                    return Err(CtfsError::Corrupt("follow-file source: unexpected EOF".to_string()));
+                }
+                read += n;
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut f = file;
+            f.seek(SeekFrom::Start(offset))?;
+            f.read_exact(buf)?;
+        }
+        Ok(())
+    }
+}
+
+impl BlockSource for FollowFileSource {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError> {
+        Self::pread_into(&self.file, offset, buf)?;
+        Ok(buf.len())
+    }
+
+    fn current_size(&self) -> u64 {
+        self.size
+    }
+
+    fn refresh(&mut self) -> Result<(), CtfsError> {
+        // Re-observe the raw length first so a Block 0 entry that now points at
+        // freshly-appended bytes is read against an up-to-date bound.
+        self.size = self.file.metadata()?.len();
+        self.reobserve_block_zero()
+    }
+
+    fn is_finalized(&self) -> bool {
+        self.finalized
+    }
+}
+
 // ── Reader ──────────────────────────────────────────────────────────────
 
 /// Reader for a CTFS v2/v3/v4 binary container.
@@ -502,6 +710,18 @@ impl CtfsReader {
     /// open path is unchanged.  Follow mode (M1) wires positional sources in.
     pub fn open_local_file(path: &Path) -> Result<Self, CtfsError> {
         Self::from_source(Box::new(LocalFileSource::open(path)?))
+    }
+
+    /// Open a CTFS container backed by a [`FollowFileSource`] (M1 follow mode).
+    ///
+    /// Parses Block 0 (directory + extended header) via positional reads over a
+    /// growing file. Because `from_source` re-parses the directory from the
+    /// freshly-observed Block 0, re-opening through this constructor always
+    /// reflects the latest committed `FileEntry` sizes — which is how the
+    /// follow-mode split-stream reader picks up a live writer's appended blocks
+    /// without ever loading the whole (still-growing) container into memory.
+    pub fn open_follow(path: &Path) -> Result<Self, CtfsError> {
+        Self::from_source(Box::new(FollowFileSource::open(path)?))
     }
 
     /// Read the full contents of a named internal file.
@@ -1055,6 +1275,122 @@ mod tests {
         let mut overflow = [0u8; 8];
         let err = read_exact_at(reader.source.as_ref(), raw.len() as u64, &mut overflow, "past end");
         assert!(matches!(err, Err(CtfsError::Corrupt(_))));
+    }
+
+    /// M1 — `FollowFileSource.refresh()` makes appended bytes / an increased
+    /// `FileEntry.Size` visible, and the new bytes are NOT visible before the
+    /// refresh.
+    ///
+    /// Models the recorder growth protocol directly: a base container is written
+    /// with one file at its initial size, then — simulating a chunk flush — extra
+    /// bytes are appended to that file's data block and the file's
+    /// `FileEntry.Size` in Block 0 is bumped to cover them. A `FollowFileSource`
+    /// opened over the file BEFORE the bump must still report the old size; only
+    /// after `refresh()` does it observe the grown `FileEntry.Size`, the larger
+    /// raw `current_size`, and successfully read the appended bytes.
+    #[test]
+    fn test_followfilesource_observes_growth() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("growing.ct");
+
+        // Base container: one file "steps.dat" with 100 bytes (one data block,
+        // direct mapping). `write_minimal_ctfs` lays down a valid CTFS v4 image.
+        let initial: Vec<u8> = (0..100u32).map(|i| (i % 256) as u8).collect();
+        write_minimal_ctfs(&path, &[("steps.dat", initial.as_slice())]).unwrap();
+
+        // Open the follow source BEFORE any growth.
+        let mut follow = FollowFileSource::open(&path).unwrap();
+        assert_eq!(follow.file_size("steps.dat"), Some(100), "initial FileEntry.Size");
+        assert!(!follow.is_finalized(), "no meta.dat/meta.json ⇒ not finalized");
+        let size_before = follow.current_size();
+
+        // ── Simulate a chunk flush that grows "steps.dat" by 50 bytes IN PLACE.
+        //    The base writer placed "steps.dat"'s single data block right after
+        //    the root map block; rather than re-derive its physical offset, we
+        //    locate it by reading the FileEntry's map_block and its first direct
+        //    pointer through a throwaway reader, then append into that block (the
+        //    block is 4096 bytes, so 150 bytes still fit in block 0 of the file).
+        let appended: Vec<u8> = (0..50u32).map(|i| (200 + i % 50) as u8).collect();
+        let (data_block_offset, entry_offset, block_size) = {
+            let reader = CtfsReader::open(&path).unwrap();
+            let block_size = reader.block_size as u64;
+            let entry = reader.files.get("steps.dat").unwrap().clone();
+            // Physical offset of the file's first (only) data block.
+            let data_block = reader.resolve_block(entry.map_block, 0).unwrap();
+            // Byte offset of "steps.dat"'s FileEntry.Size field in Block 0.
+            // Files are laid out in insertion order from the entry array start;
+            // "steps.dat" is the sole entry ⇒ index 0.
+            let entry_offset = (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64;
+            (data_block * block_size, entry_offset, block_size)
+        };
+        assert!(150 <= block_size, "fixture must fit in one block");
+
+        {
+            let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+            // Append the new bytes after the initial 100 bytes of the data block.
+            f.seek(SeekFrom::Start(data_block_offset + 100)).unwrap();
+            f.write_all(&appended).unwrap();
+            // Bump FileEntry.Size 100 → 150.
+            f.seek(SeekFrom::Start(entry_offset)).unwrap();
+            f.write_all(&150u64.to_le_bytes()).unwrap();
+            f.flush().unwrap();
+        }
+
+        // BEFORE refresh: the follow source must still report the OLD size — it
+        // only re-observes Block 0 on an explicit refresh.
+        assert_eq!(
+            follow.file_size("steps.dat"),
+            Some(100),
+            "appended bytes must NOT be visible before refresh()"
+        );
+        assert_eq!(follow.current_size(), size_before, "raw size unchanged before refresh()");
+
+        // AFTER refresh: the grown FileEntry.Size and the larger raw size are
+        // visible, and the appended bytes read back correctly.
+        follow.refresh().unwrap();
+        assert_eq!(
+            follow.file_size("steps.dat"),
+            Some(150),
+            "refresh() must observe the grown FileEntry.Size"
+        );
+        assert!(follow.current_size() >= data_block_offset + 150, "raw size covers appended bytes");
+
+        let mut buf = vec![0u8; 50];
+        follow.read_at(data_block_offset + 100, &mut buf).unwrap();
+        assert_eq!(buf, appended, "appended bytes read back through the follow source");
+    }
+
+    /// M1 — `FollowFileSource.is_finalized()` flips to `true` once a non-empty
+    /// `meta.json` / `meta.dat` is observed on `refresh()`, and not before.
+    #[test]
+    fn test_followfilesource_finalization_signal() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seal.ct");
+
+        // Two entries: a data file and a placeholder meta.json at size 0.
+        write_minimal_ctfs(&path, &[("steps.dat", b"abc"), ("meta.json", &[])]).unwrap();
+
+        let mut follow = FollowFileSource::open(&path).unwrap();
+        assert!(!follow.is_finalized(), "meta.json size 0 ⇒ not finalized");
+
+        // Bump meta.json's FileEntry.Size to a non-zero value (its entry is the
+        // SECOND in insertion order). We do not need real meta bytes — the
+        // finalization signal is "FileEntry.Size > 0".
+        let entry_offset = (HEADER_SIZE + EXTENDED_HEADER_SIZE + FILE_ENTRY_SIZE) as u64;
+        {
+            let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+            f.seek(SeekFrom::Start(entry_offset)).unwrap();
+            f.write_all(&42u64.to_le_bytes()).unwrap();
+            f.flush().unwrap();
+        }
+
+        assert!(!follow.is_finalized(), "still not finalized before refresh()");
+        follow.refresh().unwrap();
+        assert!(follow.is_finalized(), "non-empty meta.json ⇒ finalized after refresh()");
     }
 
     #[test]
