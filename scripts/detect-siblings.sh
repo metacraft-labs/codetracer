@@ -281,6 +281,9 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-js-recor
 		echo "  WARNING: codetracer-js-recorder CLI not on PATH." >&2
 		echo "    Run: cd $_ct_js_root && just build" >&2
 		echo "    or:  cd $_ct_js_root && cp -al packages crates .install-shadow/ \\" >&2
+		# The trailing backslash is a literal line-continuation printed in the
+		# copy-paste install instructions, not a shell escape (SC1003 false positive).
+		# shellcheck disable=SC1003
 		echo '              && cp package.json package-lock.json .install-shadow/ \' >&2
 		echo "              && cd .install-shadow && npm install --include=dev" >&2
 		_ct_detect_summary "codetracer-js-recorder (packages/cli present, not installed)"
@@ -333,12 +336,20 @@ fi
 
 # --- noir (metacraft-labs fork, provides nargo) ---
 # Prepends to PATH so `ct` finds nargo via the same PATH search as end users.
+# Also exports NARGO_PATH: the column-aware ViewModel test
+# (test_column_noir_vm.nim) deliberately requires an explicit NARGO_PATH
+# opt-in (no PATH/sibling fallback) so a legacy non-column-aware nargo can't
+# silently surface column=None.  We point it at the built sibling — which on
+# the workspace branches carries the M-noir column-aware tracer — so the test
+# RUNS (instead of skipping) in CI and local runs.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/noir" ]; then
 	if [ -x "$_CT_WORKSPACE_ROOT/noir/target/release/nargo" ]; then
 		export PATH="$_CT_WORKSPACE_ROOT/noir/target/release:$PATH"
+		export NARGO_PATH="$_CT_WORKSPACE_ROOT/noir/target/release/nargo"
 		_ct_detect_summary "noir (nargo release build)"
 	elif [ -x "$_CT_WORKSPACE_ROOT/noir/target/debug/nargo" ]; then
 		export PATH="$_CT_WORKSPACE_ROOT/noir/target/debug:$PATH"
+		export NARGO_PATH="$_CT_WORKSPACE_ROOT/noir/target/debug/nargo"
 		_ct_detect_summary "noir (nargo debug build)"
 	else
 		_ct_detect_summary "noir (repo present, nargo not built)"
@@ -474,17 +485,29 @@ fi
 
 # --- Blockchain / VM recorder siblings ---
 # Each blockchain recorder builds a binary at target/release/codetracer-<name>-recorder.
-# We only prepend to PATH — no env var overrides — so `ct` uses the same findTool
-# PATH search in development as it does on end-user machines.
+# We prepend to PATH so `ct` uses the same findTool PATH search in development as
+# it does on end-user machines.
+#
+# We ALSO export the per-recorder CODETRACER_<NAME>_RECORDER_PATH env var.  Some
+# column-aware ViewModel tests (e.g. test_column_move_vm.nim,
+# test_column_polkavm_vm.nim) deliberately require an explicit
+# CODETRACER_<NAME>_RECORDER_PATH opt-in with NO PATH/sibling fallback, so a
+# legacy non-column-aware recorder can't silently surface column=None.  Pointing
+# the var at the built sibling (which on the workspace branches carries the
+# column-aware tracer) makes those tests RUN instead of skipping, in CI and
+# locally, while `ct` itself still resolves the recorder via the PATH entry
+# above (same as end users).
 for _ct_bc_name in cairo cardano circom evm flow fuel leo miden move polkavm solana ton native wasmi; do
 	_ct_bc_repo="codetracer-${_ct_bc_name}-recorder"
 	_ct_bc_bin="target/release/codetracer-${_ct_bc_name}-recorder"
 	if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/$_ct_bc_repo/$_ct_bc_bin" ]; then
 		export PATH="$_CT_WORKSPACE_ROOT/$_ct_bc_repo/target/release:$PATH"
+		_ct_bc_var="CODETRACER_$(printf '%s' "$_ct_bc_name" | tr '[:lower:]' '[:upper:]')_RECORDER_PATH"
+		export "$_ct_bc_var=$_CT_WORKSPACE_ROOT/$_ct_bc_repo/$_ct_bc_bin"
 		_ct_detect_summary "$_ct_bc_repo (release build)"
 	fi
 done
-unset _ct_bc_name _ct_bc_repo _ct_bc_bin
+unset _ct_bc_name _ct_bc_repo _ct_bc_bin _ct_bc_var
 
 # --- Cadence Go helper ---
 # The Cadence/Flow recorder needs the cadence-trace-helper Go binary.
