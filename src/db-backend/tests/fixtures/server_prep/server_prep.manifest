@@ -1,0 +1,7 @@
+# format: kind key ...fields (decimal)
+# memwrites: W address tick pc size old new
+W 4096 100 57005 8 0 1
+W 4096 300 48879 8 1 2
+W 8192 150 61453 4 7 8
+# linehits: L file_id line tick...
+L 7 100 1234 1235

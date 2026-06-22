@@ -424,6 +424,105 @@ impl CtfsBlockOverlay {
         })
     }
 
+    // ── Internal-file writing (M5: persist a namespace into the .ct) ──────
+
+    /// Write a whole internal file `name` with contents `data` into the
+    /// container through the overlay (M5: persist `coverage.tc` /
+    /// `memwrites.tc` / `linehits.tc` namespace images into the `.ct`).
+    ///
+    /// Allocates fresh data blocks (born in the overlay) for `data`, a single
+    /// root mapping block pointing at them, and a directory `FileEntry` in shadow
+    /// Block 0 — all copy-on-write, so the backing file is untouched until a
+    /// `Persist` [`flush`](CtfsBlockOverlay::flush). The layout matches the
+    /// production single-level mapping (`FileEntry = (Size, MapBlock, Name)`; the
+    /// map block holds direct data-block pointers), so a plain
+    /// [`super::ctfs_container::CtfsReader`] reads the file back after a flush
+    /// (the warm-restart proof).
+    ///
+    /// Constraints (sufficient for the M5 namespace images, which are at most a
+    /// few pages): `data` must fit within a single-level mapping — i.e. at most
+    /// `entries_per_block - 1` data blocks (511 for a 4096-byte block). A larger
+    /// file would need the multi-level chain; that is not required here and is
+    /// rejected loudly rather than silently mis-mapped.
+    ///
+    /// If `name` already has a directory entry, it is **overwritten** (the entry's
+    /// size + map block are repointed at the freshly-allocated blocks; the old
+    /// blocks are simply abandoned in the overlay — acceptable for the
+    /// replay-time single-writer path, where the overlay is short-lived).
+    pub fn write_internal_file(&mut self, name: &str, data: &[u8]) -> Result<(), CtfsError> {
+        let entries_per_block = self.block_size / 8;
+        let usable = entries_per_block - 1; // last slot reserved for the chain ptr
+        let num_data_blocks = data.len().div_ceil(self.block_size).max(1);
+        if num_data_blocks > usable {
+            return Err(CtfsError::Corrupt(format!(
+                "overlay write_internal_file '{name}': {num_data_blocks} data blocks exceed single-level capacity {usable}"
+            )));
+        }
+
+        // Empty file: a directory entry with size 0 and no blocks.
+        if data.is_empty() {
+            return self.set_or_create_file_entry(name, 0, 0);
+        }
+
+        // Allocate the root mapping block first, then the data blocks.
+        let map_block = self.alloc_block();
+        let mut map_bytes = vec![0u8; self.block_size];
+        let mut written = 0usize;
+        for block_index in 0..num_data_blocks {
+            let data_block = self.alloc_block();
+            // Fill the data block with this slice of `data`.
+            let to_write = (data.len() - written).min(self.block_size);
+            let mut block = vec![0u8; self.block_size];
+            block[..to_write].copy_from_slice(&data[written..written + to_write]);
+            self.write_block(data_block, block)?;
+            written += to_write;
+            // Direct pointer at entry `block_index` of the root map block.
+            let off = block_index * 8;
+            map_bytes[off..off + 8].copy_from_slice(&data_block.to_le_bytes());
+        }
+        self.write_block(map_block, map_bytes)?;
+        self.set_or_create_file_entry(name, data.len() as u64, map_block)
+    }
+
+    /// Set (or create) the directory `FileEntry` for `name` with the given size
+    /// and root map block, copy-on-write in shadow Block 0.
+    ///
+    /// Reuses an existing slot for `name`; otherwise claims the first free slot
+    /// (name == 0). Errors if the root directory is full.
+    fn set_or_create_file_entry(&mut self, name: &str, size: u64, map_block: u64) -> Result<(), CtfsError> {
+        let name_encoded =
+            base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
+        // Find an existing slot for the name, else the first free slot.
+        let block0 = self.read_block(0)?;
+        let mut target: Option<usize> = None;
+        for index in 0..self.max_root_entries {
+            let off = Self::file_entry_offset(index);
+            if off + FILE_ENTRY_SIZE > block0.len() {
+                break;
+            }
+            let slot_name = u64::from_le_bytes(
+                block0[off + 16..off + 24]
+                    .try_into()
+                    .map_err(|_| CtfsError::Corrupt("overlay: file entry name slice".to_string()))?,
+            );
+            if slot_name == name_encoded {
+                target = Some(index);
+                break;
+            }
+            if slot_name == 0 && target.is_none() {
+                target = Some(index);
+                // keep scanning in case the exact name appears later
+            }
+        }
+        let index = target.ok_or_else(|| CtfsError::Corrupt(format!("overlay: root directory full, cannot add '{name}'")))?;
+        let off = Self::file_entry_offset(index);
+        self.mutate_block(0, |block0| {
+            block0[off..off + 8].copy_from_slice(&size.to_le_bytes());
+            block0[off + 8..off + 16].copy_from_slice(&map_block.to_le_bytes());
+            block0[off + 16..off + 24].copy_from_slice(&name_encoded.to_le_bytes());
+        })
+    }
+
     // ── Persistence (the "flip") ──────────────────────────────────────────
 
     /// Reconcile the overlay with the backing file per the persistence mode.

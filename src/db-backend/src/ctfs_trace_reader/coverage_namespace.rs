@@ -304,6 +304,46 @@ impl CoverageMap {
         Ok(commit)
     }
 
+    /// Remove every coverage row whose `tick_lo` falls in `[tick_lo, tick_hi)`,
+    /// committing the result (CoW). Used by the M5 collapse (§2.4 step 3: "drop
+    /// that region's coverage.tc rows for the merged intervals"), which then adds
+    /// a single `collapsed_complete` row spanning the range.
+    ///
+    /// The underlying CoW B-tree writer is insert/update-only (single-writer
+    /// replay-time path; no key deletion), so a removal is implemented by
+    /// **rebuilding** the namespace image from the surviving rows and committing
+    /// it. Collapse is a comparatively rare compaction event, so the rebuild cost
+    /// is acceptable and the result stays crash-safe (the rebuilt image publishes
+    /// a fresh, consistent root). Returns the new commit id (or the prior
+    /// committed id when nothing was removed).
+    pub fn coverage_remove_range(&mut self, tick_lo: u64, tick_hi: u64) -> Result<u64, CoverageError> {
+        if tick_hi <= tick_lo {
+            return Err(CoverageError::EmptyInterval { tick_lo, tick_hi });
+        }
+        let survivors: Vec<(u64, (u64, CoverageState))> = self
+            .rows
+            .iter()
+            .filter(|(row_lo, _)| !(**row_lo >= tick_lo && **row_lo < tick_hi))
+            .map(|(&k, &v)| (k, v))
+            .collect();
+        if survivors.len() == self.rows.len() {
+            // Nothing in range; keep the existing image untouched.
+            return Ok(self.writer.committed_commit_id());
+        }
+        // Rebuild a fresh CoW namespace from the surviving rows. Inserting in
+        // ascending key order mirrors a from-scratch build.
+        let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        let mut rows = BTreeMap::new();
+        let mut last_commit = 0u64;
+        for (row_lo, (row_hi, state)) in survivors {
+            last_commit = writer.insert_and_commit(row_lo, &encode_descriptor(row_hi, state))?;
+            rows.insert(row_lo, (row_hi, state));
+        }
+        self.writer = writer;
+        self.rows = rows;
+        Ok(last_commit)
+    }
+
     /// The serialised on-disk `coverage.tc` page image (what a persist-mode
     /// overlay flush writes into the `.ct`).
     pub fn serialize(&self) -> Vec<u8> {
