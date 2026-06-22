@@ -26,15 +26,18 @@
 //! contend — see the concurrent-readers test.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use codetracer_trace_types::{CallKey, FullValueRecord, FunctionId, StepId, TypeId, ValueRecord};
 
-use codetracer_trace_reader::call_stream_reader::{open_call_stream, CallStreamReader};
+use codetracer_trace_reader::call_stream_reader::{CallStreamReader, open_call_stream};
 use codetracer_trace_writer::call_stream::{CallStreamRecord, VOID_RETURN_MARKER};
+use codetracer_trace_writer::meta_dat::meta_dat_has_call_stream;
 
 use crate::db::DbCall;
+
+use super::ctfs_container::CtfsReader;
 
 /// A seekable, on-demand view over a container's `calls.dat` call stream.
 ///
@@ -62,7 +65,10 @@ impl std::fmt::Debug for SeekableCallStream {
         f.debug_struct("SeekableCallStream")
             .field("record_count", &self.record_count)
             .field("chunk_size", &self.chunk_size)
-            .field("chunk_decompressions", &self.chunk_decompressions.load(Ordering::Relaxed))
+            .field(
+                "chunk_decompressions",
+                &self.chunk_decompressions.load(Ordering::Relaxed),
+            )
             .finish()
     }
 }
@@ -75,6 +81,40 @@ impl SeekableCallStream {
     /// backward compatibility is preserved.
     pub fn open(path: &Path) -> Result<Option<SeekableCallStream>, String> {
         match open_call_stream(path)? {
+            Some(reader) => {
+                let record_count = reader.count();
+                let chunk_size = reader.chunk_size();
+                Ok(Some(SeekableCallStream {
+                    reader: Mutex::new(reader),
+                    record_count,
+                    chunk_size,
+                    chunk_decompressions: AtomicU64::new(0),
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Open the seekable call stream through the already-open db-backend CTFS
+    /// reader. `calls.dat` and `calls.idx` are read through the caller's current
+    /// `BlockSource`/overlay instead of re-opening the `.ct` by filesystem path.
+    pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableCallStream>, String> {
+        let meta = match ctfs.read_file("meta.dat") {
+            Ok(meta) => meta,
+            Err(_) => return Ok(None),
+        };
+        if !meta_dat_has_call_stream(&meta) {
+            return Ok(None);
+        }
+        let dat = match ctfs.read_file("calls.dat") {
+            Ok(dat) => dat,
+            Err(_) => return Ok(None),
+        };
+        let idx = ctfs
+            .read_file("calls.idx")
+            .map_err(|e| format!("calls.idx missing despite has_call_stream flag: {e}"))?;
+
+        match CallStreamReader::from_files(&meta, dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();

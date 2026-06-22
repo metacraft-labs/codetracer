@@ -26,8 +26,9 @@ use codetracer_trace_types::*;
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
 use codetracer_trace_writer::trace_writer::TraceWriter;
 
-use db_backend::ctfs_trace_reader::call_stream_source::SeekableCallStream;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::call_stream_source::SeekableCallStream;
+use db_backend::ctfs_trace_reader::ctfs_container::{CtfsReader, InMemoryBlockSource};
 use db_backend::trace_reader::TraceReader;
 
 /// Write a small trace exercising nested calls, mirroring the M17a round-trip
@@ -62,10 +63,23 @@ fn write_trace(dir: &tempfile::TempDir, with_call_stream: bool) -> PathBuf {
     TraceWriter::register_step(&mut writer, src, Line(2));
 
     // used_a(x=5) -> 1
-    let arg_a = TraceWriter::arg(&mut writer, "x", ValueRecord::Int { i: 5, type_id: int_type });
+    let arg_a = TraceWriter::arg(
+        &mut writer,
+        "x",
+        ValueRecord::Int {
+            i: 5,
+            type_id: int_type,
+        },
+    );
     TraceWriter::register_call(&mut writer, used_a, vec![arg_a]);
     TraceWriter::register_step(&mut writer, src, Line(11));
-    TraceWriter::register_return(&mut writer, ValueRecord::Int { i: 1, type_id: int_type });
+    TraceWriter::register_return(
+        &mut writer,
+        ValueRecord::Int {
+            i: 1,
+            type_id: int_type,
+        },
+    );
 
     // used_b() -> calls leaf()
     TraceWriter::register_call(&mut writer, used_b, vec![]);
@@ -73,7 +87,13 @@ fn write_trace(dir: &tempfile::TempDir, with_call_stream: bool) -> PathBuf {
     TraceWriter::register_call(&mut writer, leaf, vec![]);
     TraceWriter::register_step(&mut writer, src, Line(31));
     TraceWriter::register_return(&mut writer, ValueRecord::None { type_id: NONE_TYPE_ID });
-    TraceWriter::register_return(&mut writer, ValueRecord::Int { i: 2, type_id: int_type });
+    TraceWriter::register_return(
+        &mut writer,
+        ValueRecord::Int {
+            i: 2,
+            type_id: int_type,
+        },
+    );
 
     // main returns
     TraceWriter::register_return(&mut writer, ValueRecord::None { type_id: NONE_TYPE_ID });
@@ -96,9 +116,17 @@ fn fetch_call_by_key_decompresses_only_its_chunk() {
         .expect("trace has has_call_stream flag set");
 
     // 5 records over chunk_size 2 ⇒ 3 chunks; nothing inflated yet.
-    assert_eq!(stream.call_count(), 5, "expected 5 call records (1 toplevel + 4 user calls)");
+    assert_eq!(
+        stream.call_count(),
+        5,
+        "expected 5 call records (1 toplevel + 4 user calls)"
+    );
     assert_eq!(stream.chunk_size(), 2);
-    assert_eq!(stream.chunk_decompressions(), 0, "no chunk inflated before the first read");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        0,
+        "no chunk inflated before the first read"
+    );
 
     // Fetch call_key 4 (leaf), which lives in the LAST (3rd) chunk. A
     // whole-trace materialization would touch every chunk; the seekable path
@@ -117,18 +145,48 @@ fn fetch_call_by_key_decompresses_only_its_chunk() {
     // is the only record in chunk 2 here) — re-reading key 4 must NOT inflate
     // again (the reader caches the chunk).
     let _again = stream.call(CallKey(4)).expect("re-read call_key 4");
-    assert_eq!(stream.chunk_decompressions(), 1, "re-reading the cached chunk inflates nothing new");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        1,
+        "re-reading the cached chunk inflates nothing new"
+    );
 
     // Reading a call in a DIFFERENT chunk (call_key 0, chunk 0) inflates one
     // more — still bounded, one chunk per distinct chunk touched.
     let root = stream.call(CallKey(0)).expect("call_key 0 present");
     assert_eq!(root.parent_key, CallKey(-1), "toplevel root has parent -1");
-    assert_eq!(stream.chunk_decompressions(), 2, "touching a new chunk inflated exactly one more");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        2,
+        "touching a new chunk inflated exactly one more"
+    );
 
     // Out-of-range key yields None, never a panic, and inflates nothing.
     assert!(stream.call(CallKey(99)).is_none());
     assert!(stream.call(CallKey(-1)).is_none());
     assert_eq!(stream.chunk_decompressions(), 2);
+}
+
+/// M8 production BlockSource seam: the seekable call wrapper can build from
+/// the already-open CTFS container, so `calls.dat`/`calls.idx` are read through
+/// that container's BlockSource instead of re-opening the `.ct` path.
+#[test]
+fn seekable_call_stream_opens_from_block_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let ct = write_trace(&dir, true);
+    let bytes = std::fs::read(&ct).unwrap();
+    std::fs::remove_file(&ct).unwrap();
+
+    let mut ctfs = CtfsReader::from_source(Box::new(InMemoryBlockSource::new(bytes))).unwrap();
+    let stream = SeekableCallStream::open_from_ctfs(&mut ctfs)
+        .expect("open source-backed call stream")
+        .expect("trace has has_call_stream flag set");
+
+    assert_eq!(stream.call_count(), 5);
+    let leaf = stream.call(CallKey(4)).expect("leaf call");
+    assert_eq!(leaf.key, CallKey(4));
+    assert_eq!(leaf.parent_key, CallKey(3));
+    assert_eq!(leaf.depth, 3);
 }
 
 /// Deliverable test #1 (call tree from calls.dat, not a materialized Db): the
@@ -143,7 +201,9 @@ fn ctfs_reader_serves_call_tree_from_calls_dat() {
     let reader = CTFSTraceReader::open(&ct).expect("open CTFS reader over split bundle");
 
     // The seekable hooks are active (call tree comes from calls.dat).
-    let seekable_count = reader.seekable_call_count().expect("reader exposes a seekable call stream");
+    let seekable_count = reader
+        .seekable_call_count()
+        .expect("reader exposes a seekable call stream");
     assert_eq!(seekable_count, 5, "5 calls served from calls.dat");
 
     // Spot-check the tree structure read through the seekable path.
@@ -238,7 +298,10 @@ fn real_legacy_ct_reads_unchanged_with_no_seekable_stream() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../reprobuild/libs/repro_ct_incremental/tests/fixtures/m12_ctfs/ruby.ct");
     if !fixture.exists() {
-        eprintln!("skipping real_legacy_ct_reads_unchanged: fixture absent at {}", fixture.display());
+        eprintln!(
+            "skipping real_legacy_ct_reads_unchanged: fixture absent at {}",
+            fixture.display()
+        );
         return;
     }
 
@@ -249,7 +312,10 @@ fn real_legacy_ct_reads_unchanged_with_no_seekable_stream() {
     );
     // The materialized path still serves a non-trivial call tree.
     assert!(reader.call_count() >= 1, "legacy call tree materialized");
-    assert!(reader.call(CallKey(0)).is_some(), "legacy call_key 0 present on the materialized path");
+    assert!(
+        reader.call(CallKey(0)).is_some(),
+        "legacy call_key 0 present on the materialized path"
+    );
 }
 
 /// Deliverable test #1 over a REAL recorded bundle: the reprobuild
@@ -270,7 +336,10 @@ fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../reprobuild/libs/repro_ct_incremental/tests/fixtures/m12_ctfs/ruby_split.ct");
     if !fixture.exists() {
-        eprintln!("skipping real_split_ct_serves_calls_seekably: fixture absent at {}", fixture.display());
+        eprintln!(
+            "skipping real_split_ct_serves_calls_seekably: fixture absent at {}",
+            fixture.display()
+        );
         return;
     }
 
@@ -282,7 +351,11 @@ fn real_split_ct_serves_calls_seekably_with_bounded_decompression() {
 
     let n = stream.call_count();
     assert!(n >= 1, "real bundle has at least one call");
-    assert_eq!(stream.chunk_decompressions(), 0, "nothing inflated before the first read");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        0,
+        "nothing inflated before the first read"
+    );
 
     // Fetch the LAST call by key — a whole-trace load would touch every chunk;
     // the seekable path inflates at most one.

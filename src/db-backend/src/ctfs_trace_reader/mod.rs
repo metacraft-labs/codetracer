@@ -544,7 +544,7 @@ impl CTFSTraceReader {
             Self::open_old_format(&mut ctfs)?
         };
 
-        // M17b — attach the SEEKABLE `calls.dat` call-tree source when the
+        // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
         // container advertises one. This is the path that lets a network-loaded
         // `.ct` serve its call tree on-demand without materializing the whole
         // trace. A flag-off (legacy) container yields `None`, preserving the
@@ -554,7 +554,9 @@ impl CTFSTraceReader {
         // fall back to the materialized `db.calls`) rather than failing the open
         // — opening the trace at all is strictly more useful than refusing it,
         // and the materialized path is always available as a safe fallback.
-        reader.call_stream = match call_stream_source::SeekableCallStream::open(path) {
+        // Read through the already-open CtfsReader so any caller-provided
+        // BlockSource/overlay is preserved; do not reopen the filesystem path.
+        reader.call_stream = match call_stream_source::SeekableCallStream::open_from_ctfs(&mut ctfs) {
             Ok(Some(stream)) => {
                 info!(
                     "CTFS: seekable calls.dat attached ({} calls, chunk_size {}) — call tree served on-demand",
@@ -570,14 +572,14 @@ impl CTFSTraceReader {
             }
         };
 
-        // M22 — attach the SEEKABLE `steps.dat` execution stream when the
+        // M22 / M8 — attach the SEEKABLE `steps.dat` execution stream when the
         // container advertises one (`has_step_stream`). A step's source line is
         // then served on-demand from `steps.dat` (bounded decompression) rather
         // than from the materialized `db.steps`. A flag-off container yields
         // `None`, preserving the existing fully-materialized behaviour exactly.
         // A present-but-corrupt stream is logged and ignored (we keep the
         // materialized `db.steps` fallback) rather than failing the open.
-        reader.step_stream = match step_value_stream_source::SeekableStepStream::open(path) {
+        reader.step_stream = match step_value_stream_source::SeekableStepStream::open_from_ctfs(&mut ctfs) {
             Ok(Some(stream)) => {
                 info!(
                     "CTFS: seekable steps.dat attached ({} steps, chunk_size {}) — step lines served on-demand",
@@ -593,12 +595,12 @@ impl CTFSTraceReader {
             }
         };
 
-        // M22 — attach the SEEKABLE `values.dat` parallel value stream when the
+        // M22 / M8 — attach the SEEKABLE `values.dat` parallel value stream when the
         // container advertises one (`has_value_stream`). A step's variable values
         // are then served on-demand from `values.dat` rather than from the
         // materialized `db.variables`. Same fall-back/back-compat discipline as
         // the step stream above.
-        reader.value_stream = match step_value_stream_source::SeekableValueStream::open(path) {
+        reader.value_stream = match step_value_stream_source::SeekableValueStream::open_from_ctfs(&mut ctfs) {
             Ok(Some(stream)) => {
                 info!(
                     "CTFS: seekable values.dat attached ({} value records, chunk_size {}) — step values served on-demand",
@@ -641,16 +643,15 @@ impl CTFSTraceReader {
     /// falling back to a `<ct>.step-map.ns` sidecar. Returns `None` (the
     /// whole-table fallback) when neither is present or the bytes are
     /// unparseable.
-    fn load_step_map_namespace(
-        ctfs: &mut CtfsReader,
-        path: &Path,
-    ) -> Option<step_map_namespace::StepMapNamespace> {
+    fn load_step_map_namespace(ctfs: &mut CtfsReader, path: &Path) -> Option<step_map_namespace::StepMapNamespace> {
         // 1. Container-internal `step-map.ns`.
         let internal = if ctfs.has_file(step_map_namespace::STEP_MAP_FILE) {
             match ctfs.read_file(step_map_namespace::STEP_MAP_FILE) {
                 Ok(bytes) => Some(bytes),
                 Err(e) => {
-                    info!("CTFS: step-map.ns present but unreadable ({e}); falling back to whole-table breakpoint build");
+                    info!(
+                        "CTFS: step-map.ns present but unreadable ({e}); falling back to whole-table breakpoint build"
+                    );
                     None
                 }
             }
@@ -1086,7 +1087,7 @@ impl CTFSTraceReader {
     /// end-to-end and populates metadata + interning tables. Full Db
     /// population (steps, calls, events, step_map) comes next.
     #[cfg(feature = "nim-reader")]
-    fn open_new_format_nim(_ctfs: &mut CtfsReader, ct_file_path: &Path) -> Result<Self, Box<dyn Error>> {
+    fn open_new_format_nim(ctfs: &mut CtfsReader, ct_file_path: &Path) -> Result<Self, Box<dyn Error>> {
         use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
         use num_traits::FromPrimitive;
         use std::path::PathBuf;
@@ -1384,7 +1385,6 @@ impl CTFSTraceReader {
                 None
             };
 
-
         // ── M24c-steps: RANGE-AWARE LAZY step path ─────────────────────
         //
         // The PRODUCTION split bundle ships a SPEC-canonical `has_step_stream`
@@ -1409,7 +1409,7 @@ impl CTFSTraceReader {
         let lazy_steps = if column_aware {
             None
         } else {
-            match step_value_stream_source::SeekableStepStream::open(ct_file_path) {
+            match step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs) {
                 Ok(Some(stream)) => {
                     let stream = std::sync::Arc::new(stream);
                     info!(
@@ -1603,7 +1603,7 @@ impl CTFSTraceReader {
         //   - stream absent → a value-less or pre-M24a-2 (flag-off) bundle; fall
         //     back to eager FFI materialization exactly as before, so older
         //     bundles and the corrupt-stream case stay correct.
-        let lazy_values = match step_value_stream_source::SeekableValueStream::open(ct_file_path) {
+        let lazy_values = match step_value_stream_source::SeekableValueStream::open_from_ctfs(ctfs) {
             Ok(Some(stream)) => {
                 let stream = std::sync::Arc::new(stream);
                 info!(
@@ -2247,11 +2247,7 @@ impl TraceReader for CTFSTraceReader {
             &self.db.steps.items
         };
         let start = start_id.0 as usize;
-        if start < items.len() {
-            &items[start..]
-        } else {
-            &[]
-        }
+        if start < items.len() { &items[start..] } else { &[] }
     }
 
     fn path_entries_iter(&self) -> Box<dyn Iterator<Item = (&str, PathId)> + '_> {

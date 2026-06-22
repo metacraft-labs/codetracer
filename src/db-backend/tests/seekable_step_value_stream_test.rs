@@ -33,8 +33,9 @@ use codetracer_trace_types::*;
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
 use codetracer_trace_writer::trace_writer::TraceWriter;
 
-use db_backend::ctfs_trace_reader::step_value_stream_source::{SeekableStepStream, SeekableValueStream};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::ctfs_container::{CtfsReader, InMemoryBlockSource};
+use db_backend::ctfs_trace_reader::step_value_stream_source::{SeekableStepStream, SeekableValueStream};
 use db_backend::trace_reader::TraceReader;
 
 /// Compare two `FullValueRecord` lists by `(variable_id, value)` — `ValueRecord`
@@ -170,7 +171,11 @@ fn fetch_step_line_decompresses_only_its_chunk() {
 
     assert_eq!(stream.step_count(), TOTAL_STEPS, "expected {TOTAL_STEPS} step records");
     assert_eq!(stream.chunk_size(), 2);
-    assert_eq!(stream.chunk_decompressions(), 0, "no chunk inflated before the first read");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        0,
+        "no chunk inflated before the first read"
+    );
 
     // The LAST user step lives in the last chunk (total index 6 over chunk_size
     // 2 ⇒ chunk 3). A whole-trace materialization would touch every chunk; the
@@ -186,13 +191,21 @@ fn fetch_step_line_decompresses_only_its_chunk() {
 
     // Re-reading the same step (same chunk) must NOT inflate again.
     let _again = stream.step_line(StepId(last)).expect("re-read last user step");
-    assert_eq!(stream.chunk_decompressions(), 1, "re-reading the cached chunk inflates nothing new");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        1,
+        "re-reading the cached chunk inflates nothing new"
+    );
 
     // The FIRST user step is in a different chunk (total index 1, chunk 0).
     let first = user_step_index(0);
     let (_p0, l0) = stream.step_line(StepId(first)).expect("first user step present");
     assert_eq!(l0, Line(10));
-    assert_eq!(stream.chunk_decompressions(), 2, "touching a new chunk inflated exactly one more");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        2,
+        "touching a new chunk inflated exactly one more"
+    );
 
     // The path id is consistent (single source file).
     assert_eq!(path_id, _p0, "all steps share the single source path");
@@ -227,7 +240,11 @@ fn fetch_step_values_decompresses_only_its_chunk() {
         ValueRecord::Int { i, .. } => assert_eq!(*i, ((MY_STEPS - 1) * 100) as i64, "var_(n-1) = (n-1)*100"),
         other => panic!("expected Int, got {other:?}"),
     }
-    assert_eq!(stream.chunk_decompressions(), 1, "one value lookup inflated exactly one chunk");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        1,
+        "one value lookup inflated exactly one chunk"
+    );
 
     let _again = stream.variables_at(StepId(last)).expect("re-read last step values");
     assert_eq!(stream.chunk_decompressions(), 1, "cached chunk inflates nothing new");
@@ -239,7 +256,11 @@ fn fetch_step_values_decompresses_only_its_chunk() {
         ValueRecord::Int { i, .. } => assert_eq!(*i, 0, "var_0 = 0"),
         other => panic!("expected Int, got {other:?}"),
     }
-    assert_eq!(stream.chunk_decompressions(), 2, "a new chunk inflated exactly one more");
+    assert_eq!(
+        stream.chunk_decompressions(),
+        2,
+        "a new chunk inflated exactly one more"
+    );
 
     // The leading implicit step (index 0) carries NO variable values.
     let vals_leading = stream.variables_at(StepId(0)).expect("leading step record present");
@@ -247,6 +268,38 @@ fn fetch_step_values_decompresses_only_its_chunk() {
 
     assert!(stream.variables_at(StepId(99)).is_none());
     assert!(stream.variables_at(StepId(-1)).is_none());
+}
+
+/// M8 production BlockSource seam: the seekable step/value wrappers can build
+/// from the already-open CTFS container, so `steps.dat`/`steps.idx` and
+/// `values.dat`/`values.idx` are read through that container's BlockSource
+/// instead of re-opening the `.ct` path.
+#[test]
+fn seekable_step_value_streams_open_from_block_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let ct = write_trace(&dir, true);
+    let bytes = std::fs::read(&ct).unwrap();
+    std::fs::remove_file(&ct).unwrap();
+
+    let mut ctfs = CtfsReader::from_source(Box::new(InMemoryBlockSource::new(bytes))).unwrap();
+
+    let step_stream = SeekableStepStream::open_from_ctfs(&mut ctfs)
+        .expect("open source-backed step stream")
+        .expect("trace has has_step_stream flag set");
+    let value_stream = SeekableValueStream::open_from_ctfs(&mut ctfs)
+        .expect("open source-backed value stream")
+        .expect("trace has has_value_stream flag set");
+
+    let last = user_step_index(MY_STEPS - 1);
+    let (_path_id, line) = step_stream.step_line(StepId(last)).expect("last step line");
+    assert_eq!(line, Line(10 + (MY_STEPS - 1) as i64));
+
+    let vals = value_stream.variables_at(StepId(last)).expect("last step values");
+    assert_eq!(vals.len(), 1);
+    match &vals[0].value {
+        ValueRecord::Int { i, .. } => assert_eq!(*i, ((MY_STEPS - 1) * 100) as i64),
+        other => panic!("expected Int, got {other:?}"),
+    }
 }
 
 /// Deliverable test #2 (PARITY): the SEEKABLE per-step line and per-step values
@@ -272,7 +325,11 @@ fn seekable_and_materialized_steps_values_agree() {
     // Materialized baseline: postprocess the identical events into a Db-backed
     // reader (the production materialized read path) and wrap it in the trait.
     let materialized = CTFSTraceReader::from_events(fixture_events(), Path::new("/test")).expect("postprocess events");
-    assert_eq!(materialized.step_count(), TOTAL_STEPS, "materialized step table agrees on count");
+    assert_eq!(
+        materialized.step_count(),
+        TOTAL_STEPS,
+        "materialized step table agrees on count"
+    );
 
     for i in 0..TOTAL_STEPS as i64 {
         let step_id = StepId(i);
@@ -280,7 +337,10 @@ fn seekable_and_materialized_steps_values_agree() {
         // ── Step line parity ──────────────────────────────────────────
         let mat_step = materialized.step(step_id).expect("materialized step present");
         let (seek_path, seek_line) = step_stream.step_line(step_id).expect("seekable step line present");
-        assert_eq!(seek_line, mat_step.line, "seekable line must equal materialized line for step {i}");
+        assert_eq!(
+            seek_line, mat_step.line,
+            "seekable line must equal materialized line for step {i}"
+        );
         assert_eq!(
             seek_path, mat_step.path_id,
             "seekable path_id must equal materialized path_id for step {i}"
@@ -305,9 +365,17 @@ fn seekable_and_materialized_steps_values_agree() {
     // `CTFSTraceReader::from_events` reader — which has NO seekable stream — so
     // it must fall back to the materialized table, equalling `variables_at`.
     for i in 0..TOTAL_STEPS as i64 {
-        let owned = materialized.variables_at_owned(StepId(i)).expect("owned variables present");
-        let mat_vals = materialized.variables_at(StepId(i)).map(|v| v.to_vec()).unwrap_or_default();
-        assert!(records_eq(&owned, &mat_vals), "variables_at_owned fallback equals materialized for step {i}");
+        let owned = materialized
+            .variables_at_owned(StepId(i))
+            .expect("owned variables present");
+        let mat_vals = materialized
+            .variables_at(StepId(i))
+            .map(|v| v.to_vec())
+            .unwrap_or_default();
+        assert!(
+            records_eq(&owned, &mat_vals),
+            "variables_at_owned fallback equals materialized for step {i}"
+        );
     }
 }
 
@@ -374,12 +442,20 @@ fn flag_off_trace_exposes_no_seekable_streams() {
     assert_eq!(reader.seekable_value_count(), None);
     assert_eq!(reader.seekable_step_line(StepId(0)), None);
     assert!(reader.seekable_variables_at(StepId(0)).is_none());
-    assert_eq!(reader.step_count(), TOTAL_STEPS, "materialized path reads the legacy trace unchanged");
+    assert_eq!(
+        reader.step_count(),
+        TOTAL_STEPS,
+        "materialized path reads the legacy trace unchanged"
+    );
 
     // `variables_at_owned` falls back to the materialized table for legacy
     // traces. The first user step (total index 1) has its one variable.
     let owned = reader
         .variables_at_owned(StepId(user_step_index(0)))
         .expect("materialized fallback");
-    assert_eq!(owned.len(), 1, "first user step has one variable from the materialized table");
+    assert_eq!(
+        owned.len(),
+        1,
+        "first user step has one variable from the materialized table"
+    );
 }

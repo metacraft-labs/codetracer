@@ -43,10 +43,13 @@ use codetracer_trace_types::{CallKey, FullValueRecord, Line, PathId, StepId, Typ
 
 use crate::db::DbStep;
 
-use codetracer_trace_reader::step_stream_reader::{open_step_stream, StepStreamReader};
-use codetracer_trace_reader::value_stream_reader::{open_value_stream, ValueStreamReader};
-use codetracer_trace_writer::step_stream::{unpack_global_line_index, StepStreamRecord};
+use codetracer_trace_reader::step_stream_reader::{StepStreamReader, open_step_stream};
+use codetracer_trace_reader::value_stream_reader::{ValueStreamReader, open_value_stream};
+use codetracer_trace_writer::meta_dat::{meta_dat_has_step_stream, meta_dat_has_value_stream};
+use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_index};
 use codetracer_trace_writer::value_stream::ValueStreamEvent;
+
+use super::ctfs_container::CtfsReader;
 
 /// A seekable, on-demand view over a container's `steps.dat` execution stream.
 ///
@@ -83,7 +86,10 @@ impl std::fmt::Debug for SeekableStepStream {
         f.debug_struct("SeekableStepStream")
             .field("record_count", &self.record_count)
             .field("chunk_size", &self.chunk_size)
-            .field("chunk_decompressions", &self.chunk_decompressions.load(Ordering::Relaxed))
+            .field(
+                "chunk_decompressions",
+                &self.chunk_decompressions.load(Ordering::Relaxed),
+            )
             .finish()
     }
 }
@@ -102,6 +108,42 @@ impl SeekableStepStream {
                 Ok(Some(SeekableStepStream {
                     reader: Mutex::new(reader),
                     path: Some(path.to_path_buf()),
+                    record_count,
+                    chunk_size,
+                    chunk_decompressions: AtomicU64::new(0),
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Open the seekable step stream through the already-open db-backend CTFS
+    /// reader. This is the production `BlockSource` seam: `steps.dat` and
+    /// `steps.idx` are read through the caller's current source/overlay instead
+    /// of re-opening the `.ct` by filesystem path.
+    pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableStepStream>, String> {
+        let meta = match ctfs.read_file("meta.dat") {
+            Ok(meta) => meta,
+            Err(_) => return Ok(None),
+        };
+        if !meta_dat_has_step_stream(&meta) {
+            return Ok(None);
+        }
+        let dat = match ctfs.read_file("steps.dat") {
+            Ok(dat) => dat,
+            Err(_) => return Ok(None),
+        };
+        let idx = ctfs
+            .read_file("steps.idx")
+            .map_err(|e| format!("steps.idx missing despite has_step_stream flag: {e}"))?;
+
+        match StepStreamReader::from_files(&meta, dat, idx)? {
+            Some(reader) => {
+                let record_count = reader.count();
+                let chunk_size = reader.chunk_size();
+                Ok(Some(SeekableStepStream {
+                    reader: Mutex::new(reader),
+                    path: None,
                     record_count,
                     chunk_size,
                     chunk_decompressions: AtomicU64::new(0),
@@ -203,7 +245,10 @@ impl std::fmt::Debug for SeekableValueStream {
         f.debug_struct("SeekableValueStream")
             .field("record_count", &self.record_count)
             .field("chunk_size", &self.chunk_size)
-            .field("chunk_decompressions", &self.chunk_decompressions.load(Ordering::Relaxed))
+            .field(
+                "chunk_decompressions",
+                &self.chunk_decompressions.load(Ordering::Relaxed),
+            )
             .finish()
     }
 }
@@ -214,6 +259,40 @@ impl SeekableValueStream {
     /// back to the fully-materialized `db.variables`, preserving backward compat.
     pub fn open(path: &Path) -> Result<Option<SeekableValueStream>, String> {
         match open_value_stream(path)? {
+            Some(reader) => {
+                let record_count = reader.count();
+                let chunk_size = reader.chunk_size();
+                Ok(Some(SeekableValueStream {
+                    reader: Mutex::new(reader),
+                    record_count,
+                    chunk_size,
+                    chunk_decompressions: AtomicU64::new(0),
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Open the seekable value stream through the already-open db-backend CTFS
+    /// reader. `values.dat` and `values.idx` are read through the caller's
+    /// current `BlockSource`/overlay instead of by re-opening the path.
+    pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableValueStream>, String> {
+        let meta = match ctfs.read_file("meta.dat") {
+            Ok(meta) => meta,
+            Err(_) => return Ok(None),
+        };
+        if !meta_dat_has_value_stream(&meta) {
+            return Ok(None);
+        }
+        let dat = match ctfs.read_file("values.dat") {
+            Ok(dat) => dat,
+            Err(_) => return Ok(None),
+        };
+        let idx = ctfs
+            .read_file("values.idx")
+            .map_err(|e| format!("values.idx missing despite has_value_stream flag: {e}"))?;
+
+        match ValueStreamReader::from_files(&meta, dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -434,7 +513,8 @@ impl StepReplaySink for LineHitSink {
         // `line.0 >= 0` guard the in-memory `step_map` build uses, so the two
         // sinks see a consistent line→step set for the same range.
         if step.line.0 >= 0 {
-            self.hits.push((step.path_id.0 as u32, step.line.0 as u32, index as u64));
+            self.hits
+                .push((step.path_id.0 as u32, step.line.0 as u32, index as u64));
         }
     }
 }
@@ -483,7 +563,10 @@ impl StepReplaySink for WholeStepTableSink {
             self.step_map.push(std::collections::HashMap::new());
         }
         if step.line.0 >= 0 {
-            self.step_map[path_id].entry(step.line.0 as usize).or_default().push(*step);
+            self.step_map[path_id]
+                .entry(step.line.0 as usize)
+                .or_default()
+                .push(*step);
         }
     }
 }
@@ -717,13 +800,7 @@ fn build_partials_parallel(
                     // OWN sink — no shared mutable state, so the replay is race-free.
                     let span = range.len();
                     let mut sink = WholeStepTableSink::new(path_count, span);
-                    replay_steps_into_sinks(
-                        &reader,
-                        call_keys,
-                        global_call_keys,
-                        range,
-                        &mut [&mut sink],
-                    );
+                    replay_steps_into_sinks(&reader, call_keys, global_call_keys, range, &mut [&mut sink]);
                     sink
                 })
             })
@@ -1028,10 +1105,7 @@ impl LazyValueCache {
             // A step with no recorded values, or an out-of-range read the stream
             // declines, both yield an empty record list — the same answer the
             // eager path produced (`db.variables.push(vec![])`).
-            self.stream
-                .variables_at(step_id)
-                .unwrap_or_default()
-                .into_boxed_slice()
+            self.stream.variables_at(step_id).unwrap_or_default().into_boxed_slice()
         });
         Some(boxed)
     }
@@ -1215,7 +1289,13 @@ impl LazyStepCache {
         path_count: usize,
         strategy: StepBuildStrategy,
     ) -> (Vec<DbStep>, Vec<std::collections::HashMap<usize, Vec<DbStep>>>) {
-        build_whole_step_table(&self.stream, &self.call_keys, &self.global_call_keys, path_count, strategy)
+        build_whole_step_table(
+            &self.stream,
+            &self.call_keys,
+            &self.global_call_keys,
+            path_count,
+            strategy,
+        )
     }
 
     /// Find the NEXT step at-or-after `from_step` that lands on `(path_id,
@@ -1285,7 +1365,11 @@ mod tests {
         assert_eq!(expected, count, "ranges must cover all of [0, {count})");
         // At most `threads` shards, and exactly `min(threads, count)` when count>0.
         if count > 0 {
-            assert_eq!(ranges.len(), threads.clamp(1, count), "shard count for count={count}, threads={threads}");
+            assert_eq!(
+                ranges.len(),
+                threads.clamp(1, count),
+                "shard count for count={count}, threads={threads}"
+            );
         } else {
             assert!(ranges.is_empty());
         }
@@ -1298,9 +1382,9 @@ mod tests {
         for &(count, threads) in &[
             (0usize, 4usize),
             (1, 4),
-            (3, 4),   // fewer steps than threads → singleton shards
-            (8, 4),   // evenly divisible
-            (10, 4),  // remainder 2 → first two shards larger
+            (3, 4),  // fewer steps than threads → singleton shards
+            (8, 4),  // evenly divisible
+            (10, 4), // remainder 2 → first two shards larger
             (5000, 7),
             (5002, 8),
             (100, 1), // single thread → one shard
@@ -1313,7 +1397,14 @@ mod tests {
     /// with the right ids and decoded values.
     #[test]
     fn step_values_reconstructs_full_records() {
-        let v0 = cbor4ii::serde::to_vec(Vec::new(), &ValueRecord::Int { i: 7, type_id: TypeId(0) }).unwrap();
+        let v0 = cbor4ii::serde::to_vec(
+            Vec::new(),
+            &ValueRecord::Int {
+                i: 7,
+                type_id: TypeId(0),
+            },
+        )
+        .unwrap();
         let v1 = cbor4ii::serde::to_vec(
             Vec::new(),
             &ValueRecord::String {
@@ -1339,7 +1430,10 @@ mod tests {
     #[test]
     fn non_stepvalues_events_yield_no_variables() {
         let events = vec![
-            ValueStreamEvent::BindVariable { variable_id: 1, place: 9 },
+            ValueStreamEvent::BindVariable {
+                variable_id: 1,
+                place: 9,
+            },
             ValueStreamEvent::DropVariable { variable_id: 1 },
         ];
         assert!(step_values_to_full_records(&events).is_empty());
