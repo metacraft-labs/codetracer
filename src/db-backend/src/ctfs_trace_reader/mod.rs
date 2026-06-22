@@ -3,6 +3,7 @@
 //! See the module-level documentation on [`CTFSTraceReader`] for design
 //! rationale and the two-format approach.
 
+pub mod block_overlay;
 pub mod call_stream_source;
 pub mod ctfs_container;
 pub mod follow_stream_source;

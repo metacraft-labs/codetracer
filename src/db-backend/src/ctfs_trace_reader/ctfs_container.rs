@@ -34,10 +34,10 @@ use std::path::Path;
 // ── Constants ───────────────────────────────────────────────────────────
 
 /// Magic bytes identifying a CTFS file: "C0DE trACE2" in hex-speak.
-const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
+pub(crate) const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
 
 /// The minimum CTFS format version we support.
-const CTFS_VERSION_MIN: u8 = 2;
+pub(crate) const CTFS_VERSION_MIN: u8 = 2;
 
 /// The maximum CTFS format version we support.
 ///
@@ -51,16 +51,16 @@ const CTFS_VERSION_MIN: u8 = 2;
 /// across all three versions, so a single reader handles them all. The only
 /// difference is the meaning of header bytes 6 (encryption, ignored) and 7
 /// (max_shards, informational only).
-const CTFS_VERSION_MAX: u8 = 4;
+pub(crate) const CTFS_VERSION_MAX: u8 = 4;
 
 /// Size of the fixed header (magic + version + reserved).
-const HEADER_SIZE: usize = 8;
+pub(crate) const HEADER_SIZE: usize = 8;
 
 /// Size of the extended header (block_size + max_root_entries).
-const EXTENDED_HEADER_SIZE: usize = 8;
+pub(crate) const EXTENDED_HEADER_SIZE: usize = 8;
 
 /// Size of each file entry in the root directory.
-const FILE_ENTRY_SIZE: usize = 24;
+pub(crate) const FILE_ENTRY_SIZE: usize = 24;
 
 /// Maximum number of mapping levels supported (5 levels handles files up to ~35 TB).
 const MAX_MAPPING_LEVELS: usize = 5;
@@ -75,7 +75,7 @@ const BASE40_CHARS: &[u8; 40] = b"\x000123456789abcdefghijklmnopqrstuvwxyz./-";
 ///
 /// Characters are encoded left-to-right with the leftmost character in the
 /// lowest-order position: `c[0]*40^0 + c[1]*40^1 + ...`.
-fn base40_encode(name: &str) -> Result<u64, Box<dyn Error>> {
+pub(crate) fn base40_encode(name: &str) -> Result<u64, Box<dyn Error>> {
     if name.len() > 12 {
         return Err(format!("CTFS filename too long ({} chars, max 12): {name}", name.len()).into());
     }
@@ -100,7 +100,7 @@ fn base40_encode(name: &str) -> Result<u64, Box<dyn Error>> {
 /// Decode a base40-packed `u64` into a file name string.
 ///
 /// Trailing null-padding characters (index 0) are stripped.
-fn base40_decode(mut encoded: u64) -> String {
+pub(crate) fn base40_decode(mut encoded: u64) -> String {
     if encoded == 0 {
         return String::new();
     }
@@ -235,6 +235,47 @@ pub trait BlockSource: fmt::Debug + Send + Sync {
     /// recordings as not-yet-finalized.
     fn is_finalized(&self) -> bool {
         true
+    }
+
+    /// Read the whole of block `block_num` (`block_size` bytes) into a freshly
+    /// allocated `Vec`.
+    ///
+    /// This is the block-aligned helper the design's trait sketch defines
+    /// (CTFS-Binary-Format.md §11.4 "Read Path" — `backing_store.read_block(N)`).
+    /// It is deferred from M0 to M2, where the copy-on-write overlay
+    /// ([`CtfsBlockOverlay`]) is its first consumer: the overlay resolves a
+    /// block from its in-memory map *or* falls through to
+    /// `backing_store.read_block(N)`, so the plain sources and the overlay must
+    /// share one block-granular read primitive that returns identical bytes.
+    ///
+    /// The default implementation is layered on [`BlockSource::read_at`] via the
+    /// shared [`read_exact_at`] bounds check, so every source (in-memory, local
+    /// file, follow, and later HTTP range) gets a correct, bounds-checked
+    /// `read_block` for free; a source with a cheaper block-granular fetch (e.g.
+    /// the future HTTP range source's one-`Range`-request-per-block path) may
+    /// override it.
+    fn read_block(&self, block_num: u64, block_size: usize) -> Result<Vec<u8>, CtfsError> {
+        let offset = block_num
+            .checked_mul(block_size as u64)
+            .ok_or_else(|| CtfsError::Corrupt(format!("read_block: block {block_num} offset overflow")))?;
+        // Mirror `read_exact_at`'s bounds + short-read checks; we cannot call it
+        // here because it takes `&dyn BlockSource` (an unsized cast from `Self`).
+        let end = offset
+            .checked_add(block_size as u64)
+            .ok_or_else(|| CtfsError::Corrupt(format!("read_block {block_num}: read offset overflow")))?;
+        if end > self.current_size() {
+            return Err(CtfsError::Corrupt(format!(
+                "read_block {block_num}: read extends beyond end of container"
+            )));
+        }
+        let mut buf = vec![0u8; block_size];
+        let read = self.read_at(offset, &mut buf)?;
+        if read != buf.len() {
+            return Err(CtfsError::Corrupt(format!(
+                "read_block {block_num}: short read ({read} of {block_size} bytes)"
+            )));
+        }
+        Ok(buf)
     }
 }
 
@@ -917,6 +958,24 @@ impl CtfsReader {
     #[allow(dead_code)]
     pub fn has_file(&self, name: &str) -> bool {
         self.files.contains_key(name)
+    }
+
+    /// Test-support accessor: the `(size, map_block)` of a named file's
+    /// directory entry, or `None` if absent.  Used by the M2 overlay tests
+    /// (sibling module) to locate a file's data block / size field in the raw
+    /// container image for byte-level verification, without exposing the
+    /// private `FileEntry` type.
+    #[cfg(test)]
+    pub(crate) fn file_entry(&self, name: &str) -> Option<(u64, u64)> {
+        self.files.get(name).map(|e| (e.size, e.map_block))
+    }
+
+    /// Test-support accessor: resolve a logical block index to its physical
+    /// block number (wraps the private `resolve_block`).  Used by the M2 overlay
+    /// tests to find a file's data block offset in the raw image.
+    #[cfg(test)]
+    pub(crate) fn resolve_block_for_test(&self, root_map_block: u64, logical_index: usize) -> Result<u64, CtfsError> {
+        self.resolve_block(root_map_block, logical_index)
     }
 }
 
