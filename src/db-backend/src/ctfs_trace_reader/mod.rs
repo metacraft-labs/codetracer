@@ -6,6 +6,7 @@
 pub mod call_stream_source;
 pub mod ctfs_container;
 pub mod meta_dat;
+pub mod step_map_namespace;
 pub mod step_value_stream_source;
 
 use std::collections::HashMap;
@@ -173,6 +174,16 @@ pub struct CTFSTraceReader {
     /// whole-table build — which is already on-demand — is affected; opening the
     /// trace and point lookups stay lazy/bounded.
     step_build_strategy: step_value_stream_source::StepBuildStrategy,
+    /// M26 — the prepopulated `step-map.ns` breakpoint index, when the `.ct`
+    /// carries one. `Some` ONLY when [`open`](Self::open) found a parseable
+    /// `step-map.ns` (container-internal file or sidecar). When present, the
+    /// breakpoint resolver (`step_ids_on_line`) answers a line's step set with
+    /// an O(unique-lines) index lookup WITHOUT triggering the whole-table build
+    /// — that is the M26 short-circuit. `None` on every legacy/older bundle (the
+    /// common case today, since no production writer emits the namespace yet),
+    /// where the M24c lazy / M25b parallel whole-table build serves
+    /// `steps_on_line` exactly as before.
+    step_map: Option<step_map_namespace::StepMapNamespace>,
 }
 
 /// M24c-steps — the memoized whole-table step views the lazy step path builds on
@@ -328,6 +339,22 @@ impl CTFSTraceReader {
         self.lazy_steps_full.as_ref().map(|c| c.get().is_some())
     }
 
+    /// M26 — `true` when the reader attached a prepopulated `step-map.ns`
+    /// breakpoint index at open. Lets a test prove that (a) a table-bearing
+    /// bundle routes breakpoint resolution through the index and (b) a
+    /// legacy/older bundle does not. Borrow the parsed namespace for direct
+    /// inspection via [`Self::step_map`].
+    pub fn has_prepopulated_step_map(&self) -> bool {
+        self.step_map.is_some()
+    }
+
+    /// M26 — borrow the attached prepopulated `step-map.ns` index, if any. Used
+    /// by tests to assert parity of the index's step sets against the
+    /// whole-table build directly.
+    pub fn step_map(&self) -> Option<&step_map_namespace::StepMapNamespace> {
+        self.step_map.as_ref()
+    }
+
     /// M-capability-flags accessor — the column-aware capability bits
     /// decoded from `meta.dat`.  The DAP layer threads these into the
     /// `Capabilities` response so the GUI gates per-column
@@ -396,6 +423,10 @@ impl CTFSTraceReader {
             lazy_steps: None,
             lazy_steps_full: None,
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            // No `.ct` path here (events come from an in-memory stream), so no
+            // `step-map.ns` to attach. `open()` attaches it on the path-bearing
+            // constructors.
+            step_map: None,
         })
     }
 }
@@ -438,6 +469,20 @@ impl CTFSTraceReader {
 /// `Trace-Based-Incremental-Testing.milestones.org` for the bounding.
 fn is_new_format(ctfs: &CtfsReader) -> bool {
     ctfs.has_file("steps.dat") && !ctfs.has_file("events.log")
+}
+
+/// M26 — the `<ct>.step-map.ns` SIDECAR path for a given `.ct` file. Appending
+/// the namespace suffix to the full `.ct` name (rather than replacing the
+/// extension) keeps the sidecar unambiguous next to the bundle and avoids
+/// colliding with any other `.ns` artefact.
+fn sidecar_step_map_path(ct_path: &Path) -> PathBuf {
+    let mut name = ct_path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".");
+    name.push(step_map_namespace::STEP_MAP_FILE);
+    match ct_path.parent() {
+        Some(dir) => dir.join(name),
+        None => PathBuf::from(name),
+    }
 }
 
 impl CTFSTraceReader {
@@ -558,7 +603,73 @@ impl CTFSTraceReader {
             }
         };
 
+        // M26 — attach the prepopulated `step-map.ns` BREAKPOINT INDEX when the
+        // bundle carries one. When present, breakpoint line→step resolution
+        // (`step_ids_on_line`) is an O(unique-lines) index lookup that does NOT
+        // trigger the M24c lazy / M25b whole-table build. When absent — the
+        // common case today, since no production writer emits the namespace yet
+        // (see `step_map_namespace`'s module docs) — the resolver falls back to
+        // the whole-table build, byte-identically.
+        //
+        // We look for the table in two places, in order:
+        //   1. a container-internal `step-map.ns` file (the spec's layout), and
+        //   2. a `<ct>.step-map.ns` SIDECAR next to the `.ct` (the path a
+        //      writer-side toggle / external tool can drop the index at without
+        //      rewriting the container).
+        // A present-but-unparseable table is logged and ignored (we keep the
+        // whole-table fallback) rather than failing the open — opening the trace
+        // is strictly more useful than refusing it, and the fallback always
+        // yields identical breakpoints.
+        reader.step_map = Self::load_step_map_namespace(&mut ctfs, path);
+
         Ok(reader)
+    }
+
+    /// M26 — locate and parse the prepopulated `step-map.ns` breakpoint index
+    /// for the `.ct` at `path`, preferring the container-internal file and
+    /// falling back to a `<ct>.step-map.ns` sidecar. Returns `None` (the
+    /// whole-table fallback) when neither is present or the bytes are
+    /// unparseable.
+    fn load_step_map_namespace(
+        ctfs: &mut CtfsReader,
+        path: &Path,
+    ) -> Option<step_map_namespace::StepMapNamespace> {
+        // 1. Container-internal `step-map.ns`.
+        let internal = if ctfs.has_file(step_map_namespace::STEP_MAP_FILE) {
+            match ctfs.read_file(step_map_namespace::STEP_MAP_FILE) {
+                Ok(bytes) => Some(bytes),
+                Err(e) => {
+                    info!("CTFS: step-map.ns present but unreadable ({e}); falling back to whole-table breakpoint build");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // 2. Sidecar `<ct>.step-map.ns`.
+        let bytes = internal.or_else(|| {
+            // A missing sidecar is the normal case — not an error — so any read
+            // failure (absent file, permission, etc.) collapses to `None` and we
+            // stay on the whole-table fallback.
+            let sidecar = sidecar_step_map_path(path);
+            std::fs::read(&sidecar).ok()
+        });
+
+        let bytes = bytes?;
+        match step_map_namespace::StepMapNamespace::parse(&bytes) {
+            Ok(ns) => {
+                info!(
+                    "CTFS: prepopulated step-map.ns attached ({} (path,line) entries) — breakpoint resolution served from the index",
+                    ns.entry_count()
+                );
+                Some(ns)
+            }
+            Err(e) => {
+                info!("CTFS: step-map.ns malformed ({e}); falling back to whole-table breakpoint build");
+                None
+            }
+        }
     }
 
     /// Construct a [`CTFSTraceReader`] from raw bytes already in memory.
@@ -874,6 +985,10 @@ impl CTFSTraceReader {
             lazy_steps: None,
             lazy_steps_full: None,
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            // BEAM sidecar bundles do not carry a `step-map.ns`; `open()` would
+            // attach one if present, but these traces are fully materialized so
+            // the whole-table path serves breakpoints.
+            step_map: None,
         }))
     }
 
@@ -1656,6 +1771,11 @@ impl CTFSTraceReader {
             // active strategy for the (filesystem-backed) production split bundle
             // this path opens.
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            // M26 — the prepopulated `step-map.ns` (if any) is attached centrally
+            // by `open()`, which has the `.ct` path. Left `None` here so a
+            // path-less reconstruction of this struct stays on the whole-table
+            // fallback.
+            step_map: None,
         })
     }
 
@@ -1747,6 +1867,8 @@ impl CTFSTraceReader {
             lazy_steps: None,
             lazy_steps_full: None,
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            // M26 — attached centrally by `open()` (which has the `.ct` path).
+            step_map: None,
         })
     }
 
@@ -2073,6 +2195,24 @@ impl TraceReader for CTFSTraceReader {
             return self.lazy_full_steps().step_map.get(path_id.0);
         }
         self.db.step_map.get(path_id)
+    }
+
+    fn step_ids_on_line(&self, path_id: PathId, line: usize) -> Option<Vec<StepId>> {
+        // M26 — PREFER the prepopulated `step-map.ns` breakpoint index when the
+        // `.ct` carries one: a line's step ids are an O(unique-lines) HashMap
+        // lookup that does NOT touch `steps.dat` and does NOT trigger the M24c
+        // lazy / M25b whole-table build. The index stores the SAME ascending
+        // step-id set the whole-table build would produce (it is computed from
+        // the same steps), so the result is identical.
+        if let Some(step_map) = self.step_map.as_ref() {
+            return step_map.step_ids_on_line(path_id, line).cloned();
+        }
+        // No prepopulated index (legacy/older bundle): fall back to the
+        // whole-table derivation. On the lazy step path this materializes the
+        // whole-table view once on first demand (`lazy_full_steps`), exactly as
+        // `steps_on_line` does; off it, it reads the eager `db.step_map`.
+        self.steps_on_line(path_id, line)
+            .map(|records| records.iter().map(|s| s.step_id).collect())
     }
 
     // ── Iteration helpers ────────────────────────────────────────────

@@ -228,6 +228,28 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// Return the full line→steps map for a given path.
     fn step_map_for_path(&self, path_id: PathId) -> Option<&HashMap<usize, Vec<DbStep>>>;
 
+    /// M26 — the ascending `step_id`s recorded on `(path_id, line)` — the
+    /// BREAKPOINT-resolution primitive.
+    ///
+    /// This is `steps_on_line` reduced to just the step ids a breakpoint
+    /// resolver needs (it never inspects the rest of a `DbStep`). Splitting it
+    /// out lets a reader answer breakpoint queries from a PREPOPULATED line→step
+    /// index — the spec's `step-map.ns` (M26) — with an O(unique-lines) lookup
+    /// that does NOT trigger the whole step-table build, while readers without
+    /// such an index keep the existing whole-table behaviour.
+    ///
+    /// The default derives the ids from [`steps_on_line`](Self::steps_on_line),
+    /// so every reader is correct out of the box and the result is identical to
+    /// the whole-table path. The CTFS reader OVERRIDES it to prefer the
+    /// prepopulated `step-map.ns` when the `.ct` carries one (falling back to
+    /// this same whole-table derivation when it does not).
+    ///
+    /// Returns `None` when the path/line has no recorded steps.
+    fn step_ids_on_line(&self, path_id: PathId, line: usize) -> Option<Vec<StepId>> {
+        self.steps_on_line(path_id, line)
+            .map(|records| records.iter().map(|s| s.step_id).collect())
+    }
+
     // ── Iteration helpers ────────────────────────────────────────────
 
     /// Iterate over all functions with their ids.

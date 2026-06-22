@@ -3189,15 +3189,19 @@ impl Handler {
     }
 
     fn find_next_step(&self, path_id: PathId, line: usize) -> Option<StepId> {
-        if let Some(records) = self.reader.steps_on_line(path_id, line) {
-            for record in records {
-                if record.step_id > self.step_id {
-                    return Some(record.step_id);
-                }
+        // M26 — resolve the line's step ids via `step_ids_on_line`, which on the
+        // CTFS reader PREFERS the prepopulated `step-map.ns` index (O(unique
+        // lines), no whole-table build) and falls back to the whole-table build
+        // when no index is present. The ids are ascending, so the first one past
+        // the current step is the next hit; otherwise the line's last step is the
+        // closest preceding one (preserving the original behaviour exactly).
+        let step_ids = self.reader.step_ids_on_line(path_id, line)?;
+        for step_id in &step_ids {
+            if *step_id > self.step_id {
+                return Some(*step_id);
             }
-            return Some(records.last()?.step_id);
         }
-        None
+        step_ids.last().copied()
     }
 
     fn get_closest_step_id(&self, loc: &SourceLocation) -> Option<StepId> {
