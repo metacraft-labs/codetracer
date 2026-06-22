@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::path::Path;
 
@@ -180,6 +181,189 @@ struct FileEntry {
     map_block: u64,
 }
 
+// ── Block source abstraction ──────────────────────────────────────────────
+
+/// Abstraction over the raw byte storage backing a CTFS container.
+///
+/// `CtfsReader` resolves logical file blocks to physical block numbers and
+/// then asks the `BlockSource` for the bytes at the corresponding container
+/// offsets.  Separating *how blocks are stored* from *how blocks are located*
+/// is the seam that later milestones extend without touching the reader:
+///
+/// - **M0 (this milestone):** [`InMemoryBlockSource`] (whole-file load, the
+///   historical default) and [`LocalFileSource`] (positional `pread` over an
+///   open `File`).  Both are byte-for-byte equivalent for a finalized
+///   container; only the default path (`InMemoryBlockSource`) is wired in so
+///   there is no behaviour change.
+/// - **M1 (follow mode):** a follow source re-reads block-0 `FileEntry` sizes
+///   on [`BlockSource::refresh`] to observe appended blocks while a writer is
+///   still streaming, and reports finalization via [`BlockSource::is_finalized`].
+/// - **M7 (HTTP):** a range-request source serves [`BlockSource::read_at`] from
+///   bounded HTTP `Range:` fetches.
+///
+/// All reads are positional and side-effect free, so a `BlockSource` only
+/// needs `&self` for reads; this keeps the read path shareable across threads
+/// for sources whose underlying I/O is itself thread-safe.
+pub trait BlockSource: fmt::Debug + Send + Sync {
+    /// Read exactly `buf.len()` bytes starting at container byte `offset`.
+    ///
+    /// Returns the number of bytes read (always `buf.len()` on success).  An
+    /// `offset`/length that runs past the currently-observable end of the
+    /// container is a [`CtfsError::Corrupt`]; callers (e.g. `read_file`,
+    /// `read_mapping_entry`) bounds-check against [`BlockSource::current_size`]
+    /// before reading, mirroring the historical whole-file slice bounds checks.
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError>;
+
+    /// The number of bytes currently observable through this source.
+    ///
+    /// For fixed sources this is the container length captured at open time.
+    /// Growing/follow sources update this on [`BlockSource::refresh`].
+    fn current_size(&self) -> u64;
+
+    /// Re-observe the backing storage to pick up growth from a concurrent
+    /// writer.  Fixed sources are a no-op; follow/HTTP sources override this in
+    /// later milestones to re-read `FileEntry` sizes / re-probe content length.
+    fn refresh(&mut self) -> Result<(), CtfsError> {
+        Ok(())
+    }
+
+    /// Whether the container is finalized (the writer has committed terminal
+    /// metadata such as `meta.dat`/`meta.json`).
+    ///
+    /// M0 sources back finalized, fully-written containers, so the default is
+    /// `true`; follow-mode (M1) overrides this to surface in-progress
+    /// recordings as not-yet-finalized.
+    fn is_finalized(&self) -> bool {
+        true
+    }
+}
+
+/// Read exactly `buf.len()` bytes at `offset` from a `BlockSource`, mapping a
+/// short read (storage smaller than requested) to a [`CtfsError::Corrupt`].
+///
+/// Centralises the "block extends beyond end of container" bounds check that
+/// the historical whole-file path performed inline, so every reader call site
+/// gets identical error reporting regardless of the backing source.
+fn read_exact_at(source: &dyn BlockSource, offset: u64, buf: &mut [u8], context: &str) -> Result<(), CtfsError> {
+    let end = offset
+        .checked_add(buf.len() as u64)
+        .ok_or_else(|| CtfsError::Corrupt(format!("{context}: read offset overflow")))?;
+    if end > source.current_size() {
+        return Err(CtfsError::Corrupt(format!("{context}: read extends beyond end of container")));
+    }
+    let read = source.read_at(offset, buf)?;
+    if read != buf.len() {
+        return Err(CtfsError::Corrupt(format!(
+            "{context}: short read ({read} of {} bytes)",
+            buf.len()
+        )));
+    }
+    Ok(())
+}
+
+/// A `BlockSource` backed by the whole container loaded into a `Vec<u8>`.
+///
+/// This preserves the exact pre-M0 behaviour: `CtfsReader` historically held
+/// `data: Vec<u8>` and sliced it directly.  Routing those slices through this
+/// source is byte-for-byte equivalent — it is the M0 default.
+#[derive(Debug)]
+pub struct InMemoryBlockSource {
+    data: Vec<u8>,
+}
+
+impl InMemoryBlockSource {
+    /// Wrap an already-loaded container image.
+    pub fn new(data: Vec<u8>) -> Self {
+        InMemoryBlockSource { data }
+    }
+}
+
+impl BlockSource for InMemoryBlockSource {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError> {
+        let start = offset as usize;
+        let end = start
+            .checked_add(buf.len())
+            .ok_or_else(|| CtfsError::Corrupt("in-memory read offset overflow".to_string()))?;
+        if end > self.data.len() {
+            return Err(CtfsError::Corrupt(format!(
+                "in-memory read [{start}..{end}) extends beyond end of container ({} bytes)",
+                self.data.len()
+            )));
+        }
+        buf.copy_from_slice(&self.data[start..end]);
+        Ok(buf.len())
+    }
+
+    fn current_size(&self) -> u64 {
+        self.data.len() as u64
+    }
+}
+
+/// A `BlockSource` backed by positional reads (`pread`) over an open `File`.
+///
+/// Modelled on `codetracer_ctfs::concurrent_reader::ConcurrentCtfsReader`:
+/// `pread` does not move a shared file cursor, so reads are thread-safe and the
+/// container is never fully loaded into RAM.  M0 implements and unit-tests this
+/// source but does not make it the default — that swap lands with follow mode
+/// (M1) and the HTTP source (M7) which build on the same positional seam.
+#[derive(Debug)]
+pub struct LocalFileSource {
+    file: File,
+    /// Container length observed at open time (and re-observed on `refresh`).
+    size: u64,
+}
+
+impl LocalFileSource {
+    /// Open `path` for positional reads.
+    pub fn open(path: &Path) -> Result<Self, CtfsError> {
+        let file = File::open(path)?;
+        let size = file.metadata()?.len();
+        Ok(LocalFileSource { file, size })
+    }
+}
+
+impl BlockSource for LocalFileSource {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError> {
+        // Cross-platform positional read; mirrors `pread_compat::pread`.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            self.file.read_exact_at(buf, offset)?;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileExt;
+            let mut read = 0usize;
+            while read < buf.len() {
+                let n = self.file.seek_read(&mut buf[read..], offset + read as u64)?;
+                if n == 0 {
+                    return Err(CtfsError::Corrupt("local-file source: unexpected EOF".to_string()));
+                }
+                read += n;
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut f = &self.file;
+            f.seek(SeekFrom::Start(offset))?;
+            f.read_exact(buf)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn current_size(&self) -> u64 {
+        self.size
+    }
+
+    fn refresh(&mut self) -> Result<(), CtfsError> {
+        // Re-observe the file length so a later milestone's follow logic — and
+        // even a plain reader over a growing file — can see appended bytes.
+        self.size = self.file.metadata()?.len();
+        Ok(())
+    }
+}
+
 // ── Reader ──────────────────────────────────────────────────────────────
 
 /// Reader for a CTFS v2/v3/v4 binary container.
@@ -188,10 +372,12 @@ struct FileEntry {
 /// `read_file(name)` to extract internal files by name.
 #[derive(Debug)]
 pub struct CtfsReader {
-    /// The raw bytes of the entire container. For Phase 1 we load the whole
-    /// file into memory. A future Phase 2 implementation would memory-map
-    /// the file instead and read blocks on demand.
-    data: Vec<u8>,
+    /// The byte storage backing the container.  Historically this was a
+    /// `Vec<u8>` holding the whole file; M0 routes all block reads through a
+    /// [`BlockSource`] instead.  The default constructed by [`CtfsReader::open`]
+    /// / [`CtfsReader::from_bytes`] is an [`InMemoryBlockSource`], which is
+    /// byte-for-byte equivalent to the prior whole-file path.
+    source: Box<dyn BlockSource>,
     /// Block size in bytes (1024, 2048, or 4096).
     block_size: usize,
     /// Number of entries per mapping block (`block_size / 8`).
@@ -202,36 +388,56 @@ pub struct CtfsReader {
 
 impl CtfsReader {
     /// Open and parse a CTFS container from a file path.
+    ///
+    /// Loads the whole file into memory (the historical default) and backs the
+    /// reader with an [`InMemoryBlockSource`], so behaviour is byte-for-byte
+    /// unchanged from the pre-M0 `data: Vec<u8>` reader.
     pub fn open(path: &Path) -> Result<Self, CtfsError> {
         let data = fs::read(path)?;
         Self::from_bytes(data)
     }
 
-    /// Parse a CTFS container from raw bytes.
+    /// Parse a CTFS container from raw bytes, backed by an
+    /// [`InMemoryBlockSource`].  This is the M0 default and preserves the exact
+    /// prior whole-file behaviour.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, CtfsError> {
-        if data.len() < HEADER_SIZE + EXTENDED_HEADER_SIZE {
+        Self::from_source(Box::new(InMemoryBlockSource::new(data)))
+    }
+
+    /// Parse a CTFS container served by an arbitrary [`BlockSource`].
+    ///
+    /// This is the M0 seam: the header, extended header and file directory are
+    /// parsed via positional reads through `source` rather than by slicing an
+    /// in-memory buffer, so any backing storage (in-memory, local file,
+    /// follow, HTTP range) opens through one code path.
+    pub fn from_source(source: Box<dyn BlockSource>) -> Result<Self, CtfsError> {
+        let total = source.current_size();
+        if total < (HEADER_SIZE + EXTENDED_HEADER_SIZE) as u64 {
             return Err(CtfsError::Corrupt(format!(
-                "file too small ({} bytes, need at least {})",
-                data.len(),
+                "file too small ({total} bytes, need at least {})",
                 HEADER_SIZE + EXTENDED_HEADER_SIZE
             )));
         }
 
+        // Read the fixed + extended header (16 bytes) in one positional read.
+        let mut header = [0u8; HEADER_SIZE + EXTENDED_HEADER_SIZE];
+        read_exact_at(source.as_ref(), 0, &mut header, "header")?;
+
         // Validate magic bytes
-        if data[..5] != CTFS_MAGIC {
+        if header[..5] != CTFS_MAGIC {
             return Err(CtfsError::InvalidMagic);
         }
 
         // Check version — we accept v2, v3, and v4 since the extended header
         // and file entry layout is identical across these versions.
-        let version = data[5];
+        let version = header[5];
         if !(CTFS_VERSION_MIN..=CTFS_VERSION_MAX).contains(&version) {
             return Err(CtfsError::UnsupportedVersion(version));
         }
 
         // Parse extended header
-        let block_size = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
-        let max_root_entries = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
+        let max_root_entries = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
 
         // Validate block size
         if !matches!(block_size, 1024 | 2048 | 4096) {
@@ -245,25 +451,28 @@ impl CtfsReader {
         let mut files = HashMap::new();
 
         for i in 0..max_root_entries {
-            let offset = entry_start + i * FILE_ENTRY_SIZE;
-            if offset + FILE_ENTRY_SIZE > data.len() {
+            let offset = (entry_start + i * FILE_ENTRY_SIZE) as u64;
+            // Stop at the first entry that would run past the end of the
+            // container.  Matches the prior `break` on the in-memory bounds.
+            if offset + FILE_ENTRY_SIZE as u64 > total {
                 break;
             }
 
-            // Safety: bounds are checked above (offset + FILE_ENTRY_SIZE <= data.len()),
-            // so these 8-byte slices are guaranteed to succeed.
+            let mut entry_buf = [0u8; FILE_ENTRY_SIZE];
+            read_exact_at(source.as_ref(), offset, &mut entry_buf, "file entry")?;
+
             let size = u64::from_le_bytes(
-                data[offset..offset + 8]
+                entry_buf[0..8]
                     .try_into()
                     .map_err(|_| CtfsError::Corrupt("file entry size slice".to_string()))?,
             );
             let map_block = u64::from_le_bytes(
-                data[offset + 8..offset + 16]
+                entry_buf[8..16]
                     .try_into()
                     .map_err(|_| CtfsError::Corrupt("file entry map_block slice".to_string()))?,
             );
             let name_encoded = u64::from_le_bytes(
-                data[offset + 16..offset + 24]
+                entry_buf[16..24]
                     .try_into()
                     .map_err(|_| CtfsError::Corrupt("file entry name slice".to_string()))?,
             );
@@ -278,11 +487,21 @@ impl CtfsReader {
         }
 
         Ok(CtfsReader {
-            data,
+            source,
             block_size,
             entries_per_block,
             files,
         })
+    }
+
+    /// Open a CTFS container backed by a [`LocalFileSource`] (positional
+    /// `pread` over the file, no whole-file load).
+    ///
+    /// M0 implements and tests this path but does not make it the default;
+    /// [`CtfsReader::open`] still uses the in-memory source so the production
+    /// open path is unchanged.  Follow mode (M1) wires positional sources in.
+    pub fn open_local_file(path: &Path) -> Result<Self, CtfsError> {
+        Self::from_source(Box::new(LocalFileSource::open(path)?))
     }
 
     /// Read the full contents of a named internal file.
@@ -319,17 +538,22 @@ impl CtfsReader {
                 )));
             }
 
-            let block_offset = data_block_num as usize * self.block_size;
+            let block_offset = data_block_num * self.block_size as u64;
             let remaining = entry.size as usize - result.len();
             let to_read = remaining.min(self.block_size);
 
-            if block_offset + to_read > self.data.len() {
-                return Err(CtfsError::Corrupt(format!(
-                    "file '{name}': block {data_block_num} extends beyond end of container"
-                )));
-            }
-
-            result.extend_from_slice(&self.data[block_offset..block_offset + to_read]);
+            // Read this block's bytes through the BlockSource.  `read_exact_at`
+            // bounds-checks against the source's current size, mirroring the
+            // prior whole-file `block_offset + to_read > self.data.len()` guard
+            // (and reporting the same "extends beyond end of container" error).
+            let start = result.len();
+            result.resize(start + to_read, 0);
+            read_exact_at(
+                self.source.as_ref(),
+                block_offset,
+                &mut result[start..start + to_read],
+                &format!("file '{name}': block {data_block_num}"),
+            )?;
         }
 
         Ok(result)
@@ -446,17 +670,21 @@ impl CtfsReader {
 
     /// Read a single u64 entry from a mapping block.
     fn read_mapping_entry(&self, block_num: u64, entry_index: usize) -> Result<u64, CtfsError> {
-        let offset = block_num as usize * self.block_size + entry_index * 8;
-        if offset + 8 > self.data.len() {
-            return Err(CtfsError::Corrupt(format!(
+        let offset = block_num * self.block_size as u64 + (entry_index * 8) as u64;
+        let mut buf = [0u8; 8];
+        read_exact_at(
+            self.source.as_ref(),
+            offset,
+            &mut buf,
+            &format!("mapping entry at block {block_num}, index {entry_index}"),
+        )
+        .map_err(|_| {
+            // Preserve the prior error wording for out-of-bounds mapping reads.
+            CtfsError::Corrupt(format!(
                 "mapping entry at block {block_num}, index {entry_index} is out of bounds"
-            )));
-        }
-        Ok(u64::from_le_bytes(
-            self.data[offset..offset + 8]
-                .try_into()
-                .map_err(|_| CtfsError::Corrupt("mapping entry slice".to_string()))?,
-        ))
+            ))
+        })?;
+        Ok(u64::from_le_bytes(buf))
     }
 
     /// List the names of all files in the container.
@@ -704,6 +932,129 @@ mod tests {
     fn test_base40_too_long() {
         let name = "1234567890123"; // 13 chars
         assert!(base40_encode(name).is_err());
+    }
+
+    /// M0 — `LocalFileSource` returns byte-identical block bytes to the
+    /// in-memory/index path for every block of a fixture container.
+    ///
+    /// Builds a fixture container with several files (including one that spans
+    /// many blocks so multi-level mapping is exercised), then for every data
+    /// block of every file compares the bytes resolved+read through a
+    /// `LocalFileSource`-backed reader against the bytes resolved+read through
+    /// the in-memory whole-file reader.  A mis-routed block (wrong offset, off
+    /// by a block, truncated read) would surface as a byte mismatch here.
+    #[test]
+    fn test_blocksource_localfile_reads_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blocksource.ct");
+
+        // A small file, a multi-block file, and a multi-level (>511 blocks)
+        // file so the LocalFileSource is exercised across the whole mapping
+        // hierarchy, not just direct level-1 pointers.
+        const BLOCK_SIZE: usize = 4096;
+        let small = b"small file contents".to_vec();
+        let multi: Vec<u8> = (0..(BLOCK_SIZE * 3 + 7)).map(|i| (i % 256) as u8).collect();
+        let multilevel: Vec<u8> = (0..(BLOCK_SIZE * 600))
+            .map(|i| ((i.wrapping_mul(31).wrapping_add(17)) % 251) as u8)
+            .collect();
+
+        write_minimal_ctfs(
+            &path,
+            &[
+                ("small.bin", small.as_slice()),
+                ("multi.bin", multi.as_slice()),
+                ("multilvl.bin", multilevel.as_slice()),
+            ],
+        )
+        .unwrap();
+
+        // Whole-file (default, InMemoryBlockSource) reader: the reference.
+        let mut in_mem = CtfsReader::open(&path).unwrap();
+        // Positional (LocalFileSource, pread) reader: the path under test.
+        let mut local = CtfsReader::open_local_file(&path).unwrap();
+
+        // The directory parse must agree exactly.
+        let mut names_mem = in_mem.file_names();
+        let mut names_local = local.file_names();
+        names_mem.sort_unstable();
+        names_local.sort_unstable();
+        assert_eq!(names_mem, names_local, "file directory differs between sources");
+
+        for (name, expected) in [
+            ("small.bin", &small),
+            ("multi.bin", &multi),
+            ("multilvl.bin", &multilevel),
+        ] {
+            let via_mem = in_mem.read_file(name).unwrap();
+            let via_local = local.read_file(name).unwrap();
+            assert_eq!(&via_mem, expected, "in-memory read of '{name}' is wrong");
+            assert_eq!(
+                via_local, via_mem,
+                "LocalFileSource read of '{name}' differs from in-memory read"
+            );
+
+            // Per-block comparison directly through the BlockSource, so a
+            // single misrouted block is pinpointed rather than hidden inside a
+            // whole-file equality.
+            let entry = in_mem.files.get(name).unwrap().clone();
+            let num_blocks = (entry.size as usize).div_ceil(BLOCK_SIZE);
+            for block_index in 0..num_blocks {
+                let phys = in_mem.resolve_block(entry.map_block, block_index).unwrap();
+                let phys_local = local.resolve_block(entry.map_block, block_index).unwrap();
+                assert_eq!(phys, phys_local, "block {block_index} of '{name}' resolved differently");
+
+                let offset = phys * BLOCK_SIZE as u64;
+                let to_read = (entry.size as usize - block_index * BLOCK_SIZE).min(BLOCK_SIZE);
+                let mut mem_block = vec![0u8; to_read];
+                let mut local_block = vec![0u8; to_read];
+                read_exact_at(in_mem.source.as_ref(), offset, &mut mem_block, "mem block").unwrap();
+                read_exact_at(local.source.as_ref(), offset, &mut local_block, "local block").unwrap();
+                assert_eq!(
+                    local_block, mem_block,
+                    "block {block_index} of '{name}': LocalFileSource bytes differ from in-memory bytes"
+                );
+            }
+        }
+
+        // current_size() agrees with the on-disk length.
+        let on_disk = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(local.source.current_size(), on_disk);
+        assert_eq!(in_mem.source.current_size(), on_disk);
+    }
+
+    /// M0 — opening a fixture container through the (default InMemory-backed)
+    /// `CtfsReader` yields the same file/block contents as a freshly-read
+    /// whole-file image.  This pins that routing reads through the
+    /// `BlockSource` seam did not change the bytes the reader returns.
+    #[test]
+    fn test_ctfs_reader_unchanged_via_blocksource() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unchanged.ct");
+
+        let file_a = b"alpha contents".to_vec();
+        let file_b: Vec<u8> = (0..9000u32).map(|i| (i % 256) as u8).collect();
+        write_minimal_ctfs(&path, &[("file.a", file_a.as_slice()), ("file.b", file_b.as_slice())]).unwrap();
+
+        // Reference bytes: the raw container image read directly off disk.
+        let raw = std::fs::read(&path).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert!(reader.has_file("file.a"));
+        assert!(reader.has_file("file.b"));
+        assert_eq!(reader.read_file("file.a").unwrap(), file_a);
+        assert_eq!(reader.read_file("file.b").unwrap(), file_b);
+
+        // The default source is the in-memory whole-file image, byte-identical
+        // to the raw file: read the entire container back through the seam.
+        let mut whole = vec![0u8; raw.len()];
+        read_exact_at(reader.source.as_ref(), 0, &mut whole, "whole container").unwrap();
+        assert_eq!(whole, raw, "InMemoryBlockSource image differs from on-disk bytes");
+
+        // A read past the end must be a Corrupt error, not a panic — the seam
+        // preserves the historical bounds behaviour.
+        let mut overflow = [0u8; 8];
+        let err = read_exact_at(reader.source.as_ref(), raw.len() as u64, &mut overflow, "past end");
+        assert!(matches!(err, Err(CtfsError::Corrupt(_))));
     }
 
     #[test]

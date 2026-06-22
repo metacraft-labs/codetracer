@@ -2660,6 +2660,94 @@ mod tests {
         );
     }
 
+    /// M0 — end-to-end: the db-backend opens a real materialized `.ct`
+    /// fixture (whose internal files are stored as CTFS blocks resolved through
+    /// the M0 [`BlockSource`] seam) and serves a known step + variable
+    /// identically to the pre-refactor behaviour.
+    ///
+    /// The fixture is a self-contained old-format trace built by the container
+    /// writer: opening it drives `CtfsReader::read_file` (now routed through an
+    /// `InMemoryBlockSource`) for `meta.dat` and `events.log`, then the full
+    /// trace pipeline.  A block misrouted by the seam would corrupt the CBOR
+    /// event stream and break the step/variable assertions below, so this test
+    /// genuinely exercises the seam end-to-end rather than asserting a trivial
+    /// fact.
+    #[test]
+    fn e2e_db_backend_open_materialized_unchanged() {
+        use codetracer_trace_types::{
+            CallRecord, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, StepRecord, TraceLowLevelEvent,
+            TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
+        };
+        use std::path::PathBuf;
+
+        // A small but real trace: main() steps line 2 with x = 1234567.
+        let events: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/tmp/prog.py")),
+            TraceLowLevelEvent::Type(TypeRecord {
+                kind: TypeKind::Int,
+                lang_type: "int".to_string(),
+                specific_info: TypeSpecificInfo::None,
+            }),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "main".to_string(),
+            }),
+            TraceLowLevelEvent::VariableName("x".to_string()),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(2),
+            }),
+            TraceLowLevelEvent::Value(FullValueRecord {
+                variable_id: VariableId(0),
+                value: ValueRecord::Int {
+                    i: 1_234_567,
+                    type_id: TypeId(0),
+                },
+            }),
+        ];
+
+        let mut cbor_buf = Vec::new();
+        for event in &events {
+            cbor_buf = cbor4ii::serde::to_vec(cbor_buf, event).expect("CBOR encode failed");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("materialized.ct");
+        let dat = meta_dat_bytes("/tmp/prog.py", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(&ct_path, &[("meta.dat", &dat), ("events.log", &cbor_buf)]).unwrap();
+
+        // Open through the db-backend reader (default InMemoryBlockSource seam).
+        let reader = CTFSTraceReader::open(&ct_path).unwrap();
+
+        // Known step served identically: step 0 is line 2 of prog.py.
+        assert_eq!(reader.step_count(), 1, "expected exactly 1 step");
+        let step0 = reader.step(StepId(0)).expect("step 0 should exist");
+        assert_eq!(step0.path_id, PathId(0));
+        assert_eq!(step0.line, Line(2));
+
+        // Known variable served identically: x = 1234567 at step 0.
+        let vars0 = reader.variables_at(StepId(0)).expect("step 0 should have variables");
+        let x = vars0
+            .iter()
+            .find(|v| v.variable_id == VariableId(0))
+            .expect("variable x should be present at step 0");
+        match &x.value {
+            ValueRecord::Int { i, .. } => assert_eq!(*i, 1_234_567, "x must round-trip exactly through the seam"),
+            other => panic!("expected Int value for x, got {other:?}"),
+        }
+
+        // Interning + metadata served identically.
+        assert_eq!(reader.path(PathId(0)).unwrap(), "/tmp/prog.py");
+        assert_eq!(reader.function(FunctionId(0)).unwrap().name, "main");
+        assert_eq!(reader.variable_name(VariableId(0)).unwrap(), "x");
+        assert_eq!(reader.workdir().to_str().unwrap(), "/tmp");
+    }
+
     /// Verify the `is_new_format` helper function directly.
     #[test]
     fn test_is_new_format_detection() {
