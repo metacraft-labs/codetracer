@@ -63,6 +63,12 @@ import incremental/native_trace
 # CLI can additionally WRITE/UPDATE the per-test artifact file alongside the
 # decision, reusing the engine's extraction + hashing via `buildArtifact`.
 import incremental/root_hash
+# M4a (Incremental-Test-Runner): the CTFS-namespace-backed artifact codec. Just
+# importing it installs the namespace format as the default behind M2's codec
+# boundary (`setDefaultCodec`), so `writeArtifact`/`readArtifact` persist through
+# the CoW B-tree namespaces. The CLI surface and decision behaviour are
+# unchanged — only the on-disk bytes.
+import incremental/ctfs_codec
 
 type
   IncrementalLanguage* = enum

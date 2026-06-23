@@ -276,9 +276,37 @@ proc decodeJson(bytes: string): Result[RootHashArtifact, string] {.nimcall, gcsa
 
 proc provisionalJsonCodec*(): RootHashArtifactCodec =
   ## The M2 provisional codec: self-describing JSON over the engine's cache
-  ## shape. M3 decides the final format and M4 swaps THIS for the chosen codec
-  ## without touching the rest of the module.
+  ## shape. Retained as a fallback / interop format; the DEFAULT codec is now the
+  ## M4a CTFS-namespace codec (installed by `ctfs_codec` via `setDefaultCodec`).
   RootHashArtifactCodec(name: "json", encode: encodeJson, decode: decodeJson)
+
+# ---------------------------------------------------------------------------
+# The default codec (M2/M3/M4 swap point)
+# ---------------------------------------------------------------------------
+#
+# M2 hard-defaulted persistence to the JSON codec. M3 (corrected) chose the
+# CTFS B-tree NAMESPACE format and M4a implements it (`ctfs_codec.nim`). To swap
+# the format WHOLESALE behind this boundary WITHOUT a circular import
+# (`ctfs_codec` imports `root_hash` for the schema + boundary types), the default
+# codec is an INSTALLABLE hook: `ctfs_codec` registers the CTFS codec at its
+# module init via `setDefaultCodec`, so any module that imports `ctfs_codec`
+# (the CLI, the M4a tests) persists through the namespace format. Until a codec
+# is installed, the default is the provisional JSON (so `root_hash` stays usable
+# stand-alone and the M2 behaviour is preserved when CTFS is not linked).
+
+var defaultCodecHook: RootHashArtifactCodec = provisionalJsonCodec()
+
+proc setDefaultCodec*(codec: RootHashArtifactCodec) =
+  ## Install the process-wide default `RootHashArtifactCodec` used by
+  ## `writeArtifact`/`readArtifact` when no explicit codec is passed. `ctfs_codec`
+  ## calls this at init to make the CTFS-namespace format the default (the M4a
+  ## swap). Idempotent; the last installer wins.
+  defaultCodecHook = codec
+
+proc defaultCodec*(): RootHashArtifactCodec =
+  ## The currently-installed default codec (CTFS-namespace once `ctfs_codec` is
+  ## linked, else provisional JSON).
+  defaultCodecHook
 
 # ---------------------------------------------------------------------------
 # File I/O over the codec boundary
@@ -295,7 +323,7 @@ func defaultArtifactPath*(testId: string; root = "."): string =
   root / DefaultArtifactDir / (safe & ArtifactExt)
 
 proc writeArtifact*(a: RootHashArtifact; path: string;
-                    codec = provisionalJsonCodec()): Result[void, string] =
+                    codec = defaultCodec()): Result[void, string] =
   ## Encode `a` with `codec` and write it to `path`, creating parent dirs. All
   ## persistence flows through the codec, so the on-disk format is swappable
   ## (M3/M4). A codec or write failure is an `Err`, never a raise.
@@ -311,7 +339,7 @@ proc writeArtifact*(a: RootHashArtifact; path: string;
   ok()
 
 proc readArtifact*(path: string;
-                   codec = provisionalJsonCodec()): Result[RootHashArtifact, string] =
+                   codec = defaultCodec()): Result[RootHashArtifact, string] =
   ## Read + decode the artifact at `path` via `codec`. A missing file or decode
   ## failure is an `Err` (the caller treats that as "no usable baseline" and
   ## re-runs). Never raises.

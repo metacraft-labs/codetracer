@@ -28,6 +28,11 @@ import std/[unittest, os, strutils, times]
 
 import engine        # IncrementalDecisionKind, isRerun
 import root_hash      # buildArtifact, writeArtifact, readArtifact, redecideFromArtifact
+# M4a: importing ctfs_codec installs the CTFS-namespace format as the default
+# codec behind M2's boundary, so this e2e now round-trips the artifact through
+# the CoW B-tree namespaces (not the provisional JSON). The asserted §16.7.4
+# decisions are unchanged — the swap is bytes-on-disk only.
+import ctfs_codec
 
 const
   fixturesDir = currentSourcePath().parentDir / "fixtures"
