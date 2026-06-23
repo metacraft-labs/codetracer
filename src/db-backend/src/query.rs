@@ -134,6 +134,17 @@ pub enum ReplayQuery {
     SelectThread {
         tid: u32,
     },
+    /// Re-execute the half-open tick interval `[tick_lo, tick_hi)` in the replay
+    /// worker and return a materialized `memwrites.tc` image for that interval.
+    ///
+    /// The response is a [`MaterializeIntervalResponse`] JSON envelope whose
+    /// `memwrites_base64` field contains an authoritative `WLOG` image. The
+    /// db-backend production adapter decodes it through the same
+    /// `server_prep_encoding::decode_memwrites` path used by warm restart.
+    MaterializeInterval {
+        tick_lo: u64,
+        tick_hi: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -211,4 +222,53 @@ pub struct TtdTracepointEvalResponseEnvelope {
     pub return_value_u64: Option<u64>,
     pub invocation: Option<TtdTracepointFunctionInvocationSummary>,
     pub diagnostic: Option<TtdTracepointEvalDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterializeIntervalResponse {
+    pub tick_lo: u64,
+    pub tick_hi: u64,
+    pub format: String,
+    pub memwrites_base64: String,
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn materialize_interval_query_serializes_with_worker_wire_shape() {
+        let query = ReplayQuery::MaterializeInterval {
+            tick_lo: 100,
+            tick_hi: 200,
+        };
+        let json = serde_json::to_string(&query).unwrap();
+
+        assert_eq!(json, r#"{"kind":"MaterializeInterval","tick_lo":100,"tick_hi":200}"#);
+        let decoded: ReplayQuery = serde_json::from_str(&json).unwrap();
+        match decoded {
+            ReplayQuery::MaterializeInterval { tick_lo, tick_hi } => {
+                assert_eq!(tick_lo, 100);
+                assert_eq!(tick_hi, 200);
+            }
+            other => panic!("unexpected decoded query: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn materialize_interval_response_serializes_worker_payload() {
+        let response = MaterializeIntervalResponse {
+            tick_lo: 100,
+            tick_hi: 200,
+            format: "WLOG".to_string(),
+            memwrites_base64: "V0xPRw==".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&response).unwrap(),
+            r#"{"tickLo":100,"tickHi":200,"format":"WLOG","memwritesBase64":"V0xPRw=="}"#
+        );
+    }
 }

@@ -11,10 +11,14 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use std::net::TcpStream;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codetracer_trace_types::StepId;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 
+use crate::ctfs_trace_reader::materialization_cache::{MaterializedInterval, Recreator};
+use crate::ctfs_trace_reader::server_prep_encoding::decode_memwrites;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
@@ -24,8 +28,8 @@ use crate::paths::log_path_for;
 #[cfg(unix)]
 use crate::paths::recreator_socket_path;
 use crate::query::{
-    ReplayQuery, TtdTracepointEvalMode, TtdTracepointEvalRequest, TtdTracepointEvalResponseEnvelope,
-    TtdTracepointFunctionCallRequest, TtdTracepointValueClass,
+    MaterializeIntervalResponse, ReplayQuery, TtdTracepointEvalMode, TtdTracepointEvalRequest,
+    TtdTracepointEvalResponseEnvelope, TtdTracepointFunctionCallRequest, TtdTracepointValueClass,
 };
 use crate::replay::ReplaySession;
 use crate::task::{
@@ -992,6 +996,48 @@ impl ReplaySession for RecreatorReplaySession {
     }
 }
 
+impl Recreator for RecreatorReplaySession {
+    fn re_execute_and_materialize(
+        &mut self,
+        tick_lo: u64,
+        tick_hi: u64,
+    ) -> Result<MaterializedInterval, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self
+            .stable
+            .dispatch_replay_query(ReplayQuery::MaterializeInterval { tick_lo, tick_hi })?;
+        materialized_interval_from_worker_response(tick_lo, tick_hi, &response)
+    }
+}
+
+fn materialized_interval_from_worker_response(
+    expected_lo: u64,
+    expected_hi: u64,
+    response: &str,
+) -> Result<MaterializedInterval, Box<dyn Error>> {
+    let envelope: MaterializeIntervalResponse = serde_json::from_str(response)?;
+    if envelope.tick_lo != expected_lo || envelope.tick_hi != expected_hi {
+        return Err(format!(
+            "MaterializeInterval response interval mismatch: requested [{expected_lo}, {expected_hi}), got [{}, {})",
+            envelope.tick_lo, envelope.tick_hi
+        )
+        .into());
+    }
+    if envelope.format != "WLOG" {
+        return Err(format!("MaterializeInterval unsupported memwrites format '{}'", envelope.format).into());
+    }
+
+    let image = BASE64_STANDARD
+        .decode(envelope.memwrites_base64.as_bytes())
+        .map_err(|e| format!("MaterializeInterval memwrites_base64 decode failed: {e}"))?;
+    let writes = decode_memwrites(&image)
+        .map_err(|e| format!("MaterializeInterval memwrites.tc decode failed: {e}"))?
+        .into_iter()
+        .filter(|(_, write)| write.tick >= expected_lo && write.tick < expected_hi)
+        .collect();
+    Ok(MaterializedInterval { writes })
+}
+
 fn parse_recording_head_response(response: &str) -> Result<u64, Box<dyn Error>> {
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(response) {
         for key in ["rrTicks", "recordingHead", "head", "geid"] {
@@ -1174,5 +1220,121 @@ mod tests {
             ValueRecordWithType::Raw { r, .. } => assert_eq!(r, "0x0000000000001234"),
             other => panic!("unexpected value type: {other:?}"),
         }
+    }
+
+    fn memwrite(tick: u64, new_value: u64) -> crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+        crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick,
+            pc: 0xCAFE,
+            size: 8,
+            old_value: 0,
+            new_value,
+        }
+    }
+
+    #[test]
+    fn materialize_interval_response_decodes_wlog_and_clips_to_requested_range() {
+        let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(
+                    0x4000,
+                    vec![memwrite(9, 1), memwrite(10, 2), memwrite(19, 3), memwrite(20, 4)],
+                )],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 10,
+            tick_hi: 20,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(image),
+        };
+
+        let materialized =
+            materialized_interval_from_worker_response(10, 20, &serde_json::to_string(&response).unwrap()).unwrap();
+
+        assert_eq!(materialized.writes.len(), 2);
+        assert_eq!(materialized.writes[0].0, 0x4000);
+        assert_eq!(materialized.writes[0].1, memwrite(10, 2));
+        assert_eq!(materialized.writes[1].1, memwrite(19, 3));
+    }
+
+    #[test]
+    fn materialize_interval_response_rejects_interval_mismatch() {
+        let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites { per_address: vec![] },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 11,
+            tick_hi: 20,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(image),
+        };
+
+        let err = materialized_interval_from_worker_response(10, 20, &serde_json::to_string(&response).unwrap())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("interval mismatch"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recreator_session_dispatches_materialize_interval_to_worker_boundary() {
+        use std::io::{BufRead, Write};
+        use std::os::unix::net::UnixStream;
+
+        let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(0x5000, vec![memwrite(12, 99)])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 10,
+            tick_hi: 20,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(image),
+        };
+        let response_json = serde_json::to_string(&response).unwrap();
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut line = String::new();
+            {
+                let mut reader = std::io::BufReader::new(&mut server);
+                reader.read_line(&mut line).unwrap();
+            }
+            assert_eq!(
+                line.trim(),
+                r#"{"kind":"MaterializeInterval","tick_lo":10,"tick_hi":20}"#
+            );
+            server.write_all(format!("{response_json}\n").as_bytes()).unwrap();
+        });
+
+        let mut session = RecreatorReplaySession {
+            stable: ReplayWorker {
+                name: "materialize-test".to_string(),
+                index: 0,
+                active: true,
+                recreator_exe: PathBuf::new(),
+                rr_trace_folder: PathBuf::new(),
+                live_program: None,
+                live_program_args: vec![],
+                live_cwd: None,
+                live_recording_dir: None,
+                run_id: "test-run".to_string(),
+                recording_id: "test-recording".to_string(),
+                process: None,
+                stream: Some(client),
+            },
+            recreator_exe: PathBuf::new(),
+            rr_trace_folder: PathBuf::new(),
+            name: "materialize-test".to_string(),
+            index: 0,
+            last_c_location: None,
+        };
+
+        let materialized = session.re_execute_and_materialize(10, 20).unwrap();
+        worker.join().unwrap();
+
+        assert_eq!(materialized.writes, vec![(0x5000, memwrite(12, 99))]);
     }
 }
