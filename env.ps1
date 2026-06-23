@@ -693,7 +693,8 @@ function Ensure-GoldenLayoutAsset {
     return
   }
 
-  $buildDistParent = Join-Path $RepoRoot "src/build-debug/public/third_party/golden-layout"
+  $ctBuildDir = if ($env:CODETRACER_BUILD_DIR) { $env:CODETRACER_BUILD_DIR } else { Join-Path $RepoRoot "src/build-debug" }
+  $buildDistParent = Join-Path $ctBuildDir "public/third_party/golden-layout"
   if (-not (Test-Path -LiteralPath $buildDistParent -PathType Container)) {
     # Build output not produced yet — nothing to fix up.
     return

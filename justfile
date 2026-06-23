@@ -366,7 +366,7 @@ test-reprobuild-hcr-in-codetracer: ensure-ct-mcr ensure-ct-native-replay
   # so a platform/sibling SKIP above exits cleanly without an expensive build.
   just build-once
 
-  ct_bin="$repo_root/src/build-debug/bin/ct"
+  ct_bin="${CODETRACER_BUILD_DIR:-$repo_root/src/build-debug}/bin/ct"
   if [ ! -x "$ct_bin" ]; then
     echo "Error: CodeTracer build did not produce executable ct at $ct_bin" >&2
     exit 1
@@ -854,7 +854,7 @@ setcap-bpf:
   if [ "$(uname)" != "Linux" ]; then
     exit 0
   fi
-  CT_BIN="$(pwd)/src/build-debug/bin/ct"
+  CT_BIN="${CODETRACER_BUILD_DIR:-$(pwd)/src/build-debug}/bin/ct"
   if [ ! -f "$CT_BIN" ]; then
     exit 0
   fi

@@ -220,9 +220,18 @@ mkShell {
     rm -rf $ROOT_PATH/node_modules
     ln -s $NIX_NODE_PATH $ROOT_PATH/node_modules
 
-    export CODETRACER_PREFIX=$ROOT_PATH/src/build-debug
+    # Active build output dir; see ci-base.nix for the rationale. macOS/arm
+    # defaults to the reprobuild build (src/build-<config>-repro). We do not
+    # export CODETRACER_PREFIX so ct self-resolves from its own location and a
+    # binary run from any build dir uses that dir's assets.
+    _ct_config="''${CODETRACER_CONFIG:-debug}"
+    case "$(uname -s)" in
+      Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
+      *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
+    esac
+    export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
-    export PATH=$PATH:$PWD/src/build-debug/bin
+    export PATH=$PATH:$CODETRACER_BUILD_DIR/bin
     export PATH=$PATH:$ROOT_PATH/node_modules/.bin/
     export CODETRACER_DEV_TOOLS=1
     export CODETRACER_LOG_LEVEL=INFO

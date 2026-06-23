@@ -17,7 +17,7 @@ else
 
 	nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh
 
-	CT_BIN="${ROOT_DIR}/src/build-debug/bin/ct"
+	CT_BIN="${CODETRACER_BUILD_DIR:-${ROOT_DIR}/src/build-debug}/bin/ct"
 fi
 if [[ ! -x ${CT_BIN} ]]; then
 	echo "error: ${CT_BIN} not found after build"

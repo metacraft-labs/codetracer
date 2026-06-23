@@ -45,10 +45,23 @@ export DIST_DIR
 export RUSTUP_HOME=$DEPS_DIR/rustup
 export CARGO_HOME=$DEPS_DIR/cargo
 
-export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$ROOT_DIR/src/build-debug}"
+# Active build output dir. The non-Nix path defaults to the reprobuild build
+# (src/build-<config>-repro) except on Linux, where the legacy tup build
+# (src/build-<config>) is the default. CODETRACER_CONFIG (debug|release)
+# selects the configuration. CODETRACER_PREFIX is intentionally not set: ct
+# self-resolves its prefix from its own location (paths.nim getAppDir
+# fallback), so a binary run from any build dir uses that dir's assets; the
+# GUI test fixtures set CODETRACER_PREFIX explicitly where a renderer needs it.
+# See codetracer-specs Architecture/Build-Outputs-And-Path-Resolution.md.
+_ct_config="${CODETRACER_CONFIG:-debug}"
+case "$(uname -s)" in
+  Linux) _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}" ;;
+  *)     _ct_build_dir="$ROOT_DIR/src/build-${_ct_config}-repro" ;;
+esac
+export CODETRACER_BUILD_DIR="${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 
-export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$ROOT_DIR/src/build-debug/bin:$PATH
+export PATH=$DEPS_DIR/nim/bin:$ROOT_DIR/node_modules/.bin:$BIN_DIR:$CARGO_HOME/bin:$CODETRACER_BUILD_DIR/bin:$PATH
 export NIM1=$DEPS_DIR/nim/bin/nim
 
 if [ "$os" == "mac" ]; then

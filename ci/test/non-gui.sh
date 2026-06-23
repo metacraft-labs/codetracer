@@ -26,7 +26,7 @@ case "$PLATFORM" in
     # binaries compiled during the build step are available for tests.
     NON_NIX_DEPS="$REPO_ROOT/non-nix-build/deps"
     NON_NIX_BIN="$REPO_ROOT/non-nix-build/bin"
-    export PATH="$NON_NIX_DEPS/nim/bin:$NON_NIX_DEPS/cargo/bin:$NON_NIX_BIN:$REPO_ROOT/src/build-debug/bin:$PATH"
+    export PATH="$NON_NIX_DEPS/nim/bin:$NON_NIX_DEPS/cargo/bin:$NON_NIX_BIN:${CODETRACER_BUILD_DIR:-$REPO_ROOT/src/build-debug}/bin:$PATH"
 
     # Source sibling detection for recorder paths.
     # shellcheck disable=SC1091 # Path resolved at runtime from $REPO_ROOT

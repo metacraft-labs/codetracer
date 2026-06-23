@@ -60,7 +60,14 @@ const currentDir = path.resolve();
 // (1 level up).
 const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
-const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+// The active build output directory: honour CODETRACER_BUILD_DIR (set by the
+// dev shells to the platform/config-specific dir, e.g. src/build-debug or
+// src/build-debug-repro), falling back to src/build-debug for the Linux tup
+// default. See codetracer-specs Architecture/Build-Outputs-And-Path-Resolution.md.
+const codetracerPrefix =
+  process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
+    ? process.env.CODETRACER_BUILD_DIR
+    : path.join(codetracerInstallDir, "src", "build-debug");
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const guiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME ??

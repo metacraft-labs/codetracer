@@ -25,7 +25,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-CT_BIN="${CODETRACER_E2E_CT_PATH:-$ROOT_DIR/src/build-debug/bin/ct}"
+CT_BIN="${CODETRACER_E2E_CT_PATH:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct}"
 
 if [[ ! -x "$CT_BIN" ]]; then
 	echo "error: ct binary not found at $CT_BIN"

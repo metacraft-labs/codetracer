@@ -200,10 +200,25 @@ with pkgs;
     export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
 
-    export CODETRACER_PREFIX=$ROOT_PATH/src/build-debug
+    # Active build output directory. Linux defaults to the tup build
+    # (src/build-<config>); macOS/Windows default to the reprobuild build
+    # (src/build-<config>-repro). CODETRACER_CONFIG (debug|release) selects
+    # the configuration. We deliberately do NOT export CODETRACER_PREFIX: ct
+    # and its sibling/test binaries resolve their prefix self-relatively from
+    # their own location (paths.nim's getAppDir().parentDir fallback when
+    # CODETRACER_PREFIX is unset), so a binary run from any build output dir
+    # uses that dir's assets. CODETRACER_PREFIX stays an explicit override for
+    # packaged installs. See codetracer-specs Architecture/
+    # Build-Outputs-And-Path-Resolution.md.
+    _ct_config="''${CODETRACER_CONFIG:-debug}"
+    case "$(uname -s)" in
+      Darwin) _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}-repro" ;;
+      *)      _ct_build_dir="$ROOT_PATH/src/build-''${_ct_config}" ;;
+    esac
+    export CODETRACER_BUILD_DIR="''${CODETRACER_BUILD_DIR:-$_ct_build_dir}"
     export CODETRACER_REPO_ROOT_PATH=$ROOT_PATH
 
-    export PATH=$ROOT_PATH/src/build-debug/bin:$PATH
+    export PATH=$CODETRACER_BUILD_DIR/bin:$PATH
     export PATH=$ROOT_PATH/node_modules/.bin/:$PATH
     export CODETRACER_DEV_TOOLS=0
     export CODETRACER_LOG_LEVEL=INFO

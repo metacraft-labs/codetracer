@@ -116,7 +116,7 @@ unset _tc_file _gnat_ver _ldc_cand _nim_cand _tool_dirs _d SHIMS_DIR
 # ---------------------------------------------------------------------------
 
 export CODETRACER_REPO_ROOT_PATH="$ROOT_DIR"
-export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$ROOT_DIR/src/build-debug}"
+export CODETRACER_PREFIX="${CODETRACER_PREFIX:-${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}}"
 export CODETRACER_LD_LIBRARY_PATH="${CODETRACER_LD_LIBRARY_PATH:-}"
 export CODETRACER_DEV_TOOLS="${CODETRACER_DEV_TOOLS:-0}"
 export CODETRACER_LOG_LEVEL="${CODETRACER_LOG_LEVEL:-INFO}"
