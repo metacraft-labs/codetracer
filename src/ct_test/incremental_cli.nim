@@ -59,6 +59,10 @@ import incremental/engine
 # backend hashes against (`InstrumentedBinaryName`, `RecordedBinaryName`).
 import incremental/native_instrument
 import incremental/native_trace
+# M2 (Incremental-Test-Runner): the per-test ROOT HASH + re-decide artifact. The
+# CLI can additionally WRITE/UPDATE the per-test artifact file alongside the
+# decision, reusing the engine's extraction + hashing via `buildArtifact`.
+import incremental/root_hash
 
 type
   IncrementalLanguage* = enum
@@ -79,6 +83,8 @@ type
                             ## Defaults to "/" (recorded paths are absolute).
     cachePath*: string      ## Backing cache JSON. Defaults under the source root.
     testId*: string         ## Cache key. Defaults to the program's filename.
+    writeArtifact*: bool    ## M2: also write/update the per-test root-hash artifact.
+    artifactPath*: string   ## M2: artifact file path. Defaults under the source root.
 
   RecorderOutcomeKind = enum
     roSuccess  ## A real `.ct` bundle was produced.
@@ -362,7 +368,8 @@ proc parseLanguage(s: string): Result[IncrementalLanguage, string] =
 
 proc usage(): string =
   "usage: ct test --incremental --language <python|ruby|native> --program <path> " &
-  "[--source-root DIR] [--cache PATH] [--id TESTID]"
+  "[--source-root DIR] [--cache PATH] [--id TESTID] " &
+  "[--write-artifact] [--artifact PATH]"
 
 proc takeValue(args: seq[string]; i: var int; flag: string):
     Result[string, string] =
@@ -408,6 +415,16 @@ proc parseIncrementalArgs*(args: seq[string]): Result[IncrementalArgs, string] =
       let v = takeValue(args, i, "--id")
       if v.isErr: return err(v.error)
       res.testId = v.value
+    elif arg == "--write-artifact":
+      # M2: a bare flag — enable artifact writing at the default path. An
+      # explicit path is given via the separate `--artifact PATH` flag.
+      res.writeArtifact = true
+    elif arg == "--artifact" or arg.startsWith("--artifact="):
+      # M2: an explicit artifact path also implies `--write-artifact`.
+      let v = takeValue(args, i, "--artifact")
+      if v.isErr: return err(v.error)
+      res.artifactPath = v.value
+      res.writeArtifact = true
     else:
       return err("unknown argument: " & arg)
     inc i
@@ -421,6 +438,8 @@ proc parseIncrementalArgs*(args: seq[string]): Result[IncrementalArgs, string] =
     res.testId = res.program.extractFilename
   if res.cachePath.len == 0:
     res.cachePath = defaultCachePath(res.sourceRoot)
+  if res.writeArtifact and res.artifactPath.len == 0:
+    res.artifactPath = defaultArtifactPath(res.testId, res.sourceRoot)
   ok(res)
 
 # ---------------------------------------------------------------------------
@@ -459,6 +478,21 @@ type
       report*: string   ## The user-facing one-line decision report.
     of irkGated, irkError:
       message*: string  ## The exact captured diagnostic.
+
+proc persistArtifactFromCache(args: IncrementalArgs;
+                              cache: IncrementalCache): Result[void, string] =
+  ## M2: write/update the per-test ROOT-HASH artifact from the just-(re)recorded
+  ## engine cache entry, when `--write-artifact`/`--artifact` is set. The artifact
+  ## is the per-test projection of the engine's `CachedTest` (root hash =
+  ## recorded deep hash, executed functions = recorded deps), so it never
+  ## recomputes the hash — it carries the engine's value, keeping the artifact and
+  ## the live decision consistent. A no-op when artifact writing is disabled.
+  if not args.writeArtifact:
+    return ok()
+  if not cache.entries.hasKey(args.testId):
+    return err("cannot write artifact: no recorded entry for " & args.testId)
+  let artifact = fromCachedTest(args.testId, cache.entries[args.testId])
+  writeArtifact(artifact, args.artifactPath)
 
 proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult =
   ## The testable core of `ct test --incremental` (no I/O side effects beyond the
@@ -506,6 +540,11 @@ proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult
       if saved.isErr:
         return IncrementalRunResult(kind: irkError,
           message: "failed to persist cache: " & saved.error)
+      # M2: refresh the per-test root-hash artifact to the re-recorded entry.
+      let art = persistArtifactFromCache(args, cache)
+      if art.isErr:
+        return IncrementalRunResult(kind: irkError,
+          message: "failed to write artifact: " & art.error)
     return IncrementalRunResult(kind: irkDecided, decision: decision,
       report: describeDecision(args.testId, decision))
 
@@ -521,6 +560,11 @@ proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult
   if saved.isErr:
     return IncrementalRunResult(kind: irkError,
       message: "failed to persist cache: " & saved.error)
+  # M2: write the per-test root-hash artifact for the fresh baseline.
+  let art = persistArtifactFromCache(args, cache)
+  if art.isErr:
+    return IncrementalRunResult(kind: irkError,
+      message: "failed to write artifact: " & art.error)
   let decision = runFresh()
   IncrementalRunResult(kind: irkDecided, decision: decision,
     report: describeDecision(args.testId, decision))
