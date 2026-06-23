@@ -303,11 +303,20 @@ proc lookupPayload(image: openArray[byte], key: uint64):
 
 proc allKeys(image: openArray[byte]): Result[seq[uint64], string] =
   ## All committed keys of a payload-addressed image in ascending order.
+  ##
+  ## A GENUINELY EMPTY store is a fully-formed canonical empty namespace image
+  ## (one zeroed page) that `loadCowBTree` accepts and reports zero keys for — so
+  ## a real load failure here means the image is MALFORMED/CORRUPT, NOT empty. We
+  ## must NOT swallow that into `ok(@[])`: the suite-level invalidation query
+  ## derives its test universe from these keys, and silently returning an empty
+  ## key set for a corrupt image would make the query SKIP EVERY TEST — a false
+  ## skip, the one outcome the runner must never produce. So a load failure is
+  ## propagated as an `Err`, which the invalidation query turns into a re-run
+  ## (the caller re-runs the whole suite). (An empty image still round-trips
+  ## through `loadCowBTree` to `ok(@[])`; see `test_ctfs_namespace_storage_*`.)
   let loaded = loadCowBTree(@image, cltTypeB)
   if loaded.isErr:
-    # An empty/never-built image has no keys.
-    var empty: seq[uint64]
-    return ok(empty)
+    return err("cannot enumerate namespace keys (corrupt image): " & loaded.error)
   loaded.value.keys()
 
 export options
