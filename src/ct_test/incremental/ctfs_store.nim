@@ -46,7 +46,7 @@
 ## flag distinguishes the two intents. The daemon LOOP (filter "run all",
 ## update only executed) is M4c and is NOT implemented here.
 
-import std/[algorithm, tables, options]
+import std/[algorithm, tables, options, sets]
 import results
 
 import codetracer_ctfs/cow_btree
@@ -583,6 +583,209 @@ proc pointUpdateDeep*(image: seq[byte], testId: uint64, newHash: string):
   pairs.add (testId, newVal)
   pairs.sort(proc (a, b: (uint64, seq[byte])): int = cmp(a[0], b[0]))
   buildPayloadNamespace(pairs)
+
+# ---------------------------------------------------------------------------
+# Generic namespace mutation (the substrate of the incremental store update)
+# ---------------------------------------------------------------------------
+#
+# The M4c daemon updates ONLY the executed tests' entries: it must REMOVE a
+# re-run test's OLD contributions from the reverse maps (its old functions'
+# reverse sets, its old read-files' reader sets) and ADD its NEW ones, while
+# leaving every skipped test's bytes untouched. The deep-forward map has a
+# specialised O(log n) hot path (`pointUpdateDeep`); the reverse maps need
+# arbitrary per-key upserts/removals (a function/file may gain or lose a single
+# reader id, or appear/disappear entirely). Rebuilding the namespace from its
+# decoded contents with the requested upserts/removals applied is correct and
+# byte-stable (the same sorted payload-addressed layout `buildStore` produces),
+# which is what makes file mode and daemon mode produce IDENTICAL images. The
+# cost is O(map) per rewritten namespace; for the per-test reverse-map fix-up
+# that is the unavoidable shape (the namespaces touched are only those holding
+# the re-run test's functions/files).
+
+proc readAllPairs(image: openArray[byte]): Result[seq[(uint64, seq[byte])], string] =
+  ## Decode EVERY committed (key, payload-bytes) pair of a payload-addressed
+  ## Type-B image, ascending by key. Used to rebuild a namespace with a few keys
+  ## changed. A load/lookup failure is propagated (never silently dropped — a
+  ## dropped key in a reverse map would be a false skip).
+  let keysRes = allKeys(image)
+  if keysRes.isErr: return err(keysRes.error)
+  var pairs: seq[(uint64, seq[byte])]
+  for k in keysRes.value:
+    let p = lookupPayload(image, k)
+    if p.isErr: return err(p.error)
+    if p.value.isSome: pairs.add (k, p.value.get)
+  ok(pairs)
+
+proc rebuildNamespace(image: openArray[byte];
+                      upserts: seq[(uint64, seq[byte])];
+                      removals: seq[uint64]): Result[seq[byte], string] =
+  ## Rebuild a payload-addressed namespace from its current contents with
+  ## `upserts` applied (each key's value replaced or inserted) and `removals`
+  ## deleted. The result is byte-identical to what `buildPayloadNamespace` would
+  ## produce for the resulting key/value set, so two stores that reach the same
+  ## logical contents by different update orders serialize identically.
+  let curRes = readAllPairs(image)
+  if curRes.isErr: return err(curRes.error)
+  var byKey = initOrderedTable[uint64, seq[byte]]()
+  for (k, v) in curRes.value: byKey[k] = v
+  for k in removals: byKey.del k
+  for (k, v) in upserts: byKey[k] = v
+  var pairs: seq[(uint64, seq[byte])]
+  for k, v in pairs(byKey): pairs.add (k, v)
+  pairs.sort(proc (a, b: (uint64, seq[byte])): int = cmp(a[0], b[0]))
+  buildPayloadNamespace(pairs)
+
+# ---------------------------------------------------------------------------
+# Incremental per-test update (the M4c daemon hot path: only executed tests)
+# ---------------------------------------------------------------------------
+
+proc updateTests*(s: var CtfsStore; updated: seq[StoreTest]):
+    Result[void, string] =
+  ## Update ONLY the entries of the given (just re-run) tests in place,
+  ## incrementally. For each re-run test this:
+  ##
+  ##   1. DEEP-FORWARD: upserts `testId -> rootHash` (the test's new root hash).
+  ##   2. SHALLOW REVERSE (the crux): REMOVES this test's id from the reverse set
+  ##      of every function it USED TO execute, then ADDS it to the reverse set of
+  ##      every function it executes NOW — and refreshes each current function's
+  ##      recorded shallow hash + identity. A function that loses its last reader
+  ##      is dropped entirely; a newly-executed function is created. SKIPPED tests
+  ##      keep their reverse-set membership untouched.
+  ##   3. FILE REVERSE: the same remove-old/add-new for the test's read-file set.
+  ##   4. INTERNING: refreshes `testId -> name`, and adds id->identity / id->path
+  ##      for any newly-referenced function/file (stale interning entries for a
+  ##      function/file that no test references any more are pruned).
+  ##
+  ## The OLD contributions are read back from the store (the authoritative record
+  ## of what each test executed last time), so the caller need only supply the
+  ## NEW `StoreTest`s. Tests NOT in `updated` are never touched — their bytes are
+  ## byte-identical before and after (the M4c "update only executed" guarantee).
+  ##
+  ## Any store read/build error is propagated as an `Err` (the daemon then treats
+  ## the cycle as failed and re-runs / re-seeds, never trusting a partial update).
+
+  # ---- gather each updated test's OLD function/file sets from the store ----
+  # We need the prior reverse-map membership to remove it. The deep-forward map
+  # does not record which functions a test executed, so we reconstruct each
+  # test's OLD function id set by scanning the shallow reverse structure for
+  # entries whose reverse set contains the test id. (This is the inverse of the
+  # forward set; it is the authoritative prior membership.) Likewise for files.
+  var updatedIds = initHashSet[uint64]()
+  for t in updated: updatedIds.incl t.testId
+
+  # functionId -> its current ShallowEntry (decoded once).
+  var funcEntries = initOrderedTable[uint64, ShallowEntry]()
+  block:
+    let pairsRes = readAllPairs(s.shallowReverse)
+    if pairsRes.isErr: return err("shallow reverse read: " & pairsRes.error)
+    for (fid, payload) in pairsRes.value:
+      let e = decodeShallowEntry(payload)
+      if e.isErr: return err("shallow entry decode: " & e.error)
+      funcEntries[fid] = e.value
+
+  var fileEntries = initOrderedTable[uint64, FileEntry]()
+  block:
+    let pairsRes = readAllPairs(s.fileReverse)
+    if pairsRes.isErr: return err("file reverse read: " & pairsRes.error)
+    for (fid, payload) in pairsRes.value:
+      let e = decodeFileEntry(payload)
+      if e.isErr: return err("file entry decode: " & e.error)
+      fileEntries[fid] = e.value
+
+  # ---- (2a) REMOVE each updated test's OLD contributions ----
+  # Drop the updated test ids from EVERY function/file reverse set. After this
+  # the maps reflect only the SKIPPED tests' contributions; the new ones are
+  # re-added below. Removing first (rather than diffing) keeps the logic simple
+  # and provably correct: a function a test no longer executes simply never gets
+  # re-added, so it is dropped (or shrinks) exactly as it should.
+  for fid, e in funcEntries.mpairs:
+    var kept: seq[uint64]
+    for tid in e.testIds:
+      if tid notin updatedIds: kept.add tid
+    e.testIds = kept
+  for fid, e in fileEntries.mpairs:
+    var kept: seq[uint64]
+    for tid in e.testIds:
+      if tid notin updatedIds: kept.add tid
+    e.testIds = kept
+
+  # ---- (2b) ADD each updated test's NEW contributions ----
+  for t in updated:
+    for dep in t.deps:
+      let fid = functionKey(dep.fn)
+      # The current shallow hash + identity OVERWRITE the stored ones (the body
+      # may have changed — that is why the test re-ran). `mgetOrPut` inserts a
+      # fresh entry for a newly-executed function without raising.
+      let fresh = ShallowEntry(shallow: dep.shallow, name: dep.fn.name,
+                               file: dep.fn.file, defLine: dep.fn.defLine,
+                               testIds: @[])
+      var entry = funcEntries.mgetOrPut(fid, fresh)
+      entry.shallow = dep.shallow
+      entry.name = dep.fn.name; entry.file = dep.fn.file
+      entry.defLine = dep.fn.defLine
+      entry.testIds.add t.testId
+      funcEntries[fid] = entry
+    for rf in t.readFiles:
+      let fid = key64(rf.path)
+      let fresh = FileEntry(path: rf.path, mtime: rf.mtime, testIds: @[])
+      var entry = fileEntries.mgetOrPut(fid, fresh)
+      entry.path = rf.path; entry.mtime = rf.mtime
+      entry.testIds.add t.testId
+      fileEntries[fid] = entry
+
+  # ---- compute upserts/removals per namespace ----
+  # Shallow reverse + function interning: a function with an EMPTY reverse set
+  # (its last reader re-ran and no longer executes it) is REMOVED from both the
+  # reverse map and the interning table; otherwise its (possibly refreshed)
+  # entry/identity is upserted.
+  var shallowUpserts, funcInternUpserts: seq[(uint64, seq[byte])]
+  var shallowRemovals, funcInternRemovals: seq[uint64]
+  for fid, e in funcEntries:
+    if e.testIds.len == 0:
+      shallowRemovals.add fid
+      funcInternRemovals.add fid
+    else:
+      shallowUpserts.add (fid, encodeShallowEntry(e))
+      funcInternUpserts.add (fid,
+        asBytes(e.name & "\0" & e.file & "\0" & $e.defLine))
+
+  var fileUpserts, fileInternUpserts: seq[(uint64, seq[byte])]
+  var fileRemovals, fileInternRemovals: seq[uint64]
+  for fid, e in fileEntries:
+    if e.testIds.len == 0:
+      fileRemovals.add fid
+      fileInternRemovals.add fid
+    else:
+      fileUpserts.add (fid, encodeFileEntry(e))
+      fileInternUpserts.add (fid, asBytes(e.path))
+
+  # Deep-forward + test interning: upsert each updated test's root hash + name.
+  var deepUpserts, nameUpserts: seq[(uint64, seq[byte])]
+  for t in updated:
+    deepUpserts.add (t.testId, asBytes(t.rootHash))
+    nameUpserts.add (t.testId, asBytes(t.testName))
+
+  # ---- apply (rebuild each touched namespace) ----
+  let shallowRes = rebuildNamespace(s.shallowReverse, shallowUpserts, shallowRemovals)
+  if shallowRes.isErr: return err("rebuild shallow reverse: " & shallowRes.error)
+  let funcInternRes = rebuildNamespace(s.funcInterning, funcInternUpserts, funcInternRemovals)
+  if funcInternRes.isErr: return err("rebuild func interning: " & funcInternRes.error)
+  let fileRevRes = rebuildNamespace(s.fileReverse, fileUpserts, fileRemovals)
+  if fileRevRes.isErr: return err("rebuild file reverse: " & fileRevRes.error)
+  let fileInternRes = rebuildNamespace(s.fileInterning, fileInternUpserts, fileInternRemovals)
+  if fileInternRes.isErr: return err("rebuild file interning: " & fileInternRes.error)
+  let deepRes = rebuildNamespace(s.deepForward, deepUpserts, @[])
+  if deepRes.isErr: return err("rebuild deep forward: " & deepRes.error)
+  let nameRes = rebuildNamespace(s.interning, nameUpserts, @[])
+  if nameRes.isErr: return err("rebuild test interning: " & nameRes.error)
+
+  s.shallowReverse = shallowRes.value
+  s.funcInterning = funcInternRes.value
+  s.fileReverse = fileRevRes.value
+  s.fileInterning = fileInternRes.value
+  s.deepForward = deepRes.value
+  s.interning = nameRes.value
+  ok()
 
 # ---------------------------------------------------------------------------
 # Serialize / load the whole store (file mode); daemon keeps it in memory
