@@ -42,15 +42,22 @@ MINGW* | MSYS* | CYGWIN*) ct_reprobuild_host="windows" ;;
 esac
 
 if [ -n "$ct_reprobuild_host" ]; then
-	# Where the reprobuild build writes its output tree (`bin/ct`, `public/`,
-	# `config/`, …). On Linux this is `src/build-debug-repro` so the reprobuild
-	# and tup builds don't fight over tup's `build-debug` variant directory; on
-	# macOS/Windows (no tup build) it stays `src/build-debug`. This MUST match
-	# `BuildDebugRoot` in reprobuild.nim, which is the source of truth.
-	if [ "$ct_reprobuild_host" = "linux" ]; then
-		ct_repro_out_root="src/build-debug-repro"
-	else
-		ct_repro_out_root="src/build-debug"
+	# Build configuration (debug/release), selected by CODETRACER_CONFIG
+	# (default: debug). It picks the reprobuild output tree
+	# (`src/build-<config>-repro` on all platforms — the `-repro` suffix keeps
+	# it out of tup's `src/build-debug` variant dir) and threads the
+	# `buildType` reprobuild variant to the recipe so the value participates in
+	# the graph cache key (see reprobuild-specs/Standard-Configurations.md and
+	# `buildDebugRoot()` in reprobuild.nim, the source of truth). `--release`
+	# on a `repro` with the standard-config shorthands is equivalent to
+	# `REPRO_VARIANTS=buildType=release`; we set the env directly so this works
+	# with any `repro` binary.
+	ct_config="${CODETRACER_CONFIG:-debug}"
+	ct_repro_out_root="src/build-${ct_config}-repro"
+	if [ -z "${REPRO_VARIANTS:-}" ]; then
+		export REPRO_VARIANTS="buildType=${ct_config}"
+	elif ! printf '%s' "$REPRO_VARIANTS" | grep -q "buildType="; then
+		export REPRO_VARIANTS="${REPRO_VARIANTS},buildType=${ct_config}"
 	fi
 
 	repro_bin="${REPROBUILD_BIN:-}"

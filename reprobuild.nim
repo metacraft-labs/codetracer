@@ -5,24 +5,40 @@ import repro_dsl_stdlib
 const
   PublicResourceRoot = "src/public"
 
-# Reprobuild's output root.
+# Reprobuild's output root — codetracer's tup-friendly override of
+# reprobuild's cargo-like default (see codetracer-specs
+# Architecture/Build-Outputs-And-Path-Resolution.md and reprobuild-specs
+# Standard-Configurations.md).
 #
-# On Linux this is ``src/build-debug-repro`` rather than ``src/build-debug`` so
-# the reprobuild and legacy tup builds do not fight over the same directory:
-# tup refuses to build when its variant dir (``src/build-debug``) contains files
-# it did not create, so a reprobuild build that wrote there would break a later
-# ``tup build-debug`` (and vice versa). macOS/Windows have no tup build, so they
-# keep ``src/build-debug``.
+# ``src/build-<buildType>-repro`` on ALL platforms: reprobuild's output must
+# never share a directory with tup's ``src/build-debug`` variant dir (tup
+# refuses to build when its variant dir contains files it did not create), so
+# the reprobuild outputs sit beside the tup dirs with a ``-repro`` suffix.
 #
-# This MUST be a compile-time constant, not a runtime ``getEnv``: reprobuild
-# keys its lowered-graph cache on the compiled provider artifact, so a value
-# read at provider-run time is silently ignored whenever the graph is served
-# from cache (``providerInvocations: 0``). Baking it into the constant makes the
-# output root part of that cache key. Release variants would follow the same
-# scheme (``src/build-release-repro``).
-const BuildDebugRoot =
-  when defined(linux): "src/build-debug-repro"
-  else: "src/build-debug"
+# ``buildType`` is a reprobuild VARIANT — a tracked solver input that is part
+# of the graph cache key, unlike a runtime ``getEnv`` (which is silently
+# ignored when the lowered graph is served from cache, ``providerInvocations:
+# 0``). ``repro build --release`` / ``--variant buildType=release`` selects
+# ``src/build-release-repro``. It is declared at module scope (not inside the
+# ``config:`` block) so the top-level ``buildDebugPath`` proc below can read
+# its resolved value; the ``package`` macro's ``finalizeVariants()`` resolves
+# it before the build graph is emitted.
+let buildType = block:
+  let info = instantiationInfo(fullPaths = true)
+  let s = newSourceSite(info.filename, info.line, info.column, ckDefault)
+  declareVariant[string](
+    defaultValue = "debug", scopeName = "buildType",
+    description = "Build configuration: debug or release.",
+    explicitId = "", descriptionFile = info.filename,
+    descriptionLine = info.line, descriptionColumn = 0, site = s)
+
+proc buildDebugRoot(): string =
+  ## ``src/build-<buildType>-repro``. Reads the resolved ``buildType``
+  ## variant; falls back to ``debug`` if read before finalisation.
+  let bt =
+    try: buildType.value
+    except EVariantNotResolved: "debug"
+  "src/build-" & bt & "-repro"
 
 # Windows: extra C/linker flags so the bundled libzip C sources compile under
 # MinGW UCRT (mirror of src/Tuprules.tup's NIM_WINDOWS_CFLAGS / DYNLIB_OVERRIDE_FLAGS
@@ -285,7 +301,7 @@ proc buildDebugPath(path: string): string =
   # backslashes are escape characters. On Windows, Nim's ``/`` operator
   # yields ``src\build-debug\foo`` which bash sees as ``srcbuild-debugfoo``
   # after escape processing, breaking ``cp`` and friends.
-  (BuildDebugRoot / path).replace('\\', '/')
+  (buildDebugRoot() / path).replace('\\', '/')
 
 proc nativeLibraryPathEnvName(): string =
   when defined(macosx):
@@ -424,7 +440,7 @@ package codeTracer:
         discard readDevEnvFile(inputFile)
 
     setEnv "CODETRACER_REPO_ROOT_PATH", projectRoot
-    setEnv "CODETRACER_PREFIX", projectRoot / BuildDebugRoot
+    setEnv "CODETRACER_PREFIX", projectRoot / buildDebugRoot()
     setEnv "CODETRACER_DEV_TOOLS", "0"
     setEnv "CODETRACER_LOG_LEVEL", "INFO"
     setEnv "RUST_LOG", "info"
@@ -432,7 +448,7 @@ package codeTracer:
     setEnv "REPROBUILD_USE_SYSTEM_HASH_LIBS", "1"
     appendPath "NODE_PATH", projectRoot / "node_modules"
     prependPath "PATH", projectRoot / "node_modules" / ".bin"
-    prependPath "PATH", projectRoot / BuildDebugRoot / "bin"
+    prependPath "PATH", projectRoot / buildDebugRoot() / "bin"
 
     let metacraftScripts = metacraftScriptsPath(projectRoot, workspaceRoot)
     if metacraftScripts.len > 0:
@@ -1140,7 +1156,7 @@ package codeTracer:
         # runs in-process inside a single node.exe (one CreateProcessW
         # the shim handles cleanly; no bash sub-fork).
         let appRoot = "non-nix-build/CodeTracer-win"
-        let buildDebugRootPath = BuildDebugRoot   # forward slashes
+        let buildDebugRootPath = buildDebugRoot()   # forward slashes
         let ctBatContents =
           "@echo off\r\n" &
           "setlocal\r\n" &
