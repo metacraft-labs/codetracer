@@ -313,13 +313,20 @@ if [ -n "$ct_reprobuild_host" ]; then
 	exit 0
 fi
 
+# Tup build variant for the selected configuration. CODETRACER_CONFIG=release
+# builds the `build-release` variant (src/build-release/tup.config, CONFIG_DEBUG=0
+# → release Nim flags); the default is `build-debug`. The two variants live in
+# separate output dirs so they don't collide.
+ct_tup_config="${CODETRACER_CONFIG:-debug}"
+ct_tup_variant="build-${ct_tup_config}"
+
 # We have to make the dist directory here, because it's missing on a fresh check out
 # It will be created by the webpack command below, but we have an a chicken and egg
 # problem because the Tupfiles refer to it.
 mkdir -p src/public/dist
 
 cd src
-"${TUP:-tup}" build-debug
+"${TUP:-tup}" "$ct_tup_variant"
 cd ..
 
 # Build frontend_bundle.js in the dist folder
@@ -328,10 +335,10 @@ node_modules/.bin/webpack --progress
 # We need to execute another tup run because webpack may have created some new files
 # that tup will discover
 cd src
-"${TUP:-tup}" build-debug
+"${TUP:-tup}" "$ct_tup_variant"
 cd ..
 
 # Re-apply BPF capabilities on the ct binary. Tup's FUSE sandbox prevents
 # sudo from running during the build, so we do this as a post-build step.
 # Silently skips if codetracer-setcap is not installed.
-scripts/post-build-setcap.sh src/build-debug/bin/ct
+scripts/post-build-setcap.sh "src/$ct_tup_variant/bin/ct"

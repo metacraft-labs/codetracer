@@ -192,14 +192,44 @@ impl ReplayWorker {
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
-        let mut command = Command::new(&self.recreator_exe);
+        // Pillar-E Option-B: when the flow-test harness requests the
+        // cooperative-symmetric query server (CT_COOP_QUERY=1), spawn the
+        // recorder's `ct-mcr replay-worker --coop-query` instead of the
+        // default `ct-native-replay` DYLD replay (which diverges/hangs on the
+        // Rust trace).  The cooperative worker brings the SAME cooperatively-
+        // linked program up symmetrically (no divergence), stops held at the
+        // flow function, and answers the same JSON ReplayQuery protocol with
+        // REAL values read from the held child's registers + memory.  The
+        // coop env vars (CT_COOP_PROGRAM / CT_COOP_FUNC / CT_COOP_SOURCE) are
+        // inherited by the child automatically.
+        let coop_query = std::env::var("CT_COOP_QUERY").as_deref() == Ok("1");
+        let coop_exe = std::env::var("CT_COOP_RECREATOR").ok();
+        let exe_path: PathBuf = if coop_query {
+            match &coop_exe {
+                Some(p) => PathBuf::from(p),
+                None => self.recreator_exe.clone(),
+            }
+        } else {
+            self.recreator_exe.clone()
+        };
+
+        let mut command = Command::new(&exe_path);
         command
             .arg("replay-worker")
             .arg("--name")
             .arg(&self.name)
             .arg("--index")
             .arg(self.index.to_string());
-        if let Some(program) = &self.live_program {
+        if coop_query {
+            command.arg("--coop-query");
+            if let Ok(program) = std::env::var("CT_COOP_PROGRAM") {
+                command.arg("--coop-program").arg(program);
+            }
+            if let Ok(func) = std::env::var("CT_COOP_FUNC") {
+                command.arg("--coop-func").arg(func);
+            }
+            command.arg(&self.rr_trace_folder);
+        } else if let Some(program) = &self.live_program {
             command.arg("--live-program").arg(program);
             if let Some(dir) = &self.live_recording_dir {
                 command.arg("--live-recording-dir").arg(dir);
@@ -1351,6 +1381,62 @@ mod tests {
     }
 
     #[test]
+    fn test_db_backend_decodes_rr_memwrite_response_exactly() {
+        let inside_first = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 200,
+            pc: 0x401120,
+            size: 8,
+            old_value: 0x0102_0304_0506_0708,
+            new_value: 0x1122_3344,
+        };
+        let inside_second = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 201,
+            pc: 0x40112B,
+            size: 8,
+            old_value: 0x1122_3344,
+            new_value: 0x1122_3355,
+        };
+        let before = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 199,
+            pc: 0x401110,
+            size: 8,
+            old_value: 0,
+            new_value: 1,
+        };
+        let after = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 202,
+            pc: 0x401133,
+            size: 8,
+            old_value: 0x1122_3355,
+            new_value: 0x1122_3366,
+        };
+        let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(0x404030, vec![before, inside_first, inside_second, after])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 200,
+            tick_hi: 202,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(image),
+            linehits_base64: None,
+        };
+
+        let materialized =
+            materialized_interval_from_worker_response(200, 202, &serde_json::to_string(&response).unwrap()).unwrap();
+
+        assert_eq!(
+            materialized.writes,
+            vec![(0x404030, inside_first), (0x404030, inside_second)]
+        );
+        assert!(
+            !materialized.writes.is_empty(),
+            "RR memwrite response must not be accepted through an empty-success fallback"
+        );
+    }
+
+    #[test]
     fn materialize_interval_response_decodes_linehits_and_clips_to_requested_range() {
         let memwrites_image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
             &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites { per_address: vec![] },
@@ -1384,6 +1470,58 @@ mod tests {
                     crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 19 }
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn test_db_backend_decodes_rr_linehit_response_exactly() {
+        let inside_write = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 301,
+            pc: 0x40112B,
+            size: 8,
+            old_value: 0x1122_3344,
+            new_value: 0x1122_3355,
+        };
+        let memwrites_image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(0x404030, vec![inside_write])],
+            },
+        );
+        let linehits_image = crate::ctfs_trace_reader::server_prep_encoding::encode_linehits(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedLinehits {
+                per_line: vec![(11, 71, vec![299, 300]), (11, 72, vec![301, 302])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 300,
+            tick_hi: 302,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(memwrites_image),
+            linehits_base64: Some(BASE64_STANDARD.encode(linehits_image)),
+        };
+
+        let materialized =
+            materialized_interval_from_worker_response(300, 302, &serde_json::to_string(&response).unwrap()).unwrap();
+
+        let first_key = codetracer_trace_writer::step_stream::pack_global_line_index(11, 71);
+        let second_key = codetracer_trace_writer::step_stream::pack_global_line_index(11, 72);
+        assert_eq!(materialized.writes, vec![(0x404030, inside_write)]);
+        assert_eq!(
+            materialized.line_hits,
+            vec![
+                (
+                    first_key,
+                    crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 300 },
+                ),
+                (
+                    second_key,
+                    crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 301 },
+                ),
+            ]
+        );
+        assert!(
+            !materialized.line_hits.is_empty(),
+            "RR linehit response must not be accepted through an empty-success fallback"
         );
     }
 
