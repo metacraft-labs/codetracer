@@ -1,13 +1,3 @@
-## VENDORED from reprobuild's proven incremental-testing engine.
-## Provenance: /Users/zahary/m/dev/reprobuild/libs/repro_ct_incremental/src/repro_ct_incremental/catalog.nim
-## (Trace-Based-Incremental-Testing campaign, milestone M18 productionisation.)
-##
-## This is a CLEAN VENDOR (not a fork): the algorithm is byte-for-byte the
-## reprobuild prototype's. Keep the two copies in sync — if you change the
-## decision/hash logic here, mirror it in the reprobuild source above and vice
-## versa. See codetracer-specs/Planned-Features/Nim-Parallel-Test-Framework.md
-## §16.7 for the authoritative specification.
-##
 ## Test catalog reader — the M11 deliverable of the
 ## Trace-Based-Incremental-Testing campaign.
 ##

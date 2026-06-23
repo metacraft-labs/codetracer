@@ -1,13 +1,3 @@
-## VENDORED from reprobuild's proven incremental-testing engine.
-## Provenance: /Users/zahary/m/dev/reprobuild/libs/repro_ct_incremental/src/repro_ct_incremental/ctfs_trace.nim
-## (Trace-Based-Incremental-Testing campaign, milestone M18 productionisation.)
-##
-## This is a CLEAN VENDOR (not a fork): the algorithm is byte-for-byte the
-## reprobuild prototype's. Keep the two copies in sync — if you change the
-## decision/hash logic here, mirror it in the reprobuild source above and vice
-## versa. See codetracer-specs/Planned-Features/Nim-Parallel-Test-Framework.md
-## §16.7 for the authoritative specification.
-##
 ## CTFS `.ct` dependency discovery — the M12 deliverable of the
 ## Trace-Based-Incremental-Testing prototype campaign (Phase 3).
 ##
@@ -69,7 +59,7 @@
 ## (`codetracer_trace_reader` / `codetracer_ct_print_lib`) directly and read the
 ## CTFS in-process — no subprocess, no JSON round-trip. The subprocess is the
 ## documented prototype stand-in (it avoids pulling the trace-format-nim build —
-## libzstd flags, its module tree — into reprobuild's lib build for the
+## libzstd flags, its module tree — into the engine's build for the
 ## prototype). `ct-print` is resolved in this order:
 ##
 ##   1. the `CT_PRINT` environment variable, if it points at an executable file;

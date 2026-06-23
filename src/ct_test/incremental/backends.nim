@@ -1,11 +1,3 @@
-## VENDORED from reprobuild's proven incremental-testing engine.
-## Provenance: /Users/zahary/m/dev/reprobuild/libs/repro_ct_incremental/src/repro_ct_incremental/backends.nim
-## (Trace-Based-Incremental-Testing campaign, milestone M18 productionisation.)
-##
-## CLEAN VENDOR (not a fork) — keep in sync with the reprobuild source above.
-## This module is self-contained (it only imports trace_reader), so it is
-## vendored byte-for-byte.
-##
 ## Backend abstraction + detection — the M6 deliverable of the
 ## Trace-Based-Incremental-Testing prototype campaign (Phase 2).
 ##

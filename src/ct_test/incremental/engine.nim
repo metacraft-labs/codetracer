@@ -1,35 +1,3 @@
-## VENDORED from reprobuild's proven incremental-testing engine.
-## Provenance: /Users/zahary/m/dev/reprobuild/libs/repro_ct_incremental/src/repro_ct_incremental/engine.nim
-## (Trace-Based-Incremental-Testing campaign, milestone M18 productionisation.)
-##
-## CLEAN VENDOR with ONE deliberate trim (documented below) — keep in sync with
-## the reprobuild source above. The decision/record/cache/hash algorithm is
-## byte-for-byte the prototype's; only the BACKEND WIRING is reduced.
-##
-## # The M18 trim: source/CTFS backends only (native gated, never a false skip)
-##
-## The full reprobuild engine additionally wires the NATIVE (DWARF / compiled-
-## instruction-byte) backend, which pulls in `native_trace`/`native_hash`/
-## `native_instrument` (objdump/DWARF/compile-time-instrumentation tooling). M18
-## productionises trace-based incremental selection for INTERPRETED languages
-## that record live in `ct test` (Python/Ruby via the modern CTFS `.ct` bundle),
-## so this vendor wires ONLY:
-##   * `tbSourceInterpreted` — legacy JSON trace + source-text hashing, and
-##   * `tbSourceCtfs`        — modern CTFS `.ct` bundle (via `ct-print`) + the
-##                            SAME source-text hashing.
-## The NATIVE and reserved Nim-instrumented backends are LEFT WITH NIL STRATEGIES
-## (`strategiesImplemented == false`), so `record`/`decide` fail safe to a re-run
-## with a clear "backend not yet supported" reason for a native trace — NEVER a
-## false skip. Bringing native into `ct test` is a follow-up that vendors the
-## native modules too; until then native is honestly gated here.
-##
-## Everything below this banner is the prototype engine, with the native imports,
-## the native shallow hasher, the native trace-dir readability probe, and the
-## native dep-location rebind removed (they are unreachable once the native
-## strategies are nil). The original module documentation follows.
-##
-## ---------------------------------------------------------------------------
-##
 ## Deep-hash invalidation engine — the M1 deliverable of the
 ## Trace-Based-Incremental-Testing prototype campaign.
 ##
@@ -92,12 +60,16 @@ import results
 import trace_reader
 import extractors
 import backends
+import native_trace
+import native_hash
 import ctfs_trace
 import catalog
 
 export trace_reader
 export extractors
 export backends
+export native_trace
+export native_hash
 export ctfs_trace
 export catalog
 
@@ -292,6 +264,35 @@ proc shallowHashOfDepSource(dep: ExecutedFunction; sourceRoot: string): string
     return shallowHash("")  # unknown ext / out-of-range / unmatched => "missing"
   shallowHash(bodyRes.value)
 
+proc shallowHashOfDepNative(dep: ExecutedFunction; sourceRoot: string): string
+    {.nimcall, gcsafe.} =
+  ## The native/DWARF `ShallowHasher` implementation (M8). Compute the current
+  ## shallow hash of one executed native function from its CURRENT compiled
+  ## instruction bytes.
+  ##
+  ## # Why `sourceRoot` is IGNORED here (the seam design)
+  ##
+  ## For native dependencies `dep.file` already holds the OWNING BINARY path (the
+  ## convention `readExecutedFunctionsNative` establishes), and a native
+  ## function's identity is its instruction bytes located in that binary by
+  ## symbol name — there is NO source tree to resolve under `sourceRoot`. So this
+  ## hasher deliberately ignores `sourceRoot` and hashes `dep.file` (the binary)
+  ## directly via `shallowHashNative(dep.file, dep.name)`. This is exactly how
+  ## the M6 seam was designed to let native ignore `sourceRoot`: the source path
+  ## is NEVER touched on the native route.
+  ##
+  ## # Fail-safe
+  ##
+  ## A missing/unreadable binary, a function absent from the binary's symbol
+  ## table, or any native-hash tooling error makes `shallowHashNative` return an
+  ## `Err`; we map that to the reserved `"missing"` sentinel (via `shallowHash("")`)
+  ## so the dependency reads as CHANGED and the engine re-runs — never a silent
+  ## skip. This mirrors `shallowHashOfDepSource`'s treatment of an unreadable
+  ## source. (`shallowHash` of an empty body returns `"missing"`.)
+  let h = shallowHashNative(dep.file, dep.name)
+  if h.isErr:
+    return shallowHash("")  # missing/unreadable binary or absent function => "missing"
+  h.value
 
 # ---------------------------------------------------------------------------
 # Backend strategy selection (M6 seam)
@@ -312,6 +313,19 @@ let
     discovery: newDependencyDiscovery(readExecutedFunctions),
     hasher: newShallowHasher(shallowHashOfDepSource))
 
+  nativeDwarfStrategies = BackendStrategies(
+    backend: tbNativeDwarf,
+    # M8/M15: native dependency discovery reads whichever native trace flavour the
+    # dir carries — the GENUINE compile-time-instrumentation capture (M14/M15,
+    # `native_instrument_calls.log` + `instrumented_prog`) preferred, else the
+    # legacy hand-crafted `native_calltrace.json` projection (M8). Native shallow
+    # hashing reads the function's compiled instruction bytes from the owning
+    # binary carried in `dep.file` (sourceRoot is ignored — see
+    # `shallowHashOfDepNative`). Both seams are real, so the native backend
+    # participates in incremental skipping exactly like the source backend, with
+    # the SAME `{deepHash, deps}` cache shape.
+    discovery: newDependencyDiscovery(readExecutedFunctionsNativeAny),
+    hasher: newShallowHasher(shallowHashOfDepNative))
 
   sourceCtfsStrategies = BackendStrategies(
     backend: tbSourceCtfs,
@@ -334,11 +348,12 @@ proc backendStrategies*(backend: TraceBackend): BackendStrategies =
   case backend
   of tbSourceInterpreted:
     sourceInterpretedStrategies
+  of tbNativeDwarf:
+    nativeDwarfStrategies
   of tbSourceCtfs:
     sourceCtfsStrategies
-  of tbNativeDwarf, tbNimInstrumented:
-    # Vendored trim: native + reserved Nim backends have nil seam procs, so the
-    # engine fails safe to a re-run (`strategiesImplemented == false`).
+  of tbNimInstrumented:
+    # Reserved: discovery/hasher are nil until the Nim instrumented impl lands.
     BackendStrategies(backend: backend)
 
 # ---------------------------------------------------------------------------
@@ -665,6 +680,15 @@ proc sourceTraceDirReadable(traceDir: string): Result[void, string] =
       return err("unreadable trace file " & p & ": " & e.msg)
   ok()
 
+proc nativeTraceDirReadable(traceDir: string): Result[void, string] =
+  ## The native-backend readability probe (M8/M15 fail-safe). A native trace dir
+  ## must exist and carry a readable native trace artifact of a recognised
+  ## flavour — the M14/M15 instrumentation capture
+  ## (`native_instrument_calls.log`) or the legacy `native_calltrace.json`. The
+  ## recorded binary is probed later, by the native shallow hasher, which
+  ## fail-safes to a re-run if the binary is missing/unreadable — so a missing
+  ## binary is ALWAYS a re-run, never a skip (see `shallowHashOfDepNative`).
+  nativeTraceDirReadableAny(traceDir)
 
 proc ctfsTraceDirReadable(traceDir: string): Result[void, string] =
   ## The CTFS-backend readability probe (M12 fail-safe). A CTFS trace dir must
@@ -693,10 +717,12 @@ proc traceDirReadable(traceDir: string; backend: TraceBackend):
   case backend
   of tbSourceInterpreted:
     sourceTraceDirReadable(traceDir)
+  of tbNativeDwarf:
+    nativeTraceDirReadable(traceDir)
   of tbSourceCtfs:
     ctfsTraceDirReadable(traceDir)
-  of tbNativeDwarf, tbNimInstrumented:
-    # Vendored trim: native + reserved Nim backends have no wired strategies; the
+  of tbNimInstrumented:
+    # The reserved Nim instrumented backend has no wired strategies; the
     # caller's `strategiesImplemented` guard fail-safes before this is reached.
     # A trivial existence probe keeps this total.
     if dirExists(traceDir): ok() else: err("missing trace dir: " & traceDir)
@@ -718,12 +744,24 @@ proc currentDepLocations(deps: seq[CachedDep]; traceDir: string;
   ##     path so the current hash becomes the `"missing"` sentinel ⇒ a re-run,
   ##     never a skip.
   case backend
-  of tbSourceInterpreted, tbSourceCtfs, tbNativeDwarf, tbNimInstrumented:
-    # Vendored trim: only the source/CTFS-interpreted deps reach here (native is
-    # gated to a fail-safe re-run before decide() rebinds), and they carry a
-    # source path + defLine the source hasher resolves under the CURRENT
-    # `sourceRoot` — so no rebind is needed.
+  of tbSourceInterpreted, tbSourceCtfs, tbNimInstrumented:
+    # CTFS-interpreted deps carry a source path + defLine (resolved from the
+    # call's entry step) that the source hasher resolves under the CURRENT
+    # `sourceRoot`, exactly like the legacy source path — so no rebind is needed.
     ok(deps)
+  of tbNativeDwarf:
+    let binRes = nativeTraceBinaryAny(traceDir)
+    # A missing/unreadable current binary path forces every dep's hash to
+    # "missing" (re-run), rather than silently hashing a stale recorded binary.
+    let currentBinary =
+      if binRes.isOk: binRes.value
+      else: traceDir / "<unresolved-native-binary>"
+    var rebound: seq[CachedDep]
+    for dep in deps:
+      var f = dep.fn
+      f.file = currentBinary  # native deps key on name+binary; track the CURRENT binary
+      rebound.add CachedDep(fn: f, shallow: dep.shallow)
+    ok(rebound)
 
 proc decide*(testId, traceDir, sourceRoot: string;
              cache: IncrementalCache): IncrementalDecision =

@@ -17,7 +17,7 @@
 ##
 ## Every decision is made from a REAL, freshly-recorded CTFS bundle read via
 ## `ct-print --json-events`. This mirrors `reprobuild/.../tests/t_live_python.nim`
-## but exercises CodeTracer's OWN vendored engine + the M18 CLI core.
+## but exercises CodeTracer's OWN canonical engine + the M18 CLI core.
 ##
 ## # Provisioning (build once, reuse — NO silent skips)
 ##

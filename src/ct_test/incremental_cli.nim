@@ -3,13 +3,14 @@
 ## This is milestone M18 of the Trace-Based Incremental Testing campaign: it
 ## brings the runtime-dependency test-selection algorithm (spec
 ## `codetracer-specs/Planned-Features/Nim-Parallel-Test-Framework.md` §16.7) into
-## CodeTracer's `ct test` WITHOUT reprobuild, reusing the PROVEN engine vendored
-## under `incremental/` (see that directory's provenance banners).
+## CodeTracer's `ct test` WITHOUT reprobuild, on the CANONICAL engine under
+## `incremental/` (codetracer owns the engine; reprobuild reaches it only through
+## the engine-free `reprobuild-ct-test-runner` adapter — a one-way dependency).
 ##
 ## # What it does (§16.7.4 workflow)
 ##
-## Given a test program for an interpreted language (Python or Ruby), on each
-## invocation it:
+## Given a test program for an interpreted language (Python or Ruby) OR a native
+## C program, on each invocation it:
 ##
 ##   1. records a BASELINE trace of the program via the appropriate production
 ##      recorder, into a modern CTFS `.ct` bundle (stamped `ctfs-interpreted` so
@@ -30,25 +31,45 @@
 ## reports a loud, captured diagnostic and exits non-zero; it is never silently
 ## skipped.
 ##
-## # Live-validated vs deferred (M18 honesty)
+## # Live-validated languages
 ##
-## Python and Ruby are wired here and record live on this host via their
-## production recorders. The NATIVE/compiled languages are intentionally NOT
-## wired in this milestone: the vendored engine gates the native backend to a
-## fail-safe re-run, and this CLI rejects an unsupported language up front rather
-## than pretending. Bringing native into `ct test` is a follow-up.
+## Python and Ruby record live via their production recorders (source-text
+## shallow hashing over a CTFS `.ct` bundle). NATIVE C records live via the
+## CodeTracer native recorder's compile-time call-trace instrumentation
+## (`ct_instrument`, driven through the engine's `native_instrument` module): the
+## executed-function SET is captured at runtime and the per-function change signal
+## is the function's COMPILED INSTRUCTION BYTES (the engine's `tbNativeDwarf`
+## backend). The native path is no longer rejected up front — the canonical
+## engine now wires the native dependency-discovery + instruction-byte-hash seams
+## (`native_trace`/`native_hash`/`native_instrument`), so a native trace decides
+## skip-vs-rerun exactly like the source path, with the same fail-safe contract.
+##
+## Native recording drives the `ct_instrument` plugin in the
+## `codetracer-native-recorder` sibling's own dev shell (resolved by the engine's
+## `nativeRecorderRepo()`, overridable via `CT_NATIVE_RECORDER_REPO`). On a host
+## without that sibling/toolchain, the native path reports an HONEST gate
+## (non-zero exit + captured diagnostic) — never a silent skip.
 
 import std/[os, osproc, strutils, times, tables]
 import results
 
 import incremental/engine
+# Native recording drives the engine's compile-time-instrumentation seam
+# (`instrumentAndRun`) and the recorded-binary naming conventions the native
+# backend hashes against (`InstrumentedBinaryName`, `RecordedBinaryName`).
+import incremental/native_instrument
+import incremental/native_trace
 
 type
   IncrementalLanguage* = enum
-    ## A language `ct test --incremental` can drive a recorder for. Only the
-    ## interpreted languages that record live on this host are wired in M18.
+    ## A language `ct test --incremental` can drive a recorder for. The
+    ## interpreted languages (Python/Ruby) record a CTFS `.ct` bundle and hash
+    ## source text; native C records via compile-time call-trace instrumentation
+    ## and hashes the compiled instruction bytes (the engine's `tbNativeDwarf`
+    ## backend).
     ilPython = "python"
     ilRuby = "ruby"
+    ilNative = "native"
 
   IncrementalArgs* = object
     ## Parsed `ct test --incremental` arguments.
@@ -77,6 +98,7 @@ const
   # the CLI does not hard-code an absolute workspace path.
   RubyRecorderSubpath = "codetracer-ruby-recorder"
   PythonRecorderSubpath = "codetracer-python-recorder"
+  NativeRecorderSubpath = "codetracer-native-recorder"
 
 # ---------------------------------------------------------------------------
 # Workspace / recorder-repo resolution
@@ -99,7 +121,8 @@ proc workspaceRoot(): string =
     if parent.len == 0 or parent == dir:
       break
     if dirExists(parent / PythonRecorderSubpath) or
-        dirExists(parent / RubyRecorderSubpath):
+        dirExists(parent / RubyRecorderSubpath) or
+        dirExists(parent / NativeRecorderSubpath):
       return parent
     dir = parent
   # Fallback: the directory two levels above the source checkout.
@@ -238,6 +261,75 @@ proc recordPythonLive(repo, program: string): RecorderOutcome =
   markCtfsInterpreted(outDir)
   RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: bundle)
 
+# ---------------------------------------------------------------------------
+# Native (C) recording via compile-time call-trace instrumentation
+# ---------------------------------------------------------------------------
+
+proc markNativeInstrumented(traceDir: string) =
+  ## Stamp a native compile-time-instrumentation trace dir with the explicit
+  ## `recorder_backend: "native-instrumented"` metadata signal so the engine's
+  ## `detectBackend` routes the dir through the native instruction-byte backend
+  ## (`tbNativeDwarf`). The presence of `trace_db_metadata.json` is ALSO a native
+  ## structural signal, so this is belt-and-suspenders; the explicit field makes
+  ## the intent self-documenting.
+  writeFile(traceDir / "trace_db_metadata.json",
+    """{"format":"native-instrument","recorder_backend":"native-instrumented"}""")
+
+proc recordNativeLive(program: string): RecorderOutcome =
+  ## Record a native C `program` LIVE via the CodeTracer native recorder's
+  ## compile-time call-trace instrumentation. Two artifacts land in the trace dir:
+  ##
+  ##   1. the EXECUTED-FUNCTION SET — captured by the `ct_instrument` call-trace
+  ##      facet (`__cyg_profile_func_enter` + `dladdr`), driven through the
+  ##      engine's `instrumentAndRun`. This builds + runs an instrumented binary
+  ##      in the native-recorder dev shell and writes the de-duplicated name log.
+  ##   2. a CLEAN (non-instrumented) binary of the SAME source, for SHALLOW
+  ##      HASHING. Instrumentation injects pc-relative `__cyg_profile_func_*`
+  ##      calls that make every function's bytes relocation-sensitive to unrelated
+  ##      edits, so the native shallow hash must read the real, non-instrumented
+  ##      production binary (see `native_trace.instrumentHashBinaryPath`). The M7
+  ##      stability flags (`-O0 -g -fno-stack-protector
+  ##      -fno-asynchronous-unwind-tables`) keep a function's bytes a function of
+  ##      its OWN body only.
+  ##
+  ## Any compile/run/read failure is an HONEST GATE (`roGated` + the captured
+  ## diagnostic) — never a silent skip. The recorded source lives INSIDE the trace
+  ## dir, so the engine resolves the recorded binary from the trace, not a
+  ## host-specific path.
+  let outDir = freshLiveDir("ct_incremental_native_")
+  let src = outDir / "prog.c"
+  try:
+    let original = readFile(program)
+    writeFile(src, original)
+  except CatchableError as e:
+    return RecorderOutcome(kind: roGated,
+      diagnostic: "could not stage native instrumentation source from " &
+        program & ": " & e.msg)
+
+  # (1) Discover the executed set via the ct_instrument call-trace facet.
+  let runRes = instrumentAndRun(src, outDir)
+  if runRes.isErr:
+    return RecorderOutcome(kind: roGated,
+      diagnostic: "native instrumentation compile/run failed: " & runRes.error)
+
+  # (2) Build the clean (non-instrumented) binary the native shallow hash reads.
+  let cleanBin = outDir / RecordedBinaryName
+  let cc = (let e = getEnv("CC"); if e.len > 0: e else: "cc")
+  let cleanCmd =
+    quoteShell(cc) & " -O0 -g -fno-stack-protector " &
+    "-fno-asynchronous-unwind-tables -o " & quoteShell(cleanBin) & " " &
+    quoteShell(src)
+  let (cleanOut, cleanCode) = execCmdEx(cleanCmd)
+  if cleanCode != 0 or not fileExists(cleanBin):
+    return RecorderOutcome(kind: roGated,
+      diagnostic: "clean (non-instrumented) recorded binary build failed (exit " &
+        $cleanCode & "):\n" & cleanOut)
+
+  markNativeInstrumented(outDir)
+  # ctPath carries the RECORDED BINARY (no `.ct` bundle on the native path; the
+  # native flavour keys on the binary the native shallow hash reads).
+  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: cleanBin)
+
 proc recordLive(args: IncrementalArgs; ws: string): RecorderOutcome =
   ## Dispatch a live baseline recording to the language's production recorder.
   case args.language
@@ -245,6 +337,11 @@ proc recordLive(args: IncrementalArgs; ws: string): RecorderOutcome =
     recordPythonLive(ws / PythonRecorderSubpath, args.program)
   of ilRuby:
     recordRubyLive(ws / RubyRecorderSubpath, args.program)
+  of ilNative:
+    # The native path resolves the `ct_instrument` plugin via the engine's
+    # `nativeRecorderRepo()` (honouring `CT_NATIVE_RECORDER_REPO`), so it does
+    # NOT consult `ws`. `program` is a C source the recorder compiles + runs.
+    recordNativeLive(args.program)
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -254,15 +351,17 @@ proc parseLanguage(s: string): Result[IncrementalLanguage, string] =
   case s.toLowerAscii()
   of "python", "py": ok(ilPython)
   of "ruby", "rb": ok(ilRuby)
-  of "native", "c", "cpp", "c++", "rust", "go":
-    err("language '" & s & "' is not yet supported by `ct test --incremental` " &
-      "(native/compiled languages are deferred; the engine gates them to a " &
-      "fail-safe re-run). Live-validated languages: python, ruby.")
+  of "native", "c": ok(ilNative)
+  of "cpp", "c++", "rust", "go":
+    err("language '" & s & "' is not yet wired into `ct test --incremental` " &
+      "(the canonical engine's native instruction-byte backend supports it, but " &
+      "the CLI currently drives only C through the native call-trace recorder). " &
+      "Wired languages: python, ruby, native (C).")
   else:
-    err("unknown language '" & s & "' (expected: python, ruby)")
+    err("unknown language '" & s & "' (expected: python, ruby, native)")
 
 proc usage(): string =
-  "usage: ct test --incremental --language <python|ruby> --program <path> " &
+  "usage: ct test --incremental --language <python|ruby|native> --program <path> " &
   "[--source-root DIR] [--cache PATH] [--id TESTID]"
 
 proc takeValue(args: seq[string]; i: var int; flag: string):
