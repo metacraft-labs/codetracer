@@ -1381,6 +1381,62 @@ mod tests {
     }
 
     #[test]
+    fn test_db_backend_decodes_rr_memwrite_response_exactly() {
+        let inside_first = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 200,
+            pc: 0x401120,
+            size: 8,
+            old_value: 0x0102_0304_0506_0708,
+            new_value: 0x1122_3344,
+        };
+        let inside_second = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 201,
+            pc: 0x40112B,
+            size: 8,
+            old_value: 0x1122_3344,
+            new_value: 0x1122_3355,
+        };
+        let before = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 199,
+            pc: 0x401110,
+            size: 8,
+            old_value: 0,
+            new_value: 1,
+        };
+        let after = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 202,
+            pc: 0x401133,
+            size: 8,
+            old_value: 0x1122_3355,
+            new_value: 0x1122_3366,
+        };
+        let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(0x404030, vec![before, inside_first, inside_second, after])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 200,
+            tick_hi: 202,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(image),
+            linehits_base64: None,
+        };
+
+        let materialized =
+            materialized_interval_from_worker_response(200, 202, &serde_json::to_string(&response).unwrap()).unwrap();
+
+        assert_eq!(
+            materialized.writes,
+            vec![(0x404030, inside_first), (0x404030, inside_second)]
+        );
+        assert!(
+            !materialized.writes.is_empty(),
+            "RR memwrite response must not be accepted through an empty-success fallback"
+        );
+    }
+
+    #[test]
     fn materialize_interval_response_decodes_linehits_and_clips_to_requested_range() {
         let memwrites_image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
             &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites { per_address: vec![] },
