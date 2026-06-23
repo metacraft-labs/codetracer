@@ -192,14 +192,44 @@ impl ReplayWorker {
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
-        let mut command = Command::new(&self.recreator_exe);
+        // Pillar-E Option-B: when the flow-test harness requests the
+        // cooperative-symmetric query server (CT_COOP_QUERY=1), spawn the
+        // recorder's `ct-mcr replay-worker --coop-query` instead of the
+        // default `ct-native-replay` DYLD replay (which diverges/hangs on the
+        // Rust trace).  The cooperative worker brings the SAME cooperatively-
+        // linked program up symmetrically (no divergence), stops held at the
+        // flow function, and answers the same JSON ReplayQuery protocol with
+        // REAL values read from the held child's registers + memory.  The
+        // coop env vars (CT_COOP_PROGRAM / CT_COOP_FUNC / CT_COOP_SOURCE) are
+        // inherited by the child automatically.
+        let coop_query = std::env::var("CT_COOP_QUERY").as_deref() == Ok("1");
+        let coop_exe = std::env::var("CT_COOP_RECREATOR").ok();
+        let exe_path: PathBuf = if coop_query {
+            match &coop_exe {
+                Some(p) => PathBuf::from(p),
+                None => self.recreator_exe.clone(),
+            }
+        } else {
+            self.recreator_exe.clone()
+        };
+
+        let mut command = Command::new(&exe_path);
         command
             .arg("replay-worker")
             .arg("--name")
             .arg(&self.name)
             .arg("--index")
             .arg(self.index.to_string());
-        if let Some(program) = &self.live_program {
+        if coop_query {
+            command.arg("--coop-query");
+            if let Ok(program) = std::env::var("CT_COOP_PROGRAM") {
+                command.arg("--coop-program").arg(program);
+            }
+            if let Ok(func) = std::env::var("CT_COOP_FUNC") {
+                command.arg("--coop-func").arg(func);
+            }
+            command.arg(&self.rr_trace_folder);
+        } else if let Some(program) = &self.live_program {
             command.arg("--live-program").arg(program);
             if let Some(dir) = &self.live_recording_dir {
                 command.arg("--live-recording-dir").arg(dir);

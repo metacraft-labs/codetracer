@@ -461,6 +461,37 @@ impl TestRecording {
         })
     }
 
+    /// Pillar-E Option-B cooperative variant: consume a pre-built
+    /// cooperatively-linked program + cooperatively-recorded `.ct` trace
+    /// (produced out-of-band by the recorder's `cooperative_build` +
+    /// `ct-mcr record --cooperative`, since the cooperative link recipe is
+    /// Nim-only).  The artifact paths arrive via env:
+    ///   CT_COOP_TRACE_CT  — the cooperatively-recorded `.ct`
+    ///   CT_COOP_PROGRAM   — the cooperatively-linked binary (+ side-car dSYM)
+    ///   CT_COOP_SOURCE    — the source file the flow test asserts against
+    /// Returns None (test SKIPs) when the env is not set up.
+    pub fn from_cooperative_env(language: Language) -> Option<Self> {
+        let trace = std::env::var("CT_COOP_TRACE_CT").ok()?;
+        let program = std::env::var("CT_COOP_PROGRAM").ok()?;
+        let source = std::env::var("CT_COOP_SOURCE").ok()?;
+        let trace_dir = PathBuf::from(&trace);
+        if !trace_dir.exists() {
+            eprintln!("CT_COOP_TRACE_CT does not exist: {}", trace);
+            return None;
+        }
+        Some(TestRecording {
+            trace_dir,
+            source_path: PathBuf::from(source),
+            binary_path: PathBuf::from(program),
+            // Reuse the trace's parent as the temp dir; Drop removes it, but the
+            // cooperative artifacts live in a caller-owned dir, so point temp_dir
+            // at a throwaway to avoid deleting them.
+            temp_dir: std::env::temp_dir().join(format!("mcr_coop_noop_{}", std::process::id())),
+            language,
+            version_label: "coop".to_string(),
+        })
+    }
+
     /// Create a new test recording using the MCR backend.
     ///
     /// This builds the program with `ct-native-replay build` and then records
