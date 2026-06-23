@@ -784,6 +784,125 @@ mod tests {
         );
     }
 
+    #[test]
+    fn e2e_rr_materialization_cache_marks_coverage_after_complete_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rr-complete-materialization.ct");
+        write_minimal_ctfs(&path, &[("stub.dat", &[1u8, 2, 3, 4])]).unwrap();
+
+        let line_key = codetracer_trace_writer::step_stream::pack_global_line_index(9, 77);
+        let mut cache = MaterializationCache::new();
+        let mut rec = FakeRecreator::new()
+            .with_interval(200, vec![mw(200, 0x11), mw(201, 0x22)])
+            .with_line_hits(
+                200,
+                vec![
+                    (line_key, LineHitEntry { tick: 200 }),
+                    (line_key, LineHitEntry { tick: 201 }),
+                ],
+            );
+
+        assert_eq!(
+            cache.coverage_of(200, 202),
+            Coverage::NotCovered {
+                missing: vec![(200, 202)]
+            }
+        );
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 200, 202).unwrap(),
+            EnsureOutcome::CacheMiss,
+            "complete RR materialization response should populate on one miss"
+        );
+        assert_eq!(rec.calls, 1, "complete interval should invoke recreator once");
+        assert!(
+            matches!(cache.coverage_of(200, 202), Coverage::Covered { .. }),
+            "complete response must mark exactly the requested interval covered"
+        );
+        assert_eq!(
+            cache
+                .writes_in_range(ADDR, 200, 202)
+                .expect("complete interval should expose memwrites")
+                .iter()
+                .map(|write| (write.tick, write.new_value))
+                .collect::<Vec<_>>(),
+            vec![(200, 0x11), (201, 0x22)]
+        );
+        assert_eq!(
+            cache
+                .line_hits_for_key_in_range(line_key, 200, 202)
+                .expect("complete interval should expose linehits"),
+            vec![200, 201]
+        );
+
+        let backing = Box::new(InMemoryBlockSource::new(std::fs::read(&path).unwrap()));
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+        cache.persist(&mut overlay).unwrap();
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        cache.flush(&mut overlay, &mut sink).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert!(
+            reader.has_file(CTFS_COVERAGE_FILE),
+            "coverage.tc must persist only after success"
+        );
+        assert_eq!(&reader.read_file(CTFS_MEMWRITES_FILE).unwrap()[0..4], b"NSB1");
+        assert_eq!(&reader.read_file(CTFS_LINEHITS_FILE).unwrap()[0..4], b"NSB1");
+
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 200, 202).unwrap(),
+            EnsureOutcome::CacheHit,
+            "subsequent complete interval read should hit cache"
+        );
+        assert_eq!(rec.calls, 1, "cache hit must not re-execute after complete success");
+    }
+
+    #[test]
+    fn e2e_rr_materialization_cache_does_not_mark_coverage_on_boundary() {
+        let mut cache = MaterializationCache::new();
+        let mut rec = FailingRecreator {
+            calls: 0,
+            message: "rr frozen emulator boundary: unsupported_instruction partial_memwrites=1 partial_linehits=1",
+        };
+        let line_key = codetracer_trace_writer::step_stream::pack_global_line_index(2, 44);
+
+        let err = cache
+            .ensure_interval_materialized(&mut rec, 300, 302)
+            .expect_err("boundary response must not become covered materialization");
+        assert!(
+            err.to_string().contains("unsupported_instruction"),
+            "structured boundary reason must remain visible: {err}"
+        );
+        assert_eq!(rec.calls, 1, "uncovered interval should reach recreator once");
+        assert_eq!(
+            cache.coverage_of(300, 302),
+            Coverage::NotCovered {
+                missing: vec![(300, 302)]
+            }
+        );
+        assert!(
+            cache.writes_in_range(ADDR, 300, 302).is_none(),
+            "boundary failure must not create covered-empty memwrites"
+        );
+        assert!(
+            cache.line_hits_for_key_in_range(line_key, 300, 302).is_none(),
+            "boundary failure must not create covered-empty linehits"
+        );
+
+        let mut success = FakeRecreator::new()
+            .with_interval(300, vec![mw(300, 0x55)])
+            .with_line_hits(300, vec![(line_key, LineHitEntry { tick: 300 })]);
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut success, 300, 302).unwrap(),
+            EnsureOutcome::CacheMiss,
+            "failed boundary attempt must leave interval retryable"
+        );
+        assert_eq!(success.calls, 1);
+        assert!(
+            matches!(cache.coverage_of(300, 302), Coverage::Covered { .. }),
+            "successful retry after boundary must mark the interval covered"
+        );
+    }
+
     /// `test_recreator_coverage_aware_skip` — an already-covered interval is NOT
     /// re-executed (recreator count 0 for the covered probe).
     #[test]
