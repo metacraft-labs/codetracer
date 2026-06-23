@@ -135,12 +135,13 @@ pub enum ReplayQuery {
         tid: u32,
     },
     /// Re-execute the half-open tick interval `[tick_lo, tick_hi)` in the replay
-    /// worker and return a materialized `memwrites.tc` image for that interval.
+    /// worker and return materialized omniscient map images for that interval.
     ///
     /// The response is a [`MaterializeIntervalResponse`] JSON envelope whose
-    /// `memwrites_base64` field contains an authoritative `WLOG` image. The
-    /// db-backend production adapter decodes it through the same
-    /// `server_prep_encoding::decode_memwrites` path used by warm restart.
+    /// `memwrites_base64` field contains an authoritative `WLOG` image. When
+    /// present, `linehits_base64` contains an authoritative `LHTS|v1` image. The
+    /// db-backend production adapter decodes both through the same
+    /// `server_prep_encoding` paths used by collapse/warm restart.
     MaterializeInterval {
         tick_lo: u64,
         tick_hi: u64,
@@ -231,6 +232,8 @@ pub struct MaterializeIntervalResponse {
     pub tick_hi: u64,
     pub format: String,
     pub memwrites_base64: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linehits_base64: Option<String>,
 }
 
 #[cfg(test)]
@@ -264,11 +267,28 @@ mod tests {
             tick_hi: 200,
             format: "WLOG".to_string(),
             memwrites_base64: "V0xPRw==".to_string(),
+            linehits_base64: None,
         };
 
         assert_eq!(
             serde_json::to_string(&response).unwrap(),
             r#"{"tickLo":100,"tickHi":200,"format":"WLOG","memwritesBase64":"V0xPRw=="}"#
+        );
+    }
+
+    #[test]
+    fn materialize_interval_response_serializes_optional_linehits_payload() {
+        let response = MaterializeIntervalResponse {
+            tick_lo: 100,
+            tick_hi: 200,
+            format: "WLOG".to_string(),
+            memwrites_base64: "V0xPRw==".to_string(),
+            linehits_base64: Some("TEhUUw==".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&response).unwrap(),
+            r#"{"tickLo":100,"tickHi":200,"format":"WLOG","memwritesBase64":"V0xPRw==","linehitsBase64":"TEhUUw=="}"#
         );
     }
 }

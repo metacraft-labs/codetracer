@@ -7,7 +7,9 @@
 //! the varint-encoded step ids for one global line index.
 
 use super::cow_namespace_reader::{CowLeafType, CowNamespaceReader, CowNsError};
+use super::cow_namespace_writer::CowNamespaceWriter;
 use super::ctfs_container::{CtfsError, CtfsReader};
+use super::interval_tagged_map::{IntervalTaggedMap, LineHitEntry};
 use crate::omniscient_db::{OmniscientDb, Tick, WriteRecord};
 
 /// The CTFS internal-file name for the production line-hit namespace.
@@ -77,6 +79,70 @@ fn read_varint(buf: &[u8], pos: &mut usize) -> Result<u64, LinehitsNsError> {
         shift += 7;
     }
     Err(LinehitsNsError::VarintTooLong)
+}
+
+fn put_varint(mut value: u64, out: &mut Vec<u8>) {
+    loop {
+        let mut byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if value == 0 {
+            break;
+        }
+    }
+}
+
+fn descriptor(offset: usize, len: usize) -> [u8; 16] {
+    let mut d = [0u8; 16];
+    d[0..8].copy_from_slice(&(offset as u64).to_le_bytes());
+    d[8..16].copy_from_slice(&(len as u64).to_le_bytes());
+    d
+}
+
+/// Encode live materialized line hits as the production `NSB1` Type-B
+/// `linehits.tc` namespace image.
+///
+/// Sparse interval ids are intentionally flattened at this file boundary: the
+/// authoritative production `linehits.tc` reader stores one tick list per global
+/// line key. The coverage map remains the source of truth for which tick ranges
+/// have been materialized.
+pub fn encode_linehits_cow_namespace(map: &IntervalTaggedMap<LineHitEntry>) -> Result<Option<Vec<u8>>, String> {
+    if map.is_empty() {
+        return Ok(None);
+    }
+
+    let keys = map.keys();
+    let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+    for key in &keys {
+        sizing.insert_and_commit(*key, &[0u8; 16]).map_err(|e| e.to_string())?;
+    }
+    let payload_base = sizing.serialize().len();
+
+    let mut payload = Vec::new();
+    let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+    for key in keys {
+        let offset = payload_base + payload.len();
+        let before = payload.len();
+        let mut hits = map.collapse_key(key);
+        hits.sort_by_key(|hit| hit.tick);
+        hits.dedup_by_key(|hit| hit.tick);
+        for hit in hits {
+            put_varint(hit.tick, &mut payload);
+        }
+        writer
+            .insert_and_commit(key, &descriptor(offset, payload.len() - before))
+            .map_err(|e| e.to_string())?;
+    }
+
+    let mut image = writer.serialize();
+    image.extend_from_slice(&payload);
+    while !image.len().is_multiple_of(super::cow_namespace_reader::PAGE_SIZE) {
+        image.push(0);
+    }
+    Ok(Some(image))
 }
 
 impl<'a> LinehitsNamespace<'a> {
@@ -175,27 +241,6 @@ mod tests {
     use crate::ctfs_trace_reader::cow_namespace_writer::CowNamespaceWriter;
     use crate::ctfs_trace_reader::ctfs_container::{CtfsReader, write_minimal_ctfs};
 
-    fn put_varint(mut value: u64, out: &mut Vec<u8>) {
-        loop {
-            let mut byte = (value & 0x7F) as u8;
-            value >>= 7;
-            if value != 0 {
-                byte |= 0x80;
-            }
-            out.push(byte);
-            if value == 0 {
-                break;
-            }
-        }
-    }
-
-    fn descriptor(offset: usize, len: usize) -> [u8; 16] {
-        let mut d = [0u8; 16];
-        d[0..8].copy_from_slice(&(offset as u64).to_le_bytes());
-        d[8..16].copy_from_slice(&(len as u64).to_le_bytes());
-        d
-    }
-
     fn image_with_entries(entries: &[(u64, Vec<u64>)]) -> Vec<u8> {
         let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
         for (key, _) in entries {
@@ -269,5 +314,21 @@ mod tests {
         let owned = OwnedLinehitsNamespace { image };
         assert_eq!(owned.source_line_hits(7, 100), vec![11, 13, 21]);
         assert_eq!(owned.source_line_hits(7, 101), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn encodes_interval_tagged_linehits_as_cow_namespace() {
+        let mut map: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
+        map.append(10, 1, LineHitEntry { tick: 30 });
+        map.append(10, 0, LineHitEntry { tick: 5 });
+        map.append(20, 0, LineHitEntry { tick: 8 });
+
+        let image = encode_linehits_cow_namespace(&map)
+            .expect("encode")
+            .expect("non-empty image");
+        assert_eq!(&image[0..4], b"NSB1");
+        let ns = LinehitsNamespace::open(&image).expect("open encoded image");
+        assert_eq!(ns.hits(10).unwrap(), vec![5, 30]);
+        assert_eq!(ns.hits(20).unwrap(), vec![8]);
     }
 }

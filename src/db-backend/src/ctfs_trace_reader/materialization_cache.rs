@@ -65,27 +65,34 @@ use super::collapse::collapse_region;
 use super::coverage_namespace::{Coverage, CoverageMap, CoverageState};
 use super::interval_tagged_map::{IntervalTaggedMap, LineHitEntry, MemWriteEntry, TickTagged};
 use super::lazy_population_store::{StoreError, persist_into_overlay};
+use super::linehits_namespace::encode_linehits_cow_namespace;
 use super::memwrites_namespace::encode_memwrites_cow_namespace;
 use crate::omniscient_db::{OmniscientDb, Tick, WriteRecord};
 
 /// The records a [`Recreator`] produces for one re-executed tick interval.
 ///
 /// The recreator re-executes `[tick_lo, tick_hi)` and reports the memory writes
-/// (and, in a fuller implementation, line hits / steps / values) it observed. M6
-/// materializes the `memwrites.tc` stream — the one the M5 store persists and the
-/// warm-restart reader serves — keyed by address. Each write carries its own tick
-/// so the [`IntervalTaggedMap`] keeps the interval's sub-list tick-sorted.
+/// and source-line hits it observed. M6 materializes the `memwrites.tc` stream
+/// and the supported M8 linehit subset; steps/calls/values remain future work.
+/// Each record carries its own tick so the [`IntervalTaggedMap`] keeps the
+/// interval's sub-list tick-sorted.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MaterializedInterval {
     /// `(address, write)` pairs observed in the interval, in any order — the cache
     /// inserts each into its address-keyed, tick-sorted interval sub-list.
     pub writes: Vec<(u64, MemWriteEntry)>,
+    /// `(global_line_index, hit)` pairs observed in the interval, in any order.
+    /// The cache inserts each into its line-keyed, tick-sorted interval sub-list.
+    pub line_hits: Vec<(u64, LineHitEntry)>,
 }
 
 impl MaterializedInterval {
     /// An empty materialization (a covered-but-no-writes interval).
     pub fn empty() -> Self {
-        MaterializedInterval { writes: Vec::new() }
+        MaterializedInterval {
+            writes: Vec::new(),
+            line_hits: Vec::new(),
+        }
     }
 }
 
@@ -97,10 +104,11 @@ impl MaterializedInterval {
 /// so the hit/miss/skip dispatch behaviour is deterministically testable without
 /// a real recreator (rr is Linux-only; this code is exercised on macOS too).
 ///
-/// Implementors MUST return the COMPLETE set of writes for the half-open tick
-/// range `[tick_lo, tick_hi)` — the cache marks the interval covered on success,
-/// after which absence of a record for an address is treated as a genuine
-/// "no write" (§1.3 invariant 7 / `coverage_add` contract).
+/// Implementors MUST return the COMPLETE set of supported records for the
+/// half-open tick range `[tick_lo, tick_hi)` — the cache marks the interval
+/// covered on success, after which absence of a record for an address or line is
+/// treated as genuine negative knowledge for that covered interval (§1.3
+/// invariant 7 / `coverage_add` contract).
 pub trait Recreator {
     /// Re-execute `[tick_lo, tick_hi)` and return its materialized writes.
     fn re_execute_and_materialize(
@@ -138,6 +146,8 @@ pub struct MaterializationCache {
     coverage: CoverageMap,
     /// `address → per-interval, tick-sorted write sub-lists`.
     memwrites: IntervalTaggedMap<MemWriteEntry>,
+    /// `global_line_index → per-interval, tick-sorted source-line hit sub-lists`.
+    linehits: IntervalTaggedMap<LineHitEntry>,
     /// Next `interval_id` to hand out for a freshly-materialized interval.
     next_interval_id: u32,
     /// Maps each materialized `tick_lo` to the `interval_id` it was tagged with,
@@ -146,6 +156,8 @@ pub struct MaterializationCache {
     /// Last collapsed `memwrites.tc` image produced by the gate. Kept only while
     /// every coverage row is collapsed; any later sparse miss invalidates it.
     collapsed_memwrites_image: Option<Vec<u8>>,
+    /// Last live `linehits.tc` image produced by the gate.
+    collapsed_linehits_image: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for MaterializationCache {
@@ -153,12 +165,14 @@ impl std::fmt::Debug for MaterializationCache {
         f.debug_struct("MaterializationCache")
             .field("coverage_rows", &self.coverage.rows())
             .field("memwrite_keys", &self.memwrites.keys())
+            .field("linehit_keys", &self.linehits.keys())
             .field("next_interval_id", &self.next_interval_id)
             .field("interval_ids", &self.interval_ids)
             .field(
                 "has_collapsed_memwrites_image",
                 &self.collapsed_memwrites_image.is_some(),
             )
+            .field("has_collapsed_linehits_image", &self.collapsed_linehits_image.is_some())
             .finish()
     }
 }
@@ -175,9 +189,11 @@ impl MaterializationCache {
         MaterializationCache {
             coverage: CoverageMap::new(),
             memwrites: IntervalTaggedMap::new(),
+            linehits: IntervalTaggedMap::new(),
             next_interval_id: 0,
             interval_ids: BTreeMap::new(),
             collapsed_memwrites_image: None,
+            collapsed_linehits_image: None,
         }
     }
 
@@ -193,10 +209,12 @@ impl MaterializationCache {
         MaterializationCache {
             coverage,
             memwrites,
+            linehits: IntervalTaggedMap::new(),
             // Reserve 0 for the reloaded collapsed stream; new intervals start at 1.
             next_interval_id: 1,
             interval_ids: BTreeMap::new(),
             collapsed_memwrites_image: None,
+            collapsed_linehits_image: None,
         }
     }
 
@@ -207,7 +225,7 @@ impl MaterializationCache {
 
     /// Whether this cache has any materialized coverage or write records.
     pub fn is_present(&self) -> bool {
-        !self.coverage.rows().is_empty() || !self.memwrites.is_empty()
+        !self.coverage.rows().is_empty() || !self.memwrites.is_empty() || !self.linehits.is_empty()
     }
 
     /// The deduplicated set of `interval_id`s that may hold materialized writes:
@@ -294,12 +312,18 @@ impl MaterializationCache {
                 self.memwrites.append(*address, interval_id, *write);
             }
         }
+        for (global_line_index, hit) in &materialized.line_hits {
+            if hit.tick() >= tick_lo && hit.tick() < tick_hi {
+                self.linehits.append(*global_line_index, interval_id, *hit);
+            }
+        }
         self.interval_ids.insert(tick_lo, interval_id);
 
         // Mark the interval covered ONLY after its maps are complete for the
         // range (coverage_add contract / §1.3 invariant 7).
         self.coverage.coverage_add(tick_lo, tick_hi, CoverageState::Sparse)?;
         self.collapsed_memwrites_image = None;
+        self.collapsed_linehits_image = None;
         let _collapsed = self.try_collapse_completed_region(tick_lo, tick_hi)?;
 
         Ok(EnsureOutcome::CacheMiss)
@@ -317,7 +341,8 @@ impl MaterializationCache {
     /// wiring.
     pub fn persist(&self, overlay: &mut CtfsBlockOverlay) -> Result<(), StoreError> {
         let image = self.encode_memwrites_image()?;
-        persist_into_overlay(overlay, &self.coverage, image.as_deref(), None)
+        let linehits_image = self.encode_linehits_image()?;
+        persist_into_overlay(overlay, &self.coverage, image.as_deref(), linehits_image.as_deref())
     }
 
     /// Flush a `Persist`-mode overlay through `sink`, publishing the persisted
@@ -339,6 +364,22 @@ impl MaterializationCache {
             return Ok(Some(image.clone()));
         }
         encode_memwrites_cow_namespace(&self.memwrites).map_err(|e| StoreError::Decode(e.to_string()))
+    }
+
+    /// Encode live materialized line hits into the production CoW
+    /// `linehits.tc` namespace image, or `None` when no line hits have been
+    /// materialized in this cache.
+    fn encode_linehits_image(&self) -> Result<Option<Vec<u8>>, StoreError> {
+        if self
+            .coverage
+            .rows()
+            .iter()
+            .all(|row| row.state == CoverageState::CollapsedComplete)
+            && let Some(image) = &self.collapsed_linehits_image
+        {
+            return Ok(Some(image.clone()));
+        }
+        encode_linehits_cow_namespace(&self.linehits).map_err(|e| StoreError::Decode(e.to_string()))
     }
 
     fn try_collapse_completed_region(&mut self, tick_lo: u64, tick_hi: u64) -> Result<bool, Box<dyn Error>> {
@@ -391,18 +432,39 @@ impl MaterializationCache {
             }
         }
 
-        let empty_linehits: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
         let collapsed = collapse_region(
             &mut self.coverage,
             &self.memwrites,
-            &empty_linehits,
+            &self.linehits,
             region_lo,
             region_hi,
             interval_size,
-            |key| (key as u32, 0),
+            |key| {
+                let (file_id, line) = codetracer_trace_writer::step_stream::unpack_global_line_index(key);
+                (file_id as u32, line as u32)
+            },
         )?;
         self.collapsed_memwrites_image = collapsed.memwrites;
+        if collapsed.linehits.is_some() {
+            self.collapsed_linehits_image = encode_linehits_cow_namespace(&self.linehits)
+                .map_err(|e| format!("collapse linehits CoW encode failed: {e}"))?;
+        }
         Ok(true)
+    }
+
+    /// Serve line hits for one packed global line key in `[tick_lo, tick_hi)` —
+    /// ONLY when that tick range is covered.
+    pub fn line_hits_for_key_in_range(&self, global_line_index: u64, tick_lo: u64, tick_hi: u64) -> Option<Vec<Tick>> {
+        match self.coverage.coverage_of(tick_lo, tick_hi) {
+            Coverage::NotCovered { .. } => None,
+            Coverage::Covered { .. } => Some(
+                self.linehits
+                    .merge_read(global_line_index, &self.covering_interval_ids(), tick_lo, tick_hi)
+                    .into_iter()
+                    .map(|hit| hit.tick)
+                    .collect(),
+            ),
+        }
     }
 
     fn writes_overlapping_range(
@@ -477,8 +539,17 @@ impl OmniscientDb for MaterializationCache {
             .unwrap_or_default()
     }
 
-    fn source_line_hits(&self, _file_id: u32, _line: u32) -> Vec<Tick> {
-        Vec::new()
+    fn source_line_hits(&self, file_id: u32, line: u32) -> Vec<Tick> {
+        let key = codetracer_trace_writer::step_stream::pack_global_line_index(file_id as usize, i64::from(line));
+        let mut hits: Vec<Tick> = self
+            .linehits
+            .merge_read(key, &self.covering_interval_ids(), u64::MIN, u64::MAX)
+            .into_iter()
+            .map(|hit| hit.tick)
+            .collect();
+        hits.sort_unstable();
+        hits.dedup();
+        hits
     }
 
     fn is_present(&self) -> bool {
@@ -495,7 +566,7 @@ mod tests {
     use crate::ctfs_trace_reader::ctfs_container::{
         CtfsReader, InMemoryBlockSource, LocalFileSource, write_minimal_ctfs,
     };
-    use crate::ctfs_trace_reader::lazy_population_store::{CTFS_MEMWRITES_FILE, WarmRestartReader};
+    use crate::ctfs_trace_reader::lazy_population_store::{CTFS_LINEHITS_FILE, CTFS_MEMWRITES_FILE, WarmRestartReader};
     use crate::ctfs_trace_reader::memwrites_namespace::MemwritesNamespace;
     use crate::ctfs_trace_reader::server_prep_encoding::WLOG_MAGIC;
 
@@ -518,6 +589,8 @@ mod tests {
         /// `(tick, new_value)` writes to return for each re-executed interval,
         /// keyed by `tick_lo`. Writes outside the range are clipped by the cache.
         canned: BTreeMap<u64, Vec<MemWriteEntry>>,
+        /// `(global_line_index, hit_tick)` records to return for each interval.
+        canned_linehits: BTreeMap<u64, Vec<(u64, LineHitEntry)>>,
         /// Number of times `re_execute_and_materialize` was actually called.
         calls: usize,
     }
@@ -526,12 +599,18 @@ mod tests {
         fn new() -> Self {
             FakeRecreator {
                 canned: BTreeMap::new(),
+                canned_linehits: BTreeMap::new(),
                 calls: 0,
             }
         }
 
         fn with_interval(mut self, tick_lo: u64, writes: Vec<MemWriteEntry>) -> Self {
             self.canned.insert(tick_lo, writes);
+            self
+        }
+
+        fn with_line_hits(mut self, tick_lo: u64, line_hits: Vec<(u64, LineHitEntry)>) -> Self {
+            self.canned_linehits.insert(tick_lo, line_hits);
             self
         }
     }
@@ -551,7 +630,8 @@ mod tests {
                 .into_iter()
                 .map(|w| (ADDR, w))
                 .collect();
-            Ok(MaterializedInterval { writes })
+            let line_hits = self.canned_linehits.get(&tick_lo).cloned().unwrap_or_default();
+            Ok(MaterializedInterval { writes, line_hits })
         }
     }
 
@@ -856,5 +936,61 @@ mod tests {
             Vec::<WriteRecord>::new(),
             "uncovered ranges do not claim negative knowledge"
         );
+    }
+
+    #[test]
+    fn materialization_cache_serves_and_persists_live_linehits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("linehits-live.ct");
+        write_minimal_ctfs(&path, &[("stub.dat", &[1u8])]).unwrap();
+
+        let key = codetracer_trace_writer::step_stream::pack_global_line_index(3, 42);
+        let mut cache = MaterializationCache::new();
+        let mut rec = FakeRecreator::new().with_line_hits(
+            0,
+            vec![
+                (key, LineHitEntry { tick: 10 }),
+                (key, LineHitEntry { tick: 25 }),
+                (key, LineHitEntry { tick: 1000 }),
+            ],
+        );
+
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 0, 100).unwrap(),
+            EnsureOutcome::CacheMiss
+        );
+        assert_eq!(rec.calls, 1);
+        assert_eq!(
+            cache.line_hits_for_key_in_range(key, 0, 100).unwrap(),
+            vec![10, 25],
+            "line hits are clipped to the materialized interval"
+        );
+        assert_eq!(
+            cache.line_hits_for_key_in_range(key, 100, 200),
+            None,
+            "uncovered ranges do not claim complete linehit knowledge"
+        );
+
+        let db: &dyn OmniscientDb = &cache;
+        assert_eq!(db.source_line_hits(3, 42), vec![10, 25]);
+        assert_eq!(db.source_line_hits(3, 43), Vec::<u64>::new());
+
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 0, 100).unwrap(),
+            EnsureOutcome::CacheHit
+        );
+        assert_eq!(rec.calls, 1, "covered linehit interval is not replayed again");
+
+        let backing = Box::new(InMemoryBlockSource::new(std::fs::read(&path).unwrap()));
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+        cache.persist(&mut overlay).unwrap();
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        cache.flush(&mut overlay, &mut sink).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        let linehits_image = reader.read_file(CTFS_LINEHITS_FILE).unwrap();
+        assert_eq!(&linehits_image[0..4], b"NSB1");
+        let linehits = crate::ctfs_trace_reader::linehits_namespace::LinehitsNamespace::open(&linehits_image).unwrap();
+        assert_eq!(linehits.hits(key).unwrap(), vec![10, 25]);
     }
 }

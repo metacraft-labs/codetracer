@@ -22,7 +22,7 @@ use crate::ctfs_trace_reader::ctfs_container::LocalFileSource;
 use crate::ctfs_trace_reader::materialization_cache::{
     EnsureOutcome, MaterializationCache, MaterializedInterval, Recreator,
 };
-use crate::ctfs_trace_reader::server_prep_encoding::decode_memwrites;
+use crate::ctfs_trace_reader::server_prep_encoding::{decode_linehits, decode_memwrites};
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
@@ -1101,7 +1101,32 @@ fn materialized_interval_from_worker_response(
         .into_iter()
         .filter(|(_, write)| write.tick >= expected_lo && write.tick < expected_hi)
         .collect();
-    Ok(MaterializedInterval { writes })
+    let line_hits = match envelope.linehits_base64 {
+        Some(linehits_base64) => {
+            let image = BASE64_STANDARD
+                .decode(linehits_base64.as_bytes())
+                .map_err(|e| format!("MaterializeInterval linehits_base64 decode failed: {e}"))?;
+            decode_linehits(&image)
+                .map_err(|e| format!("MaterializeInterval linehits.tc decode failed: {e}"))?
+                .into_iter()
+                .flat_map(|(file_id, line, ticks)| {
+                    let key =
+                        codetracer_trace_writer::step_stream::pack_global_line_index(file_id as usize, i64::from(line));
+                    ticks
+                        .into_iter()
+                        .filter(move |tick| *tick >= expected_lo && *tick < expected_hi)
+                        .map(move |tick| {
+                            (
+                                key,
+                                crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick },
+                            )
+                        })
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    Ok(MaterializedInterval { writes, line_hits })
 }
 
 fn parse_recording_head_response(response: &str) -> Result<u64, Box<dyn Error>> {
@@ -1313,6 +1338,7 @@ mod tests {
             tick_hi: 20,
             format: "WLOG".to_string(),
             memwrites_base64: BASE64_STANDARD.encode(image),
+            linehits_base64: None,
         };
 
         let materialized =
@@ -1325,6 +1351,43 @@ mod tests {
     }
 
     #[test]
+    fn materialize_interval_response_decodes_linehits_and_clips_to_requested_range() {
+        let memwrites_image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites { per_address: vec![] },
+        );
+        let linehits_image = crate::ctfs_trace_reader::server_prep_encoding::encode_linehits(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedLinehits {
+                per_line: vec![(7, 100, vec![9, 10, 19, 20])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 10,
+            tick_hi: 20,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(memwrites_image),
+            linehits_base64: Some(BASE64_STANDARD.encode(linehits_image)),
+        };
+
+        let materialized =
+            materialized_interval_from_worker_response(10, 20, &serde_json::to_string(&response).unwrap()).unwrap();
+
+        let key = codetracer_trace_writer::step_stream::pack_global_line_index(7, 100);
+        assert_eq!(
+            materialized.line_hits,
+            vec![
+                (
+                    key,
+                    crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 10 }
+                ),
+                (
+                    key,
+                    crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 19 }
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn materialize_interval_response_rejects_interval_mismatch() {
         let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
             &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites { per_address: vec![] },
@@ -1334,6 +1397,7 @@ mod tests {
             tick_hi: 20,
             format: "WLOG".to_string(),
             memwrites_base64: BASE64_STANDARD.encode(image),
+            linehits_base64: None,
         };
 
         let err = materialized_interval_from_worker_response(10, 20, &serde_json::to_string(&response).unwrap())
@@ -1353,11 +1417,17 @@ mod tests {
                 per_address: vec![(0x5000, vec![memwrite(12, 99)])],
             },
         );
+        let linehits_image = crate::ctfs_trace_reader::server_prep_encoding::encode_linehits(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedLinehits {
+                per_line: vec![(2, 30, vec![12])],
+            },
+        );
         let response = MaterializeIntervalResponse {
             tick_lo: 10,
             tick_hi: 20,
             format: "WLOG".to_string(),
             memwrites_base64: BASE64_STANDARD.encode(image),
+            linehits_base64: Some(BASE64_STANDARD.encode(linehits_image)),
         };
         let response_json = serde_json::to_string(&response).unwrap();
 
@@ -1404,6 +1474,13 @@ mod tests {
         worker.join().unwrap();
 
         assert_eq!(materialized.writes, vec![(0x5000, memwrite(12, 99))]);
+        assert_eq!(
+            materialized.line_hits,
+            vec![(
+                codetracer_trace_writer::step_stream::pack_global_line_index(2, 30),
+                crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 12 },
+            )]
+        );
     }
 
     #[cfg(unix)]
@@ -1423,6 +1500,7 @@ mod tests {
             tick_hi: 20,
             format: "WLOG".to_string(),
             memwrites_base64: BASE64_STANDARD.encode(image),
+            linehits_base64: None,
         };
         let response_json = serde_json::to_string(&response).unwrap();
 
