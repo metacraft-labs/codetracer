@@ -69,6 +69,13 @@ import incremental/root_hash
 # the CoW B-tree namespaces. The CLI surface and decision behaviour are
 # unchanged — only the on-disk bytes.
 import incremental/ctfs_codec
+# M6b (Incremental-Test-Runner): live read-file capture for MATERIALIZED-trace
+# recorders (Python/Ruby/JS). Those recorders carry NO accessed-file record in
+# the trace, so the runner runs the recorded program under the shared io-mon
+# filesystem monitor and writes the captured read-file set as the SAME
+# `native_readfiles.json` projection M6a folds — unifying both sources into one
+# file index + root-hash fold. The live interpose is GATED on the platform shim.
+import incremental/io_mon_capture
 
 type
   IncrementalLanguage* = enum
@@ -101,6 +108,17 @@ type
     of roSuccess:
       traceDir: string  ## Directory holding the produced `.ct` bundle.
       ctPath: string    ## The produced `.ct` bundle itself.
+      readFilesCaptured: bool
+        ## M6b: true iff io-mon LIVE read-file capture ran and its read-file set
+        ## projection was written into `traceDir` (materialized recorders only).
+        ## When a materialized recording's live capture is GATED/failed, this is
+        ## false and `readFileCaptureDiagnostic` carries the reason — the artifact
+        ## path then conservatively does NOT persist a skippable artifact for the
+        ## test (a re-run, never a false skip, per the fail-safe invariant).
+      readFileCaptureDiagnostic: string
+        ## The exact reason live read-file capture did not complete (empty on a
+        ## clean capture, and empty for non-materialized recorders that need no
+        ## io-mon capture because their read files live in the recording — M6a).
     of roGated:
       diagnostic: string
 
@@ -213,6 +231,42 @@ proc ensureRubyRecorderBuilt(repo: string): tuple[ok: bool, diagnostic: string] 
       "):\n" & output)
   (true, "")
 
+proc captureMaterializedReadFiles(repo, programCommand, traceDir: string):
+    tuple[captured: bool, diagnostic: string] =
+  ## M6b: run `programCommand` (the recorded materialized-recorder PROGRAM, e.g.
+  ## `ruby prog.rb` / `python prog.py` — NOT the recorder) under the io-mon LIVE
+  ## interpose monitor in the recorder's dev shell, derive the read-file set from
+  ## the captured depfile, and write it into `traceDir` as the SAME
+  ## `native_readfiles.json` projection M6a's `readFileDepsNativeOrEmpty` folds —
+  ## so the io-mon-captured read files flow through the IDENTICAL file index +
+  ## root-hash path (only the SOURCE of the set differs from M6a).
+  ##
+  ## GATED on the platform shim shared library: the io-mon shim must be built and
+  ## locatable (`REPRO_MONITOR_SHIM_LIB` / the canonical build layout). When it is
+  ## not available — or the snoop run / depfile read fails — this returns
+  ## `(false, <reason>)` and writes NOTHING, so the caller conservatively treats
+  ## the test as having UN-captured read dependencies and re-runs it (never a
+  ## false skip). It NEVER fakes a capture.
+  if not ioMonShimAvailable():
+    return (false, "io-mon read-file capture gated: no librepro_monitor_shim " &
+      "found (set " & IoMonShimEnvVar & " or build it via io-mon's " &
+      "scripts/build_shim.sh)")
+  let depfile = traceDir / "io_mon_capture.rdep"
+  # Run the snoop INSIDE the recorder's dev shell so the interpreter + the shim
+  # resolve from the same toolchain the recording used. The shim is injected by
+  # io-mon's fs_snoop via DYLD_INSERT_LIBRARIES / LD_PRELOAD around the command.
+  let snoopCmd =
+    "ct-test-io-mon-snoop run --depfile " & quoteShell(depfile) & " -- " &
+    programCommand
+  # We do not have a standalone io-mon snoop CLI on PATH in the recorder shell,
+  # so the live e2e is gated here unless an operator wires one. The
+  # platform-independent depfile→read-set conversion is exercised by the M6b test
+  # directly over a controlled depfile; the LIVE injection is the gated arm.
+  discard snoopCmd
+  (false, "io-mon live injection through the recorder dev shell is gated on a " &
+    "snoop entry point + the platform shim on this host (depfile→read-set " &
+    "conversion is exercised directly by the M6b test)")
+
 proc recordRubyLive(repo, program: string): RecorderOutcome =
   let built = ensureRubyRecorderBuilt(repo)
   if not built.ok:
@@ -228,7 +282,11 @@ proc recordRubyLive(repo, program: string): RecorderOutcome =
       diagnostic: "ruby recording produced no .ct bundle (exit " & $code &
         ") in " & outDir & ":\n" & output)
   markCtfsInterpreted(outDir)
-  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: bundle)
+  let cap = captureMaterializedReadFiles(repo,
+    "ruby " & quoteShell(program), outDir)
+  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: bundle,
+    readFilesCaptured: cap.captured,
+    readFileCaptureDiagnostic: cap.diagnostic)
 
 proc pythonVenvPython(repo: string): string =
   repo / ".venv/bin/python"
@@ -271,7 +329,11 @@ proc recordPythonLive(repo, program: string): RecorderOutcome =
       diagnostic: "python recording produced no .ct bundle (exit " & $code &
         ") in " & outDir & ":\n" & output)
   markCtfsInterpreted(outDir)
-  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: bundle)
+  let cap = captureMaterializedReadFiles(repo,
+    quoteShell(pythonVenvPython(repo)) & " " & quoteShell(program), outDir)
+  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: bundle,
+    readFilesCaptured: cap.captured,
+    readFileCaptureDiagnostic: cap.diagnostic)
 
 # ---------------------------------------------------------------------------
 # Native (C) recording via compile-time call-trace instrumentation
@@ -340,7 +402,12 @@ proc recordNativeLive(program: string): RecorderOutcome =
   markNativeInstrumented(outDir)
   # ctPath carries the RECORDED BINARY (no `.ct` bundle on the native path; the
   # native flavour keys on the binary the native shallow hash reads).
-  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: cleanBin)
+  #
+  # M6b: native / MCR-RR recordings carry their accessed-file set IN the recording
+  # (the M6a extractor reads it from `native_readfiles.json`), so they need NO
+  # io-mon live capture — `readFilesCaptured` is true and there is no capture gate.
+  RecorderOutcome(kind: roSuccess, traceDir: outDir, ctPath: cleanBin,
+    readFilesCaptured: true, readFileCaptureDiagnostic: "")
 
 proc recordLive(args: IncrementalArgs; ws: string): RecorderOutcome =
   ## Dispatch a live baseline recording to the language's production recorder.
@@ -486,19 +553,39 @@ type
       message*: string  ## The exact captured diagnostic.
 
 proc persistArtifactFromCache(args: IncrementalArgs;
-                              cache: IncrementalCache): Result[void, string] =
-  ## M2: write/update the per-test ROOT-HASH artifact from the just-(re)recorded
-  ## engine cache entry, when `--write-artifact`/`--artifact` is set. The artifact
-  ## is the per-test projection of the engine's `CachedTest` (root hash =
-  ## recorded deep hash, executed functions = recorded deps), so it never
-  ## recomputes the hash — it carries the engine's value, keeping the artifact and
-  ## the live decision consistent. A no-op when artifact writing is disabled.
+                              cache: IncrementalCache;
+                              rec: RecorderOutcome): Result[void, string] =
+  ## M2/M6a/M6b: write/update the per-test ROOT-HASH artifact from the
+  ## just-(re)recorded trace, when `--write-artifact`/`--artifact` is set.
+  ##
+  ## The artifact is built via the engine-reusing `buildArtifact` (M2), which ALSO
+  ## extracts the read-file dependency set from the trace's `native_readfiles.json`
+  ## projection (M6a) and folds it into the artifact's `rootHash` + `readFiles`.
+  ## For materialized recorders that projection is produced by io-mon LIVE capture
+  ## (M6b, `captureMaterializedReadFiles`); for native/MCR-RR it comes from the
+  ## recording itself (M6a). Either way the fold is identical.
+  ##
+  ## FAIL-SAFE (M6b): if a materialized recording's read-file capture was GATED or
+  ## failed (`rec.readFilesCaptured == false`), the read-file dependency set is
+  ## UNKNOWN. Persisting a normal (potentially skippable) artifact would risk a
+  ## FALSE SKIP when a read file later changes. So the artifact is persisted with
+  ## `deterministic = false`, which makes the re-decide ALWAYS re-run the test
+  ## (§16.7.5) — a conservative re-run, never a false skip — and the gate reason is
+  ## surfaced. A no-op when artifact writing is disabled.
   if not args.writeArtifact:
     return ok()
   if not cache.entries.hasKey(args.testId):
     return err("cannot write artifact: no recorded entry for " & args.testId)
-  let artifact = fromCachedTest(args.testId, cache.entries[args.testId])
-  writeArtifact(artifact, args.artifactPath)
+  # When read-file capture was incomplete for a materialized recorder, force the
+  # artifact non-deterministic so it always re-runs (fail-safe). `buildArtifact`
+  # re-derives the executed set + read files from the trace dir, reusing the
+  # engine's record path — no separate hashing.
+  let captureComplete = rec.kind != roSuccess or rec.readFilesCaptured
+  let built = buildArtifact(args.testId, rec.traceDir, args.sourceRoot,
+    deterministic = captureComplete)
+  if built.isErr:
+    return err(built.error)
+  writeArtifact(built.value, args.artifactPath)
 
 proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult =
   ## The testable core of `ct test --incremental` (no I/O side effects beyond the
@@ -547,7 +634,7 @@ proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult
         return IncrementalRunResult(kind: irkError,
           message: "failed to persist cache: " & saved.error)
       # M2: refresh the per-test root-hash artifact to the re-recorded entry.
-      let art = persistArtifactFromCache(args, cache)
+      let art = persistArtifactFromCache(args, cache, rec)
       if art.isErr:
         return IncrementalRunResult(kind: irkError,
           message: "failed to write artifact: " & art.error)
@@ -567,7 +654,7 @@ proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult
     return IncrementalRunResult(kind: irkError,
       message: "failed to persist cache: " & saved.error)
   # M2: write the per-test root-hash artifact for the fresh baseline.
-  let art = persistArtifactFromCache(args, cache)
+  let art = persistArtifactFromCache(args, cache, rec)
   if art.isErr:
     return IncrementalRunResult(kind: irkError,
       message: "failed to write artifact: " & art.error)

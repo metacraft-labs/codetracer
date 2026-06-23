@@ -46,6 +46,22 @@ let traceFormatSrc = getEnv("CODETRACER_TRACE_FORMAT_NIM_SRC")
 if traceFormatSrc.len > 0:
   switch("path", traceFormatSrc)
 
+# M6b (Incremental-Test-Runner): io-mon + nim-stackable-hooks source fallbacks.
+#
+# nim.cfg lists these relative to a normal workspace checkout
+# (codetracer/src/ct_test/../../../io-mon/src and .../nim-stackable-hooks/src).
+# That relative layout does not resolve in a git worktree under
+# .claude/worktrees/<name>/ or in CI / standalone clones that only have the
+# flake-pinned sources. In those cases set IO_MON_SRC / NIM_STACKABLE_HOOKS_SRC
+# to the package `src` dirs. Adding the extra path is harmless when the relative
+# sibling already resolved — Nim picks the first module it finds.
+let ioMonSrc = getEnv("IO_MON_SRC")
+if ioMonSrc.len > 0:
+  switch("path", ioMonSrc)
+let stackableHooksSrc = getEnv("NIM_STACKABLE_HOOKS_SRC")
+if stackableHooksSrc.len > 0:
+  switch("path", stackableHooksSrc)
+
 # M1 (Incremental-Test-Runner): `results` version pin for the seekable CTFS
 # reader.
 #
