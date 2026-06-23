@@ -639,8 +639,8 @@ impl CowNamespaceWriter {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use super::super::cow_namespace_reader::{CowNamespaceReader, CowNsError};
     use super::*;
-    use crate::ctfs_trace_reader::cow_namespace_reader::{CowNamespaceReader, CowNsError};
 
     #[test]
     fn writer_round_trips_through_reader() {
