@@ -632,6 +632,22 @@ mod tests {
         }
     }
 
+    struct FailingRecreator {
+        calls: usize,
+        message: &'static str,
+    }
+
+    impl Recreator for FailingRecreator {
+        fn re_execute_and_materialize(
+            &mut self,
+            _tick_lo: u64,
+            _tick_hi: u64,
+        ) -> Result<MaterializedInterval, Box<dyn Error>> {
+            self.calls += 1;
+            Err(self.message.into())
+        }
+    }
+
     /// `e2e_recreator_cache_hit_serves_from_materialized` — a query in a COVERED
     /// interval returns the materialized data and the mock recreator's re-execute
     /// count stays 0.
@@ -732,6 +748,40 @@ mod tests {
         let out = cache.ensure_interval_materialized(&mut rec, 1000, 2000).unwrap();
         assert_eq!(out, EnsureOutcome::CacheHit);
         assert_eq!(rec.calls, 1, "subsequent query after write-back is a hit");
+    }
+
+    #[test]
+    fn test_recreator_boundary_error_does_not_mark_coverage_complete() {
+        let mut cache = MaterializationCache::new();
+        let mut rec = FailingRecreator {
+            calls: 0,
+            message: "rr frozen emulator boundary: syscall_or_replay_event_needed",
+        };
+
+        let err = cache
+            .ensure_interval_materialized(&mut rec, 1000, 2000)
+            .expect_err("boundary failure must propagate instead of marking coverage");
+        assert!(
+            err.to_string().contains("syscall_or_replay_event_needed"),
+            "structured boundary reason should remain visible in the cache error path: {err}"
+        );
+        assert_eq!(rec.calls, 1, "uncovered interval should invoke recreator once");
+        assert_eq!(
+            cache.coverage_of(1000, 2000),
+            Coverage::NotCovered {
+                missing: vec![(1000, 2000)]
+            },
+            "failed materialization must leave coverage incomplete"
+        );
+        assert!(
+            cache.writes_in_range(ADDR, 1000, 2000).is_none(),
+            "failed materialization must not create a covered-empty memwrites answer"
+        );
+        let line_key = codetracer_trace_writer::step_stream::pack_global_line_index(1, 10);
+        assert!(
+            cache.line_hits_for_key_in_range(line_key, 1000, 2000).is_none(),
+            "failed materialization must not create a covered-empty linehits answer"
+        );
     }
 
     /// `test_recreator_coverage_aware_skip` — an already-covered interval is NOT
