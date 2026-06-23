@@ -40,19 +40,16 @@
 //!
 //! ## Production wiring status (honesty note)
 //!
-//! The decision logic + the `Recreator` boundary land here and are fully tested
-//! against the fake. The PRODUCTION adapter — a `Recreator` that drives
-//! [`RecreatorReplaySession`](crate::recreator_session::RecreatorReplaySession)
-//! to re-execute `[lo, hi)` and dump its memory writes — is NOT yet implemented,
-//! because the replay-worker protocol
-//! ([`ReplayQuery`](crate::query::ReplayQuery)) currently has no
-//! "materialize interval" query: re-executing an interval and emitting its
-//! `memwrites.tc` is a native-backend (`codetracer-native-backend`) worker-side
-//! capability that does not exist yet and genuinely requires the Linux rr worker.
-//! That worker-side query + its db-backend adapter is the precise rr-gated
-//! Outstanding Task tracked for this milestone; until it lands, the coverage gate
-//! is exercised through the fake recreator (this is the testable seam the brief
-//! asked for, not a stand-in for real rr bytes).
+//! The decision logic + the `Recreator` boundary are wired into the production
+//! replay-worker protocol for the supported interval maps: memory writes and
+//! source-line hits. The Linux rr worker still fails closed until it can collect
+//! real records, so most tests use fake recreators or fake worker streams to
+//! exercise the production cache/adapter path deterministically. Steps, calls,
+//! and values are deliberately not modeled here yet: the existing stream codecs
+//! encode complete `steps.dat`/`values.dat`/`calls.dat` images plus companion
+//! indices, but this cache only has sparse interval-tagged map semantics. Writing
+//! partial stream images would make seekable readers believe an incomplete stream
+//! is authoritative.
 //!
 //! [naming]: ../../../../../codetracer-specs/Refactoring-Plans/Naming-Alignment.md
 //! [mcr]: ../../../../../codetracer-specs/Recording-Backends/Multi-Core-Recorder/MCR-Omniscient-DB-Algorithms.md
@@ -110,7 +107,7 @@ impl MaterializedInterval {
 /// treated as genuine negative knowledge for that covered interval (§1.3
 /// invariant 7 / `coverage_add` contract).
 pub trait Recreator {
-    /// Re-execute `[tick_lo, tick_hi)` and return its materialized writes.
+    /// Re-execute `[tick_lo, tick_hi)` and return its materialized records.
     fn re_execute_and_materialize(
         &mut self,
         tick_lo: u64,
