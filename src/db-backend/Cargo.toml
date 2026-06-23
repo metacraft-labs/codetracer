@@ -63,6 +63,7 @@ chrono = "0.4.41"
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2.100", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 
 # uuid is pulled transitively by codetracer_trace_types with the `v7`
 # feature. Since uuid 1.23 the `v7` generator no longer implies a
@@ -75,9 +76,17 @@ wasm-bindgen = { version = "0.2.100", optional = true }
 uuid = { version = "1.10", default-features = false, optional = true, features = [
   "js",
 ] }
+# Some transitive crates still use getrandom 0.2 directly; enable its browser
+# backend explicitly for wasm32-unknown-unknown browser-transport builds.
+getrandom = { version = "0.2", optional = true, features = ["js"] }
 web-sys = { version = "0.3", optional = true, features = [
   "DedicatedWorkerGlobalScope",
+  "Headers",
   "WorkerGlobalScope",
+  "Request",
+  "RequestInit",
+  "Response",
+  "Window",
   "console",
   "MessageEvent",
   "Worker",
@@ -271,11 +280,14 @@ syntax-highlight = [
 nim-reader = ["dep:codetracer_trace_writer_nim"]
 browser-transport = [
   "dep:serde-wasm-bindgen",
+  "dep:js-sys",
   "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
   "dep:web-sys",
   "dep:console_error_panic_hook",
   "dep:wasm-logger",
   # Enable uuid's wasm RNG backend (RngImp) so `Uuid::now_v7` in
   # codetracer_trace_types links on wasm32.
   "dep:uuid",
+  "dep:getrandom",
 ]

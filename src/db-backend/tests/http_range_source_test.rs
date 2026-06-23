@@ -9,11 +9,12 @@
 //!   `HttpRangeSource` reads a known internal file identically to the same image
 //!   opened locally, AND fetches strictly fewer bytes than the whole file
 //!   (laziness, byte-counted by the server).
-//! - `e2e_browser_replay_lazy_no_full_download` — the browser/WASM `fetch`-based
-//!   source cannot be built or driven in this environment (no browser runtime),
-//!   so the browser end-to-end remains an Outstanding Task. The NATIVE laziness
-//!   it would assert (replay over range requests touches a subset of bytes
-//!   before any whole-file download) is already proven by the test above and is
+//! - `e2e_browser_replay_lazy_no_full_download` — the browser/WASM async
+//!   `web_sys::fetch` range adapter exists in `http_range_source`, but the
+//!   synchronous `CtfsReader` replay e2e still needs an async BlockSource path
+//!   or a safe browser worker bridge plus a browser runner. The NATIVE laziness
+//!   it would assert (replay over range requests touches a subset of bytes before
+//!   any whole-file download) is already proven by the test above and is
 //!   re-asserted here over the real socket transport. The wasm gate is honoured:
 //!   the browser-specific assertion is `#[ignore]`d with a clear reason rather
 //!   than faked green.
@@ -116,12 +117,7 @@ impl Drop for RangeServer {
 /// Read one HTTP request and write the appropriate response. Returns once the
 /// single request/response is handled (ureq opens a fresh connection per call by
 /// default, so one request per connection is sufficient and keeps this simple).
-fn handle_conn(
-    mut stream: TcpStream,
-    image: &[u8],
-    served: &AtomicU64,
-    ignore_range: bool,
-) -> std::io::Result<()> {
+fn handle_conn(mut stream: TcpStream, image: &[u8], served: &AtomicU64, ignore_range: bool) -> std::io::Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
     // Read until end of headers (\r\n\r\n).
     let mut buf = Vec::new();
@@ -146,9 +142,8 @@ fn handle_conn(
     let total = image.len() as u64;
 
     if method == "HEAD" {
-        let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n"
-        );
+        let resp =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n");
         stream.write_all(resp.as_bytes())?;
         return Ok(());
     }
@@ -246,19 +241,21 @@ fn e2e_http_range_source_reads_ct_over_range_requests() {
     );
 }
 
-/// The browser/WASM `fetch`-based source end-to-end is gated: it needs a browser
-/// `fetch` runtime not available in this environment. The NATIVE laziness it
-/// would assert — replay begins reading over bounded range requests before the
-/// whole `.ct` is fetched — is proven by the test above and re-asserted here
-/// over the real socket transport (the browser path would be byte-identical, it
-/// only swaps `ureq` for `web_sys::fetch`). Kept `#[ignore]`d with a reason
-/// rather than faked, per the milestone's honesty-over-green brief.
+/// The browser/WASM replay end-to-end is gated: the async `web_sys::fetch`
+/// adapter exists, but driving `CtfsReader` through it still needs an async
+/// reader path or a safe browser worker bridge plus a browser runner. The NATIVE
+/// laziness it would assert — replay begins reading over bounded range requests
+/// before the whole `.ct` is fetched — is proven by the test above and
+/// re-asserted here over the real socket transport. Kept `#[ignore]`d with a
+/// reason rather than faked, per the milestone's honesty-over-green brief.
 #[test]
-#[ignore = "browser/WASM fetch runtime unavailable here; native laziness is proven by \
-            e2e_http_range_source_reads_ct_over_range_requests. The wasm fetch adapter is an Outstanding Task."]
+#[ignore = "browser/WASM replay e2e needs an async BlockSource path or safe worker bridge plus \
+            wasm-bindgen-test/browser; native laziness is proven by \
+            e2e_http_range_source_reads_ct_over_range_requests."]
 fn e2e_browser_replay_lazy_no_full_download() {
-    // If/when a wasm-bindgen-test browser runner is wired up, this asserts the
-    // same laziness invariant over the `web_sys::fetch` RangeFetcher.
+    // If/when a wasm-bindgen-test browser runner and async reader path are wired
+    // up, this asserts the same laziness invariant over the `web_sys::fetch`
+    // range transport.
     let target: Vec<u8> = b"browser lazy replay ".repeat(10);
     let bulk: Vec<u8> = (0..(4096 * 100)).map(|i| (i % 256) as u8).collect();
     let image = build_ct_image(&[("target.bin", &target), ("bulk.bin", &bulk)]);
@@ -269,7 +266,10 @@ fn e2e_browser_replay_lazy_no_full_download() {
     let mut reader = CtfsReader::from_source(source).unwrap();
     let got = reader.read_file("target.bin").unwrap();
     assert_eq!(got, target);
-    assert!(server.served_bytes() < total_len, "replay must not download the whole file");
+    assert!(
+        server.served_bytes() < total_len,
+        "replay must not download the whole file"
+    );
 }
 
 /// A server that IGNORES the `Range` header and returns `200 OK` with the whole

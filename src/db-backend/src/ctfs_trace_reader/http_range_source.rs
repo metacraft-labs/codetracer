@@ -18,33 +18,79 @@
 //! `ureq` client (already a direct dependency of the db-backend — see
 //! `Cargo.toml`'s `ureq` entry). It is fully testable here against a local
 //! range-serving HTTP fixture (see the unit/integration tests). The native
-//! source is gated `#[cfg(not(target_arch = "wasm32"))]` because `ureq` performs
-//! blocking socket I/O that does not compile to `wasm32-unknown-unknown`.
+//! transport is gated `#[cfg(not(target_arch = "wasm32"))]` because `ureq`
+//! performs blocking socket I/O that does not compile to
+//! `wasm32-unknown-unknown`.
 //!
-//! The browser/WASM source is a thin platform adapter over the same shape: it
-//! fulfils each `read_at` / `read_block` via an async `web_sys::fetch` with a
-//! `Range` header instead of a blocking `ureq` request, then decompresses
-//! seekable-Zstd frames with `ruzstd`. That adapter requires a browser `fetch`
-//! runtime (and async-over-sync glue) that cannot be built or exercised in this
-//! environment, so it is scoped as a precise Outstanding Task in the milestone
-//! rather than faked. The `RangeFetcher` trait below is the clearly-marked seam
-//! the wasm adapter slots into: the block-mapping / caching / `current_size`
-//! logic is transport-agnostic and reused verbatim; only the byte transport
-//! (`fetch_range` / `head_total_size`) differs.
+//! The browser/WASM path is real but explicitly async:
+//! [`BrowserRangeFetcher`] issues `web_sys::fetch` requests with `Range` headers
+//! and [`BrowserHttpRangeSource`] mirrors the block-mapping/cache rules through
+//! async `read_at` / `read_block` methods. It does **not** implement
+//! [`BlockSource`] yet. The current `BlockSource` / [`RangeFetcher`] traits are
+//! synchronous; blocking a browser worker while waiting for the same worker's
+//! fetch promise would deadlock or require SharedArrayBuffer/Atomics plumbing
+//! outside this crate. Keeping the browser adapter async is the honest
+//! future-compatible seam until the reader grows an async `BlockSource` path.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use super::ctfs_container::{BlockSource, CtfsError};
 
+const FIXED_AND_EXTENDED_HEADER_SIZE: u64 = 16; // HEADER_SIZE + EXTENDED_HEADER_SIZE
+const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
+
+fn validate_half_open_range(start: u64, end: u64, context: &str) -> Result<usize, CtfsError> {
+    if end <= start {
+        return Err(CtfsError::Corrupt(format!(
+            "{context}: empty/inverted range [{start}, {end})"
+        )));
+    }
+    usize::try_from(end - start)
+        .map_err(|_| CtfsError::Corrupt(format!("{context}: range [{start}, {end}) is too large")))
+}
+
+fn parse_ctfs_block_size(header: &[u8], context: &str) -> Result<usize, CtfsError> {
+    if header.len() != FIXED_AND_EXTENDED_HEADER_SIZE as usize {
+        return Err(CtfsError::Corrupt(format!(
+            "{context}: short header fetch ({} of {FIXED_AND_EXTENDED_HEADER_SIZE} bytes)",
+            header.len()
+        )));
+    }
+    if header[..5] != CTFS_MAGIC {
+        return Err(CtfsError::InvalidMagic);
+    }
+    let version = header[5];
+    // Mirror the container reader's accepted version range (v2..=v4).
+    if !(2..=4).contains(&version) {
+        return Err(CtfsError::UnsupportedVersion(version));
+    }
+    let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
+    if !matches!(block_size, 1024 | 2048 | 4096) {
+        return Err(CtfsError::Corrupt(format!(
+            "{context}: invalid block size: {block_size}"
+        )));
+    }
+    Ok(block_size)
+}
+
+fn parse_content_range_total(content_range: &str, context: &str) -> Result<u64, CtfsError> {
+    content_range
+        .rsplit('/')
+        .next()
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .ok_or_else(|| CtfsError::Corrupt(format!("{context}: unparseable Content-Range '{content_range}'")))
+}
+
 /// The transport seam: how an [`HttpRangeSource`] turns a byte range into bytes.
 ///
 /// The block-mapping, caching, and size logic in [`HttpRangeSource`] is
 /// transport-agnostic; this trait is the ONE place the actual network call
 /// lives. The native implementation ([`UreqRangeFetcher`]) issues a blocking
-/// `ureq` `Range:` GET; the future browser adapter implements the same two
-/// methods over `web_sys::fetch` (async-bridged to this sync signature) so the
-/// rest of the source — and `CtfsReader` above it — is reused unchanged.
+/// `ureq` `Range:` GET. The browser implementation is deliberately separate and
+/// async (`BrowserRangeFetcher`) because `web_sys::fetch` cannot honestly satisfy
+/// this synchronous trait without an async reader path or a separate safe worker
+/// bridge.
 pub trait RangeFetcher: std::fmt::Debug + Send + Sync {
     /// Fetch the half-open byte range `[start, end)` from the resource,
     /// returning exactly `end - start` bytes.
@@ -114,37 +160,15 @@ impl HttpRangeSource {
     /// resource. The header read is counted and cached like any other fetch.
     pub fn new(fetcher: Box<dyn RangeFetcher>) -> Result<Self, CtfsError> {
         let size = fetcher.total_size()?;
-        const FIXED_AND_EXTENDED: u64 = 16; // HEADER_SIZE + EXTENDED_HEADER_SIZE
-        if size < FIXED_AND_EXTENDED {
+        if size < FIXED_AND_EXTENDED_HEADER_SIZE {
             return Err(CtfsError::Corrupt(format!(
-                "http source: resource too small ({size} bytes, need at least {FIXED_AND_EXTENDED})"
+                "http source: resource too small ({size} bytes, need at least {FIXED_AND_EXTENDED_HEADER_SIZE})"
             )));
         }
 
         // Fetch the fixed + extended header in one bounded range request.
-        let header = fetcher.fetch_range(0, FIXED_AND_EXTENDED)?;
-        if header.len() != FIXED_AND_EXTENDED as usize {
-            return Err(CtfsError::Corrupt(format!(
-                "http source: short header fetch ({} of {FIXED_AND_EXTENDED} bytes)",
-                header.len()
-            )));
-        }
-        // Magic bytes: "C0DE trACE2".
-        const CTFS_MAGIC: [u8; 5] = [0xC0, 0xDE, 0x72, 0xAC, 0xE2];
-        if header[..5] != CTFS_MAGIC {
-            return Err(CtfsError::InvalidMagic);
-        }
-        let version = header[5];
-        // Mirror the container reader's accepted version range (v2..=v4).
-        if !(2..=4).contains(&version) {
-            return Err(CtfsError::UnsupportedVersion(version));
-        }
-        let block_size = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        if !matches!(block_size, 1024 | 2048 | 4096) {
-            return Err(CtfsError::Corrupt(format!(
-                "http source: invalid block size: {block_size}"
-            )));
-        }
+        let header = fetcher.fetch_range(0, FIXED_AND_EXTENDED_HEADER_SIZE)?;
+        let block_size = parse_ctfs_block_size(&header, "http source")?;
 
         let source = HttpRangeSource {
             fetcher,
@@ -152,7 +176,7 @@ impl HttpRangeSource {
             block_size,
             block_cache: Mutex::new(HashMap::new()),
             requests_made: Mutex::new(1), // the header fetch above
-            bytes_fetched: Mutex::new(FIXED_AND_EXTENDED),
+            bytes_fetched: Mutex::new(FIXED_AND_EXTENDED_HEADER_SIZE),
         };
         Ok(source)
     }
@@ -288,21 +312,14 @@ impl UreqRangeFetcher {
         let agent = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_secs(30))
             .build();
-        UreqRangeFetcher {
-            url: url.into(),
-            agent,
-        }
+        UreqRangeFetcher { url: url.into(), agent }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl RangeFetcher for UreqRangeFetcher {
     fn fetch_range(&self, start: u64, end: u64) -> Result<Vec<u8>, CtfsError> {
-        if end <= start {
-            return Err(CtfsError::Corrupt(format!(
-                "http fetch: empty/inverted range [{start}, {end})"
-            )));
-        }
+        let want = validate_half_open_range(start, end, "http fetch")?;
         // RFC 7233 ranges are inclusive on both ends; our `end` is exclusive.
         let last = end - 1;
         let resp = self
@@ -321,7 +338,6 @@ impl RangeFetcher for UreqRangeFetcher {
                 "http fetch [{start}, {end}): expected 206 Partial Content, got {status}"
             )));
         }
-        let want = (end - start) as usize;
         let mut body = Vec::with_capacity(want);
         use std::io::Read;
         resp.into_reader()
@@ -359,16 +375,268 @@ impl RangeFetcher for UreqRangeFetcher {
             .set("Range", "bytes=0-0")
             .call()
             .map_err(|e| CtfsError::Corrupt(format!("http source: size probe failed: {e}")))?;
+        let content_range = resp.header("Content-Range").ok_or_else(|| {
+            CtfsError::Corrupt("http source: no Content-Length or Content-Range for size".to_string())
+        })?;
+        parse_content_range_total(content_range, "http source")
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+fn js_error(context: &str, value: wasm_bindgen::JsValue) -> CtfsError {
+    let detail = value
+        .as_string()
+        .or_else(|| js_sys::JSON::stringify(&value).ok().and_then(|s| s.as_string()))
+        .unwrap_or_else(|| "<non-string JS error>".to_string());
+    CtfsError::Corrupt(format!("{context}: {detail}"))
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+async fn fetch_request(request: &web_sys::Request, context: &str) -> Result<web_sys::Response, CtfsError> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let global = js_sys::global();
+    let promise = if let Ok(window) = global.clone().dyn_into::<web_sys::Window>() {
+        window.fetch_with_request(request)
+    } else if let Ok(scope) = global.dyn_into::<web_sys::WorkerGlobalScope>() {
+        scope.fetch_with_request(request)
+    } else {
+        return Err(CtfsError::Corrupt(format!(
+            "{context}: no Window or WorkerGlobalScope fetch runtime is available"
+        )));
+    };
+
+    let value = JsFuture::from(promise).await.map_err(|e| js_error(context, e))?;
+    value.dyn_into::<web_sys::Response>().map_err(|e| js_error(context, e))
+}
+
+/// Browser `fetch` byte transport for CTFS HTTP range requests.
+///
+/// This adapter performs real bounded browser requests and enforces the same
+/// no-silent-full-download contract as [`UreqRangeFetcher`]: range reads must
+/// return `206 Partial Content` and exactly the requested number of bytes.
+/// It is async because browser `fetch` is promise-based; see the module-level
+/// note for why this cannot honestly implement the synchronous [`RangeFetcher`]
+/// trait yet.
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+#[derive(Debug, Clone)]
+pub struct BrowserRangeFetcher {
+    url: String,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+impl BrowserRangeFetcher {
+    pub fn new(url: impl Into<String>) -> Self {
+        BrowserRangeFetcher { url: url.into() }
+    }
+
+    pub async fn fetch_range(&self, start: u64, end: u64) -> Result<Vec<u8>, CtfsError> {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::JsFuture;
+
+        let want = validate_half_open_range(start, end, "browser fetch")?;
+        let last = end - 1;
+        let headers = web_sys::Headers::new().map_err(|e| js_error("browser fetch: create headers", e))?;
+        headers
+            .set("Range", &format!("bytes={start}-{last}"))
+            .map_err(|e| js_error("browser fetch: set Range header", e))?;
+
+        let init = web_sys::RequestInit::new();
+        init.set_method("GET");
+        init.set_headers(&headers);
+        let request = web_sys::Request::new_with_str_and_init(&self.url, &init)
+            .map_err(|e| js_error("browser fetch: create request", e))?;
+        let resp = fetch_request(&request, "browser fetch").await?;
+        let status = resp.status();
+        if status != 206 {
+            return Err(CtfsError::Corrupt(format!(
+                "browser fetch [{start}, {end}): expected 206 Partial Content, got {status}"
+            )));
+        }
+        let array_buffer = JsFuture::from(
+            resp.array_buffer()
+                .map_err(|e| js_error("browser fetch: response.arrayBuffer", e))?,
+        )
+        .await
+        .map_err(|e| js_error("browser fetch: await response body", e))?;
+        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
+        if bytes.len() != want {
+            return Err(CtfsError::Corrupt(format!(
+                "browser fetch [{start}, {end}): body length {} != requested {want}",
+                bytes.len()
+            )));
+        }
+        Ok(bytes)
+    }
+
+    pub async fn total_size(&self) -> Result<u64, CtfsError> {
+        let init = web_sys::RequestInit::new();
+        init.set_method("HEAD");
+        let request = web_sys::Request::new_with_str_and_init(&self.url, &init)
+            .map_err(|e| js_error("browser source: create HEAD request", e))?;
+        match fetch_request(&request, "browser source: HEAD").await {
+            Ok(resp) if resp.status() < 400 => {
+                if let Ok(Some(len)) = resp.headers().get("Content-Length") {
+                    if let Ok(len) = len.parse::<u64>() {
+                        return Ok(len);
+                    }
+                }
+            }
+            Ok(_) | Err(_) => {
+                // Fall through to a one-byte range probe, matching the native
+                // source's HEAD-refusing server behavior.
+            }
+        }
+
+        let headers = web_sys::Headers::new().map_err(|e| js_error("browser source: create headers", e))?;
+        headers
+            .set("Range", "bytes=0-0")
+            .map_err(|e| js_error("browser source: set size-probe Range header", e))?;
+        let init = web_sys::RequestInit::new();
+        init.set_method("GET");
+        init.set_headers(&headers);
+        let request = web_sys::Request::new_with_str_and_init(&self.url, &init)
+            .map_err(|e| js_error("browser source: create size-probe request", e))?;
+        let resp = fetch_request(&request, "browser source: size probe").await?;
+        if resp.status() != 206 {
+            return Err(CtfsError::Corrupt(format!(
+                "browser source: size probe expected 206 Partial Content, got {}",
+                resp.status()
+            )));
+        }
         let content_range = resp
-            .header("Content-Range")
-            .ok_or_else(|| CtfsError::Corrupt("http source: no Content-Length or Content-Range for size".to_string()))?;
-        // Content-Range: bytes <start>-<end>/<total>
-        let total = content_range
-            .rsplit('/')
-            .next()
-            .and_then(|t| t.trim().parse::<u64>().ok())
-            .ok_or_else(|| CtfsError::Corrupt(format!("http source: unparseable Content-Range '{content_range}'")))?;
-        Ok(total)
+            .headers()
+            .get("Content-Range")
+            .map_err(|e| js_error("browser source: read Content-Range", e))?
+            .ok_or_else(|| {
+                CtfsError::Corrupt("browser source: no Content-Length or Content-Range for size".to_string())
+            })?;
+        parse_content_range_total(&content_range, "browser source")
+    }
+}
+
+/// Async browser counterpart to [`HttpRangeSource`].
+///
+/// This mirrors the same range accounting and block cache as the synchronous
+/// `BlockSource` implementation, but exposes async methods because browser
+/// `fetch` cannot be made synchronously blocking inside the current reader
+/// without deadlocking the worker event loop.
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+#[derive(Debug)]
+pub struct BrowserHttpRangeSource {
+    fetcher: BrowserRangeFetcher,
+    size: u64,
+    block_size: usize,
+    block_cache: std::cell::RefCell<HashMap<u64, Vec<u8>>>,
+    requests_made: std::cell::Cell<u64>,
+    bytes_fetched: std::cell::Cell<u64>,
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
+impl BrowserHttpRangeSource {
+    pub async fn open(url: &str) -> Result<Self, CtfsError> {
+        Self::new(BrowserRangeFetcher::new(url)).await
+    }
+
+    pub async fn new(fetcher: BrowserRangeFetcher) -> Result<Self, CtfsError> {
+        let size = fetcher.total_size().await?;
+        if size < FIXED_AND_EXTENDED_HEADER_SIZE {
+            return Err(CtfsError::Corrupt(format!(
+                "browser http source: resource too small ({size} bytes, need at least {FIXED_AND_EXTENDED_HEADER_SIZE})"
+            )));
+        }
+        let header = fetcher.fetch_range(0, FIXED_AND_EXTENDED_HEADER_SIZE).await?;
+        let block_size = parse_ctfs_block_size(&header, "browser http source")?;
+        Ok(BrowserHttpRangeSource {
+            fetcher,
+            size,
+            block_size,
+            block_cache: std::cell::RefCell::new(HashMap::new()),
+            requests_made: std::cell::Cell::new(1),
+            bytes_fetched: std::cell::Cell::new(FIXED_AND_EXTENDED_HEADER_SIZE),
+        })
+    }
+
+    pub fn current_size(&self) -> u64 {
+        self.size
+    }
+
+    pub fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    pub fn requests_made(&self) -> u64 {
+        self.requests_made.get()
+    }
+
+    pub fn bytes_fetched(&self) -> u64 {
+        self.bytes_fetched.get()
+    }
+
+    pub async fn refresh(&mut self) -> Result<(), CtfsError> {
+        self.size = self.fetcher.total_size().await?;
+        Ok(())
+    }
+
+    pub async fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let end = offset
+            .checked_add(buf.len() as u64)
+            .ok_or_else(|| CtfsError::Corrupt("browser http source: read offset overflow".to_string()))?;
+        if end > self.size {
+            return Err(CtfsError::Corrupt(
+                "browser http source: read extends beyond end of container".to_string(),
+            ));
+        }
+        let bytes = self.fetch_counted(offset, end).await?;
+        if bytes.len() != buf.len() {
+            return Err(CtfsError::Corrupt(format!(
+                "browser http source: range response wrong length ({} of {} bytes)",
+                bytes.len(),
+                buf.len()
+            )));
+        }
+        buf.copy_from_slice(&bytes);
+        Ok(buf.len())
+    }
+
+    pub async fn read_block(&self, block_num: u64) -> Result<Vec<u8>, CtfsError> {
+        if let Some(cached) = self.block_cache.borrow().get(&block_num) {
+            return Ok(cached.clone());
+        }
+
+        let offset = block_num
+            .checked_mul(self.block_size as u64)
+            .ok_or_else(|| CtfsError::Corrupt(format!("browser http source: block {block_num} offset overflow")))?;
+        let end = offset
+            .checked_add(self.block_size as u64)
+            .ok_or_else(|| CtfsError::Corrupt(format!("browser http source: block {block_num} end overflow")))?;
+        if end > self.size {
+            return Err(CtfsError::Corrupt(format!(
+                "browser http source: block {block_num} extends beyond end of container"
+            )));
+        }
+
+        let bytes = self.fetch_counted(offset, end).await?;
+        if bytes.len() != self.block_size {
+            return Err(CtfsError::Corrupt(format!(
+                "browser http source: block {block_num} short fetch ({} of {} bytes)",
+                bytes.len(),
+                self.block_size
+            )));
+        }
+        self.block_cache.borrow_mut().insert(block_num, bytes.clone());
+        Ok(bytes)
+    }
+
+    async fn fetch_counted(&self, start: u64, end: u64) -> Result<Vec<u8>, CtfsError> {
+        let bytes = self.fetcher.fetch_range(start, end).await?;
+        self.requests_made.set(self.requests_made.get() + 1);
+        self.bytes_fetched.set(self.bytes_fetched.get() + bytes.len() as u64);
+        Ok(bytes)
     }
 }
 
@@ -559,7 +827,9 @@ mod tests {
 
         // Allocate a brand-new block in the overlay (born in RAM, never fetched).
         let new_block = overlay.alloc_block();
-        overlay.write_block(new_block, vec![0xAB; overlay.block_size()]).unwrap();
+        overlay
+            .write_block(new_block, vec![0xAB; overlay.block_size()])
+            .unwrap();
         assert_eq!(overlay.read_block(new_block).unwrap(), vec![0xAB; overlay.block_size()]);
 
         // The remote source is read-only: the overlay never wrote through it.
