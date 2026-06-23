@@ -1474,6 +1474,58 @@ mod tests {
     }
 
     #[test]
+    fn test_db_backend_decodes_rr_linehit_response_exactly() {
+        let inside_write = crate::ctfs_trace_reader::interval_tagged_map::MemWriteEntry {
+            tick: 301,
+            pc: 0x40112B,
+            size: 8,
+            old_value: 0x1122_3344,
+            new_value: 0x1122_3355,
+        };
+        let memwrites_image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(0x404030, vec![inside_write])],
+            },
+        );
+        let linehits_image = crate::ctfs_trace_reader::server_prep_encoding::encode_linehits(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedLinehits {
+                per_line: vec![(11, 71, vec![299, 300]), (11, 72, vec![301, 302])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 300,
+            tick_hi: 302,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(memwrites_image),
+            linehits_base64: Some(BASE64_STANDARD.encode(linehits_image)),
+        };
+
+        let materialized =
+            materialized_interval_from_worker_response(300, 302, &serde_json::to_string(&response).unwrap()).unwrap();
+
+        let first_key = codetracer_trace_writer::step_stream::pack_global_line_index(11, 71);
+        let second_key = codetracer_trace_writer::step_stream::pack_global_line_index(11, 72);
+        assert_eq!(materialized.writes, vec![(0x404030, inside_write)]);
+        assert_eq!(
+            materialized.line_hits,
+            vec![
+                (
+                    first_key,
+                    crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 300 },
+                ),
+                (
+                    second_key,
+                    crate::ctfs_trace_reader::interval_tagged_map::LineHitEntry { tick: 301 },
+                ),
+            ]
+        );
+        assert!(
+            !materialized.line_hits.is_empty(),
+            "RR linehit response must not be accepted through an empty-success fallback"
+        );
+    }
+
+    #[test]
     fn materialize_interval_response_rejects_interval_mismatch() {
         let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
             &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites { per_address: vec![] },
