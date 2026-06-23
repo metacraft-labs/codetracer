@@ -300,6 +300,14 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// How the traced program ended (normal exit vs. error).
     fn end_of_program(&self) -> &EndOfProgram;
 
+    /// Surface an omniscient DB owned by this trace reader, when the underlying
+    /// trace carries production omniscient namespaces. The default keeps legacy
+    /// in-memory readers unchanged; CTFS readers override this for CoW-backed
+    /// `linehits.tc` and future non-memwrite namespaces.
+    fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
+        None
+    }
+
     // ── Value / call conversion helpers ─────────────────────────────
     //
     // These default methods replace `Db::to_ct_value`, `Db::to_call`,

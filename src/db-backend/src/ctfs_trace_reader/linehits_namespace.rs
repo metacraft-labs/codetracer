@@ -8,6 +8,7 @@
 
 use super::cow_namespace_reader::{CowLeafType, CowNamespaceReader, CowNsError};
 use super::ctfs_container::{CtfsError, CtfsReader};
+use crate::omniscient_db::{OmniscientDb, Tick, WriteRecord};
 
 /// The CTFS internal-file name for the production line-hit namespace.
 pub const CTFS_LINEHITS_COW_FILE: &str = "linehits.tc";
@@ -118,6 +119,7 @@ impl<'a> LinehitsNamespace<'a> {
 }
 
 /// Owned `linehits.tc` namespace loaded from a CTFS container.
+#[derive(Debug)]
 pub struct OwnedLinehitsNamespace {
     image: Vec<u8>,
 }
@@ -137,6 +139,32 @@ impl OwnedLinehitsNamespace {
     /// Return all step ids recorded for `global_line_index`.
     pub fn hits(&self, global_line_index: u64) -> Result<Vec<u64>, LinehitsNsError> {
         LinehitsNamespace::open(&self.image)?.hits(global_line_index)
+    }
+}
+
+fn pack_line_key(file_id: u32, line: u32) -> u64 {
+    codetracer_trace_writer::step_stream::pack_global_line_index(file_id as usize, i64::from(line))
+}
+
+impl OmniscientDb for OwnedLinehitsNamespace {
+    fn last_write_before(&self, _addr: u64, _size: u32, _tick: Tick) -> Option<WriteRecord> {
+        None
+    }
+
+    fn value_at(&self, _addr: u64, _size: u32, _tick: Tick) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn writes_in_range(&self, _addr: u64, _size: u32, _tick_min: Tick, _tick_max: Tick) -> Vec<WriteRecord> {
+        Vec::new()
+    }
+
+    fn source_line_hits(&self, file_id: u32, line: u32) -> Vec<Tick> {
+        self.hits(pack_line_key(file_id, line)).unwrap_or_default()
+    }
+
+    fn is_present(&self) -> bool {
+        true
     }
 }
 
@@ -229,5 +257,17 @@ mod tests {
         let ns = OwnedLinehitsNamespace::open_from_ctfs(&mut reader).expect("open linehits.tc");
         assert_eq!(ns.hits(42).unwrap(), vec![3, 5, 8]);
         assert_eq!(ns.hits(404).unwrap(), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn omniscient_db_serves_source_line_hits_from_cow_namespace() {
+        let key = pack_line_key(7, 100);
+        let image = image_with_entries(&[(key, vec![11, 13, 21])]);
+        let ns = LinehitsNamespace::open(&image).expect("open linehits namespace");
+        assert_eq!(ns.hits(key).unwrap(), vec![11, 13, 21]);
+
+        let owned = OwnedLinehitsNamespace { image };
+        assert_eq!(owned.source_line_hits(7, 100), vec![11, 13, 21]);
+        assert_eq!(owned.source_line_hits(7, 101), Vec::<u64>::new());
     }
 }

@@ -2693,6 +2693,10 @@ impl ReplaySession for MaterializedReplaySession {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
+
+    fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
+        self.reader.omniscient_db()
+    }
 }
 
 // ===========================================================================

@@ -203,6 +203,14 @@ pub struct CTFSTraceReader {
     /// where the M24c lazy / M25b parallel whole-table build serves
     /// `steps_on_line` exactly as before.
     step_map: Option<step_map_namespace::StepMapNamespace>,
+    /// M8 — CoW-backed `linehits.tc` omniscient source-line index.
+    ///
+    /// `Some` when the CTFS container carries the production `NSB1` linehits
+    /// namespace emitted by `MultiStreamTraceWriter.close()`. The
+    /// `TraceReader::omniscient_db()` hook exposes this object so callers can
+    /// answer `source_line_hits(file_id, line)` from the already-open container
+    /// without routing through the legacy whole-tree / FFI sidecar loader.
+    linehits_db: Option<linehits_namespace::OwnedLinehitsNamespace>,
     /// Follow-mode CTFS source retained by [`open_follow`](Self::open_follow)
     /// so [`refresh`](Self::refresh) can observe appended split-stream chunks
     /// through the same production reader path.
@@ -614,6 +622,7 @@ impl CTFSTraceReader {
             // `step-map.ns` to attach. `open()` attaches it on the path-bearing
             // constructors.
             step_map: None,
+            linehits_db: None,
             follow_ctfs: None,
             follow_path: None,
             #[cfg(feature = "nim-reader")]
@@ -862,6 +871,7 @@ impl CTFSTraceReader {
         // is strictly more useful than refusing it, and the fallback always
         // yields identical breakpoints.
         reader.step_map = Self::load_step_map_namespace(ctfs, path);
+        reader.linehits_db = Self::load_linehits_namespace(ctfs);
         if follow {
             reader.refresh_follow_calls_from_stream()?;
         }
@@ -910,6 +920,26 @@ impl CTFSTraceReader {
             }
             Err(e) => {
                 info!("CTFS: step-map.ns malformed ({e}); falling back to whole-table breakpoint build");
+                None
+            }
+        }
+    }
+
+    /// M8 — locate and validate the production CoW `linehits.tc` omniscient
+    /// source-line index. Returns `None` when the trace does not carry the
+    /// namespace or carries an older/foreign image; callers then keep the
+    /// existing non-omniscient fallback rather than failing trace open.
+    fn load_linehits_namespace(ctfs: &mut CtfsReader) -> Option<linehits_namespace::OwnedLinehitsNamespace> {
+        if !ctfs.has_file(linehits_namespace::CTFS_LINEHITS_COW_FILE) {
+            return None;
+        }
+        match linehits_namespace::OwnedLinehitsNamespace::open_from_ctfs(ctfs) {
+            Ok(ns) => {
+                info!("CTFS: CoW linehits.tc attached — source_line_hits served from the namespace");
+                Some(ns)
+            }
+            Err(e) => {
+                info!("CTFS: linehits.tc present but unreadable ({e}); source_line_hits falls back to empty");
                 None
             }
         }
@@ -1232,6 +1262,7 @@ impl CTFSTraceReader {
             // attach one if present, but these traces are fully materialized so
             // the whole-table path serves breakpoints.
             step_map: None,
+            linehits_db: None,
             follow_ctfs: None,
             follow_path: None,
             #[cfg(feature = "nim-reader")]
@@ -1989,6 +2020,7 @@ impl CTFSTraceReader {
             // path-less reconstruction of this struct stays on the whole-table
             // fallback.
             step_map: None,
+            linehits_db: None,
             follow_ctfs: None,
             follow_path: None,
             #[cfg(feature = "nim-reader")]
@@ -2091,6 +2123,7 @@ impl CTFSTraceReader {
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
             // M26 — attached centrally by `open()` (which has the `.ct` path).
             step_map: None,
+            linehits_db: None,
             follow_ctfs: None,
             follow_path: None,
             #[cfg(feature = "nim-reader")]
@@ -2491,12 +2524,22 @@ impl TraceReader for CTFSTraceReader {
     fn end_of_program(&self) -> &EndOfProgram {
         &self.db.end_of_program
     }
+
+    fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
+        self.linehits_db
+            .as_ref()
+            .map(|db| db as &dyn crate::omniscient_db::OmniscientDb)
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::ctfs_trace_reader::cow_namespace_reader::CowLeafType;
+    use crate::ctfs_trace_reader::cow_namespace_writer::CowNamespaceWriter;
+    use crate::db::MaterializedReplaySession;
+    use crate::replay::ReplaySession;
 
     /// Canonical pinned test UUIDv7 (M-REC-1).  The embedded timestamp is
     /// fictional; the byte layout passes `is_canonical_uuid_v7`.
@@ -2522,6 +2565,53 @@ mod tests {
             filter_provenance: vec![],
             has_filter_provenance: false,
         })
+    }
+
+    fn put_varint(mut value: u64, out: &mut Vec<u8>) {
+        loop {
+            let mut byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    fn linehits_descriptor(offset: usize, len: usize) -> [u8; 16] {
+        let mut d = [0u8; 16];
+        d[0..8].copy_from_slice(&(offset as u64).to_le_bytes());
+        d[8..16].copy_from_slice(&(len as u64).to_le_bytes());
+        d
+    }
+
+    fn cow_linehits_image(entries: &[(u64, Vec<u64>)]) -> Vec<u8> {
+        let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        for (key, _) in entries {
+            sizing.insert_and_commit(*key, &[0u8; 16]).unwrap();
+        }
+        let payload_base = sizing.serialize().len();
+        let mut payload = Vec::new();
+        let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        for (key, ticks) in entries {
+            let offset = payload_base + payload.len();
+            let before = payload.len();
+            for tick in ticks {
+                put_varint(*tick, &mut payload);
+            }
+            writer
+                .insert_and_commit(*key, &linehits_descriptor(offset, payload.len() - before))
+                .unwrap();
+        }
+        let mut image = writer.serialize();
+        image.extend_from_slice(&payload);
+        while !image.len().is_multiple_of(cow_namespace_reader::PAGE_SIZE) {
+            image.push(0);
+        }
+        image
     }
 
     /// Verify that a minimal .ct file with `meta.dat` can be opened and
@@ -2554,6 +2644,100 @@ mod tests {
         let reader = CTFSTraceReader::open(&ct_path).unwrap();
         assert_eq!(reader.step_count(), 0);
         assert_eq!(reader.workdir().to_str().unwrap(), "/home/user");
+    }
+
+    #[test]
+    fn ctfs_reader_source_line_hits_use_cow_linehits_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("linehits.ct");
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        let key = codetracer_trace_writer::step_stream::pack_global_line_index(3, 42);
+        let linehits = cow_linehits_image(&[(key, vec![2, 5, 9])]);
+        ctfs_container::write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", dat.as_slice()),
+                (linehits_namespace::CTFS_LINEHITS_COW_FILE, linehits.as_slice()),
+            ],
+        )
+        .unwrap();
+
+        let reader = CTFSTraceReader::open(&ct_path).unwrap();
+        let db = reader.omniscient_db().expect("CoW linehits.tc attaches omniscient DB");
+        assert_eq!(db.source_line_hits(3, 42), vec![2, 5, 9]);
+        assert_eq!(db.source_line_hits(3, 43), Vec::<u64>::new());
+        assert_eq!(db.writes_in_range(0x1000, 8, 0, 100), Vec::new());
+    }
+
+    #[test]
+    fn materialized_session_delegates_source_line_hits_to_ctfs_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("session-linehits.ct");
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        let key = codetracer_trace_writer::step_stream::pack_global_line_index(1, 7);
+        let linehits = cow_linehits_image(&[(key, vec![4, 8])]);
+        ctfs_container::write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", dat.as_slice()),
+                (linehits_namespace::CTFS_LINEHITS_COW_FILE, linehits.as_slice()),
+            ],
+        )
+        .unwrap();
+
+        let reader: std::sync::Arc<dyn TraceReader> = std::sync::Arc::new(CTFSTraceReader::open(&ct_path).unwrap());
+        let session = MaterializedReplaySession::new(reader);
+        let db = session
+            .omniscient_db()
+            .expect("materialized session delegates CTFS omniscient DB");
+        assert_eq!(db.source_line_hits(1, 7), vec![4, 8]);
+    }
+
+    #[test]
+    fn ctfs_reader_attaches_empty_cow_linehits_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("empty-linehits.ct");
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        let linehits = cow_linehits_image(&[]);
+        ctfs_container::write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", dat.as_slice()),
+                (linehits_namespace::CTFS_LINEHITS_COW_FILE, linehits.as_slice()),
+            ],
+        )
+        .unwrap();
+
+        let reader = CTFSTraceReader::open(&ct_path).unwrap();
+        let db = reader
+            .omniscient_db()
+            .expect("empty CoW linehits.tc is still a valid namespace");
+        assert_eq!(db.source_line_hits(0, 1), Vec::<u64>::new());
+        assert!(db.is_present());
+    }
+
+    #[test]
+    fn ctfs_reader_ignores_legacy_linehits_blob_for_omniscient_queries() {
+        let dir = tempfile::tempdir().unwrap();
+        let ct_path = dir.path().join("legacy-linehits.ct");
+        let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
+        ctfs_container::write_minimal_ctfs(
+            &ct_path,
+            &[
+                ("meta.dat", dat.as_slice()),
+                (
+                    linehits_namespace::CTFS_LINEHITS_COW_FILE,
+                    b"LHTS\x01\x00legacy whole-tree bytes".as_slice(),
+                ),
+            ],
+        )
+        .unwrap();
+
+        let reader = CTFSTraceReader::open(&ct_path).unwrap();
+        assert!(
+            reader.omniscient_db().is_none(),
+            "legacy/non-CoW linehits.tc must not be accepted as the production CoW query path"
+        );
     }
 
     /// Verify that workdir falls back to the program's parent directory
