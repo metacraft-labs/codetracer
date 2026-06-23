@@ -52,15 +52,21 @@
 ## the documented tolerant-parsing strategy: never assume the dump is clean
 ## UTF-8.
 ##
-## # `ct-print` resolution (DOCUMENTED)
+## # M1: in-process seekable read (PRODUCTION) + `ct-print` fallback (LEGACY)
 ##
-## This prototype reads CTFS via the `ct-print --json-events` SUBPROCESS. The
-## PRODUCTION path is to link `codetracer-trace-format-nim`'s reader
-## (`codetracer_trace_reader` / `codetracer_ct_print_lib`) directly and read the
-## CTFS in-process — no subprocess, no JSON round-trip. The subprocess is the
-## documented prototype stand-in (it avoids pulling the trace-format-nim build —
-## libzstd flags, its module tree — into the engine's build for the
-## prototype). `ct-print` is resolved in this order:
+## As of M1 the MODERN split-stream `.ct` (the binary the native and native-Ruby
+## recorders emit, carrying the M17a dedicated `calls.dat` call stream) is read
+## IN-PROCESS over `codetracer-trace-format-nim`'s seekable `NewTraceReader` —
+## see `ctfs_seekable.nim`.  That reads ONLY the function interning table + the
+## seekable call stream (plus, for best-effort def-line resolution, a TARGETED
+## seek to the call-entry steps), never dumping the step/value streams and never
+## spawning a subprocess.  `readExecutedFunctionsCtfs` tries that path first.
+##
+## The `ct-print --json-events` SUBPROCESS below is retained ONLY as the
+## documented FALLBACK for bundles the seekable reader cannot handle — legacy
+## unified-stream `.ct` bundles with no dedicated `calls.dat` (their call tree
+## is interleaved in the step stream).  For those, dumping the events is still
+## the simplest correct read.  `ct-print` is resolved in this order:
 ##
 ##   1. the `CT_PRINT` environment variable, if it points at an executable file;
 ##   2. a `ct-print` on `PATH`;
@@ -74,7 +80,8 @@
 import std/[json, os, osproc, algorithm, tables, strutils]
 import results
 
-import trace_reader  # ExecutedFunction
+import trace_reader   # ExecutedFunction
+import ctfs_seekable  # readExecutedFunctionsSeekable — the M1 in-process path
 
 export results
 
@@ -356,27 +363,13 @@ func extractFromEvents(root: JsonNode): Result[seq[ExecutedFunction], string] =
   resultSeq.sort(proc (a, b: ExecutedFunction): int = cmp(a.name, b.name))
   ok(resultSeq)
 
-proc readExecutedFunctionsCtfs*(traceDirOrCtFile: string):
+proc readExecutedFunctionsCtfsViaCtPrint*(bundle: string):
     Result[seq[ExecutedFunction], string] =
-  ## The CTFS `DependencyDiscovery` implementation: read the executed-function
-  ## SET from a modern CTFS `.ct` bundle, via the `ct-print --json-events`
-  ## subprocess (the documented prototype stand-in for linking
-  ## `codetracer-trace-format-nim`'s reader directly).
-  ##
-  ## `traceDirOrCtFile` may be a `.ct` file or a directory containing one.
-  ##
-  ## Returns the de-duplicated, name-sorted executed set; each `ExecutedFunction`
-  ## carries the function `name`, and (best-effort) its source `file` and
-  ## definition `defLine` resolved from the call's entry step. Names are always
-  ## present; file/defLine may be ""/0 when the bundle does not carry them.
-  ##
-  ## Any problem — `ct-print` unavailable, bundle unresolvable/unreadable, the
-  ## subprocess failing, or malformed output — yields an `Err`. The engine turns
-  ## that into a re-run; a CTFS read error can NEVER produce a skip.
-  let bundleRes = resolveCtBundle(traceDirOrCtFile)
-  if bundleRes.isErr:
-    return err(bundleRes.error)
-  let bundle = bundleRes.value
+  ## FALLBACK read: extract the executed-function set from `bundle` (a resolved
+  ## `.ct` path) via the `ct-print --json-events` subprocess.  Retained for
+  ## legacy unified-stream bundles the seekable reader cannot handle (no
+  ## dedicated `calls.dat`).  Tolerant of non-UTF-8 value bytes; any failure is
+  ## an `Err` (⇒ re-run upstream, never a silent skip).
   let ctPrintRes = resolveCtPrint()
   if ctPrintRes.isErr:
     return err(ctPrintRes.error)
@@ -391,3 +384,48 @@ proc readExecutedFunctionsCtfs*(traceDirOrCtFile: string):
   except CatchableError as e:
     return err("malformed ct-print JSON for " & bundle & ": " & e.msg)
   extractFromEvents(root)
+
+proc readExecutedFunctionsCtfs*(traceDirOrCtFile: string):
+    Result[seq[ExecutedFunction], string] =
+  ## The CTFS `DependencyDiscovery` implementation: read the executed-function
+  ## SET from a CTFS `.ct` bundle.
+  ##
+  ## `traceDirOrCtFile` may be a `.ct` file or a directory containing one.
+  ##
+  ## M1 read strategy:
+  ##   1. PRODUCTION — read the modern split-stream bundle IN-PROCESS over the
+  ##      seekable `NewTraceReader` (`ctfs_seekable.readExecutedFunctionsSeekable`):
+  ##      ONLY the function table + the dedicated `calls.dat` call stream, plus a
+  ##      targeted seek to call-entry steps for best-effort def-line resolution.
+  ##      No subprocess, no whole-trace JSON dump, no step/value scan.
+  ##   2. FALLBACK — when the bundle carries no dedicated call stream (a legacy
+  ##      unified-stream `.ct`), the seekable reader returns an `Err`; we then
+  ##      route to the `ct-print --json-events` subprocess, which reads the
+  ##      interleaved call tree out of the dumped events.
+  ##
+  ## Returns the de-duplicated, name-sorted executed set; each `ExecutedFunction`
+  ## carries the function `name`, and (best-effort) its source `file` and
+  ## definition `defLine`.  Names are always present; file/defLine may be ""/0
+  ## when the definition site cannot be resolved.
+  ##
+  ## Any problem — bundle unresolvable/unreadable, or BOTH the seekable and the
+  ## fallback read failing — yields an `Err`. The engine turns that into a
+  ## re-run; a CTFS read error can NEVER produce a skip.
+  let bundleRes = resolveCtBundle(traceDirOrCtFile)
+  if bundleRes.isErr:
+    return err(bundleRes.error)
+  let bundle = bundleRes.value
+
+  # 1) Try the in-process seekable read (modern split-stream bundles).
+  let seekableRes = readExecutedFunctionsSeekable(bundle)
+  if seekableRes.isOk:
+    return seekableRes
+
+  # 2) Fallback to ct-print for legacy bundles the seekable reader declined.
+  #    Surface BOTH errors if the fallback also fails so the re-run is
+  #    diagnosable.
+  let fallbackRes = readExecutedFunctionsCtfsViaCtPrint(bundle)
+  if fallbackRes.isErr:
+    return err("seekable read failed (" & seekableRes.error &
+      ") and ct-print fallback failed (" & fallbackRes.error & ")")
+  fallbackRes
