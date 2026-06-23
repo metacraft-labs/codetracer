@@ -17,7 +17,11 @@ use codetracer_trace_types::StepId;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 
-use crate::ctfs_trace_reader::materialization_cache::{MaterializedInterval, Recreator};
+use crate::ctfs_trace_reader::block_overlay::{CtfsBlockOverlay, FileBlockSink, OverlayMode};
+use crate::ctfs_trace_reader::ctfs_container::LocalFileSource;
+use crate::ctfs_trace_reader::materialization_cache::{
+    EnsureOutcome, MaterializationCache, MaterializedInterval, Recreator,
+};
 use crate::ctfs_trace_reader::server_prep_encoding::decode_memwrites;
 use crate::db::DbRecordEvent;
 use crate::expr_loader::ExprLoader;
@@ -67,6 +71,8 @@ pub struct RecreatorReplaySession {
     /// The C-level location from the last `load_location` call, populated when
     /// the native backend applies Nim sourcemaps via `LoadLocationWithSourcemap`.
     last_c_location: Option<Location>,
+    materialization_cache: MaterializationCache,
+    materialization_cache_ctfs_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -606,6 +612,8 @@ impl RecreatorReplaySession {
             recreator_exe: ct_rr_args.worker_exe.clone(),
             rr_trace_folder: ct_rr_args.rr_trace_folder.clone(),
             last_c_location: None,
+            materialization_cache: MaterializationCache::new(),
+            materialization_cache_ctfs_path: default_materialization_cache_ctfs_path(&ct_rr_args.rr_trace_folder),
         }
     }
 
@@ -660,6 +668,46 @@ impl RecreatorReplaySession {
                 self.load_location_directly()
             }
         }
+    }
+
+    /// Gate a live query through the materialization cache using the production
+    /// replay-worker boundary. On a cache miss this sends
+    /// `ReplayQuery::MaterializeInterval` to the worker via `ReplayWorker`'s
+    /// [`Recreator`] implementation, records the returned writes, and persists
+    /// them into the CTFS container when this session was launched from one.
+    pub fn ensure_materialized_for_live_query(
+        &mut self,
+        tick_lo: u64,
+        tick_hi: u64,
+    ) -> Result<EnsureOutcome, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let outcome = self
+            .materialization_cache
+            .ensure_interval_materialized(&mut self.stable, tick_lo, tick_hi)?;
+        if outcome == EnsureOutcome::CacheMiss {
+            self.persist_materialization_cache()?;
+        }
+        Ok(outcome)
+    }
+
+    fn persist_materialization_cache(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some(path) = &self.materialization_cache_ctfs_path else {
+            return Ok(());
+        };
+        let backing = Box::new(LocalFileSource::open(path)?);
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist)?;
+        self.materialization_cache.persist(&mut overlay)?;
+        let mut sink = FileBlockSink::open(path)?;
+        self.materialization_cache.flush(&mut overlay, &mut sink)?;
+        Ok(())
+    }
+}
+
+fn default_materialization_cache_ctfs_path(path: &Path) -> Option<PathBuf> {
+    if path.extension().and_then(|ext| ext.to_str()) == Some("ct") {
+        Some(path.to_path_buf())
+    } else {
+        None
     }
 }
 
@@ -994,6 +1042,10 @@ impl ReplaySession for RecreatorReplaySession {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
+
+    fn omniscient_db(&self) -> Option<&dyn crate::omniscient_db::OmniscientDb> {
+        Some(&self.materialization_cache)
+    }
 }
 
 impl Recreator for RecreatorReplaySession {
@@ -1006,6 +1058,20 @@ impl Recreator for RecreatorReplaySession {
         let response = self
             .stable
             .dispatch_replay_query(ReplayQuery::MaterializeInterval { tick_lo, tick_hi })?;
+        materialized_interval_from_worker_response(tick_lo, tick_hi, &response)
+    }
+}
+
+impl Recreator for ReplayWorker {
+    fn re_execute_and_materialize(
+        &mut self,
+        tick_lo: u64,
+        tick_hi: u64,
+    ) -> Result<MaterializedInterval, Box<dyn Error>> {
+        if !self.active {
+            return Err("replay worker is not active".into());
+        }
+        let response = self.dispatch_replay_query(ReplayQuery::MaterializeInterval { tick_lo, tick_hi })?;
         materialized_interval_from_worker_response(tick_lo, tick_hi, &response)
     }
 }
@@ -1330,11 +1396,88 @@ mod tests {
             name: "materialize-test".to_string(),
             index: 0,
             last_c_location: None,
+            materialization_cache: MaterializationCache::new(),
+            materialization_cache_ctfs_path: None,
         };
 
         let materialized = session.re_execute_and_materialize(10, 20).unwrap();
         worker.join().unwrap();
 
         assert_eq!(materialized.writes, vec![(0x5000, memwrite(12, 99))]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recreator_session_live_gate_uses_worker_boundary_and_cache() {
+        use crate::replay::ReplaySession;
+        use std::io::{BufRead, Write};
+        use std::os::unix::net::UnixStream;
+
+        let image = crate::ctfs_trace_reader::server_prep_encoding::encode_memwrites(
+            &crate::ctfs_trace_reader::server_prep_encoding::CollapsedMemwrites {
+                per_address: vec![(0x6000, vec![memwrite(12, 77)])],
+            },
+        );
+        let response = MaterializeIntervalResponse {
+            tick_lo: 0,
+            tick_hi: 20,
+            format: "WLOG".to_string(),
+            memwrites_base64: BASE64_STANDARD.encode(image),
+        };
+        let response_json = serde_json::to_string(&response).unwrap();
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut line = String::new();
+            {
+                let mut reader = std::io::BufReader::new(&mut server);
+                reader.read_line(&mut line).unwrap();
+            }
+            assert_eq!(
+                line.trim(),
+                r#"{"kind":"MaterializeInterval","tick_lo":0,"tick_hi":20}"#
+            );
+            server.write_all(format!("{response_json}\n").as_bytes()).unwrap();
+        });
+
+        let mut session = RecreatorReplaySession {
+            stable: ReplayWorker {
+                name: "live-gate-test".to_string(),
+                index: 0,
+                active: true,
+                recreator_exe: PathBuf::new(),
+                rr_trace_folder: PathBuf::new(),
+                live_program: None,
+                live_program_args: vec![],
+                live_cwd: None,
+                live_recording_dir: None,
+                run_id: "test-run".to_string(),
+                recording_id: "test-recording".to_string(),
+                process: None,
+                stream: Some(client),
+            },
+            recreator_exe: PathBuf::new(),
+            rr_trace_folder: PathBuf::new(),
+            name: "live-gate-test".to_string(),
+            index: 0,
+            last_c_location: None,
+            materialization_cache: MaterializationCache::new(),
+            materialization_cache_ctfs_path: None,
+        };
+
+        assert_eq!(
+            session.ensure_materialized_for_live_query(0, 20).unwrap(),
+            EnsureOutcome::CacheMiss
+        );
+        assert_eq!(
+            session.ensure_materialized_for_live_query(0, 20).unwrap(),
+            EnsureOutcome::CacheHit,
+            "covered interval is served without sending a second worker query"
+        );
+        worker.join().unwrap();
+
+        let db = session.omniscient_db().expect("session exposes live cache");
+        assert!(db.is_present());
+        assert_eq!(db.last_write_before(0x6000, 8, 13).unwrap().new_value, 77);
     }
 }

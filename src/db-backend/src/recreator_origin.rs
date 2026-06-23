@@ -245,6 +245,17 @@ pub fn run_rr_origin_chain(
         ));
     }
 
+    // M8 gate wiring: give the live materialization cache the first chance to
+    // cover the query prefix through the production replay-worker adapter. The
+    // Linux rr collector still fails closed in current workers, so materialize
+    // errors are logged and the existing watchpoint walk remains the fallback.
+    if initial_query_step > 0 {
+        match session.ensure_materialized_for_live_query(0, initial_query_step as u64 + 1) {
+            Ok(outcome) => debug!("origin_chain: materialization gate outcome: {outcome:?}"),
+            Err(err) => warn!("origin_chain: materialization gate unavailable, falling back to RR walk: {err}"),
+        }
+    }
+
     // Step 1: seek the replay worker to the query step. The worker's
     // `SeekToGeid` query is the closest analogue (`step_id` carries
     // the RR tick for recreator traces — see

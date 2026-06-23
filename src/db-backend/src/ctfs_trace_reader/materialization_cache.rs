@@ -61,10 +61,12 @@ use std::collections::BTreeMap;
 use std::error::Error;
 
 use super::block_overlay::{BlockSink, CtfsBlockOverlay};
+use super::collapse::collapse_region;
 use super::coverage_namespace::{Coverage, CoverageMap, CoverageState};
-use super::interval_tagged_map::{IntervalTaggedMap, MemWriteEntry, TickTagged};
+use super::interval_tagged_map::{IntervalTaggedMap, LineHitEntry, MemWriteEntry, TickTagged};
 use super::lazy_population_store::{StoreError, persist_into_overlay};
 use super::memwrites_namespace::encode_memwrites_cow_namespace;
+use crate::omniscient_db::{OmniscientDb, Tick, WriteRecord};
 
 /// The records a [`Recreator`] produces for one re-executed tick interval.
 ///
@@ -141,6 +143,24 @@ pub struct MaterializationCache {
     /// Maps each materialized `tick_lo` to the `interval_id` it was tagged with,
     /// so a covered read can recover the covering interval ids for merge-on-read.
     interval_ids: BTreeMap<u64, u32>,
+    /// Last collapsed `memwrites.tc` image produced by the gate. Kept only while
+    /// every coverage row is collapsed; any later sparse miss invalidates it.
+    collapsed_memwrites_image: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for MaterializationCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MaterializationCache")
+            .field("coverage_rows", &self.coverage.rows())
+            .field("memwrite_keys", &self.memwrites.keys())
+            .field("next_interval_id", &self.next_interval_id)
+            .field("interval_ids", &self.interval_ids)
+            .field(
+                "has_collapsed_memwrites_image",
+                &self.collapsed_memwrites_image.is_some(),
+            )
+            .finish()
+    }
 }
 
 impl Default for MaterializationCache {
@@ -157,6 +177,7 @@ impl MaterializationCache {
             memwrites: IntervalTaggedMap::new(),
             next_interval_id: 0,
             interval_ids: BTreeMap::new(),
+            collapsed_memwrites_image: None,
         }
     }
 
@@ -175,12 +196,18 @@ impl MaterializationCache {
             // Reserve 0 for the reloaded collapsed stream; new intervals start at 1.
             next_interval_id: 1,
             interval_ids: BTreeMap::new(),
+            collapsed_memwrites_image: None,
         }
     }
 
     /// Read access to the live coverage map (for callers / tests).
     pub fn coverage(&self) -> &CoverageMap {
         &self.coverage
+    }
+
+    /// Whether this cache has any materialized coverage or write records.
+    pub fn is_present(&self) -> bool {
+        !self.coverage.rows().is_empty() || !self.memwrites.is_empty()
     }
 
     /// The deduplicated set of `interval_id`s that may hold materialized writes:
@@ -272,6 +299,8 @@ impl MaterializationCache {
         // Mark the interval covered ONLY after its maps are complete for the
         // range (coverage_add contract / §1.3 invariant 7).
         self.coverage.coverage_add(tick_lo, tick_hi, CoverageState::Sparse)?;
+        self.collapsed_memwrites_image = None;
+        let _collapsed = self.try_collapse_completed_region(tick_lo, tick_hi)?;
 
         Ok(EnsureOutcome::CacheMiss)
     }
@@ -300,7 +329,160 @@ impl MaterializationCache {
     /// Encode the materialized writes across ALL covered intervals into a CoW
     /// `memwrites.tc` namespace image, or `None` when empty.
     fn encode_memwrites_image(&self) -> Result<Option<Vec<u8>>, StoreError> {
+        if self
+            .coverage
+            .rows()
+            .iter()
+            .all(|row| row.state == CoverageState::CollapsedComplete)
+            && let Some(image) = &self.collapsed_memwrites_image
+        {
+            return Ok(Some(image.clone()));
+        }
         encode_memwrites_cow_namespace(&self.memwrites).map_err(|e| StoreError::Decode(e.to_string()))
+    }
+
+    fn try_collapse_completed_region(&mut self, tick_lo: u64, tick_hi: u64) -> Result<bool, Box<dyn Error>> {
+        if tick_hi <= tick_lo {
+            return Ok(false);
+        }
+        let interval_size = tick_hi - tick_lo;
+        if interval_size == 0 {
+            return Ok(false);
+        }
+
+        let rows = self.coverage.rows();
+        let Some(row_index) = rows
+            .iter()
+            .position(|row| row.tick_lo == tick_lo && row.tick_hi == tick_hi)
+        else {
+            return Ok(false);
+        };
+
+        let mut start = row_index;
+        while start > 0 {
+            let prev = &rows[start - 1];
+            let cur = &rows[start];
+            if prev.tick_hi != cur.tick_lo || prev.tick_hi - prev.tick_lo != interval_size {
+                break;
+            }
+            start -= 1;
+        }
+
+        let mut end = row_index + 1;
+        while end < rows.len() {
+            let prev = &rows[end - 1];
+            let cur = &rows[end];
+            if prev.tick_hi != cur.tick_lo || cur.tick_hi - cur.tick_lo != interval_size {
+                break;
+            }
+            end += 1;
+        }
+
+        if end - start < 2 {
+            return Ok(false);
+        }
+
+        let region_lo = rows[start].tick_lo;
+        let region_hi = rows[end - 1].tick_hi;
+        for row in &rows[start..end] {
+            let expected = row.tick_lo / interval_size;
+            if row.tick_lo % interval_size != 0 || self.interval_ids.get(&row.tick_lo) != Some(&(expected as u32)) {
+                return Ok(false);
+            }
+        }
+
+        let empty_linehits: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
+        let collapsed = collapse_region(
+            &mut self.coverage,
+            &self.memwrites,
+            &empty_linehits,
+            region_lo,
+            region_hi,
+            interval_size,
+            |key| (key as u32, 0),
+        )?;
+        self.collapsed_memwrites_image = collapsed.memwrites;
+        Ok(true)
+    }
+
+    fn writes_overlapping_range(
+        &self,
+        address: u64,
+        size: u32,
+        tick_lo: u64,
+        tick_hi: u64,
+    ) -> Option<Vec<WriteRecord>> {
+        if size == 0 {
+            return Some(Vec::new());
+        }
+        match self.coverage.coverage_of(tick_lo, tick_hi) {
+            Coverage::NotCovered { .. } => None,
+            Coverage::Covered { .. } => {
+                let query_hi = address.saturating_add(size as u64);
+                let mut out = Vec::new();
+                for key in self.memwrites.keys() {
+                    let records = self
+                        .memwrites
+                        .merge_read(key, &self.covering_interval_ids(), tick_lo, tick_hi);
+                    for write in records {
+                        let write_hi = key.saturating_add(write.size as u64);
+                        if key < query_hi && address < write_hi {
+                            out.push(WriteRecord {
+                                tick: write.tick,
+                                pc: write.pc,
+                                address: key,
+                                size: write.size,
+                                old_value: write.old_value,
+                                new_value: write.new_value,
+                            });
+                        }
+                    }
+                }
+                out.sort_by_key(|write| write.tick);
+                Some(out)
+            }
+        }
+    }
+}
+
+impl OmniscientDb for MaterializationCache {
+    fn last_write_before(&self, addr: u64, size: u32, tick: Tick) -> Option<WriteRecord> {
+        if tick == 0 {
+            return None;
+        }
+        self.writes_overlapping_range(addr, size, 0, tick)
+            .and_then(|writes| writes.into_iter().next_back())
+    }
+
+    fn value_at(&self, addr: u64, size: u32, tick: Tick) -> Option<Vec<u8>> {
+        if size == 0 || size > 8 {
+            return None;
+        }
+        let write = self.last_write_before(addr, size, tick)?;
+        let offset = addr.checked_sub(write.address)?;
+        let query_hi = addr.checked_add(size as u64)?;
+        let write_hi = write.address.checked_add(write.size as u64)?;
+        if query_hi > write_hi || offset.checked_add(size as u64)? > 8 {
+            return None;
+        }
+        let bytes = write.new_value.to_le_bytes();
+        let start = offset as usize;
+        let end = start + size as usize;
+        Some(bytes[start..end].to_vec())
+    }
+
+    fn writes_in_range(&self, addr: u64, size: u32, tick_min: Tick, tick_max: Tick) -> Vec<WriteRecord> {
+        let tick_hi = tick_max.saturating_add(1);
+        self.writes_overlapping_range(addr, size, tick_min, tick_hi)
+            .unwrap_or_default()
+    }
+
+    fn source_line_hits(&self, _file_id: u32, _line: u32) -> Vec<Tick> {
+        Vec::new()
+    }
+
+    fn is_present(&self) -> bool {
+        MaterializationCache::is_present(self)
     }
 }
 
@@ -315,6 +497,7 @@ mod tests {
     };
     use crate::ctfs_trace_reader::lazy_population_store::{CTFS_MEMWRITES_FILE, WarmRestartReader};
     use crate::ctfs_trace_reader::memwrites_namespace::MemwritesNamespace;
+    use crate::ctfs_trace_reader::server_prep_encoding::WLOG_MAGIC;
 
     const ADDR: u64 = 0x4000;
 
@@ -584,6 +767,94 @@ mod tests {
                 .map(|w| w.tick)
                 .collect::<Vec<_>>(),
             vec![5100]
+        );
+    }
+
+    #[test]
+    fn gate_collapses_aligned_contiguous_span() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collapsed.ct");
+        write_minimal_ctfs(&path, &[("stub.dat", &[1u8])]).unwrap();
+
+        let mut cache = MaterializationCache::new();
+        let mut rec = FakeRecreator::new()
+            .with_interval(0, vec![mw(100, 1)])
+            .with_interval(1000, vec![mw(1100, 2)]);
+
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 0, 1000).unwrap(),
+            EnsureOutcome::CacheMiss
+        );
+        assert_eq!(cache.coverage_of(0, 1000), Coverage::Covered { all_collapsed: false });
+
+        assert_eq!(
+            cache.ensure_interval_materialized(&mut rec, 1000, 2000).unwrap(),
+            EnsureOutcome::CacheMiss
+        );
+        assert_eq!(cache.coverage_of(0, 2000), Coverage::Covered { all_collapsed: true });
+
+        let backing = Box::new(InMemoryBlockSource::new(std::fs::read(&path).unwrap()));
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+        cache.persist(&mut overlay).unwrap();
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        cache.flush(&mut overlay, &mut sink).unwrap();
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        let memwrites_image = reader.read_file(CTFS_MEMWRITES_FILE).unwrap();
+        assert_eq!(
+            &memwrites_image[..WLOG_MAGIC.len()],
+            WLOG_MAGIC,
+            "collapsed gate persist emits server-prep WLOG bytes"
+        );
+        let warm = WarmRestartReader::open(&mut reader).unwrap();
+        assert_eq!(warm.coverage_of(0, 2000), Coverage::Covered { all_collapsed: true });
+        assert_eq!(
+            warm.writes_in_range(ADDR, 0, 2000).unwrap().unwrap(),
+            vec![mw(100, 1), mw(1100, 2)]
+        );
+    }
+
+    #[test]
+    fn materialization_cache_omniscient_db_reads_covered_memwrites() {
+        let mut cache = MaterializationCache::new();
+        let mut rec = FakeRecreator::new().with_interval(0, vec![mw(100, 0x1122), mw(500, 0x3344)]);
+        cache.ensure_interval_materialized(&mut rec, 0, 1000).unwrap();
+
+        let db: &dyn OmniscientDb = &cache;
+        assert!(db.is_present());
+        assert_eq!(
+            db.last_write_before(ADDR, 8, 501).unwrap(),
+            WriteRecord {
+                tick: 500,
+                pc: 0xCAFE,
+                address: ADDR,
+                size: 8,
+                old_value: 0,
+                new_value: 0x3344,
+            }
+        );
+        assert_eq!(db.value_at(ADDR, 2, 501).unwrap(), vec![0x44, 0x33]);
+        assert_eq!(
+            db.value_at(ADDR + 1, 2, 501).unwrap(),
+            vec![0x33, 0x00],
+            "partial-address reads slice at the requested byte offset"
+        );
+        assert_eq!(
+            db.value_at(ADDR + 7, 2, 501),
+            None,
+            "a single write cannot prove bytes beyond its covered range"
+        );
+        assert_eq!(
+            db.writes_in_range(ADDR, 8, 0, 999)
+                .into_iter()
+                .map(|write| write.tick)
+                .collect::<Vec<_>>(),
+            vec![100, 500]
+        );
+        assert_eq!(
+            db.writes_in_range(ADDR, 8, 2000, 3000),
+            Vec::<WriteRecord>::new(),
+            "uncovered ranges do not claim negative knowledge"
         );
     }
 }
