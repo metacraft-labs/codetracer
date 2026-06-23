@@ -109,6 +109,19 @@ NIM_DEBUG = $(NIM_BIN) $(NIM_DEBUG_FLAGS)
 NIM_RELEASE = $(NIM_BIN) $(NIM_RELEASE_FLAGS)
 NIM_DANGER  = $(NIM_BIN) $(NIM_DANGER_FLAGS)
 
+# NIM_SELECTED is the Nim compiler the build-graph macros use. It is chosen by
+# the tup variant's configuration: the `build-release` variant
+# (src/build-release/tup.config) sets `CONFIG_DEBUG=0` → `@(DEBUG)` is "0" →
+# release flags; every other variant (notably `build-debug`, CONFIG_DEBUG=1,
+# and any variant that omits it) keeps the debug compiler, so behaviour is
+# unchanged for the default debug build. This is how a single Tuprules drives
+# both `tup build-debug` and `tup build-release`.
+ifeq (@(DEBUG),0)
+NIM_SELECTED = $(NIM_RELEASE)
+else
+NIM_SELECTED = $(NIM_DEBUG)
+endif
+
 ifeq (@(TUP_PLATFORM),win32)
 EXE_SUFFIX = .exe
 else
@@ -199,7 +212,7 @@ endif
 # re-evaluation to re-run module init so changed Nim source actually
 # takes effect). No code in the codebase calls the Nim HCR runtime,
 # so dropping the flag is a no-op for everything except HMR.
-!nim_js = |> ^ %f^ $(NIM_DEBUG)\
+!nim_js = |> ^ %f^ $(NIM_SELECTED)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
 -d:ctHmr\
@@ -211,19 +224,19 @@ endif
 --out:%o\
 js %f |> %B.js
 
-!nim_node = |> ^ %f^ $(NIM_DEBUG)\
+!nim_node = |> ^ %f^ $(NIM_SELECTED)\
 -d:nodejs\
 --out:%o\
 js %f |> %B.js
 
-!nim_node_index = |> ^ %f^ $(NIM_DEBUG)\
+!nim_node_index = |> ^ %f^ $(NIM_SELECTED)\
 -d:ctIndex\
 -d:nodejs\
 --sourcemap:on\
 --out:%o\
 js %f |> %B.js %B.js.map
 
-!nim_node_subwindow = |> ^ %f^ $(NIM_DEBUG)\
+!nim_node_subwindow = |> ^ %f^ $(NIM_SELECTED)\
 -d:chronicles_enabled=off\
 -d:ctRenderer\
 --debugInfo:on\
@@ -233,7 +246,7 @@ js %f |> %B.js %B.js.map
 --out:%o\
 js %f |> %B.js %B.js.map
 
-!nim_node_index_server = |> ^ %f^ $(NIM_DEBUG)\
+!nim_node_index_server = |> ^ %f^ $(NIM_SELECTED)\
 -d:ctIndex\
 -d:server\
 -d:nodejs\
@@ -241,12 +254,12 @@ js %f |> %B.js %B.js.map
 --out:%o \
 js %f |> %B.js %B.js.map
 
-!codetracer_shell = |> $(NIM_DEBUG)\
+!codetracer_shell = |> $(NIM_SELECTED)\
 -d:nodejs\
 --out:%o\
 js %f |> %o
 
-!nim_test_js = |> ^ %f^ $(NIM_DEBUG) \
+!nim_test_js = |> ^ %f^ $(NIM_SELECTED) \
 -d:ctTest\
 -d:chronicles_log_level=DEBUG\
 --verbosity:1\
@@ -295,7 +308,7 @@ DYNLIB_OVERRIDE_FLAGS = \
 --passL:"-lzip"
 endif
 
-!nim_c = |> ^ %f^ $(NIM_DEBUG)\
+!nim_c = |> ^ %f^ $(NIM_SELECTED)\
 -d:ssl \
 -d:useOpenssl3 \
 $(DYNLIB_OVERRIDE_FLAGS) \
@@ -318,7 +331,7 @@ CODETRACER_FLAGS = \
 $(DYNLIB_OVERRIDE_FLAGS)
 
 # Standard CodeTracer binary build (e.g. db-backend-record).
-!codetracer = |> $(NIM_DEBUG)\
+!codetracer = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
 --nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
 --out:%o\
@@ -328,14 +341,14 @@ c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
 # BPF capabilities (cap_bpf+cap_perfmon+cap_dac_read_search) are applied as a
 # post-build step in scripts/build-once.sh, because tup's FUSE sandbox
 # prevents sudo from running during the build.
-!codetracer_bpf = |> $(NIM_DEBUG)\
+!codetracer_bpf = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
 --nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\
 --out:%o\
 c %f\
 |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
 
-!nim_tester = |> ^ %f^ $(NIM_DEBUG) \
+!nim_tester = |> ^ %f^ $(NIM_SELECTED) \
 --nimcache:/tmp/ct-nim-cache/tester \
 --warnings:on \
 --hints:on \
