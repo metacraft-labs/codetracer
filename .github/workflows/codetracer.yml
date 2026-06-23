@@ -396,141 +396,23 @@ jobs:
           submodules: recursive
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Checkout metacraft-manifests (workspace locks)
-        uses: actions/checkout@v5
+      - name: Setup dev env
+        # setup-dev-env (windows-diy) clones the cross-repo siblings adjacent
+        # to this checkout at the workspace-lock-pinned revisions and sources
+        # env.ps1, whose ensure-* helpers provision the Windows toolchain
+        # (capnp / cargo / nim / nimble), persisting the env to GITHUB_ENV /
+        # GITHUB_PATH for subsequent steps. This replaces the former
+        # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps AND
+        # the open-coded toolchain installs (dtolnay rust-toolchain, choco
+        # capnproto, choco nim).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          repository: metacraft-labs/metacraft-manifests
-          ref: latest
-          path: _manifests
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Resolve cross-repo workspace-lock SHA
-        shell: bash
-        run: |
-          case "${{ github.event_name }}" in
-            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-            *) CANDS="${{ github.sha }}" ;;
-          esac
-          LOCK_SHA=""
-          for c in $CANDS; do
-            [ -z "$c" ] && continue
-            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-                 --repo codetracer --sibling codetracer-trace-format \
-                 --manifest-dir "${{ github.workspace }}/_manifests" \
-                 --sha "$c" --no-walk >/dev/null 2>&1; then
-              LOCK_SHA="$c"; break
-            fi
-          done
-          if [ -z "$LOCK_SHA" ]; then
-            echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
-            exit 1
-          fi
-          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-          echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
-
-      - name: Resolve codetracer-trace-format ref
-        id: resolve-trace-format-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-trace-format \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-trace-format
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format
+          env-flavor: windows-diy
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-trace-format-nim ref
-        id: resolve-trace-format-nim-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-trace-format-nim \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-trace-format-nim
-        # codetracer_trace_writer_nim's build.rs (in codetracer-trace-format)
-        # resolves the Nim FFI entry point from
-        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``.
-        # nim-reader is on by default in src/db-backend/Cargo.toml, so a
-        # plain ``cargo build`` triggers the build script -- it panics
-        # without the sibling.  trace-format-nim has no .gitmodules so
-        # submodules: "false" prevents clone-repo's unconditional sed.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format-nim
-          ref: ${{ steps.resolve-trace-format-nim-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-native-recorder ref
-        id: resolve-mcr-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-native-recorder \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-native-recorder
-        # src/db-backend/build.rs canonicalizes
-        # ``../../../codetracer-native-recorder`` and links the Nim
-        # ct_emulator into replay-server.  ``cargo build`` panics
-        # with ``expected sibling codetracer-native-recorder``
-        # without this clone.  codetracer-native-recorder has no
-        # .gitmodules, so pass submodules: 'false' to avoid the
-        # clone-repo action's unconditional ``sed -i ... .gitmodules``
-        # step (which fails with ``can't read .gitmodules``).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-recorder
-          ref: ${{ steps.resolve-mcr-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Install capnproto
-        shell: pwsh
-        run: choco install capnproto -y
-
-      - name: Install Nim toolchain
-        # codetracer_trace_writer_nim's build.rs invokes ``nimble
-        # install --depsOnly`` to resolve the .nimble requires before
-        # compiling the FFI sources.  nim-reader is in the default
-        # feature set of replay-server, so plain ``cargo build`` pulls
-        # in the writer_nim crate and that build script must find
-        # ``nimble`` on PATH.
-        #
-        # ``choco install`` modifies the system PATH but the change is
-        # not reflected in subsequent step shells, so explicitly emit
-        # the Nim + nimble bin dirs into GITHUB_PATH so later steps
-        # (Build db-backend etc.) can find them.
-        shell: pwsh
-        run: |
-          choco install nim -y
-          # nim installs to C:\tools\Nim\nim-X.Y.Z\bin and nimble's
-          # pkg dir lives at $HOME\.nimble\bin.  Resolve the actual nim
-          # bin via a wildcard so this keeps working across version
-          # bumps in the chocolatey package.
-          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
-          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
-          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+          siblings: |
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            codetracer-native-recorder
 
       - name: Remove WSL bash stub from System32
         # db-backend's build.rs runs ``Command::new("bash") ...
@@ -577,7 +459,7 @@ jobs:
         # build_native_api.sh's ``--path:`` flags pick it up.
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: cargo build
+        run: dev-exec cargo build
 
       - name: Test db-backend
         working-directory: src/db-backend
@@ -606,7 +488,7 @@ jobs:
         # + runtimes available.  Mirror the skip pattern used by the
         # db-backend Nix derivation in nix/packages/default.nix.
         run: |
-          cargo test -- \
+          dev-exec cargo test -- \
             --skip ruby_flow_integration \
             --skip bash_flow_integration \
             --skip zsh_flow_integration \
@@ -617,12 +499,12 @@ jobs:
       - name: Build backend-manager
         working-directory: src/backend-manager
         shell: bash
-        run: cargo build
+        run: dev-exec cargo build
 
       - name: Build tui
         working-directory: src/tui
         shell: bash
-        run: cargo build
+        run: dev-exec cargo build
 
       - name: Clippy db-backend
         working-directory: src/db-backend
@@ -632,22 +514,22 @@ jobs:
         # a regeneration with stew on the import path.
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: cargo clippy --all-targets -- -D warnings
+        run: dev-exec cargo clippy --all-targets -- -D warnings
 
       - name: Clippy backend-manager
         working-directory: src/backend-manager
         shell: bash
-        run: cargo clippy --all-targets -- -D warnings
+        run: dev-exec cargo clippy --all-targets -- -D warnings
 
       - name: Clippy tui
         working-directory: src/tui
         shell: bash
-        run: cargo clippy --all-targets -- -D warnings
+        run: dev-exec cargo clippy --all-targets -- -D warnings
 
       - name: Test tui named pipe
         working-directory: src/tui
         shell: bash
-        run: cargo test --bin simple-tui windows_named_pipe
+        run: dev-exec cargo test --bin simple-tui windows_named_pipe
 
   # Headless DAP test suite on Windows using MCR backend.
   # Installs all dependencies via env.ps1, builds ct-mcr from the
@@ -2158,73 +2040,63 @@ jobs:
           submodules: recursive
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Checkout metacraft-manifests (workspace locks)
-        uses: actions/checkout@v5
+      - name: Setup dev env
+        # setup-dev-env (nix) installs Nix via the shared setup-nix (which
+        # skips the install when nix is already on PATH for the self-hosted
+        # nixos runner, and otherwise installs via the Determinate installer —
+        # the workaround for the hosted-macOS ``eDSRecordAlreadyExists``
+        # failure that the older installer trips on the GitHub-hosted Apple
+        # Silicon image) and clones the cross-repo siblings adjacent to this
+        # checkout (``../<name>``) at the workspace-lock-pinned revisions. This
+        # replaces the former Checkout-manifests / Resolve-lock / per-sibling
+        # clone-repo steps (both legs), the nixos ``Install Nix`` (setup-nix),
+        # and the bespoke macOS ``Install Nix (… for ct_cli build)`` Determinate
+        # step (Nix is now provisioned here for the macOS sibling
+        # ``nix develop`` builds below).
+        #
+        # NOTE: the macOS leg keeps its open-coded ``just`` / Python / Rust
+        # toolchain steps below — its ``./non-nix-build/build.sh`` and
+        # ``./ci/test/ui-tests-db.sh`` invocations run at the top shell (the
+        # explicitly *non-nix* macOS build path) and rely on those tools being
+        # on the system PATH rather than inside codetracer's nix dev shell.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          repository: metacraft-labs/metacraft-manifests
-          ref: latest
-          path: _manifests
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Resolve cross-repo workspace-lock SHA
-        shell: bash
-        run: |
-          case "${{ github.event_name }}" in
-            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-            *) CANDS="${{ github.sha }}" ;;
-          esac
-          LOCK_SHA=""
-          for c in $CANDS; do
-            [ -z "$c" ] && continue
-            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-                 --repo codetracer --sibling codetracer-trace-format \
-                 --manifest-dir "${{ github.workspace }}/_manifests" \
-                 --sha "$c" --no-walk >/dev/null 2>&1; then
-              LOCK_SHA="$c"; break
-            fi
-          done
-          if [ -z "$LOCK_SHA" ]; then
-            echo "::error::No repo-workspaces workspace lock for codetracer (candidates: $CANDS). The commit must be published through the workspace tooling (pre-push hook / 'workspace lock')."
-            exit 1
-          fi
-          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-          echo "Resolved cross-repo lock SHA for codetracer: $LOCK_SHA"
-
-      - name: Resolve codetracer-trace-format ref
-        id: resolve-trace-format-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-trace-format \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-trace-format into libs/
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format
-          ref: ${{ steps.resolve-trace-format-ref.outputs.ref }}
-          path: ${{ github.workspace }}/libs/codetracer-trace-format
+          env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          nix-develop-args: '.?submodules=1'
+          siblings: |
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            codetracer-native-recorder
+            codetracer-visual-replay
+            codetracer-native-backend
+
+      - name: Stage codetracer-trace-format into libs/
+        # The nix flake build below overrides the codetracer-trace-format input
+        # with the in-repo path ./libs/codetracer-trace-format; mirror the
+        # lock-pinned sibling clone (placed at ../codetracer-trace-format by
+        # setup-dev-env) there.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
 
       # --- NixOS setup ---
-      - name: Install Nix
-        if: matrix.platform == 'nixos'
-        uses: ./.github/actions/setup-nix
-        with:
-          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Build CodeTracer (nix)
         if: matrix.platform == 'nixos'
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       # --- macOS setup ---
+      # The macOS leg is the explicitly non-nix build path on the hosted
+      # ``macos-latest`` runner (``./non-nix-build/build.sh`` +
+      # ``./ci/test/ui-tests-db.sh`` run at the top shell). It still needs
+      # just / Python / Rust on the system PATH; the nix dev env from
+      # ``Setup dev env`` only backs the sibling ``nix develop`` builds.
       - name: Install just (macOS)
         if: matrix.platform == 'macos'
         run: brew install just
@@ -2250,118 +2122,16 @@ jobs:
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
 
-      - name: Stage codetracer-trace-format as a sibling (macOS)
-        if: matrix.platform == 'macos'
-        # ``src/db-backend/Cargo.toml`` has path deps like
-        # ``../../../codetracer-trace-format/codetracer_ctfs`` -- they
-        # resolve to ``$workspace/../codetracer-trace-format``.  The
-        # earlier ``Clone codetracer-trace-format into libs/`` step
-        # gives us only the in-repo copy used by the nix flake
-        # override.  Symlink it next to the checkout so cargo finds
-        # the path dependency at the expected location.
-        shell: bash
-        run: |
-          set -euo pipefail
-          ln -snf "${{ github.workspace }}/libs/codetracer-trace-format" \
-            "${{ github.workspace }}/../codetracer-trace-format"
-
-      - name: Resolve codetracer-trace-format-nim ref (macOS)
-        if: matrix.platform == 'macos'
-        id: resolve-trace-format-nim-ref-macos
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-trace-format-nim \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-trace-format-nim sibling (macOS)
-        if: matrix.platform == 'macos'
-        # ``codetracer_trace_writer_nim``'s ``build.rs`` (inside
-        # codetracer-trace-format) reads
-        # ``../codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim``
-        # at cargo build time.  Without this clone the macOS non-nix
-        # build aborts with ``Nim FFI entry point not found``.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-trace-format-nim
-          ref: ${{ steps.resolve-trace-format-nim-ref-macos.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-trace-format-nim
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-native-recorder ref (macOS)
-        if: matrix.platform == 'macos'
-        id: resolve-native-recorder-ref-macos
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-native-recorder \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-native-recorder sibling (macOS)
-        if: matrix.platform == 'macos'
-        # ``src/db-backend/build.rs`` canonicalises
-        # ``../../../codetracer-native-recorder`` (i.e. the workspace
-        # sibling) at compile time.  Without this clone cargo aborts
-        # with ``expected sibling codetracer-native-recorder repo``.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-recorder
-          ref: ${{ steps.resolve-native-recorder-ref-macos.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-visual-replay ref (macOS)
-        if: matrix.platform == 'macos'
-        id: resolve-visual-replay-ref-macos
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-visual-replay \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-visual-replay sibling (macOS)
-        if: matrix.platform == 'macos'
-        # ``ct_cli`` (codetracer-native-recorder) pulls
-        # ``gfx_stream/ctfs_visual`` from codetracer-visual-replay/src
-        # at compile time; without this clone ``just build-ct-mcr``
-        # aborts with ``cannot open file: gfx_stream/ctfs_visual``.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-visual-replay
-          ref: ${{ steps.resolve-visual-replay-ref-macos.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-visual-replay
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
-
-      - name: Resolve codetracer-native-backend ref (macOS)
-        if: matrix.platform == 'macos'
-        id: resolve-native-backend-ref-macos
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer --sibling codetracer-native-backend \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone codetracer-native-backend sibling (macOS)
-        if: matrix.platform == 'macos'
-        # ``just build-ct-mcr`` -> ``build-license-ffi`` cds into
-        # ``../codetracer-native-backend`` and runs ``cargo build``
-        # for ``libct_license_ffi``.  Without this clone the recipe
-        # aborts with ``could not find Cargo.toml`` at line 110 of
-        # the recorder's Justfile.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer-native-backend
-          ref: ${{ steps.resolve-native-backend-ref-macos.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.app-token.outputs.token }}
-          submodules: 'false'
+      # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
+      # codetracer-native-recorder, codetracer-visual-replay and
+      # codetracer-native-backend are now cloned adjacent to this checkout
+      # (``../<name>``) at workspace-lock-pinned revisions by the
+      # ``Setup dev env`` step above. The macOS cargo path deps
+      # (``../../../codetracer-trace-format/...``), the trace-format-nim FFI
+      # entry point, the native-recorder canonicalize, the ct_cli
+      # ``gfx_stream/ctfs_visual`` import and the build-license-ffi recipe all
+      # resolve against those clones, so the former per-sibling resolve/clone
+      # steps (and the trace-format symlink) are no longer needed.
 
       - name: Clone codetracer-snapshot-codecs sibling (macOS)
         if: matrix.platform == 'macos'
@@ -2390,38 +2160,14 @@ jobs:
           gh-token: ${{ steps.app-token.outputs.token }}
           submodules: 'false'
 
-      - name: Install Nix (macOS, for ct_cli build)
-        # See comment block below for why we don't use the shared
-        # ``setup-nix`` composite on macos-latest.
-        # The macOS Playwright suite includes visual-replay specs
-        # (``visual-replay-real-recording.spec.ts``,
-        # ``visual-recording-book-screenshots.spec.ts``) that
-        # ``requireExecutable(ct_cli)`` at module-load time.  Build
-        # ct_cli through the sibling's ``just`` target under
-        # ``direnv exec`` -- the pattern documented in
-        # metacraft-dev-guidelines/policies/ci-workflow-standards.md
-        # "Building artifacts from sibling repos".  That target's
-        # ``.envrc`` does ``use flake``, so we need a working Nix
-        # install on the runner first.
-        #
-        # We bypass the shared ``setup-nix`` composite because the
-        # install-nix action used by the regular setup path on
-        # ``macos-latest`` (arm64) trips
-        # ``eDSRecordAlreadyExists`` while creating the
-        # ``_nixbld1`` build user -- the GitHub-hosted Apple Silicon
-        # image carries leftover Nix state from its base snapshot
-        # that the older installer can't recover from.
-        # DeterminateSystems/nix-installer-action is the
-        # recommended workaround on that runner image; the regular
-        # setup path remains fine for nixos / darwin self-hosted
-        # runners because those don't trip the same state issue.
-        if: matrix.platform == 'macos'
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          extra-conf: |
-            access-tokens = github.com=${{ steps.app-token.outputs.token }}
-            substituters = https://cache.nixos.org ${{ vars.ATTIC_SUBSTITUTER }}
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+      # NOTE: Nix is installed by the ``Setup dev env`` step above. On the
+      # hosted ``macos-latest`` (arm64) runner the shared setup-nix installs
+      # via DeterminateSystems/nix-installer-action — the workaround for the
+      # ``eDSRecordAlreadyExists`` failure that the older installer trips on
+      # the GitHub-hosted Apple Silicon image (leftover Nix state in the base
+      # snapshot). The former bespoke ``Install Nix (macOS, for ct_cli build)``
+      # step is therefore no longer needed; the visual-replay sibling builds
+      # below still drive each sibling's own ``nix develop`` flake.
 
       - name: Build ct-mcr via codetracer-native-recorder nix develop (macOS)
         if: matrix.platform == 'macos'
