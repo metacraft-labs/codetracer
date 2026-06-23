@@ -91,8 +91,9 @@
 import std/[json, os, algorithm, tables]
 import results
 
-import trace_reader   # ExecutedFunction
-import engine         # deepHash, CachedTest, CachedDep, record, IncrementalCache, decide ...
+import trace_reader     # ExecutedFunction
+import engine           # deepHash, CachedTest, CachedDep, record, IncrementalCache, decide ...
+import native_readfiles # M6a: MCR/RR accessed-file extractor (read-file set)
 
 export results
 
@@ -157,6 +158,38 @@ proc rootHashOfDeps*(deps: seq[CachedDep]): string =
     pairs.add (dep.fn.name, dep.shallow)
   deepHash(pairs)
 
+const readFileKeyTag = "\x02readfile\x00"
+  ## Namespace prefix folded into a read-file's identity key in the root-hash
+  ## fold. Keeps read-file material in a DISTINCT key space from executed
+  ## functions: a function named `data.json` and a read file `data.json` cannot
+  ## collide, and — crucially — a test with NO read files produces the SAME root
+  ## hash as `rootHashOfDeps` alone (no read-file pair is contributed), so M6a is
+  ## a value-only extension of the M2 schema, not a hash-rule change for the
+  ## existing interpreted/native function-only tests.
+
+proc rootHashOfDepsAndReadFiles*(deps: seq[CachedDep];
+                                 readFiles: seq[ReadFileDep]): string =
+  ## The M6a ROOT HASH: the §16.7.3 fold over the executed functions PLUS the
+  ## read-file dependencies, so a changed READ FILE (its record-time content
+  ## signature changes) changes the test's root hash and re-decides — keeping the
+  ## M4b invalidation correct in BOTH the deep and shallow cases.
+  ##
+  ## Read files are folded into the SAME sorted-by-name accumulator the function
+  ## fold uses (`engine.deepHash` over `(identity, hash)` pairs), each read file
+  ## contributing `(readFileKeyTag & path, fileContentHash)`. Because the key is
+  ## namespaced (`readFileKeyTag`), read-file material never collides with a
+  ## function's, and an EMPTY `readFiles` reduces EXACTLY to `rootHashOfDeps` —
+  ## so this is forward-compatible: existing function-only artifacts keep their
+  ## root hash byte-for-byte, and adding a read file is a value change. The fold
+  ## stays ORDER-INDEPENDENT over both sets (the combined list is re-sorted by
+  ## key inside `deepHash`).
+  var pairs: seq[(string, string)]
+  for dep in deps:
+    pairs.add (dep.fn.name, dep.shallow)
+  for rf in readFiles:
+    pairs.add (readFileKeyTag & rf.path, rf.hash)
+  deepHash(pairs)
+
 # ---------------------------------------------------------------------------
 # Artifact <-> engine CachedTest bridge (isomorphic; lossless round-trip)
 # ---------------------------------------------------------------------------
@@ -173,6 +206,20 @@ proc fromCachedTest*(testId: string; ct: CachedTest): RootHashArtifact =
     executedFunctions: ct.deps,
     deterministic: ct.deterministic,
     readFiles: @[])
+
+proc fromCachedTestWithReadFiles*(testId: string; ct: CachedTest;
+                                  readFiles: seq[ReadFileDep]): RootHashArtifact =
+  ## M6a: project a `CachedTest` PLUS the extracted read-file set into the
+  ## artifact, folding the read files into the `rootHash` so a changed read file
+  ## changes the root hash and re-decides. With an EMPTY `readFiles` this is
+  ## EXACTLY `fromCachedTest` (the fold reduces to `rootHashOfDeps == ct.deepHash`),
+  ## so it is a strict superset — existing function-only artifacts are unchanged.
+  RootHashArtifact(
+    testId: testId,
+    rootHash: rootHashOfDepsAndReadFiles(ct.deps, readFiles),
+    executedFunctions: ct.deps,
+    deterministic: ct.deterministic,
+    readFiles: readFiles)
 
 proc toCachedTest*(a: RootHashArtifact): CachedTest =
   ## Reconstruct an engine `CachedTest` from the artifact so a later run can
@@ -367,11 +414,24 @@ proc buildArtifact*(testId, traceDir, sourceRoot: string;
   ##
   ## An unreadable/unsupported trace is an `Err` (propagated from `record`) — the
   ## caller MUST re-run, never persist a bogus artifact (fail-safe contract).
+  ##
+  ## M6a: the read-file dependency set is ALSO extracted from the recording (the
+  ## MCR/RR accessed-file projection) and folded into the artifact's `rootHash` +
+  ## `readFiles`, so a changed read file re-decides. A trace that carries NO
+  ## read-file projection (the interpreted M0 fixtures) yields an EMPTY read-file
+  ## set (correct — no file reads, no dependency); a CORRUPT projection is an
+  ## `Err` (⇒ re-run, fail-safe), never a silently-dropped dependency.
   var cache = initCache()
   let rec = record(cache, testId, traceDir, sourceRoot, deterministic = deterministic)
   if rec.isErr:
     return err(rec.error)
-  ok(fromCachedTest(testId, cache.entries[testId]))
+  let readsRes = readFileDepsNativeOrEmpty(traceDir)
+  if readsRes.isErr:
+    return err("read-file extraction failed: " & readsRes.error)
+  var readFiles: seq[ReadFileDep]
+  for rf in readsRes.value:
+    readFiles.add ReadFileDep(path: rf.path, hash: rf.hash)
+  ok(fromCachedTestWithReadFiles(testId, cache.entries[testId], readFiles))
 
 # ---------------------------------------------------------------------------
 # Re-decide from a persisted artifact (REUSES the engine decide)
