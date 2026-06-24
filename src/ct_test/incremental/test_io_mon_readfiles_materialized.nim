@@ -78,6 +78,21 @@ proc failedReadRec(path: string): MonitorRecord =
   MonitorRecord(kind: mrFileOpen, observationKind: moFileOpen,
                 seq: 4, result: -1, path: path)
 
+proc spawnRec(childPid: uint64; binaryPath: string; seqNo: uint64): MonitorRecord =
+  ## A successful spawn observation (the shim tags posix_spawn/fork with
+  ## `moExecute`), carrying the spawned child's pid in `childOsPid`. `result`
+  ## mirrors the shim's convention (the child pid for a successful spawn).
+  MonitorRecord(kind: mrProcessSpawn, observationKind: moExecute,
+                seq: seqNo, result: int64(childPid), childOsPid: childPid,
+                path: binaryPath)
+
+proc startRec(ownPid: uint64; seqNo: uint64): MonitorRecord =
+  ## A process-start observation an INJECTED child emits (`recordProcessStart`),
+  ## carrying its OWN pid in `osPid` — the confirmation that the shim loaded in
+  ## that process.
+  MonitorRecord(kind: mrProcessStart, observationKind: moProcessStart,
+                seq: seqNo, result: 0, osPid: ownPid, detail: "shim-loaded")
+
 proc dep(name, file: string, defLine: int, shallow: string): CachedDep =
   CachedDep(fn: ExecutedFunction(name: name, file: file, defLine: defLine),
             shallow: shallow)
@@ -118,6 +133,63 @@ suite "M6b — io-mon read-file capture for materialized recorders":
     # Each carries a non-empty capture-time content signature.
     for rf in reads.value:
       check rf.hash.len > 0
+
+  test "an unmonitored spawned subtree makes the capture INCOMPLETE (fail-safe)":
+    # §16.7.8 process-tree completeness. The parent reads its own input AND
+    # spawns two children. Child pid 100 is INJECTED (it emits a shim-loaded
+    # process-start), so its subtree is confirmed. Child pid 200 is NOT injected
+    # (no process-start for pid 200 — e.g. a SIP exec with no drop-in), so its
+    # subtree's reads are missing. The capture is non-empty (the parent read a
+    # file), so the empty-capture gate would NOT catch this — the subtree guard
+    # MUST, or a file pid 200 read could change without re-running (a false skip).
+    let work = tmpDir("subtree")
+    defer: removeDir(work)
+    let parentInput = work / "parent.cfg"
+    writeFile(parentInput, "{}")
+    # Real, existing binary paths so the launched-binary fold's capture-time stat
+    # succeeds; the subtree-confirmation logic keys on the spawn's CHILD PID, not
+    # on the binary path, so the identities are irrelevant to the guard itself.
+    let binConfirmed = work / "confirmed.bin"
+    let binUnmonitored = work / "unmonitored.bin"
+    writeFile(binConfirmed, "\x7fELF")
+    writeFile(binUnmonitored, "\x7fELF")
+
+    let depUnconfirmed = depFileFromRecords(@[
+      startRec(50, 1),                       # the parent itself is injected
+      readRec(parentInput),                  # the parent read (non-empty capture)
+      spawnRec(100, binConfirmed, 2),        # child 100 spawned
+      startRec(100, 3),                      # child 100 confirmed monitored
+      spawnRec(200, binUnmonitored, 4),      # child 200 spawned …
+      # … but NO startRec(200): child 200 ran UNMONITORED.
+    ])
+    let unconfirmed = unconfirmedSpawnedSubtrees(depUnconfirmed)
+    check unconfirmed == @[200'u64]          # exactly the unconfirmed child
+    check not captureSubtreeConfirmed(depUnconfirmed)
+    # The read set still folds (the parent's read + the launched binaries) — the
+    # INCOMPLETENESS is signalled separately so the caller forces
+    # deterministic=false ⇒ re-run.
+    let reads = readFilesFromDepFile(depUnconfirmed)
+    check reads.isOk
+
+    # Contrast: when EVERY spawned child confirms (both emit a process-start),
+    # the tree is complete and the capture is trusted.
+    let depConfirmed = depFileFromRecords(@[
+      startRec(50, 1),
+      readRec(parentInput),
+      spawnRec(100, binConfirmed, 2), startRec(100, 3),
+      spawnRec(200, binUnmonitored, 4), startRec(200, 5),
+    ])
+    check unconfirmedSpawnedSubtrees(depConfirmed).len == 0
+    check captureSubtreeConfirmed(depConfirmed)
+
+    # A FAILED spawn (result < 0) launched no subtree to confirm — not flagged.
+    let depFailedSpawn = depFileFromRecords(@[
+      startRec(50, 1),
+      readRec(parentInput),
+      MonitorRecord(kind: mrProcessSpawn, observationKind: moExecute,
+                    seq: 2, result: -1, childOsPid: 0, path: binUnmonitored),
+    ])
+    check captureSubtreeConfirmed(depFailedSpawn)
 
   test "captured set bridges to the M6a projection and re-extracts identically":
     # PROVE the io-mon-captured set feeds the SAME fold as M6a: write it as the

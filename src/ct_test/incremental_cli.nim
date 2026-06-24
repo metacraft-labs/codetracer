@@ -301,8 +301,32 @@ proc captureMaterializedReadFiles(repo, programCommand, traceDir: string):
       "did not fire — e.g. the macOS chained-fixups gap on macOS 26/arm64e); " &
       "treating the read-file set as UNKNOWN ⇒ fail-safe re-run, never a false " &
       "skip")
+  # FAIL-SAFE on an UNMONITORED SPAWNED SUBTREE (§16.7.8 process-tree
+  # completeness): even with a non-empty parent read set, if the monitor
+  # OBSERVED a spawn/exec whose child never confirmed it was itself monitored
+  # (no `mrProcessStart` for the child pid — e.g. a SIP exec with no resolvable
+  # non-SIP drop-in, or any host where injection across the spawn failed), the
+  # child subtree's reads are MISSING from the set. Folding only the child's
+  # binary identity is NOT sufficient: the child could read a config file that
+  # changes without the binary changing. So an unconfirmed subtree makes the
+  # whole capture INCOMPLETE ⇒ re-run, never a false skip. We re-read the small,
+  # local depfile to inspect process-tree confirmation (the conversion above
+  # consumed only the read/launch records).
+  var dep: MonitorDepFile
+  try:
+    dep = readMonitorDepFile(depfile)
+  except CatchableError as e:
+    return (false, "io-mon depfile unreadable for subtree-confirmation check: " &
+      e.msg)
+  let unconfirmed = unconfirmedSpawnedSubtrees(dep)
+  if unconfirmed.len > 0:
+    return (false, "io-mon observed " & $unconfirmed.len & " spawned child " &
+      "subtree(s) that were NOT confirmed monitored (child pid(s) " &
+      $unconfirmed & " emitted no shim-loaded record — e.g. a SIP exec with no " &
+      "injectable drop-in); the subtree's reads are UNKNOWN ⇒ fail-safe re-run, " &
+      "never a false skip")
   (true, "io-mon captured " & $conv.value.len & " read file(s) via " &
-    IoMonSnoopBinaryName)
+    IoMonSnoopBinaryName & " (process tree fully confirmed)")
 
 proc recordRubyLive(repo, program: string): RecorderOutcome =
   let built = ensureRubyRecorderBuilt(repo)

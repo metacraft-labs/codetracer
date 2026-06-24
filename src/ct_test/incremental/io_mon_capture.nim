@@ -91,6 +91,12 @@ export native_readfiles.ReadFile
 # Re-export the shim locator so the CLI can pin REPRO_MONITOR_SHIM_LIB for the
 # out-of-process snoop child it spawns in the recorder dev shell (M8).
 export io_mon.findShimLibrary
+# Re-export the depfile reader + type so the CLI can perform the §16.7.8
+# process-tree confirmation check (`unconfirmedSpawnedSubtrees`) on the captured
+# depfile without importing io-mon directly — this module is the single seam
+# between ct_test and io-mon's capture format.
+export io_mon.MonitorDepFile
+export io_mon.readMonitorDepFile
 
 type
   CapturedReadSet* = object
@@ -219,6 +225,65 @@ proc launchedBinaryPathsFromDepFile*(dep: MonitorDepFile): seq[string] =
   for path in launched.keys:
     result.add path
   result.sort(cmp)
+
+proc unconfirmedSpawnedSubtrees*(dep: MonitorDepFile): seq[uint64] =
+  ## Return the child pids of every spawn/exec the monitor OBSERVED but whose
+  ## child process never confirmed it was itself monitored. This is the
+  ## fail-safe guard for the §16.7.8 process-tree completeness invariant: a
+  ## test's invalidation set is transitive over the WHOLE tree, so if a
+  ## spawned child ran UNMONITORED, any file IT (or its own descendants) read
+  ## is silently MISSING from the captured read-file set — and folding only the
+  ## launched BINARY identity is not enough (the child could read a config file
+  ## that changes without the binary changing). Such a capture must be treated
+  ## as INCOMPLETE ⇒ re-run, never a false skip.
+  ##
+  ## How confirmation works: every INJECTED process emits an `mrProcessStart`
+  ## ("shim-loaded") record carrying its OWN pid in `osPid` (see the shim's
+  ## `recordProcessStart`). A spawn record carries the spawned child's pid in
+  ## `childOsPid`. So a spawned child is "confirmed monitored" iff some
+  ## `mrProcessStart` record has `osPid == childOsPid`. A spawn whose child pid
+  ## never appears as a process-start osPid is an UNCONFIRMED subtree.
+  ##
+  ## Scope of detection: this only flags spawns the monitor actually SAW (so a
+  ## fully-blind subtree the monitor never observed at all is out of reach here
+  ## — that case is caught upstream by the empty-capture gate, since a genuinely
+  ## monitored parent always reads at least its own inputs). What it adds is the
+  ## crucial middle case: the parent WAS monitored and reported a spawn, but the
+  ## CHILD was not injected (e.g. a SIP exec with no resolvable non-SIP drop-in,
+  ## or any platform path where injection across the spawn failed). Without this
+  ## guard such a capture looks "complete" (the parent's reads are non-empty) yet
+  ## is missing the child subtree's reads — the precise false-skip hazard.
+  ##
+  ## A `childOsPid` of 0 is ignored: an `execve` record (process REPLACEMENT,
+  ## not a new child) carries no child pid — the exec'd image runs under the
+  ## SAME pid, and its own reads are attributed to that already-confirmed pid, so
+  ## there is no separate subtree to confirm.
+  var startedPids = initHashSet[uint64]()
+  for rec in dep.records:
+    if rec.kind == mrProcessStart and rec.osPid != 0:
+      startedPids.incl rec.osPid
+  var unconfirmed = initOrderedTable[uint64, bool]()
+  for rec in dep.records:
+    if rec.kind != mrProcessSpawn:
+      continue
+    if rec.result < 0:
+      continue  # a failed spawn launched no child subtree to monitor
+    if rec.childOsPid == 0:
+      continue  # no distinct child pid (e.g. an in-place exec record)
+    if rec.childOsPid notin startedPids:
+      unconfirmed[rec.childOsPid] = true
+  result = @[]
+  for pid in unconfirmed.keys:
+    result.add pid
+
+proc captureSubtreeConfirmed*(dep: MonitorDepFile): bool =
+  ## True iff every spawned child subtree the monitor observed was confirmably
+  ## monitored (no `unconfirmedSpawnedSubtrees`). When false, the capture is
+  ## INCOMPLETE over the process tree and the caller MUST fail safe (re-run),
+  ## even if the captured read set is non-empty — an observed-but-unmonitored
+  ## spawn is exactly the case where a non-empty parent capture would otherwise
+  ## mask a missing child read (a false skip).
+  unconfirmedSpawnedSubtrees(dep).len == 0
 
 proc readFilesFromDepFile*(dep: MonitorDepFile): Result[seq[ReadFile], string] =
   ## Convert a captured io-mon depfile into the dependency SET in the SAME
