@@ -7,8 +7,9 @@ For each backend, the benchmark records:
 
 1. native program runtime (`native_ms`),
 2. `ct record --backend <mcr|rr>` runtime (`record_ms`),
-3. `trace omniscient-prep --trace-kind native` runtime (`prep_ms`),
-4. trace and omniscient artifact sizes, and
+3. `trace omniscient-prep` runtime (`prep_ms`),
+4. trace, total prep artifact, `memwrites.tc`, `linehits.tc`, and
+   origin-metadata sizes, and
 5. ratios relative to native runtime and recording time.
 
 The default fixture is
@@ -29,9 +30,16 @@ Output lands in
 
 ## Current interpretation
 
-RR currently has a wired native omniscient-prep product path. MCR recording
-is measured by this benchmark, but MCR prep is reported through the `error`
-column when the native prep subprocess rejects an MCR `.ct` container. That
-is intentional: MCR slice/concurrency scaling belongs to the MCR-only
-`slice-prep-speed` benchmark, while this benchmark compares the available
-per-backend record/prep product path without inventing RR slices.
+The benchmark uses the same `ct trace omniscient-prep` invocation helper as
+the size and slice-prep benchmarks. It does not force `--trace-kind`; the
+product command detects materialized/MCR versus native/RR traces and routes
+to the existing implementation for that trace shape. MCR slice/concurrency
+scaling remains in the MCR-only `slice-prep-speed` benchmark, while this
+benchmark compares per-backend record/prep time for one ordinary fixture.
+
+The size columns deliberately distinguish the files emitted by the current
+prep path. RR native prep emits `meta_dat/memwrites.tc` and
+`meta_dat/linehits.tc`. The current MCR/materialized prep path emits
+origin metadata under `meta_dat`; recorder/emulator-side MCR omniscience
+builders are separate code paths and should be benchmarked through their
+shared production entry point rather than duplicated here.

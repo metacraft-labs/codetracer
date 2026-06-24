@@ -5,10 +5,11 @@
 //! * P3 measures MCR slice/concurrency behavior.
 //! * This module measures the product native path end to end for the
 //!   same ordinary C program under MCR and RR: native run time, record
-//!   time, and `trace omniscient-prep --trace-kind native` time.
+//!   time, and `trace omniscient-prep` time.
 
 use crate::{
-    BenchReport, BenchRow, Language, RecorderError, ct_binary, ct_cli_binary, dir_size_bytes,
+    BenchReport, BenchRow, Language, OmniscientPrep, RecorderError, ct_binary, ct_cli_binary,
+    dir_size_bytes,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -22,6 +23,9 @@ pub struct NativeOmniscientTimingRow {
     pub prep_ms: f64,
     pub trace_size_bytes: u64,
     pub omniscient_size_bytes: u64,
+    pub memwrites_size_bytes: u64,
+    pub linehits_size_bytes: u64,
+    pub origin_meta_size_bytes: u64,
     pub error: Option<String>,
 }
 
@@ -61,6 +65,15 @@ impl NativeOmniscientTimingRow {
                 "omniscient_size_bytes",
                 self.omniscient_size_bytes.to_string(),
             )
+            .push(
+                "memwrites_size_bytes",
+                self.memwrites_size_bytes.to_string(),
+            )
+            .push("linehits_size_bytes", self.linehits_size_bytes.to_string())
+            .push(
+                "origin_meta_size_bytes",
+                self.origin_meta_size_bytes.to_string(),
+            )
             .push("error", self.error.clone().unwrap_or_default());
         row
     }
@@ -84,6 +97,9 @@ pub fn report_columns() -> Vec<String> {
         "prep_over_record",
         "trace_size_bytes",
         "omniscient_size_bytes",
+        "memwrites_size_bytes",
+        "linehits_size_bytes",
+        "origin_meta_size_bytes",
         "error",
     ]
     .into_iter()
@@ -148,6 +164,9 @@ pub fn run(
                 prep_ms: 0.0,
                 trace_size_bytes: 0,
                 omniscient_size_bytes: 0,
+                memwrites_size_bytes: 0,
+                linehits_size_bytes: 0,
+                origin_meta_size_bytes: 0,
                 error: Some(err.to_string()),
             }
             .to_row(),
@@ -198,14 +217,23 @@ fn measure_backend(
     })?;
     let slice_folder = ct_path.parent().unwrap_or(&trace_dir);
     let mut error = None;
-    let prep_ms =
-        match median_success_time_string(|| native_omniscient_prep_command(slice_folder), runs) {
-            Ok(duration) => duration_ms(duration),
-            Err(err) => {
-                error = Some(err);
-                0.0
-            }
-        };
+    let prep_ms = match median_success_prep_time(slice_folder, runs) {
+        Ok(duration) => duration_ms(duration),
+        Err(err) => {
+            error = Some(err.to_string());
+            0.0
+        }
+    };
+
+    let meta_dat = slice_folder.join("meta_dat");
+    let memwrites_size_bytes = file_size(&meta_dat.join("memwrites.tc"))?;
+    let linehits_size_bytes = file_size(&meta_dat.join("linehits.tc"))?;
+    let origin_meta_size_bytes = ["originmeta.tc", "varwrites.tc", "source_exprs.tc"]
+        .iter()
+        .map(|name| file_size(&meta_dat.join(name)))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum();
 
     Ok(NativeOmniscientTimingRow {
         backend: backend.to_string(),
@@ -214,10 +242,25 @@ fn measure_backend(
         prep_ms,
         trace_size_bytes: dir_size_bytes(&trace_dir)
             .map_err(|e| RecorderError::Io(e.to_string()))?,
-        omniscient_size_bytes: dir_size_bytes(&slice_folder.join("meta_dat"))
+        omniscient_size_bytes: dir_size_bytes(&meta_dat)
             .map_err(|e| RecorderError::Io(e.to_string()))?,
+        memwrites_size_bytes,
+        linehits_size_bytes,
+        origin_meta_size_bytes,
         error,
     })
+}
+
+fn file_size(path: &Path) -> Result<u64, RecorderError> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => Ok(meta.len()),
+        Ok(_) => Ok(0),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(err) => Err(RecorderError::Io(format!(
+            "metadata {}: {err}",
+            path.display()
+        ))),
+    }
 }
 
 fn compile_c(src: &Path, bin: &Path) -> Result<(), String> {
@@ -241,19 +284,6 @@ fn record_command(backend: &str, program_path: &Path, trace_dir: &Path) -> Resul
     Ok(cmd)
 }
 
-fn native_omniscient_prep_command(slice_folder: &Path) -> Result<Command, String> {
-    let bin = ct_binary().ok_or_else(|| "trace omniscient-prep binary not found".to_string())?;
-    let mut cmd = Command::new(bin);
-    cmd.arg("trace")
-        .arg("omniscient-prep")
-        .arg(slice_folder)
-        .arg("--trace-kind")
-        .arg("native")
-        .arg("--mode")
-        .arg("on");
-    Ok(cmd)
-}
-
 fn median_success_time<F>(mut command_factory: F, runs: usize) -> Result<Duration, RecorderError>
 where
     F: FnMut() -> Result<Command, String>,
@@ -269,16 +299,10 @@ where
     Ok(times[times.len() / 2])
 }
 
-fn median_success_time_string<F>(mut command_factory: F, runs: usize) -> Result<Duration, String>
-where
-    F: FnMut() -> Result<Command, String>,
-{
+fn median_success_prep_time(slice_folder: &Path, runs: usize) -> Result<Duration, RecorderError> {
     let mut times = Vec::with_capacity(runs);
     for _ in 0..runs {
-        let mut command = command_factory()?;
-        let started = Instant::now();
-        run_command_ref_string(&mut command)?;
-        times.push(started.elapsed());
+        times.push(OmniscientPrep::run(slice_folder, "on")?);
     }
     times.sort();
     Ok(times[times.len() / 2])
@@ -343,6 +367,9 @@ mod tests {
             prep_ms: 25.0,
             trace_size_bytes: 123,
             omniscient_size_bytes: 45,
+            memwrites_size_bytes: 30,
+            linehits_size_bytes: 15,
+            origin_meta_size_bytes: 0,
             error: None,
         }
         .to_row();
