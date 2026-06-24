@@ -251,21 +251,58 @@ proc captureMaterializedReadFiles(repo, programCommand, traceDir: string):
     return (false, "io-mon read-file capture gated: no librepro_monitor_shim " &
       "found (set " & IoMonShimEnvVar & " or build it via io-mon's " &
       "scripts/build_shim.sh)")
+  # M8: resolve the standalone `io-mon` CLI (PATH / $IO_MON). It is
+  # what lets the live capture run OUT OF PROCESS inside the recorder's dev shell
+  # (the shim injected around the recorded program, not around the runner). When
+  # it is absent, the live injection through the recorder shell cannot run — gate
+  # honestly and fail-safe (the caller persists deterministic=false ⇒ re-run).
+  let snoopCli = findSnoopCli()
+  if snoopCli.len == 0:
+    return (false, "io-mon live injection gated: no " & IoMonSnoopBinaryName &
+      " CLI on PATH (set " & IoMonSnoopEnvVar & " or build it via io-mon's " &
+      "`nimble buildSnoop`); depfile→read-set conversion is exercised directly " &
+      "by the M6b/M8 tests")
   let depfile = traceDir / "io_mon_capture.rdep"
   # Run the snoop INSIDE the recorder's dev shell so the interpreter + the shim
   # resolve from the same toolchain the recording used. The shim is injected by
   # io-mon's fs_snoop via DYLD_INSERT_LIBRARIES / LD_PRELOAD around the command.
+  # We pin the shim library for the child (REPRO_MONITOR_SHIM_LIB) so it resolves
+  # without an install, and invoke the snoop binary by its resolved absolute path.
+  let shimPin = findShimLibrary()
   let snoopCmd =
-    "ct-test-io-mon-snoop run --depfile " & quoteShell(depfile) & " -- " &
+    (if shimPin.len > 0: IoMonShimEnvVar & "=" & quoteShell(shimPin) & " " else: "") &
+    quoteShell(snoopCli) & " run --depfile " & quoteShell(depfile) & " -- " &
     programCommand
-  # We do not have a standalone io-mon snoop CLI on PATH in the recorder shell,
-  # so the live e2e is gated here unless an operator wires one. The
-  # platform-independent depfile→read-set conversion is exercised by the M6b test
-  # directly over a controlled depfile; the LIVE injection is the gated arm.
-  discard snoopCmd
-  (false, "io-mon live injection through the recorder dev shell is gated on a " &
-    "snoop entry point + the platform shim on this host (depfile→read-set " &
-    "conversion is exercised directly by the M6b test)")
+  let (snoopOut, snoopCode) = runInRecorderShell(repo, snoopCmd)
+  if snoopCode != 0:
+    return (false, "io-mon snoop run failed in the recorder shell (exit " &
+      $snoopCode & "):\n" & snoopOut)
+  # Convert the captured depfile into the SAME native_readfiles.json projection
+  # M6a folds (read-not-written classification + capture-time signatures), in
+  # process. A corrupt/unreadable depfile or a vanished read file is an Err ⇒
+  # fail-safe re-run (never a false skip). An EMPTY capture (the macOS
+  # chained-fixups interpose gap) writes an empty projection and is reported as a
+  # successful-but-empty capture, which the caller still treats conservatively.
+  let conv = depFileToProjection(depfile, traceDir)
+  if conv.isErr:
+    return (false, "io-mon depfile→read-set conversion failed: " & conv.error)
+  # FAIL-SAFE on an EMPTY capture: a real materialized-recorder program
+  # (ruby/python) always reads at least its own program source, so an EMPTY read
+  # set means the interpose did NOT observe the reads — NOT that the program had
+  # no input dependencies. We cannot tell "genuinely zero reads" from "interpose
+  # did not fire" from an empty set alone, so we conservatively treat an empty
+  # capture as INCOMPLETE (captured=false ⇒ the caller persists
+  # deterministic=false ⇒ re-run). This is exactly the macOS 26 / arm64e
+  # chained-fixups gap: the wiring runs and writes a valid (but read-empty)
+  # depfile, and the test still re-runs rather than risking a FALSE SKIP. A
+  # genuine non-empty capture (hosts where the interpose fires) folds normally.
+  if conv.value.len == 0:
+    return (false, "io-mon live capture observed NO file reads (the interpose " &
+      "did not fire — e.g. the macOS chained-fixups gap on macOS 26/arm64e); " &
+      "treating the read-file set as UNKNOWN ⇒ fail-safe re-run, never a false " &
+      "skip")
+  (true, "io-mon captured " & $conv.value.len & " read file(s) via " &
+    IoMonSnoopBinaryName)
 
 proc recordRubyLive(repo, program: string): RecorderOutcome =
   let built = ensureRubyRecorderBuilt(repo)

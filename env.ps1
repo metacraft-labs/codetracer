@@ -931,6 +931,38 @@ Set-EnvDefault -Name "TUP_WINDOWS_MSYS2_PACKAGES" -Value $toolchain["TUP_MSYS2_P
 Set-EnvDefault -Name "CT_REMOTE_WINDOWS_SOURCE_MODE" -Value "auto"
 Set-EnvDefault -Name "CT_REMOTE_WINDOWS_SOURCE_REPO" -Value (Join-Path $repoRoot "..\codetracer-ci")
 
+# --- io-mon live interpose snoop wiring (Incremental-Test-Runner M8) ----------
+# Make io-mon's standalone `io-mon.exe` CLI + interpose shim DLL
+# discoverable so the incremental test runner's live read-file capture
+# (src/ct_test/incremental/io_mon_capture.nim) resolves them out-of-process via
+# $IO_MON / PATH and $REPRO_MONITOR_SHIM_LIB. Mirrors the POSIX `.envrc`
+# wiring on the Windows DIY path. Absent / unbuilt => the runner fails safe to a
+# re-run (never a fabricated capture), so this is purely opportunistic.
+#
+# TODO(io-mon live interpose, Windows): the Windows capture path uses the
+# CreateRemoteThread + LoadLibraryW injector (io_mon/windows_injector.nim), NOT
+# the POSIX DYLD_INSERT_LIBRARIES / LD_PRELOAD env var. This block only seeds
+# DISCOVERY of the already-built artifacts; the Windows interpose injection path
+# itself still needs end-to-end validation under the DIY toolchain. Steps to
+# complete: (1) build the shim DLL in ../io-mon via `nimble buildShim`; (2) build
+# io-mon.exe via `nimble buildSnoop`; (3) run a freshly-built user binary
+# under `io-mon run --depfile <out> -- <prog>` and confirm <out> contains a
+# non-empty file-read record set. Until validated, the runner's
+# `captureMaterializedReadFiles` fails safe (deterministic=false => re-run).
+$ioMonRoot = (Join-Path $repoRoot "..\io-mon")
+if (Test-Path -LiteralPath (Join-Path $ioMonRoot "io_mon.nimble")) {
+  $ioMonSnoopExe = Join-Path $ioMonRoot "build\bin\io-mon.exe"
+  if (Test-Path -LiteralPath $ioMonSnoopExe) {
+    Set-EnvDefault -Name "IO_MON" -Value $ioMonSnoopExe
+    $env:PATH = (Join-Path $ioMonRoot "build\bin") + [IO.Path]::PathSeparator + $env:PATH
+  }
+  $ioMonShimDll = Join-Path $ioMonRoot "build\lib\librepro_monitor_shim.dll"
+  if (Test-Path -LiteralPath $ioMonShimDll) {
+    Set-EnvDefault -Name "REPRO_MONITOR_SHIM_LIB" -Value $ioMonShimDll
+  }
+  Set-EnvDefault -Name "IO_MON_SRC" -Value (Join-Path $ioMonRoot "src")
+}
+
 [Environment]::SetEnvironmentVariable("RUSTUP_HOME", (Join-Path $installRoot "rustup"), "Process")
 [Environment]::SetEnvironmentVariable("CARGO_HOME", (Join-Path $installRoot "cargo"), "Process")
 

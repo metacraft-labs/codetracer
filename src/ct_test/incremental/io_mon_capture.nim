@@ -59,7 +59,7 @@
 ## a captured path that cannot be stat'd now — yields an `Err`. The caller
 ## (`buildArtifactMaterialized`) turns that into a re-run, never a silent skip.
 
-import std/[algorithm, os, sets, tables, times]
+import std/[algorithm, os, osproc, sets, strtabs, tables, times]
 import results
 
 import io_mon
@@ -67,6 +67,9 @@ import native_readfiles  # ReadFile, signatureOf, NativeReadFilesFile, the share
 
 export results
 export native_readfiles.ReadFile
+# Re-export the shim locator so the CLI can pin REPRO_MONITOR_SHIM_LIB for the
+# out-of-process snoop child it spawns in the recorder dev shell (M8).
+export io_mon.findShimLibrary
 
 type
   CapturedReadSet* = object
@@ -79,6 +82,36 @@ const
     ## The env var io-mon's `findShimLibrary` honours first when locating the
     ## interpose shim shared library. Re-exported so the runner / tests can pin a
     ## freshly-built shim without an install step.
+
+  IoMonSnoopEnvVar* = "IO_MON"
+    ## Env override for the standalone `io-mon` CLI binary path. Honoured
+    ## first by `findSnoopCli`; falls back to the binary name on PATH
+    ## (`io-mon`, the M8 nimble `buildSnoop` output). Set by the codetracer
+    ## dev shell / `ct_test` build env when the io-mon sibling is present, and by
+    ## the M8 tests to pin a freshly-built binary without an install step.
+
+  IoMonSnoopBinaryName* = "io-mon"
+    ## The PATH-discoverable name of the standalone snoop CLI (io-mon's
+    ## `nimble buildSnoop` output). The runner resolves the live-capture entry
+    ## point by this name when `$IO_MON` is unset.
+
+proc findSnoopCli*(): string =
+  ## Locate the standalone `io-mon` CLI binary (the M8 out-of-process snoop
+  ## entry point), so the runner can drive a LIVE capture in a clean subprocess
+  ## rather than in-process. Lookup order:
+  ##   1. `$IO_MON` (operator / dev-shell / test pin) — used as-is if it
+  ##      names an existing file.
+  ##   2. `io-mon` on `$PATH` (the dev shell prepends io-mon's build/bin
+  ##      when the sibling is present).
+  ## Returns the absolute path of the first existing candidate, or "" when no
+  ## snoop CLI is locatable (⇒ the live arm gates / fails safe — never faked).
+  let pinned = getEnv(IoMonSnoopEnvVar)
+  if pinned.len > 0 and fileExists(pinned):
+    return absolutePath(pinned)
+  let onPath = findExe(IoMonSnoopBinaryName)
+  if onPath.len > 0:
+    return onPath
+  ""
 
 proc isReadObservation(kind: MonitorObservationKind): bool =
   ## True for the observation kinds that denote a file the process READ (an
@@ -184,6 +217,30 @@ proc writeReadFilesProjection*(traceDir: string;
     return err("failed to write read-file projection: " & e.msg)
   ok()
 
+proc depFileToProjection*(depfilePath, traceDir: string):
+    Result[seq[ReadFile], string] =
+  ## Read an io-mon depfile that was already produced OUT OF PROCESS (e.g. by the
+  ## standalone `io-mon` CLI run inside a recorder's dev shell), convert it
+  ## into the read-file dependency SET, and write it into `traceDir` as the SAME
+  ## `native_readfiles.json` projection M6a folds. This is the seam the CLI's
+  ## `captureMaterializedReadFiles` uses: the snoop runs in the recorder shell and
+  ## writes the depfile; the runner converts + persists it here, in-process.
+  ##
+  ## Fail-safe: an unreadable/corrupt depfile, a vanished captured read file, or a
+  ## projection write failure is an `Err` (⇒ the caller re-runs, never a false
+  ## skip). An EMPTY captured set (the macOS chained-fixups interpose gap) is a
+  ## valid `ok(@[])` — it writes an empty projection and contributes no read-file
+  ## dependency; the CLI's `deterministic=false` capture-gate still re-runs such a
+  ## test, so an empty capture is never mistaken for "no dependencies".
+  var dep: MonitorDepFile
+  try:
+    dep = readMonitorDepFile(depfilePath)
+  except CatchableError as e:
+    return err("io-mon depfile unreadable: " & e.msg)
+  let reads = ? readFilesFromDepFile(dep)
+  ? writeReadFilesProjection(traceDir, reads)
+  ok(reads)
+
 proc ioMonShimAvailable*(): bool =
   ## True iff the io-mon interpose shim shared library is locatable (so the LIVE
   ## capture path can run). Gates the live-injection e2e: when false, the live
@@ -191,32 +248,100 @@ proc ioMonShimAvailable*(): bool =
   ## re-run rather than faking a capture.
   findShimLibrary().len > 0
 
+proc ioMonLiveCaptureAvailable*(): bool =
+  ## True iff BOTH halves of the M8 live-capture wiring are present: the
+  ## interpose shim shared library (`ioMonShimAvailable`) AND the standalone
+  ## `io-mon` CLI binary on PATH / `$IO_MON` (`findSnoopCli`). The
+  ## out-of-process snoop binary is what lets the runner drive a live capture in
+  ## a clean subprocess (the shim injected around the recorder's program, not
+  ## around the runner). When either is absent the live arm gates and the caller
+  ## fails safe to a re-run — NEVER a fabricated capture.
+  ##
+  ## NOTE (honest platform reality): availability here means the wiring is
+  ## complete, NOT that the platform will actually capture. On macOS 26 / arm64e
+  ## the `__DATA,__interpose` mechanism does not intercept libc calls from
+  ## modern chained-fixups binaries, so a wired capture can still yield an EMPTY
+  ## read set even for a freshly-built user binary. An empty captured set is
+  ## still folded honestly (it just contributes no read-file dependency); the
+  ## artifact's `deterministic=false` capture-gate fail-safe (in the CLI) ensures
+  ## a materialized test whose reads could not be captured still re-runs.
+  ioMonShimAvailable() and findSnoopCli().len > 0
+
+proc captureViaSnoopBinary(snoopCli: string; command: seq[string];
+                           depfilePath: string): Result[void, string] =
+  ## Drive a live capture by invoking the standalone `io-mon` CLI OUT OF
+  ## PROCESS (`snoopCli run --depfile <depfilePath> -- <command...>`). The snoop
+  ## binary injects the shim around `command` in a clean subprocess and writes
+  ## the RMDF depfile. The shim shared library is located by the snoop binary via
+  ## `$REPRO_MONITOR_SHIM_LIB` / the canonical layout; we forward an explicit pin
+  ## when one is locatable so a non-installed dev-shell shim still resolves.
+  ##
+  ## A launch failure or a non-zero snoop exit is an `Err` (⇒ fail-safe re-run).
+  var argv = @[snoopCli, "run", "--depfile", depfilePath, "--"]
+  argv.add command
+  # Pin the shim for the child so it resolves without inheriting an install.
+  let shimLib = findShimLibrary()
+  var childEnv = newStringTable(modeCaseSensitive)
+  for k, v in envPairs():
+    childEnv[k] = v
+  if shimLib.len > 0:
+    childEnv[IoMonShimEnvVar] = shimLib
+  var exitCode: int
+  try:
+    let p = startProcess(argv[0], args = argv[1 .. ^1], env = childEnv,
+      options = {poParentStreams})
+    exitCode = waitForExit(p)
+    close(p)
+  except CatchableError as e:
+    return err("io-mon snoop binary launch failed: " & e.msg)
+  if exitCode != 0:
+    return err("io-mon snoop binary exited non-zero (" & $exitCode & ")")
+  ok()
+
 proc captureReadFilesLive*(command: seq[string];
                            depfilePath: string): Result[seq[ReadFile], string] =
   ## Run `command` (the recorded materialized-recorder process) under io-mon's
   ## LIVE interpose monitor, producing a depfile at `depfilePath`, then derive the
   ## read-file dependency set from it.
   ##
-  ## GATED: requires the platform shim shared library (`ioMonShimAvailable`). When
-  ## the shim is missing, returns an HONEST `Err` (⇒ the caller re-runs the test —
-  ## fail-safe — and the live e2e is gated on this host) rather than a fabricated
-  ## capture. A non-zero snoop exit or an unreadable/corrupt depfile is likewise an
-  ## `Err`.
+  ## M8 wiring: when the standalone `io-mon` CLI is locatable
+  ## (`findSnoopCli`), the capture runs OUT OF PROCESS through that binary (the
+  ## shim injected around `command` in a clean subprocess — the correct topology,
+  ## since the shim must wrap the recorder's program, not the runner). When the
+  ## snoop binary is absent but the shim shared library IS present, we fall back
+  ## to the IN-PROCESS `runFsSnoopCli` driver (the relocated fs_snoop entry point)
+  ## so the controlled-depfile / single-host path still works.
+  ##
+  ## GATED + FAIL-SAFE: requires at minimum the platform shim shared library
+  ## (`ioMonShimAvailable`). When the shim is missing, returns an HONEST `Err`
+  ## (⇒ the caller re-runs the test — fail-safe — and the live e2e is gated on
+  ## this host) rather than a fabricated capture. A launch failure, a non-zero
+  ## snoop exit, or an unreadable/corrupt depfile is likewise an `Err`. The
+  ## platform may legitimately capture an EMPTY read set (macOS chained-fixups
+  ## interpose gap) — that is returned as an empty-but-`ok` set, and the CLI's
+  ## `deterministic=false` capture-gate keeps such a test re-running.
   if command.len == 0:
     return err("io-mon live capture: empty command")
   if not ioMonShimAvailable():
     return err("io-mon live capture gated: " & IoMonShimEnvVar &
       " unset and no librepro_monitor_shim found (build it via io-mon's " &
       "scripts/build_shim.sh)")
-  var args = @["run", "--depfile", depfilePath, "--"]
-  args.add command
-  var exitCode: int
-  try:
-    exitCode = runFsSnoopCli("ct-test-io-mon", args)
-  except CatchableError as e:
-    return err("io-mon snoop run failed: " & e.msg)
-  if exitCode != 0:
-    return err("io-mon snoop run exited non-zero (" & $exitCode & ")")
+  let snoopCli = findSnoopCli()
+  if snoopCli.len > 0:
+    let ran = captureViaSnoopBinary(snoopCli, command, depfilePath)
+    if ran.isErr:
+      return err(ran.error)
+  else:
+    # No standalone snoop binary on PATH — fall back to the in-process driver.
+    var args = @["run", "--depfile", depfilePath, "--"]
+    args.add command
+    var exitCode: int
+    try:
+      exitCode = runFsSnoopCli("ct-test-io-mon", args)
+    except CatchableError as e:
+      return err("io-mon snoop run failed: " & e.msg)
+    if exitCode != 0:
+      return err("io-mon snoop run exited non-zero (" & $exitCode & ")")
   var dep: MonitorDepFile
   try:
     dep = readMonitorDepFile(depfilePath)
