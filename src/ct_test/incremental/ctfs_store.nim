@@ -251,27 +251,48 @@ proc pageImageLen(image: openArray[byte]): int =
 proc buildPayloadNamespace(pairs: seq[(uint64, seq[byte])]):
     Result[seq[byte], string] =
   ## Build a payload-addressed Type-B namespace from sorted `(key, value)`
-  ## pairs — the Nim port of the bench `build_payload_ns`:
-  ##   1. SIZING PASS: insert each key with a placeholder 16-byte descriptor to
-  ##      learn the committed page-image length (the absolute payload base).
-  ##   2. REAL BUILD: insert each key with a descriptor addressing its value at
-  ##      its absolute offset, then append the payload region and page-pad.
+  ## pairs in a SINGLE bottom-up pass via the CoW B-tree's `bulkLoad`
+  ## constructor (the M4-perf optimisation):
+  ##   1. SIZING PASS: `bulkLoad` the keys with placeholder 16-byte descriptors
+  ##      to learn the committed page-image length (the absolute payload base).
+  ##      Because the descriptor WIDTH is fixed (16 bytes, Type-B) and the keys
+  ##      are identical, the page region this produces is byte-for-byte the same
+  ##      length as the real build's — so the learned base is exact.
+  ##   2. REAL BUILD: `bulkLoad` each key with a descriptor addressing its value
+  ##      at its absolute offset, then append the payload region and page-pad.
+  ##
+  ## This replaces the prior per-key `insertAndCommit` build (one CoW spine-copy
+  ## + atomic root commit PER key — O(N log N) page writes, N commits, ~7.5 s at
+  ## 100k keys per the M3 benchmark) with an O(N) one-commit pass. The on-disk
+  ## WIRE FORMAT is unchanged (`bulkLoad` emits the same NSB1 header + immutable
+  ## page graph), so the Nim `loadCowBTree` reader, the lookup/enumeration
+  ## accessors, AND the Rust `CowNamespaceReader` read the result identically;
+  ## only the page packing differs (denser, no abandoned CoW pages). The build is
+  ## byte-stable in the keys/values: two namespaces with the same logical
+  ## contents serialize identically (the property `rebuildNamespace` /
+  ## daemon≡file rely on), because `bulkLoad` is a pure function of the sorted
+  ## batch.
   ##
   ## `pairs` MUST be sorted by key (the callers sort).
   var sizing = initCowBTree(cltTypeB, skipSubBlocks = true)
   let placeholder = newSeq[byte](16)
-  for (k, _) in pairs:
-    let r = sizing.insertAndCommit(k, placeholder)
-    if r.isErr: return err("sizing insert failed: " & r.error)
+  var sizingEntries = newSeq[(uint64, seq[byte])](pairs.len)
+  for i in 0 ..< pairs.len:
+    sizingEntries[i] = (pairs[i][0], placeholder)
+  let sizeRes = sizing.bulkLoad(sizingEntries)
+  if sizeRes.isErr: return err("sizing bulk-load failed: " & sizeRes.error)
   let payloadBase = sizing.serialize().len
 
   var writer = initCowBTree(cltTypeB, skipSubBlocks = true)
   var payload: seq[byte]
-  for (k, v) in pairs:
+  var realEntries = newSeq[(uint64, seq[byte])](pairs.len)
+  for i in 0 ..< pairs.len:
+    let v = pairs[i][1]
     let offset = uint64(payloadBase + payload.len)
     for b in v: payload.add b
-    let r = writer.insertAndCommit(k, descriptor16(offset, uint64(v.len)))
-    if r.isErr: return err("build insert failed: " & r.error)
+    realEntries[i] = (pairs[i][0], descriptor16(offset, uint64(v.len)))
+  let buildRes = writer.bulkLoad(realEntries)
+  if buildRes.isErr: return err("build bulk-load failed: " & buildRes.error)
 
   var image = writer.serialize()
   for b in payload: image.add b
