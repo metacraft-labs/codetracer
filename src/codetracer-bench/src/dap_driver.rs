@@ -148,7 +148,10 @@ impl DapSession {
         let mut command = Command::new(dap_binary);
         match exe_name {
             "ct" => {
-                command.arg("start_backend").arg(backend_kind).arg("--stdio");
+                command
+                    .arg("start_backend")
+                    .arg(backend_kind)
+                    .arg("--stdio");
             }
             "replay-server" => {
                 command.arg("dap-server").arg("--stdio");

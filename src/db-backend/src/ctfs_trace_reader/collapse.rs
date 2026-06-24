@@ -28,7 +28,7 @@
 use super::coverage_namespace::{Coverage, CoverageError, CoverageMap, CoverageState};
 use super::interval_tagged_map::{IntervalTaggedMap, LineHitEntry, MemWriteEntry};
 use super::server_prep_encoding::{
-    collapsed_linehits_from_entries, encode_linehits, encode_memwrites, CollapsedLinehits, CollapsedMemwrites,
+    CollapsedLinehits, CollapsedMemwrites, collapsed_linehits_from_entries, encode_linehits, encode_memwrites,
 };
 
 /// Errors raised while collapsing a region.
@@ -211,7 +211,10 @@ where
     // the span and is removed; the gap is then filled by the single collapsed row.
     coverage.coverage_remove_range(tick_lo, tick_hi)?;
     debug_assert!(
-        coverage.rows().iter().all(|r| r.tick_lo < tick_lo || r.tick_lo >= tick_hi),
+        coverage
+            .rows()
+            .iter()
+            .all(|r| r.tick_lo < tick_lo || r.tick_lo >= tick_hi),
         "collapse must have dropped all in-span rows"
     );
     coverage.coverage_add(tick_lo, tick_hi, CoverageState::CollapsedComplete)?;
@@ -282,7 +285,10 @@ mod tests {
             per_address: vec![(ADDR, all)],
         });
 
-        assert_eq!(got, reference, "collapsed memwrites must be byte-identical to server prep");
+        assert_eq!(
+            got, reference,
+            "collapsed memwrites must be byte-identical to server prep"
+        );
 
         // And it decodes back to the merged, tick-sorted writes (no interval tags).
         let decoded = decode_memwrites(&got).unwrap();

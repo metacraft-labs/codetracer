@@ -1236,7 +1236,8 @@ mod tests {
             let mut buf = writer_compat_fixture_bytes();
             buf[6] = (bits & 0xFF) as u8;
             buf[7] = ((bits >> 8) & 0xFF) as u8;
-            let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
+            let parsed =
+                parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
             assert_eq!(parsed.flags & bits, bits);
         }
     }
@@ -1259,7 +1260,8 @@ mod tests {
             let mut buf = writer_compat_fixture_bytes();
             buf[6] = (bits & 0xFF) as u8;
             buf[7] = ((bits >> 8) & 0xFF) as u8;
-            let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
+            let parsed =
+                parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
             assert_eq!(parsed.flags & bits, bits);
         }
     }
@@ -1281,7 +1283,8 @@ mod tests {
             let mut buf = writer_compat_fixture_bytes();
             buf[6] = (bits & 0xFF) as u8;
             buf[7] = ((bits >> 8) & 0xFF) as u8;
-            let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
+            let parsed =
+                parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
             assert_eq!(parsed.flags & bits, bits);
         }
     }
@@ -1298,12 +1301,17 @@ mod tests {
         // bits a real M23d bundle sets.
         for bits in [
             FLAG_HAS_INTERNING_TABLES,
-            FLAG_HAS_CALL_STREAM | FLAG_HAS_STEP_STREAM | FLAG_HAS_VALUE_STREAM | FLAG_HAS_IO_EVENT_STREAM | FLAG_HAS_INTERNING_TABLES,
+            FLAG_HAS_CALL_STREAM
+                | FLAG_HAS_STEP_STREAM
+                | FLAG_HAS_VALUE_STREAM
+                | FLAG_HAS_IO_EVENT_STREAM
+                | FLAG_HAS_INTERNING_TABLES,
         ] {
             let mut buf = writer_compat_fixture_bytes();
             buf[6] = (bits & 0xFF) as u8;
             buf[7] = ((bits >> 8) & 0xFF) as u8;
-            let parsed = parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
+            let parsed =
+                parse_meta_dat(&buf).unwrap_or_else(|e| panic!("expected bits 0x{bits:04x} to parse, got {e:?}"));
             assert_eq!(parsed.flags & bits, bits);
         }
     }

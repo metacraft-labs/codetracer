@@ -73,6 +73,7 @@ mod flow_preloader;
 mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
+mod native_rr_omniscient_prep;
 mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. Mirrors the
 // lib.rs declaration above; the bin needs its own copy because
@@ -680,15 +681,12 @@ fn run_omniscient_prep_subcommand(
     // using the existing M19 encoders. `OriginMode::Off` skips the
     // namespace emission entirely (matches the spec §6.8.6 "off" semantics).
     let (originmeta_bytes, varwrites_bytes, source_exprs_bytes, capability_count) =
-        if matches!(new_mode, OriginMode::Off) || detected_kind == "native" {
+        if matches!(new_mode, OriginMode::Off) {
             // - `Off` keeps the namespaces absent — readers fall back cleanly to Mode 1/2.
-            // - `native` lives on the `(address, tick)` keying scheme; running it
-            //    requires the M18 omniscient-DB FFI fixture which the slice may not
-            //    carry (and which is recorder-emitted, not subprocess-derived). We
-            //    persist the requested mode in `origin-config.toml` so the worker
-            //    knows the prep was attempted; the recorder-side path-A integration
-            //    fills the namespaces in production.
             (None, None, None, 0usize)
+        } else if detected_kind == "native" {
+            let output = native_rr_omniscient_prep::run(slice_folder, &meta_dat)?;
+            (None, None, None, output.capability_count)
         } else {
             let db = load_and_postprocess_trace(slice_folder)?;
             let mut changes: Vec<ValueChange> = Vec::new();

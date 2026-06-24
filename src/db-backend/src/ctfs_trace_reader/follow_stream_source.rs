@@ -50,7 +50,7 @@ use codetracer_trace_writer::call_stream::CallStreamRecord;
 use codetracer_trace_writer::meta_dat::{
     meta_dat_has_call_stream, meta_dat_has_step_stream, meta_dat_has_value_stream,
 };
-use codetracer_trace_writer::step_stream::{unpack_global_line_index, StepStreamRecord};
+use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_index};
 use codetracer_trace_writer::value_stream::ValueRecordEntry;
 
 use super::call_stream_source::call_stream_record_to_db_call;
@@ -424,8 +424,9 @@ impl FollowValueStreamSource {
             finalized,
             |name, start, len| read_internal_file_range(&path, name, start, len),
             |c, chunk| {
-                let decoded = decode_value_chunk_records(chunk)
-                    .map_err(|e| CtfsError::Corrupt(format!("follow values.dat chunk {c} ({}): {e}", path.display())))?;
+                let decoded = decode_value_chunk_records(chunk).map_err(|e| {
+                    CtfsError::Corrupt(format!("follow values.dat chunk {c} ({}): {e}", path.display()))
+                })?;
                 let n = decoded.len();
                 records.extend(decoded);
                 Ok(n)

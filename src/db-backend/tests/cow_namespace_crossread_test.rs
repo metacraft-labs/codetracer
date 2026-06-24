@@ -192,7 +192,8 @@ fn gen_rust_written_cow_fixture_for_nim() {
         w.insert_and_commit(key, &key.to_le_bytes()).expect("insert");
     }
     // In-place UPDATE so the latest committed value must win on read-back.
-    w.insert_and_commit(3 * 7, &0xDEAD_BEEFu64.to_le_bytes()).expect("update");
+    w.insert_and_commit(3 * 7, &0xDEAD_BEEFu64.to_le_bytes())
+        .expect("update");
 
     let image = w.serialize();
     let image_path = dir.join("cow_btree_rust_typea.cowbt");

@@ -9,9 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use codetracer_trace_types::{
-    CallKey, EventLogKind, Line, NO_KEY, PathId, StepId, TypeKind, VariableId,
-};
+use codetracer_trace_types::{CallKey, EventLogKind, Line, NO_KEY, PathId, StepId, TypeKind, VariableId};
 
 use crate::calltrace::Calltrace;
 use crate::dap::{self, DapClient, DapMessage};

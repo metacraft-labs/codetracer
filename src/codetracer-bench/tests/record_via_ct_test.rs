@@ -21,8 +21,8 @@
 //! single-entry-point `FixtureRecorder::record_via_ct` keeps the
 //! coverage anchored to `ct record`.
 
-use codetracer_bench::{FixtureRecorder, Language, RecorderError, ct_cli_binary};
 use codetracer_bench::omniscient_db_size::find_ct_container;
+use codetracer_bench::{FixtureRecorder, Language, RecorderError, ct_cli_binary};
 use std::path::PathBuf;
 
 fn skip(reason: &str) {
@@ -51,7 +51,10 @@ fn record_via_ct_python_fixture_produces_real_ct_container() {
     // Step 2 — find the fixture.  Use the existing gui-ops Python
     // fixture (the tiny `e = fold(d, 7)` program).  No new fixture is
     // needed; this is the same source the P4 DAP bench records.
-    let program_path = fixtures_root().join("gui-ops").join("python").join("main.py");
+    let program_path = fixtures_root()
+        .join("gui-ops")
+        .join("python")
+        .join("main.py");
     if !program_path.is_file() {
         skip(&format!(
             "gui-ops Python fixture missing at {} — check fixture layout",

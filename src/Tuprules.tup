@@ -339,8 +339,12 @@ c %f |> %o | $(NIM_SIDE_OUTPUTS_IGNORE)
 
 # CodeTracer binary with BPF capabilities (ct).
 # BPF capabilities (cap_bpf+cap_perfmon+cap_dac_read_search) are applied as a
-# post-build step in scripts/build-once.sh, because tup's FUSE sandbox
-# prevents sudo from running during the build.
+# post-build step in scripts/build-once.sh, NOT here: tup runs each rule's
+# command in a sandbox (mount namespace) that mounts filesystems `nosuid`, so
+# the setuid `sudo` wrapper cannot elevate inside a rule — even the explicit
+# /run/wrappers/bin/sudo fails with "sudo must be owned by uid 0 and have the
+# setuid bit set". codetracer-setcap needs sudo (it runs `setcap`), so it can
+# only run outside the build sandbox, as a post-materialization step.
 !codetracer_bpf = |> $(NIM_SELECTED)\
 $(CODETRACER_FLAGS) \
 --nimcache:/tmp/ct-nim-cache/%B_codetracer_binary\

@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use db_backend::ctfs_trace_reader::interval_tagged_map::MemWriteEntry;
 use db_backend::ctfs_trace_reader::server_prep_encoding::{
-    encode_linehits, encode_memwrites, CollapsedLinehits, CollapsedMemwrites,
+    CollapsedLinehits, CollapsedMemwrites, encode_linehits, encode_memwrites,
 };
 
 fn fixture_dir() -> PathBuf {
