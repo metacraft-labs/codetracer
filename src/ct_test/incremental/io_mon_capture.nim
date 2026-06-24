@@ -41,6 +41,23 @@
 ##   { path observed via moFileOpen/moFileRead } \ { path observed via moFileWrite }.
 ## This mirrors the standard build-system depfile model (inputs = read-not-written).
 ##
+## # Launched binaries are part of the dependency set (spec §16.7.8)
+##
+## Per `Nim-Parallel-Test-Framework.md` §16.7.8, a test's invalidation set is
+##   code deps ∪ read-file deps ∪ LAUNCHED-BINARY deps,
+## transitive over the whole process tree. A launched binary (e.g. the compiler a
+## test shells out to) loads via mmap/dyld, so it NEVER shows up as an
+## `open`/`read` — io-mon records it as a process spawn/exec record
+## (`mrProcessSpawn`/`mrProcessExec`, observation `moExecute`, binary path in
+## `record.path`). `launchedBinaryPathsFromDepFile` extracts the successful,
+## de-duplicated, path-sorted launched-binary set, and `readFilesFromDepFile`
+## folds it into the SAME `ReadFile` dependency set as the read files (path +
+## content signature). A changed launched binary thus invalidates every test that
+## launched it, through the identical M4b store + root-hash fold. A
+## SIP-rewritten exec path (a transient `CT_SANDBOX_TOOLS_DIR` copy the §16.7.8
+## SIP redirection produced) is mapped BACK to the original system path
+## (`unrewriteSipPath`), so the dependency is keyed on the real binary identity.
+##
 ## # Live capture is GATED (the platform shim), never faked
 ##
 ## Driving the live interpose end-to-end (the shim actually injecting into a real
@@ -64,6 +81,10 @@ import results
 
 import io_mon
 import native_readfiles  # ReadFile, signatureOf, NativeReadFilesFile, the shared fold input
+import stackable_hooks/propagation as ct_propagation
+  # sandboxToolsDir / unrewriteSipPath: map a SIP-rewritten exec path (a transient
+  # CT_SANDBOX_TOOLS_DIR copy) BACK to the original system binary identity, so a
+  # launched-binary dependency is recorded against the REAL binary, not the copy.
 
 export results
 export native_readfiles.ReadFile
@@ -151,18 +172,83 @@ proc readPathsFromDepFile*(dep: MonitorDepFile): seq[string] =
     result.add path
   result.sort(cmp)
 
+proc isLaunchObservation(kind: MonitorObservationKind): bool =
+  ## True for the observation kind that denotes a LAUNCHED binary — a
+  ## process spawn/exec. The shim tags both `mrProcessSpawn` (posix_spawn /
+  ## fork) and `mrProcessExec` (execve) with `moExecute`, carrying the launched
+  ## binary path in `record.path`.
+  kind == moExecute
+
+proc launchedBinaryPathsFromDepFile*(dep: MonitorDepFile): seq[string] =
+  ## Derive the LAUNCHED-BINARY path set from a captured io-mon depfile: every
+  ## successful spawn/exec (`moExecute`) record's binary path, de-duplicated and
+  ## path-sorted. Per spec §16.7.8 a test's invalidation set is
+  ##   code deps ∪ read-file deps ∪ LAUNCHED-BINARY deps,
+  ## transitive over the whole process tree — a launched binary loads via
+  ## mmap/dyld, so it NEVER appears as an `open`/`read` and must be folded from
+  ## the spawn/exec records explicitly.
+  ##
+  ## Filtering:
+  ##   * `moExecute` records only (spawn / exec).
+  ##   * a non-empty path (a spawn with no resolved binary path is not a usable
+  ##     dependency — e.g. a bare `fork` with no exec carries no binary).
+  ##   * `result >= 0`: a failed spawn names no launched binary. (The shim only
+  ##     records a `posix_spawn` when it succeeded, and a `fork` parent record
+  ##     carries the child pid (>0); `execve` records carry the default 0. A
+  ##     negative result would denote a failed launch and is excluded.)
+  ##
+  ## SANDBOX → ORIGINAL mapping (spec §16.7.8 SIP redirection): a SIP-protected
+  ## sub-target is redirected at spawn time to its injectable
+  ## `CT_SANDBOX_TOOLS_DIR` copy, so the recorded exec path may be the transient
+  ## sandbox copy. We map it BACK to the original system path so the dependency
+  ## is recorded against the REAL binary identity (a change to the real
+  ## `/bin/sh` must invalidate, not a change to a throwaway copy).
+  let sandboxDir = ct_propagation.sandboxToolsDir()
+  var launched = initOrderedTable[string, bool]()
+  for rec in dep.records:
+    if rec.path.len == 0:
+      continue
+    if not isLaunchObservation(rec.observationKind):
+      continue
+    if rec.result < 0:
+      continue  # a failed spawn/exec names no launched binary
+    # Map a sandbox-rewritten path back to the original system binary identity.
+    let original = ct_propagation.unrewriteSipPath(rec.path, sandboxDir)
+    launched[original] = true
+  result = @[]
+  for path in launched.keys:
+    result.add path
+  result.sort(cmp)
+
 proc readFilesFromDepFile*(dep: MonitorDepFile): Result[seq[ReadFile], string] =
-  ## Convert a captured io-mon depfile into the read-file dependency SET in the
-  ## SAME `ReadFile` shape M6a produces (path + mtime + content signature), so
-  ## both sources feed one fold.
+  ## Convert a captured io-mon depfile into the dependency SET in the SAME
+  ## `ReadFile` shape M6a produces (path + mtime + content signature), so both
+  ## sources feed one fold. This folds BOTH:
+  ##   * read-file deps (read-not-written paths — `readPathsFromDepFile`), and
+  ##   * LAUNCHED-BINARY deps (spawn/exec binaries — `launchedBinaryPathsFromDepFile`),
+  ## per spec §16.7.8 (a test's invalidation set includes the binaries it
+  ## launched, transitive over the process tree). A launched binary loads via
+  ## mmap/dyld so it never appears as a read; folding it here means a changed
+  ## launched binary (e.g. the compiler) invalidates every test that launched it,
+  ## through the IDENTICAL M4b store + root-hash fold.
   ##
   ## io-mon captures at RUN TIME, so the "record-time" stat is the file's CURRENT
   ## on-disk stat at capture — exactly the baseline the M4b invalidation will
-  ## later compare a subsequent on-disk stat against. A path that cannot be
-  ## stat'd at capture (it vanished between read and capture finalize) is an `Err`
-  ## (⇒ re-run, fail-safe — never silently dropped).
+  ## later compare a subsequent on-disk stat against. A path (read file OR
+  ## launched binary) that cannot be stat'd at capture (it vanished between
+  ## observation and capture finalize) is an `Err` (⇒ re-run, fail-safe — never
+  ## silently dropped). A launched binary that is ALSO a read path is folded
+  ## once (the de-dup below keys on path).
   var acc: seq[ReadFile] = @[]
-  for path in readPathsFromDepFile(dep):
+  var seenPaths = initHashSet[string]()
+
+  proc addPathDep(path: string): Result[void, string] =
+    ## Stat `path` at capture time and fold it as a `ReadFile` (path + mtime +
+    ## content signature). Shared by the read-file and launched-binary folds so
+    ## both carry the IDENTICAL content-signature shape (DRY). A path that cannot
+    ## be stat'd ⇒ `Err` (fail-safe re-run). De-duplicated by path.
+    if path in seenPaths:
+      return ok()
     var size: int64 = 0
     var mtime: int64 = 0
     try:
@@ -170,12 +256,19 @@ proc readFilesFromDepFile*(dep: MonitorDepFile): Result[seq[ReadFile], string] =
         size = int64(getFileSize(path))
         mtime = getLastModificationTime(path).toUnix()
       else:
-        # A captured read path that no longer exists at capture finalize: we
-        # cannot establish a baseline, so be conservative.
-        return err("captured read file no longer present: " & path)
+        # A captured dependency path that no longer exists at capture finalize:
+        # we cannot establish a baseline, so be conservative (fail-safe).
+        return err("captured dependency no longer present: " & path)
     except CatchableError as e:
-      return err("failed to stat captured read file " & path & ": " & e.msg)
+      return err("failed to stat captured dependency " & path & ": " & e.msg)
+    seenPaths.incl path
     acc.add ReadFile(path: path, mtime: mtime, hash: signatureOf(size, mtime))
+    ok()
+
+  for path in readPathsFromDepFile(dep):
+    ? addPathDep(path)
+  for path in launchedBinaryPathsFromDepFile(dep):
+    ? addPathDep(path)
   acc.sort(proc (a, b: ReadFile): int = cmp(a.path, b.path))
   ok(acc)
 

@@ -158,6 +158,12 @@ server
 # sources; both are reproducible test artifacts that must not be committed.
 src/ct_test/fixtures/*/build/
 src/ct_test/*_test
+# The incremental-runner suites compile to bare (extension-less) binaries next
+# to their .nim sources via `nim c -r`; those are reproducible test artifacts.
+src/ct_test/incremental/test_*
+!src/ct_test/incremental/test_*.nim
+src/ct_test/incremental/e2e_*
+!src/ct_test/incremental/e2e_*.nim
 *.log
 format.js
 config/.config.yaml
