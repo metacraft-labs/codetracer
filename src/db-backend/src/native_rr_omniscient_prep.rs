@@ -83,6 +83,8 @@ pub fn run(slice_folder: &Path, meta_dat: &Path) -> Result<NativeRrPrepOutput, B
         .arg("-ex")
         .arg("set pagination off")
         .arg("-ex")
+        .arg("set sysroot /")
+        .arg("-ex")
         .arg(format!("file {}", program.display()))
         .arg("-ex")
         .arg(format!("target extended-remote :{port}"))

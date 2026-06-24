@@ -138,8 +138,7 @@ fn reads_nim_bulk_built_cow_image() {
     let expected = parse_manifest(&manifest);
     assert!(!expected.is_empty(), "bulk manifest must list keys");
 
-    let reader = CowNamespaceReader::open(&image, CowLeafType::TypeA)
-        .expect("open Nim bulk-built CoW namespace image");
+    let reader = CowNamespaceReader::open(&image, CowLeafType::TypeA).expect("open Nim bulk-built CoW namespace image");
 
     assert!(reader.root_page() != 0, "reader must select a committed root");
     assert_eq!(reader.leaf_type(), CowLeafType::TypeA);
