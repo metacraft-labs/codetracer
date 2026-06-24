@@ -41,10 +41,10 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{Line, StepId, TypeId, TypeKind, ValueRecord};
 
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
-use db_backend::ctfs_trace_reader::step_map_namespace::{StepMapNamespace, STEP_MAP_FILE};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::step_map_namespace::{STEP_MAP_FILE, StepMapNamespace};
 use db_backend::trace_reader::TraceReader;
 
 /// The single source file every step in the fixture recording lives in.
@@ -345,7 +345,10 @@ fn index_and_fallback_agree() {
     }
 
     // Sanity: the full trace really did span the chunked step stream.
-    assert!(expected_step_count() > 4096, "fixture must span multiple steps.dat chunks");
+    assert!(
+        expected_step_count() > 4096,
+        "fixture must span multiple steps.dat chunks"
+    );
 }
 
 /// DELIVERABLE — a MALFORMED step-map.ns is ignored (clean fallback), never a
@@ -377,8 +380,5 @@ fn malformed_step_map_is_ignored() {
     // Breakpoint resolution still correct via the fallback build.
     let path_id = reader.path_id_for(SRC).expect("path");
     let line = 10;
-    assert_eq!(
-        reader.step_ids_on_line(path_id, line),
-        Some(expected_line_steps(line))
-    );
+    assert_eq!(reader.step_ids_on_line(path_id, line), Some(expected_line_steps(line)));
 }

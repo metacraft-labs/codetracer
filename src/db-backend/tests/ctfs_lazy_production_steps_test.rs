@@ -26,10 +26,10 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{Line, StepId, TypeId, TypeKind, ValueRecord};
 
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
-use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::trace_reader::TraceReader;
 
 /// The single source file every step in the fixture recording lives in.
@@ -193,7 +193,11 @@ fn point_step_lookup_fills_one_range_only() {
     let s = reader.step(mid).expect("step 5000 present");
     assert_eq!(s.step_id, mid);
     // User step `i` lands at reader step `i + 2`; reader step 5000 → user step 4998.
-    assert_eq!(s.line, Line(line_of_user_step(5000 - 2)), "lazy line must equal recorded line");
+    assert_eq!(
+        s.line,
+        Line(line_of_user_step(5000 - 2)),
+        "lazy line must equal recorded line"
+    );
 
     // Exactly one chunk inflated — bounded, range-aware (NOT the whole stream,
     // which spans 3 chunks here).
@@ -264,7 +268,11 @@ fn lazy_step_lines_equal_recorded() {
     for i in 0..USER_STEPS {
         let sid = StepId((i + 2) as i64);
         let s = reader.step(sid).expect("user step present");
-        assert_eq!(s.path_id, path_id, "lazy path_id must equal recorded path for step {}", sid.0);
+        assert_eq!(
+            s.path_id, path_id,
+            "lazy path_id must equal recorded path for step {}",
+            sid.0
+        );
         assert_eq!(
             s.line,
             Line(line_of_user_step(i)),
@@ -329,7 +337,10 @@ fn breakpoint_resolution_parity() {
         let line = 10 + line_off;
         let from_map = map.get(&line).map(|v| v.len()).unwrap_or(0);
         let from_acc = reader.steps_on_line(path_id, line).map(|v| v.len()).unwrap_or(0);
-        assert_eq!(from_map, from_acc, "step_map_for_path must agree with steps_on_line on line {line}");
+        assert_eq!(
+            from_map, from_acc,
+            "step_map_for_path must agree with steps_on_line on line {line}"
+        );
     }
 
     // A line with no recorded steps resolves to None.
@@ -364,7 +375,11 @@ fn history_slice_and_materialized_db_parity() {
 
     // `materialized_db()` rebuilds the full step table + line map identically.
     let mdb = reader.materialized_db();
-    assert_eq!(mdb.steps.len(), expected_step_count(), "materialized_db rebuilds the step table");
+    assert_eq!(
+        mdb.steps.len(),
+        expected_step_count(),
+        "materialized_db rebuilds the step table"
+    );
     for i in 0..expected_step_count() {
         let lazy = reader.step(StepId(i as i64)).expect("lazy step");
         let mat = &mdb.steps.items[i];

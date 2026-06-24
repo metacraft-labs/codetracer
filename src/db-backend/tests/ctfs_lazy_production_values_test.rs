@@ -25,10 +25,10 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{Line, StepId, TypeId, TypeKind, ValueRecord, VariableId};
 
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
-use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::trace_reader::TraceReader;
 
 /// The single source file every step in the fixture recording lives in.

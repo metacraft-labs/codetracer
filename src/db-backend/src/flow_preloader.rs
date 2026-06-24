@@ -1003,7 +1003,8 @@ impl<'a> CallFlowPreloader<'a> {
                     // languages whose locals are not suffixed (C/C++/…), so this
                     // is a no-op everywhere except genuine Nim source variables.
                     let value_name = if self.lang == Lang::Nim {
-                        nim_mangling::nim_local_source_name(&local.expression).unwrap_or_else(|| local.expression.clone())
+                        nim_mangling::nim_local_source_name(&local.expression)
+                            .unwrap_or_else(|| local.expression.clone())
                     } else {
                         local.expression.clone()
                     };

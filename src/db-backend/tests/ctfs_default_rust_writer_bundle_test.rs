@@ -33,8 +33,8 @@ use codetracer_trace_types::*;
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
 use codetracer_trace_writer::trace_writer::TraceWriter;
 
-use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::trace_reader::TraceReader;
 
 const SRC: &str = "/test/prog.rs";
@@ -53,7 +53,14 @@ fn write_default_bundle(dir: &Path) -> PathBuf {
     let int_type = TraceWriter::ensure_type_id(&mut writer, TypeKind::Int, "Int");
     let main_fn = TraceWriter::ensure_function_id(&mut writer, "main", src, Line(1));
 
-    let arg = TraceWriter::arg(&mut writer, "x", ValueRecord::Int { i: 42, type_id: int_type });
+    let arg = TraceWriter::arg(
+        &mut writer,
+        "x",
+        ValueRecord::Int {
+            i: 42,
+            type_id: int_type,
+        },
+    );
     TraceWriter::register_call(&mut writer, main_fn, vec![arg]);
 
     for i in 0..USER_STEPS {
@@ -61,7 +68,10 @@ fn write_default_bundle(dir: &Path) -> PathBuf {
         TraceWriter::register_variable_with_full_value(
             &mut writer,
             &format!("v{i}"),
-            ValueRecord::Int { i: (i * 10) as i64, type_id: int_type },
+            ValueRecord::Int {
+                i: (i * 10) as i64,
+                type_id: int_type,
+            },
         );
     }
 
@@ -101,8 +111,18 @@ fn default_bundle_carries_events_log_and_split_streams() {
     let ct = write_default_bundle(dir.path());
 
     let mut ctfs = CtfsReader::open(&ct).expect("open container");
-    assert!(ctfs.read_file("events.log").is_ok(), "default bundle keeps events.log (additive)");
-    for f in ["calls.dat", "steps.dat", "values.dat", "events.dat", "paths.dat", "meta.dat"] {
+    assert!(
+        ctfs.read_file("events.log").is_ok(),
+        "default bundle keeps events.log (additive)"
+    );
+    for f in [
+        "calls.dat",
+        "steps.dat",
+        "values.dat",
+        "events.dat",
+        "paths.dat",
+        "meta.dat",
+    ] {
         assert!(ctfs.read_file(f).is_ok(), "default bundle must carry split file `{f}`");
     }
 }

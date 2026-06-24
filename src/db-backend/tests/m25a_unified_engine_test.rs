@@ -41,12 +41,12 @@ use codetracer_trace_types::{
     TypeKind, ValueRecord,
 };
 
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
-use db_backend::ctfs_trace_reader::step_value_stream_source::{
-    replay_steps_into_sinks, LineHitSink, SeekableStepStream, WholeStepTableSink,
-};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::step_value_stream_source::{
+    LineHitSink, SeekableStepStream, WholeStepTableSink, replay_steps_into_sinks,
+};
 use db_backend::trace_reader::TraceReader;
 
 /// The single source file every step in the fixture recording lives in.

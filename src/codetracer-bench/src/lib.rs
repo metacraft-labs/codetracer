@@ -563,9 +563,9 @@ impl FixtureRecorder {
         }
         cmd.arg(program_path);
 
-        let output = cmd.output().map_err(|e| {
-            RecorderError::Io(format!("failed to spawn {}: {e}", ct.display()))
-        })?;
+        let output = cmd
+            .output()
+            .map_err(|e| RecorderError::Io(format!("failed to spawn {}: {e}", ct.display())))?;
         if !output.status.success() {
             // ct record routes the recorder's output via
             // poStdErrToStdOut (see record.nim `recordInternal`), so
@@ -582,11 +582,7 @@ impl FixtureRecorder {
             } else {
                 format!("{stdout_text}\n{stderr_text}")
             };
-            let stderr_tail = combined
-                .lines()
-                .take(20)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let stderr_tail = combined.lines().take(20).collect::<Vec<_>>().join("\n");
             return Err(RecorderError::RecordingFailed {
                 exit_code: output.status.code(),
                 stderr_tail,
@@ -639,10 +635,7 @@ impl std::fmt::Display for RecorderError {
                 exit_code,
                 stderr_tail,
             } => {
-                write!(
-                    f,
-                    "ct record exited with {exit_code:?}:\n{stderr_tail}"
-                )
+                write!(f, "ct record exited with {exit_code:?}:\n{stderr_tail}")
             }
         }
     }
@@ -678,11 +671,7 @@ impl OmniscientPrep {
             } else {
                 format!("{stdout_text}\n{stderr_text}")
             };
-            let stderr_tail = combined
-                .lines()
-                .take(20)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let stderr_tail = combined.lines().take(20).collect::<Vec<_>>().join("\n");
             return Err(RecorderError::RecordingFailed {
                 exit_code: output.status.code(),
                 stderr_tail,

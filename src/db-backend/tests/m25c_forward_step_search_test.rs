@@ -44,11 +44,11 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{CallKey, Line, PathId, StepId, TypeId, TypeKind, ValueRecord};
 
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
 use db_backend::ctfs_trace_reader::step_value_stream_source::{
-    build_whole_step_table, find_next_line_hit, replay_forward_until, DiscardStepSink, SeekableStepStream,
-    StepBuildStrategy, WholeStepTableSink,
+    DiscardStepSink, SeekableStepStream, StepBuildStrategy, WholeStepTableSink, build_whole_step_table,
+    find_next_line_hit, replay_forward_until,
 };
 use db_backend::db::DbStep;
 
@@ -136,7 +136,13 @@ const SRC_PATH_ID: PathId = PathId(0);
 /// be checked against the authoritative `steps_on_line`-equivalent lookup.
 fn whole_table(ct: &Path) -> (Vec<DbStep>, Vec<HashMap<usize, Vec<DbStep>>>) {
     let (stream, call_keys) = open_stream(ct);
-    build_whole_step_table(&stream, &call_keys, &call_keys, 4, StepBuildStrategy::Local { threads: 1 })
+    build_whole_step_table(
+        &stream,
+        &call_keys,
+        &call_keys,
+        4,
+        StepBuildStrategy::Local { threads: 1 },
+    )
 }
 
 /// The LOCAL whole-table answer to "next step at-or-after `from` on `(path,
@@ -279,12 +285,12 @@ fn network_forward_next_hit_matches_local_steps_on_line() {
     // Exercise several (line, from) cases spread across the trace, plus a
     // no-further-hit case.
     let cases: &[(usize, usize)] = &[
-        (10, 0),            // earliest line, from the very start
-        (25, 0),            // mid line, from the start
-        (49, count / 4),    // last spread line, quarter in
-        (30, count / 2),    // mid-trace start
-        (15, count - 50),   // near the end — may or may not have a further hit
-        (42, count - 1),    // last index start
+        (10, 0),          // earliest line, from the very start
+        (25, 0),          // mid line, from the start
+        (49, count / 4),  // last spread line, quarter in
+        (30, count / 2),  // mid-trace start
+        (15, count - 50), // near the end — may or may not have a further hit
+        (42, count - 1),  // last index start
     ];
 
     for &(line, from) in cases {
@@ -327,7 +333,10 @@ fn network_forward_next_hit_matches_local_steps_on_line() {
     );
     let local = local_next_line_hit(&map, SRC_PATH_ID, 10, last_on_10 + 1);
     assert_eq!(network, None, "no further hit on line 10 past its last occurrence");
-    assert_eq!(network, local, "NetworkForward and Local agree on the no-further-hit (None) case");
+    assert_eq!(
+        network, local,
+        "NetworkForward and Local agree on the no-further-hit (None) case"
+    );
 }
 
 /// Parity must also hold under the `Local` strategy (the forward primitive is the

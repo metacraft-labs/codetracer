@@ -216,16 +216,14 @@ pub fn measure_fixture(
     // another layout.  We resolve the canonical .ct path by walking
     // the trace_dir and passing the actual file to replay-server so
     // every layout works under the same omniscient-prep invocation.
-    let ct_path = find_ct_container(&trace_dir).ok_or_else(|| {
-        RecorderError::RecordingFailed {
-            exit_code: None,
-            stderr_tail: format!(
-                "ct record exit 0 but no *.ct CTFS container found under {} \
+    let ct_path = find_ct_container(&trace_dir).ok_or_else(|| RecorderError::RecordingFailed {
+        exit_code: None,
+        stderr_tail: format!(
+            "ct record exit 0 but no *.ct CTFS container found under {} \
                  — recorder may have written to an unexpected location; \
                  check the `recordingId:` marker in stdout for the trace id",
-                trace_dir.display()
-            ),
-        }
+            trace_dir.display()
+        ),
     })?;
     let slice_folder = ct_path.parent().unwrap_or(&trace_dir);
     OmniscientPrep::run(slice_folder, "on")?;
@@ -277,9 +275,7 @@ pub fn measure_fixture(
 pub fn find_ct_container(trace_dir: &Path) -> Option<PathBuf> {
     for entry in walkdir::WalkDir::new(trace_dir) {
         let entry = entry.ok()?;
-        if entry.file_type().is_file()
-            && entry.path().extension().is_some_and(|ext| ext == "ct")
-        {
+        if entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext == "ct") {
             return Some(entry.path().to_path_buf());
         }
     }

@@ -2,6 +2,8 @@
 
 # .NET / build outputs
 **/bin/
+!src/codetracer-bench/src/bin/
+!src/codetracer-bench/src/bin/ct-bench.rs
 **/obj/
 
 node_modules

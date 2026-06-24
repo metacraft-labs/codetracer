@@ -514,10 +514,7 @@ impl DapMeasurementDriver {
         backend_kind: Option<&str>,
         language: Language,
     ) -> Result<PathBuf, String> {
-        let cache_key = (
-            backend_kind.unwrap_or("").to_string(),
-            language,
-        );
+        let cache_key = (backend_kind.unwrap_or("").to_string(), language);
         if let Some(cached) = self.recorded_traces.borrow().get(&cache_key) {
             return Ok(cached.clone());
         }
@@ -555,9 +552,7 @@ impl DapMeasurementDriver {
                 RecorderError::RecordingFailed {
                     exit_code,
                     stderr_tail,
-                } => format!(
-                    "ct record failed (exit={exit_code:?}):\n{stderr_tail}"
-                ),
+                } => format!("ct record failed (exit={exit_code:?}):\n{stderr_tail}"),
             },
         )?;
         self.recorded_traces
@@ -735,10 +730,7 @@ impl DapMeasurementDriver {
     /// numbers ~10× faster than reality and failed silently when
     /// the underlying op was broken — the correctness gate fixes
     /// both.
-    fn op_to_dap(
-        operation: Operation,
-        ctx: &DapBenchContext,
-    ) -> Option<(&'static str, Value)> {
+    fn op_to_dap(operation: Operation, ctx: &DapBenchContext) -> Option<(&'static str, Value)> {
         let location = json!({
             "path": ctx.source_path.clone(),
             "line": ctx.stop_line,
@@ -898,7 +890,8 @@ impl MeasurementDriver for DapMeasurementDriver {
         };
         // Map backend → `ct record --backend <kind>`.  Ttd is
         // intercepted above with the Windows-only sentinel.
-        let record_backend_kind = backend.ct_record_backend_kind()
+        let record_backend_kind = backend
+            .ct_record_backend_kind()
             .map_err(|s| s.to_string())?;
         // MCR over a materialized-trace language is a category error:
         // Python / Ruby / JS / Cairo / Solana fixtures don't compile
@@ -923,14 +916,12 @@ impl MeasurementDriver for DapMeasurementDriver {
         // through `start_backend` to the right replay binary per kind).
         // Fall back to the direct `replay-server`/`ct-rr-support`
         // discovery so cells still measure when `ct` isn't built.
-        let dap_binary = ct_cli_binary()
-            .or_else(ct_binary)
-            .ok_or_else(|| {
-                "neither `ct` (preferred) nor `replay-server` is on PATH / discoverable; \
+        let dap_binary = ct_cli_binary().or_else(ct_binary).ok_or_else(|| {
+            "neither `ct` (preferred) nor `replay-server` is on PATH / discoverable; \
                  run `just build-once` to produce src/build-debug/bin/ct or build the \
                  db-backend at src/db-backend/target/debug/replay-server"
-                    .to_string()
-            })?;
+                .to_string()
+        })?;
         let program = self.fixture_program(language);
         if !program.exists() {
             return Err(format!("fixture program missing: {}", program.display()));
@@ -944,12 +935,7 @@ impl MeasurementDriver for DapMeasurementDriver {
             )
         })?;
 
-        let mut session = DapSession::launch(
-            &dap_binary,
-            backend_kind,
-            &trace_dir,
-            &trace_file,
-        )
+        let mut session = DapSession::launch(&dap_binary, backend_kind, &trace_dir, &trace_file)
             .map_err(|e: DapError| format!("dap session launch failed: {e}"))?;
 
         // One-time setup query gathers the real thread/frame ids and
@@ -982,7 +968,9 @@ impl MeasurementDriver for DapMeasurementDriver {
                 .unwrap_or("dap-server rejected every iteration without a message");
             return Err(format!(
                 "correctness fail: 0/{} successful responses for {} → {}",
-                outcome.iterations, operation.wire(), detail
+                outcome.iterations,
+                operation.wire(),
+                detail
             ));
         }
         if let Some(body) = &outcome.first_response_body
@@ -1065,17 +1053,26 @@ pub(crate) fn operation_invariant_ok(operation: Operation, body: &Value) -> Resu
         // carries an object (the real response shape is per-trace and
         // beyond a generic invariant; the success gate above already
         // ensures the dap-server didn't reject).
-        Operation::LoadLocals | Operation::LoadHistory1K | Operation::LoadHistory10K | Operation::LoadFlow => {
+        Operation::LoadLocals
+        | Operation::LoadHistory1K
+        | Operation::LoadHistory10K
+        | Operation::LoadFlow => {
             if body.is_object() || body.is_array() {
                 Ok(())
             } else {
-                Err(format!("{} response is neither object nor array", operation.wire()))
+                Err(format!(
+                    "{} response is neither object nor array",
+                    operation.wire()
+                ))
             }
         }
         // jump-to-line / jump-to-call / tracepoint-eval / watchpoint:
         // the dap-server response is task-specific; success gate
         // suffices.
-        Operation::JumpToLine | Operation::JumpToCall | Operation::Tracepoint | Operation::Watchpoint => Ok(()),
+        Operation::JumpToLine
+        | Operation::JumpToCall
+        | Operation::Tracepoint
+        | Operation::Watchpoint => Ok(()),
     }
 }
 

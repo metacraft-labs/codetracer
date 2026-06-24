@@ -45,9 +45,7 @@
 
 use std::path::{Path, PathBuf};
 
-use codetracer_trace_types::{
-    CallKey, FunctionId, Line, PathId, StepId, TypeId, TypeKind, ValueRecord, VariableId,
-};
+use codetracer_trace_types::{CallKey, FunctionId, Line, PathId, StepId, TypeId, TypeKind, ValueRecord, VariableId};
 
 use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
 use codetracer_trace_writer::trace_writer::TraceWriter as RustTraceWriter;
@@ -132,8 +130,8 @@ fn write_split_only_bundle(dir: &Path) -> PathBuf {
 /// `StepValues`).
 fn write_events_log_bundle(dir: &Path) -> PathBuf {
     use codetracer_trace_types::{
-        CallRecord, FullValueRecord, FunctionRecord, ReturnRecord, StepRecord, TraceLowLevelEvent,
-        TypeRecord, TypeSpecificInfo,
+        CallRecord, FullValueRecord, FunctionRecord, ReturnRecord, StepRecord, TraceLowLevelEvent, TypeRecord,
+        TypeSpecificInfo,
     };
 
     let path_buf = dir.join("events_log");
@@ -224,9 +222,9 @@ fn locals_at(reader: &CTFSTraceReader, step_id: StepId) -> Vec<(String, i64)> {
 /// but the leading step / call bookkeeping can shift absolute indices, so we
 /// resolve by line to compare the two bundles structurally.
 fn step_index_for_line(reader: &CTFSTraceReader, line: i64) -> Option<StepId> {
-    (0..reader.step_count() as i64).map(StepId).find(|&sid| {
-        reader.step(sid).map(|s| s.line == Line(line)).unwrap_or(false)
-    })
+    (0..reader.step_count() as i64)
+        .map(StepId)
+        .find(|&sid| reader.step(sid).map(|s| s.line == Line(line)).unwrap_or(false))
 }
 
 /// Deliverable #1 — the split-only bundle is GENUINELY `events.log`-free, so the
@@ -265,7 +263,11 @@ fn split_only_bundle_is_events_log_free_and_fully_served() {
     );
 
     // Calls: the single wrapping `main` call must be present.
-    assert!(reader.call_count() >= 1, "expected at least one call, got {}", reader.call_count());
+    assert!(
+        reader.call_count() >= 1,
+        "expected at least one call, got {}",
+        reader.call_count()
+    );
     let main_call = reader.call(CallKey(0)).expect("call 0 present");
     let main_fn = reader.function(main_call.function_id).expect("main function record");
     assert_eq!(main_fn.name, "main", "the wrapping call should be `main`");
@@ -308,13 +310,18 @@ fn split_only_bundle_cell_history_is_correctly_empty() {
         // The per-step maps exist (the new-format path pushes one HashMap per
         // step) but are empty: no Cell/Assign events ⇒ no compound/cell entries.
         let compound = reader.compound_at(sid).expect("compound map present per step");
-        assert!(compound.is_empty(), "split bundle records no compound values at line {line}");
+        assert!(
+            compound.is_empty(),
+            "split bundle records no compound values at line {line}"
+        );
 
         let cells = reader.cells_at(sid).expect("cells map present per step");
         assert!(cells.is_empty(), "split bundle records no cell values at line {line}");
 
         // No `register_variable`/`bind_variable` ⇒ no variable→place tracking.
-        let vcells = reader.variable_cells_at(sid).expect("variable_cells map present per step");
+        let vcells = reader
+            .variable_cells_at(sid)
+            .expect("variable_cells map present per step");
         assert!(
             vcells.is_empty(),
             "split bundle records no variable→place cells at line {line} \
@@ -360,10 +367,8 @@ fn split_only_and_events_log_bundles_agree() {
     // For every user step, both readers resolve the SAME `(var_name, value)`.
     for i in 0..USER_STEPS {
         let line = 10 + i as i64;
-        let split_sid =
-            step_index_for_line(&split, line).unwrap_or_else(|| panic!("split: no step at line {line}"));
-        let log_sid =
-            step_index_for_line(&log, line).unwrap_or_else(|| panic!("events.log: no step at line {line}"));
+        let split_sid = step_index_for_line(&split, line).unwrap_or_else(|| panic!("split: no step at line {line}"));
+        let log_sid = step_index_for_line(&log, line).unwrap_or_else(|| panic!("events.log: no step at line {line}"));
 
         let split_locals = locals_at(&split, split_sid);
         let log_locals = locals_at(&log, log_sid);

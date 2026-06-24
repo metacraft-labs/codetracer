@@ -217,10 +217,7 @@ pub fn decode_memwrites(image: &[u8]) -> Result<Vec<(u64, MemWriteEntry)>, Strin
         ));
     }
     if out.len() as u64 != write_count {
-        return Err(format!(
-            "WLOG write_count {write_count} != decoded {}",
-            out.len()
-        ));
+        return Err(format!("WLOG write_count {write_count} != decoded {}", out.len()));
     }
     Ok(out)
 }

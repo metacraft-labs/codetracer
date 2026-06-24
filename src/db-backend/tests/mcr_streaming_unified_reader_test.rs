@@ -52,10 +52,14 @@ fn e2e_mcr_streaming_flow_via_unified_reader() {
 
     // ── record a C program under MCR, producing a split-stream `.ct` ──
     let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-programs/c/c_flow_test.c");
-    assert!(source_path.exists(), "C test program not found at {}", source_path.display());
+    assert!(
+        source_path.exists(),
+        "C test program not found at {}",
+        source_path.display()
+    );
 
-    let recording = TestRecording::create_mcr(&source_path, Language::C, "mcr", &ct_rr_support)
-        .expect("MCR recording failed");
+    let recording =
+        TestRecording::create_mcr(&source_path, Language::C, "mcr", &ct_rr_support).expect("MCR recording failed");
     let ct_path = &recording.trace_dir; // create_mcr stores the `.ct` path here.
 
     // ── drive the recorded `.ct` through the UNIFIED follow reader ──
@@ -90,9 +94,7 @@ fn e2e_mcr_streaming_flow_via_unified_reader() {
     // schema the recorder may evolve.
     let value_count = reader.values().value_count();
     let call_count = reader.calls().call_count();
-    eprintln!(
-        "unified follow over MCR .ct: {step_count} steps, {value_count} values, {call_count} calls"
-    );
+    eprintln!("unified follow over MCR .ct: {step_count} steps, {value_count} values, {call_count} calls");
     if value_count > 0 {
         assert_eq!(
             value_count, step_count,

@@ -36,12 +36,12 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{CallKey, Line, StepId, TypeId, TypeKind, ValueRecord};
 
-use codetracer_trace_writer_nim::{trace_writer::TraceWriter, NimTraceWriter, TraceEventsFileFormat};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
 
-use db_backend::ctfs_trace_reader::step_value_stream_source::{
-    build_whole_step_table, SeekableStepStream, StepBuildStrategy,
-};
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
+use db_backend::ctfs_trace_reader::step_value_stream_source::{
+    SeekableStepStream, StepBuildStrategy, build_whole_step_table,
+};
 use db_backend::db::DbStep;
 use db_backend::trace_reader::TraceReader;
 
@@ -130,10 +130,7 @@ fn assert_whole_tables_identical(
 
     assert_eq!(a_steps.len(), b_steps.len(), "DbStep array length must match");
     for (i, (sa, sb)) in a_steps.iter().zip(b_steps.iter()).enumerate() {
-        assert!(
-            db_step_eq(sa, sb),
-            "DbStep[{i}] differs: {sa:?} vs {sb:?}"
-        );
+        assert!(db_step_eq(sa, sb), "DbStep[{i}] differs: {sa:?} vs {sb:?}");
         // The array MUST be index-aligned: steps[i] is step i.
         assert_eq!(sa.step_id.0, i as i64, "steps[{i}].step_id must equal {i}");
     }

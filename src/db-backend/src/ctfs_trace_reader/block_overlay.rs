@@ -43,7 +43,7 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use super::ctfs_container::{
-    base40_decode, base40_encode, BlockSource, CtfsError, EXTENDED_HEADER_SIZE, FILE_ENTRY_SIZE, HEADER_SIZE,
+    BlockSource, CtfsError, EXTENDED_HEADER_SIZE, FILE_ENTRY_SIZE, HEADER_SIZE, base40_decode, base40_encode,
 };
 
 /// Byte offset of the `Size` field within a 24-byte `FileEntry`
@@ -514,7 +514,8 @@ impl CtfsBlockOverlay {
                 // keep scanning in case the exact name appears later
             }
         }
-        let index = target.ok_or_else(|| CtfsError::Corrupt(format!("overlay: root directory full, cannot add '{name}'")))?;
+        let index =
+            target.ok_or_else(|| CtfsError::Corrupt(format!("overlay: root directory full, cannot add '{name}'")))?;
         let off = Self::file_entry_offset(index);
         self.mutate_block(0, |block0| {
             block0[off..off + 8].copy_from_slice(&size.to_le_bytes());
@@ -608,7 +609,7 @@ impl CtfsBlockOverlay {
 mod tests {
     use super::*;
     use crate::ctfs_trace_reader::ctfs_container::{
-        write_minimal_ctfs, CtfsReader, InMemoryBlockSource, LocalFileSource,
+        CtfsReader, InMemoryBlockSource, LocalFileSource, write_minimal_ctfs,
     };
 
     const BLOCK_SIZE: usize = 4096;

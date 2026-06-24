@@ -31,13 +31,13 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use codetracer_trace_types::{Line, PathId};
-use codetracer_trace_writer::call_stream::{encode_call_stream, CallStreamRecord};
-use codetracer_trace_writer::meta_dat::{
-    encode_meta_dat, FLAG_HAS_CALL_STREAM, FLAG_HAS_STEP_STREAM, FLAG_HAS_VALUE_STREAM,
-};
-use codetracer_trace_writer::step_stream::{encode_step_stream, StepStreamBuilder};
-use codetracer_trace_writer::value_stream::{encode_value_stream, ValueRecordEntry, ValueStreamEvent};
 use codetracer_trace_types::{StepRecord, TraceLowLevelEvent};
+use codetracer_trace_writer::call_stream::{CallStreamRecord, encode_call_stream};
+use codetracer_trace_writer::meta_dat::{
+    FLAG_HAS_CALL_STREAM, FLAG_HAS_STEP_STREAM, FLAG_HAS_VALUE_STREAM, encode_meta_dat,
+};
+use codetracer_trace_writer::step_stream::{StepStreamBuilder, encode_step_stream};
+use codetracer_trace_writer::value_stream::{ValueRecordEntry, ValueStreamEvent, encode_value_stream};
 
 const BLOCK_SIZE: usize = 4096;
 const HEADER_SIZE: usize = 8;
@@ -111,7 +111,12 @@ impl IncrementalCtfsStreamWriter {
     /// pre-declared at size 0 (each with a reserved root mapping block), and
     /// flush Block 0 so the file is immediately a valid CTFS container.
     pub fn create(path: &Path, chunk_size: usize) -> std::io::Result<Self> {
-        let file = OpenOptions::new().create(true).read(true).write(true).truncate(true).open(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(true)
+            .open(path)?;
 
         // Block 0 (directory) is block 0; reserve a root mapping block per file.
         let mut next_block = 1u64;
@@ -307,7 +312,10 @@ impl IncrementalCtfsStreamWriter {
                 let blk = self.alloc_block()?;
                 // Direct mapping only: write the pointer at `block_index` in the
                 // root map block.
-                assert!(block_index < (BLOCK_SIZE / 8 - 1) as u64, "fixture exceeds direct mapping");
+                assert!(
+                    block_index < (BLOCK_SIZE / 8 - 1) as u64,
+                    "fixture exceeds direct mapping"
+                );
                 self.write_ptr(map_block, block_index as usize, blk)?;
                 self.flush_block(map_block)?;
                 self.files[fi].data_blocks = block_index + 1;
