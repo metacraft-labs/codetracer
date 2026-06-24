@@ -2078,6 +2078,10 @@ bench-omniscient-db-size *args:
 bench-slice-prep-speed *args:
   cd src/codetracer-bench && cargo run --release --bin ct-bench -- slice-prep-speed {{args}}
 
+# Native MCR/RR omniscient-prep timing.
+bench-native-omniscient-timing *args:
+  cd src/codetracer-bench && cargo run --release --bin ct-bench -- native-omniscient-timing {{args}}
+
 # P4 — GUI-feature latency matrix.
 bench-gui-ops *args:
   cd src/codetracer-bench && cargo run --release --bin ct-bench -- gui-ops {{args}}

@@ -51,6 +51,18 @@ enum Command {
         #[arg(long)]
         temp_root: Option<PathBuf>,
     },
+    NativeOmniscientTiming {
+        #[arg(long)]
+        program: Option<PathBuf>,
+        #[arg(long, default_value = "mcr,rr")]
+        backends: String,
+        #[arg(long, default_value_t = 1)]
+        runs: usize,
+        #[arg(long)]
+        fixtures_root: Option<PathBuf>,
+        #[arg(long)]
+        temp_root: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -140,6 +152,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &operations,
             );
             let dir = write_report(&matrix.to_report())?;
+            println!("{}", dir.display());
+        }
+        Command::NativeOmniscientTiming {
+            program,
+            backends,
+            runs,
+            fixtures_root,
+            temp_root,
+        } => {
+            let fixtures_root = fixtures_root.unwrap_or_else(default_fixtures_root);
+            let program = program.unwrap_or_else(|| {
+                codetracer_bench::native_omniscient_timing::default_program(&fixtures_root)
+            });
+            let backends = backends
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let temp_root =
+                temp_root.unwrap_or_else(|| default_temp_root("native-omniscient-timing"));
+            std::fs::create_dir_all(&temp_root)?;
+            let outcome = codetracer_bench::native_omniscient_timing::run(
+                &program, &backends, runs, &temp_root,
+            );
+            for reason in &outcome.skipped {
+                eprintln!("SKIPPED: {reason}");
+            }
+            let dir = write_report(&outcome.report)?;
             println!("{}", dir.display());
         }
     }

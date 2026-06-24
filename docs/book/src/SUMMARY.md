@@ -38,6 +38,7 @@
   - [Variable Rename List](./usage_guide/variable-rename-list.md)
   - [CodeTracer Shell](./usage_guide/codetracer_shell.md)
   - [Omniscient-DB size benchmark](./usage_guide/omniscient-db-size-bench.md)
+  - [Native omniscient timing benchmark](./usage_guide/native-omniscient-timing-bench.md)
   - [Slice prep speed benchmark](./usage_guide/slice-prep-speed-bench.md)
   - [GUI-ops latency matrix benchmark](./usage_guide/gui-ops-latency-bench.md)
 

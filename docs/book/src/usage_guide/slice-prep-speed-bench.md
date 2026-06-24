@@ -1,10 +1,12 @@
 # Slice generation speed + concurrent processing speedup bench (P3)
 
 The `ct-bench slice-prep-speed` subcommand drives the P3 benchmark.
-For a fixed program (default: the P2 `mid_length_compute` fixture in
-the selected language), it records the program into K slices for
-K ∈ {1, 2, 4, 8, 16} and runs the omniscient-prep subprocess against
-each slice at concurrency C ∈ {1, 2, 4, 8}.
+Slices are an MCR concept. For a fixed program (default: the P2
+`mid_length_compute` fixture in the selected language), the current
+driver records K independent MCR-shaped trace directories as a
+slice-prep/concurrency proxy for K ∈ {1, 2, 4, 8, 16}, then runs the
+omniscient-prep subprocess against each trace at concurrency
+C ∈ {1, 2, 4, 8}.
 
 The bench measures three things:
 
@@ -24,7 +26,7 @@ just bench-slice-prep-speed
 # Narrower run.
 just bench-slice-prep-speed --slice-counts=1,2 --prep-concurrency=1,2
 
-# Different language (e.g. C++ via RR).
+# Different native language through the MCR-compatible ct record path.
 just bench-slice-prep-speed --language=c_plus_plus
 ```
 
