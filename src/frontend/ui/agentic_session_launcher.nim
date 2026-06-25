@@ -389,7 +389,7 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   launcher.vm.vcs.setHeader("agent-worktree")
   launcher.vm.vcs.setGitRepoState(true)
   launcher.vm.vcs.setBranchState("agent-worktree", ["agent-worktree"], false)
-  launcher.vm.vcs.setCommits([], -1)
+  launcher.vm.vcs.setCommits([], [])
   launcher.vm.vcs.setUnifiedDiff(launcher.vm.vcs.unifiedDiffActive.val,
     launcher.vm.vcs.diffFiles.val)
   launcher.vm.vcs.setHunkState([], false, false)
@@ -401,7 +401,8 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   comp.currentBranch = cstring"agent-worktree"
   comp.branches = @[cstring"agent-worktree"]
   comp.commits = @[]
-  comp.selectedCommitIndex = -1
+  comp.selectedCommitIndices = @[]
+  comp.lastClickedCommitIndex = -1
   comp.initialized = true
   comp.isGitRepo = true
   comp.errorMessage = cstring""
