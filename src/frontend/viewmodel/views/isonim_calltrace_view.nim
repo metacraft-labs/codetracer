@@ -115,9 +115,16 @@ proc paddingForDepth(item: proc(): CallLine; pxPerLevel: int): string =
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
-proc callDisplayName(line: CallLine): string =
+proc callDisplayName*(line: CallLine): string =
   ## Rendering stays backward-compatible: existing traces use ``name``.
   if line.displayName.len > 0: line.displayName else: line.name
+
+proc toggleIconClass*(item: proc(): CallLine): string =
+  let line = item()
+  if line.hasChildren:
+    if line.isExpanded: "collapse-call-img"
+    else: "expand-call-img"
+  else: "dot-call-img"
 
 # ---------------------------------------------------------------------------
 # MockRenderer renderer — simple structure for headless unit tests
@@ -173,6 +180,8 @@ proc renderCallLineRowMock(r: MockRenderer; vm: CalltraceVM;
          padding_left = paddingForDepth(item, 16),
          onclick = h.onSelect,
          ondblclick = h.onDblClick):
+      tdiv(class = toggleIconClass(item), onclick = h.onToggle):
+        discard
       span(class = "call-name"):
         text callDisplayName(item())
       tdiv(class = "call-args", ref = argsContainer):
@@ -291,11 +300,6 @@ when defined(js):
       "calltrace-call-line calltrace-row event-selected"
     else:
       "calltrace-call-line calltrace-row"
-
-  proc toggleIconClass(item: proc(): CallLine): string =
-    let line = item()
-    if line.hasChildren and line.isExpanded: "collapse-call-img"
-    else: "dot-call-img"
 
   proc selectedChildBoxClass(vm: CalltraceVM; item: proc(): CallLine): string =
     let sel = vm.selectedEntry.val
