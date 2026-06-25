@@ -9,7 +9,7 @@
 
 use crate::{
     BenchReport, BenchRow, Language, OmniscientPrep, RecorderError, ct_binary, ct_cli_binary,
-    dir_size_bytes,
+    ct_command, dir_size_bytes,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -127,7 +127,7 @@ pub fn run(
     if ct_binary().is_none() {
         outcome
             .skipped
-            .push("replay-server/ct binary with trace omniscient-prep not found".to_string());
+            .push("ct launcher with trace omniscient-prep not found".to_string());
         return outcome;
     }
     if crate::which("gcc").is_none() {
@@ -155,7 +155,7 @@ pub fn run(
     };
 
     for backend in backends {
-        let row = match measure_backend(backend, program, native_ms, runs, temp_root) {
+        let row = match measure_backend(backend, &bin_path, native_ms, runs, temp_root) {
             Ok(row) => row.to_row(),
             Err(err) => NativeOmniscientTimingRow {
                 backend: backend.clone(),
@@ -179,7 +179,7 @@ pub fn run(
 
 fn measure_backend(
     backend: &str,
-    program_path: &Path,
+    binary_path: &Path,
     native_ms: f64,
     runs: usize,
     temp_root: &Path,
@@ -191,7 +191,7 @@ fn measure_backend(
                 std::fs::remove_dir_all(&trace_dir)
                     .map_err(|e| format!("remove {}: {e}", trace_dir.display()))?;
             }
-            record_command(backend, program_path, &trace_dir)
+            record_command(backend, binary_path, &trace_dir)
         },
         runs,
     )?);
@@ -200,7 +200,7 @@ fn measure_backend(
         std::fs::remove_dir_all(&trace_dir)
             .map_err(|e| RecorderError::Io(format!("remove {}: {e}", trace_dir.display())))?;
     }
-    let record = record_command(backend, program_path, &trace_dir).map_err(RecorderError::Io)?;
+    let record = record_command(backend, binary_path, &trace_dir).map_err(RecorderError::Io)?;
     run_command(record).map_err(|stderr_tail| RecorderError::RecordingFailed {
         exit_code: None,
         stderr_tail,
@@ -272,7 +272,7 @@ fn compile_c(src: &Path, bin: &Path) -> Result<(), String> {
 fn record_command(backend: &str, program_path: &Path, trace_dir: &Path) -> Result<Command, String> {
     std::fs::create_dir_all(trace_dir).map_err(|e| format!("create trace dir: {e}"))?;
     let ct = ct_cli_binary().ok_or_else(|| "ct CLI not found".to_string())?;
-    let mut cmd = Command::new(ct);
+    let mut cmd = ct_command(&ct);
     cmd.arg("record")
         .arg("--lang")
         .arg(Language::C.ct_record_lang())

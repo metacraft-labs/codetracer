@@ -202,21 +202,14 @@ pub fn which(binary: &str) -> Option<PathBuf> {
     None
 }
 
-/// Returns the path of the binary the bench shells out to for the
-/// `trace omniscient-prep` subcommand.
-///
-/// The campaign's omniscient-prep entry point lives on the
-/// `replay-server` binary built by `src/db-backend/`. The dev shell's
-/// `src/build-debug/bin/replay-server` is an older, pre-M19 build that
-/// does NOT carry the `trace` subcommand; the freshly-built artifact
-/// at `src/db-backend/target/debug/replay-server` does.
+/// Returns the path of the high-level `ct` launcher used for
+/// `trace omniscient-prep`.
 ///
 /// Resolution order:
 ///   1. `CT_BIN` env var (full override; the operator picks the binary).
-///   2. `replay-server` on PATH that responds to `trace omniscient-prep`.
-///   3. The known build path `src/db-backend/target/debug/replay-server`
-///      relative to `CODETRACER_REPO_ROOT_PATH` (the env var
-///      `detect-siblings.sh` exports).
+///   2. `ct` on PATH that responds to `trace omniscient-prep`.
+///   3. The known build path `src/build-debug/bin/ct` relative to
+///      `CODETRACER_REPO_ROOT_PATH`.
 pub fn ct_binary() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("CT_BIN") {
         let p = PathBuf::from(env);
@@ -225,31 +218,21 @@ pub fn ct_binary() -> Option<PathBuf> {
         }
     }
 
-    // Check the freshly-built db-backend replay-server first if the
-    // repo root is known. This is the binary that carries the `trace`
-    // subcommand on which the campaign depends.
-    if let Some(root) = std::env::var_os("CODETRACER_REPO_ROOT_PATH") {
-        let candidate = PathBuf::from(root)
-            .join("src")
-            .join("db-backend")
-            .join("target")
-            .join("debug")
-            .join("replay-server");
-        if candidate.is_file() && binary_supports_trace_omniscient_prep(&candidate) {
-            return Some(candidate);
-        }
-    }
-
-    if let Some(p) = which("replay-server")
-        && binary_supports_trace_omniscient_prep(&p)
-    {
-        return Some(p);
-    }
-
     if let Some(p) = which("ct")
         && binary_supports_trace_omniscient_prep(&p)
     {
         return Some(p);
+    }
+
+    if let Some(root) = std::env::var_os("CODETRACER_REPO_ROOT_PATH") {
+        let candidate = PathBuf::from(root)
+            .join("src")
+            .join("build-debug")
+            .join("bin")
+            .join("ct");
+        if candidate.is_file() && binary_supports_trace_omniscient_prep(&candidate) {
+            return Some(candidate);
+        }
     }
     None
 }
@@ -296,16 +279,36 @@ pub fn ct_cli_binary() -> Option<PathBuf> {
     None
 }
 
+/// Build a `Command` for the CodeTracer `ct` binary with the runtime library
+/// path the Nix dev shell exposes through `CODETRACER_LD_LIBRARY_PATH`.
+///
+/// The `ct` binary imports Nim's OpenSSL module; that module dlopens
+/// `libcrypto` during module initialization, before `src/ct/codetracer.nim`
+/// can recompose `LD_LIBRARY_PATH` for child processes.  Benchmarks spawn `ct`
+/// directly, so they must pass the dev-shell library path in the conventional
+/// loader variable as well.
+pub fn ct_command(binary: &Path) -> Command {
+    let mut cmd = Command::new(binary);
+    match std::env::var("CODETRACER_LD_LIBRARY_PATH") {
+        Ok(ct_ld) if !ct_ld.is_empty() => {
+            let value = match std::env::var("LD_LIBRARY_PATH") {
+                Ok(current) if !current.is_empty() => format!("{ct_ld}:{current}"),
+                _ => ct_ld,
+            };
+            cmd.env("LD_LIBRARY_PATH", value);
+        }
+        _ => {}
+    }
+    cmd
+}
+
 /// Quick probe that confirms a binary is the codetracer `ct` CLI by
 /// checking its top-level `--help` output mentions the `start_backend`
 /// subcommand.  Bounded to a short timeout so a hung binary on PATH
 /// can't stall the bench at startup.
 fn binary_supports_start_backend(path: &Path) -> bool {
-    use std::process::Command;
-    let output = Command::new(path)
-        .arg("--help")
-        .env("CODETRACER_IN_UI_TEST", "1")
-        .output();
+    let mut cmd = ct_command(path);
+    let output = cmd.arg("--help").env("CODETRACER_IN_UI_TEST", "1").output();
     match output {
         Ok(o) => {
             let stdout = String::from_utf8_lossy(&o.stdout);
@@ -322,7 +325,7 @@ fn binary_supports_start_backend(path: &Path) -> bool {
 /// subcommand. The probe is best-effort: any spawn error returns false
 /// so we fall through to the next candidate.
 fn binary_supports_trace_omniscient_prep(binary: &Path) -> bool {
-    let Ok(output) = Command::new(binary)
+    let Ok(output) = ct_command(binary)
         .arg("trace")
         .arg("omniscient-prep")
         .arg("--help")
@@ -547,7 +550,7 @@ impl FixtureRecorder {
             )
         })?;
 
-        let mut cmd = Command::new(&ct);
+        let mut cmd = ct_command(&ct);
         cmd.arg("record")
             // Pin --lang explicitly so the bench is robust against
             // surprising file-extension overlaps (e.g. Solana fixtures
@@ -654,7 +657,7 @@ impl OmniscientPrep {
         let bin = ct_binary()
             .ok_or_else(|| RecorderError::Unavailable("ct binary not on PATH".to_string()))?;
         let started = std::time::Instant::now();
-        let output = Command::new(&bin)
+        let output = ct_command(&bin)
             .arg("trace")
             .arg("omniscient-prep")
             .arg(slice_folder)

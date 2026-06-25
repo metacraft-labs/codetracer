@@ -267,6 +267,14 @@ proc nativeReplayTraceKindForBackend(backend: string): string =
   ## native replay-worker family rather than materialized DB traces.
   if backend == "ttd": "ttd" else: "rr"
 
+proc isExistingExecutable(path: string): bool =
+  if not fileExists(path):
+    return false
+  try:
+    fpUserExec in getFilePermissions(path)
+  except OSError:
+    false
+
 proc record*(lang: string,
              outputFolder: string,
              exportFile: string,
@@ -374,7 +382,10 @@ proc record*(lang: string,
       # Ensure the output folder is passed to the recorder after we create it.
       pargs.add("-o")
       pargs.add(outputFolderValue)
-    programToRecord = build(program, "", nimcachePath)
+    if isExistingExecutable(program):
+      programToRecord = program
+    else:
+      programToRecord = build(program, "", nimcachePath)
 
   pargs.add(programToRecord)
   if args.len != 0:

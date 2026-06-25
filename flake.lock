@@ -323,7 +323,9 @@
     "codetracer-js-recorder": {
       "inputs": {
         "codetracer-trace-format": "codetracer-trace-format",
-        "codetracer-trace-format-nim": "codetracer-trace-format-nim",
+        "codetracer-trace-format-nim": [
+          "codetracer-trace-format-nim"
+        ],
         "fenix": "fenix",
         "nim-results": "nim-results",
         "nim-stew": "nim-stew",
@@ -387,7 +389,9 @@
     "codetracer-ruby-recorder": {
       "inputs": {
         "codetracer-trace-format": "codetracer-trace-format_2",
-        "codetracer-trace-format-nim": "codetracer-trace-format-nim_2",
+        "codetracer-trace-format-nim": [
+          "codetracer-trace-format-nim"
+        ],
         "fenix": "fenix_2",
         "nim-results": "nim-results_2",
         "nim-stew": "nim-stew_2",
@@ -413,7 +417,9 @@
     "codetracer-shell-recorders": {
       "inputs": {
         "codetracer-trace-format": "codetracer-trace-format_3",
-        "codetracer-trace-format-nim": "codetracer-trace-format-nim_3",
+        "codetracer-trace-format-nim": [
+          "codetracer-trace-format-nim"
+        ],
         "fenix": "fenix_3",
         "nim-results": "nim-results_3",
         "nim-stew": "nim-stew_3",
@@ -484,67 +490,16 @@
     "codetracer-trace-format-nim": {
       "flake": false,
       "locked": {
-        "lastModified": 1781208329,
-        "narHash": "sha256-xoReU6nRF4uWMfdHN7Y416ug49xQWIzsRBjt2h6JbDA=",
+        "lastModified": 1782268715,
+        "narHash": "sha256-kwFIZK/SfrfaE9EvQ/WYEnxH9ppE6Ng4aeN25mVzyfM=",
         "owner": "metacraft-labs",
         "repo": "codetracer-trace-format-nim",
-        "rev": "2a362a62b7004abeac67945a00148eebff56e032",
+        "rev": "839ed880c6340b9d1c4f81feb7f8e9e70b492956",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
-        "ref": "main",
-        "repo": "codetracer-trace-format-nim",
-        "type": "github"
-      }
-    },
-    "codetracer-trace-format-nim_2": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1780235114,
-        "narHash": "sha256-rpzAZQ8Q0uHc8AePJvUeHjKF274LpCRV98T94bXwktQ=",
-        "owner": "metacraft-labs",
-        "repo": "codetracer-trace-format-nim",
-        "rev": "00c59fded25f90652bf95cb59707ee5df9e87bcd",
-        "type": "github"
-      },
-      "original": {
-        "owner": "metacraft-labs",
-        "ref": "main",
-        "repo": "codetracer-trace-format-nim",
-        "type": "github"
-      }
-    },
-    "codetracer-trace-format-nim_3": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1781272418,
-        "narHash": "sha256-WPwUMydNfwjWwUvtjpMY32MAYDD1sL/xmBVrKyI7S4M=",
-        "owner": "metacraft-labs",
-        "repo": "codetracer-trace-format-nim",
-        "rev": "864cb81095401ed6ac1d7e6055320e2fa80e808f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "metacraft-labs",
-        "ref": "main",
-        "repo": "codetracer-trace-format-nim",
-        "type": "github"
-      }
-    },
-    "codetracer-trace-format-nim_4": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1782086909,
-        "narHash": "sha256-K2UDluVLmqwPl+AQUKjuypnHlH84v4u1LSs1SemUqA0=",
-        "owner": "metacraft-labs",
-        "repo": "codetracer-trace-format-nim",
-        "rev": "54b984a89a94ac7b070001b6e0b6b002a618e271",
-        "type": "github"
-      },
-      "original": {
-        "owner": "metacraft-labs",
-        "ref": "main",
+        "ref": "dev",
         "repo": "codetracer-trace-format-nim",
         "type": "github"
       }
@@ -4776,7 +4731,7 @@
         "codetracer-shell-recorders": "codetracer-shell-recorders",
         "codetracer-toolchains": "codetracer-toolchains",
         "codetracer-trace-format": "codetracer-trace-format_4",
-        "codetracer-trace-format-nim": "codetracer-trace-format-nim_4",
+        "codetracer-trace-format-nim": "codetracer-trace-format-nim",
         "fenix": "fenix_6",
         "flake-parts": "flake-parts_5",
         "flake-utils": "flake-utils_6",

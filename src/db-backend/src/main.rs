@@ -73,7 +73,6 @@ mod flow_preloader;
 mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;
-mod native_rr_omniscient_prep;
 mod nim_mangling;
 // M18 — Omniscient DB trait + FFI-backed default impl. Mirrors the
 // lib.rs declaration above; the bin needs its own copy because
@@ -236,39 +235,6 @@ enum TraceOp {
         /// the marker scanner; useful for the diagnostic-only flow
         /// recommended in spec §10.
         session_or_source: std::path::PathBuf,
-    },
-    /// M31-prep — `ct trace omniscient-prep <slice-folder>` runs the
-    /// M19 native indexer against a CTFS slice and emits the
-    /// omniscient artefacts (`memwrites.tc` / `linehits.tc` /
-    /// `originmeta.tc` / `varwrites.tc` / `source_exprs.tc`) into
-    /// `<slice-folder>/meta_dat/` so the `OmniscientPrepWorker` from
-    /// `Recording-Backends/Omniscient-DB-Server-Side-Prep.md` §5 can
-    /// invoke this binary as a subprocess.
-    ///
-    /// This is the subprocess shape M31 calls for; it does NOT yet
-    /// route through `ICtfsStorageRouter` because the CS-M5
-    /// `CtfsReadProvider` is not yet on `main`. Once M30 (rebase)
-    /// lands, the worker will fetch slices via the router, run this
-    /// subprocess against a temp directory, then upload the
-    /// resulting namespaces back through the router. For now the
-    /// subprocess works against a local filesystem slice, which is
-    /// exactly the shape the integration test harness needs.
-    OmniscientPrep {
-        /// Path to a CTFS slice folder (the recording's root dir).
-        slice_folder: std::path::PathBuf,
-        /// Override the trace kind detection. Defaults to local
-        /// detection: RR trace folders (`rr/`) and slices that already
-        /// expose root `memwrites.tc` are native; all other CTFS
-        /// containers use the materialized/MCR path.
-        #[arg(long, value_parser = ["materialized", "native"])]
-        trace_kind: Option<String>,
-        /// Output mode for the resulting `meta_dat/origin-config.toml`.
-        /// Defaults to `on` (the artefacts are present + ready). Set
-        /// to `lazy` for partial prep that records the intent without
-        /// committing the artefacts; useful for testing the M31
-        /// `lazy` mode path.
-        #[arg(long, value_parser = ["on", "lazy"], default_value = "on")]
-        mode: String,
     },
     /// M29 — `ct trace origin <session.toml> --variable <name>` prints
     /// the value-origin chain for a queried variable, with each hop
@@ -503,13 +469,6 @@ fn run_trace_subcommand(op: TraceOp) -> Result<(), Box<dyn Error>> {
         TraceOp::Correlations { session_or_source } => {
             run_correlations_subcommand(&session_or_source)?;
         }
-        TraceOp::OmniscientPrep {
-            slice_folder,
-            trace_kind,
-            mode,
-        } => {
-            run_omniscient_prep_subcommand(&slice_folder, trace_kind.as_deref(), &mode)?;
-        }
         TraceOp::Origin {
             session,
             variable,
@@ -598,194 +557,6 @@ fn run_correlations_subcommand(path: &std::path::Path) -> Result<(), Box<dyn Err
     Ok(())
 }
 
-/// M29 — `ct trace origin <session.toml> --variable <name> ...`
-/// renders the value-origin chain for a queried variable, with each
-/// hop labelled by the owning process.
-///
-/// **Scope per the M29 ship-core directive.** The recorder-driven
-/// fixture infrastructure described in the E2E design doc §3.4
-/// M31-prep — server-side omniscient-DB prep subprocess. The
-/// `OmniscientPrepWorker` described in
-/// `Recording-Backends/Omniscient-DB-Server-Side-Prep.md` §5
-/// invokes this subcommand against a CTFS slice on the worker's
-/// local filesystem (fetched via `CtfsReadProvider` once M30
-/// lands), waits for the artefacts to land in `meta_dat/`, then
-/// uploads the artefacts back through `ICtfsStorageRouter`.
-///
-/// For M31 the subprocess does the *minimum work* needed by the
-/// worker contract:
-///
-/// 1. Detect or accept the trace kind (materialized vs. native).
-/// 2. Run the M19 indexer (`MaterializedOriginIndexer` for
-///    materialized traces, `NativeOriginIndexer` stub for native
-///    traces).
-/// 3. Write the resulting namespaces + `meta_dat/origin-config.toml`
-///    into the slice folder.
-///
-/// The actual M19 byte-level namespace emission is exercised by
-/// the M19 verification tests; this CLI is a thin shim that
-/// makes the indexer subprocess-invocable for the worker fleet.
-/// The shim does NOT yet integrate with the CS-M5 `CtfsReadProvider`
-/// or the CS-M7 finalize body; that integration lands once M30
-/// completes (rebase onto the merged ci-refactor main).
-fn run_omniscient_prep_subcommand(
-    slice_folder: &std::path::Path,
-    trace_kind: Option<&str>,
-    mode: &str,
-) -> Result<(), Box<dyn Error>> {
-    use crate::diff::load_and_postprocess_trace;
-    use crate::origin_metadata_indexer::{
-        CTFS_ORIGINMETA_FILE, CTFS_SOURCE_EXPRS_FILE, CTFS_VARWRITES_FILE, MaterializedOriginIndexer,
-        ORIGIN_CONFIG_FILE, OriginConfig, OriginMode, ValueChange,
-    };
-    use codetracer_trace_types::{StepId, VariableId};
-    use std::collections::HashMap;
-
-    let detected_kind = trace_kind
-        .map(str::to_string)
-        .unwrap_or_else(|| detect_omniscient_prep_trace_kind(slice_folder).to_string());
-    let new_mode = OriginMode::parse(mode).ok_or_else(|| -> Box<dyn Error> { "invalid --mode value".into() })?;
-
-    let meta_dat = slice_folder.join("meta_dat");
-    std::fs::create_dir_all(&meta_dat)?;
-    let config_path = meta_dat.join(ORIGIN_CONFIG_FILE);
-    let mut config = if config_path.exists() {
-        OriginConfig::read_from_path(&config_path)?
-    } else {
-        OriginConfig::new(OriginMode::Off)
-    };
-
-    // Run the M19 indexer end-to-end against the slice on disk. We
-    // walk every recorded step, observe the per-step
-    // `Vec<FullValueRecord>` of variables, and synthesise a
-    // `ValueChange` for each variable whose value differs from the
-    // previous step. The classifier (Path A vs. Path B) is determined
-    // by the absence of recorder-emitted `Assignment` events in the
-    // materialized trace's event stream — without dedicated path-A
-    // signals at this layer, every change is emitted via Path B
-    // (confidence ≤ 0.9) which lets the originmeta + source_exprs
-    // namespaces ship even when no per-language path-A integration
-    // has been wired into the recorder yet.
-    //
-    // The byte-level namespace bytes are written under
-    // `slice_folder/meta_dat/{originmeta.tc,varwrites.tc,source_exprs.tc}`
-    // using the existing M19 encoders. `OriginMode::Off` skips the
-    // namespace emission entirely (matches the spec §6.8.6 "off" semantics).
-    let (originmeta_bytes, varwrites_bytes, source_exprs_bytes, capability_count) =
-        if matches!(new_mode, OriginMode::Off) {
-            // - `Off` keeps the namespaces absent — readers fall back cleanly to Mode 1/2.
-            (None, None, None, 0usize)
-        } else if detected_kind == "native" {
-            let output = native_rr_omniscient_prep::run(slice_folder, &meta_dat)?;
-            (None, None, None, output.capability_count)
-        } else {
-            let db = load_and_postprocess_trace(slice_folder)?;
-            let mut changes: Vec<ValueChange> = Vec::new();
-            // Track the last observed `ValueRecord` for each variable so we
-            // only synthesise a `ValueChange` when the value actually
-            // changed (matches the spec §6.8.0 backbone contract).
-            let mut last_value: HashMap<VariableId, codetracer_trace_types::ValueRecord> = HashMap::new();
-            let step_count = db.steps.len();
-            for step_idx in 0..step_count {
-                let step_id = StepId(step_idx as i64);
-                let Some(step) = db.steps.get(step_id).copied() else {
-                    continue;
-                };
-                let Some(variables) = db.variables.get(step_id) else {
-                    continue;
-                };
-                // The function index — defaulting to 0 when the
-                // call_key → function lookup misses. This matches the
-                // M19 encoder contract (function_idx is a dedup index;
-                // 0 is a valid id).
-                let function_idx = db.calls.get(step.call_key).map(|c| c.function_id.0 as u32).unwrap_or(0);
-                // Source-line text: re-render the path+line so the
-                // dedup index in `source_exprs.tc` has a stable string
-                // per (path, line) pair.
-                let source_expr_text = match db.paths.get(step.path_id) {
-                    Some(p) => format!("{}:{}", p, step.line.0),
-                    None => format!("path:{:?}:line:{}", step.path_id, step.line.0),
-                };
-                for fv in variables {
-                    let prev = last_value.get(&fv.variable_id);
-                    let changed = match prev {
-                        None => true,
-                        // ValueRecord uses Serialize but no PartialEq —
-                        // compare via serde representation. This is
-                        // expensive but only runs once per indexer pass.
-                        Some(p) => {
-                            serde_json::to_string(p).unwrap_or_default()
-                                != serde_json::to_string(&fv.value).unwrap_or_default()
-                        }
-                    };
-                    if !changed {
-                        continue;
-                    }
-                    last_value.insert(fv.variable_id, fv.value.clone());
-                    changes.push(ValueChange {
-                        variable_id: fv.variable_id,
-                        step_id,
-                        value: fv.value.clone(),
-                        // Path-A descriptors live on the recorder-emitted
-                        // event stream and are not yet flowing through to
-                        // the subprocess. Synthesise Path B for now — the
-                        // recorder-side wire-up of Path A is tracked
-                        // separately in the per-language recorder
-                        // milestones. We emit a synthetic Path A for
-                        // single-statement assignment shapes (TrivialCopy +
-                        // Literal) so the capability matrix surfaces the
-                        // option when downstream callers care; the bench
-                        // / chain queries treat both as a populated record.
-                        assignment: synthesise_path_a(&source_expr_text),
-                        source_expr_text: source_expr_text.clone(),
-                        function_idx,
-                    });
-                }
-            }
-
-            let indexer = MaterializedOriginIndexer::new();
-            let output = indexer.run(&changes);
-
-            config.merge_capability(output.capability.clone());
-            (
-                Some(output.originmeta.encode()),
-                Some(output.varwrites.encode()),
-                Some(output.source_exprs.encode()),
-                output.capability.len(),
-            )
-        };
-
-    if let Some(bytes) = originmeta_bytes {
-        std::fs::write(meta_dat.join(CTFS_ORIGINMETA_FILE), &bytes)?;
-    }
-    if let Some(bytes) = varwrites_bytes {
-        std::fs::write(meta_dat.join(CTFS_VARWRITES_FILE), &bytes)?;
-    }
-    if let Some(bytes) = source_exprs_bytes {
-        std::fs::write(meta_dat.join(CTFS_SOURCE_EXPRS_FILE), &bytes)?;
-    }
-
-    config.set_mode(new_mode);
-    config.write_to_path(&config_path)?;
-
-    println!(
-        "omniscient-prep: slice={} kind={} mode={} variables_indexed={}",
-        slice_folder.display(),
-        detected_kind,
-        mode,
-        capability_count,
-    );
-    Ok(())
-}
-
-fn detect_omniscient_prep_trace_kind(slice_folder: &std::path::Path) -> &'static str {
-    if slice_folder.join("rr").is_dir() || slice_folder.join("memwrites.tc").exists() {
-        "native"
-    } else {
-        "materialized"
-    }
-}
-
 /// Heuristic path-A synthesis from the source-line text. When the line
 /// has the shape `var = literal-or-name`, we emit a `TrivialCopy` /
 /// `Literal` path-A descriptor; otherwise we fall through to Path B.
@@ -802,6 +573,12 @@ fn synthesise_path_a(_source_expr_text: &str) -> Option<crate::origin_metadata_i
     None
 }
 
+/// M29 — `ct trace origin <session.toml> --variable <name> ...`
+/// renders the value-origin chain for a queried variable, with each
+/// hop labelled by the owning process.
+///
+/// **Scope per the M29 ship-core directive.** The recorder-driven
+/// fixture infrastructure described in the E2E design doc §3.4
 /// (frontend Vite plugin + per-backend recorder + `record.sh`) is
 /// deferred — without it, the CLI cannot drive a live per-backend
 /// single-trace chain compute. The command therefore emits the
@@ -1001,36 +778,4 @@ fn run_origin_subcommand(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::detect_omniscient_prep_trace_kind;
-    use std::error::Error;
-
-    #[test]
-    fn omniscient_prep_detection_treats_rr_folder_as_native() -> Result<(), Box<dyn Error>> {
-        let dir = tempfile::tempdir()?;
-        std::fs::create_dir(dir.path().join("rr"))?;
-
-        assert_eq!(detect_omniscient_prep_trace_kind(dir.path()), "native");
-        Ok(())
-    }
-
-    #[test]
-    fn omniscient_prep_detection_treats_root_memwrites_as_native() -> Result<(), Box<dyn Error>> {
-        let dir = tempfile::tempdir()?;
-        std::fs::write(dir.path().join("memwrites.tc"), b"WLOG")?;
-
-        assert_eq!(detect_omniscient_prep_trace_kind(dir.path()), "native");
-        Ok(())
-    }
-
-    #[test]
-    fn omniscient_prep_detection_defaults_to_materialized() -> Result<(), Box<dyn Error>> {
-        let dir = tempfile::tempdir()?;
-
-        assert_eq!(detect_omniscient_prep_trace_kind(dir.path()), "materialized");
-        Ok(())
-    }
 }
