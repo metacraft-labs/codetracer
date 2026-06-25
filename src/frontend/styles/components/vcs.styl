@@ -7,11 +7,10 @@
   display: flex
   flex-direction: column
   overflow: hidden
-  background: BACKGROUND_COLOR
+  background: colors-ui-surface-base-panel
   color: TEXT_CONTENT_COLOR
   font-family: "SpaceMono", monospace
-  font-size: 13px
-  line-height: 20px
+  line-height: 1.25em
 
 .vcs-panel-body
   display: flex
@@ -31,16 +30,16 @@
   justify-content: center
   height: 100%
   color: VALUE_TYPE_COLOR
-  gap: 12px
+  gap: 0.75em
 
 .vcs-no-repo-icon
-  font-size: 32px
+  font-size: 2em
   opacity: 0.5
 
 .vcs-no-repo-message
-  font-size: 13px
+  font-size: 0.8125em
   text-align: center
-  padding: 0 16px
+  padding: 0 1em
 
 // ---------------------------------------------------------------------------
 // Branch picker
@@ -49,55 +48,56 @@
 .vcs-branch-picker
   position: relative
   flex-shrink: 0
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-  background: HEADER_PANEL_BACKGROUND_COLOR
+  padding: 0.5em
+  background: colors-ui-surface-base-panel
 
 .vcs-branch-current
   display: flex
   align-items: center
-  padding: 6px 8px
+  padding: 0.3125em 0.5em
   cursor: pointer
-  gap: 6px
+  gap: 0.5em
   user-select: none
+  border: 1px solid colors-ui-text-primary-body-subtle
+  border-radius: 0.25em
+  background: colors-ui-surface-base-panel
 
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    border-color: colors-ui-text-primary-heading
 
-.vcs-branch-icon
-  font-size: 14px
-  opacity: 0.7
+.vcs-branch-chevron
+  display: flex
+  align-items: center
+  flex-shrink: 0
 
 .vcs-branch-name
   flex: 1
   overflow: hidden
   text-overflow: ellipsis
   white-space: nowrap
-  font-weight: 500
-
-.vcs-branch-arrow
-  font-size: 10px
-  opacity: 0.6
+  font-size: 0.8125em
 
 .vcs-branch-dropdown
   position: absolute
-  top: 100%
-  left: 0
-  right: 0
+  top: calc(100% - 0.25em)
+  left: 0.5em
+  right: 0.5em
   z-index: 100
-  background: BACKGROUND_COLOR
-  border: 1px solid ACTIVE_MENU_BACKGROUND
-  max-height: 200px
+  background: colors-ui-surface-base-panel
+  border: 1px solid colors-ui-text-primary-body-subtle
+  border-radius: 0.25em
+  max-height: 12.5em
   overflow-y: auto
 
 .vcs-branch-option
-  padding: 4px 8px
+  padding: 0.25em 0.5em
   cursor: pointer
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
 
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-primary-secondary-hover
 
 .vcs-branch-active-marker
   color: #4ec9b0
@@ -108,20 +108,20 @@
 // ---------------------------------------------------------------------------
 
 .vcs-section-header
-  padding: 4px 8px
-  font-size: 11px
+  padding: 0.25em 0.5em
+  font-size: 0.6875em
   font-weight: 600
   text-transform: uppercase
-  letter-spacing: 0.5px
+  letter-spacing: 0.03125em
   color: VALUE_TYPE_COLOR
-  background: HEADER_PANEL_BACKGROUND_COLOR
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+  background: colors-ui-surface-base-panel
+  border-bottom: 1px solid colors-ui-border-secondary
   flex-shrink: 0
   user-select: none
 
 .vcs-changed-files-commit
   font-family: "SpaceMono", monospace
-  font-size: 10px
+  font-size: 0.625em
   font-weight: 400
   text-transform: none
   letter-spacing: 0
@@ -135,33 +135,33 @@
   flex: 0 0 auto
   display: flex
   align-items: center
-  gap: 6px
-  padding: 6px 8px
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
-  background: BACKGROUND_COLOR
+  gap: 0.375em
+  padding: 0.375em 0.5em
+  border-bottom: 1px solid colors-ui-border-secondary
+  background: colors-ui-surface-base-panel
 
 .vcs-toggle-button
-  height: 24px
+  height: 1.5em
   display: inline-flex
   align-items: center
-  padding: 0 10px
-  border-radius: 4px
+  padding: 0 0.625em
+  border-radius: 0.25em
   cursor: pointer
   color: DROPDOWN_TEXT_COLOR
-  background: HEADER_ELEMENT_BACKGROUND_COLOR
+  background: colors-ui-surface-primary-secondary
   user-select: none
-  font-size: 12px
+  font-size: 0.75em
 
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-primary-secondary-hover
     color: TEXT_CONTENT_COLOR
 
   &.vcs-toggle-active
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-primary-secondary-hover
     color: TEXT_CONTENT_COLOR
 
 // ---------------------------------------------------------------------------
-// Commit history
+// Commit graph + accordion history
 // ---------------------------------------------------------------------------
 
 .vcs-commit-history
@@ -169,20 +169,351 @@
   display: flex
   flex-direction: column
   min-height: 0
-  border-bottom: 1px solid ACTIVE_MENU_BACKGROUND
+  border-bottom: 1px solid colors-ui-border-secondary
 
 .vcs-commit-list
   flex: 1
   overflow-y: auto
   overflow-x: hidden
 
+// One accordion entry: the header row + optional expanded file list.
+// flex-direction:column stacks the header and the file list vertically.
+// No border-bottom — a horizontal border would cut through the lane lines.
+.vcs-commit-entry
+  display: flex
+  flex-direction: column
+
+// Header row: [graph area] [message] [time]
+// align-items:stretch makes the lane-graph column fill the row height so the
+// vertical lane lines span the full row.  Do NOT add flex-direction:column
+// here — the graph column and message body must stay side-by-side (row).
+.vcs-commit-header
+  display: flex
+  flex-direction: row
+  align-items: stretch
+  min-height: 1em
+  cursor: pointer
+  user-select: none
+
+  &:hover
+    background: ACTIVE_ROW
+
+  // On the selected (active) row, hover uses the darker action-primary shade
+  // so it reads as a pressed / deepened state rather than flipping to grey.
+  &.vcs-commit-header-selected:hover
+    background: colors-ui-surface-action-primary-hover
+
+// Selected commit: uses colors-ui-surface-action-primary (#4f46e5) background.
+// The dot becomes white with a border matching the row background so it
+// visually "punches through" the fill.  Text is forced white for contrast.
+.vcs-commit-header-selected
+  background: colors-ui-surface-action-primary
+
+  .vcs-commit-msg
+    color: #ffffff
+
+  .vcs-commit-time-col
+    color: rgba(255, 255, 255, 0.7)
+
+  // Active solid dot: white fill, outline matches the row background so the
+  // ring sits outside the dot without eating into the white area.
+  .vcs-gc-dot:not(.vcs-gc-dot-hollow)
+    background: colors-base-white !important
+    outline-color: colors-ui-surface-action-primary !important
+    outline-width: 0.125em !important
+
+  // Active hollow dot (branch-out / merge-in commit): keep the dark panel
+  // background visible through the centre; halo outline matches the row
+  // background so the floating effect is consistent with the solid dot.
+  .vcs-gc-dot-hollow
+    background: colors-ui-surface-base-panel !important
+    outline-color: colors-ui-surface-action-primary !important
+    border-color: colors-base-white !important
+
+// Left graph column: flex row of vcs-gc-slot lane cells.
+// position:relative is required so that the absolute-positioned connector
+// divs (.vcs-gc-conn-r / .vcs-gc-conn-l) are placed relative to the
+// left edge of the graph area.  overflow:hidden prevents connectors from
+// bleeding into the commit-message column.
+.vcs-commit-graph
+  position: relative
+  display: flex
+  align-items: stretch
+  flex-shrink: 0
+  overflow: hidden
+
+// One lane column slot — 0.5em wide so it scales with the component font-size.
+.vcs-gc-slot
+  position: relative
+  flex: 0 0 0.5em
+  min-width: 0.5em
+  max-width: 0.5em
+
+// Full-height vertical lane bar (gckLine and gckDot lanes).
+// Horizontally centred in the 1em slot.
+.vcs-gc-line
+  position: absolute
+  left: calc(50% - 0.05em)
+  top: 0
+  bottom: 0
+  width: 0.1em
+
+// Bottom-half-only bar: used on the first (newest) commit so that no line
+// appears above the topmost dot.
+.vcs-gc-line-bot
+  position: absolute
+  left: calc(50% - 0.05em)
+  top: 50%
+  bottom: 0
+  width: 0.1em
+
+// Dot centred on the row (gckDot lane).
+// outline instead of border so the ring sits outside the dot box and does
+// not shrink the coloured area.  outline follows border-radius in Chromium.
+.vcs-gc-dot
+  position: absolute
+  left: 50%
+  top: 50%
+  transform: translate(-50%, -50%)
+  width: 0.375em
+  height: 0.375em
+  border-radius: 50%
+  outline: 0.0625em solid colors-ui-surface-base-panel
+  z-index: 1
+
+// Hollow ring dot: used for commits that have branch-outs or merge-ins.
+// border carries the branch colour (set via inline style); outline sits
+// outside the border and uses the panel background colour so the dot
+// appears to float above the lane line.
+.vcs-gc-dot-hollow
+  background: colors-ui-surface-base-panel
+  outline: 0.0625em solid colors-ui-surface-base-panel
+  border-width: 0.125em
+  border-style: solid
+
+// Right-angle connectors — stroke weight matches the lane line (0.1em).
+// border-radius on the corner creates the smooth curve.
+.vcs-gc-conn-r
+  position: absolute
+  top: 50%
+  height: 50%
+  border-right: 0.1em solid
+  border-top: 0.1em solid
+  border-top-right-radius: 0.5em
+  background: none
+  box-sizing: border-box
+  pointer-events: none
+
+// Right-angle connector: dot lane → target lane to the LEFT.
+.vcs-gc-conn-l
+  position: absolute
+  top: 50%
+  height: 50%
+  border-left: 0.1em solid
+  border-top: 0.1em solid
+  border-top-left-radius: 0.5em
+  background: none
+  box-sizing: border-box
+  pointer-events: none
+
+// Top-half right-angle connector: side lane to the RIGHT curves into dot lane.
+.vcs-gc-conn-tr
+  position: absolute
+  top: 0
+  height: 50%
+  border-right: 0.1em solid
+  border-bottom: 0.1em solid
+  border-bottom-right-radius: 0.5em
+  background: none
+  box-sizing: border-box
+  pointer-events: none
+
+// Top-half right-angle connector: side lane to the LEFT curves into dot lane.
+.vcs-gc-conn-tl
+  position: absolute
+  top: 0
+  height: 50%
+  border-left: 0.1em solid
+  border-bottom: 0.1em solid
+  border-bottom-left-radius: 0.5em
+  background: none
+  box-sizing: border-box
+  pointer-events: none
+
+// Right body column: message + timestamp.
+.vcs-commit-body
+  flex: 1
+  display: flex
+  align-items: center
+  padding: 0 0.5em
+  gap: 0.5em
+  min-width: 0
+
+.vcs-commit-msg
+  flex: 1
+  font-size: 0.75em
+  color: colors-ui-text-primary-body-subtle
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+.vcs-commit-time-col
+  font-family: "SpaceMono", monospace
+  font-size: 0.625em
+  color: colors-ui-text-primary-body-subtle
+  flex-shrink: 0
+
+// Diff button shown on hover at the far right of a commit row.
+// Hidden by default; the parent .vcs-commit-header:hover reveals it.
+.vcs-commit-diff-btn
+  display: none
+  flex-shrink: 0
+  cursor: pointer
+  font-size: 0.75em
+  color: colors-ui-text-primary-body-subtle
+  padding: 0 0.25em
+  line-height: 1
+
+.vcs-commit-header:hover .vcs-commit-diff-btn
+  display: block
+
+// ---------------------------------------------------------------------------
+// Accordion expanded area: file list rendered inline under the commit header.
+// ---------------------------------------------------------------------------
+
+// Commit-detail tooltip.
+// Shown on hover of a commit header row.  position:fixed lets it escape the
+// panel's overflow:hidden so it can appear to the right of the panel.
+// Populated and positioned by JS (showVCSTooltip / hideVCSTooltip).
+.vcs-commit-tooltip
+  display: none
+  position: fixed
+  z-index: 1000
+  background: #1e1e2e
+  border: 1px solid colors-ui-border-secondary
+  border-radius: 0.5em
+  padding: 0.75em 1em
+  min-width: 16.25em
+  max-width: 26.25em
+  box-shadow: 0 0.25em 1.25em rgba(0, 0, 0, 0.5)
+  font-family: "SpaceMono", monospace
+  font-size: 0.75em
+  pointer-events: none
+
+.vcs-tip-header
+  display: flex
+  align-items: center
+  gap: 0.5em
+  margin-bottom: 0.625em
+
+.vcs-tip-dot
+  width: 0.625em
+  height: 0.625em
+  border-radius: 50%
+  flex-shrink: 0
+
+.vcs-tip-hash
+  color: CT_SECONDARY_BLUE
+  font-weight: 600
+  letter-spacing: 0.03125em
+
+// A label + value row inside the tooltip (DATE, COMMIT, AUTHOR).
+.vcs-tip-row
+  display: flex
+  align-items: baseline
+  gap: 0.5em
+  margin-top: 0.375em
+  color: TEXT_CONTENT_COLOR
+  word-break: break-all
+
+.vcs-tip-label
+  color: VALUE_TYPE_COLOR
+  text-transform: uppercase
+  font-size: 0.625em
+  flex-shrink: 0
+
+// Inline file rows inside an expanded accordion entry.
+.vcs-accordion-files
+  background: colors-ui-surface-base-canvas
+
+// Outer file row: flex row so lane spacer and content sit side by side.
+// align-items:stretch lets the lane spacer column fill the full row height.
+// font-size is NOT set here — the lane spacer (.vcs-commit-graph) must share
+// the same em context as the commit header rows so 1em slots stay aligned.
+.vcs-accordion-file
+  display: flex
+  align-items: stretch
+  padding: 0
+  cursor: pointer
+
+  &:hover
+    background: colors-ui-surface-primary-default-hover
+
+// Inner content area of an accordion file row (status + name + stats).
+// font-size: 0.75em is scoped here so the lane spacer sibling is unaffected.
+.vcs-accordion-file-body
+  flex: 1
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.125em 0.5em
+  font-size: 0.75em
+
+// File name: takes remaining space, truncates with ellipsis.
+.vcs-accordion-file-name
+  flex: 1
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+  color: TEXT_CONTENT_COLOR
+
+// Status letter (M / A / D / …) shown left of the filename.
+.vcs-accordion-file-status
+  font-family: "SpaceMono", monospace
+  font-weight: 700
+  flex-shrink: 0
+  width: 1em
+  text-align: center
+
+// +N additions and -N deletions shown to the right of the filename,
+// matching the reference screenshot layout.
+.vcs-accordion-file-adds
+  font-family: "SpaceMono", monospace
+  color: colors-ui-text-success-primary
+  flex-shrink: 0
+
+.vcs-accordion-file-dels
+  font-family: "SpaceMono", monospace
+  color: colors-ui-text-error-primary
+  flex-shrink: 0
+
+// Status letter colours (mirror the existing vcs-status-* palette).
+.vcs-accordion-status-added    { color: colors-ui-text-success-primary }
+.vcs-accordion-status-deleted  { color: colors-ui-text-error-primary }
+.vcs-accordion-status-modified { color: colors-ui-text-warning-primary }
+.vcs-accordion-status-copied   { color: CT_SECONDARY_BLUE }
+.vcs-accordion-status-renamed  { color: #A78BFA }
+.vcs-accordion-status-other    { color: VALUE_TYPE_COLOR }
+
+// "Loading more commits…" row at the bottom during a background page fetch.
+// The IntersectionObserver sentinel element is an empty sibling; this row is
+// the visible indicator for the user.
+.vcs-load-more-sentinel
+  padding: 0.5em 0.75em
+  font-size: 0.6875em
+  color: VALUE_TYPE_COLOR
+  text-align: center
+  font-family: "SpaceMono", monospace
+
+// Legacy flat commit items (kept for DeepReview / unified-diff code paths that
+// still call the old rendering procs; not used in the new graph mode).
 .vcs-commit-item
   display: flex
   flex-direction: column
-  padding: 4px 8px
+  padding: 0.25em 0.5em
   cursor: pointer
   border-bottom: 1px solid EVENT_LOG_ROWS_BORDERS_COLOR
-  gap: 1px
+  gap: 0.0625em
 
   &:hover
     background: ACTIVE_ROW
@@ -192,20 +523,21 @@
 
 .vcs-commit-hash
   font-family: "SpaceMono", monospace
-  font-size: 11px
+  font-size: 0.6875em
   color: #4ec9b0
   flex-shrink: 0
 
 .vcs-commit-message
-  font-size: 12px
+  font-size: 0.75em
   white-space: nowrap
   overflow: hidden
   text-overflow: ellipsis
   color: TEXT_CONTENT_COLOR
 
 .vcs-commit-time
-  font-size: 10px
+  font-size: 0.625em
   color: VALUE_TYPE_COLOR
+
 
 // ---------------------------------------------------------------------------
 // Changed files
@@ -223,7 +555,7 @@
   overflow-x: hidden
 
 .vcs-no-files
-  padding: 8px
+  padding: 0.5em
   color: VALUE_TYPE_COLOR
   font-style: italic
   text-align: center
@@ -231,9 +563,9 @@
 .vcs-file-item
   display: flex
   align-items: center
-  padding: 3px 8px
+  padding: 0.1875em 0.5em
   cursor: pointer
-  gap: 6px
+  gap: 0.375em
 
   &:hover
     background: ACTIVE_ROW
@@ -243,9 +575,9 @@
 
 .vcs-file-status
   font-family: "SpaceMono", monospace
-  font-size: 11px
+  font-size: 0.6875em
   font-weight: bold
-  width: 14px
+  width: 1em
   text-align: center
   flex-shrink: 0
 
@@ -266,14 +598,14 @@
   overflow: hidden
   text-overflow: ellipsis
   white-space: nowrap
-  font-size: 12px
+  font-size: 0.75em
 
 .vcs-file-stats
   font-family: "SpaceMono", monospace
-  font-size: 10px
+  font-size: 0.625em
   flex-shrink: 0
   display: flex
-  gap: 4px
+  gap: 0.25em
 
 .vcs-stat-added
   color: #4ec9b0
@@ -287,17 +619,17 @@
 
 .vcs-refresh
   flex-shrink: 0
-  padding: 4px 8px
+  padding: 0.25em 0.5em
   text-align: center
   cursor: pointer
-  font-size: 11px
+  font-size: 0.6875em
   color: VALUE_TYPE_COLOR
-  background: HEADER_PANEL_BACKGROUND_COLOR
-  border-top: 1px solid ACTIVE_MENU_BACKGROUND
+  background: colors-ui-surface-base-panel
+  border-top: 1px solid colors-ui-border-secondary
   user-select: none
 
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-primary-secondary-hover
     color: TEXT_CONTENT_COLOR
 
 // ---------------------------------------------------------------------------
@@ -310,10 +642,10 @@
   transition: background 0.1s ease
 
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-primary-secondary-hover
 
 .hunk-selected
-  border-left: 3px solid #569cd6
+  border-left: 0.1875em solid #569cd6
   background: rgba(86, 156, 214, 0.08)
 
   .deepreview-unified-hunk-header
@@ -321,9 +653,9 @@
 
 .hunk-selection-indicator
   display: inline-block
-  margin-right: 6px
+  margin-right: 0.375em
   color: #569cd6
-  font-size: 12px
+  font-size: 0.75em
   font-weight: bold
 
 // Floating toolbar shown when hunks are selected.
@@ -334,13 +666,13 @@
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 4px 10px
-  background: BACKGROUND_COLOR
-  border: 1px solid ACTIVE_MENU_BACKGROUND
-  border-radius: 4px
-  margin: 4px 0 6px 0
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3)
-  font-size: 12px
+  padding: 0.25em 0.625em
+  background: colors-ui-surface-base-panel
+  border: 1px solid colors-ui-border-secondary
+  border-radius: 0.25em
+  margin: 0.25em 0 0.375em 0
+  box-shadow: 0 0.125em 0.5em rgba(0, 0, 0, 0.3)
+  font-size: 0.75em
 
 .hunk-toolbar-count
   color: TEXT_CONTENT_COLOR
@@ -348,15 +680,15 @@
 
 .hunk-toolbar-actions
   display: flex
-  gap: 6px
+  gap: 0.375em
 
 .hunk-toolbar-button
-  padding: 2px 10px
-  border-radius: 3px
+  padding: 0.125em 0.625em
+  border-radius: 0.1875em
   cursor: pointer
   background: #0e639c
   color: #fff
-  font-size: 11px
+  font-size: 0.6875em
   white-space: nowrap
   user-select: none
 
@@ -366,8 +698,8 @@
 .hunk-toolbar-button-subtle
   background: transparent
   color: VALUE_TYPE_COLOR
-  border: 1px solid ACTIVE_MENU_BACKGROUND
+  border: 1px solid colors-ui-border-secondary
 
   &:hover
-    background: ACTIVE_MENU_BACKGROUND
+    background: colors-ui-surface-primary-secondary-hover
     color: TEXT_CONTENT_COLOR
