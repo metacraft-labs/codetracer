@@ -522,6 +522,10 @@ proc runInitial*(conf: CodetracerConf) =
           conf.traceExportPath,
           conf.traceExportOutput,
           conf.traceExportPortable))
+      of TraceCommand.`omniscient-prep`:
+        quit(traceOmniscientPrepCommand(
+          conf.traceOmniscientPrepPath,
+          conf.traceOmniscientPrepMode))
     of StartupCommand.`gfx-replay`:
       # P7.1: user-facing wrapper around ``ct_gfx_player``.  All
       # discovery + argument forwarding lives in ``gfx_replay.nim``.

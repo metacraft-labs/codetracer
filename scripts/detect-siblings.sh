@@ -427,10 +427,15 @@ fi
 # carry the path through a non-LD_-prefixed env var that survives the
 # scrub and is re-spliced onto LD_LIBRARY_PATH by ct's startup hook in
 # src/ct/codetracer.nim.
+if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim/src" ]; then
+	export CODETRACER_TRACE_FORMAT_NIM_SRC="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim/src"
+fi
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -f "$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim/libcodetracer_trace_writer.so" ]; then
 	export LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim:${LD_LIBRARY_PATH:-}"
 	export CODETRACER_RECORDER_LD_LIBRARY_PATH="$_CT_WORKSPACE_ROOT/codetracer-trace-format-nim${CODETRACER_RECORDER_LD_LIBRARY_PATH:+:$CODETRACER_RECORDER_LD_LIBRARY_PATH}"
 	_ct_detect_summary "codetracer-trace-format-nim (Nim FFI library available for wazero)"
+elif [ -n "${CODETRACER_TRACE_FORMAT_NIM_SRC:-}" ]; then
+	_ct_detect_summary "codetracer-trace-format-nim (Nim source available)"
 fi
 
 # --- Solana SBF SDK + platform-tools ---

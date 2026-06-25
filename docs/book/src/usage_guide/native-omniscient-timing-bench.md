@@ -37,9 +37,7 @@ to the existing implementation for that trace shape. MCR slice/concurrency
 scaling remains in the MCR-only `slice-prep-speed` benchmark, while this
 benchmark compares per-backend record/prep time for one ordinary fixture.
 
-The size columns deliberately distinguish the files emitted by the current
-prep path. RR native prep emits `meta_dat/memwrites.tc` and
-`meta_dat/linehits.tc`. The current MCR/materialized prep path emits
-origin metadata under `meta_dat`; recorder/emulator-side MCR omniscience
-builders are separate code paths and should be benchmarked through their
-shared production entry point rather than duplicated here.
+The size columns deliberately distinguish the files emitted by the product
+prep path for the selected backend. Backend-specific production stays behind
+the component command reached through `ct trace omniscient-prep`; the benchmark
+only times that user-facing request path and reports the artifacts it creates.

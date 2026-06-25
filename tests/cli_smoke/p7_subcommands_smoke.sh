@@ -72,9 +72,9 @@ run_help() {
 run_help "ct record exposes --use-interpose" \
 	record -- "use-interpose"
 
-# (2) ct trace --help should advertise both sub-subcommands.
-run_help "ct trace exposes extract-gfx + export" \
-	trace -- "extract-gfx" "export"
+# (2) ct trace --help should advertise post-processing sub-subcommands.
+run_help "ct trace exposes trace post-processing commands" \
+	trace -- "extract-gfx" "export" "omniscient-prep"
 
 # (3) ct trace extract-gfx --help should mention the output dir.
 run_help "ct trace extract-gfx help" \
@@ -84,15 +84,19 @@ run_help "ct trace extract-gfx help" \
 run_help "ct trace export help" \
 	trace export -- "portable" "output"
 
-# (5) ct gfx-replay --help should mention gfx-stream + http + port.
+# (5) ct trace omniscient-prep --help should mention the mode flag.
+run_help "ct trace omniscient-prep help" \
+	trace omniscient-prep -- "mode"
+
+# (6) ct gfx-replay --help should mention gfx-stream + http + port.
 run_help "ct gfx-replay help" \
 	gfx-replay -- "gfx-stream" "http" "port"
 
-# (6) ct doctor --help should describe the language argument.
+# (7) ct doctor --help should describe the language argument.
 run_help "ct doctor help" \
 	doctor -- "doctorLanguage"
 
-# (7) ct doctor python runs the probe and prints PASS or FAIL even when
+# (8) ct doctor python runs the probe and prints PASS or FAIL even when
 # the recorder is not installed. It must not crash.
 echo ""
 echo "=== ct doctor python (probe behavior) ==="

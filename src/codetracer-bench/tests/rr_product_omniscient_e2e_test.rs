@@ -8,10 +8,11 @@
 //! transitions instead of relying on backend-only proof fixtures.
 
 use codetracer_bench::omniscient_db_size::find_ct_container;
-use codetracer_bench::{FixtureRecorder, Language, RecorderError, ct_binary, ct_cli_binary, which};
+use codetracer_bench::{
+    FixtureRecorder, Language, RecorderError, ct_binary, ct_cli_binary, ct_command, which,
+};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WlogWrite {
@@ -158,12 +159,10 @@ fn decode_lhts(image: &[u8]) -> Result<Vec<(u32, u32, Vec<u64>)>, String> {
 
 fn run_native_omniscient_prep(slice_folder: &Path) -> Result<(), String> {
     let bin = ct_binary().ok_or_else(|| "ct binary not on PATH".to_string())?;
-    let output = Command::new(&bin)
+    let output = ct_command(&bin)
         .arg("trace")
         .arg("omniscient-prep")
         .arg(slice_folder)
-        .arg("--trace-kind")
-        .arg("native")
         .arg("--mode")
         .arg("on")
         .output()
@@ -203,9 +202,7 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
         return;
     }
     if ct_binary().is_none() {
-        skip(
-            "replay-server with `trace omniscient-prep` not discoverable; set CT_BIN or build db-backend",
-        );
+        skip("ct launcher with `trace omniscient-prep` not discoverable; set CT_BIN or build ct");
         return;
     }
     if which("rr").is_none() {

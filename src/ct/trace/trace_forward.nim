@@ -75,3 +75,28 @@ proc traceExportCommand*(
     args = args,
     options = {poParentStreams, poUsePath})
   return waitForExit(process)
+
+proc traceOmniscientPrepCommand*(tracePath: string, mode: string): int =
+  ## ``ct trace omniscient-prep <trace> --mode <mode>``. Forwards to
+  ## ``ct-mcr omniscient-prep`` so backend-specific artifact production
+  ## remains owned by the recorder component.
+  if tracePath.len == 0:
+    echo "error: ct trace omniscient-prep requires a trace path"
+    return 1
+  if mode.len == 0:
+    echo "error: ct trace omniscient-prep requires --mode"
+    return 1
+
+  let ctMcr = ctMcrOrError()
+  if ctMcr.len == 0:
+    echo "error: ct-mcr binary not found."
+    echo "  Set CODETRACER_CT_MCR_CMD to its absolute path, "
+    echo "  drop it next to ct, or install it on PATH."
+    return 1
+
+  let args = @["omniscient-prep", tracePath, "--mode", mode]
+  let process = startProcess(
+    ctMcr,
+    args = args,
+    options = {poParentStreams, poUsePath})
+  return waitForExit(process)

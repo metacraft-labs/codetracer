@@ -1,5 +1,5 @@
 import std / [os, osproc, strformat, sequtils, strutils]
-import json_serialization, result
+import json_serialization, results
 import .. / .. / common / trace_index
 import .. / .. / common / types
 import .. / utilities / [git, zip]

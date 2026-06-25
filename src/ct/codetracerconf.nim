@@ -68,7 +68,8 @@ type
     ## detail. See P7.1 of the Performance + E2E Coverage campaign.
     noCommand,
     `extract-gfx`, ## Extract a recorded graphics stream
-    `export`       ## Export a trace (e.g. ``--portable`` for upload-ready containers)
+    `export`,      ## Export a trace (e.g. ``--portable`` for upload-ready containers)
+    `omniscient-prep` ## Prepare OmniscientDB artifacts for a trace
 
   StartupCommand* {.pure.} = enum
     noCommand,
@@ -1289,6 +1290,16 @@ type
           argument,
           desc: "Path to the source trace to " &
             "export."
+        .}: string
+      of TraceCommand.`omniscient-prep`:
+        traceOmniscientPrepMode* {.
+          name: "mode",
+          defaultValue: "on",
+          desc: "OmniscientDB preparation mode."
+        .}: string
+        traceOmniscientPrepPath* {.
+          argument,
+          desc: "Path to the trace or trace folder."
         .}: string
 
     # P7.1 ``ct gfx-replay`` forwards to ``ct_gfx_player``.  The
