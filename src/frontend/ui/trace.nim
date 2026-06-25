@@ -618,7 +618,7 @@ proc renderTableResults(
     # we create a new one and load all the session results in it
     let element = jqFind(cstring(fmt"#trace-table-{self.id}"))
 
-    if not element.isNil:
+    if not element.isNil and element.toJs.length.to(int) > 0:
       # traceSession.tracepoints[self.indexInSession].lastRender += results.len
       var columns = @[
         js{
