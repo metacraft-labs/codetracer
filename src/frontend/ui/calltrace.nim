@@ -9,7 +9,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # The CalltraceVM drives the IsoNim reactive DOM tree; the legacy Karax
 # render() returns an empty stub once the IsoNim view is mounted.
 # ---------------------------------------------------------------------------
-import std/[json, tables]
+import std/[json, tables, options]
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 from ../viewmodel/store/types as vm_types import nil
 from ../viewmodel/store/replay_data_store import
@@ -19,7 +19,7 @@ from ../viewmodel/store/request_tracker import markComplete
 from ../viewmodel/viewmodels/calltrace_vm import
   CalltraceVM, createCalltraceVM,
   scroll, setViewportHeight, setViewportDepth, setRawIgnorePatterns,
-  setBackendSearchResults
+  setBackendSearchResults, selectEntry
 from isonim/web/dom_api import nil
 from isonim/core/batch as isoBatch import batch
 from isonim/core/signals import val
@@ -383,6 +383,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       not callLine.content.isNil and
       not callLine.content.call.isNil
 
+  let backendStartIndex = cast[int64](results.startCallLineIndex)
   var vmLines: seq[vm_types.CallLine] = @[]
   for i, callLine in results.callLines:
     if not hasRenderableCall(callLine):
@@ -413,7 +414,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
       isExpanded = lineIsExpanded,
       callKey = $call.key,
     )
-    cl.index = i.int64
+    cl.index = backendStartIndex + i.int64
     vmLines.add(cl)
   # Mirror the backend's startCallLineIndex into the store so that the
   # visibleLines memo can correctly slice based on the global index.
@@ -421,7 +422,6 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   # backend returns a section centered around the jumped-to position,
   # but the store stored startIndex=0 so the visible window kept showing
   # rows [0..24] of the section, not rows around the jumped-to function.
-  let backendStartIndex = cast[int64](results.startCallLineIndex)
   # Mirror the per-call argument values into the store so the IsoNim
   # calltrace view can render one ``.call-arg`` element per arg per row
   # (matching the legacy call-argument markup that Playwright's
@@ -563,13 +563,16 @@ method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltrace
   if element != nil:
     element.style.display = "none"
 
+  if self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
+    self.activeCallIndex = results.startCallLineIndex + self.loadedCallKeys[self.lastSelectedCallKey]
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
+
   if self.forceCollapse:
     let scrollTo = max(results.scrollPosition - 2, 0)
 
     if results.scrollPosition > 0:
       self.calltraceScroll(scrollTo * CALL_HEIGHT_PX)
-    if self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
-      self.activeCallIndex = self.loadedCallKeys[self.lastSelectedCallKey]
     self.forceCollapse = false
   else:
     self.redrawCallLines()
@@ -977,6 +980,9 @@ method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} 
     let buffer = self.getStartBufferLen()
 
     self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key] - buffer
+
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectEntry(some(self.activeCallIndex.int64))
 
     if self.loadedCallKeys[response.location.key] >= self.panelHeight() - 1 + buffer:
       self.calltraceScroll((self.activeCallIndex - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
