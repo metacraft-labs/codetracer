@@ -19,7 +19,7 @@ static volatile uint64_t g_slots[4] = {0, 0, 0, 0};
 
 __attribute__((noinline)) static void update_counter(uint64_t delta) {
     uint64_t before = g_counter;
-    g_counter = before + delta;
+    g_counter = before + delta; /* MODEL:counter */
 }
 
 __attribute__((noinline)) static void heap_phase(void) {
@@ -27,21 +27,21 @@ __attribute__((noinline)) static void heap_phase(void) {
     if (heap == NULL) {
         _exit(3);
     }
-    heap[0] = 0x1111;
-    heap[1] = 0x2222;
-    heap[2] = 0x3333;
-    g_slots[0] = heap[0] + heap[1];
-    g_slots[1] = heap[2] ^ 0x55;
+    heap[0] = 0x1111;             /* MODEL:heap0 */
+    heap[1] = 0x2222;             /* MODEL:heap1 */
+    heap[2] = 0x3333;             /* MODEL:heap2 */
+    g_slots[0] = heap[0] + heap[1]; /* MODEL:slot0 */
+    g_slots[1] = heap[2] ^ 0x55;  /* MODEL:slot1 */
     free((void*)heap);
 }
 
 __attribute__((noinline)) static void stack_phase(uint64_t seed) {
     volatile uint64_t local[4] = {0, 0, 0, 0};
-    local[0] = seed + 7;
-    local[1] = local[0] * 3;
-    local[2] = local[1] ^ 0x44;
-    local[3] = local[2] + g_counter;
-    g_slots[2] = local[3];
+    local[0] = seed + 7;          /* MODEL:local0 */
+    local[1] = local[0] * 3;      /* MODEL:local1 */
+    local[2] = local[1] ^ 0x44;   /* MODEL:local2 */
+    local[3] = local[2] + g_counter; /* MODEL:local3 */
+    g_slots[2] = local[3];        /* MODEL:slot2 */
 }
 
 __attribute__((noinline)) static int os_phase(void) {

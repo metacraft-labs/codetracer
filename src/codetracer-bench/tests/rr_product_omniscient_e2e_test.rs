@@ -11,7 +11,7 @@ use codetracer_bench::omniscient_db_size::find_ct_container;
 use codetracer_bench::{
     FixtureRecorder, Language, RecorderError, ct_binary, ct_cli_binary, ct_command, which,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,9 +19,97 @@ struct WlogWrite {
     tick: u64,
     pc: u64,
     address: u64,
-    size: u8,
+    size: u32,
     old_value: u64,
     new_value: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ExpectedTransition {
+    name: &'static str,
+    old_value: u64,
+    new_value: u64,
+}
+
+const PAGE_SIZE: usize = 4096;
+const NSB_HEADER_TOTAL: usize = 61;
+const NSB_KIND_LEAF: u8 = 1;
+const NSB_NODE_HEADER_BYTES: usize = 8;
+const NSB_RECORD_SIZE: usize = 4 + 8 + 8 + 4 + 8 + 8;
+
+fn expected_model() -> Vec<ExpectedTransition> {
+    let first = u64::from(b'r');
+    let local0 = first + 7;
+    let local1 = local0 * 3;
+    let local2 = local1 ^ 0x44;
+    let local3 = local2 + 34;
+    vec![
+        ExpectedTransition {
+            name: "counter 5->17",
+            old_value: 5,
+            new_value: 17,
+        },
+        ExpectedTransition {
+            name: "counter 17->34",
+            old_value: 17,
+            new_value: 34,
+        },
+        ExpectedTransition {
+            name: "counter 34->51",
+            old_value: 34,
+            new_value: 51,
+        },
+        ExpectedTransition {
+            name: "heap[0]",
+            old_value: 0,
+            new_value: 0x1111,
+        },
+        ExpectedTransition {
+            name: "heap[1]",
+            old_value: 0,
+            new_value: 0x2222,
+        },
+        ExpectedTransition {
+            name: "heap[2]",
+            old_value: 0,
+            new_value: 0x3333,
+        },
+        ExpectedTransition {
+            name: "g_slots[0]",
+            old_value: 0,
+            new_value: 0x3333,
+        },
+        ExpectedTransition {
+            name: "g_slots[1]",
+            old_value: 0,
+            new_value: 0x3333 ^ 0x55,
+        },
+        ExpectedTransition {
+            name: "local[0]",
+            old_value: 0,
+            new_value: local0,
+        },
+        ExpectedTransition {
+            name: "local[1]",
+            old_value: 0,
+            new_value: local1,
+        },
+        ExpectedTransition {
+            name: "local[2]",
+            old_value: 0,
+            new_value: local2,
+        },
+        ExpectedTransition {
+            name: "local[3]",
+            old_value: 0,
+            new_value: local3,
+        },
+        ExpectedTransition {
+            name: "g_slots[2]",
+            old_value: 0,
+            new_value: local3,
+        },
+    ]
 }
 
 fn fixtures_root() -> PathBuf {
@@ -86,7 +174,7 @@ fn decode_wlog(image: &[u8]) -> Result<Vec<WlogWrite>, String> {
             tick,
             pc,
             address,
-            size,
+            size: u32::from(size),
             old_value,
             new_value,
         });
@@ -98,6 +186,170 @@ fn decode_wlog(image: &[u8]) -> Result<Vec<WlogWrite>, String> {
         ));
     }
     Ok(out)
+}
+
+fn read_u16_at(image: &[u8], off: usize, section: &str) -> Result<u16, String> {
+    image
+        .get(off..off + 2)
+        .and_then(|s| s.try_into().ok())
+        .map(u16::from_le_bytes)
+        .ok_or_else(|| format!("NSB1 truncated {section} at {off}"))
+}
+
+fn read_u64_at(image: &[u8], off: usize, section: &str) -> Result<u64, String> {
+    image
+        .get(off..off + 8)
+        .and_then(|s| s.try_into().ok())
+        .map(u64::from_le_bytes)
+        .ok_or_else(|| format!("NSB1 truncated {section} at {off}"))
+}
+
+fn nsb_page<'a>(image: &'a [u8], page: u64, section: &str) -> Result<&'a [u8], String> {
+    let base = (page as usize)
+        .checked_mul(PAGE_SIZE)
+        .ok_or_else(|| format!("NSB1 {section} page overflow at {page}"))?;
+    image
+        .get(base..base + PAGE_SIZE)
+        .ok_or_else(|| format!("NSB1 {section} page {page} out of bounds"))
+}
+
+fn nsb_node_key(page: &[u8], index: usize) -> Result<u64, String> {
+    read_u64_at(page, NSB_NODE_HEADER_BYTES + index * 8, "node key")
+}
+
+fn collect_nsb_keys(image: &[u8], root: u64) -> Result<Vec<u64>, String> {
+    let page_count = image.len() / PAGE_SIZE;
+    let mut keys = Vec::new();
+    let mut stack = vec![root];
+    let mut budget = page_count + 1;
+    while let Some(page_num) = stack.pop() {
+        if budget == 0 {
+            return Err("NSB1 key walk exceeded page budget".to_string());
+        }
+        budget -= 1;
+        let page = nsb_page(image, page_num, "node")?;
+        let count = read_u16_at(page, 2, "node count")? as usize;
+        if page[0] == NSB_KIND_LEAF {
+            for index in 0..count {
+                keys.push(nsb_node_key(page, index)?);
+            }
+        } else {
+            for child_index in 0..=count {
+                let child_off = NSB_NODE_HEADER_BYTES + count * 8 + child_index * 8;
+                let child = read_u64_at(page, child_off, "internal child")?;
+                if child != 0 && (child as usize) < page_count {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+    keys.sort_unstable();
+    Ok(keys)
+}
+
+fn lookup_nsb_descriptor<'a>(image: &'a [u8], root: u64, key: u64) -> Result<&'a [u8], String> {
+    let page_count = image.len() / PAGE_SIZE;
+    let mut page_num = root;
+    for _ in 0..=page_count {
+        let page = nsb_page(image, page_num, "lookup node")?;
+        let count = read_u16_at(page, 2, "lookup count")? as usize;
+        let mut lo = 0usize;
+        let mut hi = count;
+        while lo < hi {
+            let mid = (lo + hi) >> 1;
+            if nsb_node_key(page, mid)? < key {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if page[0] == NSB_KIND_LEAF {
+            if lo < count && nsb_node_key(page, lo)? == key {
+                let desc_base = NSB_NODE_HEADER_BYTES + count * 8 + lo * 16;
+                return page
+                    .get(desc_base..desc_base + 16)
+                    .ok_or_else(|| "NSB1 leaf descriptor out of bounds".to_string());
+            }
+            return Err(format!("NSB1 key {key:#x} not found"));
+        }
+        let child_index = if lo < count && nsb_node_key(page, lo)? == key {
+            lo + 1
+        } else {
+            lo
+        };
+        let child_off = NSB_NODE_HEADER_BYTES + count * 8 + child_index * 8;
+        page_num = read_u64_at(page, child_off, "lookup child")?;
+        if page_num == 0 || (page_num as usize) >= page_count {
+            return Err(format!("NSB1 child page {page_num} out of bounds"));
+        }
+    }
+    Err("NSB1 lookup exceeded page budget".to_string())
+}
+
+fn decode_nsb_memwrites(image: &[u8]) -> Result<Vec<WlogWrite>, String> {
+    if image.len() < NSB_HEADER_TOTAL {
+        return Err(format!("NSB1 too small: {} bytes", image.len()));
+    }
+    if &image[0..4] != b"NSB1" {
+        return Err("NSB1 bad magic".to_string());
+    }
+    if !image.len().is_multiple_of(PAGE_SIZE) {
+        return Err(format!("NSB1 image is not page-aligned: {}", image.len()));
+    }
+    if image[36] & 0b1 == 0 {
+        return Err("NSB1 memwrites must use Type-B descriptors".to_string());
+    }
+    let root0 = read_u64_at(image, 4, "root0")?;
+    let root1 = read_u64_at(image, 12, "root1")?;
+    let commit0 = read_u64_at(image, 20, "commit0")?;
+    let commit1 = read_u64_at(image, 28, "commit1")?;
+    let root = if commit1 > commit0 { root1 } else { root0 };
+    if root == 0 || commit0 == 0 && commit1 == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    for address in collect_nsb_keys(image, root)? {
+        let desc = lookup_nsb_descriptor(image, root, address)?;
+        let payload_offset = read_u64_at(desc, 0, "payload offset")? as usize;
+        let payload_len = read_u64_at(desc, 8, "payload len")? as usize;
+        let payload = image
+            .get(payload_offset..payload_offset.saturating_add(payload_len))
+            .ok_or_else(|| {
+                format!(
+                    "NSB1 payload [{payload_offset}, {}) out of bounds",
+                    payload_offset + payload_len
+                )
+            })?;
+        if !payload.len().is_multiple_of(NSB_RECORD_SIZE) {
+            return Err(format!("NSB1 bad memwrite payload len {}", payload.len()));
+        }
+        for record in payload.chunks_exact(NSB_RECORD_SIZE) {
+            let tick = read_u64_at(record, 4, "record tick")?;
+            let pc = read_u64_at(record, 12, "record pc")?;
+            let size = u32::from_le_bytes(record[20..24].try_into().unwrap());
+            let old_value = read_u64_at(record, 24, "record old")?;
+            let new_value = read_u64_at(record, 32, "record new")?;
+            out.push(WlogWrite {
+                tick,
+                pc,
+                address,
+                size,
+                old_value,
+                new_value,
+            });
+        }
+    }
+    out.sort_by_key(|w| (w.tick, w.address, w.pc));
+    Ok(out)
+}
+
+fn decode_memwrites(image: &[u8]) -> Result<Vec<WlogWrite>, String> {
+    match image.get(0..4) {
+        Some(b"WLOG") => decode_wlog(image),
+        Some(b"NSB1") => decode_nsb_memwrites(image),
+        _ => Err("memwrites bad magic".to_string()),
+    }
 }
 
 fn decode_lhts(image: &[u8]) -> Result<Vec<(u32, u32, Vec<u64>)>, String> {
@@ -190,6 +442,31 @@ fn find_write_events(root: &Path) -> Option<PathBuf> {
     None
 }
 
+fn model_line_numbers(program: &Path) -> HashMap<String, u32> {
+    let source = std::fs::read_to_string(program)
+        .unwrap_or_else(|e| panic!("failed to read model source {}: {e}", program.display()));
+    let mut out = HashMap::new();
+    for (index, line) in source.lines().enumerate() {
+        let Some(marker_start) = line.find("MODEL:") else {
+            continue;
+        };
+        let marker = line[marker_start + "MODEL:".len()..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+            .collect::<String>();
+        assert!(
+            !marker.is_empty(),
+            "empty MODEL marker on source line {}",
+            index + 1
+        );
+        assert!(
+            out.insert(marker.clone(), (index + 1) as u32).is_none(),
+            "duplicate MODEL marker {marker}"
+        );
+    }
+    out
+}
+
 #[test]
 fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
     if !cfg!(target_os = "linux") {
@@ -258,6 +535,11 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
         "RR write_events.txt must include fixture stdout boundaries; got {} bytes",
         write_events_bytes.len()
     );
+    assert!(
+        contains_bytes(&write_events_bytes, b"51 13107 13158 337"),
+        "RR write_events.txt must include model-predicted final stdout values; got: {}",
+        String::from_utf8_lossy(&write_events_bytes)
+    );
 
     run_native_omniscient_prep(slice_folder).expect("native product omniscient-prep must succeed");
 
@@ -275,31 +557,38 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
         linehits_path.display()
     );
 
-    let writes = decode_wlog(
-        &std::fs::read(&memwrites_path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", memwrites_path.display())),
-    )
-    .expect("memwrites.tc must decode as WLOG");
+    let memwrites_image = std::fs::read(&memwrites_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", memwrites_path.display()));
+    assert_eq!(
+        memwrites_image.get(0..4),
+        Some(&b"NSB1"[..]),
+        "product memwrites.tc must use the production NSB1 namespace"
+    );
+    let writes = decode_memwrites(&memwrites_image).expect("memwrites.tc must decode");
     assert!(
-        writes.len() >= 16,
-        "expected product memwrites.tc to contain enough writes for globals, heap, stack, and libc-visible setup; got {}",
+        writes.len() >= expected_model().len(),
+        "expected product memwrites.tc to contain at least the source-model writes; got {}",
         writes.len()
     );
     let transitions: HashSet<(u64, u64)> =
         writes.iter().map(|w| (w.old_value, w.new_value)).collect();
-    for expected in [
-        (5, 17),
-        (17, 34),
-        (34, 51),
-        (0, 0x1111),
-        (0, 0x2222),
-        (0, 0x3333),
-    ] {
+    for expected in expected_model() {
         assert!(
-            transitions.contains(&expected),
-            "memwrites.tc missing source-derived transition {expected:?}; decoded writes: {writes:?}"
+            transitions.contains(&(expected.old_value, expected.new_value)),
+            "memwrites.tc missing model transition {}: {} -> {}; decoded writes: {writes:?}",
+            expected.name,
+            expected.old_value,
+            expected.new_value
         );
     }
+    assert!(
+        writes.windows(2).all(|pair| pair[0].tick <= pair[1].tick),
+        "decoded memwrites must be sorted by tick for stable queries: {writes:?}"
+    );
+    assert!(
+        writes.iter().all(|w| (1..=8).contains(&w.size)),
+        "memwrites must use supported <=8-byte write runs: {writes:?}"
+    );
 
     let linehits = decode_lhts(
         &std::fs::read(&linehits_path)
@@ -315,6 +604,20 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
         total_hits >= 20,
         "expected repeated line hits across function calls and loops, got {total_hits}: {linehits:?}"
     );
+    let hit_lines: HashSet<u32> = linehits.iter().map(|(_, line, _)| *line).collect();
+    let model_lines = model_line_numbers(&program);
+    for marker in [
+        "counter", "heap0", "heap1", "heap2", "slot0", "slot1", "local0", "local1", "local2",
+        "local3", "slot2",
+    ] {
+        let line = *model_lines
+            .get(marker)
+            .unwrap_or_else(|| panic!("fixture missing MODEL marker {marker}"));
+        assert!(
+            hit_lines.contains(&line),
+            "linehits.tc missing source-model line {line} for marker {marker}; decoded linehits: {linehits:?}"
+        );
+    }
     for (_, _, ticks) in &linehits {
         assert!(
             ticks.windows(2).all(|pair| pair[0] <= pair[1]),
