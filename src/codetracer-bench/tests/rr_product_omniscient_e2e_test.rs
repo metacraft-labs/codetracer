@@ -13,6 +13,7 @@ use codetracer_bench::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WlogWrite {
@@ -432,6 +433,27 @@ fn run_native_omniscient_prep(slice_folder: &Path) -> Result<(), String> {
     ))
 }
 
+fn compile_c_fixture(source: &Path, binary: &Path) -> Result<(), String> {
+    let output = Command::new("gcc")
+        .arg("-g")
+        .arg("-O0")
+        .arg("-fno-omit-frame-pointer")
+        .arg("-o")
+        .arg(binary)
+        .arg(source)
+        .output()
+        .map_err(|e| format!("failed to spawn gcc: {e}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "gcc failed with {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
 fn find_write_events(root: &Path) -> Option<PathBuf> {
     for entry in walkdir::WalkDir::new(root) {
         let entry = entry.ok()?;
@@ -502,8 +524,10 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
     );
 
     let temp = tempfile::tempdir().expect("tempdir");
+    let binary = temp.path().join("rr-product-omniscient-fixture");
+    compile_c_fixture(&program, &binary).expect("fixture C binary must compile with debug info");
     let trace_dir = temp.path().join("rr-product-omniscient");
-    match FixtureRecorder::record_via_ct(Language::C, Some("rr"), &program, &trace_dir) {
+    match FixtureRecorder::record_via_ct(Language::C, Some("rr"), &binary, &trace_dir) {
         Ok(_) => {}
         Err(RecorderError::Unavailable(reason)) => {
             skip(&format!("ct record unavailable: {reason}"));
@@ -546,6 +570,7 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
     let meta_dat = slice_folder.join("meta_dat");
     let memwrites_path = meta_dat.join("memwrites.tc");
     let linehits_path = meta_dat.join("linehits.tc");
+    let path_marker = meta_dat.join("omniscient-prep-path.txt");
     assert!(
         memwrites_path.is_file(),
         "native product omniscient-prep must emit memwrites.tc at {}",
@@ -555,6 +580,13 @@ fn rr_product_path_builds_native_omniscient_artifacts_for_plain_c_program() {
         linehits_path.is_file(),
         "native product omniscient-prep must emit linehits.tc at {}",
         linehits_path.display()
+    );
+    let producer_path = std::fs::read_to_string(&path_marker)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path_marker.display()));
+    assert!(
+        producer_path.trim().starts_with("rr-emulator-lazy"),
+        "RR omniscient-prep must use the lazy emulator producer, not the GDB \
+         snapshot-diff collector; marker was {producer_path:?}"
     );
 
     let memwrites_image = std::fs::read(&memwrites_path)

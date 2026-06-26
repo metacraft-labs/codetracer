@@ -289,6 +289,22 @@ pub fn ct_cli_binary() -> Option<PathBuf> {
 /// loader variable as well.
 pub fn ct_command(binary: &Path) -> Command {
     let mut cmd = Command::new(binary);
+    if let Some(bin_dir) = binary.parent() {
+        if let Some(prefix_dir) = bin_dir.parent() {
+            cmd.env("CODETRACER_PREFIX", prefix_dir);
+        }
+        let value = match std::env::var_os("PATH") {
+            Some(current) if !current.is_empty() => {
+                let mut paths = vec![bin_dir.to_path_buf()];
+                paths.extend(std::env::split_paths(&current));
+                std::env::join_paths(paths).ok()
+            }
+            _ => std::env::join_paths([bin_dir]).ok(),
+        };
+        if let Some(value) = value {
+            cmd.env("PATH", value);
+        }
+    }
     match std::env::var("CODETRACER_LD_LIBRARY_PATH") {
         Ok(ct_ld) if !ct_ld.is_empty() => {
             let value = match std::env::var("LD_LIBRARY_PATH") {
