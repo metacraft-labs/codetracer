@@ -194,12 +194,19 @@ fn tracepoint_benchmark_emits_matrix_format() {
         );
         return;
     }
-    // If/when the benchmark lands, the matrix-format extension should
-    // wire it through the same `BenchReport` shape this crate emits.
-    // The assertion here is therefore a placeholder for the future
-    // verification.
-    panic!(
-        "tracepoint_interpreter benchmark exists but matrix-format extension not implemented; \
-         see P4.6.",
+    let bench_file = benches_dir.join("tracepoint_interpreter.rs");
+    let source = std::fs::read_to_string(&bench_file).unwrap_or_else(|e| {
+        panic!(
+            "tracepoint_interpreter benchmark exists but could not be read at {}: {e}",
+            bench_file.display()
+        )
+    });
+    assert!(
+        source.contains("bench_matrix_report::emit"),
+        "tracepoint_interpreter benchmark must emit through bench_matrix_report::emit"
+    );
+    assert!(
+        source.contains("target/codetracer-bench/tracepoint-interpreter"),
+        "tracepoint_interpreter benchmark must document the matrix report output path"
     );
 }

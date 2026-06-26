@@ -1585,6 +1585,8 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
   let valueSpan = document.createElement(cstring"span")
   valueSpan.setAttribute(cstring"id", cstring(&"flow-{flowMode}-value-box-{stepCount}-{i}"))
   valueSpan.applyStyle(style)
+  if event.text.len() > FLOW_VALUE_LIMIT:
+    valueSpan.style.maxWidth = FLOW_VALUE_MAX_WIDTH
   valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
   valueSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-box {valueClass} " & before))
   valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
@@ -1655,6 +1657,8 @@ proc flowSimpleValue*(
     let valueSpan = document.createElement(cstring"span")
     valueSpan.setAttribute(cstring"id", id)
     valueSpan.applyStyle(style)
+    if value.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+      valueSpan.style.maxWidth = FLOW_VALUE_MAX_WIDTH
     valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
     valueSpan.setAttribute(cstring"class", cstring(className))
     valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =

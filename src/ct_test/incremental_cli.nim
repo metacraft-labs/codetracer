@@ -50,7 +50,7 @@
 ## without that sibling/toolchain, the native path reports an HONEST gate
 ## (non-zero exit + captured diagnostic) — never a silent skip.
 
-import std/[os, osproc, strutils, times, tables]
+import std/[os, osproc, strutils, times, tables, json]
 import results
 
 import incremental/engine
@@ -723,6 +723,83 @@ proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult
   IncrementalRunResult(kind: irkDecided, decision: decision,
     report: describeDecision(args.testId, decision))
 
+proc watchFlag(args: seq[string]; name: string): string =
+  ## Returns the value following `--<name>` in `args`, or "" if absent.
+  ## Used by the granular `--watch-decide` / `--watch-record` JSON CLI below.
+  let flag = "--" & name
+  for i in 0 ..< args.len:
+    if args[i] == flag:
+      if i + 1 < args.len:
+        return args[i + 1]
+      return ""
+  ""
+
+proc watchHasFlag(args: seq[string]; name: string): bool =
+  ## Returns true if the bare flag `--<name>` is present in `args`.
+  ("--" & name) in args
+
+proc runWatchDecide(rawArgs: seq[string]): int =
+  ## Granular machine-readable decision used by the engine-free
+  ## `reprobuild-ct-test-runner` adapter, which execs `ct` as a subprocess.
+  ## Loads the cache, runs `decide`, and prints a single-line JSON object:
+  ##   {"status":"run"|"skip","reason":"...","changedFuncs":[...]}
+  ## A malformed/unreadable cache is itself a valid (fail-safe) RUN decision,
+  ## so this always exits 0 for a reached decision.
+  let
+    testId = watchFlag(rawArgs, "test-id")
+    traceDir = watchFlag(rawArgs, "trace-dir")
+    sourceRoot = watchFlag(rawArgs, "source-root")
+    cachePath = watchFlag(rawArgs, "cache-path")
+  let loaded = loadCache(cachePath)
+  if loaded.isErr:
+    echo $(%*{"status": "run", "reason": "error: " & loaded.error,
+      "changedFuncs": newJArray()})
+    return 0
+  let decision = decide(testId, traceDir, sourceRoot, loaded.value)
+  var obj: JsonNode
+  case decision.kind
+  of idRunFresh:
+    obj = %*{"status": "run", "reason": "fresh", "changedFuncs": newJArray()}
+  of idSkipUnchanged:
+    obj = %*{"status": "skip", "reason": "unchanged", "changedFuncs": newJArray()}
+  of idRerunChanged:
+    obj = %*{"status": "run",
+      "reason": "changed: " & decision.changedFuncs.join(", "),
+      "changedFuncs": %decision.changedFuncs}
+  of idRerunNonDeterministic:
+    obj = %*{"status": "run", "reason": "non-deterministic",
+      "changedFuncs": newJArray()}
+  of idRerunFailSafe:
+    obj = %*{"status": "run", "reason": "error: " & decision.reason,
+      "changedFuncs": newJArray()}
+  echo $obj
+  0
+
+proc runWatchRecord(rawArgs: seq[string]): int =
+  ## Granular machine-readable record used by the engine-free adapter. Records
+  ## the test's executed-function hashes into the cache and persists it, then
+  ## prints a single-line JSON object: {"ok":bool,"error":str}. Always exits 0;
+  ## failures are reported through the JSON payload.
+  let
+    testId = watchFlag(rawArgs, "test-id")
+    traceDir = watchFlag(rawArgs, "trace-dir")
+    sourceRoot = watchFlag(rawArgs, "source-root")
+    cachePath = watchFlag(rawArgs, "cache-path")
+    nonDet = watchHasFlag(rawArgs, "non-deterministic")
+  let loaded = loadCache(cachePath)
+  var cache = if loaded.isOk: loaded.value else: initCache(cachePath)
+  let rec = record(cache, testId, traceDir, sourceRoot,
+    deterministic = not nonDet)
+  if rec.isErr:
+    echo $(%*{"ok": false, "error": rec.error})
+    return 0
+  let saved = saveCache(cache)
+  if saved.isErr:
+    echo $(%*{"ok": false, "error": saved.error})
+    return 0
+  echo $(%*{"ok": true, "error": ""})
+  0
+
 proc runIncremental*(rawArgs: seq[string]): int =
   ## The `ct test --incremental` entry point. Parses arguments, runs
   ## `decideIncremental`, prints the decision report, and returns a process exit
@@ -731,6 +808,15 @@ proc runIncremental*(rawArgs: seq[string]): int =
   ##   * 2 — a usage / argument error.
   ##   * 1 — a recorder gate (the language's recorder could not build/record on
   ##         this host) or another hard failure. The exact diagnostic is printed.
+  ##
+  ## Two granular machine-readable modes are intercepted up front (used by the
+  ## engine-free `reprobuild-ct-test-runner` adapter, which execs `ct`):
+  ##   * `--watch-decide` — print a one-line JSON skip/run decision.
+  ##   * `--watch-record` — record + persist, print a one-line JSON ok/err.
+  if rawArgs.len > 0 and rawArgs[0] == "--watch-decide":
+    return runWatchDecide(rawArgs)
+  if rawArgs.len > 0 and rawArgs[0] == "--watch-record":
+    return runWatchRecord(rawArgs)
   let parsedRes = parseIncrementalArgs(rawArgs)
   if parsedRes.isErr:
     stderr.writeLine("ct test --incremental: " & parsedRes.error)

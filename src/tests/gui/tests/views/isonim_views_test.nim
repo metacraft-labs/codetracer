@@ -1673,6 +1673,43 @@ suite "IsoNim Calltrace Panel — call lines":
 
       dispose()
 
+  test "test_calltrace_collapse_dots":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      var line1 = makeTestCallLine(0, "parentExpanded", depth = 0)
+      line1.hasChildren = true
+      line1.isExpanded = true
+
+      var line2 = makeTestCallLine(1, "parentCollapsed", depth = 0)
+      line2.hasChildren = true
+      line2.isExpanded = false
+
+      var line3 = makeTestCallLine(2, "leaf", depth = 0)
+      line3.hasChildren = false
+      line3.isExpanded = false
+
+      store.updateCalltraceSection(
+        @[line1, line2, line3],
+        startIndex = 0'i64,
+        totalCount = 3'u64,
+      )
+
+      vm.setViewportHeight(10)
+
+      let panel = renderCalltracePanel(r, vm)
+      let container = findByClass(panel, "calltrace-lines")
+      let rows = findAllByClass(container, "calltrace-call-line")
+
+      check rows.len == 3
+      check findByClass(rows[0], "collapse-call-img") != nil
+      check findByClass(rows[1], "expand-call-img") != nil
+      check findByClass(rows[2], "dot-call-img") != nil
+
+      dispose()
+
 # ---------------------------------------------------------------------------
 # Calltrace call argument rendering tests
 # ---------------------------------------------------------------------------

@@ -1343,10 +1343,29 @@ fn resolve_replay_trace_path(trace_folder: &Path, trace_file: &Path) -> Option<P
 /// the naming convention used by the recorder.
 fn find_ct_file_in_dir(dir: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
+    let mut subdirs = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "ct") && path.is_file() {
-            return Some(path);
+        if path.is_file() {
+            if path.extension().is_some_and(|ext| ext == "ct") {
+                return Some(path);
+            }
+        } else if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if !name.starts_with('.') {
+                    subdirs.push(path);
+                }
+            }
+        }
+    }
+    for subdir in subdirs {
+        if let Some(entries) = std::fs::read_dir(&subdir).ok() {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "ct") && path.is_file() {
+                    return Some(path);
+                }
+            }
         }
     }
     None
@@ -1905,11 +1924,12 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                     // sidecars (`trace.bin` / `trace.json` +
                     // `trace_metadata.json`) are no longer supported.
                     if let Some(ct_path) = find_ct_file_in_dir(folder) {
-                        // Store just the file name — setup() joins it with
-                        // the folder.
-                        if let Some(name) = ct_path.file_name() {
-                            ctx.launch_trace_file = name.into();
-                        }
+                        let rel_path = ct_path.strip_prefix(folder)
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|_| {
+                                ct_path.file_name().map(PathBuf::from).unwrap_or(ct_path)
+                            });
+                        ctx.launch_trace_file = rel_path;
                     } else {
                         // No .ct found; default to "trace.ct" so the error
                         // message in setup() points at the canonical name.
@@ -2376,9 +2396,11 @@ fn task_thread(
                     // canonical name so setup() yields a clear error if
                     // nothing matches.
                     if let Some(ct_path) = find_ct_file_in_dir(folder) {
-                        ct_path
-                            .file_name()
-                            .map_or_else(|| "trace.ct".into(), |name| name.into())
+                        ct_path.strip_prefix(folder)
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|_| {
+                                ct_path.file_name().map(PathBuf::from).unwrap_or(ct_path)
+                            })
                     } else {
                         "trace.ct".into()
                     }

@@ -256,9 +256,10 @@ enum TraceOp {
     OmniscientPrep {
         /// Path to a CTFS slice folder (the recording's root dir).
         slice_folder: std::path::PathBuf,
-        /// Override the trace kind detection. Defaults to detection
-        /// via the slice's `trace_kind.txt` marker or the presence
-        /// of `memwrites.tc` (Native) vs. `events.tc` (Materialized).
+        /// Override the trace kind detection. Defaults to local
+        /// detection: RR trace folders (`rr/`) and slices that already
+        /// expose root `memwrites.tc` are native; all other CTFS
+        /// containers use the materialized/MCR path.
         #[arg(long, value_parser = ["materialized", "native"])]
         trace_kind: Option<String>,
         /// Output mode for the resulting `meta_dat/origin-config.toml`.
@@ -640,19 +641,9 @@ fn run_omniscient_prep_subcommand(
     use codetracer_trace_types::{StepId, VariableId};
     use std::collections::HashMap;
 
-    let detected_kind = match trace_kind {
-        Some(k) => k.to_string(),
-        None => {
-            // M30 will replace this with the production trace-kind
-            // detection; for M31 the presence of memwrites.tc is the
-            // signal.
-            if slice_folder.join("memwrites.tc").exists() {
-                "native".to_string()
-            } else {
-                "materialized".to_string()
-            }
-        }
-    };
+    let detected_kind = trace_kind
+        .map(str::to_string)
+        .unwrap_or_else(|| detect_omniscient_prep_trace_kind(slice_folder).to_string());
     let new_mode = OriginMode::parse(mode).ok_or_else(|| -> Box<dyn Error> { "invalid --mode value".into() })?;
 
     let meta_dat = slice_folder.join("meta_dat");
@@ -785,6 +776,14 @@ fn run_omniscient_prep_subcommand(
         capability_count,
     );
     Ok(())
+}
+
+fn detect_omniscient_prep_trace_kind(slice_folder: &std::path::Path) -> &'static str {
+    if slice_folder.join("rr").is_dir() || slice_folder.join("memwrites.tc").exists() {
+        "native"
+    } else {
+        "materialized"
+    }
 }
 
 /// Heuristic path-A synthesis from the source-line text. When the line
@@ -1002,4 +1001,36 @@ fn run_origin_subcommand(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_omniscient_prep_trace_kind;
+    use std::error::Error;
+
+    #[test]
+    fn omniscient_prep_detection_treats_rr_folder_as_native() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir(dir.path().join("rr"))?;
+
+        assert_eq!(detect_omniscient_prep_trace_kind(dir.path()), "native");
+        Ok(())
+    }
+
+    #[test]
+    fn omniscient_prep_detection_treats_root_memwrites_as_native() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("memwrites.tc"), b"WLOG")?;
+
+        assert_eq!(detect_omniscient_prep_trace_kind(dir.path()), "native");
+        Ok(())
+    }
+
+    #[test]
+    fn omniscient_prep_detection_defaults_to_materialized() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+
+        assert_eq!(detect_omniscient_prep_trace_kind(dir.path()), "materialized");
+        Ok(())
+    }
 }

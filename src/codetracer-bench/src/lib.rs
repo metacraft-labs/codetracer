@@ -43,6 +43,7 @@ use std::process::Command;
 
 pub mod dap_driver;
 pub mod gui_ops;
+pub mod native_omniscient_timing;
 pub mod omniscient_db_size;
 pub mod slice_prep_speed;
 
