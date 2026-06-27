@@ -47,7 +47,7 @@
 	url = https://github.com/NimParsers/parsetoml.git
 [submodule "libs/nim-result"]
 	path = libs/nim-result
-	url = https://github.com/metacraft-labs/nim-result.git
+	url = https://github.com/arnetheduck/nim-results.git
 [submodule "libs/nimcrypto"]
 	path = libs/nimcrypto
 	url = https://github.com/cheatfate/nimcrypto.git
