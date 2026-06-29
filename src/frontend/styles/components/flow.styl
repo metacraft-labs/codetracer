@@ -527,10 +527,12 @@
   border-bottom-right-radius: 0.375em
   color: PRIMARY_TEXT_COLOR
   display: inline-flex
+  flex-direction: column
   font-size: inherit
   // height: 40px
   min-width: 3.125em
   max-width: 100ch !important
+  max-height: 50vh !important
   padding-right: 0.5em
   position: relative
   // width: fit-content
@@ -604,11 +606,12 @@
     border-top-color: #FEFEFE
   }
 
-  &[data-placement^="top"] > .tippy-content {
+  .tippy-content {
     position: relative
-    // top: 13px
     font-weight: 400
-    overflow: auto
+    overflow-y: auto !important
+    overflow-x: auto !important
+    max-height: 100%
     white-space: nowrap
     max-width: 100%
     padding-left: 1ch
