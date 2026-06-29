@@ -138,12 +138,14 @@ proc requestDebugShellRender*(self: DebugComponent) =
 proc requestDebugControlsRender*(self: DebugComponent) =
   if self.isNil:
     return
-  isoNimDebugMounted = false
   let container = dom_api.getElementById(
     dom_api.document,
     cstring"isonim-debug-controls")
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
+  if isoNimDebugMounted and not dom_api.isNodeNil(dom_api.Node(container).firstChild):
+    return
+  isoNimDebugMounted = false
   tryMountIsoNimDebugControls()
 
 proc requestDebugActionRefresh(self: DebugComponent) =

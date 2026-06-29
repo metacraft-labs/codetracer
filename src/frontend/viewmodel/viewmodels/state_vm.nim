@@ -298,9 +298,9 @@ proc toggleHistory*(vm: StateVM; expression: string) =
     if not vm.onToggleHistory.isNil and not vm.valueHistory.val.hasKey(expression):
       vm.onToggleHistory(expression)
 
-proc updateHistory*(vm: StateVM; expression: string; results: seq[HistoryResult]) =
+proc updateHistory*[T](vm: StateVM; expression: string; results: seq[T]) =
   var h = vm.valueHistory.val
-  h[expression] = results
+  h[expression] = cast[seq[HistoryResult]](results)
   vm.valueHistory.val = h
 
 # ---------------------------------------------------------------------------
