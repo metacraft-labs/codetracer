@@ -303,6 +303,21 @@ suite "WelcomeScreenVM — welcome_screen":
       check mock.commandCount("ct/load-recent-trace") == 1
       dispose()
 
+  test "test_recent_trace_loading":
+    # Verifies recent traces launch properly from welcome screen
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let recId = "01949fcc-7d92-7e9c-aaaa-000000000088"
+      vm.setRecentTraces(@[makeTrace(recId, "/usr/bin/python3", @["test.py"])])
+      vm.loadRecentTrace(recId)
+      drain()
+      check vm.loading.val == true
+      check vm.loadingRecordingId.val == recId
+      check mock.commandCount("ct/load-recent-trace") == 1
+      check store.session.val.debugSessionMode == completedReplay
+      dispose()
+
   test "endLoading clears the overlay":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()

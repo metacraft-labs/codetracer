@@ -168,14 +168,14 @@ proc triggerTraceClick(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
   if callbacks.onRecentTraceClick != nil:
     callbacks.onRecentTraceClick(recordingId)
   else:
-    vm.beginLoadingTrace(recordingId)
+    vm.loadRecentTrace(recordingId)
 
 proc triggerFolderClick(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
                         folderPath: string) =
   if callbacks.onRecentFolderClick != nil:
     callbacks.onRecentFolderClick(folderPath)
   else:
-    vm.enterEditMode(folderPath)
+    vm.loadRecentFolder(folderPath)
 
 proc folderClickHandler(vm: WelcomeScreenVM; callbacks: WelcomeScreenCallbacks;
                         folderPath: string): proc() =
