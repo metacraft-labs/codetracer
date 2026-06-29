@@ -186,7 +186,7 @@ proc adjustEditorWidth*(self: EditorViewComponent) =
   let path = self.tabInfo.name
   let options = cast[MonacoEditorOptions](self.monacoEditor.getOptions())
 
-  for flowDom in self.flow.flowDom:
+  for _, flowDom in self.flow.flowDom:
     if not flowDom.firstChild.isNil and not flowDom.firstChild.toJs.firstElementChild.isNil:
       self.flow.calculateMaxWidth(cast[Element](flowDom.firstChild.toJs.firstElementChild).clientWidth)
 
@@ -1792,14 +1792,14 @@ proc flowSimpleValue*(
 proc clearSliders(self: FlowComponent) =
   if not self.inExtension:
     var tab = self.data.services.editor.open[self.editorUI.path]
-    for widget in self.sliderWidgets:
+    for _, widget in self.sliderWidgets:
       tab.monacoEditor.removeContentWidget(widget)
   self.sliderWidgets = JsAssoc[int, js]{}
 
 proc clearInline(self: FlowComponent) =
-  for line in self.flowLines:
+  for _, line in self.flowLines:
     # Remove the class 'flow-inline-value' from each node
-    for _, node in self.flowLines[line.number].decorationsDoms:
+    for _, node in line.decorationsDoms:
       let nodesToDelete = findAllNodesInElement(node, cstring".flow-inline-value")
       for nodeToDelete in nodesToDelete:
         node.removeChild(nodeToDelete)
@@ -1816,11 +1816,11 @@ proc clearParallel(self: FlowComponent) =
     var tab = self.data.services.editor.open[self.editorUI.path]
 
     if not tab.monacoEditor.isNil:
-      for viewZone in self.loopViewZones:
+      for _, viewZone in self.loopViewZones:
         tab.monacoEditor.changeViewZones do (view: js):
           view.removeZone(viewZone)
       # clear flow line content widgets
-      for flowLine in self.flowLines:
+      for _, flowLine in self.flowLines:
         if not flowLine.contentWidget.isNil:
           tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
           flowLine.contentWidget = nil
@@ -1856,7 +1856,7 @@ proc removeViewZones(self: FlowComponent, zones: JsAssoc[int, int]) =
     return
 
   self.editorUI.monacoEditor.changeViewZones do (view: js):
-    for zoneId in zones:
+    for _, zoneId in zones:
       try:
         view.removeZone(zoneId)
       except:
@@ -4500,7 +4500,7 @@ proc redrawFlow*(self: FlowComponent) =
   self.clear()
   self.recalculateAndRedrawFlow()
 
-  for zone in self.flowLoops:
+  for _, zone in self.flowLoops:
     if not zone.flowZones.isNil:
       zone.flowZones.dom.style.toJs.left = self.leftPos
 
