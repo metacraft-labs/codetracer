@@ -623,6 +623,10 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
     self.registerLocals(response)
   )
+  api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
+    if not stateVMInstance.isNil:
+      stateVMInstance.updateHistory($response.expression, response.results)
+  )
   api.emit(InternalLastCompleteMove, EmptyArg())
 
 # think if it's possible to directly exportc in this way the method

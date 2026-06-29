@@ -30,8 +30,9 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
-import ../store/[replay_data_store, types]
+import ../store/[replay_data_store, types as store_types]
 import origin_chain_types
+import ../../../common/types
 
 type
   StateTab* = enum
@@ -64,9 +65,11 @@ type
     selectedPath*: Signal[string]
       ## Empty string means "no selection".
     watchExpressions*: Signal[seq[string]]
+    expandedHistories*: Signal[HashSet[string]]
+    valueHistory*: Signal[Table[string, seq[HistoryResult]]]
 
     # -- Derived state --
-    currentVariables*: Memo[seq[Variable]]
+    currentVariables*: Memo[seq[store_types.Variable]]
     isLoading*: Memo[bool]
     codeStateLine*: Memo[string]
       ## Pre-formatted "<line> | <sourceCode>" string mirrored from
@@ -115,7 +118,7 @@ type
       ## look up the active chain for a variable. Returns ``none`` when
       ## no chain has been fetched yet — the row then renders the
       ## badge only and waits for the response.
-    onShowOriginProc*: proc(expression: string; location: Location)
+    onShowOriginProc*: proc(expression: string; location: store_types.Location)
       ## Optional bridge invoked by `onShowOrigin` — installed by
       ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
     lastContextMenu*: Signal[seq[OriginContextMenuEntry]]
@@ -285,8 +288,20 @@ proc removeWatch*(vm: StateVM; expression: string) =
     vm.watchExpressions.val = exprs
 
 proc toggleHistory*(vm: StateVM; expression: string) =
-  if not vm.onToggleHistory.isNil:
-    vm.onToggleHistory(expression)
+  var h = vm.expandedHistories.val
+  if expression in h:
+    h.excl(expression)
+    vm.expandedHistories.val = h
+  else:
+    h.incl(expression)
+    vm.expandedHistories.val = h
+    if not vm.onToggleHistory.isNil and not vm.valueHistory.val.hasKey(expression):
+      vm.onToggleHistory(expression)
+
+proc updateHistory*(vm: StateVM; expression: string; results: seq[HistoryResult]) =
+  var h = vm.valueHistory.val
+  h[expression] = results
+  vm.valueHistory.val = h
 
 # ---------------------------------------------------------------------------
 # Value Origin Tracking (M4) actions — keep adjacent to `toggleHistory`
@@ -294,7 +309,7 @@ proc toggleHistory*(vm: StateVM; expression: string) =
 # "open origin" affordance per spec §3.2.1 / §3.2.3.
 # ---------------------------------------------------------------------------
 
-proc onShowOrigin*(vm: StateVM; expression: string; location: Location) =
+proc onShowOrigin*(vm: StateVM; expression: string; location: store_types.Location) =
   ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
   ## at `location`. Sends the request directly via `BackendService.send`
   ## so the call site does not need to import the OriginChainVM, and
@@ -403,6 +418,8 @@ proc createStateVM*(store: ReplayDataStore;
     let expandedPaths = createSignal(initHashSet[string]())
     let selectedPath = createSignal("")
     let watchExpressions = createSignal(newSeq[string]())
+    let expandedHistories = createSignal(initHashSet[string]())
+    let valueHistory = createSignal(initTable[string, seq[HistoryResult]]())
     let expandedOrigins = createSignal(initHashSet[VariableId]())
     let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
     let originSummaries = createSignal(initTable[string, OriginSummary]())
@@ -411,7 +428,7 @@ proc createStateVM*(store: ReplayDataStore;
     let lastContextMenu = createSignal(newSeq[OriginContextMenuEntry]())
 
     # Derived: pick the right variable list based on the active tab.
-    let currentVariables = createMemo[seq[Variable]] proc(): seq[Variable] =
+    let currentVariables = createMemo[seq[store_types.Variable]] proc(): seq[store_types.Variable] =
       case activeTab.val
       of stLocals:
         store.locals.locals.val
@@ -421,7 +438,7 @@ proc createStateVM*(store: ReplayDataStore;
         # Watches are evaluated server-side and returned as part of
         # the locals response. For now, return an empty seq; watch
         # results will be populated when the backend supports them.
-        newSeq[Variable]()
+        newSeq[store_types.Variable]()
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -441,6 +458,8 @@ proc createStateVM*(store: ReplayDataStore;
       runtimeRole: runtimeRole,
       activeTab: activeTab,
       expandedPaths: expandedPaths,
+      expandedHistories: expandedHistories,
+      valueHistory: valueHistory,
       selectedPath: selectedPath,
       watchExpressions: watchExpressions,
       currentVariables: currentVariables,

@@ -16,14 +16,18 @@
 ##   for v in vs.variables:
 ##     echo "  ".repeat(v.depth) & v.name & " = " & v.value
 
-import std/sets
+import std/[sets, tables]
 
 import isonim/core/[signals, computation]
 
-import ../store/types
+import ../store/types as store_types
 import ../viewmodels/state_vm
+import ../../../common/types
 
 type
+  VariableHistoryRowView* = object
+    locationTicks*: BiggestInt
+    valueText*: string
   VariableViewState* = object
     ## Renderer-agnostic snapshot of a single variable row.
     ##
@@ -42,6 +46,8 @@ type
     isExpanded*: bool
     hasChildren*: bool
     depth*: int
+    isHistoryExpanded*: bool
+    history*: seq[VariableHistoryRowView]
 
   StateViewState* = object
     ## Renderer-agnostic snapshot of the state panel.
@@ -68,8 +74,10 @@ proc tabToString(tab: StateTab): string =
   of stWatches: "Watches"
 
 proc flattenVariables(
-    variables: seq[Variable];
+    variables: seq[store_types.Variable];
     expandedPaths: HashSet[string];
+    expandedHistories: HashSet[string];
+    valueHistory: Table[string, seq[HistoryResult]];
     depth: int;
     parentPath: string;
     result: var seq[VariableViewState]) =
@@ -83,6 +91,13 @@ proc flattenVariables(
     let path = if parentPath.len == 0: v.name
                else: parentPath & "." & v.name
     let expanded = path in expandedPaths
+    let histExpanded = path in expandedHistories
+    var historyRows: seq[VariableHistoryRowView] = @[]
+    if histExpanded and valueHistory.hasKey(path):
+      for r in valueHistory[path]:
+        let txt = if r.value != nil: $r.value.text else: ""
+        historyRows.add VariableHistoryRowView(locationTicks: r.time, valueText: txt)
+
     result.add VariableViewState(
       name: v.name,
       path: path,
@@ -91,11 +106,13 @@ proc flattenVariables(
       isExpanded: expanded,
       hasChildren: v.hasChildren,
       depth: depth,
+      isHistoryExpanded: histExpanded,
+      history: historyRows,
     )
     # Only recurse into children when the node is expanded and has
     # children to show.
     if expanded and v.hasChildren and v.children.len > 0:
-      flattenVariables(v.children, expandedPaths, depth + 1, path, result)
+      flattenVariables(v.children, expandedPaths, expandedHistories, valueHistory, depth + 1, path, result)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -110,9 +127,11 @@ proc getStateViewState*(vm: StateVM): StateViewState =
   let tab = vm.activeTab.val
   let variables = vm.currentVariables.val
   let expandedPaths = vm.expandedPaths.val
+  let expandedHistories = vm.expandedHistories.val
+  let valueHistory = vm.valueHistory.val
 
   var flatVars: seq[VariableViewState] = @[]
-  flattenVariables(variables, expandedPaths, depth = 0,
+  flattenVariables(variables, expandedPaths, expandedHistories, valueHistory, depth = 0,
                    parentPath = "", result = flatVars)
 
   StateViewState(
