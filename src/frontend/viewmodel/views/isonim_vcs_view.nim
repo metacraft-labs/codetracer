@@ -145,8 +145,21 @@ when defined(js):
         callbacks.invokeSelectHunk(fileIdx, hunkIdx, ev.shiftKey(), ev.ctrlOrMetaKey())
         ev.preventDefault())
 
-proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
+                           branch: string): auto =
+  let branchName = branch
   ui(r):
+    tdiv(class = "vcs-branch-option",
+         onclick = proc() =
+           callbacks.invokeCheckoutBranch(branchName)):
+      if branchName == vm.currentBranch.val:
+        span(class = "vcs-branch-active-marker"):
+          text "* "
+      text branchName
+
+proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
+  var dropdown: typeof(r.createElement("div"))
+  let panel = ui(r):
     tdiv(class = "vcs-branch-picker"):
       tdiv(class = "vcs-branch-current",
            onclick = proc() = vm.invokeToggleBranchDropdown(callbacks)):
@@ -157,16 +170,11 @@ proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
         span(class = "vcs-branch-arrow"):
           text (if vm.branchDropdownOpen.val: "^" else: "v")
       if vm.branchDropdownOpen.val:
-        tdiv(class = "vcs-branch-dropdown"):
-          for branch in vm.branches.val:
-            let branchLocal = branch
-            tdiv(class = "vcs-branch-option",
-                 onclick = proc() =
-                   callbacks.invokeCheckoutBranch(branchLocal)):
-              if branchLocal == vm.currentBranch.val:
-                span(class = "vcs-branch-active-marker"):
-                  text "* "
-              text branchLocal
+        tdiv(ref = dropdown, class = "vcs-branch-dropdown")
+  if vm.branchDropdownOpen.val:
+    for branch in vm.branches.val:
+      r.appendRenderedChild(dropdown, renderBranchOption(r, vm, callbacks, branch))
+  panel
 
 proc renderHeader[R](r: R; vm: VCSVM): auto =
   ui(r):
@@ -185,6 +193,21 @@ proc renderNoRepo[R](r: R; vm: VCSVM): auto =
       tdiv(class = "vcs-no-repo-message"):
         text vm.errorMessage.val
 
+proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
+                        index: int; commit: VCSCommitRow): auto =
+  let rowIndex = index
+  let isSelected = index == vm.selectedCommitIndex.val
+  ui(r):
+    tdiv(class = commitRowClass(isSelected),
+         onclick = proc() =
+           vm.invokeSelectCommit(callbacks, rowIndex)):
+      span(class = "vcs-commit-hash"):
+        text commit.hash
+      span(class = "vcs-commit-message"):
+        text commit.message
+      span(class = "vcs-commit-time"):
+        text commit.relativeTime
+
 proc renderCommitHistory[R](r: R; vm: VCSVM;
                             callbacks: VCSCallbacks): auto =
   var list: typeof(r.createElement("div"))
@@ -194,18 +217,7 @@ proc renderCommitHistory[R](r: R; vm: VCSVM;
         text "Commits"
       tdiv(ref = list, class = "vcs-commit-list")
   for i, commit in vm.commits.val:
-    let index = i
-    let row = ui(r):
-      tdiv(class = commitRowClass(i == vm.selectedCommitIndex.val),
-           onclick = proc() =
-             vm.invokeSelectCommit(callbacks, index)):
-        span(class = "vcs-commit-hash"):
-          text commit.hash
-        span(class = "vcs-commit-message"):
-          text commit.message
-        span(class = "vcs-commit-time"):
-          text commit.relativeTime
-    r.appendRenderedChild(list, row)
+    r.appendRenderedChild(list, renderCommitRow(r, vm, callbacks, i, commit))
   panel
 
 proc changedFilesHeaderText(vm: VCSVM): string =
