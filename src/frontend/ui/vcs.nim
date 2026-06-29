@@ -807,9 +807,7 @@ proc handleVCSFileSelection(self: VCSComponent; index: int; path: string) =
     return
   if self.unifiedDiffActive:
     self.loadGitDiffForUnifiedView()
-    self.syncLegacyVCSIntoVM()
-  else:
-    self.data.openTab(cstring(path), ViewSource)
+  self.data.openTab(cstring(path), ViewSource)
 
 proc handleHunkSelection(self: VCSComponent; fileIdx, hunkIdx: int;
                          shiftKey, ctrlKey: bool) =

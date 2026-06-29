@@ -355,7 +355,7 @@ proc renderDiffFile[R](r: R; file: VCSDiffFileRow;
                                                callbacks))
   node
 
-proc renderUnifiedDiff[R](r: R; vm: VCSVM;
+proc renderUnifiedDiff*[R](r: R; vm: VCSVM;
                           callbacks: VCSCallbacks): auto =
   let panel = ui(r):
     tdiv(class = "deepreview-unified-diff")
@@ -402,11 +402,8 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
     else:
       r.appendRenderedChild(body, renderBranchPicker(r, vm, callbacks))
       r.appendRenderedChild(body, renderDiffToggle(r, vm, callbacks))
-      if vm.unifiedDiffActive.val:
-        r.appendRenderedChild(body, renderUnifiedDiff(r, vm, callbacks))
-      else:
-        r.appendRenderedChild(body, renderCommitHistory(r, vm, callbacks))
-        r.appendRenderedChild(body, renderChangedFiles(r, vm, callbacks))
+      r.appendRenderedChild(body, renderCommitHistory(r, vm, callbacks))
+      r.appendRenderedChild(body, renderChangedFiles(r, vm, callbacks))
       r.appendRenderedChild(body, renderRefresh(r, callbacks))
 
   panel

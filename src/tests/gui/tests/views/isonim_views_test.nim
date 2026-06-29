@@ -10438,7 +10438,8 @@ suite "IsoNim VCS Panel — structure":
       check selectedCommit == 0
       check selectedFile == "src/main.nim"
       check toggled
-      check findByClass(panel, "deepreview-unified-diff") != nil
+      check findByClass(panel, "deepreview-unified-diff") == nil
+      check findByClass(panel, "vcs-changed-files") != nil
 
       dispose()
 
@@ -10471,6 +10472,34 @@ suite "IsoNim VCS Panel — structure":
 
       dispose()
 
+  test "test_vcs_unified_diff_tab":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let r = MockRenderer()
+      var openedFile = ""
+      let callbacks = VCSCallbacks(
+        onSelectFile: proc(index: int; path: string) =
+          (discard index; openedFile = path),
+      )
+      let panel = renderVCSPanel(r, vm, callbacks)
+
+      vm.setGitRepoState(true)
+      vm.setHeader("main")
+      vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
+      vm.setChangedFiles(@[
+        VCSFileRow(status: "M", path: "src/foo.nim", baseName: "foo.nim",
+                   additions: 5, deletions: 2),
+      ])
+
+      # Panel maintains commit history and file list even when unified diff is active
+      check findByClass(panel, "vcs-changed-files") != nil
+      check findByClass(panel, "deepreview-unified-diff") == nil
+
+      findByClass(panel, "vcs-file-item").fireEvent("click")
+      check openedFile == "src/foo.nim"
+
+      dispose()
+
   test "unified diff renders toolbar selection and hunk callback":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
@@ -10480,7 +10509,7 @@ suite "IsoNim VCS Panel — structure":
         onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
           (discard shiftKey; discard ctrlKey; selectedHunk = (fileIdx, hunkIdx)),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderUnifiedDiff(r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
