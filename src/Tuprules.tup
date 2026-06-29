@@ -395,6 +395,7 @@ export LIBRARY_PATH
 # during compilation. Without this export, tup's environment sanitization
 # strips it and gcc cannot find libbpf headers from the Nix store.
 export C_INCLUDE_PATH
+export NIX_CFLAGS_COMPILE
 
 # Keep linker selection in Cargo config/env instead of inline --config args.
 # This avoids shell-quoting differences between Windows environments.

@@ -48,3 +48,17 @@ if dirExists(pkgs2):
       if best.len == 0 or path.lastPathPart > best.lastPathPart:
         best = path
   addPathIfDir(best)
+
+block:
+  let nixCflags = getEnv("NIX_CFLAGS_COMPILE")
+  if nixCflags.len > 0:
+    let toks = nixCflags.splitWhitespace()
+    var i = 0
+    while i < toks.len:
+      if toks[i] == "-isystem" and i + 1 < toks.len:
+        let dir = toks[i + 1]
+        if "zstd" in dir:
+          switch("passC", "-isystem " & dir)
+        i += 2
+      else:
+        i += 1
