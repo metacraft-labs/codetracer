@@ -1179,20 +1179,23 @@ proc synchronizeLinkedSliders(
     let originLoopIteration = loop.baseIteration
     self.flowLines[originLoop.first].sliderPosition =
       (loopIndex: originLoopId, iteration: originLoopIteration)
-    self.flowLines[originLoop.first].sliderDom.toJs.noUiSlider.set(originLoopIteration)
+    if not self.flowLines[originLoop.first].sliderDom.isNil and not self.flowLines[originLoop.first].sliderDom.toJs.noUiSlider.isNil:
+      self.flowLines[originLoop.first].sliderDom.toJs.noUiSlider.set(originLoopIteration)
     let iterationRatio = index.float / loop.iteration.float
 
     for line, slider in self.sliderWidgets:
       if line > originLoop.first and line <= originLoop.last and line != position:
         let sliderPositionsCount =
           self.calculateSliderPosition(line, originLoopIteration, iterationRatio)
-        self.flowLines[line].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
+        if not self.flowLines[line].sliderDom.isNil and not self.flowLines[line].sliderDom.toJs.noUiSlider.isNil:
+          self.flowLines[line].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
   else:
     for line, slider in self.sliderWidgets:
       if line > loop.first and line <= loop.last and line != position:
         let sliderPositionsCount =
           self.calculateSliderPosition(line, index, 0)
-        self.flowLines[line].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
+        if not self.flowLines[line].sliderDom.isNil and not self.flowLines[line].sliderDom.toJs.noUiSlider.isNil:
+          self.flowLines[line].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
 
 proc moveFlowDom(
   self: FlowComponent,
@@ -4055,47 +4058,48 @@ proc makeSlider(self: FlowComponent, position: int) =
 
   if not element.toJs.noUiSlider.isNil:
     element.toJs.noUiSlider.destroy()
-  elif loop.iteration <= FLOW_ITERATION_START:
+
+  if loop.iteration <= FLOW_ITERATION_START:
     # Single-iteration loop (min == max): noUiSlider cannot create a slider
     # with zero range, so skip slider creation entirely.
     return
-  else:
-    noUiSlider.create(element, js{
-      "start": step.iteration,
-      "range": js{
-        "min": FLOW_ITERATION_START,
-        "max": loop.iteration
-      },
-      "behaviour": cstring"drag-tap",
-      "connect": [true, false],
-      "step": 1,
-    })
 
-    var onUpdate = proc(values: seq[cstring], handle: int, unencoded: seq[float], tap: bool, positions: seq[float]) =
-      let newTimeInMs = now()
-      let loopIteration = Math.floor(unencoded[0])
-      let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
+  noUiSlider.create(element, js{
+    "start": step.iteration,
+    "range": js{
+      "min": FLOW_ITERATION_START,
+      "max": loop.iteration
+    },
+    "behaviour": cstring"drag-tap",
+    "connect": [true, false],
+    "step": 1,
+  })
 
-      # if self.data.ui.activeFocus != self:
-      #   self.data.ui.activeFocus = self
+  var onUpdate = proc(values: seq[cstring], handle: int, unencoded: seq[float], tap: bool, positions: seq[float]) =
+    let newTimeInMs = now()
+    let loopIteration = Math.floor(unencoded[0])
+    let activeStep = self.loopIterationStepAt(step.loop, loopIteration, step.position)
 
-      if activeStep.stepCount != NO_STEP_COUNT:
-        self.flowLoops[position].loopStep = activeStep
-        self.activeStep = activeStep
-      # self.updateFlowOnMove(newStepCount + 1, activeStep.position)
-      self.redrawFlow()
-      # TODO?
-      # if self.lastSliderUpdateTimeInMs <= 0 or newTimeInMs - self.lastSliderUpdateTimeInMs >= 100:
-      self.lastSliderUpdateTimeInMs = newTimeInMs
-      self.selectLoopIteration(step.loop, loopIteration, step.position)
-      # Affect the complete move to have a delay on the update
-      # Maybe later on add to all of the EventLog components?
-      cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
+    # if self.data.ui.activeFocus != self:
+    #   self.data.ui.activeFocus = self
 
-    let elementSlider = cast[JsObject](element).noUiSlider
-    elementSlider.on(cstring"slide", onUpdate)
-    if not self.inExtension:
-      setEditorResizeObserver(self, position)
+    if activeStep.stepCount != NO_STEP_COUNT:
+      self.flowLoops[position].loopStep = activeStep
+      self.activeStep = activeStep
+    # self.updateFlowOnMove(newStepCount + 1, activeStep.position)
+    self.redrawFlow()
+    # TODO?
+    # if self.lastSliderUpdateTimeInMs <= 0 or newTimeInMs - self.lastSliderUpdateTimeInMs >= 100:
+    self.lastSliderUpdateTimeInMs = newTimeInMs
+    self.selectLoopIteration(step.loop, loopIteration, step.position)
+    # Affect the complete move to have a delay on the update
+    # Maybe later on add to all of the EventLog components?
+    cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
+
+  let elementSlider = cast[JsObject](element).noUiSlider
+  elementSlider.on(cstring"slide", onUpdate)
+  if not self.inExtension:
+    setEditorResizeObserver(self, position)
 
 proc resizeLineSlider(self: FlowComponent, position: int) =
   let editor = self.editorUI.monacoEditor
@@ -4600,7 +4604,8 @@ proc updateFlowOnMove*(self: FlowComponent, rrTicks: int, line: int) =
       sliderPositionsCount =
         self.calculateSliderPosition(activeLoopFirstLine, activeLoopBaseIteration, iterationRatio)
 
-    self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
+    if not self.flowLines[activeLoopFirstLine].sliderDom.isNil and not self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.isNil:
+      self.flowLines[activeLoopFirstLine].sliderDom.toJs.noUiSlider.set(sliderPositionsCount)
 
 
 method onCompleteMove*(self: FlowComponent, response: MoveState) {.async.} =
