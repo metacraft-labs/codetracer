@@ -742,16 +742,16 @@ proc findActiveRow(self: EventLogComponent, rrTicks: int, isEventJump: bool = fa
         domNode.classList.remove("future")
         rowTimestamp(domNode, row, rrTicks)
 
-        if not isEventJump:
-          if row.directLocationRRTicks == debuggerLocationRRTicks:
+      if not isEventJump:
+        if row.directLocationRRTicks == debuggerLocationRRTicks:
+          denseTable.activeRowIndex = index
+          self.rowSelected = index
+      else:
+        if index > 0 and
+          row.directLocationRRTicks >= debuggerLocationRRTicks and
+          denseTableRows[i-1].directLocationRRTicks <= debuggerLocationRRTicks:
             denseTable.activeRowIndex = index
             self.rowSelected = index
-        else:
-          if index > 0 and
-            row.directLocationRRTicks >= debuggerLocationRRTicks and
-            denseTableRows[i-1].directLocationRRTicks <= debuggerLocationRRTicks:
-              denseTable.activeRowIndex = index
-              self.rowSelected = index
 
     self.focusItem()
 
@@ -1208,12 +1208,25 @@ proc events(self: EventLogComponent) =
     # cdebug "event_log: setup " & $(cstring"#" & context.detailedId & cstring" tbody")
     jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.denseTable.context, e))
     let denseWrapper = cstring"#" & self.denseId & cstring"_wrapper"
-    cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
-      .addEventListener(
+    let denseScrollBody = cast[Node](jq(denseWrapper)).findNodeInElement(".dt-scroll-body")
+    if not denseScrollBody.isNil:
+      denseScrollBody.addEventListener(
         cstring"scroll",
         proc () =
-          self.denseTable.updateTableRows(redraw = true)
-          self.redraw()
+          self.denseTable.updateTableRows(redraw = false)
+          if not self.denseTable.footerDom.isNil:
+            self.denseTable.updateTableFooter()
+      )
+
+    let detailedWrapper = cstring"#" & self.detailedId & cstring"_wrapper"
+    let detailedScrollBody = cast[Node](jq(detailedWrapper)).findNodeInElement(".dt-scroll-body")
+    if not detailedScrollBody.isNil:
+      detailedScrollBody.addEventListener(
+        cstring"scroll",
+        proc () =
+          self.detailedTable.updateTableRows(redraw = false)
+          if not self.detailedTable.footerDom.isNil:
+            self.detailedTable.updateTableFooter()
       )
     jqFind(cstring"#" & context.detailedId & cstring" tbody").on(cstring"click", cstring"tr", proc(e: js) = handler(context.detailedTable.context, e))
     jqFind(cstring"#" & context.denseId & cstring" tbody").on(cstring"mouseover", cstring"td", proc(e: js) = handlerMouseover(context.denseTable.context, e))
@@ -1504,8 +1517,19 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
         self.afterMove(),
         cast[int](MOVE_DELAY)
     )
-    # else:
-    #   self.findActiveRow(self.activeRowTicks, true)
+  else:
+    if not self.denseTable.isNil:
+      self.rowSelected = response.eventLogIndex
+      self.denseTable.activeRowIndex = response.eventLogIndex
+      self.autoScrollUpdate = true
+
+      if self.denseTable.autoScroll:
+        if self.rowSelected > self.denseTable.endRow - 1 or self.rowSelected < self.denseTable.startRow:
+          self.scrollOnMove(self.rowSelected)
+        else:
+          self.findActiveRow(self.activeRowTicks, true)
+      else:
+        self.findActiveRow(self.activeRowTicks, true)
 
 method onUp*(self: EventLogComponent) {.async.} =
   if self.rowSelected != 0:

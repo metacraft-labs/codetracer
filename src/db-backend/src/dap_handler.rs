@@ -737,6 +737,45 @@ impl Handler {
             Location::default()
         };
 
+        let event_log_index = {
+            let target_ticks = StepId(location.rr_ticks.0);
+            let mut visible_indices = vec![];
+            for (i, (_, table_id, event_index)) in self.event_db.global_table.iter().enumerate() {
+                let event = self.event_db.get_program_event(table_id, event_index);
+                if self.event_db.selected_kinds[event.kind as usize] {
+                    visible_indices.push(i);
+                }
+            }
+            if visible_indices.is_empty() {
+                0
+            } else {
+                let idx = visible_indices.binary_search_by(|&i| {
+                    let step_id = self.event_db.global_table[i].0;
+                    step_id.cmp(&target_ticks)
+                });
+                match idx {
+                    Ok(found_idx) => found_idx as i64,
+                    Err(insert_idx) => {
+                        if insert_idx == 0 {
+                            0
+                        } else if insert_idx >= visible_indices.len() {
+                            (visible_indices.len() - 1) as i64
+                        } else {
+                            let idx_left = visible_indices[insert_idx - 1];
+                            let idx_right = visible_indices[insert_idx];
+                            let diff_left = target_ticks.0 - self.event_db.global_table[idx_left].0.0;
+                            let diff_right = self.event_db.global_table[idx_right].0.0 - target_ticks.0;
+                            if diff_left <= diff_right {
+                                (insert_idx - 1) as i64
+                            } else {
+                                insert_idx as i64
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
         let move_state = MoveState {
             status: "".to_string(),
             location,
@@ -745,6 +784,7 @@ impl Handler {
             reset_flow,
             stop_signal: RRGDBStopSignal::OtherStopSignal,
             frame_info: FrameInfo::default(),
+            event_log_index,
         };
 
         let stopped_event = self.prepare_stopped_event(is_main)?;
@@ -5994,6 +6034,36 @@ mod tests {
             sender,
         )?;
         assert_eq!(handler.step_id, StepId(0));
+        Ok(())
+    }
+
+    #[test]
+    fn test_complete_move_event_log_index() -> Result<(), Box<dyn Error>> {
+        let db = setup_db();
+        let (sender, r) = mpsc::channel();
+
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.ensure_events_loaded()?;
+
+        let request = dap::Request::default();
+        handler.step(request, make_step_in(), sender)?;
+
+        let mut found_complete_move = false;
+        while let Ok(msg) = r.try_recv() {
+            match msg {
+                DapMessage::Event(e) if e.event == "ct/complete-move" => {
+                    found_complete_move = true;
+                    let body = e.body;
+                    let event_log_index = body
+                        .get("eventLogIndex")
+                        .and_then(|v| v.as_i64())
+                        .expect("eventLogIndex should be present in complete-move body");
+                    assert_eq!(event_log_index, 0);
+                }
+                _ => {}
+            }
+        }
+        assert!(found_complete_move, "expected a ct/complete-move event");
         Ok(())
     }
 

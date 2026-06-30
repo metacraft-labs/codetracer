@@ -151,6 +151,7 @@ type
     resetFlow*: bool
     stopSignal*: RRGDBStopSignal
     frameInfo*: FrameInfo
+    eventLogIndex*: int
 
   RunTestOptions* = ref object
     testName*: cstring

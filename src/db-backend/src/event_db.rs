@@ -334,7 +334,7 @@ impl EventDb {
         // info!("self {self:?}");
     }
 
-    fn get_program_event(&self, table_id: &SingleTableId, event_index: &IndexInSingleTable) -> &ProgramEvent {
+    pub fn get_program_event(&self, table_id: &SingleTableId, event_index: &IndexInSingleTable) -> &ProgramEvent {
         &self.single_tables[table_id.0].events[event_index.0]
     }
 

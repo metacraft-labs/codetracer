@@ -516,6 +516,7 @@ pub struct MoveState {
     pub reset_flow: bool,
     pub stop_signal: RRGDBStopSignal,
     pub frame_info: FrameInfo,
+    pub event_log_index: i64,
 }
 
 #[derive(Debug, Default, Copy, Clone, FromPrimitive, Serialize_repr, Deserialize_repr, PartialEq)]
