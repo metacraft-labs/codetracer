@@ -136,6 +136,12 @@ proc setSessionMode*(store: ReplayDataStore; mode: DebugSessionMode) =
     session.lastLiveDebugSessionMode = mode
   store.session.val = session
 
+proc setSupportsStepBack*(store: ReplayDataStore; supports: bool) =
+  ## Update the supportsStepBack capability in the session state.
+  var session = store.session.val
+  session.supportsStepBack = supports
+  store.session.val = session
+
 proc isLiveSessionMode*(mode: DebugSessionMode): bool =
   mode in {liveMcr, liveMaterialized}
 

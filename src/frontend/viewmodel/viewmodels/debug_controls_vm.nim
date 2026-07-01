@@ -172,13 +172,15 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       dbg.status in {dsIdle}
 
     # Derived: the debugger can step backward when it is idle and
-    # the current position is past the start of the timeline.
+    # either the backend explicitly supports step back or the current
+    # position is past the start of the timeline.
     let canStepBackward = createMemo[bool] proc(): bool =
       let dbg = store.debugger.val
       let tl = store.timeline.val
       let session = store.session.val
       session.debugSessionMode notin {liveMcr, liveMaterialized} and
-        dbg.status == dsIdle and dbg.rrTicks > tl.minRRTicks
+        dbg.status == dsIdle and
+        (session.supportsStepBack or dbg.rrTicks > tl.minRRTicks)
 
     # Derived: continue is possible when the debugger is idle.
     let canContinue = createMemo[bool] proc(): bool =
@@ -189,7 +191,8 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       let dbg = store.debugger.val
       let session = store.session.val
       session.debugSessionMode notin {liveMcr, liveMaterialized} and
-        dbg.status == dsIdle
+        dbg.status == dsIdle and
+        session.supportsStepBack
 
     # Derived: the debugger is running if it is stepping or running.
     let isRunning = createMemo[bool] proc(): bool =

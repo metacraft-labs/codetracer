@@ -112,6 +112,7 @@ type
     lastLiveDebugSessionMode*: DebugSessionMode
     recordingHeadRRTicks*: uint64
     recordingHeadLoadingState*: LoadingState
+    supportsStepBack*: bool
 
   ReplayDeploymentMode* = enum
     ## Where a replay session is hosted.

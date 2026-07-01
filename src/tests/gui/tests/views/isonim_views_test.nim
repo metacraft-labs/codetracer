@@ -2104,6 +2104,26 @@ suite "IsoNim Debug Controls Panel — button states":
 
       dispose()
 
+  test "step-backward and reverse-continue enabled when supportsStepBack is true even at start":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      var session = store.session.val
+      session.supportsStepBack = true
+      store.session.val = session
+
+      let vm = createDebugControlsVM(store)
+      let r = MockRenderer()
+
+      # debugger at rrTicks=0, minRRTicks=0 but supportsStepBack is true
+      let panel = renderDebugControlsPanel(r, vm)
+
+      let stepBwd = findByClass(panel, "step-backward")
+      let revContinue = findByClass(panel, "reverse-continue")
+      check "disabled" notin stepBwd.attributes
+      check "disabled" notin revContinue.attributes
+
+      dispose()
+
   test "buttons disabled when debugger is stepping":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
@@ -3979,7 +3999,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
 
 suite "IsoNim Terminal Output Panel — interactions":
 
-  test "fragment click dispatches ct/event-jump via the backend":
+  test "test_terminal_click_navigation: fragment click dispatches ct/event-jump via the backend":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
@@ -4004,9 +4024,8 @@ suite "IsoNim Terminal Output Panel — interactions":
       let req = mock.findCommand("ct/event-jump")
       check req.isSome
       check req.get.args["eventIndex"].getInt == 7
-      check req.get.args["rrTicks"].getInt == 42
-
-      dispose()
+      check req.get.args["directLocationRRTicks"].getInt == 42
+      check req.get.args["kind"].getStr == "Write"
 
       dispose()
 
@@ -10509,12 +10528,13 @@ suite "IsoNim VCS Panel — structure":
         onSelectHunk: proc(fileIdx, hunkIdx: int; shiftKey, ctrlKey: bool) =
           (discard shiftKey; discard ctrlKey; selectedHunk = (fileIdx, hunkIdx)),
       )
-      let panel = renderUnifiedDiff(r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
       vm.setHunkState(@[(0, 0)], toolbarVisible = true, copyFeedback = false)
+
+      let panel = renderUnifiedDiff(r, vm, callbacks)
 
       check findByClass(panel, "hunk-toolbar-count").textContent ==
         "1 hunk selected"

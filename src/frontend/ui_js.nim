@@ -1524,6 +1524,16 @@ when not defined(ctInExtension):
 
     data.dapApi.ipc = data.ipc
 
+    data.dapApi.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
+      cerror "[PIPELINE] DapInitializeResponse: received response"
+      var supportsStepBack = false
+      if not response.isNil and not jsMissing(response["supportsStepBack"]):
+        supportsStepBack = response["supportsStepBack"].to(bool)
+      cerror "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
+      if not activeSessionVM.isNil:
+        activeSessionVM.store.setSupportsStepBack(supportsStepBack)
+    )
+
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
       clientName: "codetracer"
     )))
