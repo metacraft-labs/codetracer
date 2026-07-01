@@ -115,7 +115,8 @@ proc jumpToEvent*(vm: TerminalOutputVM; eventIndex: int) =
       if fragment.eventIndex == eventIndex:
         let args = %*{
           "eventIndex": eventIndex,
-          "rrTicks": fragment.rrTicks,
+          "directLocationRRTicks": fragment.rrTicks,
+          "kind": "Write",
         }
         vm.store.requestHistoricalNavigation("ct/event-jump", args)
         return
