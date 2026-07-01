@@ -4667,6 +4667,7 @@
         "nixpkgs": [
           "nixpkgs"
         ],
+        "reprobuild-ct-test-runner-src": "reprobuild-ct-test-runner-src",
         "reprobuild-test-adapters-src": "reprobuild-test-adapters-src",
         "runquota-src": [
           "runquota"
@@ -4674,17 +4675,33 @@
         "stackable-hooks-src": "stackable-hooks-src"
       },
       "locked": {
-        "lastModified": 1782900603,
-        "narHash": "sha256-nGr+G/KKFjxDVz4i1e40CESs5KlnZQ2lJ1PsLlFqALc=",
+        "lastModified": 1782913839,
+        "narHash": "sha256-5uqQX2xc8u4M7F0MVbFRqAKrAN9SjgvmjdI+WIwdoXA=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "9335c6bf602e87b054a03af05a76ef91c8784988",
+        "rev": "e6efdea5ee4973d79fafe0c4d217f55025cb2e05",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "ref": "main",
         "repo": "reprobuild",
+        "type": "github"
+      }
+    },
+    "reprobuild-ct-test-runner-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1782389086,
+        "narHash": "sha256-k3h/f3u/5/QiH88bRDVmHg7sc+PFricypIBlZ4Jn+Cs=",
+        "owner": "metacraft-labs",
+        "repo": "reprobuild-ct-test-runner",
+        "rev": "03c1acd3b9b4a7938c291ff74aec8368a5b657ff",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "reprobuild-ct-test-runner",
         "type": "github"
       }
     },
