@@ -5,7 +5,7 @@
 ## `codetracer-specs/Planned-Features/Nim-Parallel-Test-Framework.md` §16.7) into
 ## CodeTracer's `ct test` WITHOUT reprobuild, on the CANONICAL engine under
 ## `incremental/` (codetracer owns the engine; reprobuild reaches it only through
-## the engine-free `reprobuild-ct-test-runner` adapter — a one-way dependency).
+## the engine-free Reprobuild adapter — a one-way dependency).
 ##
 ## # What it does (§16.7.4 workflow)
 ##
@@ -740,7 +740,7 @@ proc watchHasFlag(args: seq[string]; name: string): bool =
 
 proc runWatchDecide(rawArgs: seq[string]): int =
   ## Granular machine-readable decision used by the engine-free
-  ## `reprobuild-ct-test-runner` adapter, which execs `ct` as a subprocess.
+  ## Reprobuild adapter, which execs `ct` as a subprocess.
   ## Loads the cache, runs `decide`, and prints a single-line JSON object:
   ##   {"status":"run"|"skip","reason":"...","changedFuncs":[...]}
   ## A malformed/unreadable cache is itself a valid (fail-safe) RUN decision,
@@ -810,7 +810,7 @@ proc runIncremental*(rawArgs: seq[string]): int =
   ##         this host) or another hard failure. The exact diagnostic is printed.
   ##
   ## Two granular machine-readable modes are intercepted up front (used by the
-  ## engine-free `reprobuild-ct-test-runner` adapter, which execs `ct`):
+  ## engine-free Reprobuild adapter, which execs `ct`):
   ##   * `--watch-decide` — print a one-line JSON skip/run decision.
   ##   * `--watch-record` — record + persist, print a one-line JSON ok/err.
   if rawArgs.len > 0 and rawArgs[0] == "--watch-decide":
