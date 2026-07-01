@@ -35,11 +35,12 @@
 ## `observationKind`. The interpose shim tags a file opened/`read` as
 ## `moFileOpen`/`moFileRead` and a file written/created/truncated/appended as
 ## `moFileWrite` (see io_mon/shim/{macos_interpose,linux_preload,windows_interpose}).
-## A READ-FILE DEPENDENCY is a path the process READ that it did NOT also write —
-## an output file the test creates and then reads back is not a dependency on its
-## PRIOR content. So the read-file set is
-##   { path observed via moFileOpen/moFileRead } \ { path observed via moFileWrite }.
-## This mirrors the standard build-system depfile model (inputs = read-not-written).
+## A READ-FILE DEPENDENCY is a path whose PRIOR content could have influenced
+## the process: a path read before it was written remains an input dependency,
+## even if the process later rewrites it. A path first written and only then read
+## is output churn, not a dependency on prior content. Pure writes are likewise
+## excluded. This mirrors the standard build-system depfile model while
+## preserving the read-before-write hazard.
 ##
 ## # Launched binaries are part of the dependency set (spec §16.7.8)
 ##
@@ -153,30 +154,39 @@ proc isWriteObservation(kind: MonitorObservationKind): bool =
   kind == moFileWrite
 
 proc readPathsFromDepFile*(dep: MonitorDepFile): seq[string] =
-  ## Derive the READ-FILE path set from a captured io-mon depfile: every path
-  ## observed via a read (open/read) that was NOT also written, de-duplicated and
-  ## path-sorted. A successful syscall only (`result >= 0`) — a failed open names
-  ## no real input file. Empty paths are dropped (a record with no resolved path,
-  ## e.g. a read on an anonymous fd, is not a file dependency).
-  var written = initHashSet[string]()
-  for rec in dep.records:
-    if rec.path.len > 0 and isWriteObservation(rec.observationKind):
-      written.incl rec.path
+  ## Derive the READ-FILE path set from a captured io-mon depfile. A path is an
+  ## input iff it has a successful read observation before any successful write
+  ## observation for the same path. Read-before-write stays an input dependency
+  ## because the old file content may have affected the process; write-before-read
+  ## output churn and pure writes are excluded. Results are de-duplicated and
+  ## path-sorted. Empty paths are dropped (a record with no resolved path, e.g. a
+  ## read on an anonymous fd, is not a file dependency).
+  var writtenBeforeRead = initHashSet[string]()
   var reads = initOrderedTable[string, bool]()
   for rec in dep.records:
     if rec.path.len == 0:
       continue
-    if not isReadObservation(rec.observationKind):
-      continue
-    if rec.result < 0:
-      continue  # a failed open/read names no real input file
-    if rec.path in written:
-      continue  # the process WROTE this file: it is an output, not a dependency
-    reads[rec.path] = true
+    if isReadObservation(rec.observationKind):
+      if rec.result < 0:
+        continue  # a failed open/read names no real input file
+      if rec.path notin writtenBeforeRead:
+        reads[rec.path] = true
+    elif isWriteObservation(rec.observationKind) and rec.result >= 0:
+      if rec.path notin reads:
+        writtenBeforeRead.incl rec.path
   result = @[]
   for path in reads.keys:
     result.add path
   result.sort(cmp)
+
+proc requireCompleteDepFile(dep: MonitorDepFile): Result[void, string] =
+  ## io-mon's explicit completeness signal is authoritative. An incomplete
+  ## depfile may have missed dependencies, so any consumer conversion must fail
+  ## safe instead of publishing a partial read set that could later false-skip.
+  if dep.completeness != mcComplete:
+    return err("io-mon depfile is incomplete (completeness=" &
+      $dep.completeness & ")")
+  ok()
 
 proc isLaunchObservation(kind: MonitorObservationKind): bool =
   ## True for the observation kind that denotes a LAUNCHED binary — a
@@ -304,6 +314,7 @@ proc readFilesFromDepFile*(dep: MonitorDepFile): Result[seq[ReadFile], string] =
   ## observation and capture finalize) is an `Err` (⇒ re-run, fail-safe — never
   ## silently dropped). A launched binary that is ALSO a read path is folded
   ## once (the de-dup below keys on path).
+  ? requireCompleteDepFile(dep)
   var acc: seq[ReadFile] = @[]
   var seenPaths = initHashSet[string]()
 

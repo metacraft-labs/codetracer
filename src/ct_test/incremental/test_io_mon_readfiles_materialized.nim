@@ -73,6 +73,13 @@ proc writeRec(path: string): MonitorRecord =
   MonitorRecord(kind: mrFileWrite, observationKind: moFileWrite,
                 seq: 3, result: 64, path: path)
 
+proc eventLossRec(seqNo: uint64): MonitorRecord =
+  ## A monitor event-loss marker. io-mon folds this into `mcIncomplete`, and
+  ## consumers must reject the depfile as incomplete instead of trusting a
+  ## partial read set.
+  MonitorRecord(kind: mrEventLoss, observationKind: moEventLoss,
+                seq: seqNo, result: 0, detail: "synthetic loss")
+
 proc failedReadRec(path: string): MonitorRecord =
   ## A FAILED open (result < 0) — names no real input file, must be dropped.
   MonitorRecord(kind: mrFileOpen, observationKind: moFileOpen,
@@ -105,34 +112,63 @@ suite "M6b — io-mon read-file capture for materialized recorders":
     defer: removeDir(work)
     let cfg = work / "config.json"
     let csv = work / "table.csv"
-    let outp = work / "result.out"
+    let readThenWrite = work / "read_then_write.txt"
+    let writeThenRead = work / "write_then_read.txt"
+    let pureWrite = work / "result.out"
     writeFile(cfg, "{}")
     writeFile(csv, "a,b\n")
-    writeFile(outp, "x")
+    writeFile(readThenWrite, "old input content")
+    writeFile(writeThenRead, "generated content")
+    writeFile(pureWrite, "x")
 
     # The depfile the interpose shim would emit: cfg opened+read, csv opened,
-    # outp WRITTEN (and also opened — an output the program created then touched),
-    # plus a FAILED open of a non-existent path.
+    # readThenWrite READ before it is overwritten (still an input dependency),
+    # writeThenRead written before being read back (output churn), pureWrite only
+    # written, plus a FAILED open of a non-existent path.
     let dep = depFileFromRecords(@[
       readRec(cfg), readDataRec(cfg),
       readRec(csv),
-      readRec(outp), writeRec(outp),
+      readRec(readThenWrite), writeRec(readThenWrite),
+      writeRec(writeThenRead), readRec(writeThenRead),
+      writeRec(pureWrite),
       failedReadRec(work / "missing.dat"),
     ])
 
-    # The READ-dependency set = read-not-written paths, path-sorted, de-duped:
-    # cfg + csv only. outp was written (output), missing.dat failed.
+    # The READ-dependency set = paths read before first write, path-sorted,
+    # de-duped: cfg + csv + readThenWrite. writeThenRead was written first,
+    # pureWrite was never read, missing.dat failed.
     let paths = readPathsFromDepFile(dep)
-    check paths == @[cfg, csv]  # sorted; outp excluded (written), missing dropped (failed)
+    check paths == @[cfg, csv, readThenWrite]
 
     let reads = readFilesFromDepFile(dep)
     check reads.isOk
-    check reads.value.len == 2
+    check reads.value.len == 3
     check reads.value[0].path == cfg
     check reads.value[1].path == csv
+    check reads.value[2].path == readThenWrite
     # Each carries a non-empty capture-time content signature.
     for rf in reads.value:
       check rf.hash.len > 0
+
+  test "incomplete io-mon depfile is rejected before projection":
+    let work = tmpDir("incomplete")
+    let traceDir = tmpDir("incomplete_trace")
+    defer: (removeDir(work); removeDir(traceDir))
+    let cfg = work / "config.json"
+    writeFile(cfg, "{}")
+    let dep = depFileFromRecords(@[readRec(cfg), eventLossRec(10)])
+    check dep.completeness == mcIncomplete
+
+    let converted = readFilesFromDepFile(dep)
+    check converted.isErr
+    check "incomplete" in converted.error
+
+    let depfile = work / "cap.rdep"
+    writeCanonical(depfile, @[readRec(cfg), eventLossRec(10)])
+    let projected = depFileToProjection(depfile, traceDir)
+    check projected.isErr
+    check "incomplete" in projected.error
+    check not fileExists(traceDir / NativeReadFilesFile)
 
   test "an unmonitored spawned subtree makes the capture INCOMPLETE (fail-safe)":
     # §16.7.8 process-tree completeness. The parent reads its own input AND
