@@ -44,10 +44,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-project_root="${tmp_root}/project"
-mkdir -p "${project_root}"
-cp -R "${fixture_root}/." "${project_root}/"
-
 if [ -n "${REPROBUILD_SOURCE_ROOT:-}" ]; then
 	if [ ! -d "${REPROBUILD_SOURCE_ROOT}/libs/repro_project_dsl/src" ]; then
 		echo "REPROBUILD_SOURCE_ROOT does not look like a reprobuild source tree: ${REPROBUILD_SOURCE_ROOT}" >&2
@@ -61,21 +57,34 @@ if [ -n "${REPROBUILD_SOURCE_ROOT:-}" ]; then
 	echo "reprobuild source: ${REPROBUILD_SOURCE_ROOT}"
 fi
 
-echo "project: ${project_root}"
-(
-	cd "${project_root}"
-	repro build . \
-		--tool-provisioning=path \
-		--progress=none \
-		--log=actions
-)
+run_smoke_build() {
+	local label="$1"
+	local daemon_mode="$2"
+	local project_root="${tmp_root}/project-${label}"
+	mkdir -p "${project_root}"
+	cp -R "${fixture_root}/." "${project_root}/"
 
-actual_output="$(cat "${project_root}/build/hello-output.txt")"
-if [ "${actual_output}" != "${expected_output}" ]; then
-	echo "unexpected smoke output" >&2
-	echo "expected: ${expected_output}" >&2
-	echo "actual:   ${actual_output}" >&2
-	exit 1
-fi
+	echo "project (${label}): ${project_root}"
+	(
+		cd "${project_root}"
+		repro build . \
+			--daemon="${daemon_mode}" \
+			--tool-provisioning=path \
+			--progress=none \
+			--log=actions
+	)
 
-echo "smoke output: ${actual_output}"
+	local actual_output
+	actual_output="$(cat "${project_root}/build/hello-output.txt")"
+	if [ "${actual_output}" != "${expected_output}" ]; then
+		echo "unexpected smoke output for ${label}" >&2
+		echo "expected: ${expected_output}" >&2
+		echo "actual:   ${actual_output}" >&2
+		exit 1
+	fi
+
+	echo "smoke output (${label}): ${actual_output}"
+}
+
+run_smoke_build "daemon" "auto"
+run_smoke_build "direct" "off"

@@ -247,21 +247,20 @@ else:
   ]
 
 when defined(macosx):
-  const NativePassL = @[
-    "-L/nix/store/3z54dgks2mz3dhwddj158sdibll8xmq5-openssl-3.6.0/lib",
-    "-L/nix/store/dfjhk9hdzfwb5jvhsya30lk1ipz92jr9-sqlite-3.50.4/lib",
-    "-L/nix/store/pim60iwy1hwmrxdgxi5zb4kigswhr88q-pcre-8.45/lib",
-    "-L/nix/store/8g96p6dsssmph0p81g0y4im6sl4i3gd5-libzip-1.11.4/lib",
-    "-Wl,-rpath,/nix/store/3z54dgks2mz3dhwddj158sdibll8xmq5-openssl-3.6.0/lib",
-    "-Wl,-rpath,/nix/store/dfjhk9hdzfwb5jvhsya30lk1ipz92jr9-sqlite-3.50.4/lib",
-    "-Wl,-rpath,/nix/store/pim60iwy1hwmrxdgxi5zb4kigswhr88q-pcre-8.45/lib",
-    "-Wl,-rpath,/nix/store/8g96p6dsssmph0p81g0y4im6sl4i3gd5-libzip-1.11.4/lib",
-    "-lssl",
-    "-lcrypto",
-    "-lsqlite3",
-    "-lpcre",
-    "-lzip"
-  ]
+  proc deriveNativeLibFlags(): seq[string] {.compileTime.} =
+    let libraryPath = staticExec("printenv LIBRARY_PATH").strip()
+    for dir in libraryPath.split(':'):
+      if dir.len == 0:
+        continue
+      result.add("-L" & dir)
+      result.add("-Wl,-rpath," & dir)
+    result.add("-lssl")
+    result.add("-lcrypto")
+    result.add("-lsqlite3")
+    result.add("-lpcre")
+    result.add("-lzip")
+
+  const NativePassL = deriveNativeLibFlags()
 else:
   const NativePassL = @[
     "-lssl",

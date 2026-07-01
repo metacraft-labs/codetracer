@@ -93,6 +93,9 @@ test-hmr-fixture: build-hmr-fixture
 test-reprobuild-macos-smoke:
   ./ci/reprobuild/macos-smoke.sh
 
+test-reprobuild-macos-daemon-build:
+  bash ci/reprobuild/macos-daemon-build.sh
+
 test-reprobuild-linux-smoke:
   ./ci/reprobuild/linux-smoke.sh
 
