@@ -318,7 +318,7 @@ build_sibling \
 build_sibling \
 	codetracer-wasm-recorder \
 	wazero \
-	"go build -o wazero ./cmd/wazero" \
+	"export CGO_LDFLAGS=\"-L$WS_ROOT/codetracer-trace-format-nim\"; go build -o wazero ./cmd/wazero" \
 	codetracer-wasm-recorder \
 	codetracer
 

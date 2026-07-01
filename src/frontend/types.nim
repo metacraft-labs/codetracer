@@ -1804,6 +1804,7 @@ type
     openViewOnCompleteMove*: array[EditorView, bool]
     openComponentIds*:        array[Content, seq[int]]
     saveLayout*:     bool
+    isReparenting*:  bool
     menuNode*: MenuNode
     launchConfigs*: seq[FrontendLaunchConfig]
     pageLoaded*: bool

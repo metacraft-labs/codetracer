@@ -21,7 +21,7 @@ type
 
 const
   AutoHideBottomTabsClass* = "auto-hide-bottom-tabs"
-  AutoHideBottomTabClass* = "ct-button-sm-secondary"
+  AutoHideBottomTabClass* = "ct-button-sm-secondary auto-hide-strip-tab"
 
 proc invokeSelect(callbacks: AutoHideBottomTabsCallbacks; index: int) =
   if not callbacks.onSelect.isNil:

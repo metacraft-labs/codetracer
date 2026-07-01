@@ -235,7 +235,7 @@ proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
 
   template appendDropdownItem(label: cstring, body: untyped) =
     let item = kdom.document.createElement("div")
-    item.class = cstring"ct-menu-item"
+    item.class = cstring"layout-dropdown-node ct-menu-item"
     item.innerHTML = label
     item.addEventListener(cstring"click", proc(e {.inject.}: Event) =
       body
@@ -434,11 +434,19 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       return
 
     let componentLabel = cstring(fmt"editorComponent-{state.id}")
-
     var element = container.getElement()
-    element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
 
-    cdebug fmt"layout: registering editor component {componentLabel}"
+    let panel = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
+    let isReparenting = not panel.isNil and not panel.liveElement.isNil and data.ui.isReparenting
+
+    if isReparenting:
+      element.innerHTML = cstring""
+      while panel.liveElement.childNodes.len > 0:
+        element.appendChild(panel.liveElement.childNodes[0])
+      cdebug fmt"layout: reparented live editor DOM synchronously for {componentLabel}"
+    else:
+      element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
+      cdebug fmt"layout: registering editor component {componentLabel}"
 
     container.on(cstring"tab") do (tab: GoldenTab):
       data.ui.saveLayout = true
@@ -538,27 +546,40 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       injectPinButton(tab.element, proc() =
         pinPanel(cast[GoldenLayout](layout), editorContentItem, AutoHideEdge.Left))
 
-    var containerId: cstring
-    containerId = cstring(fmt"editorComponent-{state.id}")
+    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
+    let isReparentingObj = not panelObj.isNil and not panelObj.liveElement.isNil and data.ui.isReparenting
 
-    discard windowSetTimeout((proc =
-      if not data.ui.componentMapping[state.content].hasKey(state.id):
-        discard data.makeComponent(state.content, state.id)
-      if not data.ui.componentMapping[state.content][state.id].isNil:
-        let component = data.ui.componentMapping[state.content][state.id]
+    if not isReparentingObj:
+      var containerId: cstring
+      containerId = cstring(fmt"editorComponent-{state.id}")
 
-        EditorViewComponent(component).renderTopLevelEditorDirect(containerId)
+      discard windowSetTimeout((proc =
+        if not data.ui.componentMapping[state.content].hasKey(state.id):
+          discard data.makeComponent(state.content, state.id)
+        if not data.ui.componentMapping[state.content][state.id].isNil:
+          let component = data.ui.componentMapping[state.content][state.id]
 
-      ), 200)
+          EditorViewComponent(component).renderTopLevelEditorDirect(containerId)
+
+        ), 200)
 
   layout.registerComponent(cstring"genericUiComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:
       return
     let editorLabel = state.label
     var element = container.getElement()
-    element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
 
-    cdebug "layout: register " & state.label
+    let panel = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
+    let isReparenting = not panel.isNil and not panel.liveElement.isNil and data.ui.isReparenting
+
+    if isReparenting:
+      element.innerHTML = cstring""
+      while panel.liveElement.childNodes.len > 0:
+        element.appendChild(panel.liveElement.childNodes[0])
+      cdebug "layout: reparented live generic DOM synchronously for " & $state.content
+    else:
+      element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
+      cdebug "layout: register " & state.label
 
     container.on(cstring"tab") do (tab: GoldenTab):
       # prepare layout to be saved on upcoming stateChanged event
@@ -629,7 +650,12 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     var containerId: cstring
     containerId = state.label
 
+    let panelObj = if not autoHideState.isNil: autoHideState.findPanelByContent(state.content) else: nil
+    let isReparentingObj = not panelObj.isNil and not panelObj.liveElement.isNil and data.ui.isReparenting
+
     discard windowSetTimeout((proc =
+      if isReparentingObj:
+        return
       if not data.ui.componentMapping[state.content].hasKey(state.id):
         discard data.makeComponent(state.content, state.id)
       if not data.ui.componentMapping[state.content][state.id].isNil:
@@ -1254,6 +1280,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
   layout.on(cstring"itemDestroyed") do (event: js):
     cdebug "layout event: itemDestroyed"
+    if not data.ui.isNil and data.ui.isReparenting:
+      cdebug "layout event: itemDestroyed - suppressed during reparenting"
+      return
+
     let eventTarget = cast[GoldenContentItem](event.target)
 
     if eventTarget.isComponent:

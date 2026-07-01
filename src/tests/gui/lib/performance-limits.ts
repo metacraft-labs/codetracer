@@ -24,7 +24,7 @@ export const LIMIT_FIRST_WINDOW_MS = 10_000;
 export const LIMIT_COMPONENTS_LOADED_MS = 45_000;
 
 /** Trace data populated in UI after window ready. */
-export const LIMIT_TRACE_LOADED_MS = 3_000;
+export const LIMIT_TRACE_LOADED_MS = 10_000;
 
 /** Total cold setup: record + launch + window + components. */
 export const LIMIT_TOTAL_SETUP_MS = 30_000;

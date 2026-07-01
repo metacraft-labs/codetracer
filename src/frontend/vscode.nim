@@ -31,7 +31,7 @@ when defined(ctInExtension):
 
   proc acquireVsCodeApi*(): VsCode {.importc.}
 
-  {.emit: "var vscode = null; try { vscode = require(\"vscode\"); } catch { vscode = acquireVsCodeApi(); }".}
+  {.emit: "var vscode = null; try { vscode = require(\"vscode\"); } catch { if (typeof acquireVsCodeApi !== 'undefined') { vscode = acquireVsCodeApi(); } else { vscode = { postMessage: function(msg) { console.log('MOCK VSCODE POSTMESSAGE:', msg); } }; } }".}
 
   var vscode* {.importc.}: VsCode # vscode in extension central context; acquireVsCodeApi() in webview;
 

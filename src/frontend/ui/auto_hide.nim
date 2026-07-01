@@ -232,7 +232,13 @@ proc pinPanel*(
   # Detach from GL.  The parent is typically a Stack.
   let parent = contentItem.parent
   if not parent.isNil:
-    parent.removeChild(contentItem)
+    if not data.ui.isNil:
+      data.ui.isReparenting = true
+    try:
+      parent.removeChild(contentItem)
+    finally:
+      if not data.ui.isNil:
+        data.ui.isReparenting = false
   else:
     console.warn cstring"auto_hide: contentItem has no parent, skipping removeChild"
 
@@ -331,6 +337,8 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   # Re-add to GL via addItem — this creates a new GL container + component
   # shell. We'll then swap the new container's content with our preserved
   # live DOM element.
+  if not data.ui.isNil:
+    data.ui.isReparenting = true
   try:
     let ground = layout.groundItem
     if not ground.isNil and ground.contentItems.len > 0:
@@ -339,40 +347,11 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
     else:
       console.warn cstring"auto_hide: no existing container — adding to root"
       discard ground.addItem(panel.config)
-
-    # After addItem, GL has created a new component with a fresh container.
-    # Find the newly created container and swap its content with our live
-    # DOM element. The new component will have the same componentState
-    # (content + id), so we can locate it via the component label.
-    if not panel.liveElement.isNil:
-      # GL's addItem triggers the registerComponent factory, which creates
-      # a new container element and sets innerHTML. We need to find that
-      # new container and replace its children with our live element.
-      # Use a short delay to let GL finish its internal layout cycle.
-      discard windowSetTimeout(proc() =
-        let componentLabel = if panel.config["componentName"].to(cstring) == cstring"editorComponent":
-            cstring("editorComponent-" & $panel.componentId)
-          else:
-            panel.config["componentState"]["label"].to(cstring)
-
-        # Find the newly created component-container div by its id.
-        let newContainerDiv = document.getElementById(componentLabel)
-        if not newContainerDiv.isNil and not newContainerDiv.parentNode.isNil:
-          # The new container div is inside the GL container element.
-          # Replace the GL container element's content with our live element's
-          # children, preserving the component's full DOM tree.
-          let glContainerEl = newContainerDiv.parentNode
-          # Clear the newly created (empty) content.
-          glContainerEl.innerHTML = cstring""
-          # Move all children from our live element into the GL container.
-          while panel.liveElement.childNodes.len > 0:
-            glContainerEl.appendChild(panel.liveElement.childNodes[0])
-          cdebug fmt"auto_hide: reparented live DOM back into GL for '{panel.title}'"
-        else:
-          console.warn cstring"auto_hide: could not find new GL container to swap live DOM into"
-      , 50)
   except:
     cerror "auto_hide: failed to re-add panel to GL: " & getCurrentExceptionMsg()
+  finally:
+    if not data.ui.isNil:
+      data.ui.isReparenting = false
 
   # Remove from state regardless of whether re-add succeeded, so the
   # strip tab is cleaned up and the user can retry by re-opening
