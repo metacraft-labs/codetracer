@@ -57,6 +57,7 @@ type
     hash*: string          ## abbreviated SHA-1 for display
     message*: string       ## commit subject
     relativeTime*: string  ## e.g. "3 hours ago"
+    date*: string          ## absolute date in YYYY-MM-DD format (git %cs token)
     author*: string        ## author name, shown when the accordion is open
     fullHash*: string      ## full SHA-1, shown in the accordion header
     graphCells*: seq[VCSGraphCell] ## branch-graph columns for this row
@@ -133,8 +134,9 @@ proc `==`*(a, b: VCSGraphConnector): bool {.noSideEffect.} =
 
 proc `==`*(a, b: VCSCommitRow): bool {.noSideEffect.} =
   a.hash == b.hash and a.message == b.message and
-    a.relativeTime == b.relativeTime and a.author == b.author and
-    a.fullHash == b.fullHash and a.graphCells == b.graphCells and
+    a.relativeTime == b.relativeTime and a.date == b.date and
+    a.author == b.author and a.fullHash == b.fullHash and
+    a.graphCells == b.graphCells and
     a.dotLane == b.dotLane and a.connectors == b.connectors
 
 proc `==`*(a, b: VCSFileRow): bool {.noSideEffect.} =
