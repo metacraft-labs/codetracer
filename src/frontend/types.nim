@@ -757,6 +757,7 @@ type
     hash*: cstring         ## abbreviated SHA-1 (7 chars) for display
     message*: cstring      ## commit subject line
     relativeTime*: cstring ## human-readable relative age ("2 hours ago")
+    date*: cstring         ## absolute date in YYYY-MM-DD format (git %cs token)
     fullHash*: cstring     ## full 40-char SHA-1; used for graph lane tracking
     author*: cstring       ## author name shown in the expanded accordion row
     parents*: seq[cstring] ## full hashes of parent commits (1 normal, 2+ merge)

@@ -274,11 +274,12 @@ proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
   ## Fetch ``commitPageSize`` commits starting at ``skip``, parsing parent
   ## hashes so the commit-graph algorithm can assign branch lanes.
   ##
-  ## Format: ``<fullHash> <parent1> [<parent2> …>]\x1e<shortHash>\x1e<subject>\x1e<relDate>\x1e<author>``
+  ## Format: ``<fullHash> <parent1> [<parent2> …>]\x1e<shortHash>\x1e<subject>\x1e<relDate>\x1e<absDate>\x1e<author>``
   ## The ``%P`` token is a space-separated list of full parent hashes;
-  ## it is empty for root commits.
+  ## it is empty for root commits.  ``%cs`` produces the committer date in
+  ## short YYYY-MM-DD format (requires git ≥ 2.29).
   const sep = "\x1e"
-  let prettyFmt = "%H %P" & sep & "%h" & sep & "%s" & sep & "%cr" & sep & "%an"
+  let prettyFmt = "%H %P" & sep & "%h" & sep & "%s" & sep & "%cr" & sep & "%cs" & sep & "%an"
   let skipStr = "--skip=" & $skip
   let countStr = "-" & $commitPageSize
   let raw = gitExec(
@@ -307,14 +308,16 @@ proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
         let p = hashAndParents[pIdx].strip()
         if p.len > 0:
           parents.add(cstring(p))
-      let shortH   = if parts.len > 1: parts[1].strip() else: fullH[0..min(6, fullH.high)]
+      let shortH    = if parts.len > 1: parts[1].strip() else: fullH[0..min(6, fullH.high)]
       let subject   = if parts.len > 2: parts[2] else: ""
       let relDate   = if parts.len > 3: parts[3] else: ""
-      let authorStr = if parts.len > 4: parts[4] else: ""
+      let absDate   = if parts.len > 4: parts[4] else: ""
+      let authorStr = if parts.len > 5: parts[5] else: ""
       self.commits.add(VCSCommit(
         hash: cstring(shortH),
         message: cstring(subject),
         relativeTime: cstring(relDate),
+        date: cstring(absDate),
         fullHash: cstring(fullH),
         author: cstring(authorStr),
         parents: parents,
@@ -947,6 +950,7 @@ proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
       hash: safeStr(commit.hash),
       message: safeStr(commit.message),
       relativeTime: safeStr(commit.relativeTime),
+      date: safeStr(commit.date),
       author: safeStr(commit.author),
       fullHash: safeStr(commit.fullHash),
       graphCells: gr.cells,
